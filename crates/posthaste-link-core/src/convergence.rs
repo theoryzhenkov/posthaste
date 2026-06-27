@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
@@ -91,6 +91,11 @@ pub struct SettlementResult {
 pub struct Replica<C: Convergence> {
     base: BTreeMap<C::Key, C::State>,
     pending: Vec<PendingMutation<C>>,
+    /// Ids the far node has **confirmed**. An op retires only once it is both
+    /// confirmed AND absorbed by the base — so it survives its own local echo
+    /// and a concurrent stale re-serve, retiring on the keyed confirmation
+    /// rather than on any base update that happens to carry its effect.
+    confirmed: HashSet<MutationId>,
     _convergence: PhantomData<C>,
 }
 
@@ -99,6 +104,7 @@ impl<C: Convergence> Default for Replica<C> {
         Self {
             base: BTreeMap::new(),
             pending: Vec::new(),
+            confirmed: HashSet::new(),
             _convergence: PhantomData,
         }
     }
@@ -130,61 +136,113 @@ impl<C: Convergence> Replica<C> {
         self.pending.push(mutation);
     }
 
-    /// Settle a pending mutation by its terminal outcome — the
-    /// `retire-on-confirmation` rule ([replication L1 §5.3, §5.5](../replication/L1.md)),
-    /// realized per mutation as the contract serves it rather than as a scalar
-    /// high-water mark. `Confirmed` drops the pending op (the served base already
-    /// reflects it, so this is a no-op visually); `Failed` drops it and reports
-    /// `reverted` so the caller surfaces the failure as the view recomputes back
-    /// to authoritative state. Out-of-order safe: only the named mutation is
-    /// touched. Idempotent: settling an unknown/already-retired id is a no-op.
-    pub fn settle(&mut self, id: &MutationId, outcome: SettlementOutcome) -> SettlementResult {
-        let before = self.pending.len();
-        self.pending.retain(|held| &held.id != id);
-        let retired = self.pending.len() != before;
-        SettlementResult {
-            retired,
-            reverted: retired && matches!(outcome, SettlementOutcome::Failed),
+    /// Settle a pending mutation by its terminal outcome
+    /// ([mutation.notification design](../eph/DESIGN-L2-mutation-notification.md)).
+    ///
+    /// `Confirmed` does **not** unconditionally drop the op: it marks the op
+    /// authority-confirmed, then retires it only if the base already absorbs its
+    /// effect (else it stays folded, to retire on a later base update that
+    /// carries it). This is the confirmed-gating that keeps an op folded through
+    /// its own local echo and a concurrent stale re-serve — retiring on the
+    /// keyed confirmation, not on any absorbing ingest. `Failed` drops the op and
+    /// reports `reverted` so the view recomputes back to authoritative state.
+    /// Out-of-order safe; idempotent on an unknown id.
+    pub fn settle(&mut self, id: &MutationId, outcome: SettlementOutcome) -> SettlementResult
+    where
+        C::State: PartialEq,
+    {
+        match outcome {
+            SettlementOutcome::Confirmed => {
+                let Some(key) = self
+                    .pending
+                    .iter()
+                    .find(|held| &held.id == id)
+                    .map(|held| held.key.clone())
+                else {
+                    return SettlementResult::default();
+                };
+                self.confirmed.insert(id.clone());
+                let retired = self.retire_absorbed(&key);
+                SettlementResult {
+                    retired,
+                    reverted: false,
+                }
+            }
+            SettlementOutcome::Failed => {
+                let before = self.pending.len();
+                self.pending.retain(|held| &held.id != id);
+                self.confirmed.remove(id);
+                let retired = self.pending.len() != before;
+                SettlementResult {
+                    retired,
+                    reverted: retired,
+                }
+            }
         }
     }
 
-    /// Retire pending mutations on `key` that the confirmed base now **absorbs**:
-    /// folding the op over the running confirmed state produces no change, so it
-    /// is redundant — the authoritative base already carries its effect. Ops are
-    /// checked in order; a still-effective op is kept and advances the running
-    /// state, so a later op is judged against the state its predecessors produce.
+    /// Retire pending mutations on `key` that are **both authority-confirmed and
+    /// absorbed** by the confirmed base (folding the op over the running base
+    /// produces no change at its position). Ops are checked in order; a
+    /// still-effective op is kept and advances the running state, so a later op
+    /// is judged against the state its predecessors produce.
     ///
-    /// This is the race-free retire trigger ([mutation.notification design](../eph/DESIGN-L2-mutation-notification.md)):
-    /// an op retires exactly when the base carries its effect, whether that is
-    /// learned from a base update (`message.updated`) or a confirmation. Because
-    /// retirement is gated on absorption, a confirmation that outruns the base
-    /// update never reverts a not-yet-absorbed op — it simply finds nothing to
-    /// retire and waits for the base. Returns whether any op was retired; a no-op
-    /// when the key has no confirmed base (nothing to absorb against) or is a
-    /// destroy over a present base (a removal a present base cannot carry).
+    /// The confirmed gate is the fix for the local-echo / stale-re-serve flicker
+    /// ([mutation.notification design](../eph/DESIGN-L2-mutation-notification.md)):
+    /// an **un**confirmed op is never retired here, so it stays folded
+    /// (idempotent — invisible) through its own optimistic message.updated echo
+    /// and through a concurrent stale provider re-serve; it retires only once the
+    /// far node has confirmed it (via [`settle`](Self::settle)) *and* the base
+    /// carries the effect. A confirmation that outruns the base update marks the
+    /// op confirmed but does not revert it — it retires on the next base update
+    /// that absorbs it. Returns whether any op was retired.
     pub fn retire_absorbed(&mut self, key: &C::Key) -> bool
     where
         C::State: PartialEq,
     {
         let Some(base) = self.base.get(key).cloned() else {
-            return false;
+            // No base: the entity left the working set (authoritative removal).
+            // A confirmed op on it is moot (there is nothing to absorb against,
+            // and the authority has both confirmed the op and removed the
+            // entity) — retire it so it does not leak. Unconfirmed ops stay.
+            let retire: Vec<MutationId> = self
+                .pending
+                .iter()
+                .filter(|held| &held.key == key && self.confirmed.contains(&held.id))
+                .map(|held| held.id.clone())
+                .collect();
+            if retire.is_empty() {
+                return false;
+            }
+            self.pending.retain(|held| !retire.contains(&held.id));
+            for id in &retire {
+                self.confirmed.remove(id);
+            }
+            return true;
         };
-        let before = self.pending.len();
+        // First pass (immutable): walk the key's ops in order, collecting those
+        // that are confirmed AND absorbed at their position.
         let mut running = base;
-        self.pending.retain(|held| {
-            if &held.key != key {
-                return true;
-            }
+        let mut retire: Vec<MutationId> = Vec::new();
+        for held in self.pending.iter().filter(|held| &held.key == key) {
             match C::fold(running.clone(), std::slice::from_ref(&held.effect)) {
-                Outcome::Present(next) if next == running => false,
-                Outcome::Present(next) => {
-                    running = next;
-                    true
+                Outcome::Present(next) if next == running => {
+                    if self.confirmed.contains(&held.id) {
+                        retire.push(held.id.clone());
+                    }
                 }
-                Outcome::Removed => true,
+                Outcome::Present(next) => running = next,
+                Outcome::Removed => {}
             }
-        });
-        self.pending.len() != before
+        }
+        if retire.is_empty() {
+            return false;
+        }
+        self.pending.retain(|held| !retire.contains(&held.id));
+        for id in &retire {
+            self.confirmed.remove(id);
+        }
+        true
     }
 
     /// The optimistic state of one entity: `replay(base, its pending)`. `None`
@@ -386,10 +444,28 @@ mod tests {
         replica.accept(flag("op1", "m1"));
         // Base catches up to the flag (the `message.updated` for the mutation).
         replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
-        assert!(replica.retire_absorbed(&"m1".to_string()));
+        // ...but the op only retires once the authority confirms it.
+        assert!(
+            replica
+                .settle(&MutationId("op1".into()), SettlementOutcome::Confirmed)
+                .retired
+        );
         assert!(!replica.has_pending());
         // The projection still shows the flag — retire did not revert.
         assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+    }
+
+    #[test]
+    fn unconfirmed_op_is_not_retired_even_when_the_base_carries_it() {
+        // The Bug-1 fix: a base update that carries the effect (a local echo or a
+        // stale provider re-serve) must NOT retire an op the authority has not
+        // yet confirmed — it stays folded (idempotent, invisible).
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
+        replica.accept(flag("op1", "m1"));
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        assert!(!replica.retire_absorbed(&"m1".to_string()));
+        assert!(replica.has_pending());
     }
 
     #[test]
@@ -418,9 +494,13 @@ mod tests {
                 remove: vec![],
             },
         });
-        // Base caught up to the flag only (op1), not the read (op2).
+        // Base caught up to the flag only (op1), not the read (op2). Confirm op1.
         replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
-        assert!(replica.retire_absorbed(&"m1".to_string()));
+        assert!(
+            replica
+                .settle(&MutationId("op1".into()), SettlementOutcome::Confirmed)
+                .retired
+        );
         let ids: Vec<&str> = replica.pending().iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, vec!["op2"]);
         // The still-pending read folds over the caught-up base.
@@ -449,7 +529,11 @@ mod tests {
                 remove: vec![],
             },
         });
-        assert!(replica.retire_absorbed(&"m1".to_string()));
+        assert!(
+            replica
+                .settle(&MutationId("op1".into()), SettlementOutcome::Confirmed)
+                .retired
+        );
         assert!(!replica.has_pending());
     }
 
@@ -460,7 +544,11 @@ mod tests {
         let mut replica = MessageReplica::new();
         replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        assert!(replica.retire_absorbed(&"m1".to_string()));
+        assert!(
+            replica
+                .settle(&MutationId("op1".into()), SettlementOutcome::Confirmed)
+                .retired
+        );
         assert!(!replica.has_pending());
     }
 
@@ -479,7 +567,7 @@ mod tests {
         replica.set_base("m2".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         replica.accept(flag("op2", "m2"));
-        replica.retire_absorbed(&"m1".to_string());
+        replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
         let ids: Vec<&str> = replica.pending().iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, vec!["op2"]);
     }
