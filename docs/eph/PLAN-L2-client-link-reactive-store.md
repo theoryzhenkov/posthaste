@@ -144,6 +144,31 @@ store notifications → cache).
 - **2e — Retire invalidation (G5).** When the store is active, stop
   `applyDomainEvent` invalidating store-owned entities; remove
   `useDomainEventRefresh`/`eventMayAffectView` for those.
+
+  **2e.1 LANDED (2026-06-26, `wxoppyyn`):** `EntityStoreHandle` (wasm-bindgen,
+  JSON boundary mirroring `MailListReplicaHandle`) — register/setViewRows/close,
+  ingestBatch, acceptMutation/settle/hasPending, message/mailbox/viewRows/
+  projectView/drainDirty. Serde (camelCase) on the store's boundary types + 4
+  round-trip tests (link-replica) + 2 end-to-end handle tests (link-wasm).
+
+  **2e.2 LANDED (2026-06-26, `pozrlkou`):** the `EntityStoreAdapter` — a
+  `RuntimeAdapter` wrapping the base, behind `VITE_ENTITY_STORE` (precedence over
+  `VITE_RUNTIME_REPLICA`). `viewSnapshot`/`viewReplace` → register + ingest row
+  projections (P1 atomic) + set_view_rows → re-project → synthesized
+  `viewReplace` (renderer unchanged). `notification(message.updated)` →
+  `ingest_batch` (the 2c/2b stream) → drain → re-project open views + emit +
+  `setQueryData` mailbox counts (no REST refetch). `mutationSettlement` → settle +
+  outbox. `runMutation` → accept_mutation + outbox + emit. Views open
+  non-delta-capable (option i); evaluable views (date + source-mailbox)
+  self-maintain, others `Deferred`. WASM `projectViewJson` (one call per view per
+  drain). 7 controller tests (faithful in-TS fake); 248 web tests green.
+
+  **Remaining (2e.3, the retirement):** `applyDomainEvent` + `useDaemonEvents`
+  + `useDomainEventRefresh`/`eventMayAffectView` still run alongside the store
+  (redundant invalidation for `message.updated` — rows via messagesRoot + counts
+  via mailboxes refetch). 2e.3 retires them for store-owned entities (keeps the
+  conversations/tags/smart-mailboxes invalidations, which the store does not
+  own). Then 2e.4 deletes `MailListReplica`/`view_replica.rs`/`ReplicaController`.
 - **2f — Flip default.** Store on by default once real-browser-validated; the
   legacy REST/invalidation paths become dead code to remove (then realized
   `client-link/L2.md` §4/§5/§6 are rewritten).
