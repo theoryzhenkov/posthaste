@@ -247,7 +247,17 @@ impl ViewRegistry {
                         let Ok(view) = registry.current_view(&view_id) else {
                             break;
                         };
-                        if event_affects_view(&view.kind, &event) {
+                        // The client entity store self-maintains evaluable
+                        // mail-list membership from the `message.updated` firehose
+                        // (option iii, single-source-view-membership), so the
+                        // runtime no longer recomputes + re-serves the whole
+                        // mail-list view per affecting event — the O(view)
+                        // `build_snapshot` that dominated sync cost. Other view
+                        // kinds (detail, conversation, account) are not
+                        // client-self-maintained and still recompute. Resync
+                        // re-derives mail-lists fresh (`refresh_open_views`).
+                        let self_maintained = matches!(view.kind, ViewKind::MailList(_));
+                        if !self_maintained && event_affects_view(&view.kind, &event) {
                             registry.send_recomputed_replace(&view_id).await;
                         }
                     }
@@ -345,7 +355,7 @@ impl ViewRegistry {
         Ok(snapshot)
     }
 
-    async fn recompute_view_if_changed(
+    pub(crate) async fn recompute_view_if_changed(
         &self,
         view_id: &ViewId,
     ) -> Result<Option<ViewSnapshot>, RuntimeError> {

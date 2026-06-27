@@ -174,12 +174,22 @@ That is the prerequisite decision, not a detail.
    corrector. Fixed in [[L2-projectionless-sync-events]] (fix a) — the three sync
    emitters now attach `projection` + `countDeltas`, so the store self-maintains
    rows + counts on those paths. This unblocks #3 removal.
-3. **Neuter #3 for `ViewKind::MailList`** in `spawn_event_pump` (skip
-   `send_recomputed_replace`); keep it for the other view kinds and keep
-   #1/#2/#4/#5/#6 untouched.
-4. **Harden gap-detection** (#4/#5/#6 become the *only* correctors) before, not
-   after.
-5. **Measure** the recompute drop.
+3. **Neuter #3 for `ViewKind::MailList`** in `spawn_event_pump` — **DONE.** The
+   event pump skips `send_recomputed_replace` for mail-list views (the client
+   self-maintains); detail/conversation/account views still recompute.
+4. **Harden gap-detection** — **DONE.** Removing #3 makes the session's stored
+   mail-list snapshot go stale (only fresh on open/extend), so every resync path
+   now recomputes open views fresh first via `SessionRegistry::refresh_open_views`
+   (`recompute_view_if_changed`, no-ops unchanged views): the reconnect catch-up
+   (`subscribe_frames`, now async), the frame-stream lag arm, and the
+   notification-forwarder lag collapse. Verified: the testkit live-convergence
+   trio (`live_inbox_convergence` / `gmail_inbox_sync` / `mutation_flicker`) all
+   pass without #3; `view_settlement` updated to the new contract (firehose fires,
+   no per-event re-serve). runtime 25 / testkit all green; clippy 0.
+5. **Measure** the recompute drop — pending (the `posthaste-bench` harness; the
+   win is structural: no `build_snapshot` per affecting `message.updated`).
+
+**STATUS: option iii landed (steps 1–4).** Only the perf measurement (5) remains.
 
 ## Provenance
 

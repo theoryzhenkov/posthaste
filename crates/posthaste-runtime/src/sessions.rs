@@ -195,12 +195,28 @@ impl SessionRegistry {
         Ok(RuntimeSession { session_id })
     }
 
-    pub(crate) fn subscribe_frames(
+    pub(crate) async fn subscribe_frames(
         self: &Arc<Self>,
         caller: RuntimeCaller,
         session_id: RuntimeSessionId,
         after_seq: Option<RuntimeSessionSeq>,
     ) -> Result<RuntimeFrameSubscription, RuntimeError> {
+        // A reconnect (a stale `after_seq`, not the initial subscribe) re-derives
+        // current state from the collapse below. The per-event mail-list re-serve
+        // was retired (option iii), so the session's stored mail-list snapshot is
+        // only fresh after open/extend — refresh the open views first or the
+        // catch-up would replay stale rows.
+        let is_reconnect = {
+            let sessions = self.lock_sessions();
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+            ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
+            after_seq.is_some_and(|seq| seq != RuntimeSessionSeq::new(session.last_seq))
+        };
+        if is_reconnect {
+            self.refresh_open_views(&session_id).await;
+        }
         let (catch_up, mut receiver) = {
             let mut sessions = self.lock_sessions();
             let session = sessions
@@ -235,6 +251,7 @@ impl SessionRegistry {
                             missed_frames = missed,
                             "session frame stream lagged; recovering with a collapsed snapshot",
                         );
+                        registry.refresh_open_views(&session_id).await;
                         match registry.collapse_session(&session_id, caller_scope.as_deref()) {
                             Ok(frames) => {
                                 for frame in frames {
@@ -649,6 +666,7 @@ impl SessionRegistry {
                             missed_events = missed,
                             "notification forwarder lagged; collapsing the session to resync",
                         );
+                        registry.refresh_open_views(&session_id).await;
                         let _ = registry.collapse_session_into_stream(&session_id);
                     }
                     Err(broadcast::error::RecvError::Closed) => return,
@@ -693,6 +711,33 @@ impl SessionRegistry {
         drop(sessions);
         let _ = sender.send(frame);
         true
+    }
+
+    /// Re-derive each open view fresh and refresh the session's stored snapshot,
+    /// so a subsequent collapse/catch-up serves current state rather than a stale
+    /// cached one. Required because the per-event mail-list re-serve was retired
+    /// (option iii): the session's stored mail-list snapshot is otherwise only
+    /// refreshed on open/extend, so resync would replay stale rows. Holds no lock
+    /// across the async recompute; `recompute_view_if_changed` no-ops views that
+    /// haven't moved (so unchanged + still-#3-served views cost nothing).
+    async fn refresh_open_views(&self, session_id: &RuntimeSessionId) {
+        let open_views: Vec<ViewId> = {
+            let sessions = self.lock_sessions();
+            match sessions.get(session_id) {
+                Some(session) => session.open_views.iter().cloned().collect(),
+                None => return,
+            }
+        };
+        for view_id in &open_views {
+            if let Ok(Some(snapshot)) = self.views.recompute_view_if_changed(view_id).await {
+                let mut sessions = self.lock_sessions();
+                if let Some(session) = sessions.get_mut(session_id) {
+                    if session.open_views.contains(view_id) {
+                        session.latest_snapshots.insert(view_id.clone(), snapshot);
+                    }
+                }
+            }
+        }
     }
 
     fn collapse_session(

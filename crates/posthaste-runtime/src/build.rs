@@ -869,6 +869,7 @@ impl RuntimeCore for RuntimeHandle {
         self.core
             .sessions
             .subscribe_frames(caller, session_id, after_seq)
+            .await
     }
 
     async fn close_session(
