@@ -620,7 +620,23 @@ impl SessionRegistry {
                             return;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        // The event bus dropped `missed` events for this
+                        // forwarder — they never reached the session's frame
+                        // stream. Recover by collapsing to the session's current
+                        // state so the client resyncs (re-snapshots open views
+                        // + replays the live mutation window) rather than
+                        // silently missing them (I3, `gap-detection`).
+                        let Some(registry) = registry.upgrade() else {
+                            return;
+                        };
+                        warn!(
+                            session_id = %session_id.as_str(),
+                            missed_events = missed,
+                            "notification forwarder lagged; collapsing the session to resync",
+                        );
+                        let _ = registry.collapse_session_into_stream(&session_id);
+                    }
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
             }
@@ -677,6 +693,22 @@ impl SessionRegistry {
         ensure_caller_matches_session(session, caller_scope)?;
         Ok(collapse_session_frames(session))
     }
+
+    /// Collapse the session and push the frames into its stream — the
+    /// notification forwarder's recovery from an event-bus lag (it silently
+    /// dropped events; the client resyncs from the collapsed snapshot). No
+    /// caller-scope check: the forwarder is the session's own component.
+    fn collapse_session_into_stream(
+        &self,
+        session_id: &RuntimeSessionId,
+    ) -> Result<(), RuntimeError> {
+        let mut sessions = self.lock_sessions();
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        collapse_session_frames_into(session);
+        Ok(())
+    }
 }
 
 fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
@@ -699,6 +731,18 @@ fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
         frames.push(mutation.frame(session_seq));
     }
     frames
+}
+
+/// Push the session's collapsed state into its frame stream — the recovery
+/// path for a notification forwarder that lagged on the event bus: it silently
+/// dropped events, so collapse to a consistent snapshot the client re-applies
+/// (re-snapshot open views + replay the live mutation window) rather than
+/// missing them (I3, `gap-detection`). Reuses [`collapse_session_frames`].
+fn collapse_session_frames_into(session: &mut StoredSession) {
+    let sender = session.frames.clone();
+    for frame in collapse_session_frames(session) {
+        let _ = sender.send(frame);
+    }
 }
 
 /// Compute a row-local mail-list delta between two snapshots, or `None` when the
@@ -1131,6 +1175,34 @@ mod mutation_eviction_tests {
         assert_eq!(
             mutation_frames, cap,
             "reconnect re-emits at most MAX_LATEST_MUTATIONS settlement frames"
+        );
+    }
+
+    #[test]
+    fn collapse_session_frames_into_streams_for_resync() {
+        // The notification forwarder lagged on the event bus and silently
+        // dropped events. `collapse_session_frames_into` pushes the session's
+        // collapsed state into the frame stream so the client resyncs (I3,
+        // gap-detection) instead of missing them.
+        let (frames, mut rx) = broadcast::channel(8);
+        let mut session = empty_session();
+        session.frames = frames;
+        for id in 1u64..=3 {
+            let m = stored_mutation(id, id, MutationSettlementState::Confirmed);
+            session.latest_mutations.insert(m.mutation_id.clone(), m);
+        }
+
+        collapse_session_frames_into(&mut session);
+
+        let mut streamed = 0;
+        while let Ok(frame) = rx.try_recv() {
+            if matches!(frame, RuntimeFrame::MutationSettlement { .. }) {
+                streamed += 1;
+            }
+        }
+        assert_eq!(
+            streamed, 3,
+            "collapse streamed the live mutation window into the frame stream"
         );
     }
 }
