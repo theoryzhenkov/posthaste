@@ -72,8 +72,10 @@ import type {
   RuntimeResourceDescriptor,
   RuntimeViewFrame,
   RuntimeViewFrameHandlers,
+  RuntimeViewDescriptor,
   RuntimeViewSnapshot,
 } from './types'
+import { isMailListSelfMaintained } from './mailListSelfMaintained'
 
 /**
  * Default runtime adapter during migration.
@@ -127,6 +129,21 @@ function mailQueryRequest(
       sortDirection: request.sortDir ?? 'desc',
     },
     visibility: null,
+  }
+}
+
+/** Build the mailList view descriptor, stamping `clientSelfMaintained` from the
+ * view's scope+sort (single source: `isMailListSelfMaintained`, shared with the
+ * store's predicate derivation). The runtime reads the flag to decide whether to
+ * skip the per-event re-serve (option iii); a `Deferred` mail-list (smart-
+ * mailbox / global / non-`date`) stays false and is re-served. */
+function mailListViewDescriptor(
+  view: RuntimeMessagePageRequest,
+): RuntimeViewDescriptor {
+  return {
+    family: 'mailList',
+    payload: mailQueryRequest(view),
+    clientSelfMaintained: isMailListSelfMaintained(view.scope, view.sort),
   }
 }
 
@@ -184,10 +201,7 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     })
   },
   async openRuntimeSessionMessageListView(request) {
-    const descriptor = {
-      family: 'mailList',
-      payload: mailQueryRequest(request.view),
-    }
+    const descriptor = mailListViewDescriptor(request.view)
     return openRuntimeSessionView<
       RuntimeViewSnapshot<RuntimeMailListViewState>
     >(request.sessionId, { descriptor }, { sourceId: request.sourceId })
@@ -283,10 +297,7 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     return () => controller.abort()
   },
   async openMessageListView(request) {
-    const descriptor = {
-      family: 'mailList',
-      payload: mailQueryRequest(request),
-    }
+    const descriptor = mailListViewDescriptor(request)
     return openView<RuntimeViewSnapshot<RuntimeMailListViewState>>(
       { descriptor },
       { sourceId: sourceScope(request) },

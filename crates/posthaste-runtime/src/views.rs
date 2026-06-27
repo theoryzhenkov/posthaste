@@ -256,7 +256,17 @@ impl ViewRegistry {
                         // kinds (detail, conversation, account) are not
                         // client-self-maintained and still recompute. Resync
                         // re-derives mail-lists fresh (`refresh_open_views`).
-                        let self_maintained = matches!(view.kind, ViewKind::MailList(_));
+                        // Self-maintained iff this is a mail-list the client
+                        // store owns the membership of (evaluable predicate). The
+                        // client stamps `client_self_maintained` on the view
+                        // descriptor from its predicate; `Deferred` mail-lists
+                        // (smart-mailbox / global / non-`date`) stay false and
+                        // are still re-served per event — they have no client
+                        // self-maintenance, so skipping would stale them until
+                        // reload (the option-iii regression).
+                        let self_maintained =
+                            matches!(view.kind, ViewKind::MailList(_))
+                                && view.descriptor.client_self_maintained;
                         if !self_maintained && event_affects_view(&view.kind, &event) {
                             registry.send_recomputed_replace(&view_id).await;
                         }

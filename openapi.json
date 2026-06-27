@@ -7635,6 +7635,10 @@
           "family"
         ],
         "properties": {
+          "clientSelfMaintained": {
+            "type": "boolean",
+            "description": "Whether the client entity store self-maintains this view's membership from\nthe `message.updated` firehose (evaluable predicates only). When true\nthe runtime skips the per-event re-serve for this view (option iii,\nsingle-source-view-membership); when false the runtime re-serves on every\naffecting event — required for `Deferred` mail-lists (smart-mailbox /\nglobal / non-`date`) the store cannot self-maintain. Single source: the\nclient computes it from its predicate and stamps it here; the runtime\nnever re-derives it (no TS↔Rust drift)."
+          },
           "family": {
             "type": "string"
           },

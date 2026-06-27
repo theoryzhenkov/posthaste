@@ -67,6 +67,15 @@ export interface RuntimeMessagePageRequest {
   operation: OperationContext
 }
 
+/** A view descriptor: the family + payload, plus the `clientSelfMaintained` flag
+ * the client stamps for mail-list views it self-maintains (evaluable
+ * predicate). See `isMailListSelfMaintained`. */
+export interface RuntimeViewDescriptor {
+  family: string
+  payload: unknown
+  clientSelfMaintained?: boolean
+}
+
 export interface RuntimeMessageCursor {
   sortValue: string
   sourceId: string
@@ -87,7 +96,7 @@ export interface RuntimeMailQueryRequest {
 
 export interface RuntimeViewSnapshot<TData = unknown> {
   viewId: string
-  descriptor: { family: string; payload: unknown }
+  descriptor: RuntimeViewDescriptor
   revision: number
   lifecycle: 'loading' | 'ready' | 'updating' | 'error'
   readWatermark: { value: string } | null
@@ -259,7 +268,7 @@ export interface RuntimeSessionViewExtendRequest {
 /// page result; this is the generic single-object path.
 export interface RuntimeSessionObjectViewRequest {
   sessionId: string
-  descriptor: { family: string; payload: unknown }
+  descriptor: RuntimeViewDescriptor
   sourceId?: string | null
 }
 
