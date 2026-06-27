@@ -8,6 +8,7 @@ import { httpRuntimeAdapter } from './httpAdapter'
 import { loadEntityStoreHandleFactory } from './replica/handle'
 import { loadReplicaHandleFactory } from './replica/handle'
 import { defaultOutboxStore } from './replica/outboxStore'
+import { markEntityStoreActive } from './entityStoreState'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createReplicaAdapter } from './replica/replicaAdapter'
 import type { RuntimeAdapter } from './types'
@@ -112,13 +113,6 @@ export function isReplicaAdapterActive(): boolean {
   return replicaActive
 }
 
-let entityStoreActive = false
-
-/** Whether the client-layer WASM entity-store adapter (2e) is active. */
-export function isEntityStoreAdapterActive(): boolean {
-  return entityStoreActive
-}
-
 /** Test-only: override the active adapter without starting a backend. */
 export function setRuntimeAdapterForTesting(
   adapter: RuntimeAdapter,
@@ -199,7 +193,7 @@ export function installEntityStoreAdapter(): Promise<void> {
       makeHandle,
       outbox: defaultOutboxStore(),
     })
-    entityStoreActive = true
+    markEntityStoreActive()
     syncLogger.info(
       {
         event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
