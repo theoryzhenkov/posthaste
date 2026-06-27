@@ -6,8 +6,6 @@ reviewed: 2026-06-22
 lifecycle: ephemeral
 type: DESIGN
 depends:
-  - path: docs/stale/L1-outbox
-  - path: docs/stale/L1-sync
   - path: docs/runtime/mutations/L1
   - path: docs/backend/L1
   - path: docs/client/L1
@@ -25,7 +23,7 @@ depends:
 
 This is subsystem **(1)** of the three-owner redesign (mutations/read-model;
 accounts/runtime — see [[DESIGN-L2-account-state-architecture]]; UI surface/app-mode).
-It supersedes the reactive `docs/stale/L1-outbox` spec, which itself accreted
+It supersedes the earlier reactive outbox spec, which itself accreted
 edge cases (`reconcile-after-automation`, flush-ordering pair, stale-inflight,
 legacy-`conflicted`) and is the source of the visible flicker.
 

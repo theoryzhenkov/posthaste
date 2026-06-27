@@ -6,15 +6,9 @@ reviewed: 2026-06-20
 lifecycle: ephemeral
 type: REPORT
 depends:
-  - path: docs/stale/L0-providers
-  - path: docs/stale/L1-sync
-  - path: docs/stale/L1-compose
-  - path: docs/stale/L1-search
   - path: docs/runtime/adapter/L1
   - path: docs/backend/L1
   - path: docs/api/L1
-  - path: docs/stale/L1-lab
-  - path: docs/stale/L1-logging
 ---
 
 # Public beta readiness audit

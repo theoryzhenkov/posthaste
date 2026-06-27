@@ -113,7 +113,6 @@ pub trait SyncWriteStore: Send + Sync {
     /// chunks and returned a reconciliation set; a single self-reconciling
     /// batch skips it.
     ///
-    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
     fn reconcile_sync(
         &self,
         account_id: &AccountId,

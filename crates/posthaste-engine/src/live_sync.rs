@@ -101,7 +101,6 @@ pub(crate) async fn sync_account(
 /// locals absent from the complete remote set and commits the withheld cursors.
 ///
 /// @spec docs/L1-sync#sync-loop
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 pub(crate) async fn sync_account_streamed(
     client: &Arc<Client>,
     account_id: &AccountId,

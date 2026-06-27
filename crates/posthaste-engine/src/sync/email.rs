@@ -43,7 +43,6 @@ pub(crate) async fn fetch_email_sync(
 /// full-snapshot metadata page by page through `on_page` so mail surfaces
 /// progressively.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 pub(crate) enum StreamedEmailSync {
     /// Delta sync: small and self-reconciling. The caller emits it as one chunk
     /// carrying its explicit removals and cursors; no reconciliation pass runs.
@@ -60,7 +59,6 @@ pub(crate) enum StreamedEmailSync {
 /// the caller to emit as one chunk, while a full snapshot streams metadata pages
 /// through `on_page` and reports the complete remote id set for reconciliation.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 pub(crate) async fn fetch_email_sync_streamed(
     client: &Client,
     since_state: Option<&str>,
@@ -195,7 +193,6 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
 /// cursor for the reconciliation pass. Bodies are omitted (fetched lazily).
 ///
 /// @spec docs/L1-sync#sync-granularity
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 async fn fetch_email_full_streamed(
     client: &Client,
     on_page: &mut (dyn FnMut(Vec<MessageRecord>) -> Result<(), GatewayError> + Send),
