@@ -181,11 +181,73 @@ import_fixture_messages() {
   echo "imported fixture messages for $USER from $FIXTURE_ROOT"
 }
 
+ensure_mailbox_roles() {
+  # Stalwart auto-creates Drafts/Sent/Junk/Trash with their special-use roles on
+  # account creation, but NOT Archive. The fixture import creates the "Archive"
+  # mailbox from the .Archive maildir folder without a role, so client
+  # `moveToRole{archive}` mutations fail with "account has no mailbox with role
+  # 'archive'". Set the role here for dev parity with production (where Archive
+  # carries the \Archive special-use). Idempotent: a no-op once the role is set.
+  local session account_id response archive_id archive_role
+
+  session=$(curl -sfL -u "$USER:$POSTHASTE_STALWART_USER_PASSWORD" "$BASE/.well-known/jmap")
+  account_id=$(printf '%s' "$session" | jq -r '.primaryAccounts["urn:ietf:params:jmap:mail"] // empty')
+  if [[ -z "$account_id" ]]; then
+    echo "could not discover JMAP mail account for $USER (skipping mailbox roles)" >&2
+    return
+  fi
+
+  response=$(curl -sf -u "$USER:$POSTHASTE_STALWART_USER_PASSWORD" "$BASE/jmap/" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg account_id "$account_id" '{
+      using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+      methodCalls: [[
+        "Mailbox/get",
+        { accountId: $account_id, ids: null, properties: ["id", "name", "role"] },
+        "0"
+      ]]
+    }')")
+
+  read -r archive_id archive_role <<< "$(printf '%s' "$response" | jq -r '
+    .methodResponses[0][1].list[]?
+    | select(.name | ascii_downcase == "archive")
+    | [.id, (.role // "")] | @tsv
+  ' | head -n1)"
+
+  if [[ -z "$archive_id" ]]; then
+    echo "no Archive mailbox found for $USER (skipping role set)"
+    return
+  fi
+  if [[ "$archive_role" == "archive" ]]; then
+    echo "Archive mailbox already has role 'archive'"
+    return
+  fi
+
+  response=$(curl -sf -u "$USER:$POSTHASTE_STALWART_USER_PASSWORD" "$BASE/jmap/" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg account_id "$account_id" --arg id "$archive_id" '{
+      using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+      methodCalls: [[
+        "Mailbox/set",
+        { accountId: $account_id, update: { ($id): { role: "archive" } } },
+        "0"
+      ]]
+    }')")
+
+  if printf '%s' "$response" | jq -e --arg id "$archive_id" \
+    '.methodResponses[0][1].updated | has($id)' >/dev/null; then
+    echo "set Archive mailbox role to 'archive'"
+  else
+    echo "failed to set Archive mailbox role: $response" >&2
+  fi
+}
+
 wait_for_stalwart
 ensure_domain
 ensure_user
 ensure_jmap_identity
 import_fixture_messages
+ensure_mailbox_roles
 mkdir -p "$STATE_ROOT"
 touch "$SEED_READY_MARKER"
 
