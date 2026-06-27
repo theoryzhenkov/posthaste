@@ -213,6 +213,13 @@ pub struct EntityStore {
     /// The message convergence engine: confirmed fold states + the optimistic
     /// outbox. Keyed by message id (`MessageConvergence::Key = String`).
     engine: MessageReplica,
+    /// Per-op the authority base version captured at accept time, so retirement
+    /// can be gated on a STRICTLY HIGHER version. A local move does not bump the
+    /// provider modseq, so its same-version echo and a stale re-serve share this
+    /// version — retiring there would let the stale re-serve clobber membership.
+    /// Absent for ops accepted with no version yet (those retire on the old
+    /// confirmed+absorbed rule; opt-in for no-version providers).
+    accepted_at: HashMap<MutationId, u64>,
     dirty: HashSet<DirtyKey>,
 }
 
@@ -350,6 +357,16 @@ impl EntityStore {
         message_id: &str,
         assertion: MessageAssertion,
     ) {
+        // Remember the authority version at accept time so retirement can be
+        // gated on a strictly-higher version (the equal-version hold that
+        // survives the local move's same-modseq echo + a stale re-serve).
+        if let Some(version) = self
+            .messages
+            .get(message_id)
+            .and_then(|entity| authority_version(&entity.projection))
+        {
+            self.accepted_at.insert(mutation_id.clone(), version);
+        }
         self.engine.accept(PendingMessageMutation {
             id: mutation_id,
             key: message_id.to_string(),
@@ -382,16 +399,79 @@ impl EntityStore {
             .iter()
             .find(|held| &held.id == mutation_id)
             .map(|held| held.key.clone());
-        // The engine handles both outcomes: `Confirmed` marks the op confirmed +
-        // retires it iff the base absorbs it (confirmed-gating — an unconfirmed
-        // base update never retires it); `Failed` removes + reverts.
-        let result = self.engine.settle(mutation_id, outcome);
+        let result = match outcome {
+            SettlementOutcome::Confirmed => {
+                // Mark confirmed, but retire only ops whose current base version
+                // is STRICTLY HIGHER than at accept. A local move does not bump
+                // the provider modseq, so its same-version echo would absorb +
+                // retire the op prematurely — letting a later equal-version stale
+                // re-serve clobber membership. The op stays folded through that
+                // window, retiring only on the real modseq bump.
+                self.engine.mark_confirmed(mutation_id);
+                let mut retired = false;
+                if let Some(message_id) = key.as_ref() {
+                    let current = self
+                        .messages
+                        .get(message_id.as_str())
+                        .and_then(|e| authority_version(&e.projection));
+                    let can_retire = self.retireable_ops(message_id.as_str(), current);
+                    retired = self.engine.retire_absorbed_if(
+                        message_id,
+                        |id| can_retire.contains(id),
+                    );
+                    if retired {
+                        self.prune_accepted_at(message_id.as_str());
+                    }
+                }
+                SettlementResult { retired, reverted: false }
+            }
+            SettlementOutcome::Failed => {
+                self.accepted_at.remove(mutation_id);
+                self.engine.settle(mutation_id, outcome)
+            }
+        };
         if let Some(message_id) = key {
             if self.messages.contains_key(&message_id) {
                 self.rederive_message(&message_id);
             }
         }
         result
+    }
+
+    /// The pending ops on `message_id` that may retire at `current_version`: an
+    /// op retires only if it was accepted with no version tracked (opt-in for
+    /// no-version providers — the old confirmed+absorbed rule) OR the current
+    /// base version is STRICTLY HIGHER than the version captured at accept (a
+    /// real provider modseq bump, not the local move's same-modsec echo / a
+    /// stale re-serve). This is the equal-version hold.
+    fn retireable_ops(
+        &self,
+        message_id: &str,
+        current_version: Option<u64>,
+    ) -> HashSet<MutationId> {
+        self.engine
+            .pending()
+            .iter()
+            .filter(|held| held.key.as_str() == message_id)
+            .filter(|held| match self.accepted_at.get(&held.id) {
+                None => true,
+                Some(at) => current_version.is_some_and(|cur| cur > *at),
+            })
+            .map(|held| held.id.clone())
+            .collect()
+    }
+
+    /// Drop `accepted_at` entries for ops no longer pending on `message_id`
+    /// (retired/failed), so the map does not leak across the outbox lifecycle.
+    fn prune_accepted_at(&mut self, message_id: &str) {
+        let live: HashSet<MutationId> = self
+            .engine
+            .pending()
+            .iter()
+            .filter(|held| held.key.as_str() == message_id)
+            .map(|held| held.id.clone())
+            .collect();
+        self.accepted_at.retain(|id, _| live.contains(id));
     }
 
     /// Whether any optimistic mutation is still pending (drives optimistic-UI
@@ -434,9 +514,20 @@ impl EntityStore {
                 fold_state_from_projection(projection),
             );
             // A base update retires any pending op the new base now carries
-            // (the race-free happy-path retire); optimism the base has not yet
-            // caught up to stays folded and re-derives below.
-            self.engine.retire_absorbed(&message_id.to_string());
+            // (the race-free happy-path retire) — but only at a STRICTLY HIGHER
+            // version: an equal-version base (the local move's same-modseq echo,
+            // or a stale re-serve) must NOT retire the op, so it stays folded and
+            // holds membership through the unconfirmed window.
+            let can_retire =
+                self.retireable_ops(message_id, authority_version(projection));
+            let retired = self
+                .engine
+                .retire_absorbed_if(&message_id.to_string(), |id| {
+                    can_retire.contains(id)
+                });
+            if retired {
+                self.prune_accepted_at(message_id);
+            }
             self.rederive_message(message_id);
         }
         self.dirty.insert(DirtyKey::Message(message_id.to_string()));
@@ -748,6 +839,20 @@ mod tests {
         }]);
     }
 
+    /// Ingest m2 in `mailboxes` stamped with an authority `version` (the move
+    /// flicker: a local move does not bump modseq, so the moved base and a stale
+    /// re-serve share the version).
+    fn ingest_m2_mailbox_v(store: &mut EntityStore, mailboxes: &[&str], version: u64) {
+        let mut proj = summary("m2", "2026-04-28T12:00:00Z", mailboxes);
+        proj["version"] = json!(version);
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m2".into(),
+            projection: proj,
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+    }
+
     fn flag_assertion() -> MessageAssertion {
         MessageAssertion::SetKeywords {
             add: vec!["$flagged".into()],
@@ -949,6 +1054,53 @@ mod tests {
         let proj = store.message("m2").unwrap();
         assert_eq!(proj["mailboxIds"], json!(["archive"]));
         assert!(store.has_pending());
+    }
+
+    #[test]
+    fn move_op_holds_through_equal_version_then_retires_on_bump() {
+        // The .20 flicker root cause: a LOCAL move does not bump the provider
+        // modseq, so the moved [archive]@v5 base and a stale [inbox]@v5 re-serve
+        // are EQUAL version. The op must NOT retire on the equal-version echo +
+        // confirm (5 == 5) — else the stale re-serve clobbers membership with no
+        // op to re-fold [archive] over it. It holds through the window, retiring
+        // only on the real modseq+1 bump.
+        let (mut store, view) = inbox_view();
+        ingest_m2_v(&mut store, &[], 5); // m2 in inbox @ v5
+        store.drain_dirty();
+        assert_eq!(store.view_rows(view).unwrap().len(), 1);
+
+        // Local move to archive (optimism folds archive over the inbox@v5 base).
+        store.accept_mutation(
+            MutationId("op1".into()),
+            "m2",
+            MessageAssertion::ReplaceMailboxes {
+                mailbox_ids: vec!["archive".into()],
+            },
+        );
+        assert!(store.view_rows(view).unwrap().is_empty()); // m2 leaves inbox
+
+        // Provider's same-modseq [archive]@v5 (move applied, modseq not yet
+        // bumped) + the verdict Confirmed: the op must NOT retire at 5 == 5.
+        ingest_m2_mailbox_v(&mut store, &["archive"], 5);
+        let result = store.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
+        assert!(!result.retired, "op must hold at equal version");
+        assert!(store.has_pending());
+        assert!(store.view_rows(view).unwrap().is_empty());
+
+        // A STALE [inbox]@v5 re-serve (equal version) clobbers the base — but the
+        // op is still pending, folding [archive] over it, so m2 stays out.
+        ingest_m2_mailbox_v(&mut store, &["inbox"], 5);
+        assert!(
+            store.view_rows(view).unwrap().is_empty(),
+            "stale equal-version re-serve must not re-add the row"
+        );
+        assert!(store.has_pending(), "op still holds through the stale re-serve");
+
+        // Provider confirms with modseq+1 ([archive]@v6): strictly higher → retire.
+        ingest_m2_mailbox_v(&mut store, &["archive"], 6);
+        assert!(!store.has_pending(), "op retires on the real modseq bump");
+        assert!(store.view_rows(view).unwrap().is_empty());
+        assert_eq!(store.message("m2").unwrap()["mailboxIds"], json!(["archive"]));
     }
 
     #[test]
