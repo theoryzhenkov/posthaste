@@ -8,26 +8,36 @@
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+use std::collections::HashMap;
+
 use posthaste_link_contract::message_mutation::MessageMutation;
 use posthaste_link_core::{MessageAssertion, MessageChangeDiff};
 use posthaste_runtime_contract::MutationRequest;
 
 /// Parse a runtime mutation request and return `{ messageId, assertion }` as
 /// JSON when the mutation is locally foldable. Returns `null` for mutations
-/// whose effect cannot be folded from the request alone (role moves such as
-/// archive/trash/moveToRole). Mirrors the Rust near-node
-/// `MessageMutation::from_request` + `to_assertion` path.
+/// whose effect cannot be folded from the request alone. `role_map_json` is the
+/// account's role→mailbox-id map (`{"archive": "mbx-..."}`, built client-side
+/// from the mailbox list); it resolves role moves (archive/trash/restoreToInbox/
+/// moveToRole) to `ReplaceMailboxes`. `{}` → role moves get no optimism (graceful
+/// when the mailbox list isn't loaded yet). Mirrors the Rust near-node
+/// `MessageMutation::from_request` + `to_assertion_with_roles` path.
 #[wasm_bindgen(js_name = parseMessageMutation)]
-pub fn parse_message_mutation(request_json: &str) -> Result<Option<String>, JsError> {
+pub fn parse_message_mutation(
+    request_json: &str,
+    role_map_json: &str,
+) -> Result<Option<String>, JsError> {
     let request: MutationRequest =
         serde_json::from_str(request_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let roles: HashMap<String, String> =
+        serde_json::from_str(role_map_json).map_err(|error| JsError::new(&error.to_string()))?;
     // Unknown or non-foldable message mutations are not errors; the adapter
     // simply passes them through to the runtime.
     let mutation = match MessageMutation::from_request(&request) {
         Ok(mutation) => mutation,
         Err(_) => return Ok(None),
     };
-    let assertion = match mutation.to_assertion() {
+    let assertion = match mutation.to_assertion_with_roles(&roles) {
         Some(assertion) => assertion,
         None => return Ok(None),
     };
@@ -76,7 +86,7 @@ mod tests {
             },
             "clientMutationId": "op-1"
         });
-        let output = parse_message_mutation(&request.to_string())
+        let output = parse_message_mutation(&request.to_string(), "{}")
             .unwrap()
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
@@ -96,7 +106,7 @@ mod tests {
             },
             "clientMutationId": "op-1"
         });
-        let output = parse_message_mutation(&request.to_string())
+        let output = parse_message_mutation(&request.to_string(), "{}")
             .unwrap()
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
@@ -108,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_archive_returns_null() {
+    fn parse_archive_resolves_via_the_role_map() {
         let request = json!({
             "name": "message.archive",
             "args": {
@@ -117,9 +127,18 @@ mod tests {
             },
             "clientMutationId": "op-1"
         });
-        assert!(parse_message_mutation(&request.to_string())
+        // No role map → no optimism (graceful: mailbox list not loaded yet).
+        assert!(parse_message_mutation(&request.to_string(), "{}")
             .unwrap()
             .is_none());
+        // With the account's archive mailbox → ReplaceMailboxes.
+        let output =
+            parse_message_mutation(&request.to_string(), r#"{"archive":"mbx-a"}"#)
+                .unwrap()
+                .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["assertion"]["kind"], "replaceMailboxes");
+        assert_eq!(parsed["assertion"]["mailbox_ids"], json!(["mbx-a"]));
     }
 
     #[test]
