@@ -54,11 +54,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use posthaste_link_core::{
-    MessageAssertion, MessageReplica, MutationId, Outcome, PendingMessageMutation,
-    SettlementOutcome, SettlementResult,
+    MessageAssertion, MessageFoldState, MessageReplica, MutationId, Outcome,
+    PendingMessageMutation, SettlementOutcome, SettlementResult,
 };
-
-use crate::mail_list::{apply_fold_to_projection, fold_state_from_projection};
 
 /// A changed entity key, reported by [`EntityStore::drain_dirty`].
 ///
@@ -529,6 +527,59 @@ fn insert_sorted(rows: &mut Vec<ViewRow>, row: ViewRow, direction: SortDirection
         SortDirection::Asc => rows.iter().position(|r| r.sort_key > row.sort_key),
     };
     rows.insert(pos.unwrap_or(rows.len()), row);
+}
+
+/// Read the foldable canonical state (keywords + mailbox ids) out of a row's
+/// presentation projection. Absent/!array fields read as empty.
+pub fn fold_state_from_projection(projection: &Value) -> MessageFoldState {
+    MessageFoldState {
+        keywords: string_array(projection.get("keywords")),
+        mailbox_ids: string_array(projection.get("mailboxIds")),
+    }
+}
+
+/// Write the folded canonical state back into a presentation projection,
+/// re-deriving the read/flag display flags from the keywords and preserving
+/// every other field.
+pub fn apply_fold_to_projection(mut projection: Value, state: &MessageFoldState) -> Value {
+    if let Value::Object(map) = &mut projection {
+        map.insert(
+            "keywords".to_string(),
+            Value::Array(state.keywords.iter().cloned().map(Value::String).collect()),
+        );
+        map.insert(
+            "mailboxIds".to_string(),
+            Value::Array(
+                state
+                    .mailbox_ids
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+        map.insert(
+            "isRead".to_string(),
+            Value::Bool(state.keywords.iter().any(|keyword| keyword == "$seen")),
+        );
+        map.insert(
+            "isFlagged".to_string(),
+            Value::Bool(state.keywords.iter().any(|keyword| keyword == "$flagged")),
+        );
+    }
+    projection
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

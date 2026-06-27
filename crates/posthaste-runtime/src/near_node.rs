@@ -21,8 +21,10 @@
 use std::sync::Mutex;
 
 use posthaste_link_contract::message_mutation::MessageMutation;
-use posthaste_link_core::{MessageAssertion, MutationId, PendingMessageMutation};
-use posthaste_link_replica::{MailListReplica, MailListRow};
+use posthaste_link_core::{
+    MessageAssertion, MutationId, Outcome, PendingMessageMutation, MessageReplica,
+};
+use posthaste_link_replica::{apply_fold_to_projection, fold_state_from_projection};
 use posthaste_runtime_contract::{MailListViewState, MutationRequest};
 use serde_json::Value;
 
@@ -80,14 +82,15 @@ pub(crate) fn named_message_assertion(
 }
 
 /// Fold the runtime→backend outbox over a recomputed mail-list view, in place,
-/// using the shared replica. Behavior-preserving when the outbox is empty (the
-/// in-process default): a short-circuit that leaves the served rows untouched.
+/// using the shared convergence engine (the same fold the browser client's
+/// entity store runs — assertion `one-replica`). Behavior-preserving when the
+/// outbox is empty (the in-process default): a short-circuit that leaves the
+/// served rows untouched.
 ///
 /// The served rows are the confirmed base; each pending mutation is folded over
 /// them; destroyed rows drop. Membership beyond destroy (e.g. archived out of a
-/// concrete mailbox) is left for the runtime's next recompute to correct
-/// (`project_all`), as the client replica does for views it cannot evaluate
-/// locally.
+/// concrete mailbox) is left for the runtime's next recompute to correct, as the
+/// client store does for views it cannot evaluate locally.
 pub(crate) fn apply_outbox_overlay(
     state: &mut MailListViewState,
     pending: &[PendingMessageMutation],
@@ -95,25 +98,14 @@ pub(crate) fn apply_outbox_overlay(
     if pending.is_empty() {
         return;
     }
-    let mut replica = MailListReplica::new();
-    replica.ingest(
-        state
-            .rows
-            .iter()
-            .map(|row| MailListRow {
-                message_id: row_message_id(row),
-                projection: row.projection.clone(),
-            })
-            .collect(),
-    );
-    for mutation in pending {
-        replica.accept(
-            mutation.id.clone(),
-            mutation.key.clone(),
-            mutation.effect.clone(),
-        );
+    let mut engine = MessageReplica::new();
+    for row in &state.rows {
+        engine.set_base(row_message_id(row), fold_state_from_projection(&row.projection));
     }
-    if !replica.has_pending() {
+    for mutation in pending {
+        engine.accept(mutation.clone());
+    }
+    if !engine.has_pending() {
         return;
     }
     // Re-key the original rows by message id so the projected (folded) rows keep
@@ -124,14 +116,20 @@ pub(crate) fn apply_outbox_overlay(
             .iter()
             .map(|row| (row_message_id(row), row.clone()))
             .collect();
-    state.rows = replica
-        .project_all()
-        .into_iter()
-        .filter_map(|projection| {
-            let id = projection.get("id").and_then(Value::as_str)?;
-            let mut row = originals.get(id)?.clone();
-            row.projection = projection;
-            Some(row)
+    state.rows = state
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let id = row_message_id(row);
+            match engine.project(&id) {
+                Some(Outcome::Present(fold_state)) => {
+                    let mut row = originals.get(&id)?.clone();
+                    row.projection = apply_fold_to_projection(row.projection.clone(), &fold_state);
+                    Some(row)
+                }
+                // Destroyed (or no base): drop, mirroring `project_all`.
+                _ => None,
+            }
         })
         .collect();
 }

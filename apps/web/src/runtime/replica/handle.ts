@@ -1,11 +1,14 @@
 /**
- * The narrow JS surface of the WASM replica boundary
- * (`RuntimeMailListReplica`), declared independently of the generated module so
- * the host glue and its tests depend on this interface rather than on the
- * artifact. Production resolves it from the generated bundle via
- * {@link loadReplicaHandleFactory}; tests substitute an in-memory fake.
+ * The narrow JS surface of the WASM `EntityStoreHandle` (slice 2e), declared
+ * independently of the generated module so the host glue + its tests depend on
+ * this interface. Production resolves it from the generated bundle via
+ * {@link loadEntityStoreHandleFactory}; tests substitute an in-memory fake.
  *
- * @spec docs/replication/client-link/L2#3-the-wasm-boundary-posthaste-link-wasm
+ * Values cross the boundary as JSON strings (camelCase, externally-tagged) —
+ * the wire contract is pinned by `entity_store::tests` in `posthaste-link-replica`
+ * + the end-to-end handle tests in `posthaste-link-wasm`.
+ *
+ * @spec docs/eph/DESIGN-L2-client-link-reactive-store (2e)
  */
 export type SettlementVerdict = 'confirmed' | 'failed'
 
@@ -50,59 +53,6 @@ export interface DiffStep {
   diff: MessageChangeDiff
 }
 
-export interface RuntimeReplicaHandle {
-  /** Adopt a served `MailListViewState` rows array as the confirmed base. */
-  ingestViewJson(rowsJson: string): void
-  /** Apply a runtime `MailListDelta` to the confirmed base. */
-  applyDeltaJson(deltaJson: string): void
-  /** Accept an optimistic mutation: `{mutationId, messageId, assertion}`. */
-  acceptJson(acceptJson: string): void
-  /**
-   * Retire a pending mutation. Returns `true` when a failure reverted optimism
-   * (the host should surface it).
-   */
-  settle(mutationId: string, outcome: SettlementVerdict): boolean
-  hasPending(): boolean
-  /**
-   * The optimistic rows as a JSON array of full `MailListRowState`. Pass the
-   * view's concrete mailbox to drop archived-out rows; omit it to defer
-   * membership to the runtime's next served base.
-   */
-  projectViewJson(mailboxId?: string | null): string
-}
-
-export type ReplicaHandleFactory = () => RuntimeReplicaHandle
-
-let cachedFactory: Promise<ReplicaHandleFactory> | undefined
-
-/**
- * Load and instantiate the generated WASM module once, returning a factory for
- * fresh per-view handles. Cached so the module initializes a single time.
- *
- * The dynamic import keeps the WASM out of the main bundle unless the
- * replicaAdapter is actually selected (VITE_RUNTIME_REPLICA).
- */
-export function loadReplicaHandleFactory(): Promise<ReplicaHandleFactory> {
-  cachedFactory ??= (async () => {
-    const module = await import('../wasm/posthaste_link_wasm.js')
-    await module.default()
-    return () => new module.RuntimeMailListReplica() as RuntimeReplicaHandle
-  })()
-  return cachedFactory
-}
-
-/**
- * The narrow JS surface of the WASM `EntityStoreHandle` (slice 2e), declared
- * independently of the generated module so the host glue + its tests depend on
- * this interface. Production resolves it from the generated bundle via
- * {@link loadEntityStoreHandleFactory}; tests substitute an in-memory fake.
- *
- * Values cross the boundary as JSON strings (camelCase, externally-tagged) —
- * the wire contract is pinned by `entity_store::tests` in `posthaste-link-replica`
- * + the end-to-end handle tests in `posthaste-link-wasm`.
- *
- * @spec docs/eph/DESIGN-L2-client-link-reactive-store (2e)
- */
 export interface EntityStoreHandle {
   /** Register a view: `{predicate, sortField, sortDirection, watermark?}`. */
   registerViewJson(viewId: string, argsJson: string): void

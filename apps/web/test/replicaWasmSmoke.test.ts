@@ -5,9 +5,10 @@ import { join } from 'node:path'
 /**
  * End-to-end smoke test for the WASM boundary (W3): synchronously instantiate
  * the generated module against the built `.wasm` bytes and drive the full
- * `MailListReplicaHandle` surface — ingest a served base, fold an optimistic
- * mutation, project, then settle. This validates the cargo→wasm-bindgen→wasm-opt
- * pipeline produces a loadable module whose JSON contract matches the host's.
+ * `EntityStoreHandle` surface — register a view, ingest an authoritative
+ * batch, fold an optimistic mutation, project, then settle. This validates the
+ * cargo→wasm-bindgen→wasm-opt pipeline produces a loadable module whose JSON
+ * contract matches the host's.
  *
  * The artifacts are generated (`just build-replica-wasm`, gitignored), so the
  * suite skips when they are absent — the `replica-wasm` CI job builds first and
@@ -19,109 +20,89 @@ const binaryPath = join(wasmDir, 'posthaste_link_wasm_bg.wasm')
 
 const artifactsPresent = existsSync(loaderPath) && existsSync(binaryPath)
 
-describe.skipIf(!artifactsPresent)('replica WASM boundary smoke', () => {
-  it('instantiates and folds an optimistic mutation over a served base', async () => {
-    const { initSync, MailListReplicaHandle } = (await import(loaderPath)) as {
+describe.skipIf(!artifactsPresent)('entity-store WASM boundary smoke', () => {
+  it('registers a view, ingests a batch, folds optimism, and projects', async () => {
+    const { initSync, EntityStoreHandle } = (await import(loaderPath)) as {
       initSync: (module: { module: BufferSource }) => unknown
-      MailListReplicaHandle: new () => {
-        ingestJson(rows: string): void
-        acceptJson(accept: string): void
+      EntityStoreHandle: new () => {
+        registerViewJson(viewId: string, argsJson: string): void
+        setViewRowsJson(
+          viewId: string,
+          rowsJson: string,
+          watermarkJson: string,
+        ): void
+        ingestBatchJson(batchJson: string): void
+        acceptMutationJson(acceptJson: string): void
         hasPending(): boolean
         settle(mutationId: string, outcome: string): boolean
-        projectJson(mailboxId?: string | null): string
+        projectViewJson(viewId: string): string
+        drainDirtyJson(): string
       }
     }
 
     initSync({ module: readFileSync(binaryPath) })
 
-    const handle = new MailListReplicaHandle()
-    handle.ingestJson(
+    const handle = new EntityStoreHandle()
+    handle.registerViewJson(
+      'inbox',
+      JSON.stringify({
+        predicate: { inMailbox: 'inbox' },
+        sortField: 'date',
+        sortDirection: 'desc',
+        watermark: null,
+      }),
+    )
+    handle.ingestBatchJson(
       JSON.stringify([
-        { messageId: 'm1', projection: { id: 'm1', keywords: [] } },
-        { messageId: 'm2', projection: { id: 'm2', keywords: [] } },
+        {
+          message: {
+            messageId: 'm1',
+            projection: {
+              id: 'm1',
+              sourceId: 'primary',
+              receivedAt: '2026-04-29T10:00:00Z',
+              mailboxIds: ['inbox'],
+              keywords: [],
+              isRead: false,
+              isFlagged: false,
+              subject: 'm1',
+            },
+            deleted: false,
+            countDeltas: [],
+          },
+        },
       ]),
     )
-
+    handle.drainDirtyJson()
     expect(handle.hasPending()).toBe(false)
 
-    handle.acceptJson(
+    // An optimistic flag folds over the projected message.
+    handle.acceptMutationJson(
       JSON.stringify({
         mutationId: 'c1',
         messageId: 'm1',
-        assertion: { kind: 'setKeywords', add: ['$seen'], remove: [] },
+        assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
       }),
     )
     expect(handle.hasPending()).toBe(true)
 
-    const optimistic = JSON.parse(handle.projectJson()) as Array<{
-      id: string
-      keywords: string[]
+    const projected = JSON.parse(handle.projectViewJson('inbox')) as Array<{
+      messageId: string
+      projection: { isFlagged: boolean; keywords: string[] }
     }>
-    expect(optimistic.map((row) => row.id)).toEqual(['m1', 'm2'])
-    const folded = optimistic.find((row) => row.id === 'm1')
-    expect(folded?.keywords).toContain('$seen')
+    expect(projected.map((row) => row.messageId)).toEqual(['m1'])
+    expect(projected[0]?.projection.isFlagged).toBe(true)
+    expect(projected[0]?.projection.keywords).toContain('$flagged')
+
+    // The dirty drain reports the changed message + view.
+    const dirty = JSON.parse(handle.drainDirtyJson()) as Array<
+      Record<string, string>
+    >
+    expect(dirty.some((key) => 'message' in key)).toBe(true)
 
     // Confirmation retires the pending op without reverting optimism.
     const reverted = handle.settle('c1', 'confirmed')
     expect(reverted).toBe(false)
     expect(handle.hasPending()).toBe(false)
-  })
-
-  it('folds an applyDiff assertion over keywords and mailboxes', async () => {
-    const { initSync, MailListReplicaHandle } = (await import(loaderPath)) as {
-      initSync: (module: { module: BufferSource }) => unknown
-      MailListReplicaHandle: new () => {
-        ingestJson(rows: string): void
-        acceptJson(accept: string): void
-        hasPending(): boolean
-        settle(mutationId: string, outcome: string): boolean
-        projectJson(mailboxId?: string | null): string
-      }
-    }
-
-    initSync({ module: readFileSync(binaryPath) })
-
-    const handle = new MailListReplicaHandle()
-    handle.ingestJson(
-      JSON.stringify([
-        {
-          messageId: 'm1',
-          projection: {
-            id: 'm1',
-            keywords: ['$seen'],
-            mailboxIds: ['inbox'],
-          },
-        },
-      ]),
-    )
-
-    handle.acceptJson(
-      JSON.stringify({
-        mutationId: 'c2',
-        messageId: 'm1',
-        assertion: {
-          kind: 'applyDiff',
-          diff: {
-            keywords: { added: ['$flagged'], removed: ['$seen'] },
-            mailboxes: { added: [], removed: ['inbox'] },
-          },
-        },
-      }),
-    )
-
-    const optimistic = JSON.parse(handle.projectJson()) as Array<{
-      id: string
-      keywords: string[]
-      mailboxIds: string[]
-    }>
-    const folded = optimistic.find((row) => row.id === 'm1')
-    expect(folded?.keywords).toContain('$flagged')
-    expect(folded?.keywords).not.toContain('$seen')
-    expect(folded?.mailboxIds).not.toContain('inbox')
-
-    const inboxView = JSON.parse(handle.projectJson('inbox')) as Array<{
-      id: string
-    }>
-    expect(inboxView.some((row) => row.id === 'm1')).toBe(false)
   })
 })
