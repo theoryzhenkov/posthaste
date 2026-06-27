@@ -1,12 +1,11 @@
-//! First view-settlement regression: a keyword toggle settles Confirmed, the
-//! touched view recomputes at least once (no missed update), no unrelated view
-//! recomputes (no over-broad invalidation), and session seq is monotonic.
-//!
-//! A `run_mutation` on a live account legitimately recomputes twice — the
-//! optimistic local pass, then a sync-confirmed pass — so this asserts
-//! `at_least_once`, not `exactly_once`. The settlement recorder captures both
-//! phases plus the notification fan-out; `exactly_once` is reserved for
-//! no-follow-up-sync scenarios.
+//! First view-settlement regression: a keyword toggle settles Confirmed and the
+//! change reaches the client. Under option iii (single-source-view-membership)
+//! an evaluable mail-list view is **self-maintained by the client** from the
+//! `message.updated` firehose, so the runtime no longer re-serves it per event —
+//! the assertion is that the firehose notification fired AND the runtime emitted
+//! no redundant per-event view recompute (the retired #3 re-serve). No unrelated
+//! view recomputes, and session seq is monotonic. (The client-side convergence
+//! of the view itself is covered by the live-convergence + replica tests.)
 //!
 // spec: docs/testing/L1#view-settlement-correctness
 
@@ -44,7 +43,10 @@ async fn keyword_toggle_settles_and_recomputes_the_touched_view() {
         .await;
 
     settlement.assert_confirmed();
-    settlement.assert_view_recomputed_at_least_once();
+    // Option iii: the mail-list view is self-maintained by the client from the
+    // firehose, so the runtime fires the notification but does NOT re-serve it.
+    settlement.assert_message_updated_notification();
+    settlement.assert_view_not_recomputed();
     settlement.assert_only_view_recomputed();
     settlement.assert_seq_monotonic();
 }
