@@ -42,6 +42,9 @@ export interface MessageSummary {
   isFlagged: boolean
   mailboxIds: string[]
   keywords: string[]
+  /** Per-message authority-state version (IMAP `max(modseq)`); `null` for
+   * providers without one (JMAP/mock). Drives the replica's stale-re-serve guard. */
+  version?: number | null
 }
 
 /** @spec docs/L1-api#cursor-pagination */
