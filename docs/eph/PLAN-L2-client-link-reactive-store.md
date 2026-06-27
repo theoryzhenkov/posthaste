@@ -200,6 +200,16 @@ store notifications → cache).
   legacy REST/invalidation paths become dead code to remove (then realized
   `client-link/L2.md` §4/§5/§6 are rewritten).
 
+  **2f LANDED (2026-06-27, `lnnkknos`):** `entityStoreAdapterEnabled()` flipped
+  to default-on (`VITE_ENTITY_STORE !== 'false'` — opt-out escape hatch). The
+  store installs on every app load now; the legacy REST row/count refetch on
+  `message.updated` is dead for store-owned entities (retired in 2e.3); the base
+  HTTP adapter is the fallback if the WASM fails to load. 239 web tests green.
+
+  **Follow-ons (separate slices):** remove the now-dead `useDomainEventRefresh`
+  (gated off since `runtimeMailListViewsEnabled` went default-on) + rewrite
+  `client-link/L2.md` §4/§5/§6 to reflect the store.
+
 ### Host-contract preconditions (must land with/before 2e)
 
 These came out of the optimism-fold quality review (`yoyvspnq`/`ukylrwov`).
