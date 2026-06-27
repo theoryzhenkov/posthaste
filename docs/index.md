@@ -16,5 +16,3 @@ Current rewritten specs live in domain directories:
 - [Backend](backend/L1.md): service, store, provider, runtime, event, and API implementation boundaries.
 - [Testing](testing/L0.md): behavior-contract coverage model, the shared `posthaste-testkit` harness and `StalwartFixture`, and the verification ladder. The settlement recorder, runtime-in-harness, and declarative TOML fixtures have landed; the remaining forward contract (`posthastectl`) is in the [testkit roadmap](eph/PLAN-L2-testkit-roadmap.md).
 - [Release channels](eph/DESIGN-L2-release-channels.md): nightly (dogfood/devtools) versus stable (public beta/release) builds, updater manifests, and signing gates.
-
-Legacy specs that have not been rewritten yet live under [stale specs](stale/L0-api.md).

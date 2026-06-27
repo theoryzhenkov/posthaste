@@ -31,7 +31,6 @@ impl MailGateway for LiveJmapGateway {
     /// mail surfaces progressively. A full snapshot returns a reconciliation
     /// set; a delta self-reconciles.
     ///
-    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
     async fn sync_streamed(
         &self,
         account_id: &AccountId,

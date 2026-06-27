@@ -225,7 +225,6 @@ pub(crate) fn apply_sync_batch_tx(
 /// `replace_all_mailboxes` snapshot path and the streamed final-reconciliation
 /// pass, which both prune by difference against the authoritative remote ids.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 pub(crate) fn prune_mailboxes_absent_from_remote_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -261,7 +260,6 @@ pub(crate) fn prune_mailboxes_absent_from_remote_tx(
 /// `replace_all_messages` snapshot path and the streamed final-reconciliation
 /// pass.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 pub(crate) fn prune_messages_absent_from_remote_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -299,7 +297,6 @@ pub(crate) fn prune_messages_absent_from_remote_tx(
 /// in one transaction. Additions/updates were already applied + published per
 /// chunk; this is the deletion correctness boundary.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 pub(crate) fn reconcile_sync_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,

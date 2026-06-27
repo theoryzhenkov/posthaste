@@ -11,7 +11,6 @@ use async_trait::async_trait;
 /// as they arrive. The service supplies the implementation; the gateway only
 /// emits.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 pub trait SyncChunkSink: Send {
     fn emit(&mut self, batch: SyncBatch) -> Result<(), GatewayError>;
 }
@@ -38,7 +37,6 @@ pub trait MailGateway: Send + Sync {
     /// self-reconciling and behaves exactly like the batch path. Folder-centric
     /// (IMAP) and page-centric (JMAP) transports override this to emit chunks.
     ///
-    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
     async fn sync_streamed(
         &self,
         account_id: &AccountId,

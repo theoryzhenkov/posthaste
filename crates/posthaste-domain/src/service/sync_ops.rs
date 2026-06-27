@@ -5,7 +5,6 @@ use crate::{MessageRecord, SyncBatch, SyncChunkSink, SyncWriteStore};
 /// the per-chunk messages and counts the post-sync steps need. Chunk events are
 /// published immediately so mail surfaces progressively.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 struct ServiceSyncSink<'a> {
     sync_writer: &'a dyn SyncWriteStore,
     account_id: &'a AccountId,
@@ -124,7 +123,6 @@ impl MailService {
         // surfaces progressively. The sink accumulates messages/counts; the
         // outcome carries any reconciliation set for the final pass.
         //
-        // @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
         let (
             sync_messages,
             mailbox_count,
@@ -173,7 +171,6 @@ impl MailService {
         // (delta syncs, the default gateway path) leaves this `None`, having
         // carried its own removals and cursors in the chunk.
         //
-        // @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
         if let Some(reconciliation) = &outcome.reconciliation {
             let reconcile_events = self
                 .sync_writer

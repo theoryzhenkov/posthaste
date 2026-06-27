@@ -26,7 +26,18 @@ Audit scope: Rust crates in `crates/`, the `docs/stale/` tree, and selected Carg
 
 ## Actionable findings
 
-### 1. `docs/stale/*` cannot be deleted without first updating references
+### 1. `docs/stale/*` cannot be deleted without first updating references — **RESOLVED 2026-06-27**
+
+**Done:** retired the folder outright (the user decided to delete, accepting the
+traceability loss — the referenced content was never migrated into current docs,
+so there was nothing to preserve). Removed every `@spec docs/stale/...` /
+`spec: docs/stale/...` reference from 10 Rust source files (comment-only), the
+`Stale specs` nav block from `mkdocs.yml`, the `path: docs/stale/` `depends:`
+entries from the doc frontmatter, and the narrative mentions in 5 doc files;
+deleted the 24-file `docs/stale/` directory. `mkdocs build --strict` clean (no
+broken links); `cargo check` clean.
+
+**Original finding (preserved).**
 
 **Files / paths:**
 

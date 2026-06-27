@@ -23,8 +23,8 @@ doc is deleted. The `[::state planned]` / `[::state partial]` markers in
 
 ### P0 — Spec migration (done 2026-06-26)
 
-`docs/testing/{L0,L1}.md` created; `docs/stale/L0-testing` superseded. The lab
-domain (`docs/stale/L0-lab`, `L1-lab`) migration is a separate slice.
+`docs/testing/{L0,L1}.md` created (superseding the legacy testing spec). The lab
+domain migration is a separate slice.
 
 ### P1 — Shared testkit extraction (done 2026-06-26)
 

@@ -8,8 +8,6 @@ type: DESIGN
 depends:
   - path: docs/runtime/adapter/L2
   - path: docs/backend/L1
-  - path: docs/stale/L1-accounts
-  - path: docs/stale/L1-sync
 ---
 
 # Account state architecture: diagnosis and redesign
