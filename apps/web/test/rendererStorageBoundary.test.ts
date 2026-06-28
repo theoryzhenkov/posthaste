@@ -14,14 +14,18 @@ const allowedStorageFiles = new Set([
   'src/hooks/useDaemonEvents.ts',
   'src/hooks/useMailLayoutPersistence.ts',
   'src/observability.ts',
-  // The client-layer replica's durable outbox: the sanctioned IndexedDB user.
-  // It persists only mutation metadata (target message id, keyword/mailbox
-  // assertion, id pairing) — never bodies, attachments, or auth material, which
-  // the forbidden-value check below still enforces.
+  // The client-layer replica's durable state lives in one IndexedDB DB
+  // (`posthaste-replica`); `replicaDatabase.ts` is the single shared opener
+  // that owns the schema version + creates every object store, so the outbox
+  // + undo history can't diverge on version again. It persists only mutation
+  // metadata + invertible diffs (keyword/mailbox deltas, step ids) — never
+  // bodies, attachments, or auth material, which the forbidden-value check
+  // below still enforces.
+  'src/runtime/replica/replicaDatabase.ts',
   'src/runtime/replica/outboxStore.ts',
   // The client-owned undo/redo history: persists only invertible change-diffs
   // (keyword/mailbox deltas) + step ids — no bodies, attachments, or auth
-  // material. Shares the `posthaste-replica` DB with the outbox.
+  // material. Shares the `posthaste-replica` DB via the shared opener.
   'src/runtime/replica/undoHistoryStore.ts',
 ])
 
