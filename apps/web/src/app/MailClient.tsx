@@ -24,7 +24,7 @@ import {
 import { useMailNavigationReadBootstrap } from '@/mailboxNavigationReadModels'
 import { mailKeys, type MailSelection } from '@/mailState'
 import { useUndoRedo } from '@/hooks/useUndoRedo'
-import { useRevLogMirror } from '@/hooks/useRevLogMirror'
+import { RevLogMirrors } from '@/hooks/RevLogMirrors'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
 import { runtimeMutations } from '@/runtime/mutations'
@@ -87,12 +87,15 @@ export function MailClient({
     () => accounts.filter((account) => account.enabled),
     [accounts],
   )
-  // Phase 2: mirror the server-authoritative RevLog view for the primary
-  // account so undo/redo history converges cross-device (the RECEIVE half of
-  // cursor sync; `useUndoRedo` sends the `revCursor`). v1 mirrors the primary
-  // enabled account; multi-account per-store history is a follow-up.
+  // Phase 2: mirror the server-authoritative RevLog view for EVERY enabled
+  // account so undo/redo history converges cross-device per-account (the
+  // RECEIVE half of cursor sync; `useUndoRedo` sends the `revCursor`). The
+  // global Ctrl+Z merges the per-account partitions by `createdAt` in the store.
   // @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
-  useRevLogMirror(enabledAccounts[0]?.id ?? null)
+  const enabledAccountIds = useMemo(
+    () => enabledAccounts.map((account) => account.id),
+    [enabledAccounts],
+  )
   const hasEnabledSources = enabledAccounts.length > 0
   const effectiveView = hasEnabledSources
     ? (selectedView ?? DEFAULT_VIEW)
@@ -192,59 +195,62 @@ export function MailClient({
   }
 
   return (
-    <MailClientView
-      actions={actions}
-      appReadinessState={appReadinessState}
-      closeCompose={handlers.closeCompose}
-      composeIntent={handlers.composeIntent}
-      effectiveSurface={effectiveSurface}
-      effectiveView={effectiveView}
-      invalidSurfaceRoute={invalidSurfaceRoute}
-      isCommandPaletteOpen={isCommandPaletteOpen}
-      isDarkMode={theme.resolvedMode === 'dark'}
-      isMessageDetailOpen={isMessageDetailOpen}
-      isSettingsSurfaceOpen={isSettingsSurfaceOpen}
-      isTagEditorOpen={isTagEditorOpen}
-      messageDefaultLayout={layout.messageDefaultLayout}
-      preparedSearchQuery={preparedSearchQuery}
-      searchQuery={searchQuery}
-      selectedMessage={selectedMessage}
-      selectedMessageData={selectedMessageQuery.data}
-      shellDefaultLayout={layout.shellDefaultLayout}
-      showShortcuts={showShortcuts}
-      tags={tagsQuery.data ?? []}
-      viewRole={viewRole}
-      onApplySearch={handlers.handleApplySearch}
-      onArchive={handlers.handleArchive}
-      onEditDraft={handlers.handleEditDraft}
-      onClearSearch={handlers.handleRejectSearchPreview}
-      onClearSelectedMessage={handlers.handleClearSelectedMessage}
-      onCloseCommandPalette={handlers.handleCloseCommandPalette}
-      onCompose={handlers.handleCompose}
-      onForward={handlers.handleForward}
-      onMessageLayoutChanged={layout.onMessageLayoutChanged}
-      onOpenCommandPalette={handlers.handleOpenCommandPalette}
-      onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
-      onOpenSettings={handlers.handleOpenSettings}
-      onPlaceholderAction={handlers.handlePlaceholderAction}
-      onRejectSearchPreview={handlers.handleRejectSearchPreview}
-      onReply={handlers.handleReply}
-      onSearch={handlers.handleSearch}
-      onSelectMessage={handlers.handleSelectMessage}
-      onSelectMessageRef={handlers.handleSelectMessageRef}
-      onSelectSmartMailbox={handlers.handleSelectSmartMailbox}
-      onSelectSourceMailbox={handlers.handleSelectSourceMailbox}
-      onSelectTag={handlers.handleSelectTag}
-      onSetTagEditorOpen={setIsTagEditorOpen}
-      onShellLayoutChanged={layout.onShellLayoutChanged}
-      onShowShortcuts={handlers.handleShowShortcuts}
-      onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
-      onToggleFlag={handlers.handleToggleFlag}
-      onToggleShortcuts={handlers.handleToggleShortcuts}
-      onToggleSettings={handlers.handleToggleSettings}
-      onToggleTheme={handleToggleTheme}
-      onTrash={handlers.handleTrash}
-    />
+    <>
+      <RevLogMirrors accountIds={enabledAccountIds} />
+      <MailClientView
+        actions={actions}
+        appReadinessState={appReadinessState}
+        closeCompose={handlers.closeCompose}
+        composeIntent={handlers.composeIntent}
+        effectiveSurface={effectiveSurface}
+        effectiveView={effectiveView}
+        invalidSurfaceRoute={invalidSurfaceRoute}
+        isCommandPaletteOpen={isCommandPaletteOpen}
+        isDarkMode={theme.resolvedMode === 'dark'}
+        isMessageDetailOpen={isMessageDetailOpen}
+        isSettingsSurfaceOpen={isSettingsSurfaceOpen}
+        isTagEditorOpen={isTagEditorOpen}
+        messageDefaultLayout={layout.messageDefaultLayout}
+        preparedSearchQuery={preparedSearchQuery}
+        searchQuery={searchQuery}
+        selectedMessage={selectedMessage}
+        selectedMessageData={selectedMessageQuery.data}
+        shellDefaultLayout={layout.shellDefaultLayout}
+        showShortcuts={showShortcuts}
+        tags={tagsQuery.data ?? []}
+        viewRole={viewRole}
+        onApplySearch={handlers.handleApplySearch}
+        onArchive={handlers.handleArchive}
+        onEditDraft={handlers.handleEditDraft}
+        onClearSearch={handlers.handleRejectSearchPreview}
+        onClearSelectedMessage={handlers.handleClearSelectedMessage}
+        onCloseCommandPalette={handlers.handleCloseCommandPalette}
+        onCompose={handlers.handleCompose}
+        onForward={handlers.handleForward}
+        onMessageLayoutChanged={layout.onMessageLayoutChanged}
+        onOpenCommandPalette={handlers.handleOpenCommandPalette}
+        onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
+        onOpenSettings={handlers.handleOpenSettings}
+        onPlaceholderAction={handlers.handlePlaceholderAction}
+        onRejectSearchPreview={handlers.handleRejectSearchPreview}
+        onReply={handlers.handleReply}
+        onSearch={handlers.handleSearch}
+        onSelectMessage={handlers.handleSelectMessage}
+        onSelectMessageRef={handlers.handleSelectMessageRef}
+        onSelectSmartMailbox={handlers.handleSelectSmartMailbox}
+        onSelectSourceMailbox={handlers.handleSelectSourceMailbox}
+        onSelectTag={handlers.handleSelectTag}
+        onSetTagEditorOpen={setIsTagEditorOpen}
+        onShellLayoutChanged={layout.onShellLayoutChanged}
+        onShowShortcuts={handlers.handleShowShortcuts}
+        onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
+        onToggleFlag={handlers.handleToggleFlag}
+        onToggleShortcuts={handlers.handleToggleShortcuts}
+        onToggleSettings={handlers.handleToggleSettings}
+        onToggleTheme={handleToggleTheme}
+        onTrash={handlers.handleTrash}
+      />
+    </>
   )
 }
 

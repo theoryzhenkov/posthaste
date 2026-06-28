@@ -95,7 +95,7 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
       error: null,
       output: { events: [] },
     })
-    await store.pushForward(makeStep('a'))
+    await store.pushForward('primary', makeStep('a'))
 
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
     await waitFor(() => expect(result.current.canUndo).toBe(true))
@@ -142,9 +142,9 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
       error: null,
       output: { events: [] },
     })
-    await store.pushForward(makeStep('a'))
-    await store.pushForward(makeStep('b'))
-    await store.pushForward(makeStep('c'))
+    await store.pushForward('primary', makeStep('a'))
+    await store.pushForward('primary', makeStep('b'))
+    await store.pushForward('primary', makeStep('c'))
 
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
     await waitFor(() => expect(result.current.canUndo).toBe(true))
@@ -175,8 +175,8 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
       error: null,
       output: { events: [] },
     })
-    await store.pushForward(makeStep('a'))
-    await store.navigateUndo()
+    await store.pushForward('primary', makeStep('a'))
+    await store.undo()
 
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
     await waitFor(() => expect(result.current.canRedo).toBe(true))
@@ -202,7 +202,7 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
       error: null,
       output: { events: [] },
     })
-    await store.pushForward(makeStep('a'))
+    await store.pushForward('primary', makeStep('a'))
 
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
     await waitFor(() => expect(result.current.canUndo).toBe(true))
@@ -227,13 +227,13 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
     runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
 
-    await act(() => store.pushForward(makeStep('a')))
+    await act(() => store.pushForward('primary', makeStep('a')))
     await waitFor(() => {
       expect(result.current.canUndo).toBe(true)
       expect(result.current.canRedo).toBe(false)
     })
 
-    await act(() => store.navigateUndo())
+    await act(() => store.undo())
     await waitFor(() => {
       expect(result.current.canUndo).toBe(false)
       expect(result.current.canRedo).toBe(true)
@@ -244,12 +244,12 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
     runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
 
-    await act(() => store.pushForward(makeStep('a')))
-    await act(() => store.pushForward(makeStep('b')))
-    await act(() => store.navigateUndo()) // cursor at a; b redoable
+    await act(() => store.pushForward('primary', makeStep('a')))
+    await act(() => store.pushForward('primary', makeStep('b')))
+    await act(() => store.undo()) // cursor at a; b redoable
     await waitFor(() => expect(result.current.canRedo).toBe(true))
 
-    await act(() => store.pushForward(makeStep('c'))) // truncates b
+    await act(() => store.pushForward('primary', makeStep('c'))) // truncates b
     await waitFor(() => expect(result.current.canRedo).toBe(false))
     expect(result.current.canUndo).toBe(true)
   })

@@ -38,7 +38,7 @@ export function useRevLogMirror(accountId: string | null): void {
 
     const reconcile = (data: RevLogSnapshotWire | undefined): void => {
       if (data) {
-        void store.reconcileWithServer(data)
+        void store.reconcileWithServer(accountId, data)
       }
     }
 

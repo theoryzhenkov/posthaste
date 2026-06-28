@@ -5,7 +5,7 @@ modified: 2026-06-28
 reviewed: 2026-06-28
 lifecycle: ephemeral
 type: DESIGN
-status: "Slices 1–5b done: store tables, RevLog view, forward-action append + cursor auto-advance, revCursor arbitration, client send (revCursor) + receive (mirror). Remaining: multi-account per-store history; JMAP per-message version."
+status: "Slices 1–5c done: store tables, RevLog view, forward-action append + cursor auto-advance, revCursor arbitration, client send (revCursor) + receive (mirror), + multi-account per-store history with global Ctrl+Z merge by createdAt. Remaining: JMAP per-message version; e2e verification against the real dev stack."
 depends:
   - path: docs/eph/DESIGN-L2-undo-redo-synced-history
     note: "the overview + Phase 1 (shipped .26); this is the Phase 2 implementable contract"
@@ -158,11 +158,14 @@ Carried from the overview doc; resolved here:
 
 ## Out of scope
 
-- Global cross-account undo (the client merges open per-account `RevLog` views by
-  `created_at` for the global Ctrl+Z shortcut — no globally-ordered log needed).
 - Non-message reversibility (settings, account, smart-mailbox actions).
 - JMAP/IMAP provider-level undo (the `RevLog` is Posthaste account state, not
   synced to the provider).
+
+Global cross-account undo is IN scope (Slice 5c): the client opens a per-account
+`RevLog` view for every enabled account + the global Ctrl+Z merges the
+per-account partitions by `createdAt` (the latest undoable step across all
+accounts) — no globally-ordered log needed.
 
 ## Code anchors (Phase 2 targets)
 
@@ -179,8 +182,10 @@ Carried from the overview doc; resolved here:
   `OPTIMISM_TIMEOUT_MS` safety valve converges), `apps/web/src/hooks/useRevLogMirror.ts`
   (subscribes to the `RevLog` view + reconciles the store — the RECEIVE half of
   cross-device cursor sync). DONE (Slice 5a sent the `revCursor`; Slice 5b
-  mirrors it). v1 mirrors the primary enabled account; multi-account per-store
-  history is a follow-up.
+  mirrors it). The store holds per-account partitions (one `RevStep[]` + cursor
+  per account — the Phase 1 singleton mixing is gone); `MailClient.tsx` renders
+  `<RevLogMirrors accountIds={enabledAccounts} />` to mirror every enabled
+  account. DONE (Slice 5c).
 - Reuse (unchanged): `MessageChangeDiff`/`inverse`/`from_before_after`
   (`crates/posthaste-link-core/src/message.rs`), `captureMutationDiffJson`
   (`posthaste-link-wasm`), the outbox, `message.applyDiff`.
