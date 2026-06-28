@@ -146,8 +146,10 @@ pub enum MessageAssertion {
         // Wire field is `mailboxIds` (camelCase) to match the TS `ReplicaAssertion`
         // type + the project's wire convention. The enum-level `rename_all =
         // "camelCase"` renames variant TAGS, not struct fields, so the field needs
-        // its own rename.
-        #[serde(rename = "mailboxIds")]
+        // its own rename. The `alias` keeps durable outbox records written before
+        // the camelCase rename (wire `mailbox_ids`) deserializable, so they still
+        // apply on rehydration instead of throwing.
+        #[serde(rename = "mailboxIds", alias = "mailbox_ids")]
         mailbox_ids: Vec<String>,
     },
     Destroy,
@@ -315,6 +317,26 @@ mod tests {
             MessageOutcome::Present(state) => state,
             MessageOutcome::Removed => panic!("expected present"),
         }
+    }
+
+    #[test]
+    fn replace_mailboxes_accepts_legacy_snake_case_wire_field() {
+        // Durable outbox records written before the camelCase rename carry
+        // `mailbox_ids`; the serde alias keeps them deserializable so they still
+        // apply on rehydration instead of throwing and bricking view-open.
+        let legacy: MessageAssertion =
+            serde_json::from_str(r#"{"kind":"replaceMailboxes","mailbox_ids":["inbox"]}"#)
+                .expect("legacy mailbox_ids must deserialize via the alias");
+        let current: MessageAssertion =
+            serde_json::from_str(r#"{"kind":"replaceMailboxes","mailboxIds":["inbox"]}"#)
+                .expect("current mailboxIds must deserialize");
+        assert_eq!(legacy, current);
+        assert_eq!(
+            current,
+            MessageAssertion::ReplaceMailboxes {
+                mailbox_ids: vec!["inbox".to_string()]
+            }
+        );
     }
 
     #[test]
