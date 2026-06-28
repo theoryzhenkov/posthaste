@@ -364,6 +364,48 @@ describe('useRuntimeMailListView', () => {
     ])
   })
 
+  it('surfaces a thrown open as `error` and clears `isLoading`', async () => {
+    const queryKey = queryKeys.messages(
+      { kind: 'source-mailbox', sourceId: 'primary', mailboxId: 'inbox' },
+      undefined,
+      { columnId: 'date', direction: 'desc' },
+    )
+    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    // The IndexedDB VersionError class of failure: view open rejects, so the
+    // view never opens and no snapshot ever lands.
+    runtimeAdapter.queueRuntimeSessionMessageListViewError(
+      new Error('IndexedDB VersionError'),
+    )
+
+    const hookInput = mailListHookInput(queryKey)
+    const { result } = renderHook(() => useRuntimeMailListView(hookInput), {
+      wrapper,
+    })
+
+    await waitFor(() => expect(result.current.error).not.toBeNull())
+    expect(result.current.error?.message).toBe('IndexedDB VersionError')
+    // The skeleton must stop: an error means we are no longer loading.
+    expect(result.current.isLoading).toBe(false)
+    expect(result.current.items).toEqual([])
+
+    // Retry clears the error and re-opens; a good snapshot now lands.
+    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-2' })
+    runtimeAdapter.queueRuntimeSessionMessageListView({
+      viewId: 'view-1',
+      snapshot: mailListSnapshot(1, message),
+    })
+    result.current.retry()
+
+    await waitFor(() => expect(result.current.error).toBeNull())
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKey)).toEqual({
+        pages: [{ items: [message], nextCursor: null }],
+        pageParams: [null],
+      }),
+    )
+    expect(result.current.isLoading).toBe(false)
+  })
+
   it('shares the renderer runtime stream with notification subscribers', async () => {
     const queryKey = queryKeys.messages(
       { kind: 'source-mailbox', sourceId: 'primary', mailboxId: 'inbox' },

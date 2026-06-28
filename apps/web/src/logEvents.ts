@@ -28,6 +28,8 @@ export const LOG_EVENTS = {
   updateCheckFailed: 'update.check.failed',
   updateInstallFailed: 'update.install.failed',
   viewDeltaApplied: 'view.delta.applied',
+  viewExtendFailed: 'view.extend.failed',
+  viewOpenFailed: 'view.open.failed',
   viewSnapshotApplied: 'view.snapshot.applied',
 } as const
 
