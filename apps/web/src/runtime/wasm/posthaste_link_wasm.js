@@ -34,6 +34,49 @@ export class EntityStoreHandle {
         }
     }
     /**
+     * Capture the invertible change-diff a mutation would produce over a
+     * message's current folded base, **without applying it**: reads the message's
+     * optimistic fold state (`prev`), applies the assertion purely (`curr`),
+     * and returns `MessageChangeDiff::from_before_after(prev, curr)` as JSON.
+     * This is the client-local diff capture for client-owned undo history
+     * ([undo-redo-synced-history] Phase 1 option a) — it mirrors the runtime's
+     * `read_fold_state` + `capture_diff` over the store, so the two produce the
+     * same diff for the same assertion + base.
+     *
+     * Returns `"null"` when the message is not held (no `prev` — the mutation
+     * is deferred until the base arrives) or the assertion would destroy it
+     * (non-invertible; `Destroy` is not diff-eligible). The host records no
+     * history step in either case.
+     *
+     * `assertion_json` is the same `ReplicaAssertion` shape `acceptMutationJson`
+     * takes (`{kind, ...}`), already role-resolved by `parseMessageMutation`.
+     * @param {string} message_id
+     * @param {string} assertion_json
+     * @returns {string}
+     */
+    captureMutationDiffJson(message_id, assertion_json) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(message_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(assertion_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.entitystorehandle_captureMutationDiffJson(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
      * Close a view (it was closed on the host).
      * @param {string} view_id
      */

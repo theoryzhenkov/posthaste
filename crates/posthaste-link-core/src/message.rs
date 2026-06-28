@@ -143,6 +143,11 @@ pub enum MessageAssertion {
         remove: Vec<String>,
     },
     ReplaceMailboxes {
+        // Wire field is `mailboxIds` (camelCase) to match the TS `ReplicaAssertion`
+        // type + the project's wire convention. The enum-level `rename_all =
+        // "camelCase"` renames variant TAGS, not struct fields, so the field needs
+        // its own rename.
+        #[serde(rename = "mailboxIds")]
         mailbox_ids: Vec<String>,
     },
     Destroy,

@@ -86,7 +86,6 @@ export function useRuntimeObjectView<TData>({
                 case 'viewClosed':
                 case 'mutationNotification':
                 case 'notification':
-                case 'mutationHistory':
                 case 'heartbeat':
                   return
               }

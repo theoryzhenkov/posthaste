@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Redesign the client↔runtime data flow as one reactive entity store (the WASM replica, generalized) fed by a single ordered mutation stream, with coverage expressed as sort-key intervals per predicate — removing the parallel count/row derivations and hand-maintained affects predicates that let a new message move the unread counter without appearing as a row."
-modified: 2026-06-26
-reviewed: 2026-06-26
+modified: 2026-06-27
+reviewed: 2026-06-27
 lifecycle: ephemeral
 type: DESIGN
 depends:
@@ -10,7 +10,8 @@ depends:
   - path: docs/replication/client-link/L2
   - path: docs/eph/DESIGN-L2-optimistic-projection
   - path: docs/state/mail/L2
-dependents: []
+dependents:
+  - path: docs/eph/DESIGN-L2-render-flicker-tracker
 ---
 
 # Client-link reactive store: one derivation, interval coverage

@@ -3,6 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_entitystorehandle_free: (a: number, b: number) => void;
 export const entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
+export const entitystorehandle_captureMutationDiffJson: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const entitystorehandle_closeView: (a: number, b: number, c: number) => void;
 export const entitystorehandle_drainDirtyJson: (a: number) => [number, number];
 export const entitystorehandle_drainRetiredJson: (a: number) => [number, number];

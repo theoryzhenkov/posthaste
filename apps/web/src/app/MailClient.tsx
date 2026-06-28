@@ -23,7 +23,7 @@ import {
 } from '@/labReadiness'
 import { useMailNavigationReadBootstrap } from '@/mailboxNavigationReadModels'
 import { mailKeys, type MailSelection } from '@/mailState'
-import { useRuntimeUndoRedo } from '@/hooks/useRuntimeUndoRedo'
+import { useUndoRedo } from '@/hooks/useUndoRedo'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
 import { runtimeMutations } from '@/runtime/mutations'
@@ -70,7 +70,7 @@ export function MailClient({
     [searchQuery],
   )
   const theme = useDesignTheme()
-  const undoRedo = useRuntimeUndoRedo()
+  const undoRedo = useUndoRedo()
   const actions = useEmailActions({ undo: undoRedo.undo })
 
   const mailNavigationBootstrap = useMailNavigationReadBootstrap()

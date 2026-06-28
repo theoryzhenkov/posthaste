@@ -11,7 +11,7 @@ import {
 } from '@/desktop'
 import { useComposeIntent } from '@/hooks/useComposeIntent'
 import { useEmailActions } from '@/hooks/useEmailActions'
-import { useRuntimeUndoRedo } from '@/hooks/useRuntimeUndoRedo'
+import { useUndoRedo } from '@/hooks/useUndoRedo'
 import { replaceFocusedSurface } from '@/hooks/useSurfaceRouting'
 import { runtimeViews } from '@/runtime/views'
 import { AttachmentSurface } from './AttachmentSurface'
@@ -41,7 +41,7 @@ export function FocusedSurface({
     queryFn: runtimeViews.accounts.list,
     enabled: surface.kind === 'settings',
   })
-  const undoRedo = useRuntimeUndoRedo()
+  const undoRedo = useUndoRedo()
   const actions = useEmailActions({ undo: undoRedo.undo })
   const {
     closeCompose,

@@ -253,21 +253,6 @@ impl ReadCache {
         Ok(result)
     }
 
-    /// Read a message's current summary bypassing any stale cache entry, for
-    /// capturing a mutation's before/after diff. The retaining cache is kept
-    /// coherent by down-channel eviction, but that eviction races the post-apply
-    /// read (the down-channel bridge is a separate task); evicting the entry here
-    /// forces `current_summary` to read straight through and re-warm with the
-    /// fresh state. A passthrough cache has no entry to evict, so this is
-    /// equivalent there.
-    pub(crate) async fn fresh_summary(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-    ) -> Result<Option<MessageSummary>, RuntimeError> {
-        self.evict(message_id.as_str());
-        self.current_summary(account_id, message_id).await
-    }
 
     /// Drop a message's cached summary (it changed authoritatively). No-op for a
     /// passthrough cache.
