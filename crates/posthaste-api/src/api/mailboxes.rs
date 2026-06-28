@@ -8,7 +8,24 @@ use super::*;
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchMailboxRequest {
+    // `double_option` is load-bearing: serde otherwise collapses both an absent
+    // field and an explicit `null` to `None`, so `{"role": null}` would be
+    // rejected as "role is required" and a mailbox role could never be cleared
+    // from the UI. With it, absent -> None (unchanged) and null -> Some(None)
+    // (clear).
+    #[serde(default, deserialize_with = "double_option")]
     pub role: Option<Option<String>>,
+}
+
+/// Deserialize a present field (even an explicit `null`) as `Some`, so the outer
+/// `Option` can tell "omitted" (`None`, via `#[serde(default)]`) from "explicit
+/// null" (`Some(None)`). Without this, serde maps both to `None`.
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
 /// GET /v1/sources/{source_id}/mailboxes
@@ -101,5 +118,50 @@ fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<St
             ApiErrorCode::InvalidMailbox,
             "unsupported mailbox role",
         )),
+    }
+}
+
+#[cfg(test)]
+mod patch_mailbox_role_tests {
+    use super::*;
+
+    fn role_of(json: &str) -> Option<Option<String>> {
+        serde_json::from_str::<PatchMailboxRequest>(json)
+            .expect("valid JSON")
+            .role
+    }
+
+    #[test]
+    fn explicit_null_role_clears_and_is_not_rejected() {
+        // {"role": null} must clear the role (Ok(None)), not error "role is
+        // required" — the bug that blocked setting a mailbox role to None.
+        let role = role_of(r#"{"role": null}"#);
+        assert_eq!(
+            role,
+            Some(None),
+            "explicit null must deserialize as Some(None)"
+        );
+        assert_eq!(validate_patch_mailbox_role(role).ok(), Some(None));
+    }
+
+    #[test]
+    fn omitted_role_is_required() {
+        let role = role_of(r"{}");
+        assert_eq!(role, None, "omitted role is outer None");
+        assert!(validate_patch_mailbox_role(role).is_err());
+    }
+
+    #[test]
+    fn valid_role_is_accepted() {
+        let role = role_of(r#"{"role": "archive"}"#);
+        assert_eq!(
+            validate_patch_mailbox_role(role).ok(),
+            Some(Some("archive".to_string()))
+        );
+    }
+
+    #[test]
+    fn unsupported_role_is_rejected() {
+        assert!(validate_patch_mailbox_role(role_of(r#"{"role": "nonsense"}"#)).is_err());
     }
 }
