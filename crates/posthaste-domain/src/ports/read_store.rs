@@ -230,4 +230,16 @@ pub trait RevLogStore: Send + Sync {
         diff: &serde_json::Value,
         created_at: &str,
     ) -> Result<u32, StoreError>;
+
+    /// Set the account's undo/redo cursor (idempotent upsert).
+    /// `cursor_step_id = None` means all undone. The caller (server) validates
+    /// the referenced steps exist before calling this.
+    ///
+    /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    fn set_rev_cursor(
+        &self,
+        account_id: &AccountId,
+        cursor_step_id: Option<&str>,
+        redo_tail: &[String],
+    ) -> Result<(), StoreError>;
 }

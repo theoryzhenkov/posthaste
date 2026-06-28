@@ -37,8 +37,8 @@ use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationRequest, PatchAccountMutation,
-    PatchAppSettingsMutation, PatchSmartMailboxMutation, RevStepInput, RuntimeAccountList,
-    RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
+    PatchAppSettingsMutation, PatchSmartMailboxMutation, RevCursorArgs, RevStepInput,
+    RuntimeAccountList, RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
 use tokio::sync::broadcast;
 
@@ -413,6 +413,58 @@ impl Backend {
         }
     }
 
+    /// Phase 2: apply a `revCursor` control mutation — validate the referenced
+    /// steps exist in `rev_log`, then apply the idempotent cursor assignment +
+    /// emit `rev_log.appended` so the `RevLog` synced view re-serves the
+    /// cursor. Re-delivery is a no-op (the assignment is idempotent).
+    ///
+    /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    async fn apply_rev_cursor(
+        &self,
+        request: &MutationRequest,
+    ) -> Result<CommandAck, RuntimeError> {
+        let args: RevCursorArgs = serde_json::from_value(request.args.clone())
+            .map_err(|e| RuntimeError::invalid_mutation(format!("invalid revCursor args: {e}")))?;
+        let account = AccountId(args.account_id.clone());
+        // Validate: cursor_step_id (if Some) + redo_tail steps must exist.
+        let snapshot = self
+            .store
+            .rev_log_snapshot(&account)
+            .map_err(|e| RuntimeError::internal(e.to_string(), None))?;
+        if let Some(cursor) = &args.cursor_step_id {
+            if !snapshot.steps.iter().any(|s| &s.step_id == cursor) {
+                return Err(RuntimeError::invalid_mutation(format!(
+                    "revCursor cursor_step_id {cursor} is not in the rev_log"
+                )));
+            }
+        }
+        for step in &args.redo_tail {
+            if !snapshot.steps.iter().any(|s| &s.step_id == step) {
+                return Err(RuntimeError::invalid_mutation(format!(
+                    "revCursor redo_tail step {step} is not in the rev_log"
+                )));
+            }
+        }
+        // Apply the idempotent cursor assignment.
+        self.store
+            .set_rev_cursor(&account, args.cursor_step_id.as_deref(), &args.redo_tail)
+            .map_err(|e| RuntimeError::internal(e.to_string(), None))?;
+        // Emit the recompute trigger (same topic as append).
+        let _ = self.event_sender.send(DomainEvent {
+            seq: 0,
+            account_id: account.clone(),
+            topic: EVENT_TOPIC_REV_LOG_APPENDED.to_string(),
+            occurred_at: now_iso8601().unwrap_or_default(),
+            mailbox_id: None,
+            message_id: None,
+            payload: serde_json::json!({
+                "cursorStepId": args.cursor_step_id,
+                "redoTail": args.redo_tail,
+            }),
+        });
+        Ok(CommandAck { events: Vec::new() })
+    }
+
     /// Publish authoritative domain events on the down-channel broadcast. In the
     /// co-located deployment this is the same event bus the runtime's views and
     /// the SSE event stream already consume.
@@ -767,6 +819,11 @@ impl Backend {
         &self,
         request: &MutationRequest,
     ) -> Result<CommandAck, RuntimeError> {
+        // Phase 2: `revCursor` is a control mutation (not a message mutation) —
+        // route it to the cursor-arbitration path before the message parse.
+        if request.name == "revCursor" {
+            return self.apply_rev_cursor(request).await;
+        }
         let mutation = MessageMutation::from_request(request)?;
         let account_id = mutation.account_id().to_string();
         let message_id = mutation.message_id().to_string();
