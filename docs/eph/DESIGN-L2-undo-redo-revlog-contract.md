@@ -5,6 +5,7 @@ modified: 2026-06-28
 reviewed: 2026-06-28
 lifecycle: ephemeral
 type: DESIGN
+status: "Slices 1–5b done: store tables, RevLog view, forward-action append + cursor auto-advance, revCursor arbitration, client send (revCursor) + receive (mirror). Remaining: multi-account per-store history; JMAP per-message version."
 depends:
   - path: docs/eph/DESIGN-L2-undo-redo-synced-history
     note: "the overview + Phase 1 (shipped .26); this is the Phase 2 implementable contract"
@@ -172,8 +173,14 @@ Carried from the overview doc; resolved here:
 - Cursor arbitration: a new `revCursor` runtime mutation (the
   `{cursor_step_id, redo_tail}` assignment) in `runtime/build.rs` +
   `runtime-contract`.
-- Client mirror: `apps/web/src/runtime/replica/undoHistoryStore.ts` (becomes the
-  `RevLog` view mirror), `entityStoreAdapter.ts` (subscribe to the view).
+- Client mirror: `apps/web/src/runtime/replica/undoHistoryStore.ts`
+  (`reconcileWithServer` adopts the server's snapshot with an optimism guard —
+  a local move stays optimistic until the server echoes the cursor or the
+  `OPTIMISM_TIMEOUT_MS` safety valve converges), `apps/web/src/hooks/useRevLogMirror.ts`
+  (subscribes to the `RevLog` view + reconciles the store — the RECEIVE half of
+  cross-device cursor sync). DONE (Slice 5a sent the `revCursor`; Slice 5b
+  mirrors it). v1 mirrors the primary enabled account; multi-account per-store
+  history is a follow-up.
 - Reuse (unchanged): `MessageChangeDiff`/`inverse`/`from_before_after`
   (`crates/posthaste-link-core/src/message.rs`), `captureMutationDiffJson`
   (`posthaste-link-wasm`), the outbox, `message.applyDiff`.
