@@ -4,19 +4,16 @@
  * @spec docs/L1-api#mailbox-metadata
  * @spec docs/L1-ui#account-settings
  */
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type {
   AccountOverview,
   AppSettings,
   KnownMailboxRole,
   Mailbox,
 } from '../../api/types'
-import { runtimeMutations } from '../../runtime/mutations'
-import { invalidateAccountReadModels } from '../../domainCache'
 import { isKnownMailboxRole, renderMailboxRoleIcon } from '../../mailboxRoles'
-import { queryKeys } from '../../queryKeys'
 import { SourceMailboxAutomationFields } from './AutomationActionsEditor'
 import { FeedbackBanner, SettingsPageHeader, SettingsSection } from './shared'
+import { useMailboxRoleMutation } from './useMailboxRoleMutation'
 import {
   Select,
   SelectContent,
@@ -51,15 +48,7 @@ export function SourceMailboxEditor({
   settings: AppSettings | null
   onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
 }) {
-  const queryClient = useQueryClient()
-  const roleMutation = useMutation({
-    mutationFn: (role: KnownMailboxRole | null) =>
-      runtimeMutations.mailboxes.patch(account.id, mailbox.id, { role }),
-    onSuccess: (nextMailboxes) => {
-      queryClient.setQueryData(queryKeys.mailboxes(account.id), nextMailboxes)
-      invalidateAccountReadModels(queryClient, account.id)
-    },
-  })
+  const roleMutation = useMailboxRoleMutation(account.id, mailbox.id)
   const hasUnknownRole = Boolean(
     mailbox.role && !isKnownMailboxRole(mailbox.role),
   )
@@ -92,7 +81,6 @@ export function SourceMailboxEditor({
           </span>
           <Select
             value={selectValue}
-            disabled={roleMutation.isPending}
             onValueChange={(value) =>
               roleMutation.mutate(
                 value === '__none__' ? null : (value as KnownMailboxRole),
