@@ -28,7 +28,6 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 
-
 macro_rules! define_id {
     ($name:ident, u64, $getter:ident) => {
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -1401,7 +1400,10 @@ mod tests {
             lifecycle: ViewLifecycle::Ready,
             read_watermark: None,
             coverage: RuntimeCoverage {
-                ranges: vec![CoverageRange { from: None, to: None }],
+                ranges: vec![CoverageRange {
+                    from: None,
+                    to: None,
+                }],
             },
             data: serde_json::json!({ "rows": [] }),
             error: None,
@@ -1439,7 +1441,10 @@ mod tests {
                 value: "watermark-1".to_string(),
             }),
             coverage: RuntimeCoverage {
-                ranges: vec![CoverageRange { from: None, to: None }],
+                ranges: vec![CoverageRange {
+                    from: None,
+                    to: None,
+                }],
             },
             known_total_count: Some(0),
             anchor: MailListAnchorState::Removed {
@@ -1459,13 +1464,22 @@ mod tests {
                 value: "watermark-1".to_string(),
             }),
             coverage: RuntimeCoverage {
-                ranges: vec![CoverageRange { from: None, to: None }],
+                ranges: vec![CoverageRange {
+                    from: None,
+                    to: None,
+                }],
             },
             data: serde_json::to_value(state).expect("state should serialize"),
             error: None,
         };
 
-        assert_eq!(snapshot.coverage.ranges, vec![CoverageRange { from: None, to: None }]);
+        assert_eq!(
+            snapshot.coverage.ranges,
+            vec![CoverageRange {
+                from: None,
+                to: None
+            }]
+        );
         assert_eq!(snapshot.data["continuation"]["hasAfter"], false);
         assert_eq!(snapshot.data["anchor"]["kind"], "removed");
         assert_eq!(snapshot.read_watermark.unwrap().value, "watermark-1");

@@ -133,10 +133,9 @@ mod tests {
             .unwrap()
             .is_none());
         // With the account's archive mailbox → ReplaceMailboxes.
-        let output =
-            parse_message_mutation(&request.to_string(), r#"{"archive":"mbx-a"}"#)
-                .unwrap()
-                .unwrap();
+        let output = parse_message_mutation(&request.to_string(), r#"{"archive":"mbx-a"}"#)
+            .unwrap()
+            .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed["assertion"]["kind"], "replaceMailboxes");
         // Wire field is camelCase `mailboxIds` (renamed from `mailbox_ids`).

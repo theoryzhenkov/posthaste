@@ -4,8 +4,8 @@
 //! `ReplicaProbe` (the Layer-B Rust port of the web `entityStoreAdapter` that
 //! drove a real `EntityStore` from captured frames) is **retired**: it was
 //! duplicated, divergent glue. The flicker-prone logic is the shared
-//! `EntityStore`, and the REAL adapter — Layer D (`apps/web/test/renderProbe.tsx`)
-//! + real WASM Layer C (`apps/web/test/replicaAbsorptionRetire.test.ts`) + the
+//! `EntityStore`, and the REAL adapter — Layer D (`apps/web/test/renderProbe.tsx`),
+//! real WASM Layer C (`apps/web/test/replicaAbsorptionRetire.test.ts`), and the
 //! Playwright e2e — covers it faithfully without a hand-ported copy. A future
 //! Rust probe can drive the real `EntityStore` directly and feed these detectors
 //! without re-introducing the adapter port.

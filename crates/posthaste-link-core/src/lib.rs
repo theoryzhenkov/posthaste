@@ -19,8 +19,8 @@ mod convergence;
 mod message;
 
 pub use convergence::{
-    Convergence, MessageConvergence, MessageReplica, MutationId, Outcome, PendingMutation,
-    PendingMessageMutation, Replica, SettlementOutcome, SettlementResult,
+    Convergence, MessageConvergence, MessageReplica, MutationId, Outcome, PendingMessageMutation,
+    PendingMutation, Replica, SettlementOutcome, SettlementResult,
 };
 pub use message::{
     apply_message_assertion, coalesce_message_assertions, replay_message, KeywordDelta,

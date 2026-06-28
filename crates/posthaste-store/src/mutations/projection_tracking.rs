@@ -200,8 +200,11 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
     // these the store cannot self-maintain membership for an IMAP
     // expunge/location-removal and the row only corrected on a full re-serve.
     let detail = query_message_detail_tx(tx, account_id, &location.message_id)?;
-    let count_deltas =
-        crate::query::mailbox_counts_json_tx(tx, account_id, std::iter::once(&location.mailbox_id))?;
+    let count_deltas = crate::query::mailbox_counts_json_tx(
+        tx,
+        account_id,
+        std::iter::once(&location.mailbox_id),
+    )?;
     let mut payload = json!({
         "messageId": location.message_id.as_str(),
         "changes": { "mailboxes": true },

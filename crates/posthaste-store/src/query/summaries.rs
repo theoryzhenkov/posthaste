@@ -108,7 +108,10 @@ fn fetch_versions_bulk(
             .map_err(sql_to_store_error)?;
         let fetched = statement
             .query_map(params_from_iter(params), |row| {
-                Ok((row.get::<_, i64>(0)? as usize, row.get::<_, Option<i64>>(1)?))
+                Ok((
+                    row.get::<_, i64>(0)? as usize,
+                    row.get::<_, Option<i64>>(1)?,
+                ))
             })
             .map_err(sql_to_store_error)?;
         for entry in fetched {

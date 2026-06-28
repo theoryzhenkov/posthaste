@@ -232,6 +232,12 @@ impl ReadCache {
             .await
     }
 
+    // Summary-tier read fast-path: caches `MessageSummary`s and is invalidated by
+    // `evict`/`apply_coherence_frame`. The production caller is not wired yet
+    // (reads currently go through `message_detail`), so this is exercised only by
+    // the unit tests below. Kept rather than removed because deleting it would
+    // leave the sibling `evict` + `summaries` cache half-wired.
+    #[allow(dead_code)]
     pub(crate) async fn current_summary(
         &self,
         account_id: &AccountId,
@@ -561,7 +567,11 @@ mod tests {
             },
         });
         outbox.settle_receipt(&posthaste_link_core::MutationId("op1".into()), true);
-        assert_eq!(outbox.snapshot().len(), 1, "op held until the base absorbs it");
+        assert_eq!(
+            outbox.snapshot().len(),
+            1,
+            "op held until the base absorbs it"
+        );
 
         let (events, mut rx) = broadcast::channel(16);
         let link = BackendLink::new(backend.clone());
@@ -569,7 +579,10 @@ mod tests {
         run_backend_down_channel(link, cache.clone(), events, outbox.clone()).await;
 
         // The base now carries the flag: the held op is retired by absorption.
-        assert!(outbox.snapshot().is_empty(), "absorbed op retired by the bridge");
+        assert!(
+            outbox.snapshot().is_empty(),
+            "absorbed op retired by the bridge"
+        );
 
         // It republished the assertion as a `message.updated` domain event
         // scoped to the right account + message, flagged so views recompute.
