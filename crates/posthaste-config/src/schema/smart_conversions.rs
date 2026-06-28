@@ -15,6 +15,7 @@ impl SmartMailboxToml {
                 SmartMailboxKindToml::User => SmartMailboxKind::User,
             },
             default_key: self.default_key.clone(),
+            role: self.role.clone(),
             parent_id: self.parent_id.as_deref().map(SmartMailboxId::from),
             rule: SmartMailboxRule {
                 root: convert_rule_group(&self.rule)?,
@@ -44,6 +45,7 @@ impl SmartMailboxToml {
                 SmartMailboxKind::User => SmartMailboxKindToml::User,
             },
             default_key: mailbox.default_key.clone(),
+            role: mailbox.role.clone(),
             parent_id: mailbox.parent_id.as_ref().map(|id| id.to_string()),
             rule: convert_group_to_toml(&mailbox.rule.root),
             created_at: Some(mailbox.created_at.clone()),
