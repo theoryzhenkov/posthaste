@@ -11,7 +11,7 @@ use posthaste_domain::{
 /// @spec docs/L1-accounts#smart-mailbox-defaults
 pub fn default_smart_mailboxes() -> Vec<SmartMailbox> {
     vec![
-        role_mailbox("default-inbox", "All Inboxes", 0, "inbox", "inbox"),
+        role_mailbox("default-inbox", "Inbox", 0, "inbox", "inbox"),
         role_mailbox("default-archive", "Archive", 1, "archive", "archive"),
         role_mailbox("default-drafts", "Drafts", 2, "drafts", "drafts"),
         role_mailbox("default-sent", "Sent", 3, "sent", "sent"),
@@ -37,6 +37,7 @@ fn role_mailbox(
         position,
         kind: SmartMailboxKind::Default,
         default_key: Some(default_key.to_string()),
+        role: Some(role.to_string()),
         parent_id: None,
         rule: SmartMailboxRule {
             root: SmartMailboxGroup {
@@ -65,6 +66,7 @@ fn all_mail_mailbox() -> SmartMailbox {
         position: 6,
         kind: SmartMailboxKind::Default,
         default_key: Some("all-mail".to_string()),
+        role: None,
         parent_id: None,
         rule: SmartMailboxRule {
             root: SmartMailboxGroup {

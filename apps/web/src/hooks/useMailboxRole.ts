@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { queryKeys } from '../queryKeys'
 import { runtimeViews } from '../runtime/views'
-
 /**
  * Resolve a mailbox's role from the per-account mailbox read model
  * (`queryKeys.mailboxes`) — the domain authority for mailbox metadata, rather
@@ -25,5 +24,31 @@ export function useMailboxRole(
   return useMemo(
     () => mailboxes?.find((mailbox) => mailbox.id === mailboxId)?.role ?? null,
     [mailboxes, mailboxId],
+  )
+}
+
+/**
+ * Resolve a smart mailbox's assigned role from the cached smart-mailbox read
+ * model (`queryKeys.smartMailboxes`). Returns null until loaded, when the id is
+ * absent, or for an unassigned (role-less) smart mailbox. The contextual-action
+ * layer uses this to surface role-driven actions (e.g. Delete permanently when
+ * the view's smart mailbox carries the `trash` role).
+ *
+ * A cache-only observer (`enabled: false`) of the list hydrated by the
+ * navigation bootstrap — no fetch of its own.
+ */
+export function useSmartMailboxRole(
+  smartMailboxId: string | null,
+): string | null {
+  const { data: smartMailboxes } = useQuery({
+    queryKey: queryKeys.smartMailboxes,
+    queryFn: runtimeViews.smartMailboxes.list,
+    enabled: false,
+  })
+  return useMemo(
+    () =>
+      smartMailboxes?.find((mailbox) => mailbox.id === smartMailboxId)?.role ??
+      null,
+    [smartMailboxes, smartMailboxId],
   )
 }

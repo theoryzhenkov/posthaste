@@ -14,7 +14,7 @@ import { useAutoMarkRead } from '@/hooks/useAutoMarkRead'
 import { useDesignTheme } from '@/hooks/useDesignTheme'
 import { useEmailActions } from '@/hooks/useEmailActions'
 import { useGlobalMailShortcuts } from '@/hooks/useGlobalMailShortcuts'
-import { useMailboxRole } from '@/hooks/useMailboxRole'
+import { useMailboxRole, useSmartMailboxRole } from '@/hooks/useMailboxRole'
 import { useMailLayoutPersistence } from '@/hooks/useMailLayoutPersistence'
 import { closeWebSurface, useEffectiveSurface } from '@/hooks/useSurfaceRouting'
 import {
@@ -36,7 +36,7 @@ import { useMailClientHandlers } from './useMailClientHandlers'
 const DEFAULT_VIEW: SidebarSelection = {
   kind: 'smart-mailbox',
   id: 'default-inbox',
-  name: 'All Inboxes',
+  name: 'Inbox',
 }
 
 /**
@@ -90,10 +90,15 @@ export function MailClient({
   const effectiveView = hasEnabledSources
     ? (selectedView ?? DEFAULT_VIEW)
     : null
-  const viewRole = useMailboxRole(
+  const sourceRole = useMailboxRole(
     effectiveView?.kind === 'source-mailbox' ? effectiveView.sourceId : null,
     effectiveView?.kind === 'source-mailbox' ? effectiveView.mailboxId : null,
   )
+  const smartRole = useSmartMailboxRole(
+    effectiveView?.kind === 'smart-mailbox' ? effectiveView.id : null,
+  )
+  const viewRole =
+    effectiveView?.kind === 'smart-mailbox' ? smartRole : sourceRole
   const hasAccountsError =
     accountsQuery.isError || mailNavigationBootstrap.isError
   const isLoading = accountsQuery.isLoading || mailNavigationBootstrap.isLoading

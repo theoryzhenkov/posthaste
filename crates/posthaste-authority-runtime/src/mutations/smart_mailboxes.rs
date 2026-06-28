@@ -13,6 +13,7 @@ impl AccountMutationService {
             position: request.position.unwrap_or(0),
             kind: SmartMailboxKind::User,
             default_key: None,
+            role: None,
             parent_id: None,
             rule: request.rule,
             created_at: timestamp.clone(),

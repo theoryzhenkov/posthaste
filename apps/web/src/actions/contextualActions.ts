@@ -43,8 +43,10 @@ export interface MessageActionContext {
   target: SourceMessageRef
   /**
    * Mailbox role of the current view (a JMAP role string; known values match
-   * `KnownMailboxRole`), or null when ambiguous (smart mailbox or search), in
-   * which case the default inbox-like move actions apply.
+   * `KnownMailboxRole`), or null when ambiguous (a search view, or a smart
+   * mailbox with no assigned role). For source-mailbox views it is the
+   * mailbox's role; for role-tagged smart mailboxes it is the smart mailbox's
+   * assigned role, so e.g. the Trash smart mailbox surfaces Delete permanently.
    */
   viewRole: string | null
   surface: 'context-menu'
