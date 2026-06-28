@@ -255,3 +255,33 @@ fn smart_mailbox_crud_round_trips() {
     repo.delete_smart_mailbox(&mailbox.id).unwrap();
     assert!(repo.get_smart_mailbox(&mailbox.id).unwrap().is_none());
 }
+
+#[test]
+fn save_source_preserves_user_comments_across_a_resave() {
+    let root = temp_root();
+    let repo = TomlConfigRepository::open(&root).unwrap();
+    repo.save_source(&mock_source("acct", "First")).unwrap();
+
+    // A user (or an LLM) hand-edits the source file with a comment.
+    let path = root.join("sources/acct.toml");
+    let original = fs::read_to_string(&path).unwrap();
+    fs::write(&path, format!("# my account notes\n{original}")).unwrap();
+
+    // A UI save (rename) must not clobber the comment (lossless write).
+    repo.save_source(&mock_source("acct", "Renamed")).unwrap();
+
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(
+        after.contains("# my account notes"),
+        "comment dropped:\n{after}"
+    );
+    assert!(after.contains("Renamed"), "rename not applied:\n{after}");
+    assert!(
+        !after.contains("\"First\""),
+        "stale name lingered:\n{after}"
+    );
+
+    // And it still round-trips with no data loss.
+    let loaded = repo.get_source(&AccountId::from("acct")).unwrap().unwrap();
+    assert_eq!(loaded.name, "Renamed");
+}

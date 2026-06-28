@@ -150,31 +150,56 @@ pub(super) fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbo
 }
 
 /// Serializes and atomically writes an account source TOML file.
+/// The top-level keys `SourceToml` owns (snake_case = the field names; no
+/// `rename_all`). Add a key here when `SourceToml` gains a top-level field.
+const SOURCE_TOML_MANAGED_KEYS: &[&str] = &[
+    "id",
+    "name",
+    "full_name",
+    "email_patterns",
+    "driver",
+    "enabled",
+    "appearance",
+    "transport",
+    "created_at",
+    "updated_at",
+];
+
 pub(super) fn write_source_toml(
     config_root: &Path,
     source: &AccountSettings,
 ) -> Result<(), ConfigError> {
     let source_toml = SourceToml::from_account_settings(source);
-    let content = toml::to_string_pretty(&source_toml)
-        .map_err(|error| ConfigError::Parse(error.to_string()))?;
     let path = config_root
         .join("sources")
         .join(format!("{}.toml", source.id));
-    atomic_write(&path, content.as_bytes())
+    write_managed_toml(&path, &source_toml, SOURCE_TOML_MANAGED_KEYS)
 }
 
 /// Serializes and atomically writes a smart mailbox TOML file.
+/// The top-level keys `SmartMailboxToml` owns (snake_case; no `rename_all`).
+const SMART_MAILBOX_TOML_MANAGED_KEYS: &[&str] = &[
+    "id",
+    "name",
+    "position",
+    "kind",
+    "default_key",
+    "role",
+    "parent_id",
+    "rule",
+    "created_at",
+    "updated_at",
+];
+
 pub(super) fn write_smart_mailbox_toml(
     config_root: &Path,
     mailbox: &SmartMailbox,
 ) -> Result<(), ConfigError> {
     let toml_struct = SmartMailboxToml::from_smart_mailbox(mailbox);
-    let content =
-        toml::to_string_pretty(&toml_struct).map_err(|e| ConfigError::Parse(e.to_string()))?;
     let path = config_root
         .join("smart-mailboxes")
         .join(format!("{}.toml", mailbox.id));
-    atomic_write(&path, content.as_bytes())
+    write_managed_toml(&path, &toml_struct, SMART_MAILBOX_TOML_MANAGED_KEYS)
 }
 
 /// Rejects IDs containing path separators, parent traversal, or null bytes to
