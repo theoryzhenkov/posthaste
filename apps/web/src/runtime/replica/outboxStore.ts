@@ -12,6 +12,7 @@
  * @spec docs/replication/client-link/L3#3-indexeddb-persistence
  */
 import type { ReplicaAssertion } from './handle'
+import type { RuntimeRunMutationRequest } from '../types'
 import { openReplicaDatabase, OUTBOX_STORE } from './replicaDatabase'
 
 export interface OutboxRecord {
@@ -20,6 +21,14 @@ export interface OutboxRecord {
   assertion: ReplicaAssertion
   runtimeMutationId: string | null
   acceptedAt: number
+  /**
+   * The original runtime send, stored so a never-dispatched record
+   * (`runtimeMutationId === null`) can be re-sent verbatim on rehydration.
+   * Optional: records written before this field existed lack it and are
+   * skipped on replay (can't reconstruct the send). IndexedDB is schemaless,
+   * so adding this needs NO `replicaDatabase` version bump.
+   */
+  request?: RuntimeRunMutationRequest
 }
 
 /**
