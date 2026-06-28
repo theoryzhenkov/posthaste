@@ -326,6 +326,7 @@ class EntityStoreController {
         )
         entry.lastSnapshot = frame.snapshot
         this.drainAndEmit()
+        void this.clearRetired()
         return
       }
       case 'notification': {
@@ -333,6 +334,7 @@ class EntityStoreController {
         if (event?.topic === 'message.updated') {
           this.ingestMessageEvent(event)
           this.drainAndEmit()
+          void this.clearRetired()
         }
         // Pass through: `useDaemonEvents` still handles non-store invalidations
         // (conversations, tags, smart-mailboxes) until 2e.3 retires the
@@ -430,8 +432,18 @@ class EntityStoreController {
     verdict: SettlementVerdict,
   ): Promise<void> {
     this.handle.settle(clientMutationId, verdict)
-    await this.deps.outbox.remove(clientMutationId)
+    await this.clearRetired()
     this.drainAndEmit()
+  }
+
+  /** Clear durable-outbox records for ops the engine retired since the last
+   *  drain (settle-confirm or base catch-up). An un-retired op stays durable so
+   *  it survives a reload to be replayed. (outbox D) */
+  private async clearRetired(): Promise<void> {
+    const retired = JSON.parse(this.handle.drainRetiredJson()) as string[]
+    if (retired.length) {
+      await Promise.all(retired.map((id) => this.deps.outbox.remove(id)))
+    }
   }
 
   /** Drain the store's dirty keys, re-project open views, and write counts. */

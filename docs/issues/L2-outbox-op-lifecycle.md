@@ -5,7 +5,7 @@ modified: 2026-06-27
 reviewed: 2026-06-27
 lifecycle: ephemeral
 type: ISSUE
-status: open
+status: resolved
 priority: high
 depends:
   - path: docs/eph/DESIGN-L2-mutation-notification
@@ -117,7 +117,7 @@ buries a `Failed` verdict under 105 `Confirmed` and asserts it is retained
 
 Provenance: four-reviewer Task 2 (MEDIUM-4).
 
-## D — Durable outbox cleared on `confirmed` even when the engine did not retire (MEDIUM)
+## D — Durable outbox cleared on `confirmed` even when the engine did not retire (MEDIUM) — **RESOLVED**
 
 `settleAll` (`apps/web/src/runtime/replica/entityStoreAdapter.ts:408`) calls
 `handle.settle(...)` then unconditionally `outbox.remove(clientMutationId)`. But
@@ -135,5 +135,24 @@ durable trace.
 result); in `settleAll`, clear the durable record only when the op actually
 retired (confirmed+retired, or failed) — otherwise keep it until a later
 absorbing base update retires it.
+
+**Resolved:** the issue's proposed settle-return-gating was incomplete — the
+retire happens at TWO times (settle-confirm AND base catch-up
+`ingestBatch → apply_message → retire_absorbed_if`), so gating only at settle
+leaves the outbox leaked after the later retire. Went drain-based instead:
+`retire_absorbed_if` (`crates/posthaste-link-core/src/convergence.rs`) now
+returns the retired op ids (`Vec<MutationId>`, was `bool`); `EntityStore`
+(`crates/posthaste-link-replica/src/entity_store.rs`) buffers them at both
+retire sites (settle confirm/failed + apply_message) and exposes
+`drain_retired()`; the WASM boundary adds `drainRetiredJson()`
+(`crates/posthaste-link-wasm/src/entity_store.rs`). The adapter's
+`clearRetired()` drains and clears the corresponding durable-outbox records —
+called in `settleAll` (awaited) and the ingest paths (fire-and-forget; the
+retire is already in-engine, so a crash before the durable clear self-heals on
+reload when the replayed op re-retires). `settle` keeps returning `reverted`
+(the drain is the retire signal). Regression: the `entityStoreAdapter` flicker
+test now asserts the outbox RETAINS the op at confirm-before-base (length 1)
+and CLEARS it after the base catches up (length 0). 6 link-wasm + 31 link-core
++ 25 link-replica + 252 web tests green.
 
 Provenance: four-reviewer Task 3 (MEDIUM-3).
