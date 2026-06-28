@@ -23,9 +23,9 @@ export function createMailboxProvider(input: {
           subtitle: 'Smart mailbox',
           keywords: smartMailbox.name,
           icon: renderMailboxRoleIcon(
-            null,
+            smartMailbox.role,
             15,
-            smartMailboxFallbackIcon(smartMailbox.name),
+            smartMailboxFallbackIcon(smartMailbox.defaultKey),
           ),
           action: {
             kind: 'open-smart-mailbox',
