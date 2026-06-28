@@ -35,7 +35,7 @@ async function stillPendingAfterConfirmAndAbsorbingBase(
   h.registerViewJson(
     'v',
     JSON.stringify({
-      predicate: { inMailbox: 'inbox' },
+      predicate: { inMailboxes: ['inbox'] },
       sortField: 'date',
       sortDirection: 'desc',
       watermark: null,
@@ -110,7 +110,7 @@ describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
     h.registerViewJson(
       'v',
       JSON.stringify({
-        predicate: { inMailbox: 'inbox' },
+        predicate: { inMailboxes: ['inbox'] },
         sortField: 'date',
         sortDirection: 'desc',
         watermark: null,
@@ -187,7 +187,7 @@ describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
     h.registerViewJson(
       'v',
       JSON.stringify({
-        predicate: { inMailbox: 'inbox' },
+        predicate: { inMailboxes: ['inbox'] },
         sortField: 'date',
         sortDirection: 'desc',
         watermark: null,

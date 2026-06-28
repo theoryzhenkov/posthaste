@@ -75,7 +75,11 @@ import type {
   RuntimeViewDescriptor,
   RuntimeViewSnapshot,
 } from './types'
-import { isMailListSelfMaintained } from './mailListSelfMaintained'
+import { queryClient as singletonQueryClient } from '@/app/queryClient'
+import {
+  buildMailListPredicateContext,
+  isMailListSelfMaintained,
+} from './mailListSelfMaintained'
 
 /**
  * Default runtime adapter during migration.
@@ -143,7 +147,11 @@ function mailListViewDescriptor(
   return {
     family: 'mailList',
     payload: mailQueryRequest(view),
-    clientSelfMaintained: isMailListSelfMaintained(view.scope, view.sort),
+    clientSelfMaintained: isMailListSelfMaintained(
+      view.scope,
+      view.sort,
+      buildMailListPredicateContext(singletonQueryClient),
+    ),
   }
 }
 

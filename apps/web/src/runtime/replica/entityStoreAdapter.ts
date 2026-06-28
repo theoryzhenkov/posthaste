@@ -37,8 +37,6 @@ import type {
   RuntimeFrameSubscriptionRequest,
   RuntimeMailListRowState,
   RuntimeMailListViewState,
-  RuntimeMessagePageRequest,
-  RuntimeMessagePageScope,
   RuntimeOpenMessageListViewResult,
   RuntimeRunMutationRequest,
   RuntimeSessionViewCloseRequest,
@@ -54,7 +52,11 @@ import type {
   SettlementVerdict,
 } from './handle'
 import { settlementVerdict } from './mapping'
-import { isMailListSelfMaintained } from '../mailListSelfMaintained'
+import {
+  buildMailListPredicateContext,
+  resolveMailListPredicate,
+  type MailListPredicate,
+} from '../mailListSelfMaintained'
 import type { OutboxStore } from './outboxStore'
 import { parseMessageMutation } from './wasmUtil'
 
@@ -65,7 +67,7 @@ interface SortKey {
 }
 
 /** The store's membership predicate (externally-tagged + camelCase on the wire). */
-type ViewPredicate = { inMailbox: string } | 'all' | 'deferred'
+type ViewPredicate = MailListPredicate
 
 /** A row the store places (`setViewRowsJson` input). */
 interface StoreViewRow {
@@ -113,22 +115,7 @@ interface ViewEntry {
   lastProjectionJson: string
 }
 
-/**
- * The store self-maintains (evaluable) only for the default `date` sort
- * (which keys rows by `receivedAt`) over a concrete source mailbox.
- * Smart-mailbox / global / null-mailbox / non-`date` views are `Deferred` —
- * the runtime drives them via served snapshots, and the store holds +
- * re-serves those rows without re-deriving.
- */
-function predicateForScope(
-  scope: RuntimeMessagePageScope,
-  sort: RuntimeMessagePageRequest['sort'],
-): ViewPredicate {
-  if (isMailListSelfMaintained(scope, sort)) {
-    return { inMailbox: scope.mailboxId }
-  }
-  return 'deferred'
-}
+
 
 function sortKeyOf(projection: { receivedAt: string; id: string }): SortKey {
   return { receivedAt: projection.receivedAt, messageId: projection.id }
@@ -198,7 +185,11 @@ class EntityStoreController {
       await this.deps.base.openRuntimeSessionMessageListView(request)
     const { viewId, snapshot } = result
     const rows = snapshot.data.rows
-    const predicate = predicateForScope(request.view.scope, request.view.sort)
+    const predicate = resolveMailListPredicate(
+      request.view.scope,
+      request.view.sort,
+      buildMailListPredicateContext(this.queryClient),
+    )
     this.handle.registerViewJson(
       viewId,
       JSON.stringify({
