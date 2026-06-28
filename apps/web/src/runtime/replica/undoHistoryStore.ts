@@ -14,6 +14,7 @@
  * @spec docs/eph/DESIGN-L2-undo-redo-synced-history
  */
 import type { MessageChangeDiff } from './handle'
+import { openReplicaDatabase, UNDO_HISTORY_STORE } from './replicaDatabase'
 
 /** One recorded reversible step on the history. */
 export interface RevStep {
@@ -223,24 +224,8 @@ export class MemoryUndoHistoryStore extends BaseUndoHistoryStore {
   }
 }
 
-const DB_NAME = 'posthaste-replica'
-const STORE_NAME = 'undoHistory'
-const DB_VERSION = 2 // bumped from the outbox's v1 (new object store)
+const STORE_NAME = UNDO_HISTORY_STORE
 const RECORD_KEY = 'main'
-
-function openConnection(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
-    request.onupgradeneeded = () => {
-      const connection = request.result
-      if (!connection.objectStoreNames.contains(STORE_NAME)) {
-        connection.createObjectStore(STORE_NAME, { keyPath: 'key' })
-      }
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-  })
-}
 
 function runRequest<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -258,7 +243,7 @@ export class IndexedDbUndoHistoryStore extends BaseUndoHistoryStore {
   private connection: Promise<IDBDatabase> | undefined
 
   private db(): Promise<IDBDatabase> {
-    this.connection ??= openConnection()
+    this.connection ??= openReplicaDatabase()
     return this.connection
   }
 
