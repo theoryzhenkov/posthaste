@@ -17,11 +17,11 @@ use posthaste_link_core::{MutationId, PendingMessageMutation};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
-    MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller, RuntimeCore,
-    RuntimeError, RuntimeErrorCode, RuntimeEventSubscription, RuntimeFrameSubscription,
-    RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes, RuntimeSession, RuntimeSessionId,
-    RuntimeSessionSeq, RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor,
-    ViewId, ViewRevision,
+    MutationSettlementState, PatchAccountMutation, RevCursorArgs, RuntimeAccountList,
+    RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode, RuntimeEventSubscription,
+    RuntimeFrameSubscription, RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes,
+    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, RuntimeStatus, RuntimeStoreStatus,
+    RuntimeViewSubscription, ViewDescriptor, ViewId, ViewRevision,
 };
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -554,6 +554,15 @@ impl RuntimeHandle {
             .core
             .sessions
             .session_scope(&session_id, caller.account_scope.as_deref())?;
+        // Phase 2: `revCursor` is a control mutation (not a message mutation) —
+        // it carries no message target + has no outbox optimism. Route it
+        // directly to the backend (which validates + applies the cursor).
+        // @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+        if request.name == "revCursor" {
+            return self
+                .dispatch_rev_cursor(caller, session_scope.as_deref(), request)
+                .await;
+        }
         // Runtime (near-node) concern: scope enforcement per mutation. The
         // command application is the backend's; it is forwarded up the link
         // below, uniform across names. Undo/redo history is client-owned
@@ -595,6 +604,28 @@ impl RuntimeHandle {
             self.core.outbox.settle_receipt(&id, confirmed);
         }
         result
+    }
+
+    /// Phase 2: route a `revCursor` control mutation to the backend. Parses the
+    /// args for the account (scope check), then forwards through the normal
+    /// accept → forward → settle flow (no outbox optimism — a cursor move has
+    /// no message assertion to fold). The backend validates the referenced
+    /// steps exist + applies the cursor + emits the recompute trigger.
+    ///
+    /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    async fn dispatch_rev_cursor(
+        &self,
+        caller: RuntimeCaller,
+        session_scope: Option<&[String]>,
+        request: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        let args: RevCursorArgs =
+            serde_json::from_value(request.args.clone()).map_err(|error| {
+                RuntimeError::invalid_mutation(format!("invalid revCursor args: {error}"))
+            })?;
+        Self::ensure_account_in_scope(&args.account_id, session_scope)?;
+        let forward = self.core.backend_link.forward_mutation(request.clone());
+        self.run_message_mutation(caller, &request, forward).await
     }
 }
 

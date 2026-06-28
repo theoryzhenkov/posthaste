@@ -683,6 +683,22 @@ pub struct RevStepInput {
     pub diff: Value,
 }
 
+/// Phase 2 undo/redo: the `revCursor` control-mutation args — an idempotent
+/// cursor assignment the client sends after moving its optimistic cursor
+/// locally (Phase 1). The server validates the referenced steps exist + applies
+/// it to `rev_cursor`.
+///
+/// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevCursorArgs {
+    pub account_id: String,
+    /// The topmost APPLIED step (`None` = all undone). Must exist in `rev_log`.
+    pub cursor_step_id: Option<String>,
+    /// The undone step_ids above the cursor, in `seq` order. Each must exist.
+    pub redo_tail: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
