@@ -3,6 +3,7 @@ import type { UseMutationResult } from '@tanstack/react-query'
 import type {
   AccountOverview,
   AppSettings,
+  CachePolicy,
   SmartMailbox,
   SmartMailboxSummary,
 } from '../../api/types'
@@ -10,6 +11,7 @@ import type { SettingsSurfaceDescriptor } from '../../surfaces'
 import { AccountsPane } from './AccountsPane'
 import { AppearancePane } from './AppearancePane'
 import { GeneralPane } from './GeneralPane'
+import { StoragePane } from './StoragePane'
 import {
   SmartMailboxesPane,
   type MailboxEditorTarget,
@@ -28,6 +30,7 @@ interface SettingsPanelContentProps {
       account: AccountOverview
     }
   >
+  cacheMutation: UseMutationResult<AppSettings, Error, CachePolicy>
   defaultAccountId: string | null | undefined
   defaultMutation: UseMutationResult<AppSettings, Error, string | null>
   editingAccount: AccountOverview | null
@@ -65,6 +68,7 @@ export function SettingsPanelContent({
   accounts,
   accountCommandError,
   activeCategory,
+  cacheMutation,
   commandMutation,
   defaultAccountId,
   defaultMutation,
@@ -112,6 +116,16 @@ export function SettingsPanelContent({
         {activeCategory === 'appearance' && (
           <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
             <AppearancePane />
+          </div>
+        )}
+
+        {activeCategory === 'storage' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <StoragePane
+              cachePolicy={settings?.cachePolicy}
+              onChange={(policy) => cacheMutation.mutate(policy)}
+              isPending={cacheMutation.isPending}
+            />
           </div>
         )}
 
