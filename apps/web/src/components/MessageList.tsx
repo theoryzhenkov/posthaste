@@ -125,12 +125,14 @@ export function MessageList({
     [accountDirectory, rawMessages],
   )
   const selectedKey = selectionKey(selection)
-  // The mail-list view surfaces no fetch error of its own (search-syntax errors
-  // still flow through `buildErrorState` via `preparedSearchQuery`).
-  const errorKey: string | null = null
+  // A fatal view-open failure surfaces here as an inline error + retry (instead
+  // of an infinite skeleton); search-syntax errors still flow through
+  // `buildErrorState` via `preparedSearchQuery`.
+  const viewOpenError = runtimeMailListView.error
+  const errorKey: string | null = viewOpenError ? currentViewKey : null
   const errorState = buildErrorState({
     dismissedErrorKey,
-    error: null,
+    error: viewOpenError,
     errorKey,
     preparedSearchQuery,
   })

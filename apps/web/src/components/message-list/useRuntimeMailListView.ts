@@ -80,6 +80,12 @@ export interface RuntimeMailListView {
   items: MessageSummary[]
   /** True only on the first load of a view with no rows yet to show. */
   isLoading: boolean
+  /**
+   * A fatal open-path failure: the view never opened, so there are no rows and
+   * no skeleton — the renderer shows this with a retry affordance. Cleared on
+   * retry and on view change.
+   */
+  error: Error | null
   /** Re-open the view (the renderer's retry affordance). */
   retry: () => void
   /** Grow the open view's window by a page; no-op while one is in flight. */
@@ -117,7 +123,11 @@ export function useRuntimeMailListView({
   const [hasMore, setHasMore] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [retryNonce, setRetryNonce] = useState(0)
-  const retry = useCallback(() => setRetryNonce((n) => n + 1), [])
+  const [error, setError] = useState<Error | null>(null)
+  const retry = useCallback(() => {
+    setError(null)
+    setRetryNonce((n) => n + 1)
+  }, [])
 
   // The mail-list rows live in the query cache (written by this hook from view
   // frames); this read makes them reactive without a second, fetching query.
@@ -140,6 +150,7 @@ export function useRuntimeMailListView({
     enabled &&
     selectedView !== null &&
     !preparedSearchQuery.isBlocked &&
+    error === null &&
     cached.data === undefined
 
   useEffect(() => {
@@ -147,6 +158,9 @@ export function useRuntimeMailListView({
       return
     }
 
+    // The effect re-runs on retry/view change; clear any prior fatal error so
+    // the skeleton can show again while the new open is in flight.
+    setError(null)
     let closed = false
     let viewId: string | undefined
     let unsubscribe: (() => void) | undefined
@@ -252,9 +266,26 @@ export function useRuntimeMailListView({
           { afterSeq: 0, sourceId },
         )
       })
-      .catch(() => {
-        // The legacy query path remains available by disabling the feature flag;
-        // avoid broad invalidation/refetch here so this path stays targeted.
+      .catch((cause: unknown) => {
+        if (closed) {
+          return
+        }
+        const openError =
+          cause instanceof Error ? cause : new Error(String(cause))
+        uiLogger.error(
+          {
+            event: LOG_EVENTS.viewOpenFailed,
+            operationId: operation.operationId,
+            operationKind: operation.operationKind,
+            sourceId: sourceId ?? undefined,
+            error: openError.message,
+          },
+          'mail-list view open failed',
+        )
+        // Surface the failure so the renderer can show an inline error + retry
+        // instead of an infinite loading skeleton (avoid broad invalidation so
+        // this path stays targeted).
+        setError(openError)
       })
 
     return () => {
@@ -296,12 +327,25 @@ export function useRuntimeMailListView({
           applySnapshotToQueryData(result.snapshot),
         )
       })
-      .catch(() => {})
+      .catch((cause: unknown) => {
+        // A transient loadMore failure leaves the open view intact (it can be
+        // retried by scrolling again), but it must not be silent.
+        const extendError =
+          cause instanceof Error ? cause : new Error(String(cause))
+        uiLogger.error(
+          {
+            event: LOG_EVENTS.viewExtendFailed,
+            viewId,
+            error: extendError.message,
+          },
+          'mail-list view extend failed',
+        )
+      })
       .finally(() => {
         loadingMoreRef.current = false
         setIsLoadingMore(false)
       })
   }, [hasMore, queryClient, queryKey])
 
-  return { items, isLoading, retry, hasMore, isLoadingMore, loadMore }
+  return { items, isLoading, error, retry, hasMore, isLoadingMore, loadMore }
 }
