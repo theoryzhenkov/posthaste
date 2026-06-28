@@ -60,7 +60,7 @@ import {
   resolveMailListPredicate,
   type MailListPredicate,
 } from '../mailListSelfMaintained'
-import type { OutboxStore } from './outboxStore'
+import type { OutboxRecord, OutboxStore } from './outboxStore'
 import { getUndoHistoryStore, makeRevStep } from './undoHistoryStore'
 import { parseMessageMutation } from './wasmUtil'
 
@@ -217,14 +217,15 @@ class EntityStoreController {
     // re-applying it as pending intent would never retire it — `accept` only
     // folds, and nothing re-checks absorption after a reload, so the durable
     // outbox grows unbounded across reloads (the settled-record leak that grew
-    // one real DB to 88 records on a single message). Drop those; only
-    // never-sent intent is replayed below.
+    // one real DB to 88 records on a single message). Drop those; the
+    // never-sent records below are both replayed (optimism) and re-sent.
     //
     // A single un-deserializable record (e.g. a durable assertion written before
     // a wire-schema change) must never abort the whole view-open — that bricks
     // every mail-list view silently. Skip + log the bad record and keep going.
+    const rehydrated = await this.deps.outbox.all()
     const droppedSettled: string[] = []
-    for (const record of await this.deps.outbox.all()) {
+    for (const record of rehydrated) {
       if (record.runtimeMutationId !== null) {
         droppedSettled.push(record.clientMutationId)
         continue
@@ -250,9 +251,7 @@ class EntityStoreController {
       }
     }
     if (droppedSettled.length) {
-      await Promise.all(
-        droppedSettled.map((id) => this.deps.outbox.remove(id)),
-      )
+      await Promise.all(droppedSettled.map((id) => this.deps.outbox.remove(id)))
       syncLogger.debug(
         {
           event: LOG_EVENTS.outboxRehydrateDropped,
@@ -268,6 +267,9 @@ class EntityStoreController {
       lastProjectionJson: projected.json,
     }
     this.views.set(viewId, entry)
+    // Replay records that were optimistically accepted but never reached the
+    // runtime; fire-and-forget so the view open is not blocked on the network.
+    void this.resendNeverDispatched(rehydrated)
     return { viewId, snapshot: this.snapshotFrom(entry, projected.rows) }
   }
 
@@ -361,9 +363,36 @@ class EntityStoreController {
       assertion: translated.assertion as ReplicaAssertion,
       runtimeMutationId: null,
       acceptedAt: this.now(),
+      // Store the original send so a never-dispatched record can be replayed
+      // verbatim on rehydration (outbox-rehydrate-resend).
+      request,
     })
     this.drainAndEmit()
 
+    const receipt = await this.dispatchToRuntime(request, clientMutationId)
+    // Record the forward action in the client history once the runtime has
+    // accepted it. A persist failure here must NOT trigger the optimism revert
+    // (the mutation succeeded), so this is outside the try/catch above.
+    if (capturedDiff) {
+      const sourceId =
+        (request.args as { sourceId?: string } | undefined)?.sourceId ?? ''
+      await getUndoHistoryStore().pushForward(
+        makeRevStep(translated.messageId, sourceId, capturedDiff),
+      )
+    }
+    return receipt
+  }
+
+  /**
+   * Send a translated mutation to the runtime and link/settle its receipt
+   * against the durable outbox. The single send path shared by the live
+   * `runMutation` and the rehydration replay (`resendNeverDispatched`); on a
+   * synchronous rejection it retires the optimism (revert) and rethrows.
+   */
+  private async dispatchToRuntime(
+    request: RuntimeRunMutationRequest,
+    clientMutationId: string,
+  ): Promise<RuntimeMutationReceipt> {
     let receipt: RuntimeMutationReceipt
     try {
       receipt = await this.deps.base.runRuntimeMutation(request)
@@ -378,17 +407,54 @@ class EntityStoreController {
       await this.settleAll(clientMutationId, 'failed')
       throw error
     }
-    // Record the forward action in the client history once the runtime has
-    // accepted it. A persist failure here must NOT trigger the optimism revert
-    // (the mutation succeeded), so this is outside the try/catch above.
-    if (capturedDiff) {
-      const sourceId =
-        (request.args as { sourceId?: string } | undefined)?.sourceId ?? ''
-      await getUndoHistoryStore().pushForward(
-        makeRevStep(translated.messageId, sourceId, capturedDiff),
-      )
-    }
     return receipt
+  }
+
+  /**
+   * Re-send records that were optimistically accepted but never reached the
+   * runtime (`runtimeMutationId === null`): on the reload that built this view,
+   * the live send was lost, so the server never learned of them. Replaying is
+   * safe — never-sent means no double-apply, and the runtime dedupes by
+   * `clientMutationId` within a session (`MutationAcceptance::Existing` returns
+   * the existing receipt). A record predating the stored `request` field can't
+   * be reconstructed → skip (the optimism stays durable, but the server is not
+   * told) and log.
+   *
+   * Deliberately NOT handled: sent-but-unsettled records
+   * (`runtimeMutationId !== null`). The runtime may already have applied them in
+   * a prior session, so a cross-session replay risks a double-apply; reconciling
+   * those needs a server reconciliation endpoint (TODO, out of scope).
+   */
+  private async resendNeverDispatched(records: OutboxRecord[]): Promise<void> {
+    for (const record of records) {
+      if (record.runtimeMutationId !== null) {
+        continue
+      }
+      if (!record.request) {
+        syncLogger.warn(
+          {
+            event: LOG_EVENTS.outboxRehydrateSkipped,
+            clientMutationId: record.clientMutationId,
+          },
+          'outbox record predates the stored request; cannot re-send on rehydration',
+        )
+        continue
+      }
+      syncLogger.info(
+        {
+          event: LOG_EVENTS.outboxRehydrateResent,
+          clientMutationId: record.clientMutationId,
+        },
+        're-sending never-dispatched outbox record on rehydration',
+      )
+      try {
+        await this.dispatchToRuntime(record.request, record.clientMutationId)
+      } catch {
+        // dispatchToRuntime already reverted the optimism + surfaced the
+        // failure via settleAll; swallow so one failed replay does not abort
+        // the remaining records.
+      }
+    }
   }
 
   private onBaseFrame(

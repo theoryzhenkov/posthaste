@@ -472,6 +472,64 @@ describe('entityStoreAdapter', () => {
     expect(mailboxes?.find((m) => m.id === 'inbox')?.unreadEmails).toBe(1)
   })
 
+  it('re-sends never-dispatched records on rehydration + links the receipt', async () => {
+    const { adapter, outbox, harness } = build()
+    // A record optimistically accepted on a prior session but never dispatched
+    // (runtimeMutationId === null), carrying its original send for replay.
+    await outbox.put({
+      clientMutationId: 'c-orphan',
+      messageId: 'm1',
+      assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      runtimeMutationId: null,
+      acceptedAt: 1,
+      request: setFlagged('m1', 'c-orphan'),
+    })
+
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    // The replay is fire-and-forget; let its microtasks settle.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(harness.mutations.map((m) => m.clientMutationId)).toEqual([
+      'c-orphan',
+    ])
+    const records = await outbox.all()
+    expect(records).toHaveLength(1)
+    expect(records[0]?.runtimeMutationId).toBe('r-1')
+  })
+
+  it('does not re-send sent-but-unsettled or request-less records on rehydration', async () => {
+    const { adapter, harness } = build()
+    // Already dispatched in a prior session (runtimeMutationId !== null): NOT
+    // replayed (could double-apply; needs server reconciliation — out of scope).
+    const built = build()
+    await built.outbox.put({
+      clientMutationId: 'c-sent',
+      messageId: 'm1',
+      assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      runtimeMutationId: 'r-prev',
+      acceptedAt: 1,
+      request: setFlagged('m1', 'c-sent'),
+    })
+    // Predates the stored request: can't reconstruct the send → skipped.
+    await built.outbox.put({
+      clientMutationId: 'c-legacy',
+      messageId: 'm2',
+      assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      runtimeMutationId: null,
+      acceptedAt: 2,
+    })
+
+    await built.adapter.openRuntimeSessionMessageListView(viewRequest)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(built.harness.mutations).toHaveLength(0)
+    // Unrelated sanity: a fresh adapter with no outbox sends nothing.
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    expect(harness.mutations).toHaveLength(0)
+  })
+
   it('passes non-message mutations straight through', async () => {
     const { adapter, outbox, harness } = build()
     await adapter.openRuntimeSessionMessageListView(viewRequest)
