@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "The runtime near-node tier lags the client tier: it retires its backend-facing outbox unconditionally on receipt (not by absorption), so the flicker reappears one layer down the moment runtime↔backend goes remote. Plus latent remote-seam issues: the outbox overlay isn't account-scoped (cross-account fold + double-fold), phantom seq gaps on collapse, and a dead Conflict arm."
-modified: 2026-06-27
-reviewed: 2026-06-27
+modified: 2026-06-28
+reviewed: 2026-06-28
 lifecycle: ephemeral
 type: ISSUE
 status: open
@@ -17,7 +17,7 @@ depends:
 Co-located today these are benign, but the whole effort is making runtime↔backend
 a switchable/remote transport; each item bites when the seam goes remote.
 
-## A — Near-node retires unconditionally on receipt, not by absorption (MEDIUM)
+## A — Near-node retires unconditionally on receipt, not by absorption (MEDIUM) — RESOLVED 2026-06-28
 
 `crates/posthaste-runtime/src/build.rs:586` fires `retire(&id)` immediately after
 `run_message_mutation` returns, for both Ok and Err. Co-located this is safe
@@ -33,6 +33,17 @@ near-node kept unconditional retire.
 absorption test in `apply_outbox_overlay`/`set_base`), or at minimum gate the
 retire on the down-channel having delivered the corresponding `message.updated`,
 not on `forward.await`.
+
+**Resolved (2026-06-28):** `RuntimeBackendOutbox` now wraps a `MessageReplica`
+and its retirement is policy-driven by `drive_down_channel`. Co-located it drops
+a confirmed op on receipt (`drop_pending`; the base already carries the effect —
+`colocated-unchanged`). Remote it only `mark_confirmed`s on receipt and retires
+by absorption when `run_backend_down_channel` applies the corresponding base
+assertion (`apply_base` → `retire_absorbed`), so a receipt that outruns the
+`message.updated` propagation no longer recomputes against a stale base. This
+mirrors the client tier's absorption-gated retire. A rejection (`Failed` receipt)
+still drops on receipt in either mode (the base never absorbs a rejection). Added
+`Replica::drop_pending` to link-core for the unconditional co-located drop.
 
 Provenance: four-reviewer Task 2 (MEDIUM-2).
 
