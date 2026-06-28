@@ -10,7 +10,7 @@ import {
   type ComposeForm,
 } from '../composeFormHelpers'
 
-const AUTOSAVE_DEBOUNCE_MS = 1500
+const AUTOSAVE_DEBOUNCE_MS = 800
 
 /** Whether the form holds anything worth persisting as a draft. */
 function formHasContent(form: ComposeForm): boolean {
@@ -85,6 +85,12 @@ export function useComposeAutosave({
   const savingRef = useRef(false)
   const pendingRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The latest signature that has been queued (debounced) but not yet persisted.
+  // Drives the flush-on-close so an edit made within the debounce window is not
+  // lost when the compose window is closed before the timer fires.
+  const pendingSignatureRef = useRef<string | null>(null)
+  // Set once the draft is finalized (sent/discarded) so the close flush no-ops.
+  const finalizedRef = useRef(false)
 
   // Latest form/context read by the (otherwise stable) save closure. Updated in
   // an effect (never during render) so the React Compiler can optimize freely.
@@ -165,8 +171,10 @@ export function useComposeAutosave({
     if (timerRef.current) {
       clearTimeout(timerRef.current)
     }
+    pendingSignatureRef.current = signature
     timerRef.current = setTimeout(() => {
       savedSignatureRef.current = signature
+      pendingSignatureRef.current = null
       void saveNow()
     }, AUTOSAVE_DEBOUNCE_MS)
     return () => {
@@ -179,11 +187,30 @@ export function useComposeAutosave({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature])
 
+  // Flush a pending edit when the compose session ends (unmount / close). The
+  // debounce timer is cleared on unmount, so without this an edit made within
+  // the last `AUTOSAVE_DEBOUNCE_MS` would be lost on close. Skipped once the
+  // draft has been finalized (sent/discarded). Fire-and-forget: the saveDraft
+  // mutation outlives the component.
+  useEffect(() => {
+    return () => {
+      if (!finalizedRef.current && pendingSignatureRef.current !== null) {
+        savedSignatureRef.current = pendingSignatureRef.current
+        pendingSignatureRef.current = null
+        void saveNow()
+      }
+    }
+    // Unmount-only: `saveNow` reads the latest state through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   /**
    * Delete the autosaved draft (after the message is sent, or on explicit
    * discard). No-op if nothing was ever saved.
    */
   const discardDraft = async (): Promise<void> => {
+    finalizedRef.current = true
+    pendingSignatureRef.current = null
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
