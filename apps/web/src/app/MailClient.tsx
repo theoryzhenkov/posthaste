@@ -36,7 +36,7 @@ import { useMailClientHandlers } from './useMailClientHandlers'
 const DEFAULT_VIEW: SidebarSelection = {
   kind: 'smart-mailbox',
   id: 'default-inbox',
-  name: 'Inbox',
+  name: 'All Inboxes',
 }
 
 /**

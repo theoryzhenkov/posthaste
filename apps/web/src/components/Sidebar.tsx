@@ -9,10 +9,9 @@
 import { useMemo, useState } from 'react'
 
 import { useMailboxNavigationReadModels } from '../mailboxNavigationReadModels'
-import { partitionSmartMailboxes } from './sidebar/model'
+import { sortSmartMailboxes } from './sidebar/model'
 import {
   AccountsSection,
-  QuickSmartMailboxSection,
   SidebarError,
   SidebarLoading,
   SmartMailboxSection,
@@ -67,8 +66,8 @@ export function Sidebar({
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false)
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
-  const groupedSmartMailboxes = useMemo(
-    () => partitionSmartMailboxes(smartMailboxes),
+  const sortedSmartMailboxes = useMemo(
+    () => sortSmartMailboxes(smartMailboxes),
     [smartMailboxes],
   )
 
@@ -79,15 +78,9 @@ export function Sidebar({
         {error && <SidebarError onRetry={() => void refetchBootstrap()} />}
         {!isLoading && !error && (
           <>
-            <QuickSmartMailboxSection
-              mailboxes={groupedSmartMailboxes.quick}
-              selectedView={selectedView}
-              onOpenSmartMailboxSettings={onOpenSmartMailboxSettings}
-              onSelectSmartMailbox={onSelectSmartMailbox}
-            />
             <SmartMailboxSection
               collapsed={mailboxesCollapsed}
-              mailboxes={groupedSmartMailboxes.smart}
+              mailboxes={sortedSmartMailboxes}
               selectedView={selectedView}
               onOpenSmartMailboxSettings={onOpenSmartMailboxSettings}
               onSelectSmartMailbox={onSelectSmartMailbox}
