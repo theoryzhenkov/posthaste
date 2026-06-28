@@ -24,6 +24,7 @@ import {
 import { useMailNavigationReadBootstrap } from '@/mailboxNavigationReadModels'
 import { mailKeys, type MailSelection } from '@/mailState'
 import { useUndoRedo } from '@/hooks/useUndoRedo'
+import { useRevLogMirror } from '@/hooks/useRevLogMirror'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
 import { runtimeMutations } from '@/runtime/mutations'
@@ -86,6 +87,12 @@ export function MailClient({
     () => accounts.filter((account) => account.enabled),
     [accounts],
   )
+  // Phase 2: mirror the server-authoritative RevLog view for the primary
+  // account so undo/redo history converges cross-device (the RECEIVE half of
+  // cursor sync; `useUndoRedo` sends the `revCursor`). v1 mirrors the primary
+  // enabled account; multi-account per-store history is a follow-up.
+  // @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+  useRevLogMirror(enabledAccounts[0]?.id ?? null)
   const hasEnabledSources = enabledAccounts.length > 0
   const effectiveView = hasEnabledSources
     ? (selectedView ?? DEFAULT_VIEW)
