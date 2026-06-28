@@ -157,6 +157,21 @@ impl<C: Convergence> Replica<C> {
         true
     }
 
+    /// Remove one pending op by its mutation id (and clear its confirmed
+    /// marker), unconditionally — a plain drop with no base or absorption gate.
+    /// The co-located near node uses this to retire a forwarded op the instant
+    /// its synchronous receipt returns: the far node applied the effect before
+    /// the receipt, so the next recompute's base already carries it and there is
+    /// no propagation window to gate on. The absorption-gated retire
+    /// ([`retire_absorbed`](Self::retire_absorbed)) is for the remote seam, where
+    /// the receipt can outrun the base update. Returns whether an op was removed.
+    pub fn drop_pending(&mut self, id: &MutationId) -> bool {
+        let before = self.pending.len();
+        self.pending.retain(|held| &held.id != id);
+        self.confirmed.remove(id);
+        self.pending.len() != before
+    }
+
     /// Accept an optimistic mutation: append it to the outbox. Idempotent on
     /// mutation id — re-accepting an already-held id is a no-op
     /// ([replication L1 §4.2](../replication/L1.md)).
@@ -620,6 +635,21 @@ mod tests {
         replica.accept(flag("op1", "m1"));
         assert!(replica.retire_absorbed(&"m1".to_string()).is_empty());
         assert!(replica.has_pending());
+    }
+
+    #[test]
+    fn drop_pending_removes_one_op_unconditionally() {
+        // The co-located retire: drop a confirmed op outright, regardless of base
+        // or absorption (the far node already applied the effect on receipt).
+        let mut replica = MessageReplica::new();
+        replica.accept(flag("op1", "m1"));
+        replica.accept(flag("op2", "m2"));
+        replica.mark_confirmed(&MutationId("op1".into()));
+        assert!(replica.drop_pending(&MutationId("op1".into())));
+        let ids: Vec<&str> = replica.pending().iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["op2"]);
+        // Idempotent: dropping an unknown id removes nothing.
+        assert!(!replica.drop_pending(&MutationId("op1".into())));
     }
 
     #[test]

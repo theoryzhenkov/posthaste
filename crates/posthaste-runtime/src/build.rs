@@ -273,12 +273,16 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     } = assembly;
 
     let stopped = Arc::new(AtomicBool::new(false));
-    let outbox = Arc::new(RuntimeBackendOutbox::new());
+    // Remote backend (`drive_down_channel`): retirement is absorption-gated on
+    // the down-channel base assertion, not the receipt. Co-located: retire on
+    // receipt (`colocated-unchanged`). See [`RuntimeBackendOutbox`].
+    let outbox = Arc::new(RuntimeBackendOutbox::new(drive_down_channel));
     if drive_down_channel {
         tokio::spawn(crate::read::run_backend_down_channel(
             backend_link.clone(),
             reads.clone(),
             event_sender.clone(),
+            outbox.clone(),
         ));
     }
     let views = Arc::new(ViewRegistry::new(
@@ -561,10 +565,13 @@ impl RuntimeHandle {
         let source_id = mutation.account_id().to_string();
         Self::ensure_account_in_scope(&source_id, session_scope.as_deref())?;
         // Accept the mutation into the runtime's outbox toward the backend so
-        // recomputed views fold it optimistically while it is in flight; retire
-        // it once the backend confirms (or fails). In the in-process default the
+        // recomputed views fold it optimistically while it is in flight. It is
+        // settled from the receipt below: co-located it retires on receipt (the
         // forward confirms synchronously, so the outbox is empty between
-        // mutations and the overlay is a pass-through (`colocated-unchanged`).
+        // mutations and the overlay is a pass-through, `colocated-unchanged`);
+        // remote it retires by absorption when the down-channel base assertion
+        // arrives, so a receipt that outruns the `message.updated` propagation
+        // does not recompute against a stale base (the near-node flicker).
         let optimistic = named_message_assertion(&request).map(|(message_id, assertion)| {
             let id = MutationId(request.client_mutation_id.as_str().to_string());
             self.core.outbox.accept(PendingMessageMutation {
@@ -578,7 +585,14 @@ impl RuntimeHandle {
         let forward = self.core.backend_link.forward_mutation(request.clone());
         let result = self.run_message_mutation(caller, &request, forward).await;
         if let Some(id) = optimistic {
-            self.core.outbox.retire(&id);
+            // A backend rejection settles as `Ok(receipt)` carrying a `Failed`
+            // state (the verdict is on `error.code`), so the confirm signal is
+            // the receipt state, not `is_ok()`.
+            let confirmed = matches!(
+                &result,
+                Ok(receipt) if receipt.state == MutationSettlementState::Confirmed
+            );
+            self.core.outbox.settle_receipt(&id, confirmed);
         }
         result
     }
@@ -1270,7 +1284,7 @@ mod outbox_lifecycle_tests {
 
     fn test_session_registry() -> Arc<SessionRegistry> {
         let event_sender = broadcast::channel(16).0;
-        let outbox = Arc::new(RuntimeBackendOutbox::new());
+        let outbox = Arc::new(RuntimeBackendOutbox::new(false));
         let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopBackend)));
         let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
         Arc::new(SessionRegistry::new(views, event_sender))
