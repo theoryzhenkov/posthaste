@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 
 import { runtimeSessionClient } from '@/runtime/sessionClient'
-import type { RuntimeViewSnapshot } from '@/runtime/types'
 import {
   getUndoHistoryStore,
   type RevLogSnapshotWire,
@@ -68,8 +67,13 @@ export function useRevLogMirror(accountId: string | null): void {
                     return
                   }
                   reconcile(
-                    (frame.snapshot as RuntimeViewSnapshot<RevLogSnapshotWire>)
-                      .data,
+                    // `RuntimeFrameHandlers.onFrame` is hardcoded to
+                    // `RuntimeMailListViewState` (it predates per-view data
+                    // types), so cast through `unknown`. The RevLog view's
+                    // snapshot data IS a `RevLogSnapshotWire` (the server's
+                    // `build_snapshot` serializes one) — this isn't papering
+                    // over a real mismatch, just the under-specialized handler.
+                    frame.snapshot.data as unknown as RevLogSnapshotWire,
                   )
                   return
                 case 'viewError':
