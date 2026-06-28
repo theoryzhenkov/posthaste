@@ -209,15 +209,30 @@ class EntityStoreController {
       JSON.stringify(watermarkFromSnapshot(snapshot, rows)),
     )
     this.handle.drainDirtyJson()
-    // Rehydrate unconfirmed intent (durable across reload) over the base.
+    // Rehydrate unconfirmed intent (durable across reload) over the base. A
+    // single un-deserializable record (e.g. a durable assertion written before
+    // a wire-schema change) must never abort the whole view-open — that bricks
+    // every mail-list view silently. Skip + log the bad record and keep going.
     for (const record of await this.deps.outbox.all()) {
-      this.handle.acceptMutationJson(
-        JSON.stringify({
-          mutationId: record.clientMutationId,
-          messageId: record.messageId,
-          assertion: record.assertion,
-        }),
-      )
+      try {
+        this.handle.acceptMutationJson(
+          JSON.stringify({
+            mutationId: record.clientMutationId,
+            messageId: record.messageId,
+            assertion: record.assertion,
+          }),
+        )
+      } catch (error) {
+        syncLogger.error(
+          {
+            event: LOG_EVENTS.outboxRehydrateSkipped,
+            clientMutationId: record.clientMutationId,
+            messageId: record.messageId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'skipped an un-deserializable outbox record during rehydration',
+        )
+      }
     }
     const projected = this.projectView(viewId)
     const entry: ViewEntry = {

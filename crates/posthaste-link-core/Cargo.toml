@@ -15,3 +15,8 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { workspace = true }
+
+[dev-dependencies]
+# Test-only: drive the serde wire contract (e.g. the ReplaceMailboxes alias).
+# Not part of the portable artifact; serde_json is pure-Rust + wasm-safe anyway.
+serde_json = { workspace = true }
