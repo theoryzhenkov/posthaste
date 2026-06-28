@@ -12,6 +12,7 @@
  * @spec docs/replication/client-link/L3#3-indexeddb-persistence
  */
 import type { ReplicaAssertion } from './handle'
+import { openReplicaDatabase, OUTBOX_STORE } from './replicaDatabase'
 
 export interface OutboxRecord {
   clientMutationId: string
@@ -35,25 +36,7 @@ export interface OutboxStore {
   all(): Promise<OutboxRecord[]>
 }
 
-const DB_NAME = 'posthaste-replica'
-const STORE_NAME = 'outbox'
-const VERSION = 1
-
-function openConnection(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, VERSION)
-    request.onupgradeneeded = () => {
-      const connection = request.result
-      if (!connection.objectStoreNames.contains(STORE_NAME)) {
-        connection.createObjectStore(STORE_NAME, {
-          keyPath: 'clientMutationId',
-        })
-      }
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-  })
-}
+const STORE_NAME = OUTBOX_STORE
 
 function runRequest<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -71,7 +54,7 @@ export class IndexedDbOutboxStore implements OutboxStore {
   private connection: Promise<IDBDatabase> | undefined
 
   private db(): Promise<IDBDatabase> {
-    this.connection ??= openConnection()
+    this.connection ??= openReplicaDatabase()
     return this.connection
   }
 
