@@ -70,6 +70,18 @@ pub enum DirtyKey {
     View(String),
 }
 
+/// The outcome of re-evaluating a message's placement in one view, used to
+/// drive dirty-marking + reverse-index maintenance after the row borrow ends.
+enum Placement {
+    /// The row is in the view after rederive (newly placed, reordered, or a
+    /// content-only change): mark the view dirty + record membership.
+    Present,
+    /// The row was held but no longer matches: mark dirty + drop membership.
+    Removed,
+    /// Not a member before or after: nothing to do.
+    Absent,
+}
+
 /// Sort direction of a view's order; selects the in-range comparison.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -220,6 +232,14 @@ pub struct EntityStore {
     messages: HashMap<String, MessageEntity>,
     mailboxes: HashMap<String, MailboxEntity>,
     views: HashMap<String, ViewEntity>,
+    /// Reverse index `messageId -> set of viewIds the message currently appears
+    /// in`, kept in sync as rows are inserted/removed/rederived. A content-only
+    /// `rederive_message` (a flag/read toggle that leaves the sort key — and so
+    /// the row tuple — unchanged) marks the OWNING views dirty through this
+    /// index, so the drained `View` set is trustworthy and complete: the host
+    /// re-projects only the views a change actually touched, never all of them
+    /// (`adapter-reproject-all`). Empty sets are pruned so membership is exact.
+    message_views: HashMap<String, HashSet<String>>,
     /// The message convergence engine: confirmed fold states + the optimistic
     /// outbox. Keyed by message id (`MessageConvergence::Key = String`).
     engine: MessageReplica,
@@ -319,10 +339,27 @@ impl EntityStore {
                     .collect()
             }
         };
-        if let Some(view) = self.views.get_mut(view_id) {
-            view.rows = reconciled;
-            view.watermark = watermark;
-            self.dirty.insert(DirtyKey::View(view_id.to_string()));
+        let (old_members, new_members) = match self.views.get_mut(view_id) {
+            None => return,
+            Some(view) => {
+                let old: Vec<String> =
+                    view.rows.iter().map(|r| r.message_id.clone()).collect();
+                let new: Vec<String> =
+                    reconciled.iter().map(|r| r.message_id.clone()).collect();
+                view.rows = reconciled;
+                view.watermark = watermark;
+                self.dirty.insert(DirtyKey::View(view_id.to_string()));
+                (old, new)
+            }
+        };
+        // Rebuild this view's slice of the reverse index: drop its old members,
+        // then record the served set (rederive below re-derives optimistic
+        // placement, adjusting the index as rows move).
+        for message_id in &old_members {
+            self.index_remove(message_id, view_id);
+        }
+        for message_id in &new_members {
+            self.index_insert(message_id, view_id);
         }
         // Re-apply pending optimistic membership over the freshly-served rows, so
         // a re-serve cannot drop an optimistically-placed row (e.g. an optimistic
@@ -341,7 +378,31 @@ impl EntityStore {
     }
 
     pub fn close_view(&mut self, view_id: &str) {
-        self.views.remove(view_id);
+        if let Some(view) = self.views.remove(view_id) {
+            for row in &view.rows {
+                let message_id = row.message_id.clone();
+                self.index_remove(&message_id, view_id);
+            }
+        }
+    }
+
+    /// Record that `message_id` now appears in `view_id` (reverse index).
+    fn index_insert(&mut self, message_id: &str, view_id: &str) {
+        self.message_views
+            .entry(message_id.to_string())
+            .or_default()
+            .insert(view_id.to_string());
+    }
+
+    /// Drop `message_id`'s membership in `view_id`, pruning an emptied set so the
+    /// index never reports a message as appearing in a view it has left.
+    fn index_remove(&mut self, message_id: &str, view_id: &str) {
+        if let Some(views) = self.message_views.get_mut(message_id) {
+            views.remove(view_id);
+            if views.is_empty() {
+                self.message_views.remove(message_id);
+            }
+        }
     }
 
     /// Apply a batch atomically: every update is applied before any dirty key
@@ -613,16 +674,19 @@ impl EntityStore {
                 }
                 _ => false,
             };
-            let changed = match (place, was_present) {
+            // `Present` covers both a reorder (tuple changed) and a content-only
+            // change (same sort key, new flags/read state): the message remains a
+            // member, so the view's projected JSON moved — mark it dirty. This is
+            // the fix the host's dirty-View set was missing; the JSON-diff gate
+            // stays the safety net for a true no-op rederive.
+            let placement = match (place, was_present) {
                 (true, Some(idx)) => {
                     let row = row_opt.clone().expect("row present when placed");
                     if view.rows[idx] != row {
                         view.rows.remove(idx);
                         insert_sorted(&mut view.rows, row, direction);
-                        true
-                    } else {
-                        false
                     }
+                    Placement::Present
                 }
                 (true, None) => {
                     insert_sorted(
@@ -630,16 +694,24 @@ impl EntityStore {
                         row_opt.clone().expect("row present when placed"),
                         direction,
                     );
-                    true
+                    Placement::Present
                 }
                 (false, Some(idx)) => {
                     view.rows.remove(idx);
-                    true
+                    Placement::Removed
                 }
-                (false, None) => false,
+                (false, None) => Placement::Absent,
             };
-            if changed {
-                self.dirty.insert(DirtyKey::View(view_id));
+            match placement {
+                Placement::Present => {
+                    self.index_insert(message_id, &view_id);
+                    self.dirty.insert(DirtyKey::View(view_id));
+                }
+                Placement::Removed => {
+                    self.index_remove(message_id, &view_id);
+                    self.dirty.insert(DirtyKey::View(view_id));
+                }
+                Placement::Absent => {}
             }
         }
         self.dirty.insert(DirtyKey::Message(message_id.to_string()));
@@ -661,6 +733,8 @@ impl EntityStore {
                 self.dirty.insert(DirtyKey::View(view_id));
             }
         }
+        // The message is gone from every view; drop its whole reverse-index entry.
+        self.message_views.remove(message_id);
     }
 
     /// The optimistic projection for a message: the authoritative base with the
@@ -1161,6 +1235,127 @@ mod tests {
         assert!(store.has_pending());
         let dirty = store.drain_dirty();
         assert!(dirty.contains(&DirtyKey::Message("m2".into())));
+    }
+
+    // --- reverse index + content-only dirty-marking -------------------------
+
+    /// The reverse index a message is sorted member-list for, for assertions.
+    fn views_of<'a>(store: &'a EntityStore, message_id: &str) -> Vec<&'a str> {
+        let mut views: Vec<&str> = store
+            .message_views
+            .get(message_id)
+            .map(|set| set.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        views.sort_unstable();
+        views
+    }
+
+    #[test]
+    fn content_only_rederive_marks_the_owning_view_dirty() {
+        // The bug: a flag/read toggle leaves the sort key (and so the row tuple)
+        // unchanged, so the old `changed` gate never marked the view dirty —
+        // the host then had to re-project every view to catch it.
+        let (mut store, view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+        assert_eq!(views_of(&store, "m2"), vec![view], "m2 indexed in the view");
+
+        // A content-only optimism: same sort key, new keywords.
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+
+        let dirty = store.drain_dirty();
+        assert!(
+            dirty.contains(&DirtyKey::View(view.into())),
+            "a content-only rederive must mark the owning view dirty: {dirty:?}"
+        );
+        // The row is still held (a flag does not change membership) and indexed.
+        assert_eq!(views_of(&store, "m2"), vec![view]);
+    }
+
+    #[test]
+    fn content_only_change_to_a_message_in_no_view_marks_nothing() {
+        let (mut store, _view) = inbox_view();
+        // m3 sits below the watermark → ingested but placed in no view.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m3".into(),
+            projection: summary("m3", "2026-04-27T10:00:00Z", &["inbox"]),
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+        store.drain_dirty();
+        assert!(views_of(&store, "m3").is_empty(), "m3 is in no view");
+
+        store.accept_mutation(MutationId("op1".into()), "m3", flag_assertion());
+
+        let dirty = store.drain_dirty();
+        assert!(
+            !dirty.iter().any(|k| matches!(k, DirtyKey::View(_))),
+            "a change to a message in no view must mark no view dirty: {dirty:?}"
+        );
+        // The message itself is still reported dirty (its projection moved).
+        assert!(dirty.contains(&DirtyKey::Message("m3".into())));
+    }
+
+    #[test]
+    fn reverse_index_tracks_insert_membership_loss_and_deletion() {
+        let (mut store, view) = inbox_view();
+        // Arrival in range → placed → indexed.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m1".into(),
+            projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+        assert_eq!(views_of(&store, "m1"), vec![view]);
+
+        // Membership loss (m1 leaves the inbox mailbox) → row + index drop.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m1".into(),
+            projection: summary("m1", "2026-04-29T10:00:00Z", &["archive"]),
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+        assert!(views_of(&store, "m1").is_empty(), "moved-out row de-indexed");
+
+        // Re-arrival then authoritative deletion → index entry purged entirely.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m1".into(),
+            projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+        assert_eq!(views_of(&store, "m1"), vec![view]);
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m1".into(),
+            projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
+            deleted: true,
+            count_deltas: vec![],
+        }]);
+        assert!(views_of(&store, "m1").is_empty(), "deleted row de-indexed");
+    }
+
+    #[test]
+    fn set_view_rows_and_close_view_keep_the_index_correct() {
+        let (mut store, view) = inbox_view();
+        // inbox_view seeds m2 via set_view_rows → indexed.
+        assert_eq!(views_of(&store, "m2"), vec![view]);
+
+        // Re-serve a snapshot that replaces m2 with m9 → index follows the swap.
+        store.set_view_rows(
+            view,
+            vec![ViewRow {
+                row_key: "primary:m9".into(),
+                message_id: "m9".into(),
+                sort_key: key("2026-04-28T13:00:00Z", "m9"),
+            }],
+            Some(key("2026-04-28T13:00:00Z", "m9")),
+        );
+        assert!(views_of(&store, "m2").is_empty(), "replaced row de-indexed");
+        assert_eq!(views_of(&store, "m9"), vec![view]);
+
+        // Closing the view drops its membership from the index.
+        store.close_view(view);
+        assert!(views_of(&store, "m9").is_empty(), "closed view de-indexed");
     }
 
     #[test]
