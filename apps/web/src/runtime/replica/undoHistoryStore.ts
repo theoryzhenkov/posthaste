@@ -27,6 +27,44 @@ export interface RevStep {
 }
 
 /**
+ * The server's `RevLogStep` wire shape (serde `camelCase`) — one row of the
+ * per-account `rev_log`. The Phase 2 synced view serves a `RevLogSnapshotWire`
+ * of these; the client mirror translates them to {@link RevStep}.
+ *
+ * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+ */
+export interface RevLogStepWire {
+  /** Globally-orderable id (ULID); the cursor key. Maps to {@link RevStep.id}. */
+  stepId: string
+  /** Per-account monotonic append order (the sync delta cursor). */
+  seq: number
+  messageId: string
+  sourceId: string
+  /** `MessageChangeDiff` JSON (`{keywords, mailboxes}{added, removed}`). */
+  diff: MessageChangeDiff
+  /** ISO-8601 timestamp; for ordering/display only (`stepId`/`seq` order). */
+  createdAt: string
+}
+
+/**
+ * The server's `RevLogSnapshot` wire shape — the read result behind the `RevLog`
+ * synced view. The mirror reconciles its local {@link UndoHistorySnapshot} with
+ * this (translate + sort steps by `seq`; derive the cursor index from
+ * `cursorStepId`).
+ *
+ * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+ */
+export interface RevLogSnapshotWire {
+  steps: RevLogStepWire[]
+  cursor: {
+    /** The topmost APPLIED step (`null` = all undone, or empty account). */
+    cursorStepId: string | null
+    /** The undone step_ids above the cursor, in `seq` order. */
+    redoTail: string[]
+  }
+}
+
+/**
  * The full history state: `steps[0..cursor]` are applied (undoable, newest
  * first), `steps[cursor+1..]` are undone (redoable, oldest first). `cursor` is
  * -1 when everything has been undone.
@@ -52,10 +90,51 @@ export interface UndoHistoryStore {
   clear(): Promise<void>
   /** Notify on every history change (the hook keeps canUndo/canRedo fresh). */
   subscribe(listener: (snapshot: UndoHistorySnapshot) => void): () => void
+  /**
+   * Phase 2: reconcile with the server-authoritative `RevLog` view snapshot.
+   * Adopts the server's steps + cursor unless a local move is in-flight
+   * (optimism guard — see {@link BaseUndoHistoryStore}).
+   *
+   * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+   */
+  reconcileWithServer(server: RevLogSnapshotWire): Promise<void>
 }
 
 /// Upper bound on retained history (matches the runtime's former `MAX_HISTORY`).
 const MAX_HISTORY = 50
+
+/// Phase 2 optimism guard config. The timeout is how long a local cursor move
+/// stays optimistic before the mirror converges to the server's (possibly
+/// stale) cursor — a safety valve for a lost/overridden `revCursor` so the
+/// client re-converges instead of drifting forever. The `revCursor` round-trip
+/// is fast (<1s local); 5s is generous. Mutable for tests (the timeout path).
+/// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+const optimismConfig = { timeoutMs: 5000 }
+
+/** Translate a server {@link RevLogStepWire} to a client {@link RevStep}. */
+function translateStep(step: RevLogStepWire): RevStep {
+  return {
+    id: step.stepId,
+    messageId: step.messageId,
+    sourceId: step.sourceId,
+    diff: step.diff,
+    createdAt: Date.parse(step.createdAt) || 0,
+  }
+}
+
+/** Translate + sort the server's steps by `seq` (the per-account append order). */
+function translateAndSort(steps: RevLogStepWire[]): RevStep[] {
+  return steps
+    .slice()
+    .sort((a, b) => a.seq - b.seq)
+    .map(translateStep)
+}
+
+/** The cursor index for a `cursorStepId` (`null` = -1, all undone). */
+function indexForStepId(steps: RevStep[], stepId: string | null): number {
+  if (stepId === null) return -1
+  return steps.findIndex((s) => s.id === stepId)
+}
 
 /** Truncate the redoable tail, append the step, advance the cursor to it. */
 function applyPushForward(
@@ -133,10 +212,32 @@ abstract class BaseUndoHistoryStore implements UndoHistoryStore {
   protected state: UndoHistorySnapshot = { steps: [], cursor: -1 }
   private loaded = false
   private readonly listeners = new Set<(s: UndoHistorySnapshot) => void>()
+  /**
+   * Phase 2 optimism guard: the cursor step_id a local undo/redo/forward move
+   * set optimistically (+ when), awaiting server confirmation via the `RevLog`
+   * view. While set, {@link reconcileWithServer} skips adoption of a stale
+   * server cursor (the server hasn't processed the `revCursor`/append yet) so
+   * the optimistic move isn't reverted. Cleared on confirm (server echoes the
+   * same cursor) or after {@link OPTIMISM_TIMEOUT_MS} (lost/overridden →
+   * converge). Transient — not persisted (no in-flight move across reload).
+   */
+  private pendingConfirm: { stepId: string | null; sentAt: number } | null =
+    null
 
   protected abstract loadPersisted(): Promise<UndoHistorySnapshot | null>
   protected abstract savePersisted(snapshot: UndoHistorySnapshot): Promise<void>
   protected abstract clearPersisted(): Promise<void>
+
+  /** Mark the post-move cursor as optimistically pending server confirmation. */
+  private markPending(snapshot: UndoHistorySnapshot): void {
+    this.pendingConfirm = {
+      stepId:
+        snapshot.cursor >= 0
+          ? (snapshot.steps[snapshot.cursor]?.id ?? null)
+          : null,
+      sentAt: Date.now(),
+    }
+  }
 
   async load(): Promise<UndoHistorySnapshot> {
     if (!this.loaded) {
@@ -154,6 +255,7 @@ abstract class BaseUndoHistoryStore implements UndoHistoryStore {
   async pushForward(step: RevStep): Promise<UndoHistorySnapshot> {
     await this.load()
     this.state = capHistory(applyPushForward(this.state, step))
+    this.markPending(this.state)
     this.notify()
     await this.savePersisted(this.state)
     return this.state
@@ -163,6 +265,7 @@ abstract class BaseUndoHistoryStore implements UndoHistoryStore {
     await this.load()
     const result = applyUndo(this.state)
     this.state = result.snapshot
+    this.markPending(this.state)
     this.notify()
     await this.savePersisted(this.state)
     return result.step
@@ -172,6 +275,7 @@ abstract class BaseUndoHistoryStore implements UndoHistoryStore {
     await this.load()
     const result = applyRedo(this.state)
     this.state = result.snapshot
+    this.markPending(this.state)
     this.notify()
     await this.savePersisted(this.state)
     return result.step
@@ -180,8 +284,52 @@ abstract class BaseUndoHistoryStore implements UndoHistoryStore {
   async clear(): Promise<void> {
     this.state = { steps: [], cursor: -1 }
     this.loaded = true
+    this.pendingConfirm = null
     this.notify()
     await this.clearPersisted()
+  }
+
+  /**
+   * Phase 2: reconcile with the server-authoritative `RevLog` view. Adopts the
+   * server's steps + cursor unless a local move is in-flight (`pendingConfirm`):
+   *
+   * - No pending move → adopt (cross-device convergence: this device sees
+   *   other devices' forward actions + cursor).
+   * - Pending + the server echoes the optimistic cursor → confirmed → adopt +
+   *   clear pending (the `revCursor`/append was processed).
+   * - Pending + timed out (`OPTIMISM_TIMEOUT_MS`) → lost/overridden → converge
+   *   to the server's cursor + clear pending (last-writer-wins re-convergence).
+   * - Pending + otherwise → stale → skip adoption (keep the optimistic local
+   *   state; preserves in-flight forward-action steps the server hasn't
+   *   confirmed yet).
+   *
+   * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+   */
+  async reconcileWithServer(server: RevLogSnapshotWire): Promise<void> {
+    await this.load()
+    const serverSteps = translateAndSort(server.steps)
+    const serverCursorStepId = server.cursor.cursorStepId
+    if (this.pendingConfirm) {
+      if (serverCursorStepId === this.pendingConfirm.stepId) {
+        // Confirmed: the server processed our move. Fall through to adopt.
+        this.pendingConfirm = null
+      } else if (
+        Date.now() - this.pendingConfirm.sentAt >=
+        optimismConfig.timeoutMs
+      ) {
+        // Lost/overridden: converge to the server's cursor. Fall through.
+        this.pendingConfirm = null
+      } else {
+        // Stale: the server hasn't caught up. Keep the optimistic local state.
+        return
+      }
+    }
+    this.state = {
+      steps: serverSteps,
+      cursor: indexForStepId(serverSteps, serverCursorStepId),
+    }
+    this.notify()
+    await this.savePersisted(this.state)
   }
 
   subscribe(listener: (s: UndoHistorySnapshot) => void): () => void {
@@ -311,3 +459,9 @@ export function setUndoHistoryStoreForTesting(store: UndoHistoryStore): void {
 export function resetUndoHistoryStoreForTesting(): void {
   singletonStore = undefined
 }
+
+/**
+ * @internal Phase 2 optimism-guard timeout (mutable for tests — the timeout
+ * re-convergence path). Restore to 5000 after mutating.
+ */
+export const _optimismConfigForTesting = optimismConfig
