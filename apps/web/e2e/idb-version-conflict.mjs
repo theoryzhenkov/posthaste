@@ -52,7 +52,9 @@ const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 page.on('console', (m) => console.log('[browser]', m.text().slice(0, 180)))
 page.on('pageerror', (e) => console.log('[PAGEERR]', e.message.slice(0, 250)))
-await page.route(URL, (r) => r.fulfill({ contentType: 'text/html', body: BLANK }))
+await page.route(URL, (r) =>
+  r.fulfill({ contentType: 'text/html', body: BLANK }),
+)
 await page.goto(URL, { waitUntil: 'load', timeout: 20000 })
 const probe = await page.evaluate(() => window.__PROBE__)
 await browser.close()

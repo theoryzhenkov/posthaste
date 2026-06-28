@@ -60,10 +60,7 @@ export function mailboxRoleAccent(role: string | null): string {
 /** Accent for smart mailbox and tag rows. Role-tagged smart mailboxes key
  *  off the stable `role` (rename/locale-safe); role-less ones (All Mail, user
  *  smart mailboxes, tags) carry no stable id and fall back to the display name. */
-export function smartMailboxAccent(
-  role: string | null,
-  name: string,
-): string {
+export function smartMailboxAccent(role: string | null, name: string): string {
   if (isKnownMailboxRole(role)) {
     switch (role) {
       case MAILBOX_ROLES.Inbox:
@@ -125,6 +122,8 @@ export function renderMailboxRoleIcon(
 
 /** Choose a fallback icon for smart mailboxes: All Mail gets the Mail icon,
  *  keyed off the stable `defaultKey` (rename-safe), not the display name. */
-export function smartMailboxFallbackIcon(defaultKey: string | null): LucideIcon {
+export function smartMailboxFallbackIcon(
+  defaultKey: string | null,
+): LucideIcon {
   return defaultKey === ALL_MAIL_DEFAULT_KEY ? Mail : Folder
 }
