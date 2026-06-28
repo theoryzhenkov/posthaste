@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 
 import type { DomainEvent } from '../api/types'
 import { queryKeys } from '../queryKeys'
+import { isEntityStoreAdapterActive } from '../runtime/entityStoreState'
 import { removeAccountOverview } from './accounts'
 import {
   invalidateAccountReadModels,
@@ -84,7 +85,9 @@ function applyResourceInvalidation(
       invalidateSmartMailboxReadModels(queryClient, resource.id)
       return true
     case 'mailbox':
-      invalidateMailboxReadModels(queryClient, accountId)
+      invalidateMailboxReadModels(queryClient, accountId, {
+        skipStoreOwned: isEntityStoreAdapterActive(),
+      })
       return true
     case 'sync':
       invalidateAccountReadModels(queryClient, accountId)
@@ -93,7 +96,9 @@ function applyResourceInvalidation(
       invalidateMessageDetailReadModels(queryClient)
       return true
     case 'message':
-      invalidateMessageListReadModels(queryClient)
+      invalidateMessageListReadModels(queryClient, {
+        skipStoreOwned: isEntityStoreAdapterActive(),
+      })
       return true
     default:
       return false

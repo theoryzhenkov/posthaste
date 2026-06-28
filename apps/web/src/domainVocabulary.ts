@@ -25,6 +25,11 @@ export const KNOWN_MAILBOX_ROLES = [
   MAILBOX_ROLES.Trash,
 ] as const satisfies readonly KnownMailboxRole[]
 
+/** The `defaultKey` of the built-in All Mail smart mailbox (empty rule,
+ *  matches every message). Shared so the predicate resolver + any presenter
+ *  agree on the single key. */
+export const ALL_MAIL_DEFAULT_KEY = 'all-mail'
+
 export const SYSTEM_KEYWORD_PREFIX = '$'
 
 export const SYSTEM_KEYWORDS = {
