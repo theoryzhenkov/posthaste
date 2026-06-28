@@ -7,6 +7,9 @@ edition = "2021"
 posthaste-domain = { path = "../posthaste-domain" }
 serde = { workspace = true }
 toml = { workspace = true }
+# Format/comment-preserving TOML edits so a UI save doesn't clobber hand/LLM
+# edits (comments, ordering, unknown sections). Matches `toml = 0.8`'s backend.
+toml_edit = "0.22"
 
 [lints]
 workspace = true
