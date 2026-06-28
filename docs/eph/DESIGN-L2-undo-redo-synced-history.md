@@ -209,10 +209,11 @@ as today) — "restore a trashed draft" is a move, so it is covered.
   `undo_history`/`redo_history`, `MutationHistory` frame, `DiffStep`,
   `undoOf`/`redoOf` all dropped); the client captures the diff via the
   WASM-exposed `captureMutationDiffJson` (`from_before_after`).
-- **Phase 2 — server-authoritative synced log.** Promote the log to the
-  per-account store table + `RevLog` view; clients mirror + propose; the server
+- **Phase 2 — server-authoritative synced log (planned).** Promote the log to
+  the per-account store table + `RevLog` view; clients mirror + propose; the server
   arbitrates append/cursor/truncation. Unlocks **cross-device**. Phase 1's id
-  keying + idempotent ops make this additive, not a rewrite.
+  keying + idempotent ops make this additive, not a rewrite. Contract:
+  [`DESIGN-L2-undo-redo-revlog-contract`](DESIGN-L2-undo-redo-revlog-contract).
 
 ## Edge cases
 
@@ -228,18 +229,16 @@ as today) — "restore a trashed draft" is a move, so it is covered.
 - **Account removed / signed out on a device** — that device drops the account's
   mirror; the authoritative log persists for other devices.
 
-## Open questions
+## Open questions — resolved (Phase 2 contract)
 
-- **Global vs per-account ordering.** Per-account authoritative logs are clean for
-  cross-device (devices have different account sets); is a globally-ordered cross
-  account undo ever wanted, or is the client-merge sufficient?
-- **Redo-tail durability.** Sync the truncated redo tail explicitly, or let
-  clients re-derive redoability from `cursor < len`? (Affects "undo on A, redo on
-  B" when B was offline during the undo.)
-- **Cap/eviction policy** for a _shared_ log (per device vs per account; time vs
-  count).
-- **Non-message reversibility** (settings/account/smart-mailbox) — still out of
-  scope; revisit if users expect undo there.
+Resolved in [`DESIGN-L2-undo-redo-revlog-contract`](DESIGN-L2-undo-redo-revlog-contract)
+(the Phase 2 implementable contract):
+
+- **Global vs per-account ordering** → per-account.
+- **Redo-tail durability** → sync the cursor explicitly (`cursor_step_id` +
+  `redo_tail` are part of the `RevLog` view).
+- **Cap/eviction** → per-account, count-based (`MAX_HISTORY = 50`), oldest-first.
+- **Non-message reversibility** → out of scope (messages only).
 
 ## Code anchors
 
