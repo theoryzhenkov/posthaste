@@ -66,6 +66,24 @@ function applyDiffArgs(call: {
   return call.request.args as { diff: unknown }
 }
 
+/** The `message.applyDiff` calls (filters out the Phase 2 `revCursor` calls). */
+function applyDiffCalls(): {
+  request: { name: string; args: Record<string, unknown> }
+}[] {
+  return runtimeAdapter.runtimeMutationCalls.filter(
+    (c) => c.request.name === 'message.applyDiff',
+  )
+}
+
+/** The `revCursor` control-mutation calls (Phase 2 cursor arbitration). */
+function revCursorCalls(): {
+  request: { name: string; args: Record<string, unknown> }
+}[] {
+  return runtimeAdapter.runtimeMutationCalls.filter(
+    (c) => c.request.name === 'revCursor',
+  )
+}
+
 describe('useUndoRedo (client-owned, round-trip-free)', () => {
   it('undo dispatches applyDiff with the inverse diff, with no frame round trip', async () => {
     runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
@@ -85,10 +103,8 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
     act(() => {
       result.current.undo()
     })
-    await waitFor(() =>
-      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(1),
-    )
-    const args = applyDiffArgs(runtimeAdapter.runtimeMutationCalls[0])
+    await waitFor(() => expect(applyDiffCalls().length).toBe(1))
+    const args = applyDiffArgs(applyDiffCalls()[0])
     expect(args).not.toBeNull()
     // inverse of {added:[$flagged],removed:[]} swaps → {added:[],removed:[$flagged]}
     expect(
@@ -139,11 +155,9 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
       result.current.undo()
       result.current.undo()
     })
-    await waitFor(() =>
-      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(3),
-    )
+    await waitFor(() => expect(applyDiffCalls().length).toBe(3))
     // Order: c, b, a (newest undone first)
-    const seq = runtimeAdapter.runtimeMutationCalls.map(
+    const seq = applyDiffCalls().map(
       (c) =>
         (applyDiffArgs(c) as { diff: { keywords: { removed: string[] } } }).diff
           .keywords.removed,
@@ -170,14 +184,43 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
     act(() => {
       result.current.redo()
     })
-    await waitFor(() =>
-      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(1),
-    )
-    const args = applyDiffArgs(runtimeAdapter.runtimeMutationCalls[0])
+    await waitFor(() => expect(applyDiffCalls().length).toBe(1))
+    const args = applyDiffArgs(applyDiffCalls()[0])
     // forward diff (not inverted): added [$flagged]
     expect(
       (args as { diff: { keywords: { added: string[] } } }).diff.keywords.added,
     ).toEqual(['$flagged'])
+  })
+
+  it('undo sends a revCursor cursor-arbitration mutation (Phase 2)', async () => {
+    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeMutationReceipt({
+      runtimeMutationId: 'rm-1',
+      clientMutationId: 'undo-1',
+      name: 'message.applyDiff',
+      state: 'confirmed',
+      error: null,
+      output: { events: [] },
+    })
+    await store.pushForward(makeStep('a'))
+
+    const { result } = renderHook(() => useUndoRedo(), { wrapper })
+    await waitFor(() => expect(result.current.canUndo).toBe(true))
+
+    act(() => {
+      result.current.undo()
+    })
+    await waitFor(() => expect(revCursorCalls().length).toBe(1))
+    const revCursor = revCursorCalls()[0].request.args as {
+      accountId: string
+      cursorStepId: string | null
+      redoTail: string[]
+    }
+    // After undoing step 'a', the cursor is all-undone (null) + 'a' is in the
+    // redo tail. accountId = the step's sourceId.
+    expect(revCursor.accountId).toBe('primary')
+    expect(revCursor.cursorStepId).toBeNull()
+    expect(revCursor.redoTail).toEqual(['a'])
   })
 
   it('canUndo/canRedo track the store cursor', async () => {
