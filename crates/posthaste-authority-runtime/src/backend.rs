@@ -27,8 +27,9 @@ use posthaste_domain::{
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity,
     MailService, MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
     Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
-    SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SharedGateway, SmartMailbox,
-    SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger, TagSummary,
+    RevLogSnapshot, SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SharedGateway,
+    SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger,
+    TagSummary,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
@@ -342,6 +343,19 @@ impl Backend {
     /// for the runtime status.
     pub(crate) fn account_count(&self) -> Option<usize> {
         self.live_accounts.account_count()
+    }
+
+    /// Read channel: the per-account undo/redo `rev_log` + cursor (Phase 2
+    /// server-authoritative history). Serves the `RevLog` synced view.
+    ///
+    /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    pub(crate) fn rev_log_snapshot(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<RevLogSnapshot, RuntimeError> {
+        self.store
+            .rev_log_snapshot(account_id)
+            .map_err(|error| RuntimeError::internal(error.to_string(), None))
     }
 
     /// Publish authoritative domain events on the down-channel broadcast. In the

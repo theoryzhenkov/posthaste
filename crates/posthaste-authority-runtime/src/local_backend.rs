@@ -17,9 +17,9 @@ use posthaste_domain::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
     MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode, TagSummary,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot,
+    SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    SyncMode, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_link_contract::{
     BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
@@ -161,6 +161,13 @@ impl BackendApi for LocalBackend {
 
     async fn account_count(&self) -> Result<Option<usize>, RuntimeError> {
         Ok(self.backend.account_count())
+    }
+
+    async fn rev_log_snapshot(
+        &self,
+        account_id: AccountId,
+    ) -> Result<RevLogSnapshot, RuntimeError> {
+        self.backend.rev_log_snapshot(&account_id)
     }
 
     async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {

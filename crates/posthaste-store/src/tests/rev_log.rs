@@ -177,3 +177,28 @@ fn evict_oldest_caps_the_log() -> Result<(), StoreError> {
     assert_eq!(deleted_again, 0);
     Ok(())
 }
+
+#[test]
+fn rev_log_snapshot_combines_log_and_cursor() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+
+    // Empty account: the default snapshot (no steps, default cursor).
+    let snapshot = store.rev_log_snapshot(&account)?;
+    assert!(snapshot.steps.is_empty());
+    assert_eq!(snapshot.cursor, RevCursor::default());
+
+    // Append two steps + set a cursor, then the snapshot mirrors both.
+    store.append_rev_log_step(&account, "a", "m", "s", &diff_json(), "t1")?;
+    store.append_rev_log_step(&account, "b", "m", "s", &diff_json(), "t2")?;
+    store.set_rev_cursor(&account, Some("a"), &["b".to_string()])?;
+
+    let snapshot = store.rev_log_snapshot(&account)?;
+    assert_eq!(snapshot.steps.len(), 2);
+    assert_eq!(snapshot.steps[0].step_id, "a");
+    assert_eq!(snapshot.steps[1].step_id, "b");
+    assert_eq!(snapshot.cursor.cursor_step_id.as_deref(), Some("a"));
+    assert_eq!(snapshot.cursor.redo_tail, vec!["b".to_string()]);
+    Ok(())
+}
