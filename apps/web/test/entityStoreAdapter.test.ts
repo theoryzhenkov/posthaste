@@ -108,6 +108,14 @@ function makeBase(rows: BaseRow[]) {
       viewId: 'v1',
       snapshot: snapshot(rows),
     }),
+    extendRuntimeSessionView: async () => ({
+      viewId: 'v1',
+      snapshot: snapshot([
+        ...rows,
+        row('m3', '2026-04-27T10:00:00Z'),
+        row('m4', '2026-04-26T10:00:00Z'),
+      ]),
+    }),
     closeRuntimeSessionView: async (): Promise<OkResponse> => ({ ok: true }),
     subscribeRuntimeFrames: (
       _request: unknown,
@@ -359,6 +367,51 @@ describe('entityStoreAdapter', () => {
     await Promise.resolve()
 
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+  })
+
+  it('extend seeds the store so a later message.updated keeps the extended rows', async () => {
+    const built = build()
+    const { adapter, frames } = built
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+
+    // Extend the window: the base returns m1..m4. The store must be re-seeded
+    // (the fix); without it the store still holds only m1, m2.
+    await adapter.extendRuntimeSessionView({
+      sessionId: 'sess',
+      viewId: 'v1',
+      count: 50,
+    })
+
+    // A message.updated for an original-row message arrives before the
+    // broadcast viewReplace. The store re-projects; the emitted viewReplace
+    // must contain the EXTENDED rows (m1..m4), not drop back to the first page
+    // (the loadMore-vs-firehose race the override closes).
+    built.harness.push(
+      messageUpdated('m1', {
+        id: 'm1',
+        sourceId: 's',
+        receivedAt: '2026-04-29T10:00:00Z',
+        keywords: ['$flagged'],
+        mailboxIds: ['inbox'],
+        isRead: false,
+        isFlagged: true,
+        subject: 'm1',
+      }),
+    )
+    await Promise.resolve()
+
+    const replace = [...frames]
+      .reverse()
+      .find((f) => f.type === 'viewReplace')
+    expect(replace?.type).toBe('viewReplace')
+    const rows =
+      replace?.type === 'viewReplace' ? replace.snapshot.data.rows : []
+    expect(rows.map((r) => (r.projection as { id: string }).id)).toEqual([
+      'm1',
+      'm2',
+      'm3',
+      'm4',
+    ])
   })
 
   it('writes the count delta straight into the React Query cache (no refetch)', async () => {
