@@ -184,11 +184,15 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       dispatch({
         label,
         run: () =>
-          runtimeMutations.messages.moveToMailboxRole({
-            messageId: target.messageId,
-            role,
-            sourceId: target.sourceId,
-          }),
+          runtimeMutations.messages.moveToMailboxRole(
+            {
+              messageId: target.messageId,
+              role,
+              sourceId: target.sourceId,
+            },
+            // A structural user action (archive/trash/move) is undoable.
+            { userInitiated: true },
+          ),
         undoSourceId: target.sourceId,
       })
     },
@@ -199,6 +203,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
     (
       message: ReadToggleTarget | FlagToggleTarget | MessageSummary,
       delta: { add: string[]; remove: string[] },
+      options?: { userInitiated?: boolean },
     ) => {
       if (delta.add.length === 0 && delta.remove.length === 0) {
         return
@@ -206,15 +211,18 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       const target = toSourceMessageRef(message)
       dispatch({
         run: () =>
-          runtimeMutations.messages.command({
-            command: {
-              kind: 'setKeywords',
-              add: delta.add,
-              remove: delta.remove,
-            } satisfies MessageCommand,
-            messageId: target.messageId,
-            sourceId: target.sourceId,
-          }),
+          runtimeMutations.messages.command(
+            {
+              command: {
+                kind: 'setKeywords',
+                add: delta.add,
+                remove: delta.remove,
+              } satisfies MessageCommand,
+              messageId: target.messageId,
+              sourceId: target.sourceId,
+            },
+            options,
+          ),
       })
     },
     [dispatch],
@@ -228,6 +236,8 @@ export function useEmailActions({ undo }: { undo: () => void }) {
         previous.isRead
           ? { add: [], remove: [SYSTEM_KEYWORDS.Seen] }
           : { add: [SYSTEM_KEYWORDS.Seen], remove: [] },
+        // An explicit read toggle is a user action (undoable).
+        { userInitiated: true },
       )
     },
     markRead: (message: ReadToggleTarget | MessageSummary) => {
@@ -235,6 +245,8 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       if (previous.isRead) {
         return
       }
+      // Auto-mark-read (useAutoMarkRead) is a side-effect, not a user gesture —
+      // NOT tagged userInitiated, so it doesn't pollute the undo history.
       runKeywords(message, { add: [SYSTEM_KEYWORDS.Seen], remove: [] })
     },
     toggleFlag: (message: FlagToggleTarget | MessageSummary) => {
@@ -244,6 +256,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
         previous.isFlagged
           ? { add: [], remove: [SYSTEM_KEYWORDS.Flagged] }
           : { add: [SYSTEM_KEYWORDS.Flagged], remove: [] },
+        { userInitiated: true },
       )
     },
     setUserTags: (
@@ -257,7 +270,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       const remove = previousUserTags.filter(
         (tag) => !nextUserTags.includes(tag),
       )
-      runKeywords(message, { add, remove })
+      runKeywords(message, { add, remove }, { userInitiated: true })
     },
     archive: (target: SourceMessageRef) =>
       moveToRole(target, MAILBOX_ROLES.Archive, 'Message archived'),

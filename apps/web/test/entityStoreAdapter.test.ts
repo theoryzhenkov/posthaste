@@ -10,6 +10,11 @@ import { queryKeys } from '../src/queryKeys'
 import { createEntityStoreAdapter } from '../src/runtime/replica/entityStoreAdapter'
 import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 import { MemoryOutboxStore } from '../src/runtime/replica/outboxStore'
+import {
+  MemoryUndoHistoryStore,
+  resetUndoHistoryStoreForTesting,
+  setUndoHistoryStoreForTesting,
+} from '../src/runtime/replica/undoHistoryStore'
 import type {
   RuntimeAdapter,
   RuntimeFrame,
@@ -539,6 +544,48 @@ describe('entityStoreAdapter', () => {
     })
     expect(harness.mutations.map((m) => m.name)).toEqual(['account.sync'])
     expect(await outbox.all()).toHaveLength(0)
+  })
+
+  it('records an undo step only for user-initiated mutations (Phase 2 Slice 5d)', async () => {
+    // Only mutations tagged `context.userInitiated` (explicit user gestures:
+    // archive, flag, move) record an undo step. Internal/side-effect mutations
+    // (e.g. auto-mark-read) omit the tag + don't pollute the undo history.
+    const store = new MemoryUndoHistoryStore()
+    setUndoHistoryStoreForTesting(store)
+    try {
+      const { adapter } = build()
+      await adapter.openRuntimeSessionMessageListView(viewRequest) // seed replica
+
+      // A user-initiated flag toggle records a step.
+      await adapter.runRuntimeMutation({
+        sessionId: 'sess',
+        name: 'message.setKeywords',
+        args: {
+          sourceId: 's',
+          messageId: 'm1',
+          command: { add: ['$flagged'], remove: [] },
+        },
+        clientMutationId: 'c-u1',
+        context: { userInitiated: true },
+      })
+      expect(store.canUndo()).toBe(true)
+      expect(store.snapshot('s').steps).toHaveLength(1)
+
+      // An internal setKeywords (no userInitiated — e.g. auto-mark-read) does NOT.
+      await adapter.runRuntimeMutation({
+        sessionId: 'sess',
+        name: 'message.setKeywords',
+        args: {
+          sourceId: 's',
+          messageId: 'm2',
+          command: { add: ['$seen'], remove: [] },
+        },
+        clientMutationId: 'c-u2',
+      })
+      expect(store.snapshot('s').steps).toHaveLength(1) // still just the one
+    } finally {
+      resetUndoHistoryStoreForTesting()
+    }
   })
 
   it('forwards unrelated frames unchanged (parity)', async () => {

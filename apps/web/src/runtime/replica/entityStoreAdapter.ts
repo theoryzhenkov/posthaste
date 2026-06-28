@@ -340,8 +340,17 @@ class EntityStoreController {
     // `message.applyDiff` is the undo/redo vehicle itself — the hook navigates
     // the history for it, so it is NOT a forward action to record.
     const isUndoVehicle = request.name === 'message.applyDiff'
+    // Phase 2 Slice 5d: only USER-initiated mutations (tagged `userInitiated` in
+    // their context) record an undo step. Internal/side-effect mutations — e.g.
+    // auto-mark-read, sync-induced re-projection — omit the tag, so they don't
+    // pollute the undo history (an archive + a spurious setKeywords would
+    // otherwise both be undoable, + the global undo would target the latest
+    // spurious step instead of the archive). @spec Phase 2 Slice 5d
+    const isUserInitiated =
+      (request.context as { userInitiated?: boolean } | null | undefined)
+        ?.userInitiated === true
     let capturedDiff: MessageChangeDiff | null = null
-    if (!isUndoVehicle) {
+    if (!isUndoVehicle && isUserInitiated) {
       const diffJson = this.handle.captureMutationDiffJson(
         translated.messageId,
         JSON.stringify(translated.assertion),
