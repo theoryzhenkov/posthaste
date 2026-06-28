@@ -71,7 +71,6 @@ paths = [
   "crates/posthaste-lab/Cargo.toml",
   "crates/posthaste-lab/src/lib.rs",
   "crates/posthaste-lab/src/main.rs",
-  "docs/stale/L1-lab.md",
   "tools/lab/justfile",
   "tools/lab/suites.toml",
 ]
