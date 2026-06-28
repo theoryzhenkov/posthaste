@@ -277,8 +277,10 @@ impl ReadCache {
 }
 
 /// Consume the backend's down-channel and drive the near node from it: evict the
-/// read cache (so the next read re-fetches) AND republish each base assertion as
-/// a domain event on the runtime's event bus, so the existing view machinery
+/// read cache (so the next read re-fetches), retire any outbox op the asserted
+/// base now absorbs (the absorption-gated retire — a confirmed op held since its
+/// receipt outran this assertion), AND republish each base assertion as a domain
+/// event on the runtime's event bus, so the existing view machinery
 /// (`ViewRegistry`'s event pump + `subscribe_events`) recomputes and pushes
 /// frames to clients. This is the runtime↔backend half of the recursive
 /// down-channel; the runtime→client half is the shipped view-frame protocol it
@@ -289,6 +291,7 @@ pub(crate) async fn run_backend_down_channel(
     link: BackendLink,
     reads: Arc<ReadCache>,
     events: broadcast::Sender<DomainEvent>,
+    outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
 ) {
     let Ok(mut stream) = link.subscribe(LinkCoverage::Complete).await else {
         return;
@@ -301,6 +304,11 @@ pub(crate) async fn run_backend_down_channel(
         reads.apply_coherence_frame(&frame);
         if let DownFrame::Base { assertions } = &frame {
             for assertion in assertions {
+                // The authoritative base now carries the asserted state, so a
+                // confirmed outbox op it absorbs is retired here — NOT on the
+                // mutation's receipt, which can outrun this assertion when the
+                // backend is remote.
+                outbox.apply_base(&assertion.message_id, &assertion.update);
                 seq += 1;
                 // A send error means there are no live subscribers yet; the next
                 // read still re-fetches (the cache was evicted above).
@@ -500,7 +508,11 @@ mod tests {
                 assertions: vec![BaseAssertion {
                     account_id: "acct".into(),
                     message_id: "m1".into(),
-                    update: BaseUpdate::Present(MessageFoldState::default()),
+                    // Carries the flag so a pending flag op on m1 is absorbed.
+                    update: BaseUpdate::Present(MessageFoldState {
+                        keywords: vec!["$flagged".into()],
+                        mailbox_ids: vec![],
+                    }),
                 }],
             }])))
         }
@@ -528,10 +540,28 @@ mod tests {
         cache.current_summary(&account, &message).await.unwrap();
         assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 1);
 
+        // A confirmed flag op on m1, held pending because its receipt outran the
+        // base assertion (the remote seam). The bridge's assertion below carries
+        // the flag, so the absorption-gated retire drops it.
+        let outbox = Arc::new(crate::near_node::RuntimeBackendOutbox::new(true));
+        outbox.accept(posthaste_link_core::PendingMessageMutation {
+            id: posthaste_link_core::MutationId("op1".into()),
+            key: "m1".into(),
+            effect: posthaste_link_core::MessageAssertion::SetKeywords {
+                add: vec!["$flagged".into()],
+                remove: vec![],
+            },
+        });
+        outbox.settle_receipt(&posthaste_link_core::MutationId("op1".into()), true);
+        assert_eq!(outbox.snapshot().len(), 1, "op held until the base absorbs it");
+
         let (events, mut rx) = broadcast::channel(16);
         let link = BackendLink::new(backend.clone());
         // The stub stream closes after one frame, so the bridge returns.
-        run_backend_down_channel(link, cache.clone(), events).await;
+        run_backend_down_channel(link, cache.clone(), events, outbox.clone()).await;
+
+        // The base now carries the flag: the held op is retired by absorption.
+        assert!(outbox.snapshot().is_empty(), "absorbed op retired by the bridge");
 
         // It republished the assertion as a `message.updated` domain event
         // scoped to the right account + message, flagged so views recompute.
