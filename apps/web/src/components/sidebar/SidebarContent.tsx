@@ -72,8 +72,10 @@ export function SmartMailboxSection({
               key={smartMailbox.id}
               id={smartMailbox.id}
               name={smartMailbox.name}
+              role={smartMailbox.role}
+              defaultKey={smartMailbox.defaultKey}
               unreadMessages={smartMailbox.unreadMessages}
-              accent={smartMailboxAccent(smartMailbox.name)}
+              accent={smartMailboxAccent(smartMailbox.role, smartMailbox.name)}
               isSelected={
                 selectedView?.kind === 'smart-mailbox' &&
                 selectedView.id === smartMailbox.id

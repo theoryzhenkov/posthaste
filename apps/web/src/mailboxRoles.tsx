@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { KnownMailboxRole } from './api/types'
-import { MAILBOX_ROLES } from './domainVocabulary'
+import { ALL_MAIL_DEFAULT_KEY, MAILBOX_ROLES } from './domainVocabulary'
 
 /** Lucide icon mapping for each known JMAP mailbox role. */
 const ROLE_ICON_MAP: Record<KnownMailboxRole, LucideIcon> = {
@@ -52,36 +52,36 @@ export function isKnownMailboxRole(
   return Boolean(role && role in ROLE_ICON_MAP)
 }
 
-/** Heuristically map a mailbox or smart-mailbox name to a known role. */
-export function mailboxRoleFromName(name: string): KnownMailboxRole | null {
-  switch (name.toLowerCase()) {
-    case 'inbox':
-      return MAILBOX_ROLES.Inbox
-    case 'archive':
-      return MAILBOX_ROLES.Archive
-    case 'drafts':
-      return MAILBOX_ROLES.Drafts
-    case 'sent':
-      return MAILBOX_ROLES.Sent
-    case 'junk':
-    case 'spam':
-      return MAILBOX_ROLES.Junk
-    case 'trash':
-      return MAILBOX_ROLES.Trash
-    default:
-      return null
-  }
-}
-
 /** Accent for source mailbox rows keyed by canonical role. */
 export function mailboxRoleAccent(role: string | null): string {
   return isKnownMailboxRole(role) ? MAILBOX_ROLE_ACCENTS[role] : '#7E8691'
 }
 
-/** Accent for smart mailbox and tag rows keyed by known display names. */
-export function smartMailboxAccent(name: string): string {
-  const normalized = name.trim().toLowerCase()
-  switch (normalized) {
+/** Accent for smart mailbox and tag rows. Role-tagged smart mailboxes key
+ *  off the stable `role` (rename/locale-safe); role-less ones (All Mail, user
+ *  smart mailboxes, tags) carry no stable id and fall back to the display name. */
+export function smartMailboxAccent(
+  role: string | null,
+  name: string,
+): string {
+  if (isKnownMailboxRole(role)) {
+    switch (role) {
+      case MAILBOX_ROLES.Inbox:
+      case MAILBOX_ROLES.Archive:
+        return SMART_MAILBOX_ACCENTS.blue
+      case MAILBOX_ROLES.Drafts:
+        return SMART_MAILBOX_ACCENTS.violet
+      case MAILBOX_ROLES.Sent:
+        return SMART_MAILBOX_ACCENTS.coral
+      case MAILBOX_ROLES.Junk:
+        return SMART_MAILBOX_ACCENTS.amber
+      case MAILBOX_ROLES.Trash:
+        return SMART_MAILBOX_ACCENTS.rose
+      default:
+        return SMART_MAILBOX_ACCENTS.muted
+    }
+  }
+  switch (name.trim().toLowerCase()) {
     case 'inbox':
     case 'all inboxes':
     case 'all mail':
@@ -123,7 +123,8 @@ export function renderMailboxRoleIcon(
   return <Icon size={size} className="shrink-0" />
 }
 
-/** Choose a fallback icon for smart mailboxes ("All Mail" gets a Mail icon). */
-export function smartMailboxFallbackIcon(name: string): LucideIcon {
-  return name.toLowerCase() === 'all mail' ? Mail : Folder
+/** Choose a fallback icon for smart mailboxes: All Mail gets the Mail icon,
+ *  keyed off the stable `defaultKey` (rename-safe), not the display name. */
+export function smartMailboxFallbackIcon(defaultKey: string | null): LucideIcon {
+  return defaultKey === ALL_MAIL_DEFAULT_KEY ? Mail : Folder
 }
