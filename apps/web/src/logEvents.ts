@@ -16,6 +16,7 @@ export const LOG_EVENTS = {
   paletteSearchCancelled: 'palette.search.cancelled',
   paletteSearchStale: 'palette.search.stale',
   databaseRepairFailed: 'database.repair.failed',
+  outboxRehydrateSkipped: 'outbox.rehydrate.skipped',
   resourceFetchError: 'resource.fetch.error',
   runtimeAdapterInitialized: 'runtime.adapter.initialized',
   runtimeFrameDispatched: 'runtime.frame.dispatched',
