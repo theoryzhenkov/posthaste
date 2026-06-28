@@ -119,6 +119,7 @@ export const runtimeMutations = {
   messages: {
     async command(
       request: RuntimeMessageCommandRequest,
+      options?: { userInitiated?: boolean },
     ): Promise<MessageCommandResult> {
       // Route message commands through the runtime named-mutation pipeline
       // (Phase 5a). `addToMailbox`/`removeFromMailbox` are not emitted by the
@@ -137,11 +138,16 @@ export const runtimeMutations = {
         },
         clientMutationId: request.clientMutationId,
         sourceId: request.sourceId,
+        // Tag user-initiated actions so the replica adapter records them as
+        // undoable steps (internal/side-effect mutations — e.g. auto-mark-read —
+        // omit this + don't pollute the undo history). @spec Phase 2 Slice 5d
+        ...(options?.userInitiated ? { context: { userInitiated: true } } : {}),
       })
       return confirmedMessageCommandResult(receipt)
     },
     async moveToMailboxRole(
       request: RuntimeMoveMessageToMailboxRoleRequest,
+      options?: { userInitiated?: boolean },
     ): Promise<MessageCommandResult> {
       const receipt = await runtimeSessionClient.runMutation({
         name: 'message.moveToRole',
@@ -151,6 +157,7 @@ export const runtimeMutations = {
           role: request.role,
         },
         sourceId: request.sourceId,
+        ...(options?.userInitiated ? { context: { userInitiated: true } } : {}),
       })
       return confirmedMessageCommandResult(receipt)
     },
