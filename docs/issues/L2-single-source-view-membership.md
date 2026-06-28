@@ -5,7 +5,7 @@ modified: 2026-06-27
 reviewed: 2026-06-27
 lifecycle: ephemeral
 type: ISSUE
-status: open
+status: done
 priority: medium
 depends:
   - path: docs/eph/DESIGN-L2-client-link-reactive-store
