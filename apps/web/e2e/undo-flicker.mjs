@@ -21,7 +21,10 @@ const ROWSEL = '.ph-scroll:has([data-message-list-empty]) > div > button'
 const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errs = []
-page.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)))
+page.on(
+  'console',
+  (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)),
+)
 
 await page.addInitScript(
   ([t, p]) => {
@@ -44,19 +47,39 @@ await page.evaluate(() => {
   function snap(tag) {
     const sp = document.querySelector('[data-message-list-empty]')
     const c = sp ? sp.parentElement : null
-    const r = c ? [...c.querySelectorAll(':scope > div > button')].map((b) => b.textContent.replace(/\s+/g, ' ').trim().slice(0, 20)) : []
+    const r = c
+      ? [...c.querySelectorAll(':scope > div > button')].map((b) =>
+          b.textContent.replace(/\s+/g, ' ').trim().slice(0, 20),
+        )
+      : []
     const key = r.join('|')
-    if (tag || key !== last) { window.__FLASH__.push({ t: performance.now().toFixed(0), tag: tag || null, n: r.length, rows: r }); last = key }
+    if (tag || key !== last) {
+      window.__FLASH__.push({
+        t: performance.now().toFixed(0),
+        tag: tag || null,
+        n: r.length,
+        rows: r,
+      })
+      last = key
+    }
   }
   window.__SNAP__ = snap
   window.__MUT__ = []
   const mo = new MutationObserver((muts) => {
     for (const m of muts)
-      if (m.target.closest?.('.ph-scroll')) window.__MUT__.push({ t: performance.now().toFixed(0), added: m.addedNodes.length, removed: m.removedNodes.length })
+      if (m.target.closest?.('.ph-scroll'))
+        window.__MUT__.push({
+          t: performance.now().toFixed(0),
+          added: m.addedNodes.length,
+          removed: m.removedNodes.length,
+        })
   })
   const c0 = document.querySelector('[data-message-list-empty]')?.parentElement
   if (c0) mo.observe(c0, { childList: true })
-  ;(function loop() { snap(null); requestAnimationFrame(loop) })()
+  ;(function loop() {
+    snap(null)
+    requestAnimationFrame(loop)
+  })()
 })
 
 const before = await page.evaluate(() => window.__FLASH__.slice(-1)[0])
@@ -65,7 +88,10 @@ console.log('pre-archive rows:', JSON.stringify(before.rows))
 
 // Archive the first message.
 await page.locator(ROWSEL).first().click()
-await page.waitForSelector('button[aria-label="Archive"]', { state: 'visible', timeout: 5000 })
+await page.waitForSelector('button[aria-label="Archive"]', {
+  state: 'visible',
+  timeout: 5000,
+})
 await page.locator('button[aria-label="Archive"]').click()
 await page.evaluate(() => window.__SNAP__('archive-pressed'))
 await page.waitForTimeout(1200) // let the archive settle + the toast appear
@@ -83,7 +109,10 @@ if (await undoBtn.count().catch(() => 0)) {
   await page.keyboard.press('Control+z')
   undid = true
 }
-await page.evaluate((u) => window.__SNAP__(u ? 'undo-clicked' : 'undo-failed'), undid)
+await page.evaluate(
+  (u) => window.__SNAP__(u ? 'undo-clicked' : 'undo-failed'),
+  undid,
+)
 await page.waitForTimeout(1500)
 
 // Redo via keyboard (Ctrl+Shift+Z) to re-apply the archive.
@@ -91,28 +120,51 @@ await page.keyboard.press('Control+Shift+z')
 await page.evaluate(() => window.__SNAP__('redo-clicked'))
 await page.waitForTimeout(2500)
 
-const log = await page.evaluate(() => ({ flash: window.__FLASH__, mut: window.__MUT__ }))
+const log = await page.evaluate(() => ({
+  flash: window.__FLASH__,
+  mut: window.__MUT__,
+}))
 console.log('--- rAF frame log ---')
-for (const f of log.flash) console.log(`  t=${f.t.padStart(8)} ${(f.tag ?? '').padEnd(16)} | ${f.n}r: ${f.rows.join(' || ')}`)
+for (const f of log.flash)
+  console.log(
+    `  t=${f.t.padStart(8)} ${(f.tag ?? '').padEnd(16)} | ${f.n}r: ${f.rows.join(' || ')}`,
+  )
 console.log('--- MutationObserver (add/remove events around undo) ---')
 const undoIdx = log.mut.findIndex((m) => true)
 console.log(`  total events: ${log.mut.length}`)
-console.log('  ' + log.mut.map((m) => `[${m.t} +${m.added}/-${m.removed}]`).join(' '))
+console.log(
+  '  ' + log.mut.map((m) => `[${m.t} +${m.added}/-${m.removed}]`).join(' '),
+)
 
 // Analysis: track the archived fingerprint's presence across the whole
 // archive -> undo -> redo trajectory. Expected transitions: 3
 // (archive removes, undo restores, redo removes). Extra toggling = flash.
 const presence = log.flash.map((f) => f.rows.includes(archivedFp))
 let transitions = 0
-for (let i = 1; i < presence.length; i++) if (presence[i] !== presence[i - 1]) transitions++
-const restoredAfterUndo = presence.slice(log.flash.findIndex((f) => f.tag === 'undo-clicked') + 1).some(Boolean)
+for (let i = 1; i < presence.length; i++)
+  if (presence[i] !== presence[i - 1]) transitions++
+const restoredAfterUndo = presence
+  .slice(log.flash.findIndex((f) => f.tag === 'undo-clicked') + 1)
+  .some(Boolean)
 const absentAfterRedo = !presence[presence.length - 1]
 console.log('\n=== analysis ===')
 console.log('archived fingerprint:', archivedFp)
-console.log('presence transitions:', transitions, '(expected 3: archive/undo/redo)')
-console.log('restored after undo:', restoredAfterUndo, '| absent after redo:', absentAfterRedo)
-if (transitions > 3) console.log('>>> UNDO/REDO FLASH REPRODUCED (extra toggling)')
-else if (restoredAfterUndo && absentAfterRedo) console.log('>>> no flash (undo restored, redo re-removed, clean)')
+console.log(
+  'presence transitions:',
+  transitions,
+  '(expected 3: archive/undo/redo)',
+)
+console.log(
+  'restored after undo:',
+  restoredAfterUndo,
+  '| absent after redo:',
+  absentAfterRedo,
+)
+if (transitions > 3)
+  console.log('>>> UNDO/REDO FLASH REPRODUCED (extra toggling)')
+else if (restoredAfterUndo && absentAfterRedo)
+  console.log('>>> no flash (undo restored, redo re-removed, clean)')
 else console.log('>>> unexpected trajectory (inspect log)')
-if (errs.length) console.log('console errors:', JSON.stringify(errs.slice(0, 4)))
+if (errs.length)
+  console.log('console errors:', JSON.stringify(errs.slice(0, 4)))
 await browser.close()

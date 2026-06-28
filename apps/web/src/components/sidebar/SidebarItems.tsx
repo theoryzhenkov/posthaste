@@ -65,9 +65,7 @@ export function SmartMailboxItem({
       >
         {smartMailboxIcon(role, defaultKey)}
       </span>
-      <span className="min-w-0 flex-1 truncate">
-        {name}
-      </span>
+      <span className="min-w-0 flex-1 truncate">{name}</span>
       {unreadMessages != null && unreadMessages > 0 && (
         <UnreadCount count={unreadMessages} isSelected={isSelected} />
       )}

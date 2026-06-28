@@ -3,7 +3,10 @@ import { describe, expect, it } from 'bun:test'
 import { Folder, Mail } from 'lucide-react'
 
 import { ALL_MAIL_DEFAULT_KEY, MAILBOX_ROLES } from '../src/domainVocabulary'
-import { smartMailboxAccent, smartMailboxFallbackIcon } from '../src/mailboxRoles'
+import {
+  smartMailboxAccent,
+  smartMailboxFallbackIcon,
+} from '../src/mailboxRoles'
 
 describe('smartMailboxAccent', () => {
   it('keys off the role for role-tagged smart mailboxes (rename-safe)', () => {

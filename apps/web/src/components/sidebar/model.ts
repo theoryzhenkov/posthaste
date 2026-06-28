@@ -23,8 +23,7 @@ export function sortSmartMailboxes(
 ): SmartMailboxSummary[] {
   return [...smartMailboxes].sort(
     (left, right) =>
-      left.position - right.position ||
-      left.name.localeCompare(right.name),
+      left.position - right.position || left.name.localeCompare(right.name),
   )
 }
 
