@@ -304,12 +304,7 @@ impl EntityStore {
     /// longer clobber it (the move/delete/archive flicker,
     /// [reserve-clobbers-optimism](../../issues/L2-reserve-clobbers-optimism)).
     /// Does not touch the message base or outbox.
-    pub fn set_view_rows(
-        &mut self,
-        view_id: &str,
-        rows: Vec<ViewRow>,
-        watermark: Option<SortKey>,
-    ) {
+    pub fn set_view_rows(&mut self, view_id: &str, rows: Vec<ViewRow>, watermark: Option<SortKey>) {
         let reconciled = match self.views.get(view_id) {
             None => return,
             Some(view) if !view.predicate.is_evaluable() => rows,
@@ -327,11 +322,7 @@ impl EntityStore {
                         match self.optimistic_projection(&row.message_id) {
                             Some(projection) => {
                                 predicate.matches(&projection)
-                                    && in_range(
-                                        &row.sort_key,
-                                        &watermark,
-                                        view.sort_direction,
-                                    )
+                                    && in_range(&row.sort_key, &watermark, view.sort_direction)
                             }
                             None => false,
                         }
@@ -342,10 +333,8 @@ impl EntityStore {
         let (old_members, new_members) = match self.views.get_mut(view_id) {
             None => return,
             Some(view) => {
-                let old: Vec<String> =
-                    view.rows.iter().map(|r| r.message_id.clone()).collect();
-                let new: Vec<String> =
-                    reconciled.iter().map(|r| r.message_id.clone()).collect();
+                let old: Vec<String> = view.rows.iter().map(|r| r.message_id.clone()).collect();
+                let new: Vec<String> = reconciled.iter().map(|r| r.message_id.clone()).collect();
                 view.rows = reconciled;
                 view.watermark = watermark;
                 self.dirty.insert(DirtyKey::View(view_id.to_string()));
@@ -495,17 +484,19 @@ impl EntityStore {
                         .get(message_id.as_str())
                         .and_then(|e| authority_version(&e.projection));
                     let can_retire = self.retireable_ops(message_id.as_str(), current);
-                    let retired_ids = self.engine.retire_absorbed_if(
-                        message_id,
-                        |id| can_retire.contains(id),
-                    );
+                    let retired_ids = self
+                        .engine
+                        .retire_absorbed_if(message_id, |id| can_retire.contains(id));
                     retired = !retired_ids.is_empty();
                     self.retired_buffer.extend(retired_ids);
                     if retired {
                         self.prune_accepted_at(message_id.as_str());
                     }
                 }
-                SettlementResult { retired, reverted: false }
+                SettlementResult {
+                    retired,
+                    reverted: false,
+                }
             }
             SettlementOutcome::Failed => {
                 self.accepted_at.remove(mutation_id);
@@ -614,13 +605,10 @@ impl EntityStore {
             // version: an equal-version base (the local move's same-modseq echo,
             // or a stale re-serve) must NOT retire the op, so it stays folded and
             // holds membership through the unconfirmed window.
-            let can_retire =
-                self.retireable_ops(message_id, authority_version(projection));
+            let can_retire = self.retireable_ops(message_id, authority_version(projection));
             let retired_ids = self
                 .engine
-                .retire_absorbed_if(&message_id.to_string(), |id| {
-                    can_retire.contains(id)
-                });
+                .retire_absorbed_if(&message_id.to_string(), |id| can_retire.contains(id));
             let retired = !retired_ids.is_empty();
             self.retired_buffer.extend(retired_ids);
             if retired {
@@ -635,7 +623,8 @@ impl EntityStore {
         let mailbox = self.mailboxes.entry(delta.mailbox_id.clone()).or_default();
         mailbox.unread_count = delta.unread_count;
         mailbox.total_count = delta.total_count;
-        self.dirty.insert(DirtyKey::Mailbox(delta.mailbox_id.clone()));
+        self.dirty
+            .insert(DirtyKey::Mailbox(delta.mailbox_id.clone()));
     }
 
     /// Re-evaluate a held message's placement across every evaluable view from
@@ -669,8 +658,7 @@ impl EntityStore {
             let was_present = view.rows.iter().position(|r| r.message_id == message_id);
             let place = match (&row_opt, &optimistic) {
                 (Some(row), Some(proj)) => {
-                    predicate.matches(proj)
-                        && in_range(&row.sort_key, &watermark, direction)
+                    predicate.matches(proj) && in_range(&row.sort_key, &watermark, direction)
                 }
                 _ => false,
             };
@@ -808,11 +796,7 @@ fn row_key_of(projection: &Value, message_id: &str) -> String {
 /// Whether a sort key falls within a view's held range `[TOP, W]`. `None`
 /// watermark means the range reaches BOTTOM (complete) — always in range.
 /// Desc: at or above `W` (`sort_key >= W`); Asc: at or below `W` (`sort_key <= W`).
-fn in_range(
-    sort_key: &SortKey,
-    watermark: &Option<SortKey>,
-    direction: SortDirection,
-) -> bool {
+fn in_range(sort_key: &SortKey, watermark: &Option<SortKey>, direction: SortDirection) -> bool {
     match watermark {
         None => true,
         Some(w) => match (direction, sort_key.cmp(w)) {
@@ -998,8 +982,12 @@ mod tests {
             deleted: false,
             count_deltas: vec![],
         }]);
-        let ids: Vec<&str> =
-            store.view_rows(view).unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        let ids: Vec<&str> = store
+            .view_rows(view)
+            .unwrap()
+            .iter()
+            .map(|r| r.message_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["m1", "m2"]);
     }
 
@@ -1013,8 +1001,12 @@ mod tests {
             deleted: false,
             count_deltas: vec![],
         }]);
-        let ids: Vec<&str> =
-            store.view_rows(view).unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        let ids: Vec<&str> = store
+            .view_rows(view)
+            .unwrap()
+            .iter()
+            .map(|r| r.message_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["m2"]);
         // But the message entity itself is stored (discovery happened).
         assert!(store.message("m3").is_some());
@@ -1060,8 +1052,12 @@ mod tests {
             count_deltas: vec![],
         }]);
 
-        let ids: Vec<&str> =
-            store.view_rows("asc").unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        let ids: Vec<&str> = store
+            .view_rows("asc")
+            .unwrap()
+            .iter()
+            .map(|r| r.message_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["m3", "m2"]);
     }
 
@@ -1132,11 +1128,17 @@ mod tests {
             },
         ]);
         let dirty = store.drain_dirty();
-        let view_dirty_count =
-            dirty.iter().filter(|k| matches!(k, DirtyKey::View(v) if v == view)).count();
+        let view_dirty_count = dirty
+            .iter()
+            .filter(|k| matches!(k, DirtyKey::View(v) if v == view))
+            .count();
         assert_eq!(view_dirty_count, 1, "a batch notifies a view once");
-        let ids: Vec<&str> =
-            store.view_rows(view).unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        let ids: Vec<&str> = store
+            .view_rows(view)
+            .unwrap()
+            .iter()
+            .map(|r| r.message_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["m0", "m1", "m2"]);
     }
 
@@ -1229,8 +1231,12 @@ mod tests {
         assert_eq!(proj["isFlagged"], json!(true));
         assert_eq!(proj["keywords"], json!(["$flagged"]));
         // The view row still holds m2 (a flag does not change membership).
-        let ids: Vec<&str> =
-            store.view_rows(view).unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        let ids: Vec<&str> = store
+            .view_rows(view)
+            .unwrap()
+            .iter()
+            .map(|r| r.message_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["m2"]);
         assert!(store.has_pending());
         let dirty = store.drain_dirty();
@@ -1315,7 +1321,10 @@ mod tests {
             deleted: false,
             count_deltas: vec![],
         }]);
-        assert!(views_of(&store, "m1").is_empty(), "moved-out row de-indexed");
+        assert!(
+            views_of(&store, "m1").is_empty(),
+            "moved-out row de-indexed"
+        );
 
         // Re-arrival then authoritative deletion → index entry purged entirely.
         store.ingest_batch(vec![StoreUpdate::Message {
@@ -1459,13 +1468,19 @@ mod tests {
             store.view_rows(view).unwrap().is_empty(),
             "stale equal-version re-serve must not re-add the row"
         );
-        assert!(store.has_pending(), "op still holds through the stale re-serve");
+        assert!(
+            store.has_pending(),
+            "op still holds through the stale re-serve"
+        );
 
         // Provider confirms with modseq+1 ([archive]@v6): strictly higher → retire.
         ingest_m2_mailbox_v(&mut store, &["archive"], 6);
         assert!(!store.has_pending(), "op retires on the real modseq bump");
         assert!(store.view_rows(view).unwrap().is_empty());
-        assert_eq!(store.message("m2").unwrap()["mailboxIds"], json!(["archive"]));
+        assert_eq!(
+            store.message("m2").unwrap()["mailboxIds"],
+            json!(["archive"])
+        );
     }
 
     #[test]
@@ -1558,7 +1573,10 @@ mod tests {
 
         // m2 stays gone, and the held base is still archive (guard held).
         assert!(store.view_rows(view).unwrap().is_empty());
-        assert_eq!(store.message("m2").unwrap()["mailboxIds"], json!(["archive"]));
+        assert_eq!(
+            store.message("m2").unwrap()["mailboxIds"],
+            json!(["archive"])
+        );
     }
 
     #[test]
@@ -1638,8 +1656,12 @@ mod tests {
         // m2's optimism survived the rebase (its pending was not cleared).
         assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
         assert!(store.has_pending());
-        let ids: Vec<&str> =
-            store.view_rows(view).unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        let ids: Vec<&str> = store
+            .view_rows(view)
+            .unwrap()
+            .iter()
+            .map(|r| r.message_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["m0", "m2"]);
     }
 
@@ -1673,7 +1695,11 @@ mod tests {
 
         store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
         assert!(store.has_pending());
-        assert_eq!(store.view_rows(view).unwrap().len(), 1, "row left untouched");
+        assert_eq!(
+            store.view_rows(view).unwrap().len(),
+            1,
+            "row left untouched"
+        );
 
         // The base arrives: optimism folds in.
         ingest_m2(&mut store, &[]);
@@ -1699,7 +1725,8 @@ mod tests {
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(
-            json["message"]["messageId"], json!("m1"),
+            json["message"]["messageId"],
+            json!("m1"),
             "message update is externally-tagged + camelCase"
         );
         assert_eq!(json["message"]["deleted"], json!(false));

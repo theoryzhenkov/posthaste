@@ -151,9 +151,11 @@ impl MessageMutation {
 /// assertion via the account's role→mailbox-id map. `None` when the role is
 /// absent (mailbox list not loaded) — the caller then falls back to no optimism.
 fn role_to_replace(roles: &HashMap<String, String>, role: &str) -> Option<MessageAssertion> {
-    roles.get(role).map(|mailbox_id| MessageAssertion::ReplaceMailboxes {
-        mailbox_ids: vec![mailbox_id.clone()],
-    })
+    roles
+        .get(role)
+        .map(|mailbox_id| MessageAssertion::ReplaceMailboxes {
+            mailbox_ids: vec![mailbox_id.clone()],
+        })
 }
 
 fn parse_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>

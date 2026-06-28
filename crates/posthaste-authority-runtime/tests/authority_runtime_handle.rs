@@ -20,8 +20,7 @@ use posthaste_engine::MockJmapGateway;
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,
-    MutationSettlementState,
-    RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame,
+    MutationSettlementState, RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame,
     RuntimeLifecycle, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor,
     ViewFrame, ViewRevision,
 };
@@ -1378,30 +1377,6 @@ async fn runtime_account_status_view_serves_and_recomputes() {
         2,
         "the view now serves both accounts"
     );
-}
-
-/// Read whether `message_id` shows as flagged in the account's inbox view
-/// (folded current state), for asserting undo/redo effects end-to-end.
-async fn inbox_message_flagged(
-    build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
-    account_id: &AccountId,
-    message_id: &str,
-) -> bool {
-    let snapshot = build
-        .handle
-        .open_view(
-            RuntimeCaller::test(),
-            mail_list_descriptor(&format!("in:{}/inbox", account_id.as_str())),
-        )
-        .await
-        .expect("inbox view should open");
-    let state = mail_list_state(&snapshot);
-    state
-        .rows
-        .iter()
-        .find(|row| row.projection["id"] == message_id)
-        .map(|row| row.projection["isFlagged"] == serde_json::Value::Bool(true))
-        .unwrap_or(false)
 }
 
 #[tokio::test]

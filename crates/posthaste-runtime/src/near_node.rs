@@ -146,7 +146,10 @@ pub(crate) fn apply_outbox_overlay(
     }
     let mut engine = MessageReplica::new();
     for row in &state.rows {
-        engine.set_base(row_message_id(row), fold_state_from_projection(&row.projection));
+        engine.set_base(
+            row_message_id(row),
+            fold_state_from_projection(&row.projection),
+        );
     }
     for mutation in pending {
         engine.accept(mutation.clone());
@@ -231,7 +234,10 @@ mod tests {
             },
             read_watermark: None,
             coverage: RuntimeCoverage {
-                ranges: vec![CoverageRange { from: None, to: None }],
+                ranges: vec![CoverageRange {
+                    from: None,
+                    to: None,
+                }],
             },
             known_total_count: None,
             anchor: MailListAnchorState::NotRequested,

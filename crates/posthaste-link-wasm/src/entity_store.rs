@@ -28,7 +28,7 @@ use posthaste_link_core::{
     SettlementOutcome,
 };
 use posthaste_link_replica::{
-    EntityStore, fold_state_from_projection, SortDirection, SortKey, StoreUpdate, ViewPredicate,
+    fold_state_from_projection, EntityStore, SortDirection, SortKey, StoreUpdate, ViewPredicate,
     ViewRow,
 };
 
@@ -142,8 +142,11 @@ impl EntityStoreHandle {
     pub fn accept_mutation_json(&mut self, accept_json: &str) -> Result<(), JsError> {
         let args: AcceptArgs =
             serde_json::from_str(accept_json).map_err(|e| JsError::new(&e.to_string()))?;
-        self.inner
-            .accept_mutation(MutationId(args.mutation_id), &args.message_id, args.assertion);
+        self.inner.accept_mutation(
+            MutationId(args.mutation_id),
+            &args.message_id,
+            args.assertion,
+        );
         Ok(())
     }
 
@@ -365,8 +368,7 @@ mod tests {
         assert!(dirty.contains(&json!({"view": "inbox"})));
 
         // The projected message + view row + mailbox counts read back.
-        let msg: serde_json::Value =
-            serde_json::from_str(&handle.message_json("m1")).unwrap();
+        let msg: serde_json::Value = serde_json::from_str(&handle.message_json("m1")).unwrap();
         assert_eq!(msg["subject"], json!("m1"));
         let rows: Vec<serde_json::Value> =
             serde_json::from_str(&handle.view_rows_json("inbox")).unwrap();
@@ -425,8 +427,7 @@ mod tests {
             )
             .unwrap();
         assert!(handle.has_pending());
-        let msg: serde_json::Value =
-            serde_json::from_str(&handle.message_json("m1")).unwrap();
+        let msg: serde_json::Value = serde_json::from_str(&handle.message_json("m1")).unwrap();
         assert_eq!(msg["isFlagged"], json!(true));
         assert_eq!(msg["keywords"], json!(["$flagged"]));
 
