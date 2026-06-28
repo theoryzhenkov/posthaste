@@ -419,10 +419,7 @@ impl Backend {
     /// cursor. Re-delivery is a no-op (the assignment is idempotent).
     ///
     /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
-    async fn apply_rev_cursor(
-        &self,
-        request: &MutationRequest,
-    ) -> Result<CommandAck, RuntimeError> {
+    fn apply_rev_cursor(&self, request: &MutationRequest) -> Result<CommandAck, RuntimeError> {
         let args: RevCursorArgs = serde_json::from_value(request.args.clone())
             .map_err(|e| RuntimeError::invalid_mutation(format!("invalid revCursor args: {e}")))?;
         let account = AccountId(args.account_id.clone());
@@ -452,7 +449,7 @@ impl Backend {
         // Emit the recompute trigger (same topic as append).
         let _ = self.event_sender.send(DomainEvent {
             seq: 0,
-            account_id: account.clone(),
+            account_id: account,
             topic: EVENT_TOPIC_REV_LOG_APPENDED.to_string(),
             occurred_at: now_iso8601().unwrap_or_default(),
             mailbox_id: None,
@@ -822,7 +819,7 @@ impl Backend {
         // Phase 2: `revCursor` is a control mutation (not a message mutation) —
         // route it to the cursor-arbitration path before the message parse.
         if request.name == "revCursor" {
-            return self.apply_rev_cursor(request).await;
+            return self.apply_rev_cursor(request);
         }
         let mutation = MessageMutation::from_request(request)?;
         let account_id = mutation.account_id().to_string();
