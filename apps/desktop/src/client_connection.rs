@@ -176,11 +176,7 @@ pub(crate) fn consume_factory_reset_marker<R: Runtime>(app: &AppHandle<R>) -> bo
     }
     let config_root = daemon_config_root();
     let connections = client_dir(app).ok().map(|dir| dir.join(CONNECTIONS_FILE));
-    let _ = wipe_factory_reset_targets(
-        &state_root,
-        config_root.as_deref(),
-        connections.as_deref(),
-    );
+    let _ = wipe_factory_reset_targets(&state_root, config_root.as_deref(), connections.as_deref());
     true
 }
 
