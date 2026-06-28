@@ -76,8 +76,13 @@ async fn forward_action_with_rev_step_appends_to_rev_log() {
         .await;
     settlement.assert_confirmed();
 
-    // The rev_log step was appended on confirmation (server-side); the cursor is
-    // untouched (the client mirror advances it — Slice 5).
+    // The rev_log step was appended on confirmation (server-side) + the
+    // cursor advanced to it: a forward action makes the new step the topmost
+    // APPLIED step + truncates the redo tail. The server-authoritative cursor
+    // now reflects forward actions (Slice 5b-1), so the client mirror can adopt
+    // it without a client-side revCursor per forward action.
+    //
+    // @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
     let snapshot = harness
         .store()
         .rev_log_snapshot(&account)
@@ -88,8 +93,11 @@ async fn forward_action_with_rev_step_appends_to_rev_log() {
     assert_eq!(snapshot.steps[0].source_id, account.as_str());
     assert_eq!(
         snapshot.cursor,
-        RevCursor::default(),
-        "cursor is not moved by the append (client mirror does that)"
+        RevCursor {
+            cursor_step_id: Some("step-1".to_string()),
+            redo_tail: vec![],
+        },
+        "the append advances the cursor to the new step + clears the redo tail"
     );
 }
 
@@ -135,7 +143,9 @@ async fn rev_cursor_assigns_the_cursor() {
     let account = harness.create_mock_account("a").await;
     harness.seed_messages(&account, &[("m-1", "inbox")]);
 
-    // Forward action appends step-1 (cursor stays default — {None, []}).
+    // Forward action appends step-1 + advances the cursor to it
+    // ({Some(step-1), []}) — Slice 5b-1: the server-authoritative cursor
+    // reflects forward actions.
     harness
         .settle(
             set_keywords_with_rev_step(account.as_str(), "m-1", "c-1", "step-1"),
