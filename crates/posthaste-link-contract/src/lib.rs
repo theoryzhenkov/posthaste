@@ -37,8 +37,9 @@ use posthaste_domain::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
     MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode, TagSummary,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot,
+    SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    SyncMode, TagSummary,
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
@@ -409,6 +410,20 @@ pub trait BackendApi: Send + Sync {
     /// Read channel: the backend's count of live (running) accounts, for the
     /// runtime status. `None` when the backend does not track it.
     async fn account_count(&self) -> Result<Option<usize>, RuntimeError> {
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the per-account undo/redo `rev_log` + cursor (Phase 2
+    /// server-authoritative history). Serves the `RevLog` synced view, which
+    /// mirrors the log + cursor to every device. The default errors: a transport
+    /// that does not carry the read channel is not a read source for history.
+    ///
+    /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    async fn rev_log_snapshot(
+        &self,
+        account_id: AccountId,
+    ) -> Result<RevLogSnapshot, RuntimeError> {
+        let _ = account_id;
         Err(read_channel_unsupported())
     }
 
