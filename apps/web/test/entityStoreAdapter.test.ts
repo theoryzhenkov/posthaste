@@ -429,9 +429,7 @@ describe('entityStoreAdapter', () => {
     )
     await Promise.resolve()
 
-    const replace = [...frames]
-      .reverse()
-      .find((f) => f.type === 'viewReplace')
+    const replace = [...frames].reverse().find((f) => f.type === 'viewReplace')
     expect(replace?.type).toBe('viewReplace')
     const rows =
       replace?.type === 'viewReplace' ? replace.snapshot.data.rows : []

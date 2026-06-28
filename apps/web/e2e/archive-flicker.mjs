@@ -36,7 +36,10 @@ const SWITCH_TO_INBOX = process.env.ALL_INBOXES !== '1' // default: specific Inb
 const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errs = []
-page.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)))
+page.on(
+  'console',
+  (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)),
+)
 
 await page.addInitScript(
   ([t, p]) => {
@@ -61,41 +64,74 @@ await page.evaluate(() => {
   function snap(tag) {
     const sp = document.querySelector('[data-message-list-empty]')
     const c = sp ? sp.parentElement : null
-    const r = c ? [...c.querySelectorAll(':scope > div > button')].map((b) => b.textContent.replace(/\s+/g, ' ').trim().slice(0, 20)) : []
+    const r = c
+      ? [...c.querySelectorAll(':scope > div > button')].map((b) =>
+          b.textContent.replace(/\s+/g, ' ').trim().slice(0, 20),
+        )
+      : []
     const key = r.join('|')
-    if (tag || key !== last) { window.__FLASH__.push({ t: performance.now().toFixed(0), tag: tag || null, n: r.length, rows: r }); last = key }
+    if (tag || key !== last) {
+      window.__FLASH__.push({
+        t: performance.now().toFixed(0),
+        tag: tag || null,
+        n: r.length,
+        rows: r,
+      })
+      last = key
+    }
   }
   window.__SNAP__ = snap
   window.__MUT__ = []
   const mo = new MutationObserver((muts) => {
     for (const m of muts) {
       if (m.target.closest?.('.ph-scroll')) {
-        window.__MUT__.push({ t: performance.now().toFixed(0), added: m.addedNodes.length, removed: m.removedNodes.length })
+        window.__MUT__.push({
+          t: performance.now().toFixed(0),
+          added: m.addedNodes.length,
+          removed: m.removedNodes.length,
+        })
       }
     }
   })
   const c0 = document.querySelector('[data-message-list-empty]')?.parentElement
   if (c0) mo.observe(c0, { childList: true })
-  ;(function loop() { snap(null); requestAnimationFrame(loop) })()
+  ;(function loop() {
+    snap(null)
+    requestAnimationFrame(loop)
+  })()
 })
 
 const N = Number(process.env.ARCHIVES || 3)
 for (let i = 1; i <= N; i++) {
   await page.evaluate((n) => window.__SNAP__('archive-' + n), i)
   await page.locator(ROWSEL).first().click()
-  await page.waitForSelector('button[aria-label="Archive"]', { state: 'visible', timeout: 5000 })
+  await page.waitForSelector('button[aria-label="Archive"]', {
+    state: 'visible',
+    timeout: 5000,
+  })
   await page.locator('button[aria-label="Archive"]').click()
   await page.waitForTimeout(250)
 }
 await page.waitForTimeout(2000)
 
-const log = await page.evaluate(() => ({ flash: window.__FLASH__, mut: window.__MUT__ }))
+const log = await page.evaluate(() => ({
+  flash: window.__FLASH__,
+  mut: window.__MUT__,
+}))
 console.log('=== rAF frame log ===')
-for (const f of log.flash) console.log(`  t=${f.t.padStart(8)} ${f.tag ?? ''} | ${f.n}r: ${f.rows.join(' || ')}`)
+for (const f of log.flash)
+  console.log(
+    `  t=${f.t.padStart(8)} ${f.tag ?? ''} | ${f.n}r: ${f.rows.join(' || ')}`,
+  )
 const removes = log.mut.filter((m) => m.removed > 0).length
 const adds = log.mut.filter((m) => m.added > 0).length
 console.log('=== MutationObserver ===')
 console.log(`  removal events: ${removes} | addition events: ${adds}`)
-console.log(adds > 0 ? '>>> FLASH REPRODUCED (row re-added after removal)' : '>>> no flash (no row re-added after removal)')
-if (errs.length) console.log('console errors:', JSON.stringify(errs.slice(0, 4)))
+console.log(
+  adds > 0
+    ? '>>> FLASH REPRODUCED (row re-added after removal)'
+    : '>>> no flash (no row re-added after removal)',
+)
+if (errs.length)
+  console.log('console errors:', JSON.stringify(errs.slice(0, 4)))
 await browser.close()

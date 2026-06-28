@@ -158,9 +158,6 @@ export function useRuntimeMailListView({
       return
     }
 
-    // The effect re-runs on retry/view change; clear any prior fatal error so
-    // the skeleton can show again while the new open is in flight.
-    setError(null)
     let closed = false
     let viewId: string | undefined
     let unsubscribe: (() => void) | undefined
@@ -294,6 +291,10 @@ export function useRuntimeMailListView({
       unsubscribe?.()
       closeView()
       setHasMore(false)
+      // The effect re-runs on retry/view change; clear any prior fatal error in
+      // cleanup (runs before the next open) so the skeleton can show again while
+      // the new open is in flight.
+      setError(null)
     }
   }, [
     enabled,
