@@ -139,7 +139,8 @@ mod tests {
                 .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed["assertion"]["kind"], "replaceMailboxes");
-        assert_eq!(parsed["assertion"]["mailbox_ids"], json!(["mbx-a"]));
+        // Wire field is camelCase `mailboxIds` (renamed from `mailbox_ids`).
+        assert_eq!(parsed["assertion"]["mailboxIds"], json!(["mbx-a"]));
     }
 
     #[test]
