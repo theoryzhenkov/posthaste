@@ -24,8 +24,8 @@ use std::collections::BTreeMap;
 use posthaste_domain::{
     now_iso8601, AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId,
     ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary,
-    MessageDetail, MessageId, MessageSummary, Operation, ReplyContext, SmartMailbox,
-    SmartMailboxId, SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
+    MessageDetail, MessageId, MessageSummary, Operation, ReplyContext, RevLogSnapshot,
+    SmartMailbox, SmartMailboxId, SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_link_contract::{
     BackendApi, BackendLink, BaseAssertion, BaseUpdate, DownFrame, LinkCoverage,
@@ -114,6 +114,15 @@ impl ReadCache {
     /// Read the backend's live account count (passthrough; status metadata).
     pub(crate) async fn account_count(&self) -> Result<Option<usize>, RuntimeError> {
         self.backend.account_count().await
+    }
+
+    /// Read channel: the per-account undo/redo `rev_log` + cursor (passthrough).
+    /// Serves the `RevLog` synced view. @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    pub(crate) async fn rev_log_snapshot(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<RevLogSnapshot, RuntimeError> {
+        self.backend.rev_log_snapshot(account_id.clone()).await
     }
 
     /// Account/config reads through the backend (passthrough; not cached — these
@@ -252,7 +261,6 @@ impl ReadCache {
         }
         Ok(result)
     }
-
 
     /// Drop a message's cached summary (it changed authoritatively). No-op for a
     /// passthrough cache.

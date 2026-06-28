@@ -13,28 +13,9 @@ use super::*;
 /// The conventional per-account history cap (carried from Phase 1).
 pub const MAX_REV_LOG_HISTORY: u32 = 50;
 
-/// One reversible-operation step in the per-account `rev_log`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RevLogStep {
-    /// Globally-orderable id (ULID); the cursor key.
-    pub step_id: String,
-    /// Per-account monotonic append order (the sync delta cursor).
-    pub seq: u32,
-    pub message_id: String,
-    pub source_id: String,
-    /// `MessageChangeDiff` JSON (`{keywords, mailboxes}{added, removed}`).
-    pub diff: Value,
-    pub created_at: String,
-}
-
-/// The per-account undo/redo cursor. `cursor_step_id` = the topmost APPLIED
-/// step (`None` = all undone); `redo_tail` = the undone step_ids above the
-/// cursor, in `seq` order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RevCursor {
-    pub cursor_step_id: Option<String>,
-    pub redo_tail: Vec<String>,
-}
+// `RevLogStep` + `RevCursor` live in `posthaste-domain` (shared with the
+// `BackendApi` read channel + the `RevLog` synced view); `use super::*`
+// brings them into scope via the crate re-export.
 
 const REV_LOG_COLUMNS: &str = "step_id, seq, message_id, source_id, diff, created_at";
 
@@ -160,10 +141,7 @@ impl DatabaseStore {
             .optional()
             .map_err(sql_to_store_error)?;
         match row {
-            None => Ok(RevCursor {
-                cursor_step_id: None,
-                redo_tail: Vec::new(),
-            }),
+            None => Ok(RevCursor::default()),
             Some((cursor_step_id, redo_tail_str)) => Ok(RevCursor {
                 cursor_step_id,
                 redo_tail: serde_json::from_str(&redo_tail_str).unwrap_or_default(),

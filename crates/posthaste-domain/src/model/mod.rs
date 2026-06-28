@@ -241,6 +241,7 @@ mod errors;
 mod messages;
 mod outbox;
 mod records;
+mod rev_log;
 mod smart_mailboxes;
 mod sync;
 
@@ -253,6 +254,7 @@ pub use errors::*;
 pub use messages::*;
 pub use outbox::*;
 pub use records::*;
+pub use rev_log::*;
 pub use smart_mailboxes::*;
 pub use sync::*;
 

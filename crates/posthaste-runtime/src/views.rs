@@ -9,9 +9,9 @@ use posthaste_domain::{
     EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_runtime_contract::{
-    MailListAnchorState, MailListContinuation, MailListProjectionKind, MailListRowState,
-    MailListViewState, MailPresentationRequest, MailQueryPage, MailQueryRequest, ReadWatermark,
-    CoverageRange, RuntimeCoverage, RuntimeError, RuntimeErrorCode, RuntimeViewSubscription,
+    CoverageRange, MailListAnchorState, MailListContinuation, MailListProjectionKind,
+    MailListRowState, MailListViewState, MailPresentationRequest, MailQueryPage, MailQueryRequest,
+    ReadWatermark, RuntimeCoverage, RuntimeError, RuntimeErrorCode, RuntimeViewSubscription,
     ViewDescriptor, ViewFrame, ViewId, ViewLifecycle, ViewRevision, ViewSnapshot,
 };
 use serde::Deserialize;
@@ -41,6 +41,11 @@ enum ViewKind {
     AccountStatus {
         account_id: Option<String>,
     },
+    /// Phase 2 undo/redo: the per-account reversible-op log + cursor, mirrored
+    /// to every device. @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    RevLog {
+        account_id: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -61,6 +66,12 @@ struct ConversationDescriptor {
 struct AccountStatusDescriptor {
     #[serde(default)]
     account_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RevLogDescriptor {
+    account_id: String,
 }
 
 pub(crate) struct ViewRegistry {
@@ -264,9 +275,8 @@ impl ViewRegistry {
                         // are still re-served per event — they have no client
                         // self-maintenance, so skipping would stale them until
                         // reload (the option-iii regression).
-                        let self_maintained =
-                            matches!(view.kind, ViewKind::MailList(_))
-                                && view.descriptor.client_self_maintained;
+                        let self_maintained = matches!(view.kind, ViewKind::MailList(_))
+                            && view.descriptor.client_self_maintained;
                         if !self_maintained && event_affects_view(&view.kind, &event) {
                             registry.send_recomputed_replace(&view_id).await;
                         }
@@ -463,6 +473,16 @@ impl ViewRegistry {
                 };
                 (data, local_watermark(), complete_coverage())
             }
+            ViewKind::RevLog { account_id } => {
+                let snapshot = self
+                    .reads
+                    .rev_log_snapshot(&AccountId::from(account_id.clone()))
+                    .await?;
+                let data = serde_json::to_value(snapshot).map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+                })?;
+                (data, local_watermark(), complete_coverage())
+            }
         };
         Ok(ViewSnapshot {
             view_id,
@@ -524,6 +544,15 @@ fn parse_view_kind(descriptor: &ViewDescriptor) -> Result<ViewKind, RuntimeError
                 account_id: descriptor.account_id,
             })
         }
+        "revLog" => {
+            let descriptor: RevLogDescriptor = serde_json::from_value(descriptor.payload.clone())
+                .map_err(|error| {
+                RuntimeError::invalid_descriptor(format!("invalid revLog descriptor: {error}"))
+            })?;
+            Ok(ViewKind::RevLog {
+                account_id: descriptor.account_id,
+            })
+        }
         other => Err(RuntimeError::invalid_descriptor(format!(
             "unsupported view family '{other}'"
         ))),
@@ -554,7 +583,10 @@ fn complete_coverage() -> RuntimeCoverage {
     // for single-object views (message detail, conversation) and the all-accounts
     // status, which genuinely hold their whole result.
     RuntimeCoverage {
-        ranges: vec![CoverageRange { from: None, to: None }],
+        ranges: vec![CoverageRange {
+            from: None,
+            to: None,
+        }],
     }
 }
 
@@ -613,6 +645,11 @@ fn event_affects_view(kind: &ViewKind, event: &DomainEvent) -> bool {
                     .as_ref()
                     .is_none_or(|id| event.account_id.as_str() == id)
         }
+        // Phase 2: the RevLog view recomputes on its own dedicated events
+        // (forward-action append, cursor arbitration), wired in later slices —
+        // not on the `message.updated` firehose (a per-message update would
+        // needlessly re-fetch the whole log).
+        ViewKind::RevLog { .. } => false,
     }
 }
 
@@ -645,6 +682,9 @@ fn validate_kind_account_scope(
                 account_scope.is_empty() || account_scope.iter().any(|id| id == account_id)
             }
         },
+        ViewKind::RevLog { account_id } => {
+            account_scope.is_empty() || account_scope.iter().any(|id| id == account_id)
+        }
     };
     if in_scope {
         return Ok(());
@@ -819,5 +859,140 @@ mod recompute_trigger_tests {
         assert!(!message_event_affects_list(&message_event(
             json!({ "changes": { "keywords": false, "mailboxes": false } })
         )));
+    }
+}
+
+#[cfg(test)]
+mod rev_log_view_tests {
+    use super::*;
+    use crate::near_node::RuntimeBackendOutbox;
+    use crate::read::ReadCache;
+    use async_trait::async_trait;
+    use posthaste_domain::{RevCursor, RevLogSnapshot, RevLogStep};
+    use posthaste_link_contract::{BackendApi, DownStream, LinkCoverage};
+    use posthaste_runtime_contract::{MutationReceipt, MutationRequest};
+
+    /// A read-only `BackendApi` stub that serves a canned `RevLogSnapshot` for
+    /// every account — enough to drive the `RevLog` view's build/read path
+    /// without the store plumbing (Slice 2b wires the real `LocalBackend`).
+    struct RevLogStubBackend {
+        snapshot: RevLogSnapshot,
+    }
+
+    #[async_trait]
+    impl BackendApi for RevLogStubBackend {
+        async fn forward_mutation(
+            &self,
+            _mutation: MutationRequest,
+        ) -> Result<MutationReceipt, RuntimeError> {
+            Err(RuntimeError::internal(
+                "rev_log view test is read-only",
+                None,
+            ))
+        }
+
+        async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+            Ok(Box::pin(futures_util::stream::empty()))
+        }
+
+        async fn rev_log_snapshot(
+            &self,
+            _account_id: AccountId,
+        ) -> Result<RevLogSnapshot, RuntimeError> {
+            Ok(self.snapshot.clone())
+        }
+    }
+
+    fn registry(snapshot: RevLogSnapshot) -> Arc<ViewRegistry> {
+        let (event_sender, _) = broadcast::channel(16);
+        let outbox = Arc::new(RuntimeBackendOutbox::new(false));
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(RevLogStubBackend {
+            snapshot,
+        })));
+        Arc::new(ViewRegistry::new(event_sender, outbox, reads))
+    }
+
+    fn rev_log_descriptor(account_id: &str) -> ViewDescriptor {
+        ViewDescriptor {
+            family: "revLog".to_string(),
+            payload: json!({ "accountId": account_id }),
+            client_self_maintained: false,
+        }
+    }
+
+    fn sample_snapshot() -> RevLogSnapshot {
+        RevLogSnapshot {
+            steps: vec![
+                RevLogStep {
+                    step_id: "step-1".to_string(),
+                    seq: 1,
+                    message_id: "msg-1".to_string(),
+                    source_id: "acct".to_string(),
+                    diff: json!({"keywords": {"added": ["$seen"], "removed": []}}),
+                    created_at: "2026-06-28T00:00:00Z".to_string(),
+                },
+                RevLogStep {
+                    step_id: "step-2".to_string(),
+                    seq: 2,
+                    message_id: "msg-2".to_string(),
+                    source_id: "acct".to_string(),
+                    diff: json!({"mailboxes": {"added": ["archive"], "removed": ["inbox"]}}),
+                    created_at: "2026-06-28T00:01:00Z".to_string(),
+                },
+            ],
+            cursor: RevCursor {
+                cursor_step_id: Some("step-1".to_string()),
+                redo_tail: vec!["step-2".to_string()],
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn rev_log_view_serves_the_log_and_cursor() {
+        let views = registry(sample_snapshot());
+        let snapshot = views
+            .open_view(rev_log_descriptor("acct"), None)
+            .await
+            .expect("revLog view opens");
+        // The snapshot data mirrors the canned log + cursor (camelCase wire).
+        let steps = snapshot.data["steps"]
+            .as_array()
+            .expect("steps is an array");
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["stepId"], "step-1");
+        assert_eq!(steps[0]["seq"], 1);
+        assert_eq!(steps[1]["stepId"], "step-2");
+        assert_eq!(steps[1]["seq"], 2);
+        assert_eq!(snapshot.data["cursor"]["cursorStepId"], "step-1");
+        assert_eq!(snapshot.data["cursor"]["redoTail"][0], "step-2");
+    }
+
+    #[tokio::test]
+    async fn rev_log_view_serves_an_empty_account() {
+        let views = registry(RevLogSnapshot::default());
+        let snapshot = views
+            .open_view(rev_log_descriptor("acct"), None)
+            .await
+            .expect("empty revLog view opens");
+        assert_eq!(snapshot.data["steps"].as_array().unwrap().len(), 0);
+        assert_eq!(snapshot.data["cursor"]["cursorStepId"], Value::Null);
+        assert_eq!(
+            snapshot.data["cursor"]["redoTail"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn rev_log_view_rejects_an_out_of_scope_account() {
+        let views = registry(sample_snapshot());
+        // The caller's scope is ["other-acct"]; "acct" is outside it.
+        let scope = vec!["other-acct".to_string()];
+        let result = views
+            .open_view(rev_log_descriptor("acct"), Some(scope.as_slice()))
+            .await;
+        assert!(result.is_err(), "out-of-scope revLog view must be rejected");
     }
 }

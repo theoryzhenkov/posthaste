@@ -22,7 +22,8 @@ mod store;
 mod sync_state;
 
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
-pub use rev_log::{RevCursor, RevLogStep, MAX_REV_LOG_HISTORY};
+pub use posthaste_domain::{RevCursor, RevLogStep};
+pub use rev_log::MAX_REV_LOG_HISTORY;
 
 use std::collections::BTreeSet;
 use std::fs;
