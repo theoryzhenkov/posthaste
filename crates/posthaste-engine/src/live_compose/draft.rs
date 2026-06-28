@@ -39,6 +39,9 @@ pub(crate) async fn save_draft(
         let email_obj = email_set.create();
         email_obj.mailbox_ids([drafts_mailbox_id.as_str()]);
         email_obj.keyword("$draft", true);
+        // Your own draft is not "unread" to you (IMAP/JMAP convention: drafts
+        // carry \Seen). Without it the draft syncs back as unread.
+        email_obj.keyword("$seen", true);
         email_obj.from([(identity.name.as_str(), identity.email.as_str())]);
         // Stamp the stable draft identity so a resumed edit replaces this draft
         // in place across provider id rotation (read back on sync).

@@ -32,6 +32,9 @@ pub(crate) async fn send_message(
     let mut request = gateway.client().build();
     let email_obj = request.set_email().create();
     email_obj.mailbox_ids([drafts_mailbox_id.as_str()]);
+    // A message you sent is read by you (IMAP/JMAP convention: sent mail carries
+    // \Seen). Without it the Sent copy syncs back as unread.
+    email_obj.keyword("$seen", true);
     email_obj.from([(identity.name.as_str(), identity.email.as_str())]);
     if !request_data.to.is_empty() {
         email_obj.to(request_data.to.iter().map(recipient_to_address));
