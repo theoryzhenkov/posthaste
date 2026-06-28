@@ -11,6 +11,7 @@ import { useState } from 'react'
 import type {
   AccountOverview,
   AppSettings,
+  CachePolicy,
   SmartMailboxSummary,
 } from '../api/types'
 import { runtimeMutations } from '../runtime/mutations'
@@ -178,6 +179,13 @@ export function SettingsPanel({
       invalidateAccountReadModels(queryClient)
     },
   })
+  const cacheMutation = useMutation({
+    mutationFn: (cachePolicy: CachePolicy) =>
+      runtimeMutations.settings.patch({ cachePolicy }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.settings, settings)
+    },
+  })
   const commandMutation = useAccountCommandMutation({
     accounts,
     activeAccountId,
@@ -225,6 +233,7 @@ export function SettingsPanel({
         accounts={accounts}
         accountCommandError={accountCommandError}
         activeCategory={activeCategory}
+        cacheMutation={cacheMutation}
         commandMutation={commandMutation}
         defaultAccountId={settingsQuery.data?.defaultAccountId}
         defaultMutation={defaultMutation}
