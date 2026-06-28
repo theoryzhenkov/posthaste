@@ -74,6 +74,10 @@ export interface SmartMailbox {
   position: number
   kind: SmartMailboxKind
   defaultKey: string | null
+  /** The mailbox role whose semantics apply to this view (e.g. 'trash'),
+   *  driving contextual actions like Delete Permanently. `null` for All Mail
+   *  and unassigned user smart mailboxes. */
+  role: string | null
   parentId: string | null
   rule: SmartMailboxRule
   createdAt: string
@@ -87,6 +91,7 @@ export interface SmartMailboxSummary {
   position: number
   kind: SmartMailboxKind
   defaultKey: string | null
+  role: string | null
   parentId: string | null
   unreadMessages: number
   totalMessages: number

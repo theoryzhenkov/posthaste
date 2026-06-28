@@ -152,6 +152,10 @@ pub struct SmartMailbox {
     pub kind: SmartMailboxKind,
     /// Identifies built-in smart mailboxes (e.g. "inbox", "trash").
     pub default_key: Option<String>,
+    /// The mailbox role whose semantics apply to this view (e.g. `"trash"`),
+    /// driving contextual actions like Delete Permanently. Set on the built-in
+    /// role defaults; `None` for All Mail and unassigned user smart mailboxes.
+    pub role: Option<String>,
     pub parent_id: Option<SmartMailboxId>,
     pub rule: SmartMailboxRule,
     pub created_at: String,
@@ -170,6 +174,7 @@ pub struct SmartMailboxSummary {
     pub position: i64,
     pub kind: SmartMailboxKind,
     pub default_key: Option<String>,
+    pub role: Option<String>,
     pub parent_id: Option<SmartMailboxId>,
     pub unread_messages: i64,
     pub total_messages: i64,

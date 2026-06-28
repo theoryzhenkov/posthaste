@@ -7062,6 +7062,13 @@
             "type": "integer",
             "format": "int64"
           },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The mailbox role whose semantics apply to this view (e.g. `\"trash\"`),\ndriving contextual actions like Delete Permanently. Set on the built-in\nrole defaults; `None` for All Mail and unassigned user smart mailboxes."
+          },
           "rule": {
             "$ref": "#/components/schemas/SmartMailboxRule"
           },
@@ -7291,6 +7298,12 @@
           "position": {
             "type": "integer",
             "format": "int64"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "totalMessages": {
             "type": "integer",

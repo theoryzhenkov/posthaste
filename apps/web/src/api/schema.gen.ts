@@ -2317,6 +2317,12 @@ export interface components {
             parentId?: null | components["schemas"]["SmartMailboxId"];
             /** Format: int64 */
             position: number;
+            /**
+             * @description The mailbox role whose semantics apply to this view (e.g. `"trash"`),
+             *     driving contextual actions like Delete Permanently. Set on the built-in
+             *     role defaults; `None` for All Mail and unassigned user smart mailboxes.
+             */
+            role?: string | null;
             rule: components["schemas"]["SmartMailboxRule"];
             updatedAt: string;
         };
@@ -2412,6 +2418,7 @@ export interface components {
             parentId?: null | components["schemas"]["SmartMailboxId"];
             /** Format: int64 */
             position: number;
+            role?: string | null;
             /** Format: int64 */
             totalMessages: number;
             /** Format: int64 */

@@ -7,6 +7,7 @@ pub(super) fn sample_smart_mailbox() -> SmartMailbox {
         position: 0,
         kind: SmartMailboxKind::Default,
         default_key: Some("inbox".to_string()),
+        role: None,
         parent_id: None,
         rule: SmartMailboxRule {
             root: SmartMailboxGroup {

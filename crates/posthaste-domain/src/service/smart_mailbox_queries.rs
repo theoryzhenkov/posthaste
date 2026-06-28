@@ -41,6 +41,7 @@ impl MailService {
                 position: mailbox.position,
                 kind: mailbox.kind,
                 default_key: mailbox.default_key,
+                role: mailbox.role,
                 parent_id: mailbox.parent_id,
                 unread_messages: unread,
                 total_messages: total,

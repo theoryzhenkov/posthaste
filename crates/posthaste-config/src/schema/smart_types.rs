@@ -16,6 +16,8 @@ pub struct SmartMailboxToml {
     #[serde(default = "default_user_kind")]
     pub kind: SmartMailboxKindToml,
     pub default_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
     pub parent_id: Option<String>,
     pub rule: RuleGroupToml,
     pub created_at: Option<String>,
