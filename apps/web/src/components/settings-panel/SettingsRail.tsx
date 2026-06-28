@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   FolderSearch,
+  HardDrive,
   Mailbox,
   Palette,
   Settings as SettingsIcon,
@@ -35,6 +36,13 @@ const SETTINGS_CATEGORIES = [
     description: 'Connected mail sources, sync state, and credentials.',
     icon: Mailbox,
     accent: brandAccents.coral,
+  },
+  {
+    id: 'storage',
+    label: 'Storage',
+    description: 'Cache size and what to keep on this device.',
+    icon: HardDrive,
+    accent: brandAccents.amber,
   },
   {
     id: 'mailboxes',

@@ -234,6 +234,7 @@ function isSettingsSurfaceCategory(
     value === 'general' ||
     value === 'appearance' ||
     value === 'accounts' ||
-    value === 'mailboxes'
+    value === 'mailboxes' ||
+    value === 'storage'
   )
 }
