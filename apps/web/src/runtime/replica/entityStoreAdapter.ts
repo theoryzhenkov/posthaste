@@ -40,6 +40,7 @@ import type {
   RuntimeOpenMessageListViewResult,
   RuntimeRunMutationRequest,
   RuntimeSessionViewCloseRequest,
+  RuntimeSessionViewExtendRequest,
   RuntimeSessionViewRequest,
   RuntimeUnsubscribe,
   RuntimeViewSnapshot,
@@ -225,6 +226,35 @@ class EntityStoreController {
     }
     this.views.set(viewId, entry)
     return { viewId, snapshot: this.snapshotFrom(entry, projected.rows) }
+  }
+
+  /** Extend a tracked view's window. The base returns the extended snapshot,
+   *  but the store must be re-seeded with it (mirrors the served-snapshot path
+   *  in `onBaseFrame`) — otherwise a `message.updated` arriving before the
+   *  broadcast `viewReplace` projects the pre-extend rows + emits a
+   *  row-dropping `viewReplace` (the loadMore-vs-firehose race). The caller
+   *  still applies the returned snapshot directly for scroll responsiveness.
+   */
+  async extendMailListView(
+    request: RuntimeSessionViewExtendRequest,
+  ): Promise<RuntimeOpenMessageListViewResult> {
+    const result = await this.deps.base.extendRuntimeSessionView(request)
+    const entry = this.views.get(result.viewId)
+    if (!entry) {
+      // Untracked view (not opened through the store): pass through unchanged.
+      return result
+    }
+    const rows = result.snapshot.data.rows
+    this.handle.ingestBatchJson(JSON.stringify(projectionBatchFromRows(rows)))
+    this.handle.setViewRowsJson(
+      result.viewId,
+      JSON.stringify(rows.map(toStoreRow)),
+      JSON.stringify(watermarkFromSnapshot(result.snapshot, rows)),
+    )
+    entry.lastSnapshot = result.snapshot
+    this.handle.drainDirtyJson()
+    entry.lastProjectionJson = this.projectView(result.viewId).json
+    return result
   }
 
   closeView(request: RuntimeSessionViewCloseRequest): Promise<OkResponse> {
@@ -545,6 +575,8 @@ export function createEntityStoreAdapter(
     ...deps.base,
     openRuntimeSessionMessageListView: (request) =>
       controller.openMailListView(request),
+    extendRuntimeSessionView: (request) =>
+      controller.extendMailListView(request),
     closeRuntimeSessionView: (request) => controller.closeView(request),
     subscribeRuntimeFrames: (request, handlers) =>
       controller.subscribe(request, handlers),
