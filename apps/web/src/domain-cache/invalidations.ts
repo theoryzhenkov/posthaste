@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { DomainEvent } from '../api/types'
 import { findConversationIdForMessage, mailKeys } from '../mailState'
 import { queryKeys } from '../queryKeys'
+import { isEntityStoreAdapterActive } from '../runtime/entityStoreState'
 import { eventTarget, payloadConversationId } from './payload'
 
 export function invalidateMessageListReadModels(
@@ -37,12 +38,22 @@ export async function invalidateSyncStartedReadModels(
   queryClient: QueryClient,
   accountId: string,
 ) {
+  // `messagesRoot` (the mail list) + `mailboxes(accountId)` (counts) are owned
+  // by the entity store when active — invalidating would refetch redundantly
+  // and race the store's SSE-fed updates. The rest are not store-owned.
+  const skipStoreOwned = isEntityStoreAdapterActive()
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes(accountId) }),
+    skipStoreOwned
+      ? undefined
+      : queryClient.invalidateQueries({
+          queryKey: queryKeys.mailboxes(accountId),
+        }),
     queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
     queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
     queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
+    skipStoreOwned
+      ? undefined
+      : queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
   ])
 }
 
@@ -50,8 +61,15 @@ export async function invalidateComposeSendReadModels(
   queryClient: QueryClient,
   accountId: string,
 ) {
+  // `mailboxes(accountId)` (counts) is store-owned when active; the rest are
+  // not (smart-mailbox/tag counts, sender addresses, conversations).
+  const skipStoreOwned = isEntityStoreAdapterActive()
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes(accountId) }),
+    skipStoreOwned
+      ? undefined
+      : queryClient.invalidateQueries({
+          queryKey: queryKeys.mailboxes(accountId),
+        }),
     queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
     queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
     queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead }),
@@ -119,6 +137,7 @@ export function invalidateAccountReadModels(
   queryClient: QueryClient,
   accountId?: string,
 ) {
+  const skipStoreOwned = isEntityStoreAdapterActive()
   void queryClient.invalidateQueries({ queryKey: queryKeys.settings })
   void queryClient.invalidateQueries({ queryKey: queryKeys.accounts })
   void queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead })
@@ -126,11 +145,13 @@ export function invalidateAccountReadModels(
     void queryClient.invalidateQueries({
       queryKey: queryKeys.account(accountId),
     })
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.mailboxes(accountId),
-    })
+    if (!skipStoreOwned) {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.mailboxes(accountId),
+      })
+    }
   }
-  invalidateMessageListReadModels(queryClient)
+  invalidateMessageListReadModels(queryClient, { skipStoreOwned })
 }
 
 export function invalidateTargetMessageReadModels(

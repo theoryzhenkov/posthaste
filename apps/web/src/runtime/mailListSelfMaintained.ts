@@ -1,6 +1,10 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import type { AccountOverview, Mailbox, SmartMailboxSummary } from '@/api/types'
+import {
+  ALL_MAIL_DEFAULT_KEY,
+  KNOWN_MAILBOX_ROLES,
+} from '@/domainVocabulary'
 import { queryKeys } from '@/queryKeys'
 
 import type { RuntimeMessagePageRequest, RuntimeMessagePageScope } from './types'
@@ -32,15 +36,10 @@ export interface MailListPredicateContext {
 }
 
 /** The built-in role smart mailboxes whose membership is a single
- *  `mailboxRole == <role>` rule — evaluable from the firehose projection. */
-const ROLE_DEFAULT_KEYS = new Set([
-  'inbox',
-  'archive',
-  'drafts',
-  'sent',
-  'junk',
-  'trash',
-])
+ *  `mailboxRole == <role>` rule — evaluable from the firehose projection.
+ *  Derived from {@link KNOWN_MAILBOX_ROLES} so the resolver + the role
+ *  vocabulary cannot drift. */
+const ROLE_DEFAULT_KEYS = new Set<string>(KNOWN_MAILBOX_ROLES)
 
 /**
  * The store-side membership predicate for a mail-list view, or `'deferred'` when
@@ -72,7 +71,7 @@ export function resolveMailListPredicate(
     case 'smart-mailbox': {
       const key = ctx.smartMailboxDefaultKey(scope.smartMailboxId)
       if (key == null) return 'deferred'
-      if (key === 'all-mail') return 'all'
+      if (key === ALL_MAIL_DEFAULT_KEY) return 'all'
       if (!ROLE_DEFAULT_KEYS.has(key)) return 'deferred'
       const ids = ctx.mailboxesForRole(key)
       return ids.length > 0 ? { inMailboxes: ids } : 'deferred'
