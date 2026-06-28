@@ -36,10 +36,60 @@ pub(super) fn read_app_toml(config_root: &Path) -> Result<AppToml, ConfigError> 
     toml::from_str(&content).map_err(|e| ConfigError::Parse(format!("app.toml: {e}")))
 }
 
-/// Serializes and atomically writes `app.toml`.
+/// The top-level keys `AppToml` owns. The lossless write overwrites exactly
+/// these from the struct and leaves everything else in the file untouched
+/// (comments, ordering, and any unknown section a user or LLM added). Add a key
+/// here whenever `AppToml` gains a top-level section — forgetting only means the
+/// new section is not written (a visible bug), never that another section is
+/// silently dropped (the round-trip footgun this fixes).
+const APP_TOML_MANAGED_KEYS: &[&str] = &[
+    "schema_version",
+    "default_source_id",
+    "automations",
+    "draft_automations",
+    "daemon",
+    "logging",
+    "cache",
+    "link",
+];
+
+/// Atomically write `value`'s managed top-level keys into the existing file at
+/// `path` without disturbing anything else: comments, key ordering, and unknown
+/// sections survive. A managed key absent from `value` (a cleared `Option`) is
+/// removed. This is the lossless replacement for `to_string_pretty`, which
+/// rebuilt the whole file from the struct and dropped everything the struct does
+/// not model.
+fn write_managed_toml<T: serde::Serialize>(
+    path: &Path,
+    value: &T,
+    managed_keys: &[&str],
+) -> Result<(), ConfigError> {
+    let existing = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(io_error(err)),
+    };
+    let mut doc = existing
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| ConfigError::Parse(format!("{}: {e}", path.display())))?;
+    let managed = toml::to_string_pretty(value)
+        .map_err(|e| ConfigError::Parse(e.to_string()))?
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| ConfigError::Parse(e.to_string()))?;
+    for key in managed_keys {
+        match managed.get(key) {
+            Some(item) => doc[*key] = item.clone(),
+            None => {
+                doc.remove(key);
+            }
+        }
+    }
+    atomic_write(path, doc.to_string().as_bytes())
+}
+
+/// Atomically writes `app.toml`, preserving comments + unknown sections.
 pub(super) fn write_app_toml(config_root: &Path, app: &AppToml) -> Result<(), ConfigError> {
-    let content = toml::to_string_pretty(app).map_err(|e| ConfigError::Parse(e.to_string()))?;
-    atomic_write(&config_root.join("app.toml"), content.as_bytes())
+    write_managed_toml(&config_root.join("app.toml"), app, APP_TOML_MANAGED_KEYS)
 }
 
 /// Reads all `sources/*.toml` files, validates filename-ID match, and returns
@@ -174,4 +224,88 @@ pub(super) fn io_error(err: std::io::Error) -> ConfigError {
 /// Wraps a lock-poisoned error into `ConfigError::Io`.
 pub(super) fn lock_error<T>(_: T) -> ConfigError {
     ConfigError::Io("config lock poisoned".to_string())
+}
+
+#[cfg(test)]
+mod lossless_write_tests {
+    use super::*;
+
+    #[test]
+    fn write_app_toml_preserves_comments_and_unknown_sections() {
+        let dir = std::env::temp_dir().join(format!(
+            "ph-cfg-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("app.toml");
+        fs::write(
+            &path,
+            "# my notes\nschema_version = 1\ndefault_source_id = \"acct-a\"\n\n# keep this too\n[custom]\nmy_key = \"keep me\"\n",
+        )
+        .unwrap();
+
+        // Load (the struct can't model [custom]), change a managed field, write back.
+        let mut app = read_app_toml(&dir).unwrap();
+        app.default_source_id = Some("acct-b".to_string());
+        write_app_toml(&dir, &app).unwrap();
+
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("# my notes"),
+            "leading comment dropped:\n{after}"
+        );
+        assert!(
+            after.contains("[custom]") && after.contains("keep me"),
+            "unknown section dropped:\n{after}"
+        );
+        assert!(
+            after.contains("# keep this too"),
+            "section comment dropped:\n{after}"
+        );
+        assert!(
+            after.contains("acct-b"),
+            "managed field not updated:\n{after}"
+        );
+        assert!(
+            !after.contains("acct-a"),
+            "stale managed value lingered:\n{after}"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_app_toml_removes_a_cleared_managed_key() {
+        let dir = std::env::temp_dir().join(format!(
+            "ph-cfg-clear-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("app.toml");
+        fs::write(&path, "default_source_id = \"acct-a\"\n[custom]\nk = 1\n").unwrap();
+
+        let mut app = read_app_toml(&dir).unwrap();
+        app.default_source_id = None; // cleared in the UI
+        write_app_toml(&dir, &app).unwrap();
+
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(
+            !after.contains("default_source_id"),
+            "cleared key not removed:\n{after}"
+        );
+        assert!(
+            after.contains("[custom]"),
+            "unknown section dropped on clear:\n{after}"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }
