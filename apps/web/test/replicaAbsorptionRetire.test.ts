@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import type { EntityStoreHandle } from '../src/runtime/replica/handle'
+
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 const present =
   existsSync(join(wasmDir, 'posthaste_link_wasm.js')) &&
@@ -27,7 +29,12 @@ async function stillPendingAfterConfirmAndAbsorbingBase(
   seed: string[],
   base: string[],
 ): Promise<boolean> {
-  const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+  const mod = (await import(
+    join(wasmDir, 'posthaste_link_wasm.js')
+  )) as unknown as {
+    initSync(input: { module: BufferSource }): unknown
+    EntityStoreHandle: new () => EntityStoreHandle
+  }
   mod.initSync({
     module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
   })
@@ -102,7 +109,12 @@ describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
     ).toBe(false)
   })
   it('a stale provider re-serve BEFORE confirm does not revert (confirmed-gating, Bug 1a)', async () => {
-    const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+    const mod = (await import(
+      join(wasmDir, 'posthaste_link_wasm.js')
+    )) as unknown as {
+      initSync(input: { module: BufferSource }): unknown
+      EntityStoreHandle: new () => EntityStoreHandle
+    }
     mod.initSync({
       module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
     })
@@ -179,7 +191,12 @@ describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
     expect(h.hasPending()).toBe(true)
   })
   it('BUG 1b guard target: a stale re-serve (older version) after confirm is rejected', async () => {
-    const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+    const mod = (await import(
+      join(wasmDir, 'posthaste_link_wasm.js')
+    )) as unknown as {
+      initSync(input: { module: BufferSource }): unknown
+      EntityStoreHandle: new () => EntityStoreHandle
+    }
     mod.initSync({
       module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
     })

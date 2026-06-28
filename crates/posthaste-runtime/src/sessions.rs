@@ -4,9 +4,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
 use posthaste_domain::{DomainEvent, Id};
-use posthaste_link_core::MessageChangeDiff;
 use posthaste_runtime_contract::{
-    ClientMutationId, DiffStep, MailListDelta, MailListRowState, MailListViewState,
+    ClientMutationId, MailListDelta, MailListRowState, MailListViewState,
     MutationNotification, MutationReceipt, MutationRequest, MutationSettlementState,
     RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeFrameSubscription,
     RuntimeMutationId, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
@@ -47,19 +46,8 @@ struct StoredSession {
     /// Terminal mutation IDs in settlement order, used to evict the oldest
     /// settled mutations once the live catch-up window reaches its cap.
     settled_mutation_ids: VecDeque<RuntimeMutationId>,
-    /// Reversible mutations the session has applied, oldest first. Each step is
-    /// an invertible change-diff; undo applies `inverse(diff)`, redo applies
-    /// `diff`, both as ordinary `message.applyDiff` mutations.
-    undo_history: Vec<DiffStep>,
-    /// Steps moved off `undo_history` by an undo, oldest first. Redo replays the
-    /// most recent. Cleared whenever a new user mutation's diff is recorded.
-    redo_history: Vec<DiffStep>,
     event_task: Option<AbortHandle>,
 }
-
-/// Upper bound on each session's undo and redo history (matches the renderer's
-/// former client-side bound).
-const MAX_HISTORY: usize = 50;
 
 /// Upper bound on the number of terminal mutations retained in a session for
 /// catch-up retransmission. Older mutations are evicted so reconnect cost stays
@@ -183,8 +171,6 @@ impl SessionRegistry {
                 latest_mutations: HashMap::new(),
                 mutations_by_client_id: HashMap::new(),
                 settled_mutation_ids: VecDeque::new(),
-                undo_history: Vec::new(),
-                redo_history: Vec::new(),
                 event_task: None,
             },
         );
@@ -430,119 +416,6 @@ impl SessionRegistry {
         // outbox the moment it dispatches it.
         drop(sessions);
         Ok(MutationAcceptance::New { mutation_id })
-    }
-
-    /// Record a reversible mutation's invertible diff onto the session's undo
-    /// history (the step's seq is assigned here), clearing the redo history, and
-    /// broadcast the new availability. Called after the backend confirms a
-    /// diff-eligible message mutation; the before/after read produced `diff`.
-    pub(crate) fn record_diff(
-        &self,
-        session_id: &RuntimeSessionId,
-        source_id: String,
-        message_id: String,
-        diff: MessageChangeDiff,
-    ) -> Result<(), RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        let step = DiffStep {
-            seq: next_seq(session),
-            source_id,
-            message_id,
-            diff,
-        };
-        push_capped(&mut session.undo_history, step);
-        session.redo_history.clear();
-        let frame = history_frame(session);
-        let sender = session.frames.clone();
-        drop(sessions);
-        let _ = sender.send(frame);
-        Ok(())
-    }
-
-    /// Take the undo step with the given seq off the undo history so the caller
-    /// can run its inverse (`message.applyDiff { undoOf }`). On success the
-    /// caller pushes it to redo with [`push_redo`]; on failure it restores it with
-    /// [`push_undo`]. `None` when no step matches (a stale `undoOf`: under
-    /// last-writer-wins the applyDiff still runs, it just does not navigate).
-    pub(crate) fn pop_undo_by_seq(
-        &self,
-        session_id: &RuntimeSessionId,
-        seq: RuntimeSessionSeq,
-    ) -> Result<Option<DiffStep>, RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        Ok(remove_by_seq(&mut session.undo_history, seq))
-    }
-
-    /// Take the redo step with the given seq off the redo history so the caller
-    /// can replay its forward diff (`message.applyDiff { redoOf }`).
-    pub(crate) fn pop_redo_by_seq(
-        &self,
-        session_id: &RuntimeSessionId,
-        seq: RuntimeSessionSeq,
-    ) -> Result<Option<DiffStep>, RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        Ok(remove_by_seq(&mut session.redo_history, seq))
-    }
-
-    /// Push a step onto the undo history (capped), without clearing redo. Used to
-    /// commit a redo replay (the step returns to undo) or to roll back a failed
-    /// undo (the step returns to where it was popped from).
-    pub(crate) fn push_undo(
-        &self,
-        session_id: &RuntimeSessionId,
-        step: DiffStep,
-    ) -> Result<(), RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        push_capped(&mut session.undo_history, step);
-        Ok(())
-    }
-
-    /// Push a step onto the redo history (capped), without clearing it. Used to
-    /// commit an undo (the undone step becomes redoable).
-    pub(crate) fn push_redo(
-        &self,
-        session_id: &RuntimeSessionId,
-        step: DiffStep,
-    ) -> Result<(), RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        push_capped(&mut session.redo_history, step);
-        Ok(())
-    }
-
-    /// Broadcast the session's current undo/redo availability — `canUndo`/
-    /// `canRedo` plus the current top of each stack as an invertible diff — so
-    /// the renderer can drive button state and construct the undo/redo
-    /// `message.applyDiff` mutation. Called whenever the histories change.
-    ///
-    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    pub(crate) fn emit_history_frame(
-        &self,
-        session_id: &RuntimeSessionId,
-    ) -> Result<(), RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        let frame = history_frame(session);
-        let sender = session.frames.clone();
-        drop(sessions);
-        let _ = sender.send(frame);
-        Ok(())
     }
 
     pub(crate) fn settle_mutation(
@@ -957,38 +830,6 @@ fn next_seq(session: &mut StoredSession) -> RuntimeSessionSeq {
     RuntimeSessionSeq::new(session.last_seq)
 }
 
-/// Push onto a history stack, evicting the oldest entry once `MAX_HISTORY` is
-/// exceeded so a session's undo/redo state stays bounded.
-fn push_capped<T>(stack: &mut Vec<T>, entry: T) {
-    stack.push(entry);
-    if stack.len() > MAX_HISTORY {
-        stack.remove(0);
-    }
-}
-
-/// Build the `MutationHistory` frame for a session's current undo/redo state:
-/// availability flags plus the top diff of each stack. The client needs only the
-/// current top of each stack to construct the undo/redo `message.applyDiff`
-/// mutation (it never needs the full history).
-fn history_frame(session: &mut StoredSession) -> RuntimeFrame {
-    let undo_top = session.undo_history.last().cloned();
-    let redo_top = session.redo_history.last().cloned();
-    RuntimeFrame::MutationHistory {
-        session_seq: next_seq(session),
-        can_undo: undo_top.is_some(),
-        can_redo: redo_top.is_some(),
-        undo_top,
-        redo_top,
-    }
-}
-
-/// Remove the step with the given seq from a history, searching from the most
-/// recent (the top), preserving the order of the remaining steps.
-fn remove_by_seq(history: &mut Vec<DiffStep>, seq: RuntimeSessionSeq) -> Option<DiffStep> {
-    let position = history.iter().rposition(|step| step.seq == seq)?;
-    Some(history.remove(position))
-}
-
 fn event_matches_session_scope(event: &DomainEvent, account_scope: Option<&[String]>) -> bool {
     account_scope
         .map(|scope| {
@@ -1128,8 +969,6 @@ mod mutation_eviction_tests {
             latest_mutations: HashMap::new(),
             mutations_by_client_id: HashMap::new(),
             settled_mutation_ids: VecDeque::new(),
-            undo_history: Vec::new(),
-            redo_history: Vec::new(),
             event_task: None,
         }
     }

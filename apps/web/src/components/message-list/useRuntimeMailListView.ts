@@ -244,7 +244,6 @@ export function useRuntimeMailListView({
                 case 'viewClosed':
                 case 'mutationNotification':
                 case 'notification':
-                case 'mutationHistory':
                 case 'heartbeat':
                   return
               }

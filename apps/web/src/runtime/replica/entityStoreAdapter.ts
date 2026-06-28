@@ -37,6 +37,7 @@ import type {
   RuntimeFrameSubscriptionRequest,
   RuntimeMailListRowState,
   RuntimeMailListViewState,
+  RuntimeMutationReceipt,
   RuntimeOpenMessageListViewResult,
   RuntimeRunMutationRequest,
   RuntimeSessionViewCloseRequest,
@@ -49,6 +50,7 @@ import type { OkResponse } from '../../api/types'
 import type {
   EntityStoreHandle,
   EntityStoreHandleFactory,
+  MessageChangeDiff,
   ReplicaAssertion,
   SettlementVerdict,
 } from './handle'
@@ -59,6 +61,7 @@ import {
   type MailListPredicate,
 } from '../mailListSelfMaintained'
 import type { OutboxStore } from './outboxStore'
+import { getUndoHistoryStore, makeRevStep } from './undoHistoryStore'
 import { parseMessageMutation } from './wasmUtil'
 
 /** The store's sort key `[receivedAt, id]`. */
@@ -115,8 +118,6 @@ interface ViewEntry {
   /** The last projected-rows JSON, to emit `viewReplace` only when it moved. */
   lastProjectionJson: string
 }
-
-
 
 function sortKeyOf(projection: { receivedAt: string; id: string }): SortKey {
   return { receivedAt: projection.receivedAt, messageId: projection.id }
@@ -290,6 +291,21 @@ class EntityStoreController {
       return this.deps.base.runRuntimeMutation(request)
     }
     const clientMutationId = request.clientMutationId
+    // Capture the invertible diff BEFORE folding the assertion (prev = current
+    // folded base, curr = base + assertion), for the client-owned undo history.
+    // `message.applyDiff` is the undo/redo vehicle itself — the hook navigates
+    // the history for it, so it is NOT a forward action to record.
+    const isUndoVehicle = request.name === 'message.applyDiff'
+    let capturedDiff: MessageChangeDiff | null = null
+    if (!isUndoVehicle) {
+      const diffJson = this.handle.captureMutationDiffJson(
+        translated.messageId,
+        JSON.stringify(translated.assertion),
+      )
+      if (diffJson !== 'null') {
+        capturedDiff = JSON.parse(diffJson) as MessageChangeDiff
+      }
+    }
     this.handle.acceptMutationJson(
       JSON.stringify({
         mutationId: clientMutationId,
@@ -306,20 +322,31 @@ class EntityStoreController {
     })
     this.drainAndEmit()
 
+    let receipt: RuntimeMutationReceipt
     try {
-      const receipt = await this.deps.base.runRuntimeMutation(request)
+      receipt = await this.deps.base.runRuntimeMutation(request)
       if (receipt.runtimeMutationId) {
         await this.deps.outbox.linkRuntimeMutationId(
           clientMutationId,
           receipt.runtimeMutationId,
         )
       }
-      return receipt
     } catch (error) {
       // Synchronous rejection: retire the optimism and surface the revert.
       await this.settleAll(clientMutationId, 'failed')
       throw error
     }
+    // Record the forward action in the client history once the runtime has
+    // accepted it. A persist failure here must NOT trigger the optimism revert
+    // (the mutation succeeded), so this is outside the try/catch above.
+    if (capturedDiff) {
+      const sourceId =
+        (request.args as { sourceId?: string } | undefined)?.sourceId ?? ''
+      await getUndoHistoryStore().pushForward(
+        makeRevStep(translated.messageId, sourceId, capturedDiff),
+      )
+    }
+    return receipt
   }
 
   private onBaseFrame(
@@ -434,9 +461,8 @@ class EntityStoreController {
   private roleMapForRequest(
     request: RuntimeRunMutationRequest,
   ): Record<string, string> {
-    const sourceId = (
-      request.args as { sourceId?: string } | undefined
-    )?.sourceId
+    const sourceId = (request.args as { sourceId?: string } | undefined)
+      ?.sourceId
     if (!sourceId) return {}
     const mailboxes = this.queryClient.getQueryData<Mailbox[]>(
       queryKeys.mailboxes(sourceId),

@@ -28,7 +28,6 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 
-use posthaste_link_core::MessageChangeDiff;
 
 macro_rules! define_id {
     ($name:ident, u64, $getter:ident) => {
@@ -411,24 +410,6 @@ pub enum RuntimeFrame {
         #[cfg_attr(feature = "openapi", schema(value_type = Object))]
         payload: Value,
     },
-    /// Undo/redo availability for the session's history, emitted whenever the
-    /// stack changes so the renderer can drive undo/redo button state. Carries
-    /// the current top of each stack as an invertible diff (`undoTop`/`redoTop`):
-    /// the client folds `inverse(undoTop.diff)` (undo) or `redoTop.diff` (redo)
-    /// into its outbox as an ordinary `message.applyDiff` mutation, so undo/redo
-    /// flow through the same optimism guard as any user action (no flicker).
-    MutationHistory {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
-        #[serde(rename = "canUndo")]
-        can_undo: bool,
-        #[serde(rename = "canRedo")]
-        can_redo: bool,
-        #[serde(rename = "undoTop", default, skip_serializing_if = "Option::is_none")]
-        undo_top: Option<DiffStep>,
-        #[serde(rename = "redoTop", default, skip_serializing_if = "Option::is_none")]
-        redo_top: Option<DiffStep>,
-    },
     Heartbeat {
         #[serde(rename = "sessionSeq")]
         session_seq: RuntimeSessionSeq,
@@ -444,38 +425,10 @@ impl RuntimeFrame {
             | Self::ViewError { session_seq, .. }
             | Self::ViewClosed { session_seq, .. }
             | Self::MutationNotification { session_seq, .. }
-            | Self::MutationHistory { session_seq, .. }
             | Self::Notification { session_seq, .. }
             | Self::Heartbeat { session_seq } => *session_seq,
         }
     }
-}
-
-/// One recorded reversible step on a session's undo/redo history: the session
-/// seq at which the diff was captured, the message it touched, and the
-/// invertible change-diff. The runtime owns the seq-ordered history and
-/// broadcasts the current top of each stack via [`RuntimeFrame::MutationHistory`];
-/// the client applies `inverse(diff)` (undo) or `diff` (redo) as an ordinary
-/// `message.applyDiff` mutation, carrying the step's `seq` as the `undoOf`/`redoOf`
-/// hint so the runtime can navigate its own history.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct DiffStep {
-    /// The session seq at which this diff was recorded (the history step id).
-    pub seq: RuntimeSessionSeq,
-    /// The message the reversible mutation touched.
-    #[serde(rename = "messageId")]
-    pub message_id: String,
-    /// The account the message belongs to, so the client can construct the
-    /// undo/redo `message.applyDiff` mutation (scope + the far-node read).
-    #[serde(rename = "sourceId")]
-    pub source_id: String,
-    /// The invertible change-diff. `inverse(diff)` reconstructs the pre-mutation
-    /// state over `curr`; represented as an opaque object on the OpenAPI schema
-    /// (the diff type lives in the portable `posthaste-link-core` crate).
-    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
-    pub diff: MessageChangeDiff,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

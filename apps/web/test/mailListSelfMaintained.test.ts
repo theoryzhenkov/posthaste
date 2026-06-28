@@ -22,8 +22,7 @@ const ctx: MailListPredicateContext = {
       'default-all-mail': 'all-mail',
       'user-rule': null,
     })[id],
-  mailboxesForRole: (role) =>
-    role === 'inbox' ? ['inbox-a', 'inbox-b'] : [],
+  mailboxesForRole: (role) => (role === 'inbox' ? ['inbox-a', 'inbox-b'] : []),
 }
 
 describe('resolveMailListPredicate', () => {
@@ -48,9 +47,9 @@ describe('resolveMailListPredicate', () => {
   })
 
   it('is a one-element set for a concrete source mailbox', () => {
-    expect(resolveMailListPredicate(sourceMailbox('inbox'), 'date', ctx)).toEqual(
-      { inMailboxes: ['inbox'] },
-    )
+    expect(
+      resolveMailListPredicate(sourceMailbox('inbox'), 'date', ctx),
+    ).toEqual({ inMailboxes: ['inbox'] })
   })
 
   it('defers a role smart mailbox whose role resolves to no mailbox', () => {
@@ -93,16 +92,18 @@ describe('isMailListSelfMaintained', () => {
   })
 
   it('is deferred for a non-date sort', () => {
-    expect(isMailListSelfMaintained(sourceMailbox('inbox'), 'subject', ctx)).toBe(
-      false,
-    )
+    expect(
+      isMailListSelfMaintained(sourceMailbox('inbox'), 'subject', ctx),
+    ).toBe(false)
     expect(
       isMailListSelfMaintained(sourceMailbox('inbox'), 'relevance', ctx),
     ).toBe(false)
   })
 
   it('is deferred for a source mailbox with no concrete mailbox id', () => {
-    expect(isMailListSelfMaintained(sourceMailbox(null), 'date', ctx)).toBe(false)
+    expect(isMailListSelfMaintained(sourceMailbox(null), 'date', ctx)).toBe(
+      false,
+    )
   })
 
   it('is deferred for a user-defined smart mailbox (opaque rule)', () => {
@@ -116,6 +117,8 @@ describe('isMailListSelfMaintained', () => {
   })
 
   it('is deferred for a global scope', () => {
-    expect(isMailListSelfMaintained({ kind: 'global' }, 'date', ctx)).toBe(false)
+    expect(isMailListSelfMaintained({ kind: 'global' }, 'date', ctx)).toBe(
+      false,
+    )
   })
 })

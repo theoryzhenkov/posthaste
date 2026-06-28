@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import type { EntityStoreHandle } from '../src/runtime/replica/handle'
+
 // Regression for the move/archive/delete flicker (distinct from the keyword
 // flicker): a row leaves the inbox, then a STALE view re-serve that still lists
 // it must NOT re-add it ("comes back after a blink and stays until refresh").
@@ -36,7 +38,12 @@ const row = [
 
 describe.skipIf(!present)('mailbox-move flicker (real WASM)', () => {
   it('a stale re-serve does not re-add a moved-out row', async () => {
-    const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+    const mod = (await import(
+      join(wasmDir, 'posthaste_link_wasm.js')
+    )) as unknown as {
+      initSync(input: { module: BufferSource }): unknown
+      EntityStoreHandle: new () => EntityStoreHandle
+    }
     mod.initSync({
       module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
     })
@@ -52,7 +59,7 @@ describe.skipIf(!present)('mailbox-move flicker (real WASM)', () => {
     )
     const inboxIds = () =>
       (JSON.parse(h.projectViewJson('inbox')) ?? []).map(
-        (r: any) => r.messageId,
+        (r: { messageId: string }) => r.messageId,
       )
 
     // m1 in inbox @ v1.

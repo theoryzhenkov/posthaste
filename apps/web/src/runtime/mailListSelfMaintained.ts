@@ -1,13 +1,13 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import type { AccountOverview, Mailbox, SmartMailboxSummary } from '@/api/types'
-import {
-  ALL_MAIL_DEFAULT_KEY,
-  KNOWN_MAILBOX_ROLES,
-} from '@/domainVocabulary'
+import { ALL_MAIL_DEFAULT_KEY, KNOWN_MAILBOX_ROLES } from '@/domainVocabulary'
 import { queryKeys } from '@/queryKeys'
 
-import type { RuntimeMessagePageRequest, RuntimeMessagePageScope } from './types'
+import type {
+  RuntimeMessagePageRequest,
+  RuntimeMessagePageScope,
+} from './types'
 
 /**
  * The store's membership predicate for a mail-list view (mirrors the WASM
@@ -15,10 +15,7 @@ import type { RuntimeMessagePageRequest, RuntimeMessagePageScope } from './types
  * `mailboxIds` intersect the set. A concrete folder is a one-element set; a role
  * smart mailbox (e.g. "All Inboxes") is the role's mailbox in every account.
  */
-export type MailListPredicate =
-  | { inMailboxes: string[] }
-  | 'all'
-  | 'deferred'
+export type MailListPredicate = { inMailboxes: string[] } | 'all' | 'deferred'
 
 /**
  * Resolution context for {@link resolveMailListPredicate}, read from the cached
