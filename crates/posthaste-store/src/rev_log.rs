@@ -205,3 +205,13 @@ impl DatabaseStore {
         })
     }
 }
+
+impl RevLogStore for DatabaseStore {
+    /// The account's `rev_log` steps + cursor — the snapshot behind the `RevLog`
+    /// synced view. Combines the bounded log read with the cursor.
+    fn rev_log_snapshot(&self, account_id: &AccountId) -> Result<RevLogSnapshot, StoreError> {
+        let steps = self.fetch_rev_log(account_id, None, MAX_REV_LOG_HISTORY)?;
+        let cursor = self.get_rev_cursor(account_id)?;
+        Ok(RevLogSnapshot { steps, cursor })
+    }
+}
