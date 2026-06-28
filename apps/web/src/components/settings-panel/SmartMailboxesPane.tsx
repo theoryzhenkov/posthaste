@@ -164,7 +164,7 @@ export function SmartMailboxesPane({
             smartMailboxes.map((mailbox) => (
               <MailboxListRow
                 key={mailbox.id}
-                accent={smartMailboxAccent(mailbox.name)}
+                accent={smartMailboxAccent(mailbox.role, mailbox.name)}
                 icon={<FolderSearch size={15} strokeWidth={1.45} />}
                 label={mailbox.name}
                 sublabel={`${mailbox.totalMessages} messages · ${mailbox.unreadMessages} unread`}

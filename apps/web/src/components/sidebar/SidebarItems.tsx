@@ -5,7 +5,6 @@ import type { Mailbox, TagSummary } from '@/api/types'
 import { cn } from '@/lib/utils'
 import {
   mailboxRoleAccent,
-  mailboxRoleFromName,
   renderMailboxRoleIcon,
   smartMailboxAccent,
   smartMailboxFallbackIcon,
@@ -24,17 +23,19 @@ function roleIcon(role: Mailbox['role'], size = 14): ReactNode {
   return renderMailboxRoleIcon(role, size)
 }
 
-function smartMailboxIcon(name: string, size = 14): ReactNode {
-  return renderMailboxRoleIcon(
-    mailboxRoleFromName(name),
-    size,
-    smartMailboxFallbackIcon(name),
-  )
+function smartMailboxIcon(
+  role: string | null,
+  defaultKey: string | null,
+  size = 14,
+): ReactNode {
+  return renderMailboxRoleIcon(role, size, smartMailboxFallbackIcon(defaultKey))
 }
 
 export function SmartMailboxItem({
   id,
   name,
+  role,
+  defaultKey,
   unreadMessages,
   accent,
   isSelected,
@@ -43,6 +44,8 @@ export function SmartMailboxItem({
 }: {
   id: string
   name: string
+  role: string | null
+  defaultKey: string | null
   unreadMessages?: number
   accent?: string
   isSelected: boolean
@@ -60,7 +63,7 @@ export function SmartMailboxItem({
         className="flex w-4 justify-center"
         style={accent ? { color: accent } : undefined}
       >
-        {smartMailboxIcon(name)}
+        {smartMailboxIcon(role, defaultKey)}
       </span>
       <span className="min-w-0 flex-1 truncate">
         {name}
@@ -100,9 +103,9 @@ export function TagItem({
     <button className={itemButtonClass(false)} onClick={onSelect} type="button">
       <span
         className="flex w-4 justify-center"
-        style={{ color: smartMailboxAccent(tag.name) }}
+        style={{ color: smartMailboxAccent(null, tag.name) }}
       >
-        {smartMailboxIcon(tag.name)}
+        {smartMailboxIcon(null, null)}
       </span>
       <span className="min-w-0 flex-1 truncate">{tag.name}</span>
       {tag.unreadMessages > 0 && <UnreadCount count={tag.unreadMessages} />}
