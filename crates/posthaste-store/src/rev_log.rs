@@ -217,7 +217,7 @@ impl DatabaseStore {
                     params![account_id.as_str(), excess],
                 )
                 .map_err(sql_to_store_error)?;
-            Ok(deleted.max(0) as u32)
+            Ok(deleted as u32)
         })
     }
 }
