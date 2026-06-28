@@ -178,7 +178,7 @@ export class EntityStoreHandle {
      * Register a view with its predicate, sort, and initial coverage
      * watermark. The host calls this when a view is opened (or its window
      * grows). `args_json` is `{predicate, sortField, sortDirection,
-     * watermark?}` where `predicate` is `{"inMailbox":id}` / `"all"` /
+     * watermark?}` where `predicate` is `{"inMailboxes":[id,..]}` / `"all"` /
      * `"deferred"` and `watermark` is `{"receivedAt","messageId"}` or null
      * (reaches BOTTOM). Marks the view dirty.
      * @param {string} view_id

@@ -10,7 +10,7 @@
 //! [`EntityStore::drain_dirty`]. The host does the reactive fan-out (write the
 //! changed keys into the renderer cache); the store is a dumb dirty-tracker.
 //!
-//! For an **evaluable** predicate (`InMailbox`, `All`) the store self-maintains
+//! For an **evaluable** predicate (`InMailboxes`, `All`) the store self-maintains
 //! each view's membership: on a message mutation it runs one local evaluation —
 //! place the row if the predicate matches *and* the message's sort key is within
 //! the held coverage `[TOP, W]`, otherwise ignore (or remove, if it was held and
@@ -90,15 +90,20 @@ pub struct SortKey {
     pub message_id: String,
 }
 
-/// A view's membership predicate. `InMailbox`/`All` are **evaluable** (the store
-/// self-maintains placement); `Deferred` is not (the host drives deltas).
+/// A view's membership predicate. `InMailboxes`/`All` are **evaluable** (the
+/// store self-maintains placement); `Deferred` is not (the host drives deltas).
 ///
-/// Serializes externally-tagged + camelCase: `{"inMailbox":id}` / `"all"` /
-/// `"deferred"`.
+/// `InMailboxes` is set-intersection: a message matches if its `mailboxIds`
+/// intersect the predicate's set. A concrete-folder view holds a one-element
+/// set; a role smart mailbox (e.g. "All Inboxes") holds the role's mailbox in
+/// every account.
+///
+/// Serializes externally-tagged + camelCase: `{"inMailboxes":[id,..]}` /
+/// `"all"` / `"deferred"`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ViewPredicate {
-    InMailbox(String),
+    InMailboxes(Vec<String>),
     All,
     Deferred,
 }
@@ -108,10 +113,15 @@ impl ViewPredicate {
     /// (the store does not decide; the host places via deltas).
     fn matches(&self, projection: &Value) -> bool {
         match self {
-            ViewPredicate::InMailbox(mailbox_id) => projection
+            ViewPredicate::InMailboxes(mailbox_ids) => projection
                 .get("mailboxIds")
                 .and_then(Value::as_array)
-                .map(|ids| ids.iter().any(|id| id.as_str() == Some(mailbox_id)))
+                .map(|ids| {
+                    ids.iter().any(|id| {
+                        id.as_str()
+                            .is_some_and(|id| mailbox_ids.iter().any(|m| m == id))
+                    })
+                })
                 .unwrap_or(false),
             ViewPredicate::All => true,
             ViewPredicate::Deferred => true,
@@ -822,7 +832,7 @@ mod tests {
         // A small window: m2 held at the watermark, with more below (watermark Some).
         store.register_view(
             "inbox",
-            ViewPredicate::InMailbox("inbox".into()),
+            ViewPredicate::InMailboxes(vec!["inbox".into()]),
             "receivedAt".into(),
             SortDirection::Desc,
             Some(key("2026-04-28T12:00:00Z", "m2")),
@@ -1040,6 +1050,38 @@ mod tests {
         // The host drives a deferred view via set_view_rows; a raw mutation
         // does not place a row.
         assert!(store.view_rows("search").unwrap().is_empty());
+    }
+
+    #[test]
+    fn in_mailboxes_places_a_row_matching_any_set_member() {
+        // "All Inboxes": the inbox-role mailbox in two accounts. A message in
+        // either account's inbox is placed; one in neither is ignored.
+        let mut store = EntityStore::new();
+        store.register_view(
+            "all-inboxes",
+            ViewPredicate::InMailboxes(vec!["inbox-a".into(), "inbox-b".into()]),
+            "receivedAt".into(),
+            SortDirection::Desc,
+            None,
+        );
+        store.drain_dirty();
+        store.ingest_batch(vec![
+            StoreUpdate::Message {
+                message_id: "m-a".into(),
+                projection: summary("m-a", "2026-04-29T12:00:00Z", &["inbox-b"]),
+                deleted: false,
+                count_deltas: vec![],
+            },
+            StoreUpdate::Message {
+                message_id: "m-c".into(),
+                projection: summary("m-c", "2026-04-29T11:00:00Z", &["archive-a"]),
+                deleted: false,
+                count_deltas: vec![],
+            },
+        ]);
+        let rows = store.view_rows("all-inboxes").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].message_id, "m-a");
     }
 
     // --- optimism -----------------------------------------------------------
@@ -1466,8 +1508,8 @@ mod tests {
         assert_eq!(back, row);
 
         assert_eq!(
-            serde_json::to_value(ViewPredicate::InMailbox("inbox".into())).unwrap(),
-            json!({"inMailbox": "inbox"})
+            serde_json::to_value(ViewPredicate::InMailboxes(vec!["inbox".into()])).unwrap(),
+            json!({"inMailboxes": ["inbox"]})
         );
         assert_eq!(
             serde_json::to_value(ViewPredicate::All).unwrap(),

@@ -64,7 +64,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
     h.registerViewJson(
       'inbox',
       JSON.stringify({
-        predicate: { inMailbox: 'inbox' },
+        predicate: { inMailboxes: ['inbox'] },
         sortField: 'date',
         sortDirection: 'desc',
         watermark: null,
