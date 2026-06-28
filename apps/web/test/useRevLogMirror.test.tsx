@@ -95,9 +95,12 @@ describe('useRevLogMirror (Phase 2 RevLog view → store reconciliation)', () =>
     })
 
     await waitFor(() =>
-      expect(store.snapshot().steps.map((s) => s.id)).toEqual(['a', 'b']),
+      expect(store.snapshot('primary').steps.map((s) => s.id)).toEqual([
+        'a',
+        'b',
+      ]),
     )
-    expect(store.snapshot().cursor).toBe(1) // b
+    expect(store.snapshot('primary').cursor).toBe(1) // b
 
     // The view was opened with family 'revLog' + the accountId payload.
     expect(runtimeAdapter.runtimeSessionObjectViewOpenCalls).toHaveLength(1)
@@ -117,7 +120,7 @@ describe('useRevLogMirror (Phase 2 RevLog view → store reconciliation)', () =>
     })
 
     await waitFor(() =>
-      expect(store.snapshot().steps.map((s) => s.id)).toEqual(['a']),
+      expect(store.snapshot('primary').steps.map((s) => s.id)).toEqual(['a']),
     )
 
     // Another device appended step 'b' + the cursor advanced to it.
@@ -130,9 +133,12 @@ describe('useRevLogMirror (Phase 2 RevLog view → store reconciliation)', () =>
     })
 
     await waitFor(() =>
-      expect(store.snapshot().steps.map((s) => s.id)).toEqual(['a', 'b']),
+      expect(store.snapshot('primary').steps.map((s) => s.id)).toEqual([
+        'a',
+        'b',
+      ]),
     )
-    expect(store.snapshot().cursor).toBe(1) // b
+    expect(store.snapshot('primary').cursor).toBe(1) // b
   })
 
   it('does nothing when accountId is null', async () => {

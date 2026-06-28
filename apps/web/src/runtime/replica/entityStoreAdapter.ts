@@ -377,6 +377,7 @@ class EntityStoreController {
       const sourceId =
         (request.args as { sourceId?: string } | undefined)?.sourceId ?? ''
       await getUndoHistoryStore().pushForward(
+        sourceId,
         makeRevStep(translated.messageId, sourceId, capturedDiff),
       )
     }
