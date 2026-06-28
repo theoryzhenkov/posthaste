@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { applyDomainEvent } from '../src/domainCache'
 import { EVENT_TOPICS } from '../src/domainVocabulary'
 import { mailKeys } from '../src/mailState'
 import { queryKeys } from '../src/queryKeys'
+import { setEntityStoreActiveForTesting } from '../src/runtime/entityStoreState'
 import {
   accountOverview,
   createQueryClient,
@@ -13,6 +14,19 @@ import {
 } from './domainCache.fixtures'
 
 describe('frontend domain cache event contracts', () => {
+  // These contracts assert the store-inactive (legacy) invalidation path:
+  // a remote event invalidates the message list + mailbox counts. Pin the
+  // entity-store flag off so the suite is deterministic regardless of the
+  // `installEntityStoreAdapter()` import side effect (which flips the global
+  // flag on) or concurrent test files. The store-active gate is exercised in
+  // `domainCacheMessageUpdated.test.ts`.
+  let restoreStoreFlag: () => void
+  beforeEach(() => {
+    restoreStoreFlag = setEntityStoreActiveForTesting(false)
+  })
+  afterEach(() => {
+    restoreStoreFlag()
+  })
   it('invalidates message list views when a remote event can change visible rows', () => {
     const queryClient = createQueryClient()
     const messageList = queryKeys.messages({

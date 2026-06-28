@@ -219,7 +219,7 @@ export function MessageList({
               actions={actions}
               columns={columns}
               errorState={errorState}
-              isFetchingNextPage={false}
+              isFetchingNextPage={runtimeMailListView.isLoadingMore}
               isLoading={runtimeMailListView.isLoading}
               layout={tableLayout}
               messages={messages}
