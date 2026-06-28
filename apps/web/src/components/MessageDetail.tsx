@@ -56,6 +56,7 @@ interface MessageDetailProps {
   onEditDraft?: () => void
   onForward: () => void
   onReply: () => void
+  onReplyAll: () => void
   onSelectMessage: (message: MessageSummary) => void
   onSearch?: (query: string, append?: boolean) => void
 }
@@ -71,6 +72,7 @@ export function MessageDetail({
   onEditDraft,
   onForward,
   onReply,
+  onReplyAll,
   onSelectMessage,
   onSearch,
 }: MessageDetailProps) {
@@ -184,6 +186,7 @@ export function MessageDetail({
         onEditDraft={onEditDraft}
         onForward={onForward}
         onReply={onReply}
+        onReplyAll={onReplyAll}
         onSearch={onSearch}
         threadMessages={threadMessages}
       />

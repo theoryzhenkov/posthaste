@@ -126,6 +126,12 @@ function parseComposeIntent(params: URLSearchParams): ComposeIntent | null {
         ? { kind: 'reply', sourceId, messageId }
         : null
     }
+    case 'replyAll': {
+      const messageId = params.get('messageId')
+      return messageId && hasOnlyComposeParams(params, ['messageId'])
+        ? { kind: 'replyAll', sourceId, messageId }
+        : null
+    }
     case 'forward': {
       const messageId = params.get('messageId')
       return messageId && hasOnlyComposeParams(params, ['messageId'])

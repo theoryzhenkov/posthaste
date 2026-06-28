@@ -6397,6 +6397,7 @@
         "required": [
           "to",
           "cc",
+          "originalTo",
           "replySubject",
           "forwardSubject"
         ],
@@ -6422,6 +6423,13 @@
               "string",
               "null"
             ]
+          },
+          "originalTo": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            },
+            "description": "The original `To` recipients of the source message. `to` holds the\nderived reply recipient (the original `From`); `original_to` lets a\nclient build a reply-all recipient set (original `From` + `To` + `Cc`,\nminus self) without a second fetch."
           },
           "quotedBody": {
             "type": [

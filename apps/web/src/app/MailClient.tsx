@@ -179,6 +179,7 @@ export function MailClient({
     onOpenTagEditor: handlers.handleOpenTagEditor,
     onRedo: undoRedo.redo,
     onReply: handlers.handleReply,
+    onReplyAll: handlers.handleReplyAll,
     onToggleFlag: handlers.handleToggleFlag,
     onToggleShortcuts: handlers.handleToggleShortcuts,
     onUndo: undoRedo.undo,
@@ -229,6 +230,7 @@ export function MailClient({
         onCloseCommandPalette={handlers.handleCloseCommandPalette}
         onCompose={handlers.handleCompose}
         onForward={handlers.handleForward}
+        onReplyAll={handlers.handleReplyAll}
         onMessageLayoutChanged={layout.onMessageLayoutChanged}
         onOpenCommandPalette={handlers.handleOpenCommandPalette}
         onOpenFocusedMessage={handlers.handleOpenFocusedMessage}

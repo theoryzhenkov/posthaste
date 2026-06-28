@@ -181,6 +181,11 @@ pub struct CachedSenderAddress {
 pub struct ReplyContext {
     pub to: Vec<Recipient>,
     pub cc: Vec<Recipient>,
+    /// The original `To` recipients of the source message. `to` holds the
+    /// derived reply recipient (the original `From`); `original_to` lets a
+    /// client build a reply-all recipient set (original `From` + `To` + `Cc`,
+    /// minus self) without a second fetch.
+    pub original_to: Vec<Recipient>,
     pub reply_subject: String,
     pub forward_subject: String,
     pub quoted_body: Option<String>,

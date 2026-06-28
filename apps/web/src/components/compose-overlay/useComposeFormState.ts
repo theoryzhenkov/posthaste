@@ -7,7 +7,7 @@ import {
   type SetStateAction,
 } from 'react'
 
-import type { Identity, ReplyContext } from '@/api/types'
+import type { Identity, Recipient, ReplyContext } from '@/api/types'
 import type { ComposeIntent } from '@/composeIntent'
 
 import type { MarkdownComposerEditorHandle } from '../MarkdownComposerEditor'
@@ -20,6 +20,36 @@ import {
   type ComposeForm,
 } from '../composeFormHelpers'
 import { validateAttachmentLimits } from './attachments'
+
+/**
+ * Derive the reply-all recipient set: original From + To (minus self) go to
+ * `to`, original Cc (minus self) goes to `cc`. Recipients are de-duplicated by
+ * email (case-insensitive). Only the primary identity address is excluded;
+ * alias exclusion is a follow-up.
+ */
+function replyAllRecipients(
+  replyTo: Recipient[],
+  originalTo: Recipient[],
+  cc: Recipient[],
+  selfEmail: string | undefined,
+): { to: Recipient[]; cc: Recipient[] } {
+  const self = selfEmail?.toLowerCase()
+  const dedupedExcludingSelf = (recipients: Recipient[]): Recipient[] => {
+    const seen = new Set<string>()
+    const out: Recipient[] = []
+    for (const r of recipients) {
+      const key = r.email.toLowerCase()
+      if (seen.has(key) || (self && key === self)) continue
+      seen.add(key)
+      out.push(r)
+    }
+    return out
+  }
+  return {
+    to: dedupedExcludingSelf([...replyTo, ...originalTo]),
+    cc: dedupedExcludingSelf(cc),
+  }
+}
 
 export function useComposeFormState({
   composeKey,
@@ -70,19 +100,31 @@ export function useComposeFormState({
       intentKind === 'forward'
         ? replyContext.forwardedBody
         : replyContext.quotedBody
+    // Reply-all derives the full recipient set (original From + To, plus the
+    // original Cc) with the user's own address excluded. A plain reply uses the
+    // original From only; forward starts empty.
+    const { to, cc } =
+      intentKind === 'replyAll'
+        ? replyAllRecipients(
+            replyContext.to,
+            replyContext.originalTo,
+            replyContext.cc,
+            identity?.email,
+          )
+        : { to: replyContext.to, cc: [] }
     return {
       from: '',
-      to: intentKind === 'reply' ? formatRecipients(replyContext.to) : '',
-      cc: '',
+      to: formatRecipients(to),
+      cc: formatRecipients(cc),
       bcc: '',
       subject:
-        intentKind === 'reply'
-          ? replyContext.replySubject
-          : replyContext.forwardSubject,
+        intentKind === 'forward'
+          ? replyContext.forwardSubject
+          : replyContext.replySubject,
       body: seed ? `\n\n${seed}` : '',
       attachments: [],
     }
-  }, [draftSeed, intentKind, replyContext])
+  }, [draftSeed, identity, intentKind, replyContext])
   const contextReady =
     intentKind === 'draft' ? Boolean(draftSeed) : Boolean(replyContext)
   const formResetKey = isMessageBasedCompose
