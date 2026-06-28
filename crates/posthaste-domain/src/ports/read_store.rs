@@ -205,3 +205,14 @@ pub trait SmartMailboxStore: Send + Sync {
     fn query_smart_mailbox_counts(&self, rule: &SmartMailboxRule)
         -> Result<(i64, i64), StoreError>;
 }
+
+/// Phase 2 undo/redo: the per-account reversible-op log + cursor read. Serves
+/// the `RevLog` synced view. The `diff` is opaque `MessageChangeDiff` JSON.
+///
+/// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+pub trait RevLogStore: Send + Sync {
+    /// The account's `rev_log` steps + cursor — the snapshot behind the `RevLog`
+    /// synced view. Eviction keeps the log bounded (`MAX_REV_LOG_HISTORY`), so
+    /// this returns the full undoable range.
+    fn rev_log_snapshot(&self, account_id: &AccountId) -> Result<RevLogSnapshot, StoreError>;
+}

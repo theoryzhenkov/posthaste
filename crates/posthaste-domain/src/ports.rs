@@ -8,9 +8,9 @@ use crate::{
     ImapMailboxSyncState, ImapMessageLocation, MailboxId, MailboxSummary, MessageCursor,
     MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
     Operation, OperationId, OperationState, PushTransport, Recipient, ReplaceMailboxesCommand,
-    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
-    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome, SyncProgress,
-    SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
+    ReplyContext, RevLogSnapshot, SecretRef, SecretStoreError, SendMessageRequest,
+    SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject,
+    SyncOutcome, SyncProgress, SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -28,7 +28,7 @@ pub use gateway::{MailGateway, SyncChunkSink};
 pub use progress::SyncProgressReporter;
 pub use read_store::{
     ConversationReadStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore,
-    MessageListStore, SmartMailboxStore, TagReadStore,
+    MessageListStore, RevLogStore, SmartMailboxStore, TagReadStore,
 };
 pub use sync_store::{
     ImapMessageLocationStore, ImapMessageLocationWriteStore, ImapSyncStateStore,
