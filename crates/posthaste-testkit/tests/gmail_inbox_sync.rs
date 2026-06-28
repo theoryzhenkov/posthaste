@@ -103,7 +103,10 @@ async fn gmail_imap_sync_lands_inbox_message_in_the_mail_list_view() {
     // modseq 100, so the projection's `version` is 100 — exactly the value the
     // client replica's strict-`<` staleness guard compares.
     assert_eq!(
-        state.rows[0].projection.get("version").and_then(serde_json::Value::as_u64),
+        state.rows[0]
+            .projection
+            .get("version")
+            .and_then(serde_json::Value::as_u64),
         Some(100),
         "the row projection should carry version=max(modseq); got: {projection}"
     );
