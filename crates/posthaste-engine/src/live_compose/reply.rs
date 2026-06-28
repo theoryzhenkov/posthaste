@@ -76,6 +76,7 @@ pub(crate) async fn fetch_reply_context(
     Ok(ReplyContext {
         to,
         cc,
+        original_to,
         reply_subject: prefix_subject("Re:", subject),
         forward_subject: prefix_subject("Fwd:", subject),
         quoted_body,

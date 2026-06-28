@@ -369,6 +369,7 @@ impl MailGateway for MockJmapGateway {
                     .unwrap_or_else(|| "unknown@example.com".to_string()),
             }],
             cc: Vec::new(),
+            original_to: Vec::new(),
             reply_subject: format!("Re: {}", message.subject.clone().unwrap_or_default()),
             forward_subject: format!("Fwd: {}", message.subject.clone().unwrap_or_default()),
             quoted_body: message.body_text.clone(),

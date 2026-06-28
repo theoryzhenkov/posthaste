@@ -47,6 +47,7 @@ pub fn imap_reply_context_from_raw_mime(
     Ok(ReplyContext {
         to: original_from,
         cc: parsed.cc().map(addresses_to_recipients).unwrap_or_default(),
+        original_to,
         reply_subject: prefix_subject("Re:", subject),
         forward_subject: prefix_subject("Fwd:", subject),
         quoted_body,

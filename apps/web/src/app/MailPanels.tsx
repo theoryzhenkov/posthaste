@@ -86,6 +86,7 @@ function MessagePanels(props: MailClientViewProps) {
               onEditDraft={props.onEditDraft}
               onForward={props.onForward}
               onReply={props.onReply}
+              onReplyAll={props.onReplyAll}
               onSelectMessage={props.onSelectMessage}
               onSearch={props.onSearch}
             />

@@ -48,6 +48,7 @@ export function FocusedSurface({
     composeIntent,
     editDraft,
     forwardSelectedMessage,
+    replyAllToSelectedMessage,
     replyToSelectedMessage,
   } = useComposeIntent({
     enabledAccounts: [],
@@ -121,6 +122,7 @@ export function FocusedSurface({
         }
         onForward={forwardSelectedMessage}
         onReply={replyToSelectedMessage}
+        onReplyAll={replyAllToSelectedMessage}
         onSearch={onSearch}
         onSelectMessage={onSelectMessage ?? (() => {})}
       />

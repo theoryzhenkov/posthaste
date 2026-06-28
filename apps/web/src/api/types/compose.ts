@@ -15,6 +15,8 @@ export interface Recipient {
 export interface ReplyContext {
   to: Recipient[]
   cc: Recipient[]
+  /** Original `To` recipients; lets a client build a reply-all set (From + To + Cc minus self) without a second fetch. */
+  originalTo: Recipient[]
   replySubject: string
   forwardSubject: string
   quotedBody: string | null

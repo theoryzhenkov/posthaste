@@ -2090,6 +2090,13 @@ export interface components {
              */
             forwardedBody?: string | null;
             inReplyTo?: string | null;
+            /**
+             * @description The original `To` recipients of the source message. `to` holds the
+             *     derived reply recipient (the original `From`); `original_to` lets a
+             *     client build a reply-all recipient set (original `From` + `To` + `Cc`,
+             *     minus self) without a second fetch.
+             */
+            originalTo: components["schemas"]["Recipient"][];
             quotedBody?: string | null;
             references?: string | null;
             replySubject: string;

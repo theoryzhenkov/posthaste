@@ -38,7 +38,9 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   })
   const isMessageBasedCompose = intent.kind !== 'new'
   const requiresMessageContext =
-    intent.kind === 'reply' || intent.kind === 'forward'
+    intent.kind === 'reply' ||
+    intent.kind === 'replyAll' ||
+    intent.kind === 'forward'
   const isDraftEdit = intent.kind === 'draft'
   const draftSeedQuery = useQuery({
     queryKey: isDraftEdit
