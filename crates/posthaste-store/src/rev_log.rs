@@ -228,4 +228,15 @@ impl RevLogStore for DatabaseStore {
     ) -> Result<u32, StoreError> {
         self.append_rev_log_step(account_id, step_id, message_id, source_id, diff, created_at)
     }
+
+    /// Delegates to the inherent `DatabaseStore::set_rev_cursor` (same inherent
+    /// priority as `append_rev_log_step`).
+    fn set_rev_cursor(
+        &self,
+        account_id: &AccountId,
+        cursor_step_id: Option<&str>,
+        redo_tail: &[String],
+    ) -> Result<(), StoreError> {
+        self.set_rev_cursor(account_id, cursor_step_id, redo_tail)
+    }
 }
