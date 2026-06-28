@@ -32,15 +32,15 @@ own status, severity, location, mechanism, and proposed fix.
 | Priority | Issue | One-line |
 |---|---|---|
 | ~~HIGH~~ **DONE** | [[L2-reserve-clobbers-optimism]] | **The user-reported on-mutation flicker — FIXED, shipped in `.21`** (independently verified). A: `set_view_rows` reconcile + version-gated retire + role-move optimism; B: per-message version guard + confirmed-gated retire. Deeper follow-up: [[L2-single-source-view-membership]]. |
-| **HIGH** | [[L2-outbox-op-lifecycle]] | Op leaks forever on authoritative delete; cancelled dispatch leaks as `Accepted`; `Rejected` evicted → permanent ghost; durable outbox cleared on confirm even when not retired. |
-| **HIGH** | [[L2-projectionless-sync-events]] | Sync/expunge/membership `message.updated` carry no projection+counts → store drops + REST skipped → row/count divergence until reload. |
+| ~~HIGH~~ **DONE** | [[L2-outbox-op-lifecycle]] | **All four facets RESOLVED, shipped in `.24`** — A: purge pending on authoritative delete; B: `MutationCancelGuard` drop-guard settles `Failed` on cancelled dispatch; C: retain `Rejected`/`Failed` across the confirmed-eviction window; D: drain-based durable-outbox clear on actual retire (settle-confirm + base catch-up). |
+| ~~HIGH~~ **DONE** | [[L2-projectionless-sync-events]] | **DONE.** Sync/expunge/membership `message.updated` now attach `projection` + `countDeltas`; store + (former REST) consume them. |
 | ~~HIGH~~ **DONE** | [[L2-test-fakehandle-drift]] | **Retargeted onto the real wasm handle** — the 250-line drifting `FakeHandle` deleted; all 8 adapter tests now real-verified (false-green class retired). |
 | LOW (was MED) | [[L2-engine-absorption-footguns]] | **Mostly resolved**: dead base-update methods gone; `settle(Confirmed)` now confirmed-gated; engine gained `mark_confirmed`/`retire_absorbed_if`. Residual: version-gating lives in link-replica not the engine — lift it up if a 2nd convergence consumer appears. |
 | MEDIUM | [[L2-runtime-nearnode-remote-seam]] | Runtime near-node retires unconditionally on receipt (flicker when remote); overlay not account-scoped; phantom seq gaps; dead Conflict arm. |
 | MEDIUM | [[L2-adapter-reproject-all]] | Adapter re-projects every open view every drain (O(views×rows)); needs a message→views reverse index. |
 | MEDIUM | [[L2-legacy-leftover-structures]] | **Mostly resolved**: the dual-path mail-list query (loaded gun) + `fetchMessagesForView` + `runtimeMailListViewsEnabled` flag retired — the list is single-source via `useRuntimeMailListView`; dead `useDomainEventRefresh` gone. **Still open:** the ungated invalidation storm (sidebar/nav/detail) during sync; rejection has no UI. |
 | DONE | [[L2-sugar-role-mutations]] | `archive`/`trash`/`restoreToInbox` were 1:1 aliases of `moveToRole` (no extra authority semantics); collapsed into `moveToRole`. `destroy` kept (genuine permanent deletion). |
-| MEDIUM | [[L2-single-source-view-membership]] | The dual-source membership smell: retire the runtime's redundant incremental-membership re-serve so the firehose is the single source of truth for evaluable views (perf + one channel). The deeper cleanup the `set_view_rows` reconcile is a stepping-stone toward. |
+| ~~MEDIUM~~ **DONE** | [[L2-single-source-view-membership]] | **DONE (steps 1–5; step 3 narrowed in `b7c65f58`)** — runtime no longer recomputes evaluable mail-lists per event (firehose is the single membership channel); `Deferred` mail-lists (smart-mailbox/global/non-date) still re-served per event. ~5.9× less per-event runtime work measured. |
 | MIXED | [[L2-store-correctness-grabbag]] | `in_range` ignores sort direction (HIGH); timestamp lexicographic sort; no base GC; `writeMailboxCount` unknown-account; unguarded async; nits. |
 
 ## Cross-cutting themes
@@ -63,9 +63,10 @@ own status, severity, location, mechanism, and proposed fix.
 
 1. ~~[[L2-reserve-clobbers-optimism]] — the live flicker.~~ **DONE (shipped `.21`).**
 2. ~~[[L2-test-fakehandle-drift]] — retarget onto real wasm.~~ **DONE** — the adapter test now drives the real engine; false-green class retired.
-3. **[[L2-outbox-op-lifecycle]] A + [[L2-projectionless-sync-events]] — corroborated correctness bugs (now verifiable against the real engine). ← NEXT.**
-4. ~~[[L2-engine-absorption-footguns]]~~ — mostly resolved; residual is LOW documentation.
-5. Remainder (perf, remote-seam, legacy cleanup, grab-bag, [[L2-single-source-view-membership]]) as the seam/scale demands.
+3. ~~[[L2-outbox-op-lifecycle]] A + [[L2-projectionless-sync-events]]~~ — **DONE (shipped `.24`)** — corroborated correctness bugs, verified against the real engine.
+4. ~~[[L2-single-source-view-membership]]~~ — **DONE (steps 1–5)** — retire the redundant per-event re-serve; firehose is the single membership channel for evaluable views. ~5.9× less per-event runtime work.
+5. ~~[[L2-engine-absorption-footguns]]~~ — mostly resolved; residual is LOW documentation.
+6. **Remainder — open:** [[L2-store-correctness-grabbag]] A (`in_range` ASC, HIGH) ← next correctness; then [[L2-runtime-nearnode-remote-seam]] (flicker when remote); [[L2-adapter-reproject-all]] (perf); [[L2-legacy-leftover-structures]] B (invalidation storm); then `posthaste-server` dep cleanup + `mailbox_ids`/`mailboxIds` serde mismatch.
 
 ## Resolved this round (2026-06-27)
 
@@ -74,3 +75,7 @@ own status, severity, location, mechanism, and proposed fix.
 - [[L2-test-fakehandle-drift]] — adapter test retargeted onto the real wasm engine; `FakeHandle` deleted.
 - [[L2-legacy-leftover-structures]] A+C — the legacy mail-list REST fork + flag retired (single-source via `useRuntimeMailListView`); B (invalidation storm) remains.
 - [[L2-engine-absorption-footguns]] — mostly resolved (dead methods gone; confirmed-gating in the engine).
+- [[L2-projectionless-sync-events]] — sync/expunge/membership `message.updated` now carry `projection` + `countDeltas`.
+- [[L2-single-source-view-membership]] — retire the redundant per-event re-serve (steps 1–5; step 3 narrowed); firehose is the single membership channel for evaluable views. ~5.9× less per-event runtime work measured.
+- [[L2-outbox-op-lifecycle]] — all four facets (A+B+C+D) resolved, shipped `.24`: purge-on-delete, cancel drop-guard, retain-rejected, drain-based durable-outbox clear.
+- docs/stale retirement — the 24-file `docs/stale/` directory + `@spec docs/stale/...` annotations + mkdocs nav block removed.
