@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "From-scratch redesign of undo/redo onto the assertion architecture: enrich each message-change signal with an invertible diff so undo = apply the inverse diff as an ordinary optimistic mutation through the existing outbox + replay(base, unsettled) guard — killing the command-based undo stacks, the inverse-command catalog, the role-move resolution gap, and the undo flicker."
-modified: 2026-06-25
-reviewed: 2026-06-25
+modified: 2026-06-28
+reviewed: 2026-06-28
 lifecycle: ephemeral
 type: DESIGN
 depends:
@@ -11,8 +11,17 @@ depends:
   - path: docs/replication/backend-link/L1
     section: "3. The BackendApi contract"
   - path: docs/replication/client-link/L1
-dependents: []
+dependents:
+  - path: docs/eph/DESIGN-L2-undo-redo-synced-history
+    note: "superseded as the forward design — the successor carries forward this doc's two open questions (chained-undo latency, history persistence) and adds cross-device sync. This doc still describes the shipped system."
 ---
+
+> **Superseded as the forward design** by
+> [`DESIGN-L2-undo-redo-synced-history`](./DESIGN-L2-undo-redo-synced-history.md),
+> which resolves this doc's two carried-forward open questions (chained-undo
+> latency, history persistence) and adds cross-device undo/redo. **This doc still
+> describes the shipped undo/redo system** (seq-mirrored, runtime-owned,
+> per-session); the successor is the design for the refactor, not yet realized.
 
 # Reversible undo/redo via invertible change-diffs
 

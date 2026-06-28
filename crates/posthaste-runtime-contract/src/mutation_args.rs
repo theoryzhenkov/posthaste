@@ -6,7 +6,7 @@
 //! lean near node (no `backend` feature, no in-process `Backend`) still needs
 //! them. They were factored out of `backend.rs` for exactly this reason.
 
-use crate::{MutationRequest, RuntimeError, RuntimeErrorCode, RuntimeSessionSeq};
+use crate::{MutationRequest, RuntimeError, RuntimeErrorCode};
 use posthaste_domain::SetKeywordsCommand;
 use posthaste_link_core::MessageChangeDiff;
 use serde::Deserialize;
@@ -97,20 +97,16 @@ pub struct MessageTargetArgs {
 
 /// `message.applyDiff`: apply an invertible change-diff (add/remove keywords +
 /// add/remove mailboxes) to one message. The undo/redo vehicle — undo submits
-/// `inverse(diff)` with `undoOf`, redo submits `diff` with `redoOf`. Execution is
-/// an ordinary optimistic mutation through the outbox + replay guard; the
-/// `undoOf`/`redoOf` seq hints are history-bookkeeping metadata the runtime uses
-/// to navigate its own seq-ordered diff history (they do not gate execution).
+/// `inverse(diff)`, redo submits `diff` — and an ordinary optimistic mutation
+/// through the outbox + replay guard. Undo/redo history is client-owned
+/// (@spec docs/eph/DESIGN-L2-undo-redo-synced-history), so the runtime applies
+/// the diff without navigating or recording any history.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageApplyDiffArgs {
     pub source_id: String,
     pub message_id: String,
     pub diff: MessageChangeDiff,
-    #[serde(default)]
-    pub undo_of: Option<RuntimeSessionSeq>,
-    #[serde(default)]
-    pub redo_of: Option<RuntimeSessionSeq>,
 }
 
 pub fn parse_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>

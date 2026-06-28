@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Roadmap for the posthaste-testkit forward contracts: runtime-in-harness, view-settlement recorder, declarative fixtures, posthastectl headless driver"
-modified: 2026-06-26
-reviewed: 2026-06-26
+modified: 2026-06-27
+reviewed: 2026-06-27
 lifecycle: ephemeral
 type: PLAN
 depends:
@@ -11,6 +11,7 @@ depends:
   - path: docs/replication/L1
 dependents:
   - path: docs/testing/L1
+  - path: docs/eph/DESIGN-L2-render-flicker-tracker
 ---
 
 # posthaste-testkit forward roadmap

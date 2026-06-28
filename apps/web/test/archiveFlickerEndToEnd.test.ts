@@ -4,12 +4,10 @@ import { join } from 'node:path'
 
 import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 
-// Fix (b): archive (a role move) now resolves to a replaceMailboxes op via the
-// account's role→mailbox-id map, so fix (a)'s equal-version hold can keep it
-// folded through the unconfirmed window. This is the user's actual archive
-// flicker: archive → row leaves → a stale same-modseq re-serve must NOT bring
-// it back. Models real provider behavior (a local move does not bump modseq, so
-// the moved base and a stale re-serve share v5; the op retires only at v6).
+// Independent end-to-end verification of BOTH archive fixes against the real
+// WASM: fix (b) resolves message.moveToRole{role:archive} -> replaceMailboxes via the role map
+// (parseMessageMutation), and fix (a) holds the resulting op through an
+// equal-version stale re-serve so the archived row leaves and STAYS.
 
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 const present =
@@ -19,7 +17,7 @@ const present =
 function projection(mailboxIds: string[], version: number) {
   return {
     id: 'm1',
-    sourceId: 'acct',
+    sourceId: 's',
     receivedAt: '2026-04-28T12:00:00Z',
     keywords: [],
     mailboxIds,
@@ -30,13 +28,13 @@ function projection(mailboxIds: string[], version: number) {
   }
 }
 const m1Row = {
-  rowKey: 'acct:m1',
+  rowKey: 's:m1',
   messageId: 'm1',
   sortKey: { receivedAt: '2026-04-28T12:00:00Z', messageId: 'm1' },
 }
 
-describe.skipIf(!present)('archive optimism (real WASM)', () => {
-  it('archive resolves to replaceMailboxes via the role map', async () => {
+describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
+  it('archive resolves to replaceMailboxes via the role map; empty map = no optimism', async () => {
     const mod = (await import(
       join(wasmDir, 'posthaste_link_wasm.js')
     )) as unknown as {
@@ -52,30 +50,33 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
     })
     const request = JSON.stringify({
       name: 'message.moveToRole',
-      args: { sourceId: 'acct', messageId: 'm1', role: 'archive' },
+      args: { sourceId: 's', messageId: 'm1', role: 'archive' },
       clientMutationId: 'arc-1',
     })
-    // No role map → no optimism (mailbox list not loaded yet; graceful).
-    expect(mod.parseMessageMutation(request, '{}')).toBeUndefined()
-    // With the account's archive mailbox → replaceMailboxes([mbx-archive]).
-    const out = JSON.parse(
-      mod.parseMessageMutation(request, '{"archive":"mbx-archive"}'),
+
+    // With the account's role map → resolves to a foldable ReplaceMailboxes.
+    const resolved = mod.parseMessageMutation(
+      request,
+      JSON.stringify({ archive: 'mbx-archive' }),
     )
-    expect(out.messageId).toBe('m1')
-    expect(out.assertion.kind).toBe('replaceMailboxes')
-    expect(out.assertion.mailboxIds).toEqual(['mbx-archive'])
+    expect(resolved).not.toBeNull()
+    const parsed = JSON.parse(resolved)
+    expect(parsed.messageId).toBe('m1')
+    expect(parsed.assertion.kind).toBe('replaceMailboxes')
+    expect(parsed.assertion.mailboxIds).toEqual(['mbx-archive'])
+
+    // No role map (mailbox list not cached yet) → None = falls back to pass-through.
+    // wasm-bindgen maps Rust None to `undefined`; the adapter's `if (!result)`
+    // treats it as pass-through (no optimism).
+    expect(mod.parseMessageMutation(request, '{}')).toBeUndefined()
   })
 
-  it('an archive op holds through the equal-version stale window, retiring at the bump', async () => {
+  it('an archived row leaves immediately and survives an equal-version stale re-serve', async () => {
     const mod = (await import(
       join(wasmDir, 'posthaste_link_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
-      parseMessageMutation(
-        requestJson: string,
-        roleMapJson: string,
-      ): string | undefined
     }
     mod.initSync({
       module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
@@ -95,7 +96,6 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
         (r: { messageId: string }) => r.messageId === 'm1',
       )
 
-    // m1 in inbox @ v5.
     h.ingestBatchJson(
       JSON.stringify([
         {
@@ -111,28 +111,28 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
     h.setViewRowsJson('inbox', JSON.stringify([m1Row]), 'null')
     expect(inInbox()).toBe(true)
 
-    // Archive: resolve the role → replaceMailboxes op, accept it (row leaves).
+    // The adapter resolves + accepts the archive op (fix b), then runs it.
     const parsed = JSON.parse(
       mod.parseMessageMutation(
         JSON.stringify({
           name: 'message.moveToRole',
-          args: { sourceId: 'acct', messageId: 'm1', role: 'archive' },
+          args: { sourceId: 's', messageId: 'm1', role: 'archive' },
           clientMutationId: 'arc-1',
         }),
-        '{"archive":"mbx-archive"}',
+        JSON.stringify({ archive: 'mbx-archive' }),
       ),
     )
     h.acceptMutationJson(
       JSON.stringify({
         mutationId: 'arc-1',
-        messageId: 'm1',
+        messageId: parsed.messageId,
         assertion: parsed.assertion,
       }),
     )
-    expect(inInbox()).toBe(false)
+    expect(inInbox()).toBe(false) // leaves immediately
 
-    // Provider's same-modseq [mbx-archive]@5 (move applied, modseq not bumped) +
-    // the verdict confirms: the op must NOT retire at 5 == 5.
+    // Move applied locally (same modseq) + confirm; then the equal-version stale
+    // inbox re-serve. The op holds [mbx-archive] (fix a) → stays gone.
     h.ingestBatchJson(
       JSON.stringify([
         {
@@ -145,10 +145,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
         },
       ]),
     )
-    expect(h.settle('arc-1', 'confirmed')).toBe(false) // not reverted — holds
-
-    // Stale [inbox]@5 re-serve (equal version) clobbers the base — but the op is
-    // still pending, folding [mbx-archive] over it, so m1 stays out of inbox.
+    h.settle('arc-1', 'confirmed')
     h.ingestBatchJson(
       JSON.stringify([
         {
@@ -162,9 +159,9 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
       ]),
     )
     h.setViewRowsJson('inbox', JSON.stringify([m1Row]), 'null')
-    expect(inInbox()).toBe(false)
+    expect(inInbox()).toBe(false) // does NOT come back
 
-    // Provider confirms with modseq+1 ([mbx-archive]@6): strictly higher → retire.
+    // Provider confirms the move at the bumped modseq → op retires; still gone.
     h.ingestBatchJson(
       JSON.stringify([
         {

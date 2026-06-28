@@ -19,6 +19,25 @@ export class EntityStoreHandle {
      */
     acceptMutationJson(accept_json: string): void;
     /**
+     * Capture the invertible change-diff a mutation would produce over a
+     * message's current folded base, **without applying it**: reads the message's
+     * optimistic fold state (`prev`), applies the assertion purely (`curr`),
+     * and returns `MessageChangeDiff::from_before_after(prev, curr)` as JSON.
+     * This is the client-local diff capture for client-owned undo history
+     * ([undo-redo-synced-history] Phase 1 option a) — it mirrors the runtime's
+     * `read_fold_state` + `capture_diff` over the store, so the two produce the
+     * same diff for the same assertion + base.
+     *
+     * Returns `"null"` when the message is not held (no `prev` — the mutation
+     * is deferred until the base arrives) or the assertion would destroy it
+     * (non-invertible; `Destroy` is not diff-eligible). The host records no
+     * history step in either case.
+     *
+     * `assertion_json` is the same `ReplicaAssertion` shape `acceptMutationJson`
+     * takes (`{kind, ...}`), already role-resolved by `parseMessageMutation`.
+     */
+    captureMutationDiffJson(message_id: string, assertion_json: string): string;
+    /**
      * Close a view (it was closed on the host).
      */
     closeView(view_id: string): void;
@@ -124,6 +143,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_entitystorehandle_free: (a: number, b: number) => void;
     readonly entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
+    readonly entitystorehandle_captureMutationDiffJson: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly entitystorehandle_closeView: (a: number, b: number, c: number) => void;
     readonly entitystorehandle_drainDirtyJson: (a: number) => [number, number];
     readonly entitystorehandle_drainRetiredJson: (a: number) => [number, number];

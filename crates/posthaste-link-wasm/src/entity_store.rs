@@ -23,9 +23,13 @@ use serde::Deserialize;
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use posthaste_link_core::{MessageAssertion, MutationId, SettlementOutcome};
+use posthaste_link_core::{
+    apply_message_assertion, MessageAssertion, MessageChangeDiff, MessageOutcome, MutationId,
+    SettlementOutcome,
+};
 use posthaste_link_replica::{
-    EntityStore, SortDirection, SortKey, StoreUpdate, ViewPredicate, ViewRow,
+    EntityStore, fold_state_from_projection, SortDirection, SortKey, StoreUpdate, ViewPredicate,
+    ViewRow,
 };
 
 /// A live reactive entity store owned by JS: messages, mailboxes (count
@@ -177,6 +181,43 @@ impl EntityStoreHandle {
     pub fn message_json(&self, message_id: &str) -> String {
         let projection: Option<Value> = self.inner.message(message_id);
         serde_json::to_string(&projection).unwrap_or_else(|_| "null".to_string())
+    }
+
+    /// Capture the invertible change-diff a mutation would produce over a
+    /// message's current folded base, **without applying it**: reads the message's
+    /// optimistic fold state (`prev`), applies the assertion purely (`curr`),
+    /// and returns `MessageChangeDiff::from_before_after(prev, curr)` as JSON.
+    /// This is the client-local diff capture for client-owned undo history
+    /// ([undo-redo-synced-history] Phase 1 option a) — it mirrors the runtime's
+    /// `read_fold_state` + `capture_diff` over the store, so the two produce the
+    /// same diff for the same assertion + base.
+    ///
+    /// Returns `"null"` when the message is not held (no `prev` — the mutation
+    /// is deferred until the base arrives) or the assertion would destroy it
+    /// (non-invertible; `Destroy` is not diff-eligible). The host records no
+    /// history step in either case.
+    ///
+    /// `assertion_json` is the same `ReplicaAssertion` shape `acceptMutationJson`
+    /// takes (`{kind, ...}`), already role-resolved by `parseMessageMutation`.
+    #[wasm_bindgen(js_name = captureMutationDiffJson)]
+    pub fn capture_mutation_diff_json(
+        &self,
+        message_id: &str,
+        assertion_json: &str,
+    ) -> Result<String, JsError> {
+        let projection = match self.inner.message(message_id) {
+            Some(p) => p,
+            None => return Ok("null".to_string()),
+        };
+        let prev = fold_state_from_projection(&projection);
+        let assertion: MessageAssertion =
+            serde_json::from_str(assertion_json).map_err(|e| JsError::new(&e.to_string()))?;
+        let curr = match apply_message_assertion(prev.clone(), &assertion) {
+            MessageOutcome::Present(state) => state,
+            MessageOutcome::Removed => return Ok("null".to_string()),
+        };
+        let diff = MessageChangeDiff::from_before_after(&prev, &curr);
+        serde_json::to_string(&diff).map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// A mailbox's server-authoritative counts as `{"unreadCount",

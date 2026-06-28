@@ -87,17 +87,6 @@ impl MessageMutation {
         }
     }
 
-    /// Whether a successful mutation should capture and record an invertible
-    /// change-diff for undo/redo.
-    pub fn diff_eligible(&self) -> bool {
-        // Destroy is non-invertible; applyDiff is the undo/redo vehicle itself
-        // and never records a fresh diff.
-        !matches!(
-            self,
-            MessageMutation::Destroy(_) | MessageMutation::ApplyDiff(_)
-        )
-    }
-
     /// Optimistic assertion the runtime near node can fold into a mail-list
     /// view before the backend confirms. `None` for role moves when no role map
     /// is supplied (the legacy no-optimism path) or when the role is absent

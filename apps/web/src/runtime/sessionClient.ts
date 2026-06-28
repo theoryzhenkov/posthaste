@@ -120,9 +120,6 @@ function ensureStream(afterSeq?: number | null): void {
                 frame.type === 'viewSnapshot'
                   ? { viewId: frame.viewId, revision: frame.revision }
                   : {}),
-                ...(frame.type === 'mutationHistory'
-                  ? { canUndo: frame.canUndo, canRedo: frame.canRedo }
-                  : {}),
               },
               'runtime frame dispatched',
             )

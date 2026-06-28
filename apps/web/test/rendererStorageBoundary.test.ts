@@ -19,6 +19,10 @@ const allowedStorageFiles = new Set([
   // assertion, id pairing) — never bodies, attachments, or auth material, which
   // the forbidden-value check below still enforces.
   'src/runtime/replica/outboxStore.ts',
+  // The client-owned undo/redo history: persists only invertible change-diffs
+  // (keyword/mailbox deltas) + step ids — no bodies, attachments, or auth
+  // material. Shares the `posthaste-replica` DB with the outbox.
+  'src/runtime/replica/undoHistoryStore.ts',
 ])
 
 const forbiddenStorageValueTerms = [

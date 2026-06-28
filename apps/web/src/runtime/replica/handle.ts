@@ -40,19 +40,6 @@ export interface MessageChangeDiff {
   mailboxes: KeywordDelta
 }
 
-/**
- * One recorded reversible step on the session's undo/redo history, broadcast via
- * the `mutationHistory` frame's `undoTop`/`redoTop`. The client constructs the
- * undo/redo `message.applyDiff` mutation from it (undo applies the inverse diff,
- * redo applies the diff), carrying `seq` as the `undoOf`/`redoOf` hint.
- */
-export interface DiffStep {
-  seq: number
-  messageId: string
-  sourceId: string
-  diff: MessageChangeDiff
-}
-
 export interface EntityStoreHandle {
   /** Register a view: `{predicate, sortField, sortDirection, watermark?}`. */
   registerViewJson(viewId: string, argsJson: string): void
@@ -68,6 +55,15 @@ export interface EntityStoreHandle {
   hasPending(): boolean
   /** A message's optimistic projection JSON, or `"null"`. */
   messageJson(messageId: string): string
+  /**
+   * The invertible change-diff a mutation would produce over a message's
+   * current folded base, WITHOUT applying it: `from_before_after(prev, curr)`
+   * where `prev` is the message's current fold state and `curr` is `prev` with
+   * the assertion applied purely. Client-local diff capture for client-owned
+   * undo history. `"null"` if the message is not held or the assertion destroys
+   * it (non-invertible).
+   */
+  captureMutationDiffJson(messageId: string, assertionJson: string): string
   /** A mailbox's counts `{unreadCount, totalCount}` JSON, or `"null"`. */
   mailboxJson(mailboxId: string): string
   /** A view's rows JSON (`[{rowKey, messageId, sortKey}]`), or `"null"`. */

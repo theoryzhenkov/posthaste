@@ -1560,32 +1560,6 @@ export interface components {
             draftId: string;
         };
         /**
-         * @description One recorded reversible step on a session's undo/redo history: the session
-         *     seq at which the diff was captured, the message it touched, and the
-         *     invertible change-diff. The runtime owns the seq-ordered history and
-         *     broadcasts the current top of each stack via [`RuntimeFrame::MutationHistory`];
-         *     the client applies `inverse(diff)` (undo) or `diff` (redo) as an ordinary
-         *     `message.applyDiff` mutation, carrying the step's `seq` as the `undoOf`/`redoOf`
-         *     hint so the runtime can navigate its own history.
-         */
-        DiffStep: {
-            /**
-             * @description The invertible change-diff. `inverse(diff)` reconstructs the pre-mutation
-             *     state over `curr`; represented as an opaque object on the OpenAPI schema
-             *     (the diff type lives in the portable `posthaste-link-core` crate).
-             */
-            diff: Record<string, never>;
-            /** @description The message the reversible mutation touched. */
-            messageId: string;
-            /** @description The session seq at which this diff was recorded (the history step id). */
-            seq: components["schemas"]["RuntimeSessionSeq"];
-            /**
-             * @description The account the message belongs to, so the client can construct the
-             *     undo/redo `message.applyDiff` mutation (scope + the far-node read).
-             */
-            sourceId: string;
-        };
-        /**
          * @description An ordered domain event stored in `event_log` and published via SSE.
          *
          *     @spec docs/L1-sync#event-propagation
@@ -2191,14 +2165,6 @@ export interface components {
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
             type: "notification";
-        } | {
-            canRedo: boolean;
-            canUndo: boolean;
-            redoTop?: null | components["schemas"]["DiffStep"];
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
-            /** @enum {string} */
-            type: "mutationHistory";
-            undoTop?: null | components["schemas"]["DiffStep"];
         } | {
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */

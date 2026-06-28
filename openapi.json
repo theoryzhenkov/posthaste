@@ -5126,34 +5126,6 @@
           }
         }
       },
-      "DiffStep": {
-        "type": "object",
-        "description": "One recorded reversible step on a session's undo/redo history: the session\nseq at which the diff was captured, the message it touched, and the\ninvertible change-diff. The runtime owns the seq-ordered history and\nbroadcasts the current top of each stack via [`RuntimeFrame::MutationHistory`];\nthe client applies `inverse(diff)` (undo) or `diff` (redo) as an ordinary\n`message.applyDiff` mutation, carrying the step's `seq` as the `undoOf`/`redoOf`\nhint so the runtime can navigate its own history.",
-        "required": [
-          "seq",
-          "messageId",
-          "sourceId",
-          "diff"
-        ],
-        "properties": {
-          "diff": {
-            "type": "object",
-            "description": "The invertible change-diff. `inverse(diff)` reconstructs the pre-mutation\nstate over `curr`; represented as an opaque object on the OpenAPI schema\n(the diff type lives in the portable `posthaste-link-core` crate)."
-          },
-          "messageId": {
-            "type": "string",
-            "description": "The message the reversible mutation touched."
-          },
-          "seq": {
-            "$ref": "#/components/schemas/RuntimeSessionSeq",
-            "description": "The session seq at which this diff was recorded (the history step id)."
-          },
-          "sourceId": {
-            "type": "string",
-            "description": "The account the message belongs to, so the client can construct the\nundo/redo `message.applyDiff` mutation (scope + the far-node read)."
-          }
-        }
-      },
       "DomainEvent": {
         "type": "object",
         "description": "An ordered domain event stored in `event_log` and published via SSE.\n\n@spec docs/L1-sync#event-propagation\n@spec docs/L1-api#sse-event-stream",
@@ -6735,53 +6707,6 @@
                 "type": "string",
                 "enum": [
                   "notification"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "description": "Undo/redo availability for the session's history, emitted whenever the\nstack changes so the renderer can drive undo/redo button state. Carries\nthe current top of each stack as an invertible diff (`undoTop`/`redoTop`):\nthe client folds `inverse(undoTop.diff)` (undo) or `redoTop.diff` (redo)\ninto its outbox as an ordinary `message.applyDiff` mutation, so undo/redo\nflow through the same optimism guard as any user action (no flicker).",
-            "required": [
-              "sessionSeq",
-              "canUndo",
-              "canRedo",
-              "type"
-            ],
-            "properties": {
-              "canRedo": {
-                "type": "boolean"
-              },
-              "canUndo": {
-                "type": "boolean"
-              },
-              "redoTop": {
-                "oneOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "$ref": "#/components/schemas/DiffStep"
-                  }
-                ]
-              },
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "mutationHistory"
-                ]
-              },
-              "undoTop": {
-                "oneOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "$ref": "#/components/schemas/DiffStep"
-                  }
                 ]
               }
             }

@@ -13,9 +13,7 @@ use posthaste_domain::{
     SmartMailboxId, StoreError, SyncMode,
 };
 use posthaste_link_contract::{message_mutation::MessageMutation, BackendApi, BackendLink};
-use posthaste_link_core::{
-    MessageChangeDiff, MessageFoldState, MutationId, PendingMessageMutation,
-};
+use posthaste_link_core::{MutationId, PendingMessageMutation};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
@@ -34,7 +32,6 @@ use crate::secret::SystemSecretStore;
 use crate::sessions::{MutationAcceptance, SessionRegistry};
 use crate::transport::RemoteBackend;
 use crate::views::ViewRegistry;
-use posthaste_runtime_contract::mutation_args::{parse_args, MessageApplyDiffArgs};
 
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
 
@@ -488,53 +485,6 @@ impl RuntimeHandle {
         }
     }
 
-    /// Read a message's current fold state (keywords + mailbox membership)
-    /// straight through the backend, bypassing the summary cache. Used to capture
-    /// a mutation's before/after diff: the cache is evicted by the down-channel,
-    /// but that eviction races the post-apply read, so a diff read must not serve
-    /// a stale pre-apply entry. `None` when the message is not held.
-    async fn read_fold_state(
-        &self,
-        source_id: &str,
-        message_id: &str,
-    ) -> Result<Option<MessageFoldState>, RuntimeError> {
-        Ok(self
-            .core
-            .reads
-            .fresh_summary(
-                &AccountId(source_id.to_string()),
-                &MessageId(message_id.to_string()),
-            )
-            .await?
-            .map(|summary| MessageFoldState {
-                keywords: summary.keywords,
-                mailbox_ids: summary
-                    .mailbox_ids
-                    .into_iter()
-                    .map(|id| id.as_str().to_string())
-                    .collect(),
-            }))
-    }
-
-    /// The invertible change-diff a confirmed mutation produced, from a
-    /// before/after read of the message's fold state. `None` when the before or
-    /// after state is unavailable (the message is not held). An empty diff (a
-    /// no-op mutation) is returned so the caller can skip recording it.
-    async fn capture_diff(
-        &self,
-        source_id: &str,
-        message_id: &str,
-        before: Option<MessageFoldState>,
-    ) -> Result<Option<MessageChangeDiff>, RuntimeError> {
-        let Some(before) = before else {
-            return Ok(None);
-        };
-        let Some(after) = self.read_fold_state(source_id, message_id).await? else {
-            return Ok(None);
-        };
-        Ok(Some(MessageChangeDiff::from_before_after(&before, &after)))
-    }
-
     fn event_matches_filter(event: &DomainEvent, filter: &EventFilter) -> bool {
         if let Some(account_id) = &filter.account_id {
             if &event.account_id != account_id {
@@ -602,21 +552,14 @@ impl RuntimeHandle {
             .session_scope(&session_id, caller.account_scope.as_deref())?;
         // Runtime (near-node) concern: scope enforcement per mutation. The
         // command application is the backend's; it is forwarded up the link
-        // below, uniform across names. `diff_eligible` marks mutations whose
-        // change-diff is recorded for undo (destroy is non-invertible; applyDiff
-        // is the undo/redo replay and never records a fresh diff).
+        // below, uniform across names. Undo/redo history is client-owned
+        // (@spec docs/eph/DESIGN-L2-undo-redo-synced-history): the runtime no
+        // longer records change-diffs or navigates a history stack — an undo
+        // or redo is an ordinary `message.applyDiff` mutation that flows
+        // through this same path.
         let mutation = MessageMutation::from_request(&request)?;
         let source_id = mutation.account_id().to_string();
-        let message_id = mutation.message_id().to_string();
         Self::ensure_account_in_scope(&source_id, session_scope.as_deref())?;
-        let diff_eligible = mutation.diff_eligible();
-        // Before-read for the diff (diff-eligible mutations only). Read before
-        // forwarding so the diff captures the pre-apply state.
-        let before = if diff_eligible {
-            self.read_fold_state(&source_id, &message_id).await?
-        } else {
-            None
-        };
         // Accept the mutation into the runtime's outbox toward the backend so
         // recomputed views fold it optimistically while it is in flight; retire
         // it once the backend confirms (or fails). In the in-process default the
@@ -636,72 +579,6 @@ impl RuntimeHandle {
         let result = self.run_message_mutation(caller, &request, forward).await;
         if let Some(id) = optimistic {
             self.core.outbox.retire(&id);
-        }
-        // Record the invertible change-diff once the backend has confirmed, so
-        // undo/redo can replay it. A no-op mutation (empty diff, e.g. adding a
-        // keyword that was already present) is not recorded.
-        if diff_eligible && result.is_ok() {
-            if let Some(diff) = self.capture_diff(&source_id, &message_id, before).await? {
-                if !diff.is_empty() {
-                    self.core
-                        .sessions
-                        .record_diff(&session_id, source_id, message_id, diff)?;
-                }
-            }
-        }
-        result
-    }
-
-    /// Run an undo/redo as an ordinary `message.applyDiff` mutation — its diff is
-    /// folded into the outbox and forwarded like any user action — while
-    /// navigating the runtime-owned diff history around it: the step named by
-    /// `undoOf`/`redoOf` is popped (held) before execution and committed to the
-    /// opposite stack on success, restored on failure (a desktop editor's
-    /// rollback). Execution itself is uniform (outbox + replay guard +
-    /// last-writer-wins); the seq hints are history-bookkeeping only.
-    ///
-    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    async fn run_apply_diff(
-        &self,
-        caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
-        request: MutationRequest,
-    ) -> Result<MutationReceipt, RuntimeError> {
-        let args: MessageApplyDiffArgs = parse_args(&request)?;
-        let session_scope = self
-            .core
-            .sessions
-            .session_scope(&session_id, caller.account_scope.as_deref())?;
-        Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-        // Pop the named step off the runtime's history (hold it across
-        // execution). A stale `undoOf`/`redoOf` (no matching step) still runs the
-        // applyDiff — last-writer-wins — but does not navigate; the next history
-        // frame resyncs the client.
-        let (is_undo, held) = if let Some(seq) = args.undo_of {
-            (true, self.core.sessions.pop_undo_by_seq(&session_id, seq)?)
-        } else if let Some(seq) = args.redo_of {
-            (false, self.core.sessions.pop_redo_by_seq(&session_id, seq)?)
-        } else {
-            (false, None)
-        };
-        let result = self
-            .dispatch_named_mutation(caller, session_id.clone(), request)
-            .await;
-        if let Some(step) = held {
-            // Commit: undo → redo, redo → undo. Restore to the source stack on
-            // failure so the step stays navigable.
-            let push_to_redo = match (is_undo, result.is_ok()) {
-                (true, true) => true,   // undo succeeded: step becomes redoable
-                (true, false) => false, // undo failed: restore to undo
-                (false, true) => false, // redo succeeded: step becomes undoable
-                (false, false) => true, // redo failed: restore to redo
-            };
-            if push_to_redo {
-                self.core.sessions.push_redo(&session_id, step)?;
-            } else {
-                self.core.sessions.push_undo(&session_id, step)?;
-            }
-            self.core.sessions.emit_history_frame(&session_id)?;
         }
         result
     }
@@ -977,18 +854,13 @@ impl RuntimeCore for RuntimeHandle {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        // Undo/redo are ordinary `message.applyDiff` mutations that also navigate
-        // the runtime-owned diff history; every other mutation is a fresh user
-        // action whose change-diff is recorded onto it.
+        // Undo/redo history is client-owned: an undo or redo arrives as an
+        // ordinary `message.applyDiff` mutation and flows through the same
+        // dispatch path as any user action — no runtime-owned history stack to
+        // navigate.
         //
         // @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-        match request.name.as_str() {
-            "message.applyDiff" => self.run_apply_diff(caller, session_id, request).await,
-            _ => {
-                self.dispatch_named_mutation(caller, session_id, request)
-                    .await
-            }
-        }
+        self.dispatch_named_mutation(caller, session_id, request).await
     }
 
     async fn open_view(
