@@ -307,7 +307,11 @@ impl EntityStore {
                         match self.optimistic_projection(&row.message_id) {
                             Some(projection) => {
                                 predicate.matches(&projection)
-                                    && in_range(&row.sort_key, &watermark)
+                                    && in_range(
+                                        &row.sort_key,
+                                        &watermark,
+                                        view.sort_direction,
+                                    )
                             }
                             None => false,
                         }
@@ -604,7 +608,8 @@ impl EntityStore {
             let was_present = view.rows.iter().position(|r| r.message_id == message_id);
             let place = match (&row_opt, &optimistic) {
                 (Some(row), Some(proj)) => {
-                    predicate.matches(proj) && in_range(&row.sort_key, &watermark)
+                    predicate.matches(proj)
+                        && in_range(&row.sort_key, &watermark, direction)
                 }
                 _ => false,
             };
@@ -729,12 +734,18 @@ fn row_key_of(projection: &Value, message_id: &str) -> String {
 /// Whether a sort key falls within a view's held range `[TOP, W]`. `None`
 /// watermark means the range reaches BOTTOM (complete) — always in range.
 /// Desc: at or above `W` (`sort_key >= W`); Asc: at or below `W` (`sort_key <= W`).
-fn in_range(sort_key: &SortKey, watermark: &Option<SortKey>) -> bool {
+fn in_range(
+    sort_key: &SortKey,
+    watermark: &Option<SortKey>,
+    direction: SortDirection,
+) -> bool {
     match watermark {
         None => true,
-        Some(w) => match sort_key.cmp(w) {
-            Ordering::Greater | Ordering::Equal => true,
-            Ordering::Less => false,
+        Some(w) => match (direction, sort_key.cmp(w)) {
+            (SortDirection::Desc, Ordering::Greater | Ordering::Equal) => true,
+            (SortDirection::Desc, Ordering::Less) => false,
+            (SortDirection::Asc, Ordering::Less | Ordering::Equal) => true,
+            (SortDirection::Asc, Ordering::Greater) => false,
         },
     }
 }
@@ -933,6 +944,51 @@ mod tests {
         assert_eq!(ids, vec!["m2"]);
         // But the message entity itself is stored (discovery happened).
         assert!(store.message("m3").is_some());
+    }
+
+    #[test]
+    fn asc_view_honours_its_watermark_direction() {
+        // An Asc view holds `[TOP, W]` with W at the BOTTOM of the window: in
+        // range means at-or-below W (older). m2 is the watermark.
+        let mut store = EntityStore::new();
+        store.register_view(
+            "asc",
+            ViewPredicate::InMailboxes(vec!["inbox".into()]),
+            "receivedAt".into(),
+            SortDirection::Asc,
+            Some(key("2026-04-28T12:00:00Z", "m2")),
+        );
+        store.set_view_rows(
+            "asc",
+            vec![ViewRow {
+                row_key: "primary:m2".into(),
+                message_id: "m2".into(),
+                sort_key: key("2026-04-28T12:00:00Z", "m2"),
+            }],
+            Some(key("2026-04-28T12:00:00Z", "m2")),
+        );
+        store.drain_dirty();
+
+        // m1 is newer (above the watermark) → out of range for Asc, must be
+        // ignored. The buggy Desc-only comparison would place it.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m1".into(),
+            projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+        // m3 is older (at-or-below the watermark) → in range, placed before m2
+        // in ascending order. The buggy comparison would drop it.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m3".into(),
+            projection: summary("m3", "2026-04-27T10:00:00Z", &["inbox"]),
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+
+        let ids: Vec<&str> =
+            store.view_rows("asc").unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        assert_eq!(ids, vec!["m3", "m2"]);
     }
 
     #[test]
