@@ -47,7 +47,7 @@ the partial-window store cannot self-derive. Be precise about the target:
 | Initial snapshot (open) | **keep** | store has zero messages on open |
 | Pagination / window-extend | **keep** | a message below the watermark `W` is outside the store's world |
 | Resync / gap recovery (forwarder lag → collapse) | **keep** | the recovery path; the firehose dropped events |
-| Deferred (smart-mailbox) views | **keep** | store can't evaluate the predicate |
+| Deferred views (user smart mailboxes, global, non-date sorts) | **keep** | store can't evaluate the opaque predicate |
 | ~~Store-off fallback (`VITE_ENTITY_STORE=false`)~~ | **RETIRED** | the opt-out is gone (step 1); the store is the sole read model |
 | **Incremental membership (move in/out within window) for an evaluable view while the store is active** | **RETIRE** | the store already maintains it from `message.updated` |
 
@@ -175,9 +175,10 @@ That is the prerequisite decision, not a detail.
    emitters now attach `projection` + `countDeltas`, so the store self-maintains
    rows + counts on those paths. This unblocks #3 removal.
 3. **Neuter #3 for `ViewKind::MailList`** in `spawn_event_pump` — **DONE, then
-   NARROWED (regression fix `b7c65f58`).** Originally skipped for *all* mail-lists,
-   but the client store self-maintains only *evaluable* predicates (InMailbox,
-   date-sort); `Deferred` mail-lists (smart-mailbox / global / null-mailbox /
+   NARROWED (regression fix `b7c65f58`), then WIDENED (role smart mailboxes —
+   see Follow-up below).** Originally skipped for *all* mail-lists,
+   but the client store self-maintains only *evaluable* predicates; `Deferred`
+   mail-lists (then: any smart-mailbox / global / null-mailbox /
    non-`date`) have no self-maintenance and went stale until reload (the `.22`
    regression — Playwright-confirmed: archiving from "All Inboxes" caused 0 DOM
    mutations; regular Inbox, being evaluable, was unaffected). Narrowed: the client
@@ -221,9 +222,25 @@ That is the prerequisite decision, not a detail.
 **STATUS: option iii COMPLETE (steps 1–5, step 3 narrowed in `b7c65f58`).** The
 runtime no longer recomputes + re-serves an *evaluable* mail-list per event; the
 firehose is the single membership channel for those; the per-event-per-view
-recompute (~1.5 ms, serde-heavy) is gone. `Deferred` mail-lists (smart-mailbox /
-global / non-`date`) are still re-served per event — the client cannot
-self-maintain them, so neutering #3 for them would stale them.
+recompute (~1.5 ms, serde-heavy) is gone. `Deferred` mail-lists are still
+re-served per event — the client cannot self-maintain them, so neutering #3 for
+them would stale them.
+
+## Follow-up (landed): role smart mailboxes are now self-maintained
+
+The Deferred set was narrowed further. The store predicate generalized from a
+single mailbox to set-intersection (`InMailbox(String)` → `InMailboxes(Vec<
+String>)`), so a built-in **role** smart mailbox (inbox/archive/drafts/sent/
+junk/trash — "All Inboxes" is the `inbox`-role case) resolves to the role's
+mailbox in every account and self-maintains like a folder view; All Mail (empty
+rule) → `All`. Only **user** smart mailboxes (opaque rules), global/search
+scopes, null-mailbox, and non-`date` sorts remain Deferred. One resolver
+(`resolveMailListPredicate`) produces both the store predicate and the
+`client_self_maintained` flag from the shared query cache, preserving the
+no-drift invariant. This removes the "All Inboxes is less robust than a folder"
+asymmetry that motivated this issue: the default landing view now updates from
+the firehose with no per-event runtime round-trip. An unresolvable role (no
+mailbox carries it yet) degrades to Deferred — correct, just not optimized.
 
 ## Provenance
 

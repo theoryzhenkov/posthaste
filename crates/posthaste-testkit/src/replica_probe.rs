@@ -57,7 +57,7 @@ impl ReplicaProbe {
         let mut store = EntityStore::new();
         store.register_view(
             view_id,
-            ViewPredicate::InMailbox(mailbox_id.to_string()),
+            ViewPredicate::InMailboxes(vec![mailbox_id.to_string()]),
             "receivedAt".to_string(),
             SortDirection::Desc,
             // Watermark `None` = the held window reaches BOTTOM (the view holds

@@ -44,7 +44,7 @@ describe.skipIf(!present)('mailbox-move flicker (real WASM)', () => {
     h.registerViewJson(
       'inbox',
       JSON.stringify({
-        predicate: { inMailbox: 'inbox' },
+        predicate: { inMailboxes: ['inbox'] },
         sortField: 'date',
         sortDirection: 'desc',
         watermark: null,

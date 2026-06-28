@@ -71,7 +71,7 @@ impl EntityStoreHandle {
     /// Register a view with its predicate, sort, and initial coverage
     /// watermark. The host calls this when a view is opened (or its window
     /// grows). `args_json` is `{predicate, sortField, sortDirection,
-    /// watermark?}` where `predicate` is `{"inMailbox":id}` / `"all"` /
+    /// watermark?}` where `predicate` is `{"inMailboxes":[id,..]}` / `"all"` /
     /// `"deferred"` and `watermark` is `{"receivedAt","messageId"}` or null
     /// (reaches BOTTOM). Marks the view dirty.
     #[wasm_bindgen(js_name = registerViewJson)]
@@ -269,7 +269,7 @@ mod tests {
             .register_view_json(
                 "inbox",
                 &json!({
-                    "predicate": {"inMailbox": "inbox"},
+                    "predicate": {"inMailboxes": ["inbox"]},
                     "sortField": "receivedAt",
                     "sortDirection": "desc",
                     "watermark": null
@@ -345,7 +345,7 @@ mod tests {
             .register_view_json(
                 "inbox",
                 &json!({
-                    "predicate": {"inMailbox": "inbox"},
+                    "predicate": {"inMailboxes": ["inbox"]},
                     "sortField": "receivedAt",
                     "sortDirection": "desc",
                     "watermark": null
