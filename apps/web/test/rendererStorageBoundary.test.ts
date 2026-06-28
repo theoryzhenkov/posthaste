@@ -14,6 +14,7 @@ const allowedStorageFiles = new Set([
   'src/hooks/useDaemonEvents.ts',
   'src/hooks/useMailLayoutPersistence.ts',
   'src/observability.ts',
+  'src/repairFeedback.ts',
   // The client-layer replica's durable state lives in one IndexedDB DB
   // (`posthaste-replica`); `replicaDatabase.ts` is the single shared opener
   // that owns the schema version + creates every object store, so the outbox
