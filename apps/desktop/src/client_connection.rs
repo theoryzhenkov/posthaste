@@ -99,6 +99,91 @@ pub fn request_database_repair() -> Result<(), String> {
     Ok(())
 }
 
+/// Marker that requests a full factory reset on the next launch.
+const FACTORY_RESET_MARKER: &str = ".factory-reset-requested";
+
+/// Resolve the daemon `CONFIG_ROOT` (app.toml + sources + smart-mailboxes),
+/// mirroring `posthaste-server`: `POSTHASTE_CONFIG_ROOT`, else
+/// `$XDG_CONFIG_HOME/posthaste`, else `~/.config/posthaste`.
+fn daemon_config_root() -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("POSTHASTE_CONFIG_ROOT") {
+        if !explicit.is_empty() {
+            return Some(PathBuf::from(explicit));
+        }
+    }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg).join("posthaste"));
+        }
+    }
+    dirs::home_dir().map(|home| home.join(".config").join("posthaste"))
+}
+
+/// Wipe everything a factory reset owns on the daemon side: the state root
+/// (mail.sqlite + cache + daemon.json), the config root (app.toml + sources +
+/// smart-mailboxes), and the client connection store. Each root is removed then
+/// recreated empty; missing paths are a no-op (idempotent). Keyring secrets are
+/// left as harmless orphans (re-adding an account overwrites them).
+fn wipe_factory_reset_targets(
+    state_root: &std::path::Path,
+    config_root: Option<&std::path::Path>,
+    client_connections: Option<&std::path::Path>,
+) -> std::io::Result<()> {
+    for root in std::iter::once(state_root).chain(config_root) {
+        if root.exists() {
+            std::fs::remove_dir_all(root)?;
+        }
+        std::fs::create_dir_all(root)?;
+    }
+    if let Some(path) = client_connections {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
+}
+
+/// Request a full factory reset on the next launch.
+///
+/// Writes the marker [`consume_factory_reset_marker`] acts on at startup (before
+/// the embedded server opens anything). The frontend also clears the client
+/// replica + local UI state, then relaunches. Unlike repair this also removes
+/// accounts + config; the user starts from a clean install.
+#[tauri::command]
+pub fn request_factory_reset() -> Result<(), String> {
+    let Some(state_root) = daemon_state_root() else {
+        return Err("cannot resolve the Posthaste data directory".to_string());
+    };
+    std::fs::create_dir_all(&state_root)
+        .map_err(|err| format!("cannot create {}: {err}", state_root.display()))?;
+    let marker = state_root.join(FACTORY_RESET_MARKER);
+    std::fs::write(&marker, b"")
+        .map_err(|err| format!("cannot write {}: {err}", marker.display()))?;
+    Ok(())
+}
+
+/// If a factory reset was requested, perform it before the embedded server
+/// starts (so nothing holds the files open) and return `true`. Best-effort: a
+/// partial wipe must not block launch. Call once at startup, before the server.
+pub(crate) fn consume_factory_reset_marker<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let Some(state_root) = daemon_state_root() else {
+        return false;
+    };
+    if !state_root.join(FACTORY_RESET_MARKER).exists() {
+        return false;
+    }
+    let config_root = daemon_config_root();
+    let connections = client_dir(app).ok().map(|dir| dir.join(CONNECTIONS_FILE));
+    let _ = wipe_factory_reset_targets(
+        &state_root,
+        config_root.as_deref(),
+        connections.as_deref(),
+    );
+    true
+}
+
 /// Read the connection-profile store as a raw JSON string, or `None` when the
 /// file does not exist yet (a fresh install). The frontend owns parsing so the
 /// version-tolerant schema lives in one place (TypeScript).
@@ -414,4 +499,40 @@ pub fn client_local_daemon_read() -> Result<Option<LocalDaemon>, String> {
         port: parsed.port,
         token: parsed.token,
     }))
+}
+
+#[cfg(test)]
+mod factory_reset_tests {
+    use super::*;
+
+    #[test]
+    fn wipe_clears_state_config_and_connections_and_is_idempotent() {
+        let base = std::env::temp_dir().join(format!(
+            "ph-factory-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state = base.join("state");
+        let config = base.join("config");
+        let connections = base.join("connections.json");
+        std::fs::create_dir_all(state.join("cache")).unwrap();
+        std::fs::write(state.join("mail.sqlite"), b"x").unwrap();
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("app.toml"), b"x").unwrap();
+        std::fs::write(&connections, b"{}").unwrap();
+
+        wipe_factory_reset_targets(&state, Some(&config), Some(&connections)).unwrap();
+
+        assert!(state.exists() && std::fs::read_dir(&state).unwrap().next().is_none());
+        assert!(config.exists() && std::fs::read_dir(&config).unwrap().next().is_none());
+        assert!(!connections.exists());
+
+        // A second wipe over now-clean targets must not error.
+        wipe_factory_reset_targets(&state, Some(&config), Some(&connections)).unwrap();
+
+        std::fs::remove_dir_all(&base).ok();
+    }
 }

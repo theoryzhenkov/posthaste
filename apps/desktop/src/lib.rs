@@ -123,6 +123,7 @@ pub fn run() {
         client_connection::client_token_delete,
         client_connection::client_local_daemon_read,
         client_connection::request_database_repair,
+        client_connection::request_factory_reset,
         e2e::posthaste_e2e_result
     ]);
     #[cfg(not(feature = "e2e-testing"))]
@@ -138,7 +139,8 @@ pub fn run() {
         client_connection::client_token_set,
         client_connection::client_token_delete,
         client_connection::client_local_daemon_read,
-        client_connection::request_database_repair
+        client_connection::request_database_repair,
+        client_connection::request_factory_reset
     ]);
 
     let builder = builder.setup(|app| {
@@ -148,6 +150,13 @@ pub fn run() {
             channel = RELEASE_CHANNEL,
             "desktop release channel"
         );
+
+        // A requested factory reset must run before the embedded server opens
+        // any file. Best-effort; the renderer already cleared the replica + UI
+        // state and will confirm on this boot.
+        if client_connection::consume_factory_reset_marker(app.handle()) {
+            ph_info!(events::DESKTOP_FACTORY_RESET, "factory reset performed");
+        }
 
         #[cfg(feature = "embedded-server")]
         let backend = {

@@ -27,6 +27,7 @@ import { useUndoRedo } from '@/hooks/useUndoRedo'
 import { RevLogMirrors } from '@/hooks/RevLogMirrors'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
+import { consumeRepairCompletion } from '@/repairFeedback'
 import { runtimeMutations } from '@/runtime/mutations'
 import { runtimeViews } from '@/runtime/views'
 import { prepareServerSearchQuery } from '@/searchQuery'
@@ -71,6 +72,7 @@ export function MailClient({
     [searchQuery],
   )
   const theme = useDesignTheme()
+  useRepairCompletionToast()
   const undoRedo = useUndoRedo()
   const actions = useEmailActions({ undo: undoRedo.undo })
 
@@ -264,6 +266,20 @@ function MailClientLoading() {
       <p className="text-sm text-muted-foreground">Setting up...</p>
     </div>
   )
+}
+
+/** Confirm a completed local repair / factory reset once, after the relaunch. */
+function useRepairCompletionToast() {
+  useEffect(() => {
+    const kind = consumeRepairCompletion()
+    if (kind === 'factory-reset') {
+      toast(
+        'Posthaste was reset to a clean state. Add an account to get started.',
+      )
+    } else if (kind === 'repair') {
+      toast('Posthaste repaired your local data and is re-syncing your mail.')
+    }
+  }, [])
 }
 
 function useDesktopCloseRequest(effectiveSurface: SurfaceDescriptor | null) {
