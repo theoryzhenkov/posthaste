@@ -86,6 +86,22 @@ impl DatabaseStore {
                 ],
             )
             .map_err(sql_to_store_error)?;
+            // A forward action makes the new step the topmost APPLIED step +
+            // truncates the redo tail (a forward action after undo clears the
+            // redoable steps). Advance the cursor atomically with the append so
+            // the server-authoritative cursor reflects forward actions — the
+            // client mirror can then adopt it without a client-side revCursor
+            // per forward action. Re-delivery returned early above (no cursor
+            // change), so this only runs for a newly-inserted step.
+            //
+            // @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+            tx.execute(
+                "INSERT INTO rev_cursor (account_id, cursor_step_id, redo_tail)
+                 VALUES (?1, ?2, '[]')
+                 ON CONFLICT(account_id) DO UPDATE SET cursor_step_id = ?2, redo_tail = '[]'",
+                params![account_id.as_str(), step_id],
+            )
+            .map_err(sql_to_store_error)?;
             Ok(seq.max(0) as u32)
         })
     }
