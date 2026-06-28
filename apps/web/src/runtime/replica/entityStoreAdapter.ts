@@ -209,11 +209,26 @@ class EntityStoreController {
       JSON.stringify(watermarkFromSnapshot(snapshot, rows)),
     )
     this.handle.drainDirtyJson()
-    // Rehydrate unconfirmed intent (durable across reload) over the base. A
-    // single un-deserializable record (e.g. a durable assertion written before
+    // Rehydrate durable intent over the freshly-served base.
+    //
+    // A record already sent to the runtime (`runtimeMutationId !== null`) is
+    // owned by the runtime: the base served just above already reflects its
+    // outcome (and the firehose reconciles anything still in flight), so
+    // re-applying it as pending intent would never retire it — `accept` only
+    // folds, and nothing re-checks absorption after a reload, so the durable
+    // outbox grows unbounded across reloads (the settled-record leak that grew
+    // one real DB to 88 records on a single message). Drop those; only
+    // never-sent intent is replayed below.
+    //
+    // A single un-deserializable record (e.g. a durable assertion written before
     // a wire-schema change) must never abort the whole view-open — that bricks
     // every mail-list view silently. Skip + log the bad record and keep going.
+    const droppedSettled: string[] = []
     for (const record of await this.deps.outbox.all()) {
+      if (record.runtimeMutationId !== null) {
+        droppedSettled.push(record.clientMutationId)
+        continue
+      }
       try {
         this.handle.acceptMutationJson(
           JSON.stringify({
@@ -233,6 +248,18 @@ class EntityStoreController {
           'skipped an un-deserializable outbox record during rehydration',
         )
       }
+    }
+    if (droppedSettled.length) {
+      await Promise.all(
+        droppedSettled.map((id) => this.deps.outbox.remove(id)),
+      )
+      syncLogger.debug(
+        {
+          event: LOG_EVENTS.outboxRehydrateDropped,
+          count: droppedSettled.length,
+        },
+        'dropped already-sent outbox records on rehydration (runtime-owned)',
+      )
     }
     const projected = this.projectView(viewId)
     const entry: ViewEntry = {
