@@ -187,6 +187,7 @@ mod outbox;
 mod reads_events_integrity;
 mod reconcile;
 mod repair;
+mod rev_log;
 mod smart_mailboxes;
 mod source_visibility;
 mod tags_and_locations;

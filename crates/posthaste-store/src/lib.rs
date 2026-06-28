@@ -13,6 +13,7 @@ mod outbox;
 mod projections;
 mod query;
 mod read;
+mod rev_log;
 mod sender_cache;
 mod smart_mailboxes;
 mod source;
@@ -21,6 +22,7 @@ mod store;
 mod sync_state;
 
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
+pub use rev_log::{RevCursor, RevLogStep, MAX_REV_LOG_HISTORY};
 
 use std::collections::BTreeSet;
 use std::fs;

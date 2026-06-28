@@ -248,6 +248,26 @@ pub(super) const SCHEMA_SQL: &str = "
                     ON DELETE CASCADE
             );
 
+            -- Phase 2 undo/redo: the per-account server-authoritative reversible-op
+            -- log + cursor. Append-only on forward actions; the cursor is mutable.
+            -- `diff` is a MessageChangeDiff JSON (opaque to the store). See
+            -- docs/eph/DESIGN-L2-undo-redo-revlog-contract.
+            CREATE TABLE IF NOT EXISTS rev_log (
+                account_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                message_id TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                diff TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, step_id)
+            );
+            CREATE TABLE IF NOT EXISTS rev_cursor (
+                account_id TEXT PRIMARY KEY,
+                cursor_step_id TEXT,
+                redo_tail TEXT NOT NULL DEFAULT '[]'
+            );
+
             CREATE INDEX IF NOT EXISTS idx_message_thread
                 ON message (account_id, thread_id, received_at);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_mailbox_role_override_unique_role
@@ -295,6 +315,8 @@ pub(super) const SCHEMA_SQL: &str = "
                 ON cache_message_signal (account_id, dirty_at);
             CREATE INDEX IF NOT EXISTS idx_cache_rescore_queue
                 ON cache_rescore_queue (account_id, queued_at);
+            CREATE INDEX IF NOT EXISTS idx_rev_log_account_seq
+                ON rev_log (account_id, seq);
 
             -- Full-text search index over message header fields. External-content
             -- FTS5 table linked to message.rowid; kept in sync by triggers so the
