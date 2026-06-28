@@ -601,25 +601,36 @@ class EntityStoreController {
     }
   }
 
-  /** Drain the store's dirty keys, re-project open views, and write counts. */
+  /** Drain the store's dirty keys, re-project the dirty views, and write counts. */
   private drainAndEmit(): void {
     const dirty = JSON.parse(this.handle.drainDirtyJson()) as DirtyKey[]
-    // Re-project ALL open views (D-2e-2: covers content-only mutations — P2 —
-    // without a message→rows index).
-    this.emitChangedViews()
+    // Re-project ONLY the views the store flagged dirty. The store now marks a
+    // view dirty on any change to a row it holds — including a content-only
+    // flag/read toggle (via its message→views reverse index) — so the drained
+    // `view` set is trustworthy and complete; no all-views scan per drain
+    // (`adapter-reproject-all`). The JSON-diff gate in `emitChangedViews` stays
+    // the safety net against a true no-op rederive.
+    const dirtyViews = new Set<string>()
     for (const key of dirty) {
-      if ('mailbox' in key) {
+      if ('view' in key) {
+        dirtyViews.add(key.view)
+      } else if ('mailbox' in key) {
         this.writeMailboxCount(key.mailbox)
       }
     }
+    this.emitChangedViews(dirtyViews)
   }
 
-  /** Emit a synthesized `viewReplace` for every view whose projection moved. */
-  private emitChangedViews(): void {
+  /** Emit a synthesized `viewReplace` for each dirty view whose projection moved. */
+  private emitChangedViews(dirtyViews: Set<string>): void {
     if (!this.sink) {
       return
     }
-    for (const [viewId, entry] of this.views) {
+    for (const viewId of dirtyViews) {
+      const entry = this.views.get(viewId)
+      if (!entry) {
+        continue
+      }
       const projected = this.projectView(viewId)
       if (projected.json === entry.lastProjectionJson) {
         continue
