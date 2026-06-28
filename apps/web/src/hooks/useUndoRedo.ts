@@ -25,6 +25,30 @@ export interface UndoRedo {
   redo: () => void
 }
 
+/**
+ * Phase 2: send the server-arbitrated cursor assignment after a local undo/redo
+ * move. The cursor is optimistic (the store moved it locally, instant UX); this
+ * `revCursor` control mutation is the server arbitration that syncs the cursor
+ * cross-device (last-writer-wins + idempotent — re-delivery/reorder safe). The
+ * `cursorStepId`/`redoTail` are derived from the store's post-move snapshot.
+ *
+ * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+ */
+function sendRevCursor(snapshot: UndoHistorySnapshot, accountId: string): void {
+  const cursorStepId =
+    snapshot.cursor >= 0 ? (snapshot.steps[snapshot.cursor]?.id ?? null) : null
+  const redoTail = snapshot.steps.slice(snapshot.cursor + 1).map((s) => s.id)
+  void runtimeSessionClient
+    .runMutation({
+      name: 'revCursor',
+      args: { accountId, cursorStepId, redoTail },
+    })
+    .catch(() => {
+      // Transient transport failures are non-fatal; the outbox/convergence
+      // guard reconciles. The local cursor is already correct (optimistic).
+    })
+}
+
 export function useUndoRedo(): UndoRedo {
   const store = getUndoHistoryStore()
   const [snap, setSnap] = useState<UndoHistorySnapshot>(() => store.snapshot())
@@ -62,6 +86,8 @@ export function useUndoRedo(): UndoRedo {
           // guard reconciles. (Cursor rollback on a rejected settlement is the
           // Phase 2 concern; the applyDiff is idempotent.)
         })
+      // Phase 2: arbitrate the cursor move with the server (cross-device sync).
+      sendRevCursor(store.snapshot(), step.sourceId)
     })
   }
 
@@ -78,6 +104,8 @@ export function useUndoRedo(): UndoRedo {
           },
         })
         .catch(() => {})
+      // Phase 2: arbitrate the cursor move with the server (cross-device sync).
+      sendRevCursor(store.snapshot(), step.sourceId)
     })
   }
 
