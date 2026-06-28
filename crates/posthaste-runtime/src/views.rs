@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use posthaste_domain::{
     AccountId, ConversationId, DomainEvent, MessageId, EVENT_TOPIC_ACCOUNT_CREATED,
     EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_ACCOUNT_UPDATED,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_REV_LOG_APPENDED,
 };
 use posthaste_runtime_contract::{
     CoverageRange, MailListAnchorState, MailListContinuation, MailListProjectionKind,
@@ -645,11 +645,13 @@ fn event_affects_view(kind: &ViewKind, event: &DomainEvent) -> bool {
                     .as_ref()
                     .is_none_or(|id| event.account_id.as_str() == id)
         }
-        // Phase 2: the RevLog view recomputes on its own dedicated events
-        // (forward-action append, cursor arbitration), wired in later slices —
-        // not on the `message.updated` firehose (a per-message update would
-        // needlessly re-fetch the whole log).
-        ViewKind::RevLog { .. } => false,
+        // Phase 2: the RevLog view recomputes on `rev_log.appended` for its
+        // account (a forward action confirmed + appended) — not on the
+        // `message.updated` firehose (a per-message update would needlessly
+        // re-fetch the whole log). Cursor moves (Slice 4) emit the same topic.
+        ViewKind::RevLog { account_id } => {
+            event.topic == EVENT_TOPIC_REV_LOG_APPENDED && event.account_id.as_str() == account_id
+        }
     }
 }
 

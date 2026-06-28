@@ -23,13 +23,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
-    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity,
+    now_iso8601, AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress,
+    CommandAck, ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity,
     MailService, MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
     Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
     RevLogSnapshot, SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SharedGateway,
     SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger,
-    TagSummary,
+    TagSummary, EVENT_TOPIC_REV_LOG_APPENDED,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
@@ -37,8 +37,8 @@ use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationRequest, PatchAccountMutation,
-    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
-    RuntimeErrorCode, RuntimeResourceBytes,
+    PatchAppSettingsMutation, PatchSmartMailboxMutation, RevStepInput, RuntimeAccountList,
+    RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
 use tokio::sync::broadcast;
 
@@ -356,6 +356,61 @@ impl Backend {
         self.store
             .rev_log_snapshot(account_id)
             .map_err(|error| RuntimeError::internal(error.to_string(), None))
+    }
+
+    /// Phase 2: on a confirmed forward action whose `context` carries a
+    /// `revStep`, append the reversible-op step to `rev_log` + emit
+    /// [`EVENT_TOPIC_REV_LOG_APPENDED`] so the `RevLog` synced view re-serves
+    /// the log + cursor. Best-effort — a store failure is logged (the mutation
+    /// already applied; the client can retry the append by re-sending the step).
+    ///
+    /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    fn append_rev_log_step_if_present(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        context: &Option<serde_json::Value>,
+    ) {
+        let Some(rev_step) = context.as_ref().and_then(|c| c.get("revStep")) else {
+            return;
+        };
+        let Ok(rev_step) = serde_json::from_value::<RevStepInput>(rev_step.clone()) else {
+            ph_warn!(
+                events::REV_LOG_APPEND_FAILED,
+                account_id = %account_id,
+                "rev_log step payload in mutation context was invalid; skipping append"
+            );
+            return;
+        };
+        let account = AccountId(account_id.to_string());
+        let created_at = now_iso8601().unwrap_or_default();
+        match self.store.append_rev_log_step(
+            &account,
+            &rev_step.step_id,
+            message_id,
+            account_id,
+            &rev_step.diff,
+            &created_at,
+        ) {
+            Ok(_) => {
+                let _ = self.event_sender.send(DomainEvent {
+                    seq: 0,
+                    account_id: account.clone(),
+                    topic: EVENT_TOPIC_REV_LOG_APPENDED.to_string(),
+                    occurred_at: created_at,
+                    mailbox_id: None,
+                    message_id: Some(MessageId(message_id.to_string())),
+                    payload: serde_json::json!({ "stepId": rev_step.step_id }),
+                });
+            }
+            Err(error) => ph_warn!(
+                events::REV_LOG_APPEND_FAILED,
+                account_id = %account_id,
+                step_id = %rev_step.step_id,
+                error = %error,
+                "rev_log append failed; the mutation applied but is not yet undoable"
+            ),
+        }
     }
 
     /// Publish authoritative domain events on the down-channel broadcast. In the
@@ -713,7 +768,9 @@ impl Backend {
         request: &MutationRequest,
     ) -> Result<CommandAck, RuntimeError> {
         let mutation = MessageMutation::from_request(request)?;
-        match mutation {
+        let account_id = mutation.account_id().to_string();
+        let message_id = mutation.message_id().to_string();
+        let ack = match mutation {
             MessageMutation::SetKeywords(args) => {
                 self.set_keywords(
                     AccountId(args.source_id),
@@ -829,7 +886,12 @@ impl Backend {
                 }
                 Ok(CommandAck { events })
             }
-        }
+        }?;
+        // Phase 2: append the reversible-op step on a confirmed forward action
+        // whose context carries a `revStep`, + emit the recompute trigger so the
+        // `RevLog` synced view re-serves the log + cursor.
+        self.append_rev_log_step_if_present(&account_id, &message_id, &request.context);
+        Ok(ack)
     }
 }
 

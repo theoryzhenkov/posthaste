@@ -163,6 +163,13 @@ pub const EVENT_TOPIC_MESSAGE_UPDATED: &str = "message.updated";
 /// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_MESSAGE_BODY_CACHED: &str = "message.body_cached";
 
+/// Event topic emitted when a Phase 2 reversible-op step is appended to the
+/// per-account `rev_log` (a forward action confirmed). Drives the `RevLog`
+/// synced view to re-serve the log + cursor.
+///
+/// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+pub const EVENT_TOPIC_REV_LOG_APPENDED: &str = "rev_log.appended";
+
 /// Event topic emitted when a mailbox is created, updated, or deleted.
 ///
 /// @spec docs/L1-sync#event-propagation

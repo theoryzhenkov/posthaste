@@ -668,6 +668,21 @@ pub struct ViewSnapshot {
     pub error: Option<RuntimeAdapterError>,
 }
 
+/// Phase 2 undo/redo: the client-supplied reversible-op step payload (carried
+/// in [`MutationRequest::context`] as `{"revStep": {...}}` on a forward
+/// action). The server appends it to `rev_log` on confirmation. `diff` is the
+/// `MessageChangeDiff` JSON captured client-side.
+///
+/// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevStepInput {
+    /// Client-generated ULID; the cursor key + idempotency key.
+    pub step_id: String,
+    /// `MessageChangeDiff` JSON (`{keywords, mailboxes}{added, removed}`).
+    pub diff: Value,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
