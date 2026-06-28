@@ -387,7 +387,7 @@ export interface paths {
         put?: never;
         /**
          * Run a runtime mutation
-         * @description Submits a named mutation to a runtime session (message read/flag/tags/move/archive/trash/restore/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.
+         * @description Submits a named mutation to a runtime session (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.
          */
         post: operations["run_runtime_session_mutation"];
         delete?: never;
@@ -1560,32 +1560,6 @@ export interface components {
             draftId: string;
         };
         /**
-         * @description One recorded reversible step on a session's undo/redo history: the session
-         *     seq at which the diff was captured, the message it touched, and the
-         *     invertible change-diff. The runtime owns the seq-ordered history and
-         *     broadcasts the current top of each stack via [`RuntimeFrame::MutationHistory`];
-         *     the client applies `inverse(diff)` (undo) or `diff` (redo) as an ordinary
-         *     `message.applyDiff` mutation, carrying the step's `seq` as the `undoOf`/`redoOf`
-         *     hint so the runtime can navigate its own history.
-         */
-        DiffStep: {
-            /**
-             * @description The invertible change-diff. `inverse(diff)` reconstructs the pre-mutation
-             *     state over `curr`; represented as an opaque object on the OpenAPI schema
-             *     (the diff type lives in the portable `posthaste-link-core` crate).
-             */
-            diff: Record<string, never>;
-            /** @description The message the reversible mutation touched. */
-            messageId: string;
-            /** @description The session seq at which this diff was recorded (the history step id). */
-            seq: components["schemas"]["RuntimeSessionSeq"];
-            /**
-             * @description The account the message belongs to, so the client can construct the
-             *     undo/redo `message.applyDiff` mutation (scope + the far-node read).
-             */
-            sourceId: string;
-        };
-        /**
          * @description An ordered domain event stored in `event_log` and published via SSE.
          *
          *     @spec docs/L1-sync#event-propagation
@@ -1679,7 +1653,6 @@ export interface components {
         };
         MailListRowState: {
             orderKey: string;
-            pendingMarkers?: components["schemas"]["RuntimeMutationId"][];
             projection?: Record<string, never>;
             resourceRef?: string | null;
             rowKey: string;
@@ -1837,7 +1810,7 @@ export interface components {
             sessionId?: null | components["schemas"]["RuntimeSessionId"];
         };
         /** @enum {string} */
-        MutationSettlementState: "accepted" | "localApplied" | "queued" | "confirmed" | "failed" | "conflict";
+        MutationSettlementState: "accepted" | "confirmed" | "failed";
         /**
          * @description Generic success response for mutating endpoints that return no domain data.
          *
@@ -2193,14 +2166,6 @@ export interface components {
             /** @enum {string} */
             type: "notification";
         } | {
-            canRedo: boolean;
-            canUndo: boolean;
-            redoTop?: null | components["schemas"]["DiffStep"];
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
-            /** @enum {string} */
-            type: "mutationHistory";
-            undoTop?: null | components["schemas"]["DiffStep"];
-        } | {
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
             type: "heartbeat";
@@ -2318,6 +2283,12 @@ export interface components {
             parentId?: null | components["schemas"]["SmartMailboxId"];
             /** Format: int64 */
             position: number;
+            /**
+             * @description The mailbox role whose semantics apply to this view (e.g. `"trash"`),
+             *     driving contextual actions like Delete Permanently. Set on the built-in
+             *     role defaults; `None` for All Mail and unassigned user smart mailboxes.
+             */
+            role?: string | null;
             rule: components["schemas"]["SmartMailboxRule"];
             updatedAt: string;
         };
@@ -2413,6 +2384,7 @@ export interface components {
             parentId?: null | components["schemas"]["SmartMailboxId"];
             /** Format: int64 */
             position: number;
+            role?: string | null;
             /** Format: int64 */
             totalMessages: number;
             /** Format: int64 */
@@ -2582,6 +2554,17 @@ export interface components {
             pushSupported: boolean;
         };
         ViewDescriptor: {
+            /**
+             * @description Whether the client entity store self-maintains this view's membership from
+             *     the `message.updated` firehose (evaluable predicates only). When true
+             *     the runtime skips the per-event re-serve for this view (option iii,
+             *     single-source-view-membership); when false the runtime re-serves on every
+             *     affecting event — required for `Deferred` mail-lists (smart-mailbox /
+             *     global / non-`date`) the store cannot self-maintain. Single source: the
+             *     client computes it from its predicate and stamps it here; the runtime
+             *     never re-derives it (no TS↔Rust drift).
+             */
+            clientSelfMaintained?: boolean;
             family: string;
             payload?: Record<string, never>;
         };
@@ -2596,7 +2579,6 @@ export interface components {
             descriptor: components["schemas"]["ViewDescriptor"];
             error?: null | components["schemas"]["RuntimeAdapterError"];
             lifecycle: components["schemas"]["ViewLifecycle"];
-            pendingMutations?: components["schemas"]["RuntimeMutationId"][];
             readWatermark?: null | components["schemas"]["ReadWatermark"];
             revision: components["schemas"]["ViewRevision"];
             viewId: components["schemas"]["ViewId"];
