@@ -18,7 +18,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '../ui/context-menu'
-import { displaySmartMailboxName, itemButtonClass } from './model'
+import { itemButtonClass } from './model'
 
 function roleIcon(role: Mailbox['role'], size = 14): ReactNode {
   return renderMailboxRoleIcon(role, size)
@@ -63,7 +63,7 @@ export function SmartMailboxItem({
         {smartMailboxIcon(name)}
       </span>
       <span className="min-w-0 flex-1 truncate">
-        {displaySmartMailboxName(name)}
+        {name}
       </span>
       {unreadMessages != null && unreadMessages > 0 && (
         <UnreadCount count={unreadMessages} isSelected={isSelected} />

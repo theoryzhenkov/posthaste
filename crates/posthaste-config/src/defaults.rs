@@ -11,7 +11,7 @@ use posthaste_domain::{
 /// @spec docs/L1-accounts#smart-mailbox-defaults
 pub fn default_smart_mailboxes() -> Vec<SmartMailbox> {
     vec![
-        role_mailbox("default-inbox", "Inbox", 0, "inbox", "inbox"),
+        role_mailbox("default-inbox", "All Inboxes", 0, "inbox", "inbox"),
         role_mailbox("default-archive", "Archive", 1, "archive", "archive"),
         role_mailbox("default-drafts", "Drafts", 2, "drafts", "drafts"),
         role_mailbox("default-sent", "Sent", 3, "sent", "sent"),

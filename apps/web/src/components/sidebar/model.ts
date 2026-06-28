@@ -17,43 +17,15 @@ export function fallbackAccountAppearance(
   }
 }
 
-export function smartMailboxPriority(name: string): number {
-  const normalized = name.trim().toLowerCase()
-  switch (normalized) {
-    case 'inbox':
-    case 'all inboxes':
-      return 0
-    case 'flagged':
-      return 1
-    default:
-      return 99
-  }
-}
-
-export function displaySmartMailboxName(name: string): string {
-  return name.trim().toLowerCase() === 'inbox' ? 'All Inboxes' : name
-}
-
-export function partitionSmartMailboxes(smartMailboxes: SmartMailboxSummary[]) {
-  const quick: SmartMailboxSummary[] = []
-  const smart: SmartMailboxSummary[] = []
-
-  for (const mailbox of smartMailboxes) {
-    const priority = smartMailboxPriority(mailbox.name)
-    if (priority !== 99) {
-      quick.push(mailbox)
-      continue
-    }
-    smart.push(mailbox)
-  }
-
-  quick.sort(
+/** Smart mailboxes in declared order (`position`, then name). */
+export function sortSmartMailboxes(
+  smartMailboxes: SmartMailboxSummary[],
+): SmartMailboxSummary[] {
+  return [...smartMailboxes].sort(
     (left, right) =>
-      smartMailboxPriority(left.name) - smartMailboxPriority(right.name),
+      left.position - right.position ||
+      left.name.localeCompare(right.name),
   )
-  smart.sort((left, right) => left.name.localeCompare(right.name))
-
-  return { quick, smart }
 }
 
 export function itemButtonClass(isSelected: boolean, depth = 0): string {

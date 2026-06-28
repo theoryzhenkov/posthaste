@@ -47,43 +47,6 @@ export function SidebarError({ onRetry }: { onRetry: () => void }) {
   )
 }
 
-export function QuickSmartMailboxSection({
-  mailboxes,
-  selectedView,
-  onOpenSmartMailboxSettings,
-  onSelectSmartMailbox,
-}: {
-  mailboxes: SmartMailboxSummary[]
-  selectedView: SidebarSelection | null
-  onOpenSmartMailboxSettings: (smartMailboxId: string) => void
-  onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
-}) {
-  if (mailboxes.length === 0) {
-    return null
-  }
-  return (
-    <div className="space-y-0.5 pb-3">
-      {mailboxes.map((smartMailbox) => (
-        <SmartMailboxItem
-          key={smartMailbox.id}
-          id={smartMailbox.id}
-          name={smartMailbox.name}
-          unreadMessages={smartMailbox.unreadMessages}
-          accent={smartMailboxAccent(smartMailbox.name)}
-          isSelected={
-            selectedView?.kind === 'smart-mailbox' &&
-            selectedView.id === smartMailbox.id
-          }
-          onSelect={() =>
-            onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
-          }
-          onOpenSettings={onOpenSmartMailboxSettings}
-        />
-      ))}
-    </div>
-  )
-}
-
 export function SmartMailboxSection({
   collapsed,
   mailboxes,
