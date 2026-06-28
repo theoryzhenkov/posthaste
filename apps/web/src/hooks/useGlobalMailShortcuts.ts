@@ -23,6 +23,7 @@ export function useGlobalMailShortcuts({
   onOpenTagEditor,
   onRedo,
   onReply,
+  onReplyAll,
   onToggleFlag,
   onToggleShortcuts,
   onUndo,
@@ -44,6 +45,7 @@ export function useGlobalMailShortcuts({
   onOpenTagEditor: () => void
   onRedo: () => void
   onReply: () => void
+  onReplyAll: () => void
   onToggleFlag: () => void
   onToggleShortcuts: () => void
   onUndo: () => void
@@ -75,6 +77,15 @@ export function useGlobalMailShortcuts({
       ) {
         event.preventDefault()
         onCompose()
+        return
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        (event.key === 'r' || event.key === 'R')
+      ) {
+        event.preventDefault()
+        onReplyAll()
         return
       }
       if (
@@ -195,6 +206,7 @@ export function useGlobalMailShortcuts({
     onOpenTagEditor,
     onRedo,
     onReply,
+    onReplyAll,
     onToggleFlag,
     onToggleShortcuts,
     onUndo,

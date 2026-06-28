@@ -52,6 +52,17 @@ export function useComposeIntent({
     })
   }, [selectedMessage])
 
+  const replyAllToSelectedMessage = useCallback(() => {
+    if (!selectedMessage) {
+      return
+    }
+    setComposeIntent({
+      kind: 'replyAll',
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+    })
+  }, [selectedMessage])
+
   const forwardSelectedMessage = useCallback(() => {
     if (!selectedMessage) {
       return
@@ -89,6 +100,7 @@ export function useComposeIntent({
     editSelectedDraft,
     forwardSelectedMessage,
     openCompose,
+    replyAllToSelectedMessage,
     replyToSelectedMessage,
   }
 }

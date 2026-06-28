@@ -44,6 +44,7 @@ export interface MailClientViewProps {
   onCompose: () => void
   onEditDraft: () => void
   onForward: () => void
+  onReplyAll: () => void
   onMessageLayoutChanged: LayoutHandler
   onOpenCommandPalette: () => void
   onOpenFocusedMessage: () => void

@@ -60,7 +60,10 @@ export function useComposeSubmission({
       }
 
       const input = buildSendInput(form)
-      if (intentKind === 'reply' && replyContext) {
+      if (
+        (intentKind === 'reply' || intentKind === 'replyAll') &&
+        replyContext
+      ) {
         input.inReplyTo = replyContext.inReplyTo
         input.references = replyContext.references
       }

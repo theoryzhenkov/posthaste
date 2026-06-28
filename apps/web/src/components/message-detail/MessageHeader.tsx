@@ -6,6 +6,7 @@ import {
   Paperclip,
   Pencil,
   Reply,
+  ReplyAll,
 } from 'lucide-react'
 
 import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
@@ -28,6 +29,7 @@ export function MessageHeader({
   onEditDraft,
   onForward,
   onReply,
+  onReplyAll,
   onSearch,
   threadMessages,
 }: {
@@ -37,6 +39,7 @@ export function MessageHeader({
   onEditDraft?: () => void
   onForward: () => void
   onReply: () => void
+  onReplyAll: () => void
   onSearch?: (query: string, append?: boolean) => void
   threadMessages: MessageSummary[]
 }) {
@@ -83,6 +86,7 @@ export function MessageHeader({
               onEditDraft={onEditDraft}
               onForward={onForward}
               onReply={onReply}
+              onReplyAll={onReplyAll}
             />
           </div>
           <MessageTagRow
@@ -136,12 +140,14 @@ function HeaderActions({
   onEditDraft,
   onForward,
   onReply,
+  onReplyAll,
 }: {
   isDraft: boolean
   onArchive: () => void
   onEditDraft?: () => void
   onForward: () => void
   onReply: () => void
+  onReplyAll: () => void
 }) {
   if (isDraft && onEditDraft) {
     return (
@@ -172,6 +178,16 @@ function HeaderActions({
         variant="ghost"
       >
         <Reply size={14} strokeWidth={1.6} />
+      </Button>
+      <Button
+        aria-label="Reply All"
+        onClick={onReplyAll}
+        size="icon-sm"
+        title="Reply All"
+        type="button"
+        variant="ghost"
+      >
+        <ReplyAll size={14} strokeWidth={1.6} />
       </Button>
       <Button
         aria-label="Forward (not available yet)"

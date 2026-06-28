@@ -134,6 +134,7 @@ export function useMailClientHandlers(input: {
     },
     handleRejectSearchPreview: () => setSearchQuery(''),
     handleReply: compose.replyToSelectedMessage,
+    handleReplyAll: compose.replyAllToSelectedMessage,
     handleSearch: applySearchQuery,
     handleSelectMessage: (message: MessageSummary) => {
       setSelectedMessage({
