@@ -378,7 +378,8 @@ impl RuntimeHarness {
     /// [`settle`](Self::settle) (mutation-scoped) or [`watch_view`](Self::watch_view)
     /// (predicate-scoped), the caller runs the scenario on the returned
     /// `session_id` and then [`drain`](FrameCapture::drain)s everything emitted —
-    /// the input to the [`ReplicaProbe`](crate::ReplicaProbe) flicker check.
+    /// the input to a flicker-detector replay (feed the drained frames into
+    /// [`FlickerLog`](crate::FlickerLog) snapshots).
     pub async fn open_capture(&self, view: ViewDescriptor) -> FrameCapture {
         let caller = RuntimeCaller::test();
         let session = self
@@ -412,8 +413,8 @@ impl RuntimeHarness {
     }
 }
 
-/// A raw frame-stream capture over one session/view, for replay through the
-/// [`ReplicaProbe`](crate::ReplicaProbe). Run the scenario on `session_id`
+/// A raw frame-stream capture over one session/view, for replay through a flicker
+/// detector ([`FlickerLog`](crate::FlickerLog)). Run the scenario on `session_id`
 /// (set it on the mutation request so its frames route here), then
 /// [`drain`](Self::drain).
 pub struct FrameCapture {
