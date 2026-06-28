@@ -1,17 +1,21 @@
 /**
- * Durable home of the client-owned undo/redo history — Phase 1 of the synced-
- * history refactor. Holds an append-ordered `RevStep[]` + a `cursor` (the index
- * of the topmost APPLIED step; -1 = all undone). Navigation is LOCAL: chained
- * undo pops the cursor in memory and returns each step to invert, so N undos do
- * not cost N round trips. The diff is captured client-side
+ * Durable home of the client-owned undo/redo history — Phase 2 of the synced-
+ * history refactor. Per-account partitions: each account has its own
+ * `RevStep[]` + cursor (the singleton mixing of Phase 1 is gone). The global
+ * Ctrl+Z merges per-account histories by `createdAt` (the latest undoable step
+ * across all accounts) — no globally-ordered log needed. Navigation is LOCAL:
+ * chained undo pops the cursor in memory + returns each step to invert, so N
+ * undos do not cost N round trips. The diff is captured client-side
  * (`captureMutationDiffJson`); the runtime's per-session seq-keyed stacks are
  * retired. Persisted alongside the outbox (IndexedDB) so it survives reload.
  *
- * Shape is Phase-2-ready: steps carry stable `id`s (not session seqs) + the
- * cursor moves are idempotent id-keyed assignments, so promoting the log to a
- * server-authoritative synced view is additive, not a rewrite.
+ * The store is the mirror of the server-authoritative `RevLog` synced view
+ * (Phase 2 Slice 5b): `reconcileWithServer` adopts the server's steps + cursor
+ * per account, with an optimism guard so a local move isn't reverted by a stale
+ * server view. Steps carry stable `id`s (not session seqs) + cursor moves are
+ * idempotent id-keyed assignments.
  *
- * @spec docs/eph/DESIGN-L2-undo-redo-synced-history
+ * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
  */
 import type { MessageChangeDiff } from './handle'
 import { openReplicaDatabase, UNDO_HISTORY_STORE } from './replicaDatabase'
@@ -65,7 +69,7 @@ export interface RevLogSnapshotWire {
 }
 
 /**
- * The full history state: `steps[0..cursor]` are applied (undoable, newest
+ * One account's history state: `steps[0..cursor]` are applied (undoable, newest
  * first), `steps[cursor+1..]` are undone (redoable, oldest first). `cursor` is
  * -1 when everything has been undone.
  */
@@ -74,33 +78,51 @@ export interface UndoHistorySnapshot {
   cursor: number
 }
 
-/** The store seam the adapter (forward actions) + hook (undo/redo) drive. */
-export interface UndoHistoryStore {
-  /** Load the persisted snapshot (once); subsequent calls return the cache. */
-  load(): Promise<UndoHistorySnapshot>
-  /** The cached snapshot (sync read for the hook's canUndo/canRedo). */
-  snapshot(): UndoHistorySnapshot
-  /** Record a forward action: truncate the redoable tail, append, advance. */
-  pushForward(step: RevStep): Promise<UndoHistorySnapshot>
-  /** Undo: decrement the cursor, return the step whose inverse to apply. */
-  navigateUndo(): Promise<RevStep | null>
-  /** Redo: increment the cursor, return the step to re-apply. */
-  navigateRedo(): Promise<RevStep | null>
-  /** Empty the history. */
-  clear(): Promise<void>
-  /** Notify on every history change (the hook keeps canUndo/canRedo fresh). */
-  subscribe(listener: (snapshot: UndoHistorySnapshot) => void): () => void
-  /**
-   * Phase 2: reconcile with the server-authoritative `RevLog` view snapshot.
-   * Adopts the server's steps + cursor unless a local move is in-flight
-   * (optimism guard — see {@link BaseUndoHistoryStore}).
-   *
-   * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
-   */
-  reconcileWithServer(server: RevLogSnapshotWire): Promise<void>
+/** The result of a global undo/redo: the step to apply + which account it's in. */
+export interface UndoRedoResult {
+  step: RevStep
+  accountId: string
 }
 
-/// Upper bound on retained history (matches the runtime's former `MAX_HISTORY`).
+/**
+ * The store seam: the adapter (per-account forward actions), the mirror
+ * (per-account `RevLog` view reconciliation), + the hook (global undo/redo
+ * merge) all drive this. Per-account partitions; the global undo/redo merge
+ * across accounts by `createdAt`.
+ */
+export interface UndoHistoryStore {
+  /** Load all persisted per-account snapshots (once). */
+  load(): Promise<void>
+  /** The cached snapshot for an account (empty if unseen). Sync read for the hook + `sendRevCursor`. */
+  snapshot(accountId: string): UndoHistorySnapshot
+  /** Record a forward action on an account: truncate the redoable tail, append, advance. */
+  pushForward(accountId: string, step: RevStep): Promise<void>
+  /** Reconcile an account's partition with the server-authoritative `RevLog` view. */
+  reconcileWithServer(
+    accountId: string,
+    server: RevLogSnapshotWire,
+  ): Promise<void>
+  /** Empty an account's history. */
+  clear(accountId: string): Promise<void>
+  /** Global: is there any undoable step across all accounts? */
+  canUndo(): boolean
+  /** Global: is there any redoable step across all accounts? */
+  canRedo(): boolean
+  /**
+   * Global undo: find the account whose topmost-applied step has the latest
+   * `createdAt`, move its cursor down, return the step to invert + the account.
+   */
+  undo(): Promise<UndoRedoResult | null>
+  /**
+   * Global redo: find the account whose next-redoable step has the latest
+   * `createdAt`, move its cursor up, return the step to re-apply + the account.
+   */
+  redo(): Promise<UndoRedoResult | null>
+  /** Notify on any history change (the hook re-reads canUndo/canRedo). */
+  subscribe(listener: () => void): () => void
+}
+
+/// Upper bound on retained history per account (matches the runtime's former `MAX_HISTORY`).
 const MAX_HISTORY = 50
 
 /// Phase 2 optimism guard config. The timeout is how long a local cursor move
@@ -178,6 +200,18 @@ function capHistory(state: UndoHistorySnapshot): UndoHistorySnapshot {
   }
 }
 
+/** The topmost APPLIED step of an account (the undo target), or null. */
+function topApplied(snap: UndoHistorySnapshot): RevStep | null {
+  return snap.cursor >= 0 ? (snap.steps[snap.cursor] ?? null) : null
+}
+
+/** The next redoable step of an account (the redo target), or null. */
+function nextRedoable(snap: UndoHistorySnapshot): RevStep | null {
+  return snap.cursor < snap.steps.length - 1
+    ? (snap.steps[snap.cursor + 1] ?? null)
+    : null
+}
+
 /** Generate a stable step id. `crypto.randomUUID` in browsers/bun; a fallback elsewhere. */
 function generateStepId(): string {
   if (
@@ -204,135 +238,179 @@ export function makeRevStep(
   }
 }
 
+const EMPTY_SNAPSHOT: UndoHistorySnapshot = { steps: [], cursor: -1 }
+
 /**
- * Base store: in-memory cache + cursor logic + listeners, backed by a
- * persistence seam implemented by subclasses.
+ * Base multi-account store: a `Map<accountId, UndoHistorySnapshot>` cache +
+ * per-account cursor logic + global undo/redo merge, backed by a persistence
+ * seam (per-account records) implemented by subclasses.
  */
-abstract class BaseUndoHistoryStore implements UndoHistoryStore {
-  protected state: UndoHistorySnapshot = { steps: [], cursor: -1 }
+abstract class BaseMultiAccountUndoHistoryStore implements UndoHistoryStore {
+  protected state = new Map<string, UndoHistorySnapshot>()
   private loaded = false
-  private readonly listeners = new Set<(s: UndoHistorySnapshot) => void>()
+  private readonly listeners = new Set<() => void>()
   /**
-   * Phase 2 optimism guard: the cursor step_id a local undo/redo/forward move
-   * set optimistically (+ when), awaiting server confirmation via the `RevLog`
-   * view. While set, {@link reconcileWithServer} skips adoption of a stale
-   * server cursor (the server hasn't processed the `revCursor`/append yet) so
-   * the optimistic move isn't reverted. Cleared on confirm (server echoes the
-   * same cursor) or after {@link OPTIMISM_TIMEOUT_MS} (lost/overridden →
-   * converge). Transient — not persisted (no in-flight move across reload).
+   * Phase 2 optimism guard: per-account pending cursor (the optimistic
+   * `cursorStepId` + when), awaiting server confirmation via the `RevLog` view.
+   * While set, {@link reconcileWithServer} skips adoption of a stale server
+   * cursor for that account (the server hasn't processed the `revCursor`/append
+   * yet) so the optimistic move isn't reverted. Cleared on confirm (server
+   * echoes the same cursor) or after {@link optimismConfig.timeoutMs}
+   * (lost/overridden → converge). Transient — not persisted.
    */
-  private pendingConfirm: { stepId: string | null; sentAt: number } | null =
-    null
+  private readonly pending = new Map<
+    string,
+    { stepId: string | null; sentAt: number }
+  >()
 
-  protected abstract loadPersisted(): Promise<UndoHistorySnapshot | null>
-  protected abstract savePersisted(snapshot: UndoHistorySnapshot): Promise<void>
-  protected abstract clearPersisted(): Promise<void>
+  protected abstract loadAllPersisted(): Promise<
+    Map<string, UndoHistorySnapshot>
+  >
+  protected abstract savePersisted(
+    accountId: string,
+    snapshot: UndoHistorySnapshot,
+  ): Promise<void>
+  protected abstract clearPersisted(accountId: string): Promise<void>
 
-  /** Mark the post-move cursor as optimistically pending server confirmation. */
-  private markPending(snapshot: UndoHistorySnapshot): void {
-    this.pendingConfirm = {
+  /** Mark an account's post-move cursor as optimistically pending confirmation. */
+  private markPending(accountId: string, snapshot: UndoHistorySnapshot): void {
+    this.pending.set(accountId, {
       stepId:
         snapshot.cursor >= 0
           ? (snapshot.steps[snapshot.cursor]?.id ?? null)
           : null,
       sentAt: Date.now(),
-    }
+    })
   }
 
-  async load(): Promise<UndoHistorySnapshot> {
+  async load(): Promise<void> {
     if (!this.loaded) {
-      const persisted = await this.loadPersisted()
-      if (persisted) this.state = persisted
+      this.state = await this.loadAllPersisted()
       this.loaded = true
     }
-    return this.state
   }
 
-  snapshot(): UndoHistorySnapshot {
-    return this.state
+  snapshot(accountId: string): UndoHistorySnapshot {
+    return this.state.get(accountId) ?? EMPTY_SNAPSHOT
   }
 
-  async pushForward(step: RevStep): Promise<UndoHistorySnapshot> {
+  async pushForward(accountId: string, step: RevStep): Promise<void> {
     await this.load()
-    this.state = capHistory(applyPushForward(this.state, step))
-    this.markPending(this.state)
+    const current = this.state.get(accountId) ?? EMPTY_SNAPSHOT
+    const updated = capHistory(applyPushForward(current, step))
+    this.state.set(accountId, updated)
+    this.markPending(accountId, updated)
     this.notify()
-    await this.savePersisted(this.state)
-    return this.state
+    await this.savePersisted(accountId, updated)
   }
 
-  async navigateUndo(): Promise<RevStep | null> {
+  async clear(accountId: string): Promise<void> {
     await this.load()
-    const result = applyUndo(this.state)
-    this.state = result.snapshot
-    this.markPending(this.state)
+    this.state.delete(accountId)
+    this.pending.delete(accountId)
     this.notify()
-    await this.savePersisted(this.state)
-    return result.step
+    await this.clearPersisted(accountId)
   }
 
-  async navigateRedo(): Promise<RevStep | null> {
+  canUndo(): boolean {
+    for (const snap of this.state.values()) {
+      if (topApplied(snap)) return true
+    }
+    return false
+  }
+
+  canRedo(): boolean {
+    for (const snap of this.state.values()) {
+      if (nextRedoable(snap)) return true
+    }
+    return false
+  }
+
+  async undo(): Promise<UndoRedoResult | null> {
     await this.load()
-    const result = applyRedo(this.state)
-    this.state = result.snapshot
-    this.markPending(this.state)
+    // Find the account whose topmost-applied step has the latest `createdAt`.
+    let target: { accountId: string; step: RevStep } | null = null
+    for (const [accountId, snap] of this.state) {
+      const top = topApplied(snap)
+      if (top && (!target || top.createdAt > target.step.createdAt)) {
+        target = { accountId, step: top }
+      }
+    }
+    if (!target) return null
+    const result = applyUndo(this.state.get(target.accountId)!)
+    this.state.set(target.accountId, result.snapshot)
+    this.markPending(target.accountId, result.snapshot)
     this.notify()
-    await this.savePersisted(this.state)
-    return result.step
+    await this.savePersisted(target.accountId, result.snapshot)
+    return { step: result.step!, accountId: target.accountId }
   }
 
-  async clear(): Promise<void> {
-    this.state = { steps: [], cursor: -1 }
-    this.loaded = true
-    this.pendingConfirm = null
+  async redo(): Promise<UndoRedoResult | null> {
+    await this.load()
+    // Find the account whose next-redoable step has the latest `createdAt`.
+    let target: { accountId: string; step: RevStep } | null = null
+    for (const [accountId, snap] of this.state) {
+      const next = nextRedoable(snap)
+      if (next && (!target || next.createdAt > target.step.createdAt)) {
+        target = { accountId, step: next }
+      }
+    }
+    if (!target) return null
+    const result = applyRedo(this.state.get(target.accountId)!)
+    this.state.set(target.accountId, result.snapshot)
+    this.markPending(target.accountId, result.snapshot)
     this.notify()
-    await this.clearPersisted()
+    await this.savePersisted(target.accountId, result.snapshot)
+    return { step: result.step!, accountId: target.accountId }
   }
 
   /**
-   * Phase 2: reconcile with the server-authoritative `RevLog` view. Adopts the
-   * server's steps + cursor unless a local move is in-flight (`pendingConfirm`):
+   * Phase 2: reconcile an account's partition with the server-authoritative
+   * `RevLog` view. Adopts the server's steps + cursor unless a local move is
+   * in-flight for that account (`pending`):
    *
    * - No pending move → adopt (cross-device convergence: this device sees
-   *   other devices' forward actions + cursor).
+   *   other devices' forward actions + cursor for the account).
    * - Pending + the server echoes the optimistic cursor → confirmed → adopt +
    *   clear pending (the `revCursor`/append was processed).
-   * - Pending + timed out (`OPTIMISM_TIMEOUT_MS`) → lost/overridden → converge
-   *   to the server's cursor + clear pending (last-writer-wins re-convergence).
+   * - Pending + timed out (`optimismConfig.timeoutMs`) → lost/overridden →
+   *   converge to the server's cursor + clear pending (last-writer-wins).
    * - Pending + otherwise → stale → skip adoption (keep the optimistic local
    *   state; preserves in-flight forward-action steps the server hasn't
    *   confirmed yet).
    *
    * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
    */
-  async reconcileWithServer(server: RevLogSnapshotWire): Promise<void> {
+  async reconcileWithServer(
+    accountId: string,
+    server: RevLogSnapshotWire,
+  ): Promise<void> {
     await this.load()
     const serverSteps = translateAndSort(server.steps)
     const serverCursorStepId = server.cursor.cursorStepId
-    if (this.pendingConfirm) {
-      if (serverCursorStepId === this.pendingConfirm.stepId) {
+    const pending = this.pending.get(accountId)
+    if (pending) {
+      if (serverCursorStepId === pending.stepId) {
         // Confirmed: the server processed our move. Fall through to adopt.
-        this.pendingConfirm = null
-      } else if (
-        Date.now() - this.pendingConfirm.sentAt >=
-        optimismConfig.timeoutMs
-      ) {
+        this.pending.delete(accountId)
+      } else if (Date.now() - pending.sentAt >= optimismConfig.timeoutMs) {
         // Lost/overridden: converge to the server's cursor. Fall through.
-        this.pendingConfirm = null
+        this.pending.delete(accountId)
       } else {
         // Stale: the server hasn't caught up. Keep the optimistic local state.
         return
       }
     }
-    this.state = {
+    const updated = {
       steps: serverSteps,
       cursor: indexForStepId(serverSteps, serverCursorStepId),
     }
+    this.state.set(accountId, updated)
     this.notify()
-    await this.savePersisted(this.state)
+    await this.savePersisted(accountId, updated)
   }
 
-  subscribe(listener: (s: UndoHistorySnapshot) => void): () => void {
+  subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => {
       this.listeners.delete(listener)
@@ -340,40 +418,46 @@ abstract class BaseUndoHistoryStore implements UndoHistoryStore {
   }
 
   private notify(): void {
-    for (const listener of this.listeners) listener(this.state)
+    for (const listener of this.listeners) listener()
   }
 }
 
 /**
  * In-memory history store for tests + SSR/no-IndexedDB. An optional shared
- * `backing` object lets two store instances share persisted state — used to
- * test reload survival without a real IndexedDB.
+ * `backing` map lets two store instances share persisted state — used to test
+ * reload survival without a real IndexedDB.
  */
-export class MemoryUndoHistoryStore extends BaseUndoHistoryStore {
-  private readonly backing: { snapshot: UndoHistorySnapshot | null }
+export class MemoryUndoHistoryStore extends BaseMultiAccountUndoHistoryStore {
+  private readonly backing: Map<string, UndoHistorySnapshot>
 
-  constructor(
-    backing: { snapshot: UndoHistorySnapshot | null } = { snapshot: null },
-  ) {
+  constructor(backing: Map<string, UndoHistorySnapshot> = new Map()) {
     super()
     this.backing = backing
   }
 
-  protected async loadPersisted(): Promise<UndoHistorySnapshot | null> {
-    return this.backing.snapshot
+  protected async loadAllPersisted(): Promise<
+    Map<string, UndoHistorySnapshot>
+  > {
+    return new Map(this.backing)
   }
 
-  protected async savePersisted(snapshot: UndoHistorySnapshot): Promise<void> {
-    this.backing.snapshot = snapshot
+  protected async savePersisted(
+    accountId: string,
+    snapshot: UndoHistorySnapshot,
+  ): Promise<void> {
+    this.backing.set(accountId, snapshot)
   }
 
-  protected async clearPersisted(): Promise<void> {
-    this.backing.snapshot = null
+  protected async clearPersisted(accountId: string): Promise<void> {
+    this.backing.delete(accountId)
   }
 }
 
 const STORE_NAME = UNDO_HISTORY_STORE
-const RECORD_KEY = 'main'
+/// The legacy Phase 1 single-account record key. Filtered on load (the Phase 2
+/// mirror re-syncs from the server's `RevLog` view, so dropping it loses no
+/// synced state).
+const LEGACY_RECORD_KEY = 'main'
 
 function runRequest<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -383,11 +467,13 @@ function runRequest<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 /**
- * IndexedDB-backed history. The whole snapshot (steps + cursor) is one record
- * under a fixed key — the history is small (capped at `MAX_HISTORY`) so there is
- * no per-step indexing. Shares the `posthaste-replica` DB with the outbox.
+ * IndexedDB-backed history. Each account's snapshot (steps + cursor) is one
+ * record keyed by the accountId — the history is small (capped at
+ * `MAX_HISTORY` per account) so there is no per-step indexing. Shares the
+ * `posthaste-replica` DB with the outbox. The legacy Phase 1 `'main'` record is
+ * dropped on load (the mirror re-syncs from the server).
  */
-export class IndexedDbUndoHistoryStore extends BaseUndoHistoryStore {
+export class IndexedDbUndoHistoryStore extends BaseMultiAccountUndoHistoryStore {
   private connection: Promise<IDBDatabase> | undefined
 
   private db(): Promise<IDBDatabase> {
@@ -395,36 +481,47 @@ export class IndexedDbUndoHistoryStore extends BaseUndoHistoryStore {
     return this.connection
   }
 
-  protected async loadPersisted(): Promise<UndoHistorySnapshot | null> {
+  protected async loadAllPersisted(): Promise<
+    Map<string, UndoHistorySnapshot>
+  > {
     const connection = await this.db()
     const transaction = connection.transaction(STORE_NAME, 'readonly')
-    const record = await runRequest(
-      transaction.objectStore(STORE_NAME).get(RECORD_KEY) as IDBRequest<
-        { key: string; snapshot: UndoHistorySnapshot } | undefined
+    const records = await runRequest(
+      transaction.objectStore(STORE_NAME).getAll() as IDBRequest<
+        { key: string; snapshot: UndoHistorySnapshot }[]
       >,
     )
-    return record?.snapshot ?? null
+    const map = new Map<string, UndoHistorySnapshot>()
+    for (const record of records) {
+      // Drop the legacy Phase 1 single-account record (the mirror re-syncs).
+      if (record.key === LEGACY_RECORD_KEY) continue
+      map.set(record.key, record.snapshot)
+    }
+    return map
   }
 
-  protected async savePersisted(snapshot: UndoHistorySnapshot): Promise<void> {
+  protected async savePersisted(
+    accountId: string,
+    snapshot: UndoHistorySnapshot,
+  ): Promise<void> {
     const connection = await this.db()
     await new Promise<void>((resolve, reject) => {
       const transaction = connection.transaction(STORE_NAME, 'readwrite')
       transaction.oncomplete = () => resolve()
       transaction.onerror = () => reject(transaction.error)
       transaction.onabort = () => reject(transaction.error)
-      transaction.objectStore(STORE_NAME).put({ key: RECORD_KEY, snapshot })
+      transaction.objectStore(STORE_NAME).put({ key: accountId, snapshot })
     })
   }
 
-  protected async clearPersisted(): Promise<void> {
+  protected async clearPersisted(accountId: string): Promise<void> {
     const connection = await this.db()
     await new Promise<void>((resolve, reject) => {
       const transaction = connection.transaction(STORE_NAME, 'readwrite')
       transaction.oncomplete = () => resolve()
       transaction.onerror = () => reject(transaction.error)
       transaction.onabort = () => reject(transaction.error)
-      transaction.objectStore(STORE_NAME).delete(RECORD_KEY)
+      transaction.objectStore(STORE_NAME).delete(accountId)
     })
   }
 }

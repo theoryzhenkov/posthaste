@@ -9,7 +9,7 @@
  *
  * @spec docs/eph/DESIGN-L2-undo-redo-synced-history
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer } from 'react'
 
 import {
   getUndoHistoryStore,
@@ -51,26 +51,29 @@ function sendRevCursor(snapshot: UndoHistorySnapshot, accountId: string): void {
 
 export function useUndoRedo(): UndoRedo {
   const store = getUndoHistoryStore()
-  const [snap, setSnap] = useState<UndoHistorySnapshot>(() => store.snapshot())
+  // The store notifies on any account's change; re-read canUndo/canRedo (global
+  // merge across accounts) via a force-update.
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0)
 
   useEffect(() => {
     let active = true
-    void store.load().then((s) => {
-      if (active) setSnap(s)
+    void store.load().then(() => {
+      if (active) forceUpdate()
     })
-    const unsubscribe = store.subscribe((s) => setSnap(s))
+    const unsubscribe = store.subscribe(() => forceUpdate())
     return () => {
       active = false
       unsubscribe()
     }
   }, [store])
 
-  const canUndo = snap.cursor >= 0
-  const canRedo = snap.cursor < snap.steps.length - 1
+  const canUndo = store.canUndo()
+  const canRedo = store.canRedo()
 
   const undo = () => {
-    void store.navigateUndo().then(async (step) => {
-      if (!step) return
+    void store.undo().then(async (result) => {
+      if (!result) return
+      const { step, accountId } = result
       const inverse = await invertMessageChangeDiff(step.diff)
       void runtimeSessionClient
         .runMutation({
@@ -87,13 +90,14 @@ export function useUndoRedo(): UndoRedo {
           // Phase 2 concern; the applyDiff is idempotent.)
         })
       // Phase 2: arbitrate the cursor move with the server (cross-device sync).
-      sendRevCursor(store.snapshot(), step.sourceId)
+      sendRevCursor(store.snapshot(accountId), accountId)
     })
   }
 
   const redo = () => {
-    void store.navigateRedo().then((step) => {
-      if (!step) return
+    void store.redo().then((result) => {
+      if (!result) return
+      const { step, accountId } = result
       void runtimeSessionClient
         .runMutation({
           name: 'message.applyDiff',
@@ -105,7 +109,7 @@ export function useUndoRedo(): UndoRedo {
         })
         .catch(() => {})
       // Phase 2: arbitrate the cursor move with the server (cross-device sync).
-      sendRevCursor(store.snapshot(), step.sourceId)
+      sendRevCursor(store.snapshot(accountId), accountId)
     })
   }
 
