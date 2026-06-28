@@ -284,3 +284,34 @@ impl ImapMessageLocationStore for TestStore {
         Ok(Vec::new())
     }
 }
+
+/// Phase 2: the `RevLog` store is part of the `MailStore` composite (a supertrait
+/// of `MailStore`). The domain service tests don't exercise undo/redo history, so
+/// the test double stubs the three methods as empty/no-op (an empty snapshot,
+/// a no-op append, a no-op cursor set). @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+impl RevLogStore for TestStore {
+    fn rev_log_snapshot(&self, _account_id: &AccountId) -> Result<RevLogSnapshot, StoreError> {
+        Ok(RevLogSnapshot::default())
+    }
+
+    fn append_rev_log_step(
+        &self,
+        _account_id: &AccountId,
+        _step_id: &str,
+        _message_id: &str,
+        _source_id: &str,
+        _diff: &serde_json::Value,
+        _created_at: &str,
+    ) -> Result<u32, StoreError> {
+        Ok(0)
+    }
+
+    fn set_rev_cursor(
+        &self,
+        _account_id: &AccountId,
+        _cursor_step_id: Option<&str>,
+        _redo_tail: &[String],
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
