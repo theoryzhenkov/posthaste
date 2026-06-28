@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Roadmap for the posthaste-testkit forward contracts: runtime-in-harness, view-settlement recorder, declarative fixtures, posthastectl headless driver"
-modified: 2026-06-27
-reviewed: 2026-06-27
+modified: 2026-06-28
+reviewed: 2026-06-28
 lifecycle: ephemeral
 type: PLAN
 depends:
@@ -53,7 +53,7 @@ kinds (detail, conversation, account).
 
 Historical finding (pre-option-iii, characterized, not a bug): a `run_mutation`
 keyword toggle on a live mock account recomputed the touched mail-list view
-*twice* — optimistic (rev 2) then sync-confirmed (rev 3) — with a ~16-notification
+_twice_ — optimistic (rev 2) then sync-confirmed (rev 3) — with a ~16-notification
 fan-out between them. The notification fan-out breadth is still worth a future
 profiling look.
 
@@ -116,7 +116,7 @@ FETCH parsing, or CONDSTORE/QRESYNC deltas at the protocol layer.
 - Increment 2b (done): a stateful, multi-connection `GmailImapFixture` in
   `posthaste-testkit` (`src/gmail.rs`) that answers the full discovery + sync
   command set (`CAPABILITY`/`AUTHENTICATE`/`LIST`/`STATUS`/`EXAMINE`/`UID
-  SEARCH`/`UID FETCH`) the real gateway drives across its discovery, then sync,
+SEARCH`/`UID FETCH`) the real gateway drives across its discovery, then sync,
   connections. `RuntimeHarness::create_gmail_account` wires an `ImapSmtp`
   account at it, enables it (discovery), and syncs; a self-contained test
   (`tests/gmail_inbox_sync.rs`) asserts the seeded INBOX message lands in the
@@ -147,29 +147,29 @@ fixture had to work around, in increasing severity:
    pre-quoted in the mock.
 2. **`ModSeq` encoder bug** (encoder-only, not a production risk): the encoder
    emits `MODSEQ <v>` but the decoder (correctly, per RFC 7162) requires
-   `MODSEQ (<v>)`. Production only *decodes* (client side) and real Gmail sends
+   `MODSEQ (<v>)`. Production only _decodes_ (client side) and real Gmail sends
    the parenthesized form, so this never bites production — but our mock, which
-   *encodes* responses, must splice `MODSEQ (<v>)` in by hand (the per-message
+   _encodes_ responses, must splice `MODSEQ (<v>)` in by hand (the per-message
    MODSEQ is required: the stored HIGHESTMODSEQ watermark is derived from it, so
    without it the next sync never takes the delta path).
 3. **`VANISHED` decoder bug (likely a real production defect)**: the fork's
    `response_data` only reaches its `VANISHED` arm through `message_data`, which
    requires a leading `<nz-number> SP`. A standard `* VANISHED (EARLIER) <uids>`
-   (no number — per RFC 7162 *and* the fork's own encoder) therefore fails to
+   (no number — per RFC 7162 _and_ the fork's own encoder) therefore fails to
    decode and drops the connection ("stream error"). The mock works around it by
    emitting a dummy leading sequence number (`* 1 VANISHED (EARLIER) <uids>`),
    which the QRESYNC task ignores. **This means QRESYNC expunge sync against
-   *real* Gmail likely errors on the first `VANISHED` response.** Verify against
+   _real_ Gmail likely errors on the first `VANISHED` response.** Verify against
    a real Gmail account (or extend the Stalwart parity test to drive QRESYNC),
    then fix the fork decoder to accept the number-less `VANISHED` form and bump
    the patched rev.
 
-### P3d — Flicker diagnosis fixture (Layer A+B done 2026-06-27)
+### P3d — Flicker diagnosis fixture (done 2026-06-28; flicker resolved .23/.24)
 
 A runtime-layer flicker harness: drive a real mutation through the runtime while
 a provider sync re-serves the view, capture the emitted `RuntimeFrame` stream
 (**Layer A**, `RuntimeHarness::open_capture` → `FrameCapture::drain`), and replay
-it through the *real* `posthaste_link_replica::EntityStore` reconciliation
+it through the _real_ `posthaste_link_replica::EntityStore` reconciliation
 (**Layer B**, `ReplicaProbe` — the same optimism/absorption code the browser runs
 via WASM), recording the per-row render trajectory. `FlickerLog::assert_no_flicker`
 catches any observable field reverting or a row disappearing-then-reappearing.
@@ -179,7 +179,7 @@ frame emission) is all Rust.
 - `tests/mutation_flicker.rs`: flag + mark-read on the mock driver's canned
   dataset, each interleaved with the driver's background poll re-serving the
   whole view. The mark-read case is the sharpest: the re-serve carries the
-  message *unread* (stale) on every poll, yet the optimism holds (absorption-
+  message _unread_ (stale) on every poll, yet the optimism holds (absorption-
   gated retire never retires against a base that lacks the effect). **Finding:**
   both are flicker-free — the runtime + EntityStore reconciliation does **not**
   flicker for flag/read during a stale re-serve. This narrows the residual
@@ -188,7 +188,7 @@ frame emission) is all Rust.
   **Layer C** — the TS `entityStoreAdapter` wiring / the legacy REST domain-cache
   path racing the WASM replica / React render timing.
 - Layer C (done 2026-06-27, **root cause found**): `bun` tests driving the
-  *real* WASM `EntityStore` (`apps/web/test/replicaAbsorptionRetire.test.ts`)
+  _real_ WASM `EntityStore` (`apps/web/test/replicaAbsorptionRetire.test.ts`)
   caught the flicker without `posthastectl`/Playwright. Two coupled bugs in
   `link-replica`/`link-core` (see the `flicker-root-cause` memory):
   (1) **no staleness guard on `ingest_batch`** — a late provider-sync re-serve
@@ -207,13 +207,30 @@ frame emission) is all Rust.
   absorption fix lands. Owned by views-stability; not landed here.
 - Note: the existing fake-handle adapter test + the Rust unit tests miss both
   bugs (fake handle mirrors only minimal-keyword cases; unit tests use ≤1
-  keyword). The gap was the *real adapter + real WASM + realistic projection*
+  keyword). The gap was the _real adapter + real WASM + realistic projection_
   integration — exactly what the bun real-WASM probe exercises.
 - Mock-driver notes surfaced: `AccountDriver::Mock` serves a canned dataset
   (`em-001`..`em-003` in `mb-inbox`/`mb-archive`) and re-serves it on every
   sync **plus a ~500ms background poll**; it rejects mutations on unknown
   message ids (`operation.settled: failed`). A direct `seed_messages` batch is
   wiped by the first mock sync.
+- Layer D (done 2026-06-28): a React render-layer probe — `RenderProbe` /
+  `RenderLog` (`apps/web/test/renderProbe.tsx`, design
+  `docs/eph/DESIGN-L2-render-flicker-tracker.md`) — drives the _real_
+  `createEntityStoreAdapter` + real WASM + real `useUndoRedo` + real React render
+  (no hand-ported adapter glue: "instrument, don't duplicate"). 9 tests; verified
+  the equal-version stale re-serve fix end-to-end at the render layer.
+- Playwright e2e (done 2026-06-28): `apps/web/e2e/archive-flicker.mjs` +
+  `undo-flicker.mjs` — rAF (painted states) + MutationObserver (childList
+  add/remove) capture against the real dev stack (`just dev web`). The honest tool
+  for real React commits (`act`-wrapped tests structurally can't reproduce a
+  transient commit). Confirmed the archive/undo flickers do NOT reproduce in .23;
+  caught the "All Inboxes" smart-mailbox staleness bug (fixed via the
+  `client_self_maintained` flag, shipped .23).
+- **P3d complete:** all reported nightly flickers resolved in .23/.24 (the
+  version-gated retire + archive role resolution + absorption fixes + option-iii
+  `client_self_maintained`). The fixture suite (Layers A–D + Playwright) is the
+  regression guard.
 
 ### P4 — posthastectl headless driver
 

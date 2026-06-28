@@ -20,17 +20,17 @@ dependents: []
 
 ## Problem
 
-The shipped design (`DESIGN-L2-reversible-undo-redo`) made undo *execution* a
+The shipped design (`DESIGN-L2-reversible-undo-redo`) made undo _execution_ a
 normal optimistic `message.applyDiff` mutation — good. But it kept the **history**
 runtime-owned, per-session, in-memory, and exposed only the **single top** of each
 stack on a `mutationHistory` frame. Three consequences, two of which that doc
 flagged as carried-forward open questions:
 
 1. **Chained-undo latency (open question #1).** The client mirrors only
-   `undoTop`/`redoTop`, so it cannot navigate to step *N−1* until the runtime
-   confirms step *N* and re-broadcasts the next top. `useRuntimeUndoRedo` enforces
+   `undoTop`/`redoTop`, so it cannot navigate to step _N−1_ until the runtime
+   confirms step _N_ and re-broadcasts the next top. `useRuntimeUndoRedo` enforces
    this with a `busyRef` serialization loop: **N undos = N round trips.** The view
-   update is already optimistic; it is the *navigation* that is round-trip-bound.
+   update is already optimistic; it is the _navigation_ that is round-trip-bound.
 2. **No persistence (open question #2).** The history lives in
    `StoredSession` (in-memory, per session). A reload or new connection starts
    empty; `collapse_session_frames` does not even re-emit the history on
@@ -40,8 +40,23 @@ flagged as carried-forward open questions:
 
 The seq-keyed mirror is also **racy**: a new user action clears the redo stack and
 re-broadcasts, but the client's `redoTopRef` is briefly stale; a redo in that
-window sends a dead `redoOf` seq, which `run_apply_diff` still *applies* (the diff
+window sends a dead `redoOf` seq, which `run_apply_diff` still _applies_ (the diff
 re-folds) without navigating — a phantom redo.
+
+## Phase 1 status (shipped .26, 2026-06-28)
+
+Consequences #1 + #2 are resolved; #3 (cross-device) remains for Phase 2.
+
+- #1 (latency) — resolved: the round-trip-free `useUndoRedo` hook navigates the
+  client-owned cursor locally (no `busyRef`); N undos dispatch immediately.
+- #2 (persistence) — resolved: the `IndexedDB` `undoHistoryStore` persists the
+  history alongside the outbox. **Caveat:** a version-skew bug shipped in .26 —
+  the v2 upgrade creates only the `undoHistory` store, so `outboxStore`'s v1
+  open downgrades + rejects, hanging the mail list; the fix is in flight as .27
+  (coordinate the shared schema: the v2 upgrade creates _both_ `outbox` +
+  `undoHistory`, and `outboxStore` opens at v2). Regression guard:
+  `apps/web/e2e/idb-version-conflict.mjs`.
+- #3 (cross-device) — unchanged: Phase 2 (server-authoritative synced log).
 
 ## Requirement (new)
 
@@ -55,7 +70,7 @@ client-private state — it is **account state that syncs**.
 Separate the two concerns the old design conflated:
 
 - **WHAT to undo** — a per-account, ordered, durable **reversible-operation log**
-  with a **cursor**. This is *authoritative server/store state* that **syncs to
+  with a **cursor**. This is _authoritative server/store state_ that **syncs to
   every device as a view** (snapshot + deltas), exactly like a mail-list. Each
   client mirrors the **whole log**, so navigating any number of steps is a local
   read — no per-step round trip.
@@ -64,7 +79,7 @@ Separate the two concerns the old design conflated:
   offline-capable; the existing convergence guard settles it.
 
 The history stops being a session-private mirror and becomes a synced projection.
-Evaluation stays at the edge; authority for *ordering and truncation* moves to the
+Evaluation stays at the edge; authority for _ordering and truncation_ moves to the
 account's durable log so all devices agree.
 
 ### Data model
@@ -96,11 +111,11 @@ idempotent, both are state-free (link-core `message.rs`).
 Cursor moves are **absolute assignments keyed by step id**, never relative
 "back-one" — so re-delivery and concurrent devices converge.
 
-| Op | Log/cursor effect | Local evaluation |
-| --- | --- | --- |
+| Op                              | Log/cursor effect                                                          | Local evaluation                               |
+| ------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------- |
 | **forward** reversible mutation | append `S` after `cursor`, **truncate** the redoable tail, `cursor = S.id` | (the user action itself; its diff is captured) |
-| **undo** of `S_k` | `cursor := pred(S_k)` (the step before `S_k`, or `None`) | fold `inverse(S_k.diff)` into outbox |
-| **redo** to `S_j` | `cursor := S_j.id` (the next redoable) | fold `S_j.diff` into outbox |
+| **undo** of `S_k`               | `cursor := pred(S_k)` (the step before `S_k`, or `None`)                   | fold `inverse(S_k.diff)` into outbox           |
+| **redo** to `S_j`               | `cursor := S_j.id` (the next redoable)                                     | fold `S_j.diff` into outbox                    |
 
 Idempotency falls out of absolute assignment: undoing `S_k` twice is `cursor :=
 pred(S_k)` twice — same result. A forward action truncates the tail (classic
@@ -119,14 +134,14 @@ persists, and broadcasts a log delta; other devices converge.
 
 Concurrency resolution (authority = the store; assignments idempotent + monotone):
 
-| Race | Resolution |
-| --- | --- |
-| Two devices undo the same top `S_k` | First sets `cursor := pred(S_k)`; the second arrives, sees `S_k` already undone, and is a **no-op**. Both local folds are idempotent, so views agree. |
+| Race                                                          | Resolution                                                                                                                                                                                                            |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Two devices undo the same top `S_k`                           | First sets `cursor := pred(S_k)`; the second arrives, sees `S_k` already undone, and is a **no-op**. Both local folds are idempotent, so views agree.                                                                 |
 | Device A appends a new action while Device B has redo pending | A's forward **truncates** B's redoable tail. B's redo references a now-absent step → server **rejects** → B rolls back the optimistic fold via the existing outbox-rejection path, and the synced log greys redo out. |
-| Undo races an unrelated edit to the same message | Last-writer-wins on the message (unchanged); the diff's delta semantics stay correct (it removes exactly what it added). |
+| Undo races an unrelated edit to the same message              | Last-writer-wins on the message (unchanged); the diff's delta semantics stay correct (it removes exactly what it added).                                                                                              |
 
-This replaces the old design's *racy client mirror* with *authoritative
-convergence* — the stale-seq phantom-redo cannot occur because navigation is an
+This replaces the old design's _racy client mirror_ with _authoritative
+convergence_ — the stale-seq phantom-redo cannot occur because navigation is an
 idempotent id-keyed assignment the server arbitrates, not a fire-and-hope seq.
 
 ## Persistence (two tiers)
@@ -160,37 +175,40 @@ as today) — "restore a trashed draft" is a move, so it is covered.
 
 ## What changes / what is retired
 
-- **Retire** the seq-keyed per-session stacks (`undo_history`/`redo_history`,
+- **Retired (Phase 1b)** the seq-keyed per-session stacks (`undo_history`/`redo_history`,
   `pop_*_by_seq`, `push_undo/redo`, `remove_by_seq`, `next_seq`-for-history) and
   the `MutationHistory` single-top frame.
-- **Retire** the hook's `busyRef`/queue serialization — navigation is local over
-  the mirrored log; chained undo is instant.
-- **Replace** `undoOf`/`redoOf` seq hints with an idempotent, id-keyed cursor
-  assignment carried alongside the `applyDiff`.
-- **Add** the per-account `RevLog` store table + `ViewKind::RevLog` synced view +
-  client mirror persisted with the outbox.
+- **Retired (Phase 1a)** the hook's `busyRef`/queue serialization — navigation is
+  local over the mirrored log; chained undo is instant.
+- **Replaced (Phase 1b)** `undoOf`/`redoOf` seq hints — the client-owned cursor
+  navigates locally; `applyDiff` is the undo/redo vehicle (no seq hint).
+- **Add (Phase 2, pending)** the per-account `RevLog` store table +
+  `ViewKind::RevLog` synced view + client mirror persisted with the outbox.
 - **Reuse** unchanged: `MessageChangeDiff`/`inverse`/`from_before_after`, the
   outbox, the convergence guard, the reactive-store view/delta pipeline.
 
 ### Spec deltas (flag, do not silently diverge)
 
-- `docs/runtime/mutations/L1` §5 — the `message.applyDiff` row's `undoOf`/`redoOf`
-  seq hints become an id-keyed cursor assignment; update the catalog entry.
-- Assertion `undo-runtime-backed` (§8) — intent is **preserved** (the *log* is
-  authoritative server/store state, not renderer-owned replay) but evaluation is
-  client-local; reword from "runtime-backed named mutations" to "applied as
-  client-local optimistic mutations against a server-authoritative synced log."
+- `docs/runtime/mutations/L1` §5 — **realized (Phase 1b):** the `message.applyDiff`
+  row dropped `undoOf`/`redoOf`; it is now the client-owned undo/redo vehicle
+  (the hook dispatches `applyDiff(inverse(diff))` / `applyDiff(diff)`).
+- Assertion `undo-runtime-backed` (§8) — **realized (Phase 1b):** reworded to
+  client-owned history (the runtime applies `applyDiff` as an ordinary mutation,
+  without owning or navigating a history stack).
 - A new realized home (`docs/runtime/mutations/L2` or a dedicated history spec)
   for the log/cursor/sync contract once Phase 2 lands.
 
 ## Phasing (plan big, start small)
 
-- **Phase 1 — client-local optimistic cursor.** Move the stacks to the client,
-  mirror the whole log, persist with the outbox, drop the `busyRef` round trip.
-  Ships the **latency + persistence + race** wins immediately. Shape the data
-  model for Phase 2 now: **step ids (ULID), not session seqs; idempotent
-  id-keyed cursor; durable mirror.** The runtime keeps emitting a per-mutation
-  diff (or the client captures it via a WASM-exposed `from_before_after`).
+- **Phase 1 — client-local optimistic cursor (shipped .26, 2026-06-28).** Move
+  the stacks to the client, mirror the whole log, persist with the outbox, drop
+  the `busyRef` round trip. Ships the **latency + persistence + race** wins
+  immediately. Shape the data model for Phase 2 now: **step ids (ULID), not
+  session seqs; idempotent id-keyed cursor; durable mirror.** The runtime's
+  per-session seq-keyed history is fully retired (Phase 1b: `run_apply_diff`,
+  `undo_history`/`redo_history`, `MutationHistory` frame, `DiffStep`,
+  `undoOf`/`redoOf` all dropped); the client captures the diff via the
+  WASM-exposed `captureMutationDiffJson` (`from_before_after`).
 - **Phase 2 — server-authoritative synced log.** Promote the log to the
   per-account store table + `RevLog` view; clients mirror + propose; the server
   arbitrates append/cursor/truncation. Unlocks **cross-device**. Phase 1's id
@@ -218,7 +236,7 @@ as today) — "restore a trashed draft" is a move, so it is covered.
 - **Redo-tail durability.** Sync the truncated redo tail explicitly, or let
   clients re-derive redoability from `cursor < len`? (Affects "undo on A, redo on
   B" when B was offline during the undo.)
-- **Cap/eviction policy** for a *shared* log (per device vs per account; time vs
+- **Cap/eviction policy** for a _shared_ log (per device vs per account; time vs
   count).
 - **Non-message reversibility** (settings/account/smart-mailbox) — still out of
   scope; revisit if users expect undo there.
@@ -227,12 +245,14 @@ as today) — "restore a trashed draft" is a move, so it is covered.
 
 - Diff model (reuse): `crates/posthaste-link-core/src/message.rs`
   (`MessageChangeDiff`, `inverse`, `from_before_after`, `apply_message_assertion`).
-- Current history to retire: `crates/posthaste-runtime/src/sessions.rs`
+- History retired (Phase 1b): `crates/posthaste-runtime/src/sessions.rs`
   (`undo_history`/`redo_history`, `pop_*_by_seq`, `push_*`, `history_frame`),
   `crates/posthaste-runtime/src/build.rs` (`run_apply_diff` ~664, `record_diff`),
-  `crates/posthaste-runtime-contract/src/lib.rs` (`MutationHistory`, `DiffStep`).
-- Client hook to simplify: `apps/web/src/hooks/useRuntimeUndoRedo.ts`
-  (drop `busyRef`/queue; read the mirrored log).
+  `crates/posthaste-runtime-contract/src/lib.rs` (`MutationHistory`, `DiffStep`) —
+  all removed.
+- Client hook (Phase 1a): `apps/web/src/hooks/useUndoRedo.ts` (round-trip-free;
+  `useRuntimeUndoRedo.ts` deleted) + `apps/web/src/runtime/replica/undoHistoryStore.ts`
+  (durable `RevStep[]` + cursor).
 - Outbox + mirror home: `apps/web/src/runtime/replica/outboxStore.ts`,
   `entityStoreAdapter.ts`.
 - Sync-as-view target: `crates/posthaste-runtime/src/views.rs` (`ViewKind`,
