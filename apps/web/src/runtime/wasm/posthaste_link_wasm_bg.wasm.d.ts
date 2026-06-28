@@ -5,6 +5,7 @@ export const __wbg_entitystorehandle_free: (a: number, b: number) => void;
 export const entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
 export const entitystorehandle_closeView: (a: number, b: number, c: number) => void;
 export const entitystorehandle_drainDirtyJson: (a: number) => [number, number];
+export const entitystorehandle_drainRetiredJson: (a: number) => [number, number];
 export const entitystorehandle_hasPending: (a: number) => number;
 export const entitystorehandle_ingestBatchJson: (a: number, b: number, c: number) => [number, number];
 export const entitystorehandle_mailboxJson: (a: number, b: number, c: number) => [number, number];

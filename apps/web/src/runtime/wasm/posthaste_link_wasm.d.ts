@@ -29,6 +29,13 @@ export class EntityStoreHandle {
      */
     drainDirtyJson(): string;
     /**
+     * The ids of ops retired since the last drain as a JSON array of strings
+     * (or `"[]"`). The host clears durable-outbox records only for these — an
+     * un-retired op is still pending in-engine and must survive a reload.
+     * (outbox D)
+     */
+    drainRetiredJson(): string;
+    /**
      * Whether any optimistic mutation is still pending.
      */
     hasPending(): boolean;
@@ -119,6 +126,7 @@ export interface InitOutput {
     readonly entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
     readonly entitystorehandle_closeView: (a: number, b: number, c: number) => void;
     readonly entitystorehandle_drainDirtyJson: (a: number) => [number, number];
+    readonly entitystorehandle_drainRetiredJson: (a: number) => [number, number];
     readonly entitystorehandle_hasPending: (a: number) => number;
     readonly entitystorehandle_ingestBatchJson: (a: number, b: number, c: number) => [number, number];
     readonly entitystorehandle_mailboxJson: (a: number, b: number, c: number) => [number, number];

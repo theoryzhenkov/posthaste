@@ -297,7 +297,8 @@ describe('entityStoreAdapter', () => {
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
 
     // The confirmation outruns the authoritative message.updated. It must NOT
-    // flip the row back to the un-flagged base; the durable outbox clears.
+    // flip the row back to the un-flagged base; the durable outbox RETAINS the
+    // op (outbox D: not retired yet — the base hasn't caught up to absorb it).
     built.harness.push({
       type: 'mutationNotification',
       sessionSeq: 5,
@@ -307,7 +308,7 @@ describe('entityStoreAdapter', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
-    expect(await outbox.all()).toHaveLength(0)
+    expect(await outbox.all()).toHaveLength(1)
 
     // The base then catches up; still flagged, no revert anywhere.
     built.harness.push(
@@ -327,7 +328,9 @@ describe('entityStoreAdapter', () => {
       ),
     )
     await Promise.resolve()
+    await Promise.resolve()
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+    expect(await outbox.all()).toHaveLength(0)
   })
 
   it('ingests a message.updated notification and re-projects the row', async () => {

@@ -229,6 +229,21 @@ impl EntityStoreHandle {
         let dirty = self.inner.drain_dirty();
         serde_json::to_string(&dirty).unwrap_or_else(|_| "[]".to_string())
     }
+
+    /// The ids of ops retired since the last drain as a JSON array of strings
+    /// (or `"[]"`). The host clears durable-outbox records only for these — an
+    /// un-retired op is still pending in-engine and must survive a reload.
+    /// (outbox D)
+    #[wasm_bindgen(js_name = drainRetiredJson)]
+    pub fn drain_retired_json(&mut self) -> String {
+        let ids: Vec<String> = self
+            .inner
+            .drain_retired()
+            .into_iter()
+            .map(|id| id.as_str().to_string())
+            .collect();
+        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
+    }
 }
 
 impl Default for EntityStoreHandle {

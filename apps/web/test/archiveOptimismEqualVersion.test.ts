@@ -125,7 +125,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
         },
       ]),
     )
-    expect(h.settle('arc-1', 'confirmed')).toBe(false) // not retired — holds
+    expect(h.settle('arc-1', 'confirmed')).toBe(false) // not reverted — holds
 
     // Stale [inbox]@5 re-serve (equal version) clobbers the base — but the op is
     // still pending, folding [mbx-archive] over it, so m1 stays out of inbox.

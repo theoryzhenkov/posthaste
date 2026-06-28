@@ -193,7 +193,8 @@ impl<C: Convergence> Replica<C> {
                     return SettlementResult::default();
                 };
                 self.confirmed.insert(id.clone());
-                let retired = self.retire_absorbed(&key);
+                let retired_ids = self.retire_absorbed(&key);
+                let retired = !retired_ids.is_empty();
                 SettlementResult {
                     retired,
                     reverted: false,
@@ -237,7 +238,7 @@ impl<C: Convergence> Replica<C> {
     /// carries the effect. A confirmation that outruns the base update marks the
     /// op confirmed but does not revert it — it retires on the next base update
     /// that absorbs it. Returns whether any op was retired.
-    pub fn retire_absorbed(&mut self, key: &C::Key) -> bool
+    pub fn retire_absorbed(&mut self, key: &C::Key) -> Vec<MutationId>
     where
         C::State: PartialEq,
     {
@@ -252,7 +253,7 @@ impl<C: Convergence> Replica<C> {
     /// unconfirmed window (a local move does not bump the provider modseq, so
     /// the moved base and a stale re-serve share the op's accepted-at version;
     /// retiring there would let the stale re-serve clobber membership).
-    pub fn retire_absorbed_if<F>(&mut self, key: &C::Key, can_retire: F) -> bool
+    pub fn retire_absorbed_if<F>(&mut self, key: &C::Key, can_retire: F) -> Vec<MutationId>
     where
         C::State: PartialEq,
         F: Fn(&MutationId) -> bool,
@@ -273,13 +274,13 @@ impl<C: Convergence> Replica<C> {
                 .map(|held| held.id.clone())
                 .collect();
             if retire.is_empty() {
-                return false;
+                return Vec::new();
             }
             self.pending.retain(|held| !retire.contains(&held.id));
             for id in &retire {
                 self.confirmed.remove(id);
             }
-            return true;
+            return retire;
         };
         // First pass (immutable): walk the key's ops in order, collecting those
         // that are confirmed AND absorbed at their position.
@@ -297,13 +298,13 @@ impl<C: Convergence> Replica<C> {
             }
         }
         if retire.is_empty() {
-            return false;
+            return Vec::new();
         }
         self.pending.retain(|held| !retire.contains(&held.id));
         for id in &retire {
             self.confirmed.remove(id);
         }
-        true
+        retire
     }
 
     /// The optimistic state of one entity: `replay(base, its pending)`. `None`
@@ -525,7 +526,7 @@ mod tests {
         replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
-        assert!(!replica.retire_absorbed(&"m1".to_string()));
+        assert!(replica.retire_absorbed(&"m1".to_string()).is_empty());
         assert!(replica.has_pending());
     }
 
@@ -535,7 +536,7 @@ mod tests {
         replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         // Base has NOT caught up (settlement outran the base update).
-        assert!(!replica.retire_absorbed(&"m1".to_string()));
+        assert!(replica.retire_absorbed(&"m1".to_string()).is_empty());
         assert!(replica.has_pending());
         // Optimism survives — no revert window.
         assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
@@ -617,7 +618,7 @@ mod tests {
     fn retire_absorbed_on_an_absent_base_is_a_no_op() {
         let mut replica = MessageReplica::new();
         replica.accept(flag("op1", "m1"));
-        assert!(!replica.retire_absorbed(&"m1".to_string()));
+        assert!(replica.retire_absorbed(&"m1".to_string()).is_empty());
         assert!(replica.has_pending());
     }
 

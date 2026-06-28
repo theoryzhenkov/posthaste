@@ -61,6 +61,25 @@ export class EntityStoreHandle {
         }
     }
     /**
+     * The ids of ops retired since the last drain as a JSON array of strings
+     * (or `"[]"`). The host clears durable-outbox records only for these — an
+     * un-retired op is still pending in-engine and must survive a reload.
+     * (outbox D)
+     * @returns {string}
+     */
+    drainRetiredJson() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.entitystorehandle_drainRetiredJson(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Whether any optimistic mutation is still pending.
      * @returns {boolean}
      */
