@@ -214,4 +214,18 @@ impl RevLogStore for DatabaseStore {
         let cursor = self.get_rev_cursor(account_id)?;
         Ok(RevLogSnapshot { steps, cursor })
     }
+
+    /// Delegates to the inherent `DatabaseStore::append_rev_log_step` (method-call
+    /// resolution prefers the inherent over the trait method of the same name).
+    fn append_rev_log_step(
+        &self,
+        account_id: &AccountId,
+        step_id: &str,
+        message_id: &str,
+        source_id: &str,
+        diff: &serde_json::Value,
+        created_at: &str,
+    ) -> Result<u32, StoreError> {
+        self.append_rev_log_step(account_id, step_id, message_id, source_id, diff, created_at)
+    }
 }
