@@ -341,6 +341,35 @@ describe('entityStoreAdapter', () => {
     expect(await outbox.all()).toHaveLength(0)
   })
 
+  it('drops already-sent outbox records on rehydration (no settled-record leak)', async () => {
+    const { adapter, outbox } = build()
+    // A prior session left durable records: one already sent to the runtime
+    // (runtime-owned — the served base reflects its outcome) and one never sent
+    // (still-unconfirmed intent that must survive the reload).
+    await outbox.put({
+      clientMutationId: 'sent-1',
+      messageId: 'm1',
+      assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      runtimeMutationId: 'r-prev',
+      acceptedAt: 1,
+    })
+    await outbox.put({
+      clientMutationId: 'never-sent-1',
+      messageId: 'm2',
+      assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      runtimeMutationId: null,
+      acceptedAt: 1,
+    })
+
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+
+    // The sent record is dropped (the runtime owns it); the never-sent one is
+    // retained for replay — so the durable outbox can't grow unbounded across
+    // reloads.
+    const remaining = await outbox.all()
+    expect(remaining.map((r) => r.clientMutationId)).toEqual(['never-sent-1'])
+  })
+
   it('ingests a message.updated notification and re-projects the row', async () => {
     const built = build()
     const { adapter, frames } = built
