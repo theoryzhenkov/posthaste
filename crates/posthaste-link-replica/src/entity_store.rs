@@ -221,6 +221,11 @@ pub struct EntityStore {
     /// confirmed+absorbed rule; opt-in for no-version providers).
     accepted_at: HashMap<MutationId, u64>,
     dirty: HashSet<DirtyKey>,
+    /// Ids of ops retired since the last [`drain_retired`] (at settle confirm
+    /// or base catch-up). The host clears durable-outbox records only for these
+    /// — an un-retired op is still pending in-engine and must survive a reload.
+    /// (outbox D)
+    retired_buffer: Vec<MutationId>,
 }
 
 impl EntityStore {
@@ -415,10 +420,12 @@ impl EntityStore {
                         .get(message_id.as_str())
                         .and_then(|e| authority_version(&e.projection));
                     let can_retire = self.retireable_ops(message_id.as_str(), current);
-                    retired = self.engine.retire_absorbed_if(
+                    let retired_ids = self.engine.retire_absorbed_if(
                         message_id,
                         |id| can_retire.contains(id),
                     );
+                    retired = !retired_ids.is_empty();
+                    self.retired_buffer.extend(retired_ids);
                     if retired {
                         self.prune_accepted_at(message_id.as_str());
                     }
@@ -427,7 +434,11 @@ impl EntityStore {
             }
             SettlementOutcome::Failed => {
                 self.accepted_at.remove(mutation_id);
-                self.engine.settle(mutation_id, outcome)
+                let result = self.engine.settle(mutation_id, outcome);
+                if result.retired {
+                    self.retired_buffer.push(mutation_id.clone());
+                }
+                result
             }
         };
         if let Some(message_id) = key {
@@ -530,11 +541,13 @@ impl EntityStore {
             // holds membership through the unconfirmed window.
             let can_retire =
                 self.retireable_ops(message_id, authority_version(projection));
-            let retired = self
+            let retired_ids = self
                 .engine
                 .retire_absorbed_if(&message_id.to_string(), |id| {
                     can_retire.contains(id)
                 });
+            let retired = !retired_ids.is_empty();
+            self.retired_buffer.extend(retired_ids);
             if retired {
                 self.prune_accepted_at(message_id);
             }
@@ -664,6 +677,14 @@ impl EntityStore {
     /// Drain the keys changed since the last drain. The host re-reads these.
     pub fn drain_dirty(&mut self) -> Vec<DirtyKey> {
         self.dirty.drain().collect()
+    }
+
+    /// Drain the ids of ops retired since the last drain (at settle confirm or
+    /// at base catch-up). The host clears the corresponding durable-outbox
+    /// records only for these — an un-retired op is still pending in-engine and
+    /// must survive a reload to be replayed. (outbox D)
+    pub fn drain_retired(&mut self) -> Vec<MutationId> {
+        std::mem::take(&mut self.retired_buffer)
     }
 }
 
