@@ -195,3 +195,4 @@ pub const DOMAIN_AUTOMATION_POST_SYNC_FAILED: LogEvent =
     LogEvent::new("domain.automation.post_sync_failed");
 pub const DOMAIN_CACHE_CANDIDATE_POST_SYNC_FAILED: LogEvent =
     LogEvent::new("domain.cache_candidate.post_sync_failed");
+pub const REV_LOG_APPEND_FAILED: LogEvent = LogEvent::new("rev_log.append_failed");

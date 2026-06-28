@@ -215,4 +215,19 @@ pub trait RevLogStore: Send + Sync {
     /// synced view. Eviction keeps the log bounded (`MAX_REV_LOG_HISTORY`), so
     /// this returns the full undoable range.
     fn rev_log_snapshot(&self, account_id: &AccountId) -> Result<RevLogSnapshot, StoreError>;
+
+    /// Append a reversible-op step (Phase 2 forward-action confirm). Idempotent
+    /// on `step_id`; assigns `seq = MAX(seq) + 1`. `diff` is the opaque
+    /// `MessageChangeDiff` JSON captured client-side.
+    ///
+    /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
+    fn append_rev_log_step(
+        &self,
+        account_id: &AccountId,
+        step_id: &str,
+        message_id: &str,
+        source_id: &str,
+        diff: &serde_json::Value,
+        created_at: &str,
+    ) -> Result<u32, StoreError>;
 }
