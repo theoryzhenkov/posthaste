@@ -197,7 +197,10 @@ async fn spawn_mock_gmail_imap() -> std::net::SocketAddr {
                 "SELECT" | "EXAMINE" => {
                     // A Gmail INBOX with one message; advertise CONDSTORE/QRESYNC
                     // state (UIDVALIDITY + HIGHESTMODSEQ) so delta sync can plan.
-                    writer.write_all(b"* FLAGS (\\Seen \\Flagged)\r\n").await.unwrap();
+                    writer
+                        .write_all(b"* FLAGS (\\Seen \\Flagged)\r\n")
+                        .await
+                        .unwrap();
                     writer
                         .write_all(b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\*)]\r\n")
                         .await
@@ -206,7 +209,10 @@ async fn spawn_mock_gmail_imap() -> std::net::SocketAddr {
                     writer.write_all(b"* 0 RECENT\r\n").await.unwrap();
                     writer.write_all(b"* OK [UIDVALIDITY 7]\r\n").await.unwrap();
                     writer.write_all(b"* OK [UIDNEXT 2]\r\n").await.unwrap();
-                    writer.write_all(b"* OK [HIGHESTMODSEQ 100]\r\n").await.unwrap();
+                    writer
+                        .write_all(b"* OK [HIGHESTMODSEQ 100]\r\n")
+                        .await
+                        .unwrap();
                     writer
                         .write_all(format!("{tag} OK [READ-WRITE] {verb} completed\r\n").as_bytes())
                         .await
@@ -343,7 +349,12 @@ async fn mock_gmail_imap_uid_fetch_decodes_x_gm_labels_through_real_client() {
     let labels: Vec<&str> = header
         .gmail_labels
         .as_ref()
-        .map(|labels| labels.iter().map(posthaste_domain::GmailLabel::as_str).collect())
+        .map(|labels| {
+            labels
+                .iter()
+                .map(posthaste_domain::GmailLabel::as_str)
+                .collect()
+        })
         .unwrap_or_default();
     assert_eq!(labels, ["\\Inbox", "\\Starred", "Project Alpha"]);
 }

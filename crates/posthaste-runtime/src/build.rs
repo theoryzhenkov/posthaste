@@ -19,9 +19,9 @@ use posthaste_runtime_contract::{
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
     MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller, RuntimeCore,
     RuntimeError, RuntimeErrorCode, RuntimeEventSubscription, RuntimeFrameSubscription,
-    RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
-    RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor, ViewId,
-    ViewRevision,
+    RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes, RuntimeSession, RuntimeSessionId,
+    RuntimeSessionSeq, RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor,
+    ViewId, ViewRevision,
 };
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -874,7 +874,8 @@ impl RuntimeCore for RuntimeHandle {
         // navigate.
         //
         // @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-        self.dispatch_named_mutation(caller, session_id, request).await
+        self.dispatch_named_mutation(caller, session_id, request)
+            .await
     }
 
     async fn open_view(
@@ -1264,13 +1265,19 @@ mod outbox_lifecycle_tests {
     struct NoopBackend;
     #[async_trait]
     impl BackendApi for NoopBackend {
-        async fn forward_mutation(&self, _: MutationRequest) -> Result<MutationReceipt, RuntimeError> {
+        async fn forward_mutation(
+            &self,
+            _: MutationRequest,
+        ) -> Result<MutationReceipt, RuntimeError> {
             unimplemented!("outbox-lifecycle tests do not dispatch")
         }
         async fn subscribe(&self, _: LinkCoverage) -> Result<DownStream, RuntimeError> {
             Ok(Box::pin(futures_util::stream::empty()))
         }
-        async fn query_mail_page(&self, _: MailQueryRequest) -> Result<MailQueryPage, RuntimeError> {
+        async fn query_mail_page(
+            &self,
+            _: MailQueryRequest,
+        ) -> Result<MailQueryPage, RuntimeError> {
             unimplemented!("outbox-lifecycle tests do not query")
         }
         async fn current_summary(
@@ -1323,8 +1330,10 @@ mod outbox_lifecycle_tests {
     async fn cancelled_dispatch_guard_settles_failed_not_accepted() {
         let sessions = test_session_registry();
         let caller = RuntimeCaller::test();
-        let session = sessions.open_session(caller.clone()).expect("session opens");
-        let session_id = session.session_id.clone();
+        let session = sessions
+            .open_session(caller.clone())
+            .expect("session opens");
+        let session_id = session.session_id;
         let client_mutation_id = ClientMutationId::new("cancel-cmid");
         let mutation_id = accept(&sessions, &caller, &session_id, &client_mutation_id);
 
@@ -1340,7 +1349,7 @@ mod outbox_lifecycle_tests {
             let _guard = MutationCancelGuard {
                 sessions: sessions.clone(),
                 session_id: session_id.clone(),
-                mutation_id: mutation_id.clone(),
+                mutation_id,
                 armed: true,
             };
         }
@@ -1359,8 +1368,10 @@ mod outbox_lifecycle_tests {
     async fn rejected_verdict_survives_the_confirmed_eviction_window() {
         let sessions = test_session_registry();
         let caller = RuntimeCaller::test();
-        let session = sessions.open_session(caller.clone()).expect("session opens");
-        let session_id = session.session_id.clone();
+        let session = sessions
+            .open_session(caller.clone())
+            .expect("session opens");
+        let session_id = session.session_id;
 
         let rejected_cmid = ClientMutationId::new("rej-1");
         let rejected_mid = accept(&sessions, &caller, &session_id, &rejected_cmid);

@@ -232,8 +232,14 @@ fn message_updated_carries_count_deltas_matching_served_counts() -> Result<(), S
         .collect();
     for (id, delta) in &by_id {
         let (unread, total) = served[*id];
-        assert_eq!(delta["unreadCount"], unread, "unreadCount matches served for {id}");
-        assert_eq!(delta["totalCount"], total, "totalCount matches served for {id}");
+        assert_eq!(
+            delta["unreadCount"], unread,
+            "unreadCount matches served for {id}"
+        );
+        assert_eq!(
+            delta["totalCount"], total,
+            "totalCount matches served for {id}"
+        );
     }
     // The move is reflected: inbox lost the message (total 0), archive gained it.
     assert_eq!(by_id["inbox"]["totalCount"], 0, "inbox total dropped to 0");

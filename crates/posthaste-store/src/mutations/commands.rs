@@ -153,7 +153,8 @@ pub(crate) fn replace_mailboxes_tx(
         .collect::<Vec<_>>();
     let detail = query_message_detail_tx(tx, account_id, message_id)?
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
-    let affected_mailboxes: BTreeSet<MailboxId> = previous_set.union(&current_set).cloned().collect();
+    let affected_mailboxes: BTreeSet<MailboxId> =
+        previous_set.union(&current_set).cloned().collect();
     let count_deltas =
         crate::query::mailbox_counts_json_tx(tx, account_id, affected_mailboxes.iter())?;
     let mut payload = json!({

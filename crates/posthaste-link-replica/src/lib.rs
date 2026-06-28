@@ -19,7 +19,6 @@
 pub mod entity_store;
 
 pub use entity_store::{
-    apply_fold_to_projection, fold_state_from_projection, CountDelta, DirtyKey,
-    EntityStore, MailboxEntity, SortDirection, SortKey, StoreUpdate, ViewEntity,
-    ViewPredicate, ViewRow,
+    apply_fold_to_projection, fold_state_from_projection, CountDelta, DirtyKey, EntityStore,
+    MailboxEntity, SortDirection, SortKey, StoreUpdate, ViewEntity, ViewPredicate, ViewRow,
 };

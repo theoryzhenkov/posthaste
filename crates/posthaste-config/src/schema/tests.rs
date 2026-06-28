@@ -124,13 +124,10 @@ fn default_smart_mailboxes_round_trip_through_toml() {
 fn default_smart_mailboxes_stamp_role_for_contextual_actions() {
     // Built-in role smart mailboxes carry their role (drives contextual
     // actions like Delete permanently in Trash); All Mail has none.
-    let by_key: std::collections::HashMap<String, Option<String>> =
-        default_smart_mailboxes()
-            .into_iter()
-            .filter_map(|mailbox| {
-                mailbox.default_key.map(|key| (key, mailbox.role))
-            })
-            .collect();
+    let by_key: std::collections::HashMap<String, Option<String>> = default_smart_mailboxes()
+        .into_iter()
+        .filter_map(|mailbox| mailbox.default_key.map(|key| (key, mailbox.role)))
+        .collect();
     assert_eq!(by_key.get("inbox"), Some(&Some("inbox".to_string())));
     assert_eq!(by_key.get("trash"), Some(&Some("trash".to_string())));
     assert_eq!(by_key.get("all-mail"), Some(&None));

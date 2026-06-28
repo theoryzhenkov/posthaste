@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use futures_util::StreamExt;
 use posthaste_domain::{DomainEvent, Id};
 use posthaste_runtime_contract::{
-    ClientMutationId, MailListDelta, MailListRowState, MailListViewState,
-    MutationNotification, MutationReceipt, MutationRequest, MutationSettlementState,
-    RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeFrameSubscription,
-    RuntimeMutationId, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
-    RuntimeViewSubscription, ViewDescriptor, ViewFrame, ViewId, ViewSnapshot,
+    ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MutationNotification,
+    MutationReceipt, MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller,
+    RuntimeError, RuntimeFrame, RuntimeFrameSubscription, RuntimeMutationId, RuntimeSession,
+    RuntimeSessionId, RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor, ViewFrame,
+    ViewId, ViewSnapshot,
 };
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -463,6 +463,10 @@ impl SessionRegistry {
 
     /// Read the current settlement state of a mutation by its **client** mutation
     /// id. `None` when the session or mutation is unknown (or already evicted).
+    // Settlement-state query helper; the production caller is not wired yet (the
+    // absorption path does not query it directly), so this is exercised only by
+    // the build.rs unit tests. Kept as intended pub(crate) API rather than removed.
+    #[allow(dead_code)]
     pub(crate) fn mutation_state(
         &self,
         session_id: &RuntimeSessionId,
@@ -860,9 +864,7 @@ fn ensure_caller_matches_session(
 #[cfg(test)]
 mod delta_tests {
     use super::*;
-    use posthaste_runtime_contract::{
-        CoverageRange, RuntimeCoverage, ViewLifecycle, ViewRevision,
-    };
+    use posthaste_runtime_contract::{CoverageRange, RuntimeCoverage, ViewLifecycle, ViewRevision};
     use serde_json::json;
 
     fn row(key: &str, flagged: bool) -> Value {
@@ -888,7 +890,10 @@ mod delta_tests {
             lifecycle: ViewLifecycle::Ready,
             read_watermark: None,
             coverage: RuntimeCoverage {
-                ranges: vec![CoverageRange { from: None, to: None }],
+                ranges: vec![CoverageRange {
+                    from: None,
+                    to: None,
+                }],
             },
             data: json!({
                 "scope": {},

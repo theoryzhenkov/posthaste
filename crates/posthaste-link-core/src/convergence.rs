@@ -282,9 +282,7 @@ impl<C: Convergence> Replica<C> {
                 .pending
                 .iter()
                 .filter(|held| {
-                    &held.key == key
-                        && self.confirmed.contains(&held.id)
-                        && can_retire(&held.id)
+                    &held.key == key && self.confirmed.contains(&held.id) && can_retire(&held.id)
                 })
                 .map(|held| held.id.clone())
                 .collect();
@@ -529,7 +527,10 @@ mod tests {
         );
         assert!(!replica.has_pending());
         // The projection still shows the flag — retire did not revert.
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
     }
 
     #[test]
@@ -554,7 +555,10 @@ mod tests {
         assert!(replica.retire_absorbed(&"m1".to_string()).is_empty());
         assert!(replica.has_pending());
         // Optimism survives — no revert window.
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
     }
 
     #[test]
