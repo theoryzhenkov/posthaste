@@ -49,8 +49,8 @@ jobs:
           cat "$GITHUB_OUTPUT"
 
 
-  build-serve:
-    name: Build serve ${{ matrix.platform }}
+  build-daemon:
+    name: Build daemon ${{ matrix.platform }}
     needs: resolve-channel
     runs-on: ${{ matrix.os }}
     strategy:
@@ -75,8 +75,55 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-serve-${{ matrix.platform }}
+          shared-key: release-daemon-${{ matrix.platform }}
           cache-on-failure: true
+
+      - name: Resolve channel policy
+        shell: bash
+        env:
+          POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+        run: bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
+
+      - name: Install Linux daemon dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libssl-dev \
+            mold \
+            pkg-config
+
+      - name: Build daemon binary
+        shell: bash
+        run: cargo build --release --bin posthasted
+
+      - name: Package daemon
+        shell: bash
+        env:
+          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
+        run: bash tools/package/daemon.sh
+
+      - name: Print sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-daemon-${{ matrix.platform }}
+          if-no-files-found: error
+          path: target/distribute/PosthasteDaemon*.tar.gz
+
+  build-web:
+    name: Build web frontend
+    needs: resolve-channel
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -91,17 +138,13 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install Linux serve dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libssl-dev \
-            mold \
-            pkg-config
+      - name: Resolve channel policy
+        shell: bash
+        env:
+          POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+        run: bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
 
-      - name: Build browser-localhost package
+      - name: Build + package web frontend
         shell: bash
         env:
           # Baked into the web bundle so OAuth account setup can exchange the
@@ -112,19 +155,13 @@ jobs:
           VITE_RUNTIME_REPLICA: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL == 'nightly' && 'true' || 'false' }}
         run: |
           bun --cwd=apps/web run build
-          cargo build --release --bin posthaste
-          POSTHASTE_PACKAGE_PLATFORM="${{ matrix.platform }}" bash tools/package/serve.sh
-
-      - name: Print sccache stats
-        if: always()
-        shell: bash
-        run: sccache --show-stats || true
+          bash tools/package/web.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: posthaste-serve-${{ matrix.platform }}
+          name: posthaste-web
           if-no-files-found: error
-          path: target/distribute/posthaste-serve-*.tar.gz
+          path: target/distribute/PosthasteWeb*.tar.gz
 
   build-desktop:
     name: Build desktop ${{ matrix.platform }}
@@ -461,7 +498,8 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs:
-      - build-serve
+      - build-daemon
+      - build-web
       - build-desktop
       - resolve-channel
     runs-on: ubuntu-latest

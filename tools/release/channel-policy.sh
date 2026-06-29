@@ -22,6 +22,9 @@ case "$channel" in
     include_devtools="true"
     enforce_macos_signing="false"
     is_stable="false"
+    daemon_name="PosthasteDaemonNightly"
+    cli_name="PosthasteCTLNightly"
+    web_name="PosthasteWebNightly"
     ;;
   stable)
     identifier="com.posthaste.mail"
@@ -31,6 +34,9 @@ case "$channel" in
     include_devtools="false"
     enforce_macos_signing="true"
     is_stable="true"
+    daemon_name="PosthasteDaemon"
+    cli_name="PosthasteCTL"
+    web_name="PosthasteWeb"
     ;;
   *)
     echo "error: unknown channel '$channel' (expected: nightly|stable)" >&2
@@ -46,5 +52,8 @@ POSTHASTE_UPDATER_ENDPOINT=$updater_endpoint
 POSTHASTE_INCLUDE_DEVTOOLS=$include_devtools
 POSTHASTE_ENFORCE_MACOS_SIGNING=$enforce_macos_signing
 POSTHASTE_IS_STABLE=$is_stable
+POSTHASTE_DAEMON_NAME=$daemon_name
+POSTHASTE_CLI_NAME=$cli_name
+POSTHASTE_WEB_NAME=$web_name
 POSTHASTE_RUN_ARTIFACT_SMOKE=true
 EOF

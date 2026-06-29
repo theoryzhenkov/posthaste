@@ -59,13 +59,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-serve-${{ matrix.platform }}
+          shared-key: release-daemon-${{ matrix.platform }}
           cache-on-failure: true
           # Only the default branch should write the canonical cache that tag
           # runs restore. This workflow only runs on main, but be explicit.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install Linux serve dependencies
+      - name: Install Linux daemon dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -75,12 +75,12 @@ jobs:
             mold \
             pkg-config
 
-      # The serve binary does not embed the frontend (it serves it at runtime),
+      # The daemon binary does not embed the frontend (it serves it at runtime),
       # so a frontend build is unnecessary here. Compile only the Rust artifacts
       # to populate the cache `release.yml`'s `cargo build --release --bin
-      # posthaste` will restore.
+      # posthasted` will restore.
       - name: Warm release binary compilation
-        run: cargo build --release --bin posthaste
+        run: cargo build --release --bin posthasted
 
       - name: Print sccache stats
         if: always()
