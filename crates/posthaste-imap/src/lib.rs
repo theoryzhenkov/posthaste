@@ -34,14 +34,12 @@ pub use discovery::{
 };
 pub use error::ImapAdapterError;
 pub use fetch::{
-    fetch_mailbox_changed_since_snapshot, fetch_mailbox_header_records,
-    fetch_mailbox_header_snapshot, fetch_mailbox_headers_after_uid, fetched_header_from_items,
-    fetched_header_from_items_with_metadata, ImapChangedSinceSnapshot,
+    fetched_header_from_items, fetched_header_from_items_with_metadata, ImapChangedSinceSnapshot,
     ImapFetchedHeaderWithMetadata, ImapMailboxHeaderSnapshot, ImapMailboxUidDeltaSnapshot,
 };
 pub use gateway::LiveImapSmtpGateway;
 pub use idle::imap_idle_event_stream;
-pub use mailbox::{examine_imap_mailbox, selected_mailbox_from_examine};
+pub use mailbox::selected_mailbox_from_examine;
 pub use message::{
     imap_flag_keywords, imap_header_message_record, imap_header_message_record_with_gmail_metadata,
     ImapFetchedHeader, ImapMailboxMembershipSource, ImapMappedHeader,
