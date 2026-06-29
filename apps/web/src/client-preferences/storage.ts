@@ -126,3 +126,26 @@ const themeStorageKeys = new Set<string>(Object.values(designStorageKeys))
 export function isThemeStorageEvent(event: StorageEvent): boolean {
   return event.key === null || themeStorageKeys.has(event.key)
 }
+
+/**
+ * One-time import guard for migrating the renderer's localStorage appearance
+ * cache into TOML (`[appearance]` in app.toml). Set after the cache is first
+ * written to TOML so the import is not repeated.
+ *
+ * @spec docs/eph/DESIGN-L2-appearance-toml
+ */
+const APPEARANCE_IMPORTED_FLAG = 'posthaste.appearance.imported'
+
+export function hasImportedAppearance(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.localStorage.getItem(APPEARANCE_IMPORTED_FLAG) === '1'
+  )
+}
+
+export function markAppearanceImported(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.setItem(APPEARANCE_IMPORTED_FLAG, '1')
+}
