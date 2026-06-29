@@ -275,9 +275,18 @@ async fn patch_settings_persists_appearance_to_app_toml() {
                 notifications: None,
                 appearance: Some(Appearance {
                     mode: Some(ThemeMode::Dark),
-                    palette_preset: Some(PalettePresetId::PaperInk),
+                    theme: Some("glass".to_string()),
                     density: Some(UiDensity::Compact),
-                    accent_hue: Some(250),
+                    light: Some(ThemeColors {
+                        accent_hue: Some(210),
+                        surface_hue: Some(40),
+                        ..ThemeColors::default()
+                    }),
+                    dark: Some(ThemeColors {
+                        accent_hue: Some(250),
+                        surface_hue: Some(260),
+                        ..ThemeColors::default()
+                    }),
                     glass_theme: Some(GlassTheme {
                         blooms: vec![GlassBloom {
                             id: "bloom-1".to_string(),
@@ -296,21 +305,28 @@ async fn patch_settings_persists_appearance_to_app_toml() {
 
     let appearance = settings.appearance.expect("appearance should be set");
     assert_eq!(appearance.mode, Some(ThemeMode::Dark));
-    assert_eq!(appearance.palette_preset, Some(PalettePresetId::PaperInk));
-    assert_eq!(appearance.accent_hue, Some(250));
+    assert_eq!(appearance.theme.as_deref(), Some("glass"));
+    assert_eq!(
+        appearance.dark.as_ref().and_then(|c| c.accent_hue),
+        Some(250)
+    );
+    assert_eq!(
+        appearance.light.as_ref().and_then(|c| c.surface_hue),
+        Some(40)
+    );
     let glass = appearance.glass_theme.expect("glass theme should be set");
     assert_eq!(glass.blooms.len(), 1);
     assert_eq!(glass.blooms[0].id, "bloom-1");
 
     // The TOML file is the source of truth: the appearance round-trips through it
-    // with snake_case keys and camelCase enum values (e.g. paperInk).
+    // with snake_case keys and per-mode color tables.
     let app_toml = harness.app_toml();
     assert_eq!(app_toml["appearance"]["mode"].as_str(), Some("dark"));
+    assert_eq!(app_toml["appearance"]["theme"].as_str(), Some("glass"));
     assert_eq!(
-        app_toml["appearance"]["palette_preset"].as_str(),
-        Some("paperInk"),
+        app_toml["appearance"]["dark"]["accent_hue"].as_integer(),
+        Some(250),
     );
-    assert_eq!(app_toml["appearance"]["accent_hue"].as_integer(), Some(250),);
     assert_eq!(
         app_toml["appearance"]["glass_theme"]["blooms"][0]["id"].as_str(),
         Some("bloom-1"),

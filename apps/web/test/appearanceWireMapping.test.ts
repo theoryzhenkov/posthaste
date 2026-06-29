@@ -21,17 +21,22 @@ describe('appearance wire mapping', () => {
   it('maps wire fields to design fields, filling defaults for cleared fields', () => {
     const wire: Appearance = {
       mode: 'light',
-      palettePreset: 'paperInk',
+      theme: 'glass',
       density: 'cozy',
-      accentHue: 120,
+      light: { accentHue: 120 },
       glassTheme: null,
     }
     const design = wireAppearanceToDesign(wire)
     expect(design.mode).toBe('light')
-    expect(design.palettePreset).toBe('paperInk')
+    expect(design.palettePreset).toBe('glass') // theme id -> palette id
     expect(design.density).toBe('cozy')
-    expect(design.accentHue).toBe(120)
+    expect(design.accentHue).toBe(120) // per-mode accent collapsed to one (bridge)
     expect(design.glassTheme).toEqual(defaults.glassTheme) // null -> default blooms
+  })
+
+  it('falls back to dark accent when light is unset (transitional bridge)', () => {
+    const design = wireAppearanceToDesign({ dark: { accentHue: 300 } })
+    expect(design.accentHue).toBe(300)
   })
 
   it('preserves glass blooms through wire -> design', () => {
@@ -50,7 +55,9 @@ describe('appearance wire mapping', () => {
     const original = { ...defaults, mode: 'light' as const, accentHue: 200 }
     const wire = designToWireAppearance(original)
     expect(wire.mode).toBe('light')
-    expect(wire.accentHue).toBe(200)
+    // The single design accent is written to both modes (transitional).
+    expect(wire.light?.accentHue).toBe(200)
+    expect(wire.dark?.accentHue).toBe(200)
     expect(wire.glassTheme?.blooms.length).toBe(
       defaults.glassTheme.blooms.length,
     )

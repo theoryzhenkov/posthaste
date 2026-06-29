@@ -88,26 +88,51 @@ impl CachePolicyToml {
 }
 
 /// TOML representation of `[appearance]` (UI theme prefs). Mirrors the domain
-/// `Appearance` but with snake_case keys to match the rest of `app.toml`; the
-/// enum *values* stay camelCase (e.g. `paperInk`) to match the renderer's set.
+/// `Appearance` with snake_case keys to match the rest of `app.toml`.
+///
+/// Back-compat: an older file's `palette_preset` reads into `theme` (serde
+/// alias) and a legacy top-level `accent_hue` seeds both modes when `light`/
+/// `dark` are absent. Neither legacy key is written back — a save re-serializes
+/// the current per-mode shape, migrating the file in place.
 ///
 /// @spec docs/eph/DESIGN-L2-appearance-toml
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AppearanceToml {
     pub mode: Option<ThemeMode>,
-    pub palette_preset: Option<PalettePresetId>,
+    #[serde(alias = "palette_preset", skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
     pub density: Option<UiDensity>,
+    /// Legacy single accent (pre per-mode). Read-only: seeds `light`/`dark`.
+    #[serde(skip_serializing)]
     pub accent_hue: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub light: Option<ThemeColorsToml>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dark: Option<ThemeColorsToml>,
     pub glass_theme: Option<GlassTheme>,
 }
 
 impl AppearanceToml {
     fn to_appearance(&self) -> Appearance {
+        // A legacy top-level accent seeds both modes when neither is set.
+        let legacy = self.accent_hue.map(|accent_hue| ThemeColors {
+            accent_hue: Some(accent_hue),
+            ..ThemeColors::default()
+        });
         Appearance {
             mode: self.mode,
-            palette_preset: self.palette_preset,
+            theme: self.theme.clone(),
             density: self.density,
-            accent_hue: self.accent_hue,
+            light: self
+                .light
+                .as_ref()
+                .map(ThemeColorsToml::to_theme_colors)
+                .or_else(|| legacy.clone()),
+            dark: self
+                .dark
+                .as_ref()
+                .map(ThemeColorsToml::to_theme_colors)
+                .or(legacy),
             glass_theme: self.glass_theme.clone(),
         }
     }
@@ -115,10 +140,49 @@ impl AppearanceToml {
     fn from_appearance(appearance: &Appearance) -> Self {
         Self {
             mode: appearance.mode,
-            palette_preset: appearance.palette_preset,
+            theme: appearance.theme.clone(),
             density: appearance.density,
-            accent_hue: appearance.accent_hue,
+            accent_hue: None,
+            light: appearance
+                .light
+                .as_ref()
+                .map(ThemeColorsToml::from_theme_colors),
+            dark: appearance
+                .dark
+                .as_ref()
+                .map(ThemeColorsToml::from_theme_colors),
             glass_theme: appearance.glass_theme.clone(),
+        }
+    }
+}
+
+/// TOML representation of per-mode [`ThemeColors`].
+///
+/// @spec docs/eph/DESIGN-L2-appearance-toml
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ThemeColorsToml {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accent_hue: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_hue: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub tokens: std::collections::BTreeMap<String, String>,
+}
+
+impl ThemeColorsToml {
+    fn to_theme_colors(&self) -> ThemeColors {
+        ThemeColors {
+            accent_hue: self.accent_hue,
+            surface_hue: self.surface_hue,
+            tokens: self.tokens.clone(),
+        }
+    }
+
+    fn from_theme_colors(colors: &ThemeColors) -> Self {
+        Self {
+            accent_hue: colors.accent_hue,
+            surface_hue: colors.surface_hue,
+            tokens: colors.tokens.clone(),
         }
     }
 }

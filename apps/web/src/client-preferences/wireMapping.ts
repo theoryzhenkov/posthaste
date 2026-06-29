@@ -18,21 +18,27 @@ const DEFAULT_APPEARANCE = defaultThemePreferences()
 /**
  * Map a wire `Appearance` (nullable fields; the TOML source of truth) to the
  * renderer's `DesignThemePreferences` (required fields). Absent/cleared fields
- * fall back to the renderer defaults. Wire enum values are the same strings as
- * the `@/design` enums, so a structural cast bridges the nominal types.
+ * fall back to the renderer defaults.
+ *
+ * NOTE — transitional bridge: the wire schema is per-mode (`light`/`dark`
+ * colors) + free-form `theme`, but the design layer is still single-accent +
+ * `palettePreset`. This collapses the per-mode accent to one (light, falling
+ * back to dark) and reads `theme` as the palette id. The design-layer revamp
+ * (per-mode colors + `surfaceHue` + `tokens`) will make this lossless.
  *
  * @spec docs/eph/DESIGN-L2-appearance-toml
  */
 export function wireAppearanceToDesign(
   appearance: Appearance | null | undefined,
 ): DesignThemePreferences {
+  const accent = appearance?.light?.accentHue ?? appearance?.dark?.accentHue
   return {
     accentHue:
-      appearance?.accentHue != null
-        ? normalizeAccentHue(appearance.accentHue)
+      accent != null
+        ? normalizeAccentHue(accent)
         : DEFAULT_APPEARANCE.accentHue,
     mode: (appearance?.mode ?? DEFAULT_APPEARANCE.mode) as ThemeMode,
-    palettePreset: (appearance?.palettePreset ??
+    palettePreset: (appearance?.theme ??
       DEFAULT_APPEARANCE.palettePreset) as PalettePresetId,
     density: (appearance?.density ?? DEFAULT_APPEARANCE.density) as UiDensity,
     glassTheme: wireGlassThemeToDesign(
@@ -70,11 +76,14 @@ function wireGlassThemeToDesign(
 export function designToWireAppearance(
   prefs: DesignThemePreferences,
 ): Appearance {
+  // Transitional: the single design accent is written to both modes so the
+  // round-trip is stable until the design layer becomes per-mode.
   return {
-    accentHue: prefs.accentHue,
     mode: prefs.mode,
-    palettePreset: prefs.palettePreset,
+    theme: prefs.palettePreset,
     density: prefs.density,
+    light: { accentHue: prefs.accentHue },
+    dark: { accentHue: prefs.accentHue },
     glassTheme: {
       blooms: prefs.glassTheme.blooms.map((bloom) => ({
         id: bloom.id,

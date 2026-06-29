@@ -323,7 +323,7 @@ mod lossless_write_tests {
             r#"# note
 [appearance]
 mode = "dark"
-palette_preset = "paperInk"
+palette_preset = "glass"
 density = "compact"
 accent_hue = 250
 [[appearance.glass_theme.blooms]]
@@ -356,10 +356,7 @@ radius = 45
             after.contains("[appearance]"),
             "appearance section dropped:\n{after}"
         );
-        assert!(
-            after.contains("paperInk"),
-            "palette value dropped:\n{after}"
-        );
+        assert!(after.contains("glass"), "palette value dropped:\n{after}");
         assert!(
             after.contains("[[appearance.glass_theme.blooms]]"),
             "blooms array dropped:\n{after}"
