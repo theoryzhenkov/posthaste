@@ -268,3 +268,28 @@ fn attachment_body_structure() -> BodyStructure<'static> {
         extension_data: None,
     }
 }
+
+/// Real Gmail (per RFC 7162) sends the `VANISHED (EARLIER)` response with NO
+/// leading sequence number: `* VANISHED (EARLIER) <known-uids>`. The QRESYNC
+/// delta sync depends on the forked `imap-codec` decoding this so deletions are
+/// observed; if it can't, the delta path breaks and sync degrades to repeated
+/// full re-fetches. The mock Gmail fixture sidesteps this by emitting a
+/// non-standard `* 1 VANISHED ...` (a fabricated leading number), so this is
+/// the faithful-real-format decode test the mock can't provide.
+#[test]
+fn real_gmail_vanished_earlier_decodes_without_a_leading_sequence_number() {
+    use imap_client::imap_types::response::{Data, Response};
+    use imap_codec::decode::Decoder;
+    use imap_codec::ResponseCodec;
+
+    let bytes = b"* VANISHED (EARLIER) 300:310,405,411\r\n";
+    let (_remaining, response) = ResponseCodec::default()
+        .decode(bytes)
+        .expect("real Gmail `* VANISHED (EARLIER) ...` must decode");
+    match response {
+        Response::Data(Data::Vanished { earlier, .. }) => {
+            assert!(earlier, "the EARLIER flag should be set");
+        }
+        other => panic!("expected Data::Vanished, got {other:?}"),
+    }
+}

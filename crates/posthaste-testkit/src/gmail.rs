@@ -454,13 +454,11 @@ async fn send_fetch(
             .map(u32::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        // The fork's response parser only reaches its `VANISHED` arm through
-        // `message_data`, which requires a leading `<nz-number> SP` -- so a
-        // standard `* VANISHED (EARLIER) <uids>` (no number, per RFC 7162 + the
-        // fork's own encoder) fails to decode. Emit a dummy leading sequence
-        // number (the QRESYNC task ignores it) so the fork accepts it. (Fork
-        // decoder bug; see PLAN-L2 roadmap P3c.)
-        if !send(writer, &format!("* 1 VANISHED (EARLIER) {uids}\r\n")).await {
+        // Real Gmail (RFC 7162) sends VANISHED with NO leading sequence
+        // number. The forked imap-codec now decodes this standard form (a
+        // top-level `vanished` response-data parser), so the mock emits it
+        // faithfully + the delta e2e exercises the real wire path.
+        if !send(writer, &format!("* VANISHED (EARLIER) {uids}\r\n")).await {
             return false;
         }
     }
