@@ -1316,6 +1316,7 @@ export interface components {
             automationRules?: components["schemas"]["AutomationRule"][];
             cachePolicy?: components["schemas"]["CachePolicy"];
             defaultAccountId?: null | components["schemas"]["AccountId"];
+            notifications?: null | components["schemas"]["Notifications"];
         };
         /**
          * @description App-level appearance/theme preferences — the renderer's visual settings,
@@ -1859,6 +1860,17 @@ export interface components {
         /** @enum {string} */
         MutationSettlementState: "accepted" | "confirmed" | "failed";
         /**
+         * @description Notification policy — the user's new-mail/sound preferences, stored in
+         *     `[notifications]` of `app.toml` as the single source of truth. OS-level
+         *     delivery permission stays device-local (not a config concern).
+         *
+         *     @spec docs/eph/RFC-L2-configuration-matrix
+         */
+        Notifications: {
+            newMail?: boolean | null;
+            sound?: boolean | null;
+        };
+        /**
          * @description Generic success response for mutating endpoints that return no domain data.
          *
          *     @spec docs/L1-api#endpoint-table
@@ -2001,6 +2013,7 @@ export interface components {
             automationRules?: components["schemas"]["AutomationRule"][] | null;
             cachePolicy?: null | components["schemas"]["CachePolicy"];
             defaultAccountId?: string | null;
+            notifications?: null | components["schemas"]["Notifications"];
         };
         /**
          * @description Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.

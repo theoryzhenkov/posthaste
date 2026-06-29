@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Bell,
   FolderSearch,
   HardDrive,
   Mailbox,
@@ -43,6 +44,13 @@ const SETTINGS_CATEGORIES = [
     description: 'Cache size and what to keep on this device.',
     icon: HardDrive,
     accent: brandAccents.amber,
+  },
+  {
+    id: 'notifications',
+    label: 'Notifications',
+    description: 'New-mail alerts and sounds.',
+    icon: Bell,
+    accent: brandAccents.rose,
   },
   {
     id: 'mailboxes',

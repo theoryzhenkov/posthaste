@@ -51,6 +51,7 @@ const APP_TOML_MANAGED_KEYS: &[&str] = &[
     "logging",
     "cache",
     "appearance",
+    "notifications",
     "link",
 ];
 
