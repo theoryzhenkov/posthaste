@@ -28,6 +28,7 @@ pub trait MailStore:
     + AutomationBackfillStore
     + OperationOutboxStore
     + RevLogStore
+    + SnoozeStore
 {
 }
 
@@ -53,6 +54,7 @@ impl<T> MailStore for T where
         + AutomationBackfillStore
         + OperationOutboxStore
         + RevLogStore
+        + SnoozeStore
 {
 }
 

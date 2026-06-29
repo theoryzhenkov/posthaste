@@ -14,6 +14,7 @@ mod projections;
 mod query;
 mod read;
 mod rev_log;
+mod snooze;
 mod sender_cache;
 mod smart_mailboxes;
 mod source;

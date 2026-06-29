@@ -16,7 +16,8 @@ use posthaste_link_core::MessageAssertion;
 use posthaste_runtime_contract::mutation_args::{
     keyword_toggle, MessageApplyDiffArgs, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
     MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
-    MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
+    MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageSnoozeArgs, MessageTargetArgs,
+    MessageUnsnoozeArgs,
 };
 use posthaste_runtime_contract::{MutationRequest, RuntimeError};
 
@@ -33,6 +34,8 @@ pub enum MessageMutation {
     ReplaceMailboxes(MessageReplaceMailboxesArgs),
     Destroy(MessageTargetArgs),
     ApplyDiff(MessageApplyDiffArgs),
+    Snooze(MessageSnoozeArgs),
+    Unsnooze(MessageUnsnoozeArgs),
 }
 
 impl MessageMutation {
@@ -48,6 +51,8 @@ impl MessageMutation {
             "message.replaceMailboxes" => MessageMutation::ReplaceMailboxes(parse_args(request)?),
             "message.destroy" => MessageMutation::Destroy(parse_args(request)?),
             "message.applyDiff" => MessageMutation::ApplyDiff(parse_args(request)?),
+            "message.snooze" => MessageMutation::Snooze(parse_args(request)?),
+            "message.unsnooze" => MessageMutation::Unsnooze(parse_args(request)?),
             _ => {
                 return Err(RuntimeError::invalid_mutation(format!(
                     "unknown runtime mutation '{}'",
@@ -69,6 +74,8 @@ impl MessageMutation {
             MessageMutation::ReplaceMailboxes(args) => &args.source_id,
             MessageMutation::Destroy(args) => &args.source_id,
             MessageMutation::ApplyDiff(args) => &args.source_id,
+            MessageMutation::Snooze(args) => &args.source_id,
+            MessageMutation::Unsnooze(args) => &args.source_id,
         }
     }
 
@@ -84,6 +91,8 @@ impl MessageMutation {
             MessageMutation::ReplaceMailboxes(args) => &args.message_id,
             MessageMutation::Destroy(args) => &args.message_id,
             MessageMutation::ApplyDiff(args) => &args.message_id,
+            MessageMutation::Snooze(args) => &args.message_id,
+            MessageMutation::Unsnooze(args) => &args.message_id,
         }
     }
 
@@ -143,6 +152,9 @@ impl MessageMutation {
             }),
             // Role moves resolve to ReplaceMailboxes via the account's role→id map.
             MessageMutation::MoveToRole(args) => role_to_replace(roles, &args.role),
+            // Snooze/unsnooze are role moves (to the snooze / inbox mailbox).
+            MessageMutation::Snooze(_) => role_to_replace(roles, "snooze"),
+            MessageMutation::Unsnooze(_) => role_to_replace(roles, "inbox"),
         }
     }
 }
