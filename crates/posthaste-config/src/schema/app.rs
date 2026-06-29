@@ -23,6 +23,8 @@ pub struct AppToml {
     #[serde(default)]
     pub appearance: Option<AppearanceToml>,
     #[serde(default)]
+    pub notifications: Option<NotificationsToml>,
+    #[serde(default)]
     pub link: LinkToml,
 }
 
@@ -121,6 +123,33 @@ impl AppearanceToml {
     }
 }
 
+/// TOML representation of `[notifications]` (notification policy). Mirrors the
+/// domain `Notifications` but with snake_case keys to match the rest of
+/// `app.toml`.
+///
+/// @spec docs/eph/RFC-L2-configuration-matrix
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct NotificationsToml {
+    pub new_mail: Option<bool>,
+    pub sound: Option<bool>,
+}
+
+impl NotificationsToml {
+    fn to_notifications(&self) -> Notifications {
+        Notifications {
+            new_mail: self.new_mail,
+            sound: self.sound,
+        }
+    }
+
+    fn from_notifications(notifications: &Notifications) -> Self {
+        Self {
+            new_mail: notifications.new_mail,
+            sound: notifications.sound,
+        }
+    }
+}
+
 /// Daemon-specific settings read only at startup (bind address, CORS, poll
 /// interval).
 ///
@@ -154,6 +183,7 @@ impl AppToml {
                 .map(convert_automation_rule)
                 .collect::<Result<Vec<_>, _>>()?,
             appearance: self.appearance.as_ref().map(|a| a.to_appearance()),
+            notifications: self.notifications.as_ref().map(|n| n.to_notifications()),
         })
     }
 
@@ -185,6 +215,10 @@ impl AppToml {
                 .appearance
                 .as_ref()
                 .map(AppearanceToml::from_appearance),
+            notifications: settings
+                .notifications
+                .as_ref()
+                .map(NotificationsToml::from_notifications),
             link: existing.link.clone(),
         }
     }

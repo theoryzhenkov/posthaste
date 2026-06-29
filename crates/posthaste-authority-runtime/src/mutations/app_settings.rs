@@ -58,6 +58,16 @@ impl AccountMutationService {
                     Ok(())
                 }),
             },
+            AppSettingsFieldPatch {
+                name: "notifications",
+                present: request.notifications.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(notifications) = &request.notifications {
+                        settings.notifications = Some(notifications.clone());
+                    }
+                    Ok(())
+                }),
+            },
         ];
 
         let mut changed = Vec::new();

@@ -12,6 +12,7 @@ import type {
   AccountOverview,
   AppSettings,
   CachePolicy,
+  Notifications,
   SmartMailboxSummary,
 } from '../api/types'
 import { runtimeMutations } from '../runtime/mutations'
@@ -186,6 +187,13 @@ export function SettingsPanel({
       queryClient.setQueryData(queryKeys.settings, settings)
     },
   })
+  const notificationsMutation = useMutation({
+    mutationFn: (notifications: Notifications) =>
+      runtimeMutations.settings.patch({ notifications }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.settings, settings)
+    },
+  })
   const commandMutation = useAccountCommandMutation({
     accounts,
     activeAccountId,
@@ -234,6 +242,7 @@ export function SettingsPanel({
         accountCommandError={accountCommandError}
         activeCategory={activeCategory}
         cacheMutation={cacheMutation}
+        notificationsMutation={notificationsMutation}
         commandMutation={commandMutation}
         defaultAccountId={settingsQuery.data?.defaultAccountId}
         defaultMutation={defaultMutation}

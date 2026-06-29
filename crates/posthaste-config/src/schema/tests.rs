@@ -193,6 +193,7 @@ fn app_toml_round_trips() {
         logging: LoggingToml::default(),
         cache: CachePolicyToml::default(),
         appearance: Default::default(),
+        notifications: Default::default(),
         link: LinkToml::default(),
     };
     let toml_struct = AppToml::from_app_settings(&settings, &existing);

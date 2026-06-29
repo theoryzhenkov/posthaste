@@ -4526,6 +4526,17 @@
                 "$ref": "#/components/schemas/AccountId"
               }
             ]
+          },
+          "notifications": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Notifications",
+                "description": "Notification policy (TOML source of truth; OS delivery permission stays local).\n\n@spec docs/eph/RFC-L2-configuration-matrix"
+              }
+            ]
           }
         }
       },
@@ -5879,6 +5890,24 @@
           "failed"
         ]
       },
+      "Notifications": {
+        "type": "object",
+        "description": "Notification policy — the user's new-mail/sound preferences, stored in\n`[notifications]` of `app.toml` as the single source of truth. OS-level\ndelivery permission stays device-local (not a config concern).\n\n@spec docs/eph/RFC-L2-configuration-matrix",
+        "properties": {
+          "newMail": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "sound": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
       "OkResponse": {
         "type": "object",
         "description": "Generic success response for mutating endpoints that return no domain data.\n\n@spec docs/L1-api#endpoint-table",
@@ -6202,6 +6231,16 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "notifications": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Notifications"
+              }
             ]
           }
         }
