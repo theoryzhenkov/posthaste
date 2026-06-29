@@ -10,33 +10,6 @@ use super::*;
 ///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
 /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
-pub async fn fetch_mailbox_changed_since_snapshot(
-    config: &ImapConnectionConfig,
-    mailbox_name: &str,
-    since_modseq: ImapModSeq,
-    include_vanished: bool,
-    updated_at: String,
-) -> Result<ImapChangedSinceSnapshot, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    client.refresh_capabilities().await?;
-    let fetch_gmail_metadata = normalize_imap_capabilities(
-        client
-            .state
-            .capabilities_iter()
-            .map(std::string::ToString::to_string),
-    )
-    .supports_gmail_extensions();
-    fetch_mailbox_changed_since_snapshot_with_client(
-        &mut client,
-        mailbox_name,
-        since_modseq,
-        include_vanished,
-        fetch_gmail_metadata,
-        updated_at,
-    )
-    .await
-}
-
 pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     client: &mut ImapClient,
     mailbox_name: &str,

@@ -12,11 +12,7 @@ impl SourceToml {
             full_name: self.full_name.clone(),
             signature: self.signature.clone(),
             email_patterns: self.email_patterns.clone(),
-            driver: match self.driver {
-                DriverToml::Jmap => AccountDriver::Jmap,
-                DriverToml::ImapSmtp => AccountDriver::ImapSmtp,
-                DriverToml::Mock => AccountDriver::Mock,
-            },
+            driver: self.driver.to_domain(),
             enabled: self.enabled,
             appearance: self.appearance.as_ref().map(|appearance| match appearance {
                 AccountAppearanceToml::Initials {
@@ -42,10 +38,7 @@ impl SourceToml {
                 base_url: self.transport.base_url.clone(),
                 username: self.transport.username.clone(),
                 secret_ref: self.transport.secret_ref.as_ref().map(|sr| SecretRef {
-                    kind: match sr.kind {
-                        SecretKindToml::Env => SecretKind::Env,
-                        SecretKindToml::Os => SecretKind::Os,
-                    },
+                    kind: sr.kind.to_domain(),
                     key: sr.key.clone(),
                 }),
                 imap: self
@@ -90,11 +83,7 @@ impl SourceToml {
             full_name: settings.full_name.clone(),
             signature: settings.signature.clone(),
             email_patterns: settings.email_patterns.clone(),
-            driver: match settings.driver {
-                AccountDriver::Jmap => DriverToml::Jmap,
-                AccountDriver::ImapSmtp => DriverToml::ImapSmtp,
-                AccountDriver::Mock => DriverToml::Mock,
-            },
+            driver: DriverToml::from_domain(&settings.driver),
             enabled: settings.enabled,
             appearance: settings
                 .appearance
@@ -127,10 +116,7 @@ impl SourceToml {
                     .secret_ref
                     .as_ref()
                     .map(|sr| SecretRefToml {
-                        kind: match sr.kind {
-                            SecretKind::Env => SecretKindToml::Env,
-                            SecretKind::Os => SecretKindToml::Os,
-                        },
+                        kind: SecretKindToml::from_domain(&sr.kind),
                         key: sr.key.clone(),
                     }),
                 imap: settings
@@ -159,55 +145,29 @@ impl SourceToml {
 }
 
 pub(crate) fn convert_provider_hint(provider: &ProviderHintToml) -> ProviderHint {
-    match provider {
-        ProviderHintToml::Generic => ProviderHint::Generic,
-        ProviderHintToml::Gmail => ProviderHint::Gmail,
-        ProviderHintToml::Outlook => ProviderHint::Outlook,
-        ProviderHintToml::Icloud => ProviderHint::Icloud,
-    }
+    provider.to_domain()
 }
 
 pub(crate) fn convert_provider_hint_to_toml(provider: &ProviderHint) -> ProviderHintToml {
-    match provider {
-        ProviderHint::Generic => ProviderHintToml::Generic,
-        ProviderHint::Gmail => ProviderHintToml::Gmail,
-        ProviderHint::Outlook => ProviderHintToml::Outlook,
-        ProviderHint::Icloud => ProviderHintToml::Icloud,
-    }
+    ProviderHintToml::from_domain(provider)
 }
 
 pub(crate) fn convert_auth_kind(auth: &ProviderAuthKindToml) -> ProviderAuthKind {
-    match auth {
-        ProviderAuthKindToml::Password => ProviderAuthKind::Password,
-        ProviderAuthKindToml::AppPassword => ProviderAuthKind::AppPassword,
-        ProviderAuthKindToml::OAuth2 => ProviderAuthKind::OAuth2,
-    }
+    auth.to_domain()
 }
 
 pub(crate) fn convert_auth_kind_to_toml(auth: &ProviderAuthKind) -> ProviderAuthKindToml {
-    match auth {
-        ProviderAuthKind::Password => ProviderAuthKindToml::Password,
-        ProviderAuthKind::AppPassword => ProviderAuthKindToml::AppPassword,
-        ProviderAuthKind::OAuth2 => ProviderAuthKindToml::OAuth2,
-    }
+    ProviderAuthKindToml::from_domain(auth)
 }
 
 pub(crate) fn convert_transport_security(security: &TransportSecurityToml) -> TransportSecurity {
-    match security {
-        TransportSecurityToml::Tls => TransportSecurity::Tls,
-        TransportSecurityToml::StartTls => TransportSecurity::StartTls,
-        TransportSecurityToml::Plain => TransportSecurity::Plain,
-    }
+    security.to_domain()
 }
 
 pub(crate) fn convert_transport_security_to_toml(
     security: &TransportSecurity,
 ) -> TransportSecurityToml {
-    match security {
-        TransportSecurity::Tls => TransportSecurityToml::Tls,
-        TransportSecurity::StartTls => TransportSecurityToml::StartTls,
-        TransportSecurity::Plain => TransportSecurityToml::Plain,
-    }
+    TransportSecurityToml::from_domain(security)
 }
 
 pub(crate) fn validate_source_settings(settings: &AccountSettings) -> Result<(), String> {

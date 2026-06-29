@@ -23,8 +23,8 @@ use posthaste_domain::{
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MutationNotification,
     MutationReceipt, MutationRequest, RuntimeCaller, RuntimeCore, RuntimeFrame,
-    RuntimeFrameSubscription, RuntimeSessionId, RuntimeSessionSeq, SecretWriteMode,
-    SecretWriteMutation, ViewDescriptor, ViewId, ViewSnapshot,
+    RuntimeFrameSubscription, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation,
+    ViewDescriptor, ViewId, ViewSnapshot,
 };
 
 use crate::fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
@@ -372,78 +372,6 @@ impl RuntimeHarness {
             last_snapshot: Some(snapshot),
             _phantom: PhantomData,
         }
-    }
-
-    /// Open a session + view + frame subscription and return a [`FrameCapture`]
-    /// that records the *raw* ordered `RuntimeFrame` stream across arbitrary
-    /// actions (a mutation interleaved with a provider sync). Unlike
-    /// [`settle`](Self::settle) (mutation-scoped) or [`watch_view`](Self::watch_view)
-    /// (predicate-scoped), the caller runs the scenario on the returned
-    /// `session_id` and then [`drain`](FrameCapture::drain)s everything emitted —
-    /// the input to a flicker-detector replay (feed the drained frames into
-    /// [`FlickerLog`](crate::FlickerLog) snapshots).
-    pub async fn open_capture(&self, view: ViewDescriptor) -> FrameCapture {
-        let caller = RuntimeCaller::test();
-        let session = self
-            .build
-            .handle
-            .open_session(caller.clone())
-            .await
-            .expect("session should open");
-        let snapshot = self
-            .build
-            .handle
-            .open_session_view(caller.clone(), session.session_id.clone(), view)
-            .await
-            .expect("session view should open");
-        let subscription = self
-            .build
-            .handle
-            .subscribe_runtime_frames(
-                caller,
-                session.session_id.clone(),
-                Some(RuntimeSessionSeq::new(0)),
-            )
-            .await
-            .expect("runtime stream should subscribe");
-        FrameCapture {
-            session_id: session.session_id,
-            view_id: snapshot.view_id.clone(),
-            initial: snapshot,
-            subscription,
-        }
-    }
-}
-
-/// A raw frame-stream capture over one session/view, for replay through a flicker
-/// detector ([`FlickerLog`](crate::FlickerLog)). Run the scenario on `session_id`
-/// (set it on the mutation request so its frames route here), then
-/// [`drain`](Self::drain).
-pub struct FrameCapture {
-    pub session_id: RuntimeSessionId,
-    pub view_id: ViewId,
-    pub initial: ViewSnapshot,
-    subscription: RuntimeFrameSubscription,
-}
-
-impl FrameCapture {
-    /// Collect every buffered + live frame that arrives within `window` from now
-    /// (a fixed wall-clock budget, not a quiet gap — the mock driver polls
-    /// indefinitely, so a quiet window never elapses). Returns arrival order.
-    pub async fn drain(&mut self, window: Duration) -> Vec<RuntimeFrame> {
-        let mut frames = std::mem::take(&mut self.subscription.catch_up);
-        let deadline = Instant::now() + window;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match tokio::time::timeout(remaining, self.subscription.live.next()).await {
-                Ok(Some(frame)) => frames.push(frame),
-                _ => break,
-            }
-        }
-        frames
     }
 }
 

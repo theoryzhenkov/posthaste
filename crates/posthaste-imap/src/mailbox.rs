@@ -9,20 +9,7 @@ use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
 use posthaste_domain::{ImapModSeq, ImapSelectedMailbox, ImapUid, ImapUidValidity};
 
-use crate::discovery::connect_authenticated_client;
-use crate::{imap_mailbox_id, ImapAdapterError, ImapConnectionConfig};
-
-/// EXAMINE one IMAP mailbox and return the server state needed by the sync planner.
-///
-/// @spec docs/L0-providers#imap-smtp-sync-strategy
-pub async fn examine_imap_mailbox(
-    config: &ImapConnectionConfig,
-    mailbox_name: &str,
-) -> Result<ImapSelectedMailbox, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    client.refresh_capabilities().await?;
-    examine_selected_mailbox(&mut client, mailbox_name).await
-}
+use crate::{imap_mailbox_id, ImapAdapterError};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ImapMailboxStatus {
