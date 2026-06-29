@@ -194,6 +194,53 @@ fn seed_single_message_batch(
         .expect("message batch should apply");
 }
 
+/// Seed a message in `mb-inbox` alongside a Snoozed mailbox (`mb-snooze`, role
+/// "snooze") so `message.snooze` can resolve the snooze-role mailbox.
+fn seed_message_with_snooze_mailbox(
+    build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
+    account_id: &AccountId,
+    message_id: &str,
+) {
+    build
+        .api_bridge
+        .store
+        .apply_sync_batch(
+            account_id,
+            &SyncBatch {
+                mailboxes: vec![
+                    MailboxRecord {
+                        id: MailboxId::from("mb-inbox"),
+                        name: "Inbox".to_string(),
+                        role: Some("inbox".to_string()),
+                        unread_emails: 0,
+                        total_emails: 1,
+                    },
+                    MailboxRecord {
+                        id: MailboxId::from("mb-snooze"),
+                        name: "Snoozed".to_string(),
+                        role: Some("snooze".to_string()),
+                        unread_emails: 0,
+                        total_emails: 0,
+                    },
+                ],
+                messages: vec![seeded_message(message_id, "mb-inbox")],
+                imap_mailbox_states: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "message-1".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )
+        .expect("message + snooze mailbox batch should apply");
+}
+
 /// Seed one message whose cached body is large (an attachment-shaped email with
 /// a big inline body). Used to prove the mutation settlement payload stays
 /// bounded regardless of body size.
@@ -2623,5 +2670,107 @@ async fn coalesced_sync_trigger_still_runs_a_follow_up_cycle() {
         final_count - baseline,
         2,
         "trigger A plus one coalesced follow-up should run exactly two cycles"
+    );
+}
+
+/// Snooze → undo (via `message.applyDiff`) must clear the snooze row. The undo's
+/// mailbox restore routes through `replace_mailboxes`, whose store invariant
+/// (Slice 2) deletes the snooze row when a message leaves the Snoozed mailbox.
+/// This locks the wiring so a future change to `applyDiff` can't silently leave
+/// an orphaned row (the scheduler would re-fire forever).
+///
+/// @spec docs/eph/DESIGN-L2-snooze
+#[tokio::test]
+async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("snooze-undo-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    seed_message_with_snooze_mailbox(&build, &account.id, "em-001");
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+
+    // Snooze: move em-001 to the Snoozed mailbox + record a return time.
+    let snooze_receipt = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session.session_id.clone()),
+                name: "message.snooze".to_string(),
+                args: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "em-001",
+                    "until": 2_000_000_000,
+                }),
+                client_mutation_id: ClientMutationId::new("snooze-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("snooze should run");
+    assert_eq!(snooze_receipt.state, MutationSettlementState::Confirmed);
+    assert_eq!(
+        build
+            .api_bridge
+            .store
+            .list_due_snoozes(&account.id, 2_000_000_001)
+            .expect("list due snoozes")
+            .len(),
+        1,
+        "the snooze return-time row is recorded"
+    );
+
+    // Undo via `message.applyDiff`: restore em-001 to mb-inbox (remove mb-snooze).
+    let undo_receipt = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session.session_id.clone()),
+                name: "message.applyDiff".to_string(),
+                args: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "em-001",
+                    "diff": {
+                        "keywords": {"added": [], "removed": []},
+                        "mailboxes": {"added": ["mb-inbox"], "removed": ["mb-snooze"]}
+                    }
+                }),
+                client_mutation_id: ClientMutationId::new("undo-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("applyDiff should run");
+    assert_eq!(undo_receipt.state, MutationSettlementState::Confirmed);
+
+    // The store invariant: the undo's mailbox replace cleared the snooze row.
+    assert!(
+        build
+            .api_bridge
+            .store
+            .list_due_snoozes(&account.id, 2_000_000_001)
+            .expect("list due snoozes")
+            .is_empty(),
+        "undoing the snooze (a mailbox replace) must clear the snooze row"
     );
 }
