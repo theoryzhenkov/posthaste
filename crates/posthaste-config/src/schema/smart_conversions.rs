@@ -10,10 +10,7 @@ impl SmartMailboxToml {
             id: SmartMailboxId::from(self.id.as_str()),
             name: self.name.clone(),
             position: self.position,
-            kind: match self.kind {
-                SmartMailboxKindToml::Default => SmartMailboxKind::Default,
-                SmartMailboxKindToml::User => SmartMailboxKind::User,
-            },
+            kind: self.kind.to_domain(),
             default_key: self.default_key.clone(),
             role: self.role.clone(),
             parent_id: self.parent_id.as_deref().map(SmartMailboxId::from),
@@ -40,10 +37,7 @@ impl SmartMailboxToml {
             id: mailbox.id.to_string(),
             name: mailbox.name.clone(),
             position: mailbox.position,
-            kind: match mailbox.kind {
-                SmartMailboxKind::Default => SmartMailboxKindToml::Default,
-                SmartMailboxKind::User => SmartMailboxKindToml::User,
-            },
+            kind: SmartMailboxKindToml::from_domain(&mailbox.kind),
             default_key: mailbox.default_key.clone(),
             role: mailbox.role.clone(),
             parent_id: mailbox.parent_id.as_ref().map(|id| id.to_string()),
@@ -56,10 +50,7 @@ impl SmartMailboxToml {
 
 /// Recursively converts a TOML rule group to the domain representation.
 pub(crate) fn convert_rule_group(group: &RuleGroupToml) -> Result<SmartMailboxGroup, String> {
-    let operator = match group.operator {
-        GroupOperatorToml::All => SmartMailboxGroupOperator::All,
-        GroupOperatorToml::Any => SmartMailboxGroupOperator::Any,
-    };
+    let operator = group.operator.to_domain();
     let nodes = group
         .nodes
         .iter()
@@ -87,34 +78,8 @@ pub(crate) fn convert_rule_node(node: &RuleNodeToml) -> Result<SmartMailboxRuleN
 pub(crate) fn convert_condition(
     condition: &ConditionToml,
 ) -> Result<SmartMailboxCondition, String> {
-    let field = match condition.field {
-        FieldToml::SourceId => SmartMailboxField::SourceId,
-        FieldToml::SourceName => SmartMailboxField::SourceName,
-        FieldToml::MessageId => SmartMailboxField::MessageId,
-        FieldToml::ThreadId => SmartMailboxField::ThreadId,
-        FieldToml::ConversationId => SmartMailboxField::ConversationId,
-        FieldToml::MailboxId => SmartMailboxField::MailboxId,
-        FieldToml::MailboxName => SmartMailboxField::MailboxName,
-        FieldToml::MailboxRole => SmartMailboxField::MailboxRole,
-        FieldToml::IsRead => SmartMailboxField::IsRead,
-        FieldToml::IsFlagged => SmartMailboxField::IsFlagged,
-        FieldToml::HasAttachment => SmartMailboxField::HasAttachment,
-        FieldToml::Keyword => SmartMailboxField::Keyword,
-        FieldToml::FromName => SmartMailboxField::FromName,
-        FieldToml::FromEmail => SmartMailboxField::FromEmail,
-        FieldToml::Subject => SmartMailboxField::Subject,
-        FieldToml::Preview => SmartMailboxField::Preview,
-        FieldToml::ReceivedAt => SmartMailboxField::ReceivedAt,
-    };
-    let operator = match condition.operator {
-        ConditionOperatorToml::Equals => SmartMailboxOperator::Equals,
-        ConditionOperatorToml::In => SmartMailboxOperator::In,
-        ConditionOperatorToml::Contains => SmartMailboxOperator::Contains,
-        ConditionOperatorToml::Before => SmartMailboxOperator::Before,
-        ConditionOperatorToml::After => SmartMailboxOperator::After,
-        ConditionOperatorToml::OnOrBefore => SmartMailboxOperator::OnOrBefore,
-        ConditionOperatorToml::OnOrAfter => SmartMailboxOperator::OnOrAfter,
-    };
+    let field = condition.field.to_domain();
+    let operator = condition.operator.to_domain();
     let value = convert_toml_value(&condition.value)?;
     Ok(SmartMailboxCondition {
         field,
@@ -149,10 +114,7 @@ pub(crate) fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValu
 /// Recursively converts a domain rule group back to the TOML representation.
 pub(crate) fn convert_group_to_toml(group: &SmartMailboxGroup) -> RuleGroupToml {
     RuleGroupToml {
-        operator: match group.operator {
-            SmartMailboxGroupOperator::All => GroupOperatorToml::All,
-            SmartMailboxGroupOperator::Any => GroupOperatorToml::Any,
-        },
+        operator: GroupOperatorToml::from_domain(&group.operator),
         negated: group.negated,
         nodes: group.nodes.iter().map(convert_node_to_toml).collect(),
     }
@@ -170,34 +132,8 @@ pub(crate) fn convert_node_to_toml(node: &SmartMailboxRuleNode) -> RuleNodeToml 
 
 /// Converts a domain condition back to its TOML representation.
 pub(crate) fn convert_condition_to_toml(condition: &SmartMailboxCondition) -> ConditionToml {
-    let field = match condition.field {
-        SmartMailboxField::SourceId => FieldToml::SourceId,
-        SmartMailboxField::SourceName => FieldToml::SourceName,
-        SmartMailboxField::MessageId => FieldToml::MessageId,
-        SmartMailboxField::ThreadId => FieldToml::ThreadId,
-        SmartMailboxField::ConversationId => FieldToml::ConversationId,
-        SmartMailboxField::MailboxId => FieldToml::MailboxId,
-        SmartMailboxField::MailboxName => FieldToml::MailboxName,
-        SmartMailboxField::MailboxRole => FieldToml::MailboxRole,
-        SmartMailboxField::IsRead => FieldToml::IsRead,
-        SmartMailboxField::IsFlagged => FieldToml::IsFlagged,
-        SmartMailboxField::HasAttachment => FieldToml::HasAttachment,
-        SmartMailboxField::Keyword => FieldToml::Keyword,
-        SmartMailboxField::FromName => FieldToml::FromName,
-        SmartMailboxField::FromEmail => FieldToml::FromEmail,
-        SmartMailboxField::Subject => FieldToml::Subject,
-        SmartMailboxField::Preview => FieldToml::Preview,
-        SmartMailboxField::ReceivedAt => FieldToml::ReceivedAt,
-    };
-    let operator = match condition.operator {
-        SmartMailboxOperator::Equals => ConditionOperatorToml::Equals,
-        SmartMailboxOperator::In => ConditionOperatorToml::In,
-        SmartMailboxOperator::Contains => ConditionOperatorToml::Contains,
-        SmartMailboxOperator::Before => ConditionOperatorToml::Before,
-        SmartMailboxOperator::After => ConditionOperatorToml::After,
-        SmartMailboxOperator::OnOrBefore => ConditionOperatorToml::OnOrBefore,
-        SmartMailboxOperator::OnOrAfter => ConditionOperatorToml::OnOrAfter,
-    };
+    let field = FieldToml::from_domain(&condition.field);
+    let operator = ConditionOperatorToml::from_domain(&condition.operator);
     let value = convert_value_to_toml(&condition.value);
     ConditionToml {
         field,
