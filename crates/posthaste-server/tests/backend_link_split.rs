@@ -92,6 +92,7 @@ fn account_mutation(id: &str) -> CreateAccountMutation {
         driver: Some(AccountDriver::Mock),
         enabled: Some(false),
         full_name: None,
+        signature: None,
         email_patterns: Vec::new(),
         appearance: None,
         transport: AccountTransportMutation::default(),

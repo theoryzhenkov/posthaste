@@ -40,6 +40,7 @@ fn test_account(
         id: AccountId::from("primary"),
         name: "Primary".to_string(),
         full_name: full_name.map(str::to_string),
+        signature: None,
         email_patterns: email_patterns.into_iter().map(str::to_string).collect(),
         driver: AccountDriver::ImapSmtp,
         enabled: true,

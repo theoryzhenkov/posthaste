@@ -10,6 +10,7 @@ import type { AccountFormState } from '../types'
 export const EMPTY_FORM: AccountFormState = {
   name: '',
   fullName: '',
+  signature: '',
   emailPatternsText: '',
   appearanceInitials: 'A',
   appearanceColorHue: 0,
@@ -30,6 +31,7 @@ export function formFromAccount(account: AccountOverview): AccountFormState {
   return {
     name: account.name,
     fullName: account.fullName ?? '',
+    signature: account.signature ?? '',
     emailPatternsText: account.emailPatterns?.join('\n') ?? '',
     appearanceInitials: normalizeAccountInitials(account.appearance.initials),
     appearanceColorHue: account.appearance.colorHue,
@@ -68,6 +70,7 @@ export function buildCreateAccountPayload(
   return {
     name: form.name.trim(),
     fullName: form.fullName.trim() || null,
+    signature: form.signature.trim() || null,
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
     driver: 'jmap',
     enabled: true,
@@ -91,6 +94,7 @@ export function buildUpdateAccountPayload(
   const input: UpdateAccountInput = {
     name: form.name.trim(),
     fullName: form.fullName.trim() || null,
+    signature: form.signature.trim() || null,
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
     appearance: buildAccountAppearanceInput(form),
   }

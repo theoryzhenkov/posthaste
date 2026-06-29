@@ -48,6 +48,7 @@ fn test_account(id: &str) -> AccountSettings {
         id: AccountId::from(id),
         name: "Test".to_string(),
         full_name: None,
+        signature: None,
         email_patterns: Vec::new(),
         driver: AccountDriver::Mock,
         enabled: true,

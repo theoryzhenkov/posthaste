@@ -1228,6 +1228,7 @@ export interface components {
              *     paths without the two racing inside one flat object.
              */
             runtime: components["schemas"]["AccountRuntimeOverview"];
+            signature?: string | null;
             updatedAt: string;
         };
         /**
@@ -1527,6 +1528,7 @@ export interface components {
             id?: string | null;
             name: string;
             secret?: components["schemas"]["SecretWriteRequest"];
+            signature?: string | null;
             transport?: components["schemas"]["AccountTransportRequest"];
         };
         /**
@@ -1990,6 +1992,7 @@ export interface components {
             fullName?: string | null;
             name?: string | null;
             secret?: null | components["schemas"]["SecretWriteRequest"];
+            signature?: string | null;
             transport?: null | components["schemas"]["AccountTransportRequest"];
         };
         /**

@@ -38,6 +38,7 @@ pub fn import_bootstrap(
             id: account.id.clone().into(),
             name: account.name.clone(),
             full_name: account.full_name.clone(),
+            signature: None,
             email_patterns: account.email_patterns.clone(),
             driver: account.driver.clone(),
             enabled: account.enabled.unwrap_or(true),

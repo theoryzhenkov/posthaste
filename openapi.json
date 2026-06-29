@@ -4280,6 +4280,12 @@
             "$ref": "#/components/schemas/AccountRuntimeOverview",
             "description": "Volatile runtime state, owned by the account supervisor. Nested (not\nflattened) so the UI can update config and runtime through independent\npaths without the two racing inside one flat object."
           },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "updatedAt": {
             "type": "string"
           }
@@ -5095,6 +5101,12 @@
           },
           "secret": {
             "$ref": "#/components/schemas/SecretWriteRequest"
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "transport": {
             "$ref": "#/components/schemas/AccountTransportRequest"
@@ -6159,6 +6171,12 @@
               {
                 "$ref": "#/components/schemas/SecretWriteRequest"
               }
+            ]
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
             ]
           },
           "transport": {

@@ -10,6 +10,7 @@ impl SourceToml {
             id: AccountId::from(self.id.as_str()),
             name: self.name.clone(),
             full_name: self.full_name.clone(),
+            signature: self.signature.clone(),
             email_patterns: self.email_patterns.clone(),
             driver: match self.driver {
                 DriverToml::Jmap => AccountDriver::Jmap,
@@ -87,6 +88,7 @@ impl SourceToml {
             id: settings.id.to_string(),
             name: settings.name.clone(),
             full_name: settings.full_name.clone(),
+            signature: settings.signature.clone(),
             email_patterns: settings.email_patterns.clone(),
             driver: match settings.driver {
                 AccountDriver::Jmap => DriverToml::Jmap,

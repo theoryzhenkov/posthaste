@@ -232,6 +232,7 @@ impl GmailImapFixture {
             driver: Some(AccountDriver::ImapSmtp),
             enabled: Some(true),
             full_name: Some("Gmail Dev".to_string()),
+            signature: None,
             email_patterns: vec!["dev@gmail.example".to_string()],
             appearance: None,
             transport: AccountTransportMutation {

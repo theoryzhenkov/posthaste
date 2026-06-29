@@ -10,6 +10,7 @@ pub struct SourceToml {
     pub id: String,
     pub name: String,
     pub full_name: Option<String>,
+    pub signature: Option<String>,
     #[serde(default)]
     pub email_patterns: Vec<String>,
     pub driver: DriverToml,

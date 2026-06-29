@@ -31,6 +31,7 @@ pub(super) fn sample_source() -> AccountSettings {
         id: AccountId::from("primary"),
         name: "Primary".to_string(),
         full_name: None,
+        signature: None,
         email_patterns: Vec::new(),
         driver: crate::AccountDriver::Mock,
         enabled: true,

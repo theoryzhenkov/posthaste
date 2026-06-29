@@ -30,6 +30,7 @@ export function accountFieldsSignature(
   const signature = {
     name: form.name.trim(),
     fullName: form.fullName.trim(),
+    signature: form.signature.trim(),
     emailPatternsText: form.emailPatternsText.trim(),
   }
   if (connection.kind === 'managedOAuth') {

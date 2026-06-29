@@ -60,6 +60,7 @@ async fn patch_account_appearance_publishes_account_updated_resource_event() {
             Json(PatchAccountRequest {
                 name: None,
                 full_name: None,
+                signature: None,
                 email_patterns: None,
                 driver: None,
                 enabled: None,

@@ -11,6 +11,7 @@ pub(super) fn account(id: &str, name: &str) -> AccountSettings {
         id: AccountId::from(id),
         name: name.to_string(),
         full_name: None,
+        signature: None,
         email_patterns: Vec::new(),
         driver: AccountDriver::Mock,
         enabled: true,
