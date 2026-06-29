@@ -3,7 +3,7 @@ scope: L2
 summary: "Migrate UI appearance prefs (theme mode/palette/density/accent/glass) from the renderer's localStorage snapshot into TOML as the single source of truth, with a derived localStorage boot-cache to avoid FOUC. Implements P1.4b of the configuration-surface RFC."
 modified: 2026-06-28
 reviewed: 2026-06-28
-state: in-progress
+state: implemented
 depends:
   - path: docs/eph/RFC-L2-configuration-surface
     local: "Decision: TOML = single source of truth"
@@ -18,7 +18,13 @@ Moves the renderer's `DesignThemePreferences` (currently an opaque
 `localStorage` "client-preferences snapshot") into `[appearance]` in `app.toml`,
 so it is LLM/CLI-editable like the rest of the config — no GUI harness required.
 
-## Scope [::state in-progress]
+## Status [::state implemented]
+
+**Shipped** — backend (`7ae31bfa`) plumbs `[appearance]` through domain→config→API→wire; frontend (`886dd920`) adds the Option A reconcile + write-through + one-time import, reusing the existing `AppearancePane`. 322 web tests + check + build green.
+
+**Deferred** — `keymap.toml` (P1.4c); `notifications` (P3); live reload of external `app.toml` edits (P1.3, reload-on-change).
+
+## Scope [::state implemented]
 
 **In scope** — the full appearance object, modelled in TOML + the domain wire:
 `mode` · `palette_preset` · `density` · `accent_hue` · `glass_theme` (nested
