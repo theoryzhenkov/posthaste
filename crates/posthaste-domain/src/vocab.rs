@@ -20,16 +20,19 @@ pub enum MailboxRole {
     Junk,
     #[serde(rename = "trash")]
     Trash,
+    #[serde(rename = "snooze")]
+    Snooze,
 }
 
 impl MailboxRole {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Inbox,
         Self::Archive,
         Self::Drafts,
         Self::Sent,
         Self::Junk,
         Self::Trash,
+        Self::Snooze,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -40,6 +43,7 @@ impl MailboxRole {
             Self::Sent => "sent",
             Self::Junk => "junk",
             Self::Trash => "trash",
+            Self::Snooze => "snooze",
         }
     }
 
@@ -51,6 +55,7 @@ impl MailboxRole {
             "sent" => Some(Self::Sent),
             "junk" => Some(Self::Junk),
             "trash" => Some(Self::Trash),
+            "snooze" => Some(Self::Snooze),
             _ => None,
         }
     }

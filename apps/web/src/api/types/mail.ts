@@ -7,6 +7,7 @@ export type KnownMailboxRole =
   | 'sent'
   | 'junk'
   | 'trash'
+  | 'snooze'
 
 export interface Mailbox {
   id: string
