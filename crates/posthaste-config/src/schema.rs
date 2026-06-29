@@ -13,6 +13,7 @@ use crate::runtime::DaemonRuntimeTuning;
 
 mod app;
 mod automation;
+mod enum_maps;
 mod smart_conversions;
 mod smart_types;
 mod source_conversions;
