@@ -1,15 +1,15 @@
 import {
   designStorageKeys,
-  isPalettePresetId,
   isThemeMode,
   isUiDensity,
   normalizeAccentHue,
   normalizeGlassThemeParameters,
-  parseAccentHue,
 } from '@/design'
 import {
+  defaultThemeColors,
   defaultThemePreferences,
   type DesignThemePreferences,
+  type ThemeColors,
 } from '@/themeSettings'
 
 import type { ClientPreferencesSnapshot } from './types'
@@ -22,16 +22,32 @@ export function defaultSnapshot(): ClientPreferencesSnapshot {
   return DEFAULT_CLIENT_PREFERENCES_SNAPSHOT
 }
 
+function normalizeThemeColors(value: unknown): ThemeColors {
+  const fallback = defaultThemeColors()
+  const record =
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  return {
+    accentHue: normalizeAccentHue(
+      typeof record.accentHue === 'number'
+        ? record.accentHue
+        : fallback.accentHue,
+    ),
+    surfaceHue: normalizeAccentHue(
+      typeof record.surfaceHue === 'number'
+        ? record.surfaceHue
+        : fallback.surfaceHue,
+    ),
+  }
+}
+
 function storedThemeMode(): DesignThemePreferences['mode'] {
   const value = window.localStorage.getItem(designStorageKeys.themeMode)
   return value && isThemeMode(value) ? value : defaultThemePreferences().mode
 }
 
-function storedPalettePreset(): DesignThemePreferences['palettePreset'] {
-  const value = window.localStorage.getItem(designStorageKeys.palettePreset)
-  return value && isPalettePresetId(value)
-    ? value
-    : defaultThemePreferences().palettePreset
+function storedTheme(): string {
+  const value = window.localStorage.getItem(designStorageKeys.theme)
+  return value && value.trim() ? value : defaultThemePreferences().theme
 }
 
 function storedDensity(): DesignThemePreferences['density'] {
@@ -39,10 +55,20 @@ function storedDensity(): DesignThemePreferences['density'] {
   return value && isUiDensity(value) ? value : defaultThemePreferences().density
 }
 
-function storedAccentHue(): number {
-  return parseAccentHue(
-    window.localStorage.getItem(designStorageKeys.accentHue),
-  )
+function storedColors(): Pick<DesignThemePreferences, 'light' | 'dark'> {
+  const value = window.localStorage.getItem(designStorageKeys.themeColors)
+  if (!value) {
+    return { light: defaultThemeColors(), dark: defaultThemeColors() }
+  }
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    return {
+      light: normalizeThemeColors(parsed.light),
+      dark: normalizeThemeColors(parsed.dark),
+    }
+  } catch {
+    return { light: defaultThemeColors(), dark: defaultThemeColors() }
+  }
 }
 
 function storedGlassTheme(): DesignThemePreferences['glassTheme'] {
@@ -63,12 +89,14 @@ function readStoredAppearancePreferences(): DesignThemePreferences {
     return defaultThemePreferences()
   }
 
+  const colors = storedColors()
   return {
-    accentHue: storedAccentHue(),
-    glassTheme: storedGlassTheme(),
     mode: storedThemeMode(),
-    palettePreset: storedPalettePreset(),
+    theme: storedTheme(),
     density: storedDensity(),
+    light: colors.light,
+    dark: colors.dark,
+    glassTheme: storedGlassTheme(),
   }
 }
 
@@ -80,11 +108,12 @@ export function normalizeAppearancePreferences(
   preferences: DesignThemePreferences,
 ): DesignThemePreferences {
   return {
-    accentHue: normalizeAccentHue(preferences.accentHue),
-    glassTheme: normalizeGlassThemeParameters(preferences.glassTheme),
     mode: preferences.mode,
-    palettePreset: preferences.palettePreset,
+    theme: preferences.theme,
     density: preferences.density,
+    light: normalizeThemeColors(preferences.light),
+    dark: normalizeThemeColors(preferences.dark),
+    glassTheme: normalizeGlassThemeParameters(preferences.glassTheme),
   }
 }
 
@@ -106,14 +135,11 @@ export function persistAppearancePreferences(
   }
   const normalized = normalizeAppearancePreferences(preferences)
   window.localStorage.setItem(designStorageKeys.themeMode, normalized.mode)
-  window.localStorage.setItem(
-    designStorageKeys.palettePreset,
-    normalized.palettePreset,
-  )
+  window.localStorage.setItem(designStorageKeys.theme, normalized.theme)
   window.localStorage.setItem(designStorageKeys.uiDensity, normalized.density)
   window.localStorage.setItem(
-    designStorageKeys.accentHue,
-    String(normalized.accentHue),
+    designStorageKeys.themeColors,
+    JSON.stringify({ light: normalized.light, dark: normalized.dark }),
   )
   window.localStorage.setItem(
     designStorageKeys.themeParameters,

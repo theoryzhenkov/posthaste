@@ -6,103 +6,58 @@ export type ResolvedThemeMode = (typeof resolvedThemeModes)[number]
 
 export const defaultThemeMode = 'dark' as const satisfies ThemeMode
 
-export const palettePresetIds = [
-  'neutral',
-  'paperInk',
-  'brutalist',
-  'glass',
-  'acid',
-  'marzipan',
-  'botanical',
-] as const
+/**
+ * Themes are identified by a free-form string id, not a fixed enum — so
+ * user-supplied themes (a future imported-CSS feature) need no schema change.
+ * The renderer ships two built-ins; an unknown id renders as the default.
+ */
+export type BuiltInThemeId = 'neutral' | 'glass'
 
-export type PalettePresetId = (typeof palettePresetIds)[number]
+/**
+ * `style` is the value written to `data-palette-style` (and mirrored to
+ * `data-palette-preset`), which the CSS keys off for structural looks. Only
+ * `glass` has structural CSS today; `neutral` is the unadorned base.
+ */
+export type ThemeStyle = 'neutral' | 'glass'
 
-export type PalettePresetStyle =
-  | 'neutral'
-  | 'editorial'
-  | 'brutalist'
-  | 'glass'
-  | 'acid'
-  | 'marzipan'
-  | 'botanical'
-
-export type PalettePreset = {
-  readonly id: PalettePresetId
+export type ThemeDefinition = {
+  readonly id: BuiltInThemeId
   readonly label: string
   readonly description: string
-  readonly modes: readonly ResolvedThemeMode[]
-  readonly style: PalettePresetStyle
+  readonly style: ThemeStyle
 }
 
-export const palettePresets = {
+export const builtInThemes = {
   neutral: {
     id: 'neutral',
-    label: 'Neutral',
-    description: 'Cool gray, balanced contrast',
-    modes: ['light', 'dark'],
+    label: 'Classic',
+    description: 'The clean, solid Posthaste look — fully recolorable',
     style: 'neutral',
-  },
-  paperInk: {
-    id: 'paperInk',
-    label: 'Paper & Ink',
-    description: 'Bright white, thin rules, editorial serifs, ink-red accents',
-    modes: ['light'],
-    style: 'editorial',
-  },
-  brutalist: {
-    id: 'brutalist',
-    label: 'Brutalist',
-    description: 'Monospace everywhere, 2px borders, zero rounding',
-    modes: ['light', 'dark'],
-    style: 'brutalist',
   },
   glass: {
     id: 'glass',
-    label: 'Arc Glass',
-    description: 'Layered translucent panes over a vivid desktop wash',
-    modes: ['dark', 'light'],
+    label: 'Glass',
+    description: 'Layered translucent panes over a customizable color wash',
     style: 'glass',
   },
-  acid: {
-    id: 'acid',
-    label: 'Acid',
-    description: 'Pure black + electric lime, mechanical precision',
-    modes: ['dark'],
-    style: 'acid',
-  },
-  marzipan: {
-    id: 'marzipan',
-    label: 'Marzipan',
-    description: 'Soft pastels, generous rounding, friendly',
-    modes: ['light'],
-    style: 'marzipan',
-  },
-  botanical: {
-    id: 'botanical',
-    label: 'Botanical',
-    description: 'Deep forest green on cream, quiet and confident',
-    modes: ['light'],
-    style: 'botanical',
-  },
-} as const satisfies Record<PalettePresetId, PalettePreset>
+} as const satisfies Record<BuiltInThemeId, ThemeDefinition>
 
-export const defaultPalettePresetId =
-  'neutral' as const satisfies PalettePresetId
+export const builtInThemeIds = ['neutral', 'glass'] as const
+
+export const defaultThemeId = 'neutral' as const satisfies BuiltInThemeId
 
 export function isThemeMode(value: string): value is ThemeMode {
   return themeModes.includes(value as ThemeMode)
 }
 
-export function isPalettePresetId(value: string): value is PalettePresetId {
-  return palettePresetIds.includes(value as PalettePresetId)
+export function isBuiltInThemeId(value: string): value is BuiltInThemeId {
+  return (builtInThemeIds as readonly string[]).includes(value)
 }
 
-export function resolvePaletteMode(
-  presetId: PalettePresetId,
-  mode: ResolvedThemeMode,
-): ResolvedThemeMode {
-  const preset = palettePresets[presetId]
-  const supportedModes: readonly ResolvedThemeMode[] = preset.modes
-  return supportedModes.includes(mode) ? mode : preset.modes[0]
+/**
+ * The `data-palette-style` for a theme id. Unknown ids (e.g. a future user
+ * theme) fall back to the neutral base style.
+ */
+export function themeStyle(themeId: string): ThemeStyle {
+  return isBuiltInThemeId(themeId) ? builtInThemes[themeId].style : 'neutral'
 }

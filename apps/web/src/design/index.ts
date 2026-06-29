@@ -1,6 +1,7 @@
 export {
   accentColor,
   defaultAccentHue,
+  defaultSurfaceHue,
   normalizeAccentHue,
   parseAccentHue,
 } from './accent'
@@ -44,23 +45,25 @@ export {
   getSystemThemeMode,
   resolveThemeMode,
   type AppliedRootTheme,
+  type AppliedThemeColors,
+  type RootThemeColors,
   type RootThemeState,
 } from './applyRootTheme'
 export {
-  defaultPalettePresetId,
+  builtInThemes,
+  builtInThemeIds,
+  defaultThemeId,
   defaultThemeMode,
-  isPalettePresetId,
+  isBuiltInThemeId,
   isThemeMode,
-  palettePresetIds,
-  palettePresets,
-  resolvePaletteMode,
   resolvedThemeModes,
   themeModes,
-  type PalettePreset,
-  type PalettePresetId,
-  type PalettePresetStyle,
+  themeStyle,
+  type BuiltInThemeId,
   type ResolvedThemeMode,
+  type ThemeDefinition,
   type ThemeMode,
+  type ThemeStyle,
 } from './theme'
 export {
   brandAccents,

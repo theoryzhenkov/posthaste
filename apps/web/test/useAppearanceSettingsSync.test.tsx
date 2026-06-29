@@ -85,14 +85,18 @@ describe('useAppearanceSettingsSync', () => {
     await waitFor(() => {
       expect(store.getSnapshot().appearance.mode).toBe('light')
     })
-    expect(store.getSnapshot().appearance.palettePreset).toBe('glass')
-    expect(store.getSnapshot().appearance.accentHue).toBe(200)
+    expect(store.getSnapshot().appearance.theme).toBe('glass')
+    expect(store.getSnapshot().appearance.light.accentHue).toBe(200)
   })
 
   it('imports a non-default cache to TOML once when TOML is unset', async () => {
     const store = createClientPreferencesStore()
     // Seed a non-default cache (so import is not a no-op).
-    const customized = { ...defaultThemePreferences(), accentHue: 210 }
+    const base = defaultThemePreferences()
+    const customized = {
+      ...base,
+      light: { ...base.light, accentHue: 210 },
+    }
     store.setAppearance(customized)
 
     mockFetchSettings(DEFAULT_SETTINGS)

@@ -1,8 +1,8 @@
 export const designStorageKeys = {
   themeMode: 'posthaste.themeMode.v3',
-  palettePreset: 'posthaste.palettePreset.v3',
+  theme: 'posthaste.theme.v1',
   uiDensity: 'posthaste.uiDensity.v3',
-  accentHue: 'posthaste.accentHue.v1',
+  themeColors: 'posthaste.themeColors.v1',
   themeParameters: 'posthaste.themeParameters.v1',
 } as const
 
