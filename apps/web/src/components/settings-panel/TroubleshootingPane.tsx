@@ -9,7 +9,8 @@ import {
   useDeveloperToolsEnabled,
 } from '../../developerTools'
 import { cn } from '../../lib/utils'
-import { SettingsPage, SettingsPageHeader, SettingsSection } from './shared'
+import { SettingsAdvanced } from './SettingsAdvanced'
+import { SettingsPage, SettingsPageHeader } from './shared'
 import { TroubleshootingSection } from './TroubleshootingSection'
 
 export function TroubleshootingPane() {
@@ -24,7 +25,7 @@ export function TroubleshootingPane() {
 
       <TroubleshootingSection />
 
-      <SettingsSection title="Developer">
+      <SettingsAdvanced label="Developer">
         <div className="grid gap-3 sm:grid-cols-[1fr_280px] sm:items-center">
           <div className="min-w-0">
             <p className="text-[13px] font-medium text-foreground">
@@ -55,7 +56,7 @@ export function TroubleshootingPane() {
             />
           </button>
         </div>
-      </SettingsSection>
+      </SettingsAdvanced>
     </SettingsPage>
   )
 }
