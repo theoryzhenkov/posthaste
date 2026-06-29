@@ -17,8 +17,8 @@ use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
     Appearance, AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult,
     DomainEvent, DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxId,
-    MailboxSummary, MessageAttachment, MessageId, MessageSummary, Operation, OperationId,
-    ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    MailboxSummary, MessageAttachment, MessageId, MessageSummary, Notifications, Operation,
+    OperationId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand,
     SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings,
     SyncMode, TagSummary, ValidationError,
@@ -238,6 +238,7 @@ pub struct PatchAppSettingsMutation {
     pub automation_rules: Option<Vec<AutomationRule>>,
     pub automation_drafts: Option<Vec<AutomationRule>>,
     pub appearance: Option<Appearance>,
+    pub notifications: Option<Notifications>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

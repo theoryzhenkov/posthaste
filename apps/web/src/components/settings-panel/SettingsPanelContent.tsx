@@ -4,6 +4,7 @@ import type {
   AccountOverview,
   AppSettings,
   CachePolicy,
+  Notifications,
   SmartMailbox,
   SmartMailboxSummary,
 } from '../../api/types'
@@ -11,6 +12,7 @@ import type { SettingsSurfaceDescriptor } from '../../surfaces'
 import { AccountsPane } from './AccountsPane'
 import { AppearancePane } from './AppearancePane'
 import { GeneralPane } from './GeneralPane'
+import { NotificationsPane } from './NotificationsPane'
 import { StoragePane } from './StoragePane'
 import {
   SmartMailboxesPane,
@@ -31,6 +33,7 @@ interface SettingsPanelContentProps {
     }
   >
   cacheMutation: UseMutationResult<AppSettings, Error, CachePolicy>
+  notificationsMutation: UseMutationResult<AppSettings, Error, Notifications>
   defaultAccountId: string | null | undefined
   defaultMutation: UseMutationResult<AppSettings, Error, string | null>
   editingAccount: AccountOverview | null
@@ -69,6 +72,7 @@ export function SettingsPanelContent({
   accountCommandError,
   activeCategory,
   cacheMutation,
+  notificationsMutation,
   commandMutation,
   defaultAccountId,
   defaultMutation,
@@ -125,6 +129,18 @@ export function SettingsPanelContent({
               cachePolicy={settings?.cachePolicy}
               onChange={(policy) => cacheMutation.mutate(policy)}
               isPending={cacheMutation.isPending}
+            />
+          </div>
+        )}
+
+        {activeCategory === 'notifications' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <NotificationsPane
+              notifications={settings?.notifications}
+              onChange={(notifications) =>
+                notificationsMutation.mutate(notifications)
+              }
+              isPending={notificationsMutation.isPending}
             />
           </div>
         )}

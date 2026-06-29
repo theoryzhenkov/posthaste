@@ -19,6 +19,11 @@ pub struct AppSettings {
     /// @spec docs/eph/DESIGN-L2-appearance-toml
     #[serde(default)]
     pub appearance: Option<Appearance>,
+    /// Notification policy (TOML source of truth; OS delivery permission stays local).
+    ///
+    /// @spec docs/eph/RFC-L2-configuration-matrix
+    #[serde(default)]
+    pub notifications: Option<Notifications>,
 }
 
 /// Backend driver type for an account.

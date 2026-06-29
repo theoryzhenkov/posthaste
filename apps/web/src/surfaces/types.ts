@@ -7,6 +7,7 @@ export type SettingsSurfaceCategory =
   | 'accounts'
   | 'mailboxes'
   | 'storage'
+  | 'notifications'
 
 export const SettingsSurfaceTargetKind = {
   Account: 'account',

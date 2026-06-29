@@ -21,7 +21,7 @@ use posthaste_domain::{
     ConversationSummary, ConversationView, DomainEvent, DraftContent, EventFilter, Id, Identity,
     ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary, MessageAttachment,
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
-    Operation, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
+    Notifications, Operation, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
     SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox,
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,

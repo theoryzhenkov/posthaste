@@ -78,6 +78,7 @@ impl TomlConfigRepository {
             logging: Default::default(),
             cache: Default::default(),
             appearance: Default::default(),
+            notifications: Default::default(),
             link: Default::default(),
         };
         write_app_toml(&self.config_root, &app)?;
