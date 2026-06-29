@@ -7,3 +7,15 @@
 *.tar binary
 *.woff binary
 *.woff2 binary
+
+# Generated artifacts: committed on purpose (downstream builds need them without a
+# Rust/wasm toolchain) but machine-output — marked so diff/code-context tooling skips them.
+# Regenerate, never hand-edit. See loc-reduction/00-summary.md (Tier 0).
+openapi.json linguist-generated=true
+asyncapi.json linguist-generated=true
+docs/api/endpoints.md linguist-generated=true
+apps/web/src/api/schema.gen.ts linguist-generated=true
+apps/mcp/src/schema.gen.ts linguist-generated=true
+apps/web/src/runtime/wasm/posthaste_link_wasm.js linguist-generated=true
+apps/web/src/runtime/wasm/posthaste_link_wasm.d.ts linguist-generated=true
+apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm.d.ts linguist-generated=true
