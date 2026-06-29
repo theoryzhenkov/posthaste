@@ -1,11 +1,11 @@
 ---
 scope: L2
-summary: "Snooze: defer a message to a Posthaste-managed 'Snoozed' mailbox with a server-owned scheduler that returns it to the Inbox at a chosen time. Uniform across providers (Gmail-mirror investigated + rejected — Gmail's snooze isn't reachable via IMAP/JMAP). The snoozed_until timestamp is Posthaste-local metadata; the scheduler rides the existing supervisor tick loop; snooze is a user-initiated mutation (records an undo step) while the scheduler's auto-return is not."
+summary: "Snooze: defer a message to a Posthaste-managed 'Snoozed' mailbox with a server-owned scheduler that returns it to the Inbox at a chosen time. Uniform across providers (Gmail-mirror investigated + rejected — Gmail's snooze isn't reachable via IMAP/JMAP). The return time lives in a separate `message_snooze(account_id, message_id, until)` store table (Posthaste-local, not provider-synced; no message-wire change); the scheduler rides the existing supervisor tick loop; snooze is a user-initiated mutation (records an undo step) while the scheduler's auto-return is not. A store invariant — leaving the Snoozed mailbox deletes the snooze row — makes undo correct without the diff capturing the snooze-table change."
 modified: 2026-06-28
 reviewed: 2026-06-28
 lifecycle: ephemeral
 type: DESIGN
-status: "Design doc. Gmail-mirror investigated (not clean → uniform). Implementation pending: mailbox role + snoozed_until field, snooze/unsnooze mutations, scheduler tick, UI, undo integration."
+status: "Implementation in progress (Option B: separate `message_snooze` table). Slices: 1 model+storage, 2 snooze/unsnooze mutations + store invariant, 3 scheduler tick, 4 UI, 5 undo integration + e2e."
 depends:
   - path: docs/eph/DESIGN-L2-undo-redo-revlog-contract
     note: "undo integration — snooze is a user-initiated mutation that records a rev_log step; the scheduler's auto-return must not"
@@ -46,35 +46,57 @@ including Gmail. This matches how every other third-party client does it.
 ### Mailbox role + storage
 
 - `MailboxRole::Snooze` (serialize `"snooze"`) in `posthaste-domain/vocab.rs`.
-  The "Snoozed" mailbox is provisioned per-account alongside Inbox/Archive/etc.
-- `snoozed_until: Option<i64>` (unix seconds, UTC) on the message record.
+  The "Snoozed" mailbox is **not** Posthaste-auto-provisioned — there is no
+  gateway `create_mailbox`, + mailboxes come from provider sync. Instead it's a
+  **provider mailbox the user designates with the `snooze` role** via the
+  existing `mailbox_role_override` (the same role-switch the SourceMailboxEditor
+  uses). The snooze mutation looks up the mailbox with role `snooze` + moves the
+  message there (provider-side, via the existing move machinery) — clean for
+  cross-device (the move is on the provider; all clients see it via sync) + no
+  resync-clobber. If no mailbox has the `snooze` role, the snooze mutation
+  rejects with a clear error (the UI prompts the user to designate one). v1
+  doesn't auto-create/auto-designate; that's a follow-up (would need a gateway
+  `create_mailbox`).
+- A **separate `message_snooze` store table**
+  `(account_id TEXT, message_id TEXT, until INTEGER NOT NULL, PRIMARY KEY (account_id, message_id))`
+  with an index on `(account_id, until)` for the scheduler. The return time is
   **Posthaste-local metadata** — providers have no snooze-until field, so the
-  sync layer (which maps known provider fields) must not overwrite it. The
-  field rides the existing message record/wire → openapi + schema.gen.ts regen
-  (drift guards fire; backward-compatible optional field).
+  sync layer (which maps known provider fields) never touches this table. The
+  message record/wire is **unchanged** (no `snoozedUntil` field), so there's no
+  message-schema/openapi churn — only the `MailboxRole` enum gains the `snooze`
+  value.
 - A snoozed message is in the `Snoozed` mailbox (so it's naturally hidden from
-  the Inbox view) **and** carries `snoozed_until`. The mailbox is the
-  user-visible "where is it"; `snoozed_until` is the scheduler's trigger.
+  the Inbox view) **and** carries a `message_snooze` row. The mailbox is the
+  user-visible "where is it"; the snooze row is the scheduler's trigger.
 
 ### Mutations
 
 - `message.snooze` (`{ messageId, until: i64 }`): move to the Snoozed mailbox +
-  set `snoozed_until = until`. **User-initiated** (`context.userInitiated =
-  true`) → records a rev_log undo step (Slice 5d gate). The captured diff
-  includes **both** the mailbox change and the `snoozed_until` change, so undo
-  restores the message to its prior mailbox with `snoozed_until = null`.
-- `message.unsnooze` (`{ messageId }`): move back to the Inbox + clear
-  `snoozed_until`. User-initiated → records an undo step. (A plain
-  `moveToRole(Inbox)` would move the message but leave `snoozed_until` set, so a
-  dedicated unsnooze mutation is cleaner than reusing the move path.)
+  insert the `message_snooze(account_id, message_id, until)` row. **User-initiated**
+  (`context.userInitiated = true`) → records a rev_log undo step (Slice 5d gate).
+  The captured entity-store diff is the mailbox change (the snooze row is in a
+  separate table, not the replica); undo restores the mailbox, + the store
+  invariant (below) clears the snooze row as a side effect.
+- `message.unsnooze` (`{ messageId }`): move back to the Inbox + delete the
+  `message_snooze` row. User-initiated → records an undo step.
+- **Store invariant**: whenever a message leaves the `Snoozed` mailbox (by any
+  path — unsnooze mutation, undo restoring the prior mailbox, a manual move, or
+  the scheduler's auto-return), the `message_snooze` row is deleted. This makes
+  undo correct without the diff having to capture the snooze-table change:
+  undo applies the reverse mailbox diff (move back), the invariant clears the
+  snooze row, + the scheduler no longer sees it. The only way to *enter* Snoozed
+  with a return time is the `message.snooze` mutation (a plain move to Snoozed
+  via `moveToRole`/drag is rejected or leaves no row — the Snoozed mailbox is
+  action-gated, not a drop target).
 
 ### Scheduler (server-owned, cross-device)
 
 The authority-runtime supervisor already runs a per-account tick loop
 (`supervisor/runtime.rs`: `oauth_refresh_interval`, `backfill_interval`,
 `cache_interval` via `tokio::time::interval_at`). Add a **snooze tick** (e.g.
-every 60s): `SELECT id FROM message WHERE mailbox = Snoozed AND snoozed_until
-<= now` → for each, move to Inbox + clear `snoozed_until`.
+every 60s): `SELECT message_id FROM message_snooze WHERE account_id = ? AND
+until <= now` → for each, move to Inbox + delete the snooze row (the auto-return
+path).
 
 - **Server-owned** → one place, cross-device coherent (any client sees snooze
   state via sync).
@@ -98,30 +120,33 @@ every 60s): `SELECT id FROM message WHERE mailbox = Snoozed AND snoozed_until
 
 ## Wire / artifact churn
 
-- `MailboxRole::Snooze` → domain enum → openapi (the role is a string in
-  several response schemas) + schema.gen.ts.
-- `snoozed_until` on the message record → message wire schema → openapi +
-  schema.gen.ts + the store SQL schema (a `snoozed_until INTEGER` column +
-  migration).
+- `MailboxRole::Snooze` → domain enum → openapi (the role is a string enum in
+  several response schemas) + schema.gen.ts (the `snooze` value).
+- The `message_snooze` table is store-internal — no message wire/schema change
+  (that's the point of Option B). The snooze/unsnooze commands ride the named-
+  mutation pipeline; their args (`until`) are in `MutationRequest.context`,
+  which already carries arbitrary payloads with zero wire churn.
 - `message.snooze` / `message.unsnooze` mutations → the mutation catalog
-  (`runtime/mutations/L1`) + the command wire (`/commands/messages/{id}/snooze`).
+  (`runtime/mutations/L1`).
 - `Regenerate after intentional API changes with UPDATE_OPENAPI=1 ...` then
-  `bun run api:generate` (the established flow).
+  `bun run api:generate` (the established flow) — for the `MailboxRole` enum
+  only.
 
 ## Phased implementation
 
-- **Slice 1 — model + storage**: `MailboxRole::Snooze` + `snoozed_until` column
-  + domain field + provisioning. openapi/schema regen.
-- **Slice 2 — mutations**: `message.snooze` + `message.unsnooze` (command wire
-  + backend apply + projection). User-initiated tagging.
-- **Slice 3 — scheduler**: snooze tick in `supervisor/runtime.rs` + the due-row
-  query + auto-return.
+- **Slice 1 — model + storage**: `MailboxRole::Snooze` + `message_snooze` table
+  + index + provisioning. openapi/schema regen (MailboxRole enum).
+- **Slice 2 — mutations + store invariant**: `message.snooze` +
+  `message.unsnooze` named mutations (command wire + backend apply + the snooze
+  row insert/delete). Store invariant: leaving Snoozed → delete the snooze row.
+  User-initiated tagging.
+- **Slice 3 — scheduler**: snooze tick in `supervisor/runtime.rs` + the
+  due-row query + auto-return.
 - **Slice 4 — UI**: Snooze button + popover/presets in the message header;
   sidebar entry for the Snoozed mailbox; `useEmailActions` wiring.
-- **Slice 5 — undo integration + e2e**: confirm the snooze diff captures both
-  fields; verify undo restores; Playwright e2e (snooze → assert leaves Inbox +
-  appears in Snoozed → undo → back in Inbox; advance the scheduler / wait →
-  auto-return).
+- **Slice 5 — undo integration + e2e**: confirm the store invariant clears the
+  snooze row on undo; Playwright e2e (snooze → assert leaves Inbox + appears in
+  Snoozed → undo → back in Inbox; advance the scheduler / wait → auto-return).
 
 ## Open questions / follow-ups
 
@@ -133,8 +158,14 @@ every 60s): `SELECT id FROM message WHERE mailbox = Snoozed AND snoozed_until
   won't see it until Gmail returns it. Acceptable (matches other clients); a
   future "resync detected Gmail-side moves" pass could surface it.
 - **Snooze + undo across the scheduler boundary**: if a user undoes a snooze
-  after the scheduler already auto-returned it, undo applies the reverse diff
-  (move to Snoozed + restore `snoozed_until`). The message goes back to
-  Snoozed with a now-past `snoozed_until` → the scheduler re-returns it on the
-  next tick. This is correct (undo is a point-in-time restore; the scheduler
-  re-converges) but worth an e2e to confirm the user isn't surprised.
+  after the scheduler already auto-returned it, undo applies the reverse mailbox
+  diff (move to Snoozed) — + the store invariant does NOT insert a snooze row
+  (entering Snoozed via undo is not a `message.snooze` mutation, so there's no
+  return time). The message ends up in Snoozed with no auto-return. This is
+  arguably correct (undo is a point-in-time restore: the user was undoing the
+  snooze, the scheduler already returned it, undo puts it back where it was
+  mid-snooze) — but the message is stuck in Snoozed until the user manually
+  unsnoozes or re-snoozes. Worth an e2e to confirm + maybe a UX call (should
+  undo-of-snooze-after-auto-return just no-op, or restore to Snoozed?). The
+  invariant direction matters: *leaving* Snoozed clears the row (clean);
+  *entering* Snoozed via undo does not insert a row (no return time).

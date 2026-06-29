@@ -384,4 +384,17 @@ pub(super) const SCHEMA_SQL: &str = "
                         WHERE account_id = new.account_id AND message_id = new.id
                    );
             END;
+
+            -- Snooze: a Posthaste-local return-time for a message in the Snoozed
+            -- mailbox. Not provider-synced (providers have no snooze field).
+            -- The scheduler (supervisor snooze tick) scans this for due rows.
+            -- @spec docs/eph/DESIGN-L2-snooze
+            CREATE TABLE IF NOT EXISTS message_snooze (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                until INTEGER NOT NULL,
+                PRIMARY KEY (account_id, message_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_message_snooze_until
+                ON message_snooze (account_id, until);
             ";

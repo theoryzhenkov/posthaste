@@ -4,6 +4,7 @@
  */
 import {
   Archive,
+  Clock,
   Folder,
   Inbox,
   Mail,
@@ -24,6 +25,7 @@ const ROLE_ICON_MAP: Record<KnownMailboxRole, LucideIcon> = {
   [MAILBOX_ROLES.Sent]: Send,
   [MAILBOX_ROLES.Junk]: ShieldAlert,
   [MAILBOX_ROLES.Trash]: Trash2,
+  [MAILBOX_ROLES.Snooze]: Clock,
 }
 
 const MAILBOX_ROLE_ACCENTS: Record<KnownMailboxRole, string> = {
@@ -33,6 +35,7 @@ const MAILBOX_ROLE_ACCENTS: Record<KnownMailboxRole, string> = {
   [MAILBOX_ROLES.Sent]: '#D96A42',
   [MAILBOX_ROLES.Junk]: '#C5A100',
   [MAILBOX_ROLES.Trash]: '#8A5B4B',
+  [MAILBOX_ROLES.Snooze]: '#6B7A8F',
 }
 
 const SMART_MAILBOX_ACCENTS = {
