@@ -62,3 +62,67 @@ pub async fn trigger_sync(
         mode: mode.as_str().to_string(),
     }))
 }
+
+/// Query parameters for the SSE event stream endpoint.
+///
+/// @spec docs/L1-api#sse-event-stream
+#[derive(Debug, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct EventsQuery {
+    pub account_id: Option<String>,
+    pub topic: Option<String>,
+    pub mailbox_id: Option<String>,
+    pub after_seq: Option<i64>,
+}
+
+/// GET /v1/events
+///
+/// Opens an SSE stream of domain events. When `afterSeq` is provided, replays
+/// matching events from the backlog (`event_log`) before switching to the live
+/// broadcast stream, so a reconnecting client misses nothing.
+///
+/// WHY THIS EXISTS — do **not** remove again as "no consumer": this is the flat,
+/// *view-less* projection of the very same `DomainEvent` broadcast the UI already
+/// consumes in view-coupled form (the runtime session stream's `Notification`
+/// frames; see `posthaste-runtime`'s `spawn_notification_forwarder`). Its consumer
+/// is `posthastectl events` — the scriptable CLI / MCP bridge in `apps/mcp` — plus
+/// other view-less integrations, none of which are visible from this crate. The
+/// endpoint was deleted once (commit cce95402c) precisely because that consumer
+/// did not yet exist. See docs/eph/DESIGN-L2-posthastectl §0/§3.
+///
+/// @spec docs/L1-api#sse-event-stream
+/// @spec docs/L0-api#server-sent-events-for-push
+// NOTE: utoipa cannot infer the SSE payload type. The full event payload contract
+// (DomainEvent over text/event-stream) is documented via AsyncAPI (asyncapi.json).
+#[utoipa::path(
+    get,
+    path = "/v1/events",
+    tag = "events",
+    summary = "Stream events",
+    description = "Opens a Server-Sent Events stream of domain events. When afterSeq is provided, \
+                   replays matching backlog events before switching to the live stream.",
+    params(EventsQuery),
+    responses(
+        (status = 200, description = "Server-sent event stream of domain events", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid filter", body = ApiErrorBody)
+    )
+)]
+pub async fn stream_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<EventsQuery>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let filter = EventFilter {
+        account_id: query.account_id.map(AccountId),
+        topic: query.topic,
+        mailbox_id: query.mailbox_id.map(MailboxId),
+        after_seq: query.after_seq,
+    };
+    let subscription = state
+        .runtime
+        .subscribe_events(RuntimeCaller::api(), filter)
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    let backlog_stream = tokio_stream::iter(subscription.replay.into_iter().map(event_to_sse));
+    let live_stream = subscription.live.map(event_to_sse);
+    Ok(Sse::new(backlog_stream.chain(live_stream)).keep_alive(KeepAlive::default()))
+}

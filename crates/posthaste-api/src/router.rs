@@ -182,6 +182,7 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             post(api::trigger_sync),
         )
         .route("/config:reload", post(api::reload_config))
+        .route("/events", get(api::stream_events))
         .fallback(api_not_found)
         .layer(middleware::from_fn_with_state(
             state.clone(),

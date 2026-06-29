@@ -125,6 +125,7 @@ pub(super) fn build_app(state: Arc<AppState>) -> Router {
         )
         .route("/runtime/sessions/{session_id}/mutations", post(ok))
         .route("/smart-mailboxes/{smart_mailbox_id}/conversations", get(ok))
+        .route("/events", get(ok))
         .route("/sources/{source_id}/messages", get(ok))
         .route("/sources/{source_id}/messages/{message_id}", get(ok))
         .route("/sources/{source_id}/commands/send", post(ok))

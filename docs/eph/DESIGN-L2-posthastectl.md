@@ -37,15 +37,22 @@ Built in `apps/mcp` (one registry, two front-ends):
   compiles a standalone binary via `bun build --compile`.
 - **`just mcp {check,test,build-cli}`** wired into the root `check`/`test`/`fmt`.
 
-**Open — the event tap's server endpoint.** `posthastectl events` (client-side
-SSE → NDJSON) is built and tested, but `GET /v1/events` was **removed** as
-vestigial (commit `cce95402c`, 2026-06-25) while it had no consumer — three days
-before this design was reviewed. The runtime machinery is intact
-(`runtime.subscribe_events` → replay + live broadcast); only the ~40-line HTTP
-handler + route were deleted, and `asyncapi.json` still documents the channel
-(a doc/route mismatch). Restoring it is the remaining work for a live event tap;
-`posthastectl` is precisely the consumer that justifies its return. Pending a
-decision (it touches the Rust server, against principle §6.5).
+**Event tap — `GET /v1/events` restored (2026-06-29).** `posthastectl events`
+streams the daemon's domain-event SSE as NDJSON. The route had been **removed**
+as vestigial (commit `cce95402c`, 2026-06-25) while it had no consumer — three
+days before this design was reviewed; the runtime machinery
+(`runtime.subscribe_events` → replay + live broadcast) stayed intact, so only the
+thin HTTP handler + route needed restoring. It is the **flat, view-less
+projection of the same `DomainEvent` broadcast** the UI consumes in view-coupled
+form (the runtime session stream's `Notification` frames), and `posthastectl` is
+its consumer. Restored with two upgrades over a verbatim revert: (1) a
+"why this exists" doc-comment at the handler so it is not GC'd again as "no
+consumer"; (2) classified as a **read** capability in the authz read-route table
+(it was previously under `commands.rs`, odd for a pure read). `openapi.json` +
+both `schema.gen.ts` regenerated; the deleted capability-scoping tests restored.
+This is the one place the design touches the Rust server (a deliberate, user-
+ratified exception to principle §6.5 — it restores a documented contract, not a
+new capability).
 
 ## 1. Goal & principles [::state implemented]
 
@@ -165,11 +172,11 @@ The MCP server continues to run under bun/node as today.
 - **P2 — the CLI front-end. ✅ done.** `cli.ts` + `cli/` render the registry as
   subcommands with `-i/--input` stdin, exit codes, and pretty/compact JSON.
   `bun build --compile` wired (`just mcp build-cli`).
-- **P3 — the event tap. ◐ client built; server endpoint pending.** `events`
-  streams `GET /v1/events` (SSE → NDJSON, `--after-seq`/`--topic`/`--account`/
-  `--mailbox`) and is tested against a stubbed stream. The daemon route was
-  removed (see §0); restoring it is the only remaining work. Open decision
-  (§8 Q1, principle §6.5).
+- **P3 — the event tap. ✅ done.** `events` streams `GET /v1/events` (SSE → NDJSON,
+  `--after-seq`/`--topic`/`--account`/`--mailbox`), tested against a stubbed
+  stream. The daemon route (removed as vestigial) was restored with the two
+  upgrades in §0; backend gate green (openapi/asyncapi contracts,
+  capability-scoping, authz-completeness, clippy).
 - **P4 — packaging. ◐ binary + docs done; release wiring + completions pending.**
   `bun --compile` binary, README, and the `just mcp` recipes exist; shipping the
   binary in the release artifacts and registry-derived shell-completion are not
@@ -179,11 +186,10 @@ The MCP server continues to run under bun/node as today.
 
 - **Out of scope:** repair/factory-reset (local, not API); the desktop
   `connections.json` profile store (v1 uses discovery + flags).
-- **Q1 — event stream: open (the one live blocker).** The domain-event SSE
-  (`GET /v1/events`) is the right feed (the runtime view-frame stream stays
-  view-internal). But the route was removed as vestigial (§0). Decision needed:
-  restore the ~40-line handler (machinery intact; `asyncapi.json` still documents
-  it) so `posthastectl events` works live. Recommended: yes.
+- **Q1 — event stream: resolved — restored the domain-event SSE.** Confirmed the
+  right feed: the flat view-less projection of the same `DomainEvent` broadcast
+  the UI consumes view-coupled (one source, two renderings — the runtime
+  view-frame stream stays view-internal). `GET /v1/events` restored (§0/P3).
 - **Q2 — auth scope: noted in user docs.** The CLI inherits the token's full
   power; the README capability-scoping caveat now calls this out for both
   front-ends. Tightening waits on the trust-model scoping work.
