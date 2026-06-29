@@ -214,11 +214,21 @@ pub fn imap_mailbox_state_from_header_snapshot(
             .iter()
             .map(|header| header.location.uid)
             .max(),
-        highest_modseq: snapshot
-            .headers
-            .iter()
-            .filter_map(|header| header.location.modseq)
-            .max(),
+        // Prefer the authoritative SELECT/EXAMINE `[HIGHESTMODSEQ]` watermark
+        // (RFC 7162) over the max of fetched per-message MODSEQs: an empty (or
+        // canonically-deduped) mailbox fetches no MODSEQ-bearing headers, so
+        // deriving from headers alone would store `None` — leaving the mailbox
+        // unable to take the CONDSTORE/QRESYNC delta path, so it re-runs a full
+        // snapshot on every sync. Fall back to the per-message max for servers
+        // that omit HIGHESTMODSEQ from SELECT. (The delta path already does this
+        // via `record_highest_modseq(selected.highest_modseq)`.)
+        highest_modseq: snapshot.selected.highest_modseq.or_else(|| {
+            snapshot
+                .headers
+                .iter()
+                .filter_map(|header| header.location.modseq)
+                .max()
+        }),
         updated_at,
     }
 }

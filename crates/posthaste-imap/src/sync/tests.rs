@@ -14,5 +14,6 @@ mod delta;
 mod discovery;
 mod gmail_canonical;
 mod gmail_labels;
+mod mailbox_state;
 mod message_identity;
 mod qresync;
