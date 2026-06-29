@@ -242,6 +242,7 @@ function isSettingsSurfaceCategory(
     value === 'accounts' ||
     value === 'mailboxes' ||
     value === 'storage' ||
-    value === 'notifications'
+    value === 'notifications' ||
+    value === 'troubleshooting'
   )
 }
