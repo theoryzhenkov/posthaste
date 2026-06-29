@@ -40,6 +40,7 @@ export interface AccountOverview {
   id: string
   name: string
   fullName: string | null
+  signature: string | null
   emailPatterns: string[]
   driver: AccountDriver
   enabled: boolean
@@ -144,6 +145,7 @@ export interface CreateAccountInput {
   id?: string
   name: string
   fullName?: string | null
+  signature?: string | null
   emailPatterns: string[]
   driver?: AccountDriver
   enabled?: boolean
@@ -159,6 +161,7 @@ export interface CreateAccountInput {
 export interface UpdateAccountInput {
   name?: string
   fullName?: string | null
+  signature?: string | null
   emailPatterns?: string[]
   driver?: AccountDriver
   enabled?: boolean

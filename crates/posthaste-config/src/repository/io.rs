@@ -158,6 +158,7 @@ const SOURCE_TOML_MANAGED_KEYS: &[&str] = &[
     "id",
     "name",
     "full_name",
+    "signature",
     "email_patterns",
     "driver",
     "enabled",

@@ -57,6 +57,7 @@ impl Harness {
                 id: AccountId::from(id),
                 name: name.to_string(),
                 full_name: None,
+                signature: None,
                 email_patterns: Vec::new(),
                 driver,
                 enabled: true,

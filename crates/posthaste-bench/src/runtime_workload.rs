@@ -273,6 +273,7 @@ fn mock_account_mutation(account_id: &str) -> CreateAccountMutation {
         // Enabled so run_mutation routes through the account runtime.
         enabled: Some(true),
         full_name: None,
+        signature: None,
         email_patterns: Vec::new(),
         appearance: None,
         transport: AccountTransportMutation::default(),

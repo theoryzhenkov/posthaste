@@ -87,6 +87,7 @@ impl Harness {
                 id: AccountId::from(id),
                 name: name.to_string(),
                 full_name: Some("Dev Account".to_string()),
+                signature: None,
                 email_patterns: vec!["dev@example.org".to_string()],
                 driver,
                 enabled: true,

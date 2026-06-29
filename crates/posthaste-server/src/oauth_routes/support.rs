@@ -82,6 +82,7 @@ pub(crate) fn oauth_account_settings(
         id: account_id,
         name,
         full_name: None,
+        signature: None,
         email_patterns,
         driver: AccountDriver::ImapSmtp,
         enabled: true,

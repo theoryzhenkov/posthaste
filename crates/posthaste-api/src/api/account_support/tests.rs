@@ -39,6 +39,7 @@ fn test_account(secret_ref: Option<SecretRef>) -> AccountSettings {
         id: AccountId::from("primary"),
         name: "Primary".to_string(),
         full_name: None,
+        signature: None,
         email_patterns: vec!["primary@example.com".to_string()],
         driver: AccountDriver::ImapSmtp,
         enabled: true,

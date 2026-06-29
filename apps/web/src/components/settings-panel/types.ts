@@ -13,6 +13,7 @@ export type SmartMailboxEditorTarget = 'new' | string
 export interface AccountFormState {
   name: string
   fullName: string
+  signature: string
   emailPatternsText: string
   appearanceInitials: string
   appearanceColorHue: number
