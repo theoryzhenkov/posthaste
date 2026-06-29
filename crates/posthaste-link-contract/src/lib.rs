@@ -740,248 +740,28 @@ impl BackendLink {
         self.transport.conversation(conversation_id).await
     }
 
-    /// Read channel: the account list through to the backend.
-    pub async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
-        self.transport.list_accounts().await
-    }
-
-    /// Read channel: one account's overview through to the backend.
-    pub async fn get_account(
-        &self,
-        account_id: AccountId,
-    ) -> Result<Option<AccountOverview>, RuntimeError> {
-        self.transport.get_account(account_id).await
-    }
-
-    /// Read channel: the application settings through to the backend.
-    pub async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
-        self.transport.app_settings().await
-    }
-
-    /// Write: set/clear keywords on a message (up-channel typed command).
-    pub async fn set_keywords(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: SetKeywordsCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.transport
-            .set_keywords(account_id, message_id, command)
-            .await
-    }
-
-    /// Write: add a message to a mailbox.
-    pub async fn add_to_mailbox(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: AddToMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.transport
-            .add_to_mailbox(account_id, message_id, command)
-            .await
-    }
-
-    /// Write: remove a message from a mailbox.
-    pub async fn remove_from_mailbox(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: RemoveFromMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.transport
-            .remove_from_mailbox(account_id, message_id, command)
-            .await
-    }
-
-    /// Write: replace a message's mailbox membership.
-    pub async fn replace_mailboxes(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: ReplaceMailboxesCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.transport
-            .replace_mailboxes(account_id, message_id, command)
-            .await
-    }
-
-    /// Write: destroy a message.
-    pub async fn destroy_message(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.transport.destroy_message(account_id, message_id).await
-    }
-
-    /// Write: set (or clear) a mailbox's role.
-    pub async fn set_mailbox_role(
-        &self,
-        account_id: AccountId,
-        mailbox_id: MailboxId,
-        role: Option<String>,
-    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
-        self.transport
-            .set_mailbox_role(account_id, mailbox_id, role)
-            .await
-    }
-
-    /// Write: queue a local-first send for an account.
-    pub async fn send_message(
-        &self,
-        account_id: AccountId,
-        request: SendMessageRequest,
-    ) -> Result<(), RuntimeError> {
-        self.transport.send_message(account_id, request).await
-    }
-
-    /// Write: save (create or update) a draft.
-    pub async fn save_draft(
-        &self,
-        account_id: AccountId,
-        draft_id: Option<MessageId>,
-        request: SendMessageRequest,
-    ) -> Result<Operation, RuntimeError> {
-        self.transport
-            .save_draft(account_id, draft_id, request)
-            .await
-    }
-
-    /// Write: delete a draft.
-    pub async fn delete_draft(
-        &self,
-        account_id: AccountId,
-        draft_id: MessageId,
-    ) -> Result<Operation, RuntimeError> {
-        self.transport.delete_draft(account_id, draft_id).await
-    }
-
-    /// Write: discard a pending outbox operation.
-    pub async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
-        self.transport.discard_operation(operation_id).await
-    }
-
-    /// Write: re-arm a failed outbox operation to pending.
-    pub async fn retry_operation(
-        &self,
-        account_id: AccountId,
-        operation_id: OperationId,
-    ) -> Result<(), RuntimeError> {
-        self.transport
-            .retry_operation(account_id, operation_id)
-            .await
-    }
-
-    /// Write: drive an explicit account sync.
-    pub async fn sync_account(
-        &self,
-        account_id: AccountId,
-        mode: SyncMode,
-    ) -> Result<usize, RuntimeError> {
-        self.transport.sync_account(account_id, mode).await
-    }
-
-    /// Write: patch the application settings.
-    pub async fn patch_app_settings(
-        &self,
-        mutation: PatchAppSettingsMutation,
-    ) -> Result<AppSettings, RuntimeError> {
-        self.transport.patch_app_settings(mutation).await
-    }
-
-    /// Write: preview an automation rule.
-    pub async fn preview_automation_rule(
-        &self,
-        mutation: AutomationRulePreviewMutation,
-    ) -> Result<AutomationRulePreviewResult, RuntimeError> {
-        self.transport.preview_automation_rule(mutation).await
-    }
-
-    /// Write: create a smart mailbox.
-    pub async fn create_smart_mailbox(
-        &self,
-        mutation: CreateSmartMailboxMutation,
-    ) -> Result<SmartMailbox, RuntimeError> {
-        self.transport.create_smart_mailbox(mutation).await
-    }
-
-    /// Write: patch a smart mailbox.
-    pub async fn patch_smart_mailbox(
-        &self,
-        smart_mailbox_id: SmartMailboxId,
-        mutation: PatchSmartMailboxMutation,
-    ) -> Result<SmartMailbox, RuntimeError> {
-        self.transport
-            .patch_smart_mailbox(smart_mailbox_id, mutation)
-            .await
-    }
-
-    /// Write: delete a smart mailbox.
-    pub async fn delete_smart_mailbox(
-        &self,
-        smart_mailbox_id: SmartMailboxId,
-    ) -> Result<(), RuntimeError> {
-        self.transport.delete_smart_mailbox(smart_mailbox_id).await
-    }
-
-    /// Write: reset the default smart mailboxes.
-    pub async fn reset_default_smart_mailboxes(
-        &self,
-    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
-        self.transport.reset_default_smart_mailboxes().await
-    }
-
-    /// Write: create an account.
-    pub async fn create_account(
-        &self,
-        mutation: CreateAccountMutation,
-    ) -> Result<AccountOverview, RuntimeError> {
-        self.transport.create_account(mutation).await
-    }
-
-    /// Write: patch an account.
-    pub async fn patch_account(
-        &self,
-        account_id: AccountId,
-        mutation: PatchAccountMutation,
-    ) -> Result<AccountOverview, RuntimeError> {
-        self.transport.patch_account(account_id, mutation).await
-    }
-
-    /// Write: delete an account.
-    pub async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
-        self.transport.delete_account(account_id).await
-    }
-
-    /// Write: verify an account.
-    pub async fn verify_account(
-        &self,
-        account_id: AccountId,
-    ) -> Result<AccountVerificationResult, RuntimeError> {
-        self.transport.verify_account(account_id).await
-    }
-
-    /// Write: enable or disable an account.
-    pub async fn set_account_enabled(
-        &self,
-        account_id: AccountId,
-        enabled: bool,
-    ) -> Result<(), RuntimeError> {
-        self.transport
-            .set_account_enabled(account_id, enabled)
-            .await
-    }
-
-    /// Write: reload configuration from disk.
-    pub async fn reload_config(&self) -> Result<(), RuntimeError> {
-        self.transport.reload_config().await
-    }
-
     /// The underlying transport, for callers that need to inspect or hold it.
     pub fn transport(&self) -> &Arc<dyn BackendApi> {
         &self.transport
     }
+}
+
+/// Generate `BackendLink`'s per-op delegations from the shared link-op table:
+/// each forwards straight to the wrapped transport, so the link surface cannot
+/// drift from [`BackendApi`]. The up-channel (`forward_mutation`), down-channel
+/// (`subscribe`), the four read-channel methods that are not table rows
+/// (`query_mail_page`/`current_summary`/`message_detail`/`conversation`), and the
+/// `new`/`transport` accessors stay hand-written above.
+macro_rules! backend_link_delegations {
+    ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
+        impl BackendLink {
+            $(
+                pub async fn $method(&self, $($field: $fty),*) -> Result<$ret, RuntimeError> {
+                    self.transport.$method($($field),*).await
+                }
+            )*
+        }
+    };
 }
 
 /// The canonical runtime↔backend link op table — one source of truth for the
@@ -1171,6 +951,7 @@ macro_rules! define_link_request_structs {
     };
 }
 for_each_link_op!(define_link_request_structs);
+for_each_link_op!(backend_link_delegations);
 
 #[cfg(test)]
 mod tests {
