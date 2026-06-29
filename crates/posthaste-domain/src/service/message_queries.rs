@@ -317,26 +317,20 @@ pub(crate) fn message_assertions(
     {
         match operation.kind {
             OperationKind::SetKeywords => {
-                let command =
-                    serde_json::from_value::<SetKeywordsCommand>(operation.payload.clone())
-                        .map_err(|error| {
-                            ServiceError::from(GatewayError::Rejected(format!(
-                                "invalid setKeywords overlay payload: {error}"
-                            )))
-                        })?;
+                let command = decode_payload::<SetKeywordsCommand>(
+                    operation.payload.clone(),
+                    "setKeywords overlay payload",
+                )?;
                 assertions.push(MessageAssertion::SetKeywords {
                     add: command.add,
                     remove: command.remove,
                 });
             }
             OperationKind::ReplaceMailboxes => {
-                let command =
-                    serde_json::from_value::<ReplaceMailboxesCommand>(operation.payload.clone())
-                        .map_err(|error| {
-                            ServiceError::from(GatewayError::Rejected(format!(
-                                "invalid replaceMailboxes overlay payload: {error}"
-                            )))
-                        })?;
+                let command = decode_payload::<ReplaceMailboxesCommand>(
+                    operation.payload.clone(),
+                    "replaceMailboxes overlay payload",
+                )?;
                 assertions.push(MessageAssertion::ReplaceMailboxes {
                     mailbox_ids: command
                         .mailbox_ids

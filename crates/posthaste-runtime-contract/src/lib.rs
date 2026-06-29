@@ -872,58 +872,6 @@ impl RuntimeError {
         })
     }
 
-    pub fn runtime_not_ready(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::RuntimeNotReady, message)
-    }
-
-    pub fn invalid_descriptor(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::InvalidDescriptor, message)
-    }
-
-    pub fn invalid_mutation(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::InvalidMutation, message)
-    }
-
-    pub fn invalid_secret(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::InvalidSecret, message)
-    }
-
-    pub fn invalid_account(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::InvalidAccount, message)
-    }
-
-    pub fn account_base_url_required(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::AccountBaseUrlRequired, message)
-    }
-
-    pub fn account_secret_required(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::AccountSecretRequired, message)
-    }
-
-    pub fn account_username_required(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::AccountUsernameRequired, message)
-    }
-
-    pub fn account_sender_required(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::AccountSenderRequired, message)
-    }
-
-    pub fn unauthorized(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::Unauthorized, message)
-    }
-
-    pub fn not_found(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::NotFound, message)
-    }
-
-    pub fn provider_unavailable(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::ProviderUnavailable, message)
-    }
-
-    pub fn conflict(message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::Conflict, message)
-    }
-
     pub fn compensation_failed(
         operation: impl Into<String>,
         original: RuntimeError,
@@ -961,6 +909,38 @@ impl RuntimeError {
     pub fn envelope(&self) -> &RuntimeAdapterError {
         &self.0
     }
+}
+
+/// Generate the one-line `RuntimeError` constructors that just pair a method
+/// name with a code (mirrors the crate's `define_id!` idiom). The non-trivial
+/// constructors (`new`, `with_details`, `retryable`, `internal`,
+/// `compensation_failed`) stay hand-written above.
+macro_rules! runtime_error_ctors {
+    ($($name:ident => $code:ident),+ $(,)?) => {
+        impl RuntimeError {
+            $(
+                pub fn $name(message: impl Into<String>) -> Self {
+                    Self::new(RuntimeErrorCode::$code, message)
+                }
+            )+
+        }
+    };
+}
+
+runtime_error_ctors! {
+    runtime_not_ready => RuntimeNotReady,
+    invalid_descriptor => InvalidDescriptor,
+    invalid_mutation => InvalidMutation,
+    invalid_secret => InvalidSecret,
+    invalid_account => InvalidAccount,
+    account_base_url_required => AccountBaseUrlRequired,
+    account_secret_required => AccountSecretRequired,
+    account_username_required => AccountUsernameRequired,
+    account_sender_required => AccountSenderRequired,
+    unauthorized => Unauthorized,
+    not_found => NotFound,
+    provider_unavailable => ProviderUnavailable,
+    conflict => Conflict,
 }
 
 impl From<ValidationError> for RuntimeError {

@@ -76,32 +76,16 @@ fn message_pushed(result: Result<MutationOutcome, GatewayError>) -> Result<Pushe
 /// changes) — the settle write reuses the sync write path for one record.
 fn upsert_message_batch(record: MessageRecord) -> SyncBatch {
     SyncBatch {
-        mailboxes: Vec::new(),
         messages: vec![record],
-        imap_mailbox_states: Vec::new(),
-        imap_message_locations: Vec::new(),
-        deleted_imap_message_locations: Vec::new(),
-        deleted_mailbox_ids: Vec::new(),
-        deleted_message_ids: Vec::new(),
-        replace_all_mailboxes: false,
-        replace_all_messages: false,
-        cursors: Vec::new(),
+        ..SyncBatch::default()
     }
 }
 
 /// A single-message delete batch (the readback folded to removed).
 fn delete_message_batch(message_id: &MessageId) -> SyncBatch {
     SyncBatch {
-        mailboxes: Vec::new(),
-        messages: Vec::new(),
-        imap_mailbox_states: Vec::new(),
-        imap_message_locations: Vec::new(),
-        deleted_imap_message_locations: Vec::new(),
-        deleted_mailbox_ids: Vec::new(),
         deleted_message_ids: vec![message_id.clone()],
-        replace_all_mailboxes: false,
-        replace_all_messages: false,
-        cursors: Vec::new(),
+        ..SyncBatch::default()
     }
 }
 
@@ -267,11 +251,7 @@ impl MailService {
         account_id: &AccountId,
         request: SendMessageRequest,
     ) -> Result<Operation, ServiceError> {
-        let payload = serde_json::to_value(request).map_err(|error| {
-            ServiceError::from(GatewayError::Rejected(format!(
-                "failed to serialize send request: {error}"
-            )))
-        })?;
+        let payload = encode_payload(request, "send request")?;
         self.queue_operation(
             account_id,
             OperationEntity {
@@ -328,11 +308,7 @@ impl MailService {
                 (key.clone(), kind)
             }
         };
-        let payload = serde_json::to_value(request).map_err(|error| {
-            ServiceError::from(GatewayError::Rejected(format!(
-                "failed to serialize draft request: {error}"
-            )))
-        })?;
+        let payload = encode_payload(request, "draft request")?;
         self.queue_operation(
             account_id,
             OperationEntity {
@@ -751,11 +727,7 @@ impl MailService {
                     .unwrap_or(operation.entity.id.as_str()),
             )),
         };
-        let payload = serde_json::to_value(settlement).map_err(|error| {
-            ServiceError::from(GatewayError::Rejected(format!(
-                "failed to serialize operation settlement: {error}"
-            )))
-        })?;
+        let payload = encode_payload(settlement, "operation settlement")?;
         self.events
             .append_event(
                 account_id,
@@ -783,11 +755,7 @@ fn merge_set_keywords(
     newer: &serde_json::Value,
 ) -> Result<serde_json::Value, ServiceError> {
     let parse = |value: &serde_json::Value| {
-        serde_json::from_value::<SetKeywordsCommand>(value.clone()).map_err(|error| {
-            ServiceError::from(GatewayError::Rejected(format!(
-                "invalid setKeywords payload to coalesce: {error}"
-            )))
-        })
+        decode_payload::<SetKeywordsCommand>(value.clone(), "setKeywords payload to coalesce")
     };
     let older = parse(older)?;
     let newer = parse(newer)?;
@@ -811,9 +779,5 @@ fn merge_set_keywords(
         .collect();
     remove.sort();
     remove.dedup();
-    serde_json::to_value(SetKeywordsCommand { add, remove }).map_err(|error| {
-        ServiceError::from(GatewayError::Rejected(format!(
-            "failed to serialize merged setKeywords: {error}"
-        )))
-    })
+    encode_payload(SetKeywordsCommand { add, remove }, "merged setKeywords")
 }

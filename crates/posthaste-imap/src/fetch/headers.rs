@@ -1,48 +1,11 @@
 use super::items::{fetch_item_names, fetched_header_from_items_with_metadata};
 use super::*;
 
-pub async fn fetch_mailbox_header_records(
-    config: &ImapConnectionConfig,
-    mailbox_name: &str,
-    updated_at: String,
-) -> Result<Vec<ImapMappedHeader>, ImapAdapterError> {
-    Ok(
-        fetch_mailbox_header_snapshot(config, mailbox_name, updated_at)
-            .await?
-            .headers,
-    )
-}
-
 /// Fetch selected mailbox state plus header-level records for every message in
 /// one IMAP mailbox.
 ///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
 /// @spec docs/L1-sync#body-lazy
-pub async fn fetch_mailbox_header_snapshot(
-    config: &ImapConnectionConfig,
-    mailbox_name: &str,
-    updated_at: String,
-) -> Result<ImapMailboxHeaderSnapshot, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    client.refresh_capabilities().await?;
-    let capabilities = normalize_imap_capabilities(
-        client
-            .state
-            .capabilities_iter()
-            .map(std::string::ToString::to_string),
-    );
-    let fetch_modseq = capabilities.supports_condstore();
-    let fetch_gmail_metadata = capabilities.supports_gmail_extensions();
-    fetch_mailbox_header_snapshot_with_client(
-        &mut client,
-        mailbox_name,
-        fetch_modseq,
-        fetch_gmail_metadata,
-        updated_at,
-    )
-    .await
-}
-
 pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
     client: &mut ImapClient,
     mailbox_name: &str,
@@ -86,33 +49,6 @@ pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
 ///
 /// @spec docs/L0-providers#imap-delta-fallback
 /// @spec docs/L1-sync#body-lazy
-pub async fn fetch_mailbox_headers_after_uid(
-    config: &ImapConnectionConfig,
-    mailbox_name: &str,
-    after_uid: ImapUid,
-    updated_at: String,
-) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    client.refresh_capabilities().await?;
-    let capabilities = normalize_imap_capabilities(
-        client
-            .state
-            .capabilities_iter()
-            .map(std::string::ToString::to_string),
-    );
-    let fetch_modseq = capabilities.supports_condstore();
-    let fetch_gmail_metadata = capabilities.supports_gmail_extensions();
-    fetch_mailbox_headers_after_uid_with_client(
-        &mut client,
-        mailbox_name,
-        after_uid,
-        fetch_modseq,
-        fetch_gmail_metadata,
-        updated_at,
-    )
-    .await
-}
-
 pub(crate) async fn fetch_mailbox_headers_after_uid_with_client(
     client: &mut ImapClient,
     mailbox_name: &str,
