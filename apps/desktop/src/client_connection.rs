@@ -164,6 +164,59 @@ pub fn request_factory_reset() -> Result<(), String> {
     Ok(())
 }
 
+/// Sanitized runtime info for the "Copy diagnostics" support bundle: the app
+/// version, OS/arch, and the daemon log directory path. No secrets, message
+/// bodies, or account data cross this boundary — account status is gathered
+/// renderer-side from the accounts query.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsInfo {
+    pub app_version: String,
+    pub os: String,
+    pub arch: String,
+    pub log_dir_path: Option<String>,
+}
+
+/// Return sanitized runtime info for the diagnostics bundle.
+#[tauri::command]
+pub fn get_diagnostics_info<R: Runtime>(app: AppHandle<R>) -> Result<DiagnosticsInfo, String> {
+    let log_dir_path =
+        daemon_state_root().map(|root| root.join("logs").to_string_lossy().into_owned());
+    Ok(DiagnosticsInfo {
+        app_version: app.package_info().version.to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        log_dir_path,
+    })
+}
+
+/// Open the daemon log directory in the OS file manager so the user can attach
+/// the JSONL logs to a bug report. Best-effort: a missing directory is created;
+/// an open failure returns an error string the renderer toasts.
+#[tauri::command]
+pub fn reveal_log_folder() -> Result<(), String> {
+    let Some(state_root) = daemon_state_root() else {
+        return Err("cannot resolve the Posthaste data directory".to_string());
+    };
+    let log_dir = state_root.join("logs");
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir)
+            .map_err(|err| format!("cannot create {}: {err}", log_dir.display()))?;
+    }
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(program)
+        .arg(&log_dir)
+        .spawn()
+        .map_err(|err| format!("cannot open {}: {err}", log_dir.display()))?;
+    Ok(())
+}
+
 /// If a factory reset was requested, perform it before the embedded server
 /// starts (so nothing holds the files open) and return `true`. Best-effort: a
 /// partial wipe must not block launch. Call once at startup, before the server.
