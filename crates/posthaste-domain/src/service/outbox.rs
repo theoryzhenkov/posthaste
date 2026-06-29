@@ -76,32 +76,16 @@ fn message_pushed(result: Result<MutationOutcome, GatewayError>) -> Result<Pushe
 /// changes) — the settle write reuses the sync write path for one record.
 fn upsert_message_batch(record: MessageRecord) -> SyncBatch {
     SyncBatch {
-        mailboxes: Vec::new(),
         messages: vec![record],
-        imap_mailbox_states: Vec::new(),
-        imap_message_locations: Vec::new(),
-        deleted_imap_message_locations: Vec::new(),
-        deleted_mailbox_ids: Vec::new(),
-        deleted_message_ids: Vec::new(),
-        replace_all_mailboxes: false,
-        replace_all_messages: false,
-        cursors: Vec::new(),
+        ..SyncBatch::default()
     }
 }
 
 /// A single-message delete batch (the readback folded to removed).
 fn delete_message_batch(message_id: &MessageId) -> SyncBatch {
     SyncBatch {
-        mailboxes: Vec::new(),
-        messages: Vec::new(),
-        imap_mailbox_states: Vec::new(),
-        imap_message_locations: Vec::new(),
-        deleted_imap_message_locations: Vec::new(),
-        deleted_mailbox_ids: Vec::new(),
         deleted_message_ids: vec![message_id.clone()],
-        replace_all_mailboxes: false,
-        replace_all_messages: false,
-        cursors: Vec::new(),
+        ..SyncBatch::default()
     }
 }
 
