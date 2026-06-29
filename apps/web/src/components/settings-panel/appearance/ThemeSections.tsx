@@ -1,11 +1,13 @@
-import { Check, Paintbrush } from 'lucide-react'
+import { Check } from 'lucide-react'
 
 import {
   accentColor,
-  palettePresetIds,
-  palettePresets,
+  builtInThemeIds,
+  builtInThemes,
+  resolvedThemeModes,
   themeModes,
   uiDensities,
+  type ResolvedThemeMode,
 } from '@/design'
 import { cn } from '@/lib/utils'
 import type { useDesignTheme } from '@/hooks/useDesignTheme'
@@ -14,25 +16,30 @@ import { SettingsSection } from '../shared'
 import {
   densityLabels,
   hueGradient,
-  paletteSwatches,
   themeModeIcons,
   themeModeLabels,
+  themeSwatches,
 } from './constants'
 
 type DesignTheme = ReturnType<typeof useDesignTheme>
 
-export function ThemePresetSection({ theme }: { theme: DesignTheme }) {
+const modeLabels: Record<ResolvedThemeMode, string> = {
+  light: 'Light',
+  dark: 'Dark',
+}
+
+export function ThemeSection({ theme }: { theme: DesignTheme }) {
   return (
     <SettingsSection title="Theme">
       <div className="grid gap-2 sm:grid-cols-2">
-        {palettePresetIds.map((presetId) => {
-          const preset = palettePresets[presetId]
-          const isActive = theme.palettePreset === presetId
+        {builtInThemeIds.map((themeId) => {
+          const definition = builtInThemes[themeId]
+          const isActive = theme.theme === themeId
           return (
             <button
-              key={presetId}
+              key={themeId}
               type="button"
-              onClick={() => theme.setPalettePreset(presetId)}
+              onClick={() => theme.setTheme(themeId)}
               className={cn(
                 'ph-focus-ring flex min-h-[74px] items-center gap-3 rounded-lg border bg-bg-elev/45 px-3 py-3 text-left transition-colors',
                 isActive
@@ -41,7 +48,7 @@ export function ThemePresetSection({ theme }: { theme: DesignTheme }) {
               )}
             >
               <span className="flex h-10 w-14 shrink-0 overflow-hidden rounded-md border border-border-soft bg-background">
-                {paletteSwatches[presetId].map((color) => (
+                {themeSwatches[themeId].map((color) => (
                   <span
                     key={color}
                     className="min-w-0 flex-1"
@@ -51,10 +58,10 @@ export function ThemePresetSection({ theme }: { theme: DesignTheme }) {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[13px] font-medium text-foreground">
-                  {preset.label}
+                  {definition.label}
                 </span>
                 <span className="mt-0.5 block text-[12px] leading-5 text-muted-foreground">
-                  {preset.description}
+                  {definition.description}
                 </span>
               </span>
               {isActive && (
@@ -72,47 +79,62 @@ export function ThemePresetSection({ theme }: { theme: DesignTheme }) {
   )
 }
 
-export function AccentSection({ theme }: { theme: DesignTheme }) {
-  const activeAccent = accentColor(theme.accentHue)
+function AccentModeRow({
+  mode,
+  hue,
+  onChange,
+}: {
+  mode: ResolvedThemeMode
+  hue: number
+  onChange: (hue: number) => void
+}) {
   return (
-    <SettingsSection title="Accent">
-      <div className="flex min-h-[72px] flex-col gap-4">
-        <div className="flex items-center gap-3">
-          <span
-            className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border-soft shadow-[var(--shadow-pane)]"
-            style={{ backgroundColor: activeAccent }}
-          >
-            <Paintbrush
-              size={17}
-              strokeWidth={1.7}
-              className="text-primary-foreground"
-            />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium text-foreground">App color</p>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              Hue is adjustable; contrast and saturation stay within the app
-              range.
-            </p>
-          </div>
-          <span className="font-mono text-[11px] text-muted-foreground">
-            {theme.accentHue}°
-          </span>
-        </div>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        <span
+          className="size-7 shrink-0 rounded-md border border-border-soft shadow-[var(--shadow-pane)]"
+          style={{ backgroundColor: accentColor(hue) }}
+        />
+        <span className="flex-1 text-[12px] font-medium text-foreground">
+          {modeLabels[mode]}
+        </span>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {hue}°
+        </span>
+      </div>
+      <label className="block">
+        <span className="sr-only">{modeLabels[mode]} accent hue</span>
+        <input
+          type="range"
+          min={0}
+          max={359}
+          step={1}
+          value={hue}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className="ph-hue-range h-4 w-full cursor-pointer appearance-none rounded-full border border-border-soft bg-transparent accent-primary"
+          style={{ background: hueGradient }}
+        />
+      </label>
+    </div>
+  )
+}
 
-        <label className="block">
-          <span className="sr-only">Accent hue</span>
-          <input
-            type="range"
-            min={0}
-            max={359}
-            step={1}
-            value={theme.accentHue}
-            onChange={(event) => theme.setAccentHue(Number(event.target.value))}
-            className="ph-hue-range h-4 w-full cursor-pointer appearance-none rounded-full border border-border-soft bg-transparent accent-primary"
-            style={{ background: hueGradient }}
+export function AccentSection({ theme }: { theme: DesignTheme }) {
+  return (
+    <SettingsSection title="Accent color">
+      <div className="flex flex-col gap-4">
+        <p className="text-[12px] leading-5 text-muted-foreground">
+          The interactive/brand hue, set independently for light and dark mode.
+          Contrast and saturation stay within the app range.
+        </p>
+        {resolvedThemeModes.map((mode) => (
+          <AccentModeRow
+            key={mode}
+            mode={mode}
+            hue={theme[mode].accentHue}
+            onChange={(hue) => theme.setAccentHue(mode, hue)}
           />
-        </label>
+        ))}
       </div>
     </SettingsSection>
   )

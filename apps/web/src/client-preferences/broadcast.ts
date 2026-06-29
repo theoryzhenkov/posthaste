@@ -1,5 +1,4 @@
 import {
-  isPalettePresetId,
   isThemeMode,
   isUiDensity,
   normalizeGlassThemeParameters,
@@ -23,24 +22,25 @@ function parseAppearancePreferences(
   if (!isRecord(value)) {
     return null
   }
-  const { accentHue, density, glassTheme, mode, palettePreset } = value
+  const { density, glassTheme, light, dark, mode, theme } = value
   if (
-    typeof accentHue !== 'number' ||
     typeof density !== 'string' ||
     !isUiDensity(density) ||
     typeof mode !== 'string' ||
     !isThemeMode(mode) ||
-    typeof palettePreset !== 'string' ||
-    !isPalettePresetId(palettePreset)
+    typeof theme !== 'string' ||
+    !isRecord(light) ||
+    !isRecord(dark)
   ) {
     return null
   }
   return normalizeAppearancePreferences({
-    accentHue,
     density,
     glassTheme: normalizeGlassThemeParameters(glassTheme),
+    light: light as unknown as DesignThemePreferences['light'],
+    dark: dark as unknown as DesignThemePreferences['dark'],
     mode,
-    palettePreset,
+    theme,
   })
 }
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'bun:test'
 
 import {
   defaultAccentHue,
-  defaultPalettePresetId,
+  defaultSurfaceHue,
+  defaultThemeId,
   defaultThemeMode,
   defaultUiDensity,
   defaultGlassThemeParameters,
@@ -17,9 +18,16 @@ describe('default theme preferences', () => {
     const preferences = defaultThemePreferences()
 
     expect(preferences.mode).toBe(defaultThemeMode)
-    expect(preferences.palettePreset).toBe(defaultPalettePresetId)
+    expect(preferences.theme).toBe(defaultThemeId)
     expect(preferences.density).toBe(defaultUiDensity)
-    expect(preferences.accentHue).toBe(defaultAccentHue)
+    expect(preferences.light).toEqual({
+      accentHue: defaultAccentHue,
+      surfaceHue: defaultSurfaceHue,
+    })
+    expect(preferences.dark).toEqual({
+      accentHue: defaultAccentHue,
+      surfaceHue: defaultSurfaceHue,
+    })
     expect(preferences.glassTheme.blooms.length).toBe(
       defaultGlassThemeParameters.blooms.length,
     )

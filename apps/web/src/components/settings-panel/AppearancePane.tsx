@@ -6,7 +6,7 @@ import {
   AccentSection,
   DensitySection,
   ModeSection,
-  ThemePresetSection,
+  ThemeSection,
 } from './appearance/ThemeSections'
 
 export function AppearancePane() {
@@ -20,9 +20,9 @@ export function AppearancePane() {
       />
 
       <div>
-        <ThemePresetSection theme={theme} />
+        <ThemeSection theme={theme} />
         <AccentSection theme={theme} />
-        {theme.palettePreset === 'glass' && <GlassMeshEditor />}
+        {theme.theme === 'glass' && <GlassMeshEditor />}
         <ModeSection theme={theme} />
         <DensitySection theme={theme} />
       </div>
