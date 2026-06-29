@@ -15,7 +15,7 @@ use crate::{
     OperationOutboxStore, OperationOutcome, OperationSettlement, OperationState, Recipient,
     ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
     SharedConfigRepository, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxStore,
-    SmartMailboxSummary, SortDirection, SourceDataStore, SourceProjectionStore, StoreError,
+    SmartMailboxSummary, SnoozeStore, SortDirection, SourceDataStore, SourceProjectionStore, StoreError,
     SyncMode, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore, TagSummary,
     ThreadId, ThreadView, EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_OPERATION_SETTLED,
     EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
@@ -59,6 +59,7 @@ pub struct MailService {
     source_data: Arc<dyn SourceDataStore>,
     cache_store: Arc<dyn CacheStore>,
     automation_backfills: Arc<dyn AutomationBackfillStore>,
+    snooze_reader: Arc<dyn SnoozeStore>,
     outbox: Arc<dyn OperationOutboxStore>,
 }
 
@@ -85,6 +86,7 @@ impl MailService {
             source_data: store.clone(),
             cache_store: store.clone(),
             automation_backfills: store.clone(),
+            snooze_reader: store.clone(),
             outbox: store,
         }
     }
