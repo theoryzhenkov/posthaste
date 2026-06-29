@@ -12,11 +12,15 @@ import {
   type ThemeMode,
   type UiDensity,
 } from '@/design'
+import { queryClient } from '@/app/queryClient'
 import {
   clientPreferencesStore,
   type ClientPreferencesStore,
 } from '@/clientPreferences'
+import { designToWireAppearance } from '@/client-preferences/wireMapping'
 import type { DesignThemePreferences } from '@/themeSettings'
+import { queryKeys } from '@/queryKeys'
+import { runtimeMutations } from '@/runtime/mutations'
 import {
   useCallback,
   useEffect,
@@ -25,6 +29,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { toast } from 'sonner'
 import {
   DesignThemeContext,
   type DesignThemeContextValue,
@@ -38,11 +43,20 @@ interface DesignThemeProviderProps {
    * shared cross-window-sync state.
    */
   store?: ClientPreferencesStore
+  /**
+   * Write appearance changes through to TOML (PATCH /v1/settings) — the single
+   * source of truth. Off in tests (which exercise the localStorage cache in
+   * isolation); on in the app via the AppearanceSettingsSync bridge.
+   *
+   * @spec docs/eph/DESIGN-L2-appearance-toml
+   */
+  writeThrough?: boolean
 }
 
 export function DesignThemeProvider({
   children,
   store = clientPreferencesStore,
+  writeThrough = false,
 }: DesignThemeProviderProps) {
   const { appearance: preferences } = useSyncExternalStore(
     store.subscribe,
@@ -95,9 +109,27 @@ export function DesignThemeProvider({
 
   const updatePreferences = useCallback(
     (updater: (current: DesignThemePreferences) => DesignThemePreferences) => {
-      store.updateAppearance(updater)
+      if (!writeThrough) {
+        store.updateAppearance(updater)
+        return
+      }
+      // Write-through (Option A): optimistically apply to the localStorage
+      // cache (instant UI, no flash) + PATCH TOML (source of truth). Roll back
+      // on failure so the cache never diverges from what persisted.
+      const current = store.getSnapshot().appearance
+      const next = updater(current)
+      store.setAppearance(next)
+      void runtimeMutations.settings
+        .patch({ appearance: designToWireAppearance(next) })
+        .then((updated) => {
+          queryClient.setQueryData(queryKeys.settings, updated)
+        })
+        .catch(() => {
+          store.setAppearance(current)
+          toast.error('Appearance change could not be saved.')
+        })
     },
-    [store],
+    [store, writeThrough],
   )
 
   const setAccentHue = useCallback(

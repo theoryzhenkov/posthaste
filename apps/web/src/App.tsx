@@ -23,6 +23,7 @@ import { isDeveloperToolsEnabled } from './developerTools'
 import { useAccountsView } from './hooks/useAccountsView'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import { useDesktopUpdates } from './hooks/useDesktopUpdates'
+import { AppearanceSettingsSync } from './hooks/useAppearanceSettingsSync'
 import { useSurfaceRouteState } from './hooks/useSurfaceRouting'
 
 function DaemonEventBridge() {
@@ -81,7 +82,8 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <DesignThemeProvider>
+      <DesignThemeProvider writeThrough>
+        <AppearanceSettingsSync />
         <ActiveConnectionProvider>
           <DaemonEventBridge
             key={isStandaloneSurface ? 'standalone' : 'mail'}
