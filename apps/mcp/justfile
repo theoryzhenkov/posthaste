@@ -34,6 +34,15 @@ cli *args:
 build-cli:
     bun --cwd=apps/mcp run build:cli
 
+# Cross-compile the standalone posthastectl binary for a bun target.
+# Usage: just mcp build-cli-target bun-darwin-arm64 [outfile]
+# target: bun-linux-x64 | bun-linux-arm64 | bun-darwin-x64 | bun-darwin-arm64 | bun-windows-x64
+# outfile: optional, repo-root-relative or absolute; defaults to
+#   apps/mcp/dist/posthastectl-<os>-<arch>. Bun appends .exe for windows targets;
+#   the build script prints the final artifact path as its last line of stdout.
+build-cli-target target outfile='':
+    bun run apps/mcp/scripts/build-cli.ts -- {{ target }} {{ outfile }}
+
 # Regenerate the typed API schema from openapi.json
 api-generate:
     bun --cwd=apps/mcp run api:generate
