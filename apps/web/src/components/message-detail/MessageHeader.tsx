@@ -1,6 +1,7 @@
-import type { MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import {
   Archive,
+  Clock,
   Ellipsis,
   Forward,
   Paperclip,
@@ -15,6 +16,8 @@ import type { MessageDetail, MessageSummary } from '@/api/types'
 
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
+import { snoozePresets } from './snoozePresets'
 import {
   formatAbsoluteDate,
   formatRecipientEmailList,
@@ -31,6 +34,7 @@ export function MessageHeader({
   onReply,
   onReplyAll,
   onSearch,
+  onSnooze,
   threadMessages,
 }: {
   conversationSubject: string | null | undefined
@@ -41,6 +45,7 @@ export function MessageHeader({
   onReply: () => void
   onReplyAll: () => void
   onSearch?: (query: string, append?: boolean) => void
+  onSnooze: (until: number) => void
   threadMessages: MessageSummary[]
 }) {
   const isDraft = message.keywords.includes(SYSTEM_KEYWORDS.Draft)
@@ -87,6 +92,7 @@ export function MessageHeader({
               onForward={onForward}
               onReply={onReply}
               onReplyAll={onReplyAll}
+              onSnooze={onSnooze}
             />
           </div>
           <MessageTagRow
@@ -141,6 +147,7 @@ function HeaderActions({
   onForward,
   onReply,
   onReplyAll,
+  onSnooze,
 }: {
   isDraft: boolean
   onArchive: () => void
@@ -148,7 +155,9 @@ function HeaderActions({
   onForward: () => void
   onReply: () => void
   onReplyAll: () => void
+  onSnooze: (until: number) => void
 }) {
+  const [snoozeOpen, setSnoozeOpen] = useState(false)
   if (isDraft && onEditDraft) {
     return (
       <div className="flex shrink-0 items-center gap-1">
@@ -210,6 +219,36 @@ function HeaderActions({
       >
         <Archive size={14} strokeWidth={1.6} />
       </Button>
+      <Popover open={snoozeOpen} onOpenChange={setSnoozeOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            aria-label="Snooze"
+            size="icon-sm"
+            title="Snooze"
+            type="button"
+            variant="ghost"
+          >
+            <Clock size={14} strokeWidth={1.6} />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-44">
+          {snoozePresets().map((preset) => (
+            <Button
+              key={preset.label}
+              className="w-full justify-start"
+              onClick={() => {
+                onSnooze(preset.until)
+                setSnoozeOpen(false)
+              }}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </PopoverContent>
+      </Popover>
       <Button disabled size="icon-sm" type="button" variant="ghost">
         <Ellipsis size={14} strokeWidth={1.6} />
       </Button>

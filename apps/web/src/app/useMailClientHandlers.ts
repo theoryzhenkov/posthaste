@@ -94,6 +94,14 @@ export function useMailClientHandlers(input: {
       actions.trash(selectedMessage)
     }
   }, [actions, selectedMessage])
+  const handleSnooze = useCallback(
+    (until: number) => {
+      if (selectedMessage) {
+        actions.snooze(selectedMessage, until)
+      }
+    },
+    [actions, selectedMessage],
+  )
 
   return {
     closeCompose: compose.closeCompose,
@@ -167,5 +175,6 @@ export function useMailClientHandlers(input: {
     handleToggleSettings: () => toggleSettingsSurface({ effectiveSurface }),
     handleToggleShortcuts: () => setShowShortcuts((prev) => !prev),
     handleTrash,
+    handleSnooze,
   }
 }
