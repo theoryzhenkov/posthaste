@@ -4491,6 +4491,17 @@
         "type": "object",
         "description": "Global application settings shared across all accounts.\n\n@spec docs/L1-accounts#toml-schema",
         "properties": {
+          "appearance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Appearance",
+                "description": "UI appearance/theme prefs (TOML source of truth; renderer mirrors for boot).\n\n@spec docs/eph/DESIGN-L2-appearance-toml"
+              }
+            ]
+          },
           "automationDrafts": {
             "type": "array",
             "items": {
@@ -4513,6 +4524,60 @@
               },
               {
                 "$ref": "#/components/schemas/AccountId"
+              }
+            ]
+          }
+        }
+      },
+      "Appearance": {
+        "type": "object",
+        "description": "App-level appearance/theme preferences — the renderer's visual settings,\nstored in `[appearance]` of `app.toml` as the single source of truth (moved\nout of the opaque `localStorage` \"client-preferences\" snapshot).\n\nThe backend treats appearance as **pass-through storage**: it does not\ninterpret theme values (the renderer applies them). The enums give the\nOpenAPI schema self-documentation and reject typos at the parse boundary.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "properties": {
+          "accentHue": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "density": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UiDensity"
+              }
+            ]
+          },
+          "glassTheme": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GlassTheme"
+              }
+            ]
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ThemeMode"
+              }
+            ]
+          },
+          "palettePreset": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PalettePresetId"
               }
             ]
           }
@@ -5242,6 +5307,59 @@
           }
         }
       },
+      "GlassBloom": {
+        "type": "object",
+        "description": "One decorative bloom in a [`GlassTheme`].\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "required": [
+          "id",
+          "hue",
+          "x",
+          "y",
+          "opacity",
+          "radius"
+        ],
+        "properties": {
+          "hue": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "opacity": {
+            "type": "number",
+            "format": "double"
+          },
+          "radius": {
+            "type": "number",
+            "format": "double"
+          },
+          "x": {
+            "type": "number",
+            "format": "double"
+          },
+          "y": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "GlassTheme": {
+        "type": "object",
+        "description": "Advanced glass-theme parameters: a set of decorative \"blooms\" rendered as the\nbackground. Pass-through storage; the renderer normalizes/clamps values.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "required": [
+          "blooms"
+        ],
+        "properties": {
+          "blooms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GlassBloom"
+            }
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "description": "Product API readiness response.\n\n@spec docs/L1-api#health",
@@ -5940,6 +6058,19 @@
           "failed"
         ]
       },
+      "PalettePresetId": {
+        "type": "string",
+        "description": "Palette preset identifier (the renderer resolves these to concrete palettes).\nMatches the renderer's `PalettePresetId` set; extend both together when a\npreset is added.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "enum": [
+          "neutral",
+          "paperInk",
+          "brutalist",
+          "glass",
+          "acid",
+          "marzipan",
+          "botanical"
+        ]
+      },
       "PatchAccountRequest": {
         "type": "object",
         "description": "Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.\n\n@spec docs/L1-api#account-crud-lifecycle",
@@ -6029,6 +6160,16 @@
         "type": "object",
         "description": "Request body for `PATCH /v1/settings`.\n\n@spec docs/L1-api#settings",
         "properties": {
+          "appearance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Appearance"
+              }
+            ]
+          },
           "automationDrafts": {
             "type": [
               "array",
@@ -7510,6 +7651,15 @@
           }
         }
       },
+      "ThemeMode": {
+        "type": "string",
+        "description": "Theme mode: light, dark, or follow the OS preference.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "enum": [
+          "light",
+          "dark",
+          "system"
+        ]
+      },
       "ThreadId": {
         "type": "string",
         "description": "Opaque server-assigned identifier for a JMAP thread.\n\n@spec docs/L1-jmap#core-types"
@@ -7552,6 +7702,15 @@
             "type": "boolean"
           }
         }
+      },
+      "UiDensity": {
+        "type": "string",
+        "description": "UI density (information density of the layout).\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "enum": [
+          "compact",
+          "cozy",
+          "comfortable"
+        ]
       },
       "VerificationResponse": {
         "type": "object",

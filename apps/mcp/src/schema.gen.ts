@@ -1311,10 +1311,30 @@ export interface components {
          *     @spec docs/L1-accounts#toml-schema
          */
         AppSettings: {
+            appearance?: null | components["schemas"]["Appearance"];
             automationDrafts?: components["schemas"]["AutomationRule"][];
             automationRules?: components["schemas"]["AutomationRule"][];
             cachePolicy?: components["schemas"]["CachePolicy"];
             defaultAccountId?: null | components["schemas"]["AccountId"];
+        };
+        /**
+         * @description App-level appearance/theme preferences — the renderer's visual settings,
+         *     stored in `[appearance]` of `app.toml` as the single source of truth (moved
+         *     out of the opaque `localStorage` "client-preferences" snapshot).
+         *
+         *     The backend treats appearance as **pass-through storage**: it does not
+         *     interpret theme values (the renderer applies them). The enums give the
+         *     OpenAPI schema self-documentation and reject typos at the parse boundary.
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         */
+        Appearance: {
+            /** Format: int32 */
+            accentHue?: number | null;
+            density?: null | components["schemas"]["UiDensity"];
+            glassTheme?: null | components["schemas"]["GlassTheme"];
+            mode?: null | components["schemas"]["ThemeMode"];
+            palettePreset?: null | components["schemas"]["PalettePresetId"];
         };
         /**
          * @description Supported effects for automation rules.
@@ -1602,6 +1622,33 @@ export interface components {
         ExtendRuntimeSessionViewRequest: {
             /** @description Number of additional rows to grow the view's window by. */
             count: number;
+        };
+        /**
+         * @description One decorative bloom in a [`GlassTheme`].
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         */
+        GlassBloom: {
+            /** Format: int32 */
+            hue: number;
+            id: string;
+            /** Format: double */
+            opacity: number;
+            /** Format: double */
+            radius: number;
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        };
+        /**
+         * @description Advanced glass-theme parameters: a set of decorative "blooms" rendered as the
+         *     background. Pass-through storage; the renderer normalizes/clamps values.
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         */
+        GlassTheme: {
+            blooms: components["schemas"]["GlassBloom"][];
         };
         /**
          * @description Product API readiness response.
@@ -1910,6 +1957,15 @@ export interface components {
          */
         OperationState: "pending" | "inflight" | "applied" | "failed";
         /**
+         * @description Palette preset identifier (the renderer resolves these to concrete palettes).
+         *     Matches the renderer's `PalettePresetId` set; extend both together when a
+         *     preset is added.
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         * @enum {string}
+         */
+        PalettePresetId: "neutral" | "paperInk" | "brutalist" | "glass" | "acid" | "marzipan" | "botanical";
+        /**
          * @description Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
          *
          *     @spec docs/L1-api#account-crud-lifecycle
@@ -1940,6 +1996,7 @@ export interface components {
          *     @spec docs/L1-api#settings
          */
         PatchSettingsRequest: {
+            appearance?: null | components["schemas"]["Appearance"];
             automationDrafts?: components["schemas"]["AutomationRule"][] | null;
             automationRules?: components["schemas"]["AutomationRule"][] | null;
             cachePolicy?: null | components["schemas"]["CachePolicy"];
@@ -2090,6 +2147,13 @@ export interface components {
              */
             forwardedBody?: string | null;
             inReplyTo?: string | null;
+            /**
+             * @description The original `To` recipients of the source message. `to` holds the
+             *     derived reply recipient (the original `From`); `original_to` lets a
+             *     client build a reply-all recipient set (original `From` + `To` + `Cc`,
+             *     minus self) without a second fetch.
+             */
+            originalTo: components["schemas"]["Recipient"][];
             quotedBody?: string | null;
             references?: string | null;
             replySubject: string;
@@ -2513,6 +2577,13 @@ export interface components {
             unreadMessages: number;
         };
         /**
+         * @description Theme mode: light, dark, or follow the OS preference.
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         * @enum {string}
+         */
+        ThemeMode: "light" | "dark" | "system";
+        /**
          * @description Opaque server-assigned identifier for a JMAP thread.
          *
          *     @spec docs/L1-jmap#core-types
@@ -2543,6 +2614,13 @@ export interface components {
             mode: string;
             ok: boolean;
         };
+        /**
+         * @description UI density (information density of the layout).
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         * @enum {string}
+         */
+        UiDensity: "compact" | "cozy" | "comfortable";
         /**
          * @description Response from `POST /v1/accounts/{id}/verify`.
          *
