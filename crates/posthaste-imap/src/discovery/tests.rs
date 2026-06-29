@@ -266,21 +266,21 @@ async fn spawn_mock_gmail_imap() -> std::net::SocketAddr {
     addr
 }
 
-/// Encode one Gmail-shaped FETCH response via `imap-codec`: UID + RFC822.SIZE +
-/// RFC822.HEADER (literal) + X-GM-MSGID + X-GM-THRID + X-GM-LABELS.
-/// The real `imap-client` decodes this and posthaste's parse extracts the Gmail
-/// labels. (BodyStructure/Flags omitted -- the parse defaults them.) MODSEQ is
-/// omitted too: the fork's encoder emits `MODSEQ <v>` but its decoder expects
-/// `MODSEQ (<v>)` -- a fork encode/decode mismatch to fix before delta sync
-/// (increment 3). This is where the forked `imap-codec` earns its keep: the
-/// literal + label-list encoding is error-prone by hand.
+/// Encode one Gmail-shaped FETCH response via `imap-codec`: UID + MODSEQ +
+/// RFC822.SIZE + RFC822.HEADER (literal) + X-GM-MSGID + X-GM-THRID +
+/// X-GM-LABELS. The real `imap-client` decodes this and posthaste's parse
+/// extracts the Gmail labels. (BodyStructure/Flags omitted -- the parse
+/// defaults them.) MODSEQ is now included: the fork encodes it as the
+/// parenthesized RFC 7162 form `MODSEQ (<v>)` that its decoder expects, so it
+/// round-trips through the real client. This is where the forked `imap-codec`
+/// earns its keep: the literal + label-list encoding is error-prone by hand.
 fn encode_gmail_fetch_response() -> Vec<u8> {
     use imap_client::imap_types::core::{IString, Literal, NString, Text, Vec1};
     use imap_client::imap_types::fetch::MessageDataItem;
     use imap_client::imap_types::response::{Data, Response};
     use imap_codec::encode::Encoder;
     use imap_codec::ResponseCodec;
-    use std::num::NonZeroU32;
+    use std::num::{NonZeroU32, NonZeroU64};
 
     let header_bytes =
         b"From: Alice <alice@example.test>\r\nSubject: Labels\r\nMessage-ID: <gmail-labels@example.test>\r\n\r\n";
@@ -289,6 +289,7 @@ fn encode_gmail_fetch_response() -> Vec<u8> {
     // bare, matching real Gmail). See `EncodeIntoContext for Text`.
     let items = Vec1::try_from(vec![
         MessageDataItem::Uid(NonZeroU32::new(1).unwrap()),
+        MessageDataItem::ModSeq(NonZeroU64::new(320162350).unwrap()),
         MessageDataItem::Rfc822Size(512),
         MessageDataItem::Rfc822Header(NString(Some(IString::Literal(
             Literal::try_from(header_bytes.to_vec()).expect("header literal"),
