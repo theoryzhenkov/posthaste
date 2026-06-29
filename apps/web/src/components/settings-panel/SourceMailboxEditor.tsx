@@ -11,8 +11,11 @@ import type {
   Mailbox,
 } from '../../api/types'
 import { isKnownMailboxRole, renderMailboxRoleIcon } from '../../mailboxRoles'
+import { accentColor } from '@/design'
+import { hueGradient } from './appearance/constants'
 import { SourceMailboxAutomationFields } from './AutomationActionsEditor'
 import { FeedbackBanner, SettingsPageHeader, SettingsSection } from './shared'
+import { useMailboxColorMutation } from './useMailboxColorMutation'
 import { useMailboxRoleMutation } from './useMailboxRoleMutation'
 import {
   Select,
@@ -50,6 +53,22 @@ export function SourceMailboxEditor({
   onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
 }) {
   const roleMutation = useMailboxRoleMutation(account.id, mailbox.id)
+  const colorMutation = useMailboxColorMutation()
+  const mailboxColors = settings?.mailboxColors ?? []
+  const colorHue = mailboxColors.find(
+    (entry) => entry.sourceId === account.id && entry.mailboxId === mailbox.id,
+  )?.hue
+  const setColorHue = (hue: number | null) => {
+    const without = mailboxColors.filter(
+      (entry) =>
+        !(entry.sourceId === account.id && entry.mailboxId === mailbox.id),
+    )
+    colorMutation.mutate(
+      hue == null
+        ? without
+        : [...without, { sourceId: account.id, mailboxId: mailbox.id, hue }],
+    )
+  }
   const hasUnknownRole = Boolean(
     mailbox.role && !isKnownMailboxRole(mailbox.role),
   )
@@ -111,6 +130,42 @@ export function SourceMailboxEditor({
             {roleMutation.error.message}
           </FeedbackBanner>
         )}
+      </SettingsSection>
+
+      <SettingsSection title="Sidebar color">
+        <div className="flex flex-col gap-3">
+          <p className="text-[12px] leading-5 text-muted-foreground">
+            Override this mailbox's sidebar color. Defaults to its role color.
+          </p>
+          <div className="flex items-center gap-3">
+            <span
+              className="size-7 shrink-0 rounded-md border border-border-soft"
+              style={{
+                backgroundColor: accentColor(colorHue ?? 0),
+                opacity: colorHue == null ? 0.3 : 1,
+              }}
+            />
+            <input
+              type="range"
+              min={0}
+              max={359}
+              step={1}
+              value={colorHue ?? 0}
+              onChange={(event) => setColorHue(Number(event.target.value))}
+              aria-label="Mailbox color hue"
+              className="ph-hue-range h-4 flex-1 cursor-pointer appearance-none rounded-full border border-border-soft bg-transparent accent-primary"
+              style={{ background: hueGradient }}
+            />
+            <button
+              type="button"
+              disabled={colorHue == null}
+              onClick={() => setColorHue(null)}
+              className="ph-focus-ring h-7 rounded-md border border-border-soft px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground disabled:opacity-35"
+            >
+              Default
+            </button>
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Actions">
