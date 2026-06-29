@@ -803,6 +803,40 @@ impl Backend {
         .await
     }
 
+    /// `message.snooze`: move to the Snoozed mailbox (the one with the `snooze`
+    /// role) + record the return time. Reuses `move_message_to_role` for the
+    /// provider move; the move's `replace_mailboxes_tx` invariant clears any
+    /// prior snooze row, then we insert the new one. Rejects if no mailbox has
+    /// the `snooze` role (the user must designate one via the role switch).
+    /// @spec docs/eph/DESIGN-L2-snooze
+    pub(crate) async fn snooze_message(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        until: i64,
+    ) -> Result<CommandAck, RuntimeError> {
+        let ack = self
+            .move_message_to_role(account_id.clone(), message_id.clone(), "snooze".to_string())
+            .await?;
+        self.store
+            .insert_snooze(&account_id, &message_id, until)
+            .map_err(store_error_to_runtime_error)?;
+        Ok(ack)
+    }
+
+    /// `message.unsnooze`: move a snoozed message back to the Inbox. The store
+    /// invariant (`replace_mailboxes_tx` clears the snooze row when a message
+    /// leaves the Snoozed mailbox) handles the return-time cleanup.
+    /// @spec docs/eph/DESIGN-L2-snooze
+    pub(crate) async fn unsnooze_message(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.move_message_to_role(account_id, message_id, "inbox".to_string())
+            .await
+    }
+
     /// Apply one named message mutation — the backend's up-channel handler. This
     /// is the dispatch from a transport-neutral named mutation
     /// (`message.setKeywords` / `message.moveToRole` / …) to the typed command,
@@ -887,6 +921,18 @@ impl Backend {
                     args.role,
                 )
                 .await
+            }
+            MessageMutation::Snooze(args) => {
+                self.snooze_message(
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    args.until,
+                )
+                .await
+            }
+            MessageMutation::Unsnooze(args) => {
+                self.unsnooze_message(AccountId(args.source_id), MessageId(args.message_id))
+                    .await
             }
             MessageMutation::Destroy(args) => {
                 self.destroy(AccountId(args.source_id), MessageId(args.message_id))

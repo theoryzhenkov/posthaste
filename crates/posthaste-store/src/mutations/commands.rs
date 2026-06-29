@@ -144,6 +144,14 @@ pub(crate) fn replace_mailboxes_tx(
         .map_err(sql_to_store_error)?;
     }
 
+    // Snooze invariant: any mailbox replace clears the snooze return-time row.
+    // The `message.snooze` mutation re-inserts the row after its move, so this
+    // only affects messages *leaving* the Snoozed mailbox (unsnooze, undo, a
+    // manual move, the scheduler auto-return) — preventing orphaned rows. The
+    // sync path does not route through here, so provider re-sync never clobbers
+    // a snooze. @spec docs/eph/DESIGN-L2-snooze
+    crate::snooze::clear_snooze_on_mailbox_replace_tx(tx, account_id, message_id)?;
+
     let previous_set: BTreeSet<_> = previous_mailboxes.iter().cloned().collect();
     let current_set: BTreeSet<_> = command.mailbox_ids.iter().cloned().collect();
 

@@ -315,3 +315,30 @@ impl RevLogStore for TestStore {
         Ok(())
     }
 }
+
+impl SnoozeStore for TestStore {
+    fn insert_snooze(
+        &self,
+        _account_id: &AccountId,
+        _message_id: &MessageId,
+        _until: i64,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn delete_snooze(
+        &self,
+        _account_id: &AccountId,
+        _message_id: &MessageId,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn list_due_snoozes(
+        &self,
+        _account_id: &AccountId,
+        _now: i64,
+    ) -> Result<Vec<(MessageId, i64)>, StoreError> {
+        Ok(Vec::new())
+    }
+}

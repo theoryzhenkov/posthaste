@@ -28,7 +28,7 @@ pub use gateway::{MailGateway, SyncChunkSink};
 pub use progress::SyncProgressReporter;
 pub use read_store::{
     ConversationReadStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore,
-    MessageListStore, RevLogStore, SmartMailboxStore, TagReadStore,
+    MessageListStore, RevLogStore, SmartMailboxStore, SnoozeStore, TagReadStore,
 };
 pub use sync_store::{
     ImapMessageLocationStore, ImapMessageLocationWriteStore, ImapSyncStateStore,

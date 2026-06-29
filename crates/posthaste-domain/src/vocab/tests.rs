@@ -9,9 +9,10 @@ fn mailbox_roles_preserve_serialized_strings() {
 
     assert_eq!(
         values,
-        ["inbox", "archive", "drafts", "sent", "junk", "trash"]
+        ["inbox", "archive", "drafts", "sent", "junk", "trash", "snooze"]
     );
     assert_eq!(MailboxRole::parse("sent"), Some(MailboxRole::Sent));
+    assert_eq!(MailboxRole::parse("snooze"), Some(MailboxRole::Snooze));
     assert_eq!(MailboxRole::parse("Sent"), None);
     assert_eq!(MailboxRole::parse("all"), None);
     assert_eq!(
@@ -21,6 +22,10 @@ fn mailbox_roles_preserve_serialized_strings() {
     assert_eq!(
         serde_json::from_str::<MailboxRole>("\"trash\"").expect("deserialize role"),
         MailboxRole::Trash
+    );
+    assert_eq!(
+        serde_json::from_str::<MailboxRole>("\"snooze\"").expect("deserialize role"),
+        MailboxRole::Snooze
     );
 }
 
