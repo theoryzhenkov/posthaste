@@ -118,6 +118,20 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/sender-addresses",
         authz: gate(Action::Read, ResourceShape::empty()),
     },
+    // SSE domain-event stream (GET /v1/events): a cross-account *read* feed for
+    //    view-less consumers (posthastectl's `events` tap). It accepts `accountId`
+    //    /`mailboxId` query filters, so it is a Filter aggregate keyed on those
+    //    params — a matching `accountId` satisfies an account-scoped caveat, a
+    //    missing/non-matching one denies. A pure read (no mutation), so it belongs
+    //    in the read table, not commands.
+    Entry {
+        method: "GET",
+        template: "/events",
+        authz: filter(
+            Action::Read,
+            ResourceShape::account_mailbox("accountId", "mailboxId"),
+        ),
+    },
     Entry {
         method: "GET",
         template: "/sources/{source_id}/identity",

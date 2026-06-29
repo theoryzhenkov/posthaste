@@ -92,3 +92,35 @@ async fn full_scope_conversation_search_sees_all_accounts() {
         "a full-scope token should see both accounts: {raw}"
     );
 }
+
+/// The domain-event SSE (`GET /v1/events`, restored for the posthastectl event
+/// tap) opens as a live `text/event-stream` for an authorized token — proving
+/// the real handler executes `runtime.subscribe_events` against the real runtime
+/// (not just type-checks). An account-scoped token needs a matching `accountId`
+/// filter (Filter route); a full-scope token opens unfiltered.
+#[tokio::test]
+async fn events_stream_opens_as_sse() {
+    let harness = Harness::new();
+    harness.seed_source("acct-a", "Account A");
+
+    // Full-scope token: opens the cross-account feed.
+    let (status, content_type) = harness.sse_open(&harness.full_scope(), "/v1/events").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "events stream should open for full scope"
+    );
+    assert_eq!(
+        content_type.as_deref(),
+        Some("text/event-stream"),
+        "the event tap must be served as SSE"
+    );
+
+    // Account-scoped token with a matching filter also opens (Filter route).
+    let scoped = harness.scoped(&["action = read", "account = acct-a"]);
+    let (status, content_type) = harness
+        .sse_open(&scoped, "/v1/events?accountId=acct-a")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type.as_deref(), Some("text/event-stream"));
+}

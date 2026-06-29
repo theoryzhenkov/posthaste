@@ -60,6 +60,7 @@ use utoipa::OpenApi;
         crate::api::messages::compose::operations::discard_operation,
         crate::api::messages::compose::operations::retry_operation,
         crate::api::sync_events::trigger_sync,
+        crate::api::sync_events::stream_events,
         crate::api::views::open_view,
         crate::api::views::stream_view,
         crate::api::runtime_stream::sessions::open_runtime_session,

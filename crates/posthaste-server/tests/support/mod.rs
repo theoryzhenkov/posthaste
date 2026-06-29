@@ -298,6 +298,32 @@ impl Harness {
 
     /// `GET path` and return the first response body data frame. Useful for
     /// infinite SSE bodies where collecting the full body would hang.
+    /// Open an SSE endpoint and return `(status, content-type)` WITHOUT draining
+    /// the (potentially infinite) event body. Proves the handler opened the
+    /// stream against the real runtime; the body is dropped unread.
+    pub async fn sse_open(&self, token: &str, path: &str) -> (StatusCode, Option<String>) {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .header(header::HOST, "127.0.0.1")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("request should build");
+        let response = self
+            .router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("router should respond");
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        (status, content_type)
+    }
+
     pub async fn get_text_frame(&self, token: &str, path: &str) -> (StatusCode, String) {
         let request = Request::builder()
             .method(Method::GET)
