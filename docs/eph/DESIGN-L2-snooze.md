@@ -5,7 +5,7 @@ modified: 2026-06-28
 reviewed: 2026-06-28
 lifecycle: ephemeral
 type: DESIGN
-status: "Implementation in progress (Option B: separate `message_snooze` table). Slices: 1 model+storage, 2 snooze/unsnooze mutations + store invariant, 3 scheduler tick, 4 UI, 5 undo integration + e2e."
+status: "Implementation in progress (Option B: separate `message_snooze` table). Slices 1–4 shipped; Slice 5 undo-integration verified (applyDiff → replace_mailboxes → invariant clears the row, locked with an authority-runtime test) + e2e caught a JMAP designation gap (set_mailbox_role gateway round-trip rejects 'snooze'; needs a local-override path for non-provider roles)."
 depends:
   - path: docs/eph/DESIGN-L2-undo-redo-revlog-contract
     note: "undo integration — snooze is a user-initiated mutation that records a rev_log step; the scheduler's auto-return must not"
@@ -57,6 +57,15 @@ including Gmail. This matches how every other third-party client does it.
   rejects with a clear error (the UI prompts the user to designate one). v1
   doesn't auto-create/auto-designate; that's a follow-up (would need a gateway
   `create_mailbox`).
+  > **Gap (found by the Slice 5 e2e):** `set_mailbox_role` does an unconditional
+  > gateway round-trip (`gateway.set_mailbox_role`), so designating a mailbox
+  > with the `snooze` role FAILS for JMAP providers — JMAP's mailbox `role`
+  > property only accepts standard roles (inbox/archive/drafts/sent/junk/trash),
+  > so Stalwart rejects `"snooze"` (`gateway_rejected: invalidProperties: role`).
+  > The local `mailbox_role_override` table exists but `set_mailbox_role` never
+  > writes it. Fix direction: write the local `mailbox_role_override` + skip the
+  > gateway round-trip for non-provider roles (like `snooze`). Until fixed, the
+  > snooze UI can't designate a Snoozed mailbox on JMAP accounts.
 - A **separate `message_snooze` store table**
   `(account_id TEXT, message_id TEXT, until INTEGER NOT NULL, PRIMARY KEY (account_id, message_id))`
   with an index on `(account_id, until)` for the scheduler. The return time is
@@ -145,8 +154,12 @@ path).
 - **Slice 4 — UI**: Snooze button + popover/presets in the message header;
   sidebar entry for the Snoozed mailbox; `useEmailActions` wiring.
 - **Slice 5 — undo integration + e2e**: confirm the store invariant clears the
-  snooze row on undo; Playwright e2e (snooze → assert leaves Inbox + appears in
-  Snoozed → undo → back in Inbox; advance the scheduler / wait → auto-return).
+  snooze row on undo (✅ verified — `applyDiff` → `replace_mailboxes` → the
+  invariant fires; locked with an authority-runtime test). Playwright e2e
+  (snooze → assert leaves Inbox + appears in Snoozed → undo → back in Inbox;
+  advance the scheduler / wait → auto-return) — ⚠️ blocked on the JMAP
+  designation gap above (can't designate a Snoozed mailbox on the dev stack's
+  Stalwart account until `set_mailbox_role` gets a local-override path).
 
 ## Open questions / follow-ups
 
