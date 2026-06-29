@@ -128,6 +128,14 @@ else
   export POSTHASTE_STATE_ROOT="${POSTHASTE_STATE_ROOT:-$root/var/dev/posthaste/state}"
 fi
 
+# Optional mock Gmail dev provider (POSTHASTE_DEV_GMAIL=1): a Gmail-shaped IMAP
+# server (X-GM-EXT-1 + CONDSTORE + QRESYNC) so a developer can exercise the real
+# Gmail sync path locally. SMTP points at the same port (the mock serves IMAP
+# only; sync works, sends do not).
+export POSTHASTE_MOCK_GMAIL_IMAP_PORT="${POSTHASTE_MOCK_GMAIL_IMAP_PORT:-11430}"
+export POSTHASTE_MOCK_GMAIL_CONTROL_PORT="${POSTHASTE_MOCK_GMAIL_CONTROL_PORT:-11431}"
+export POSTHASTE_MOCK_GMAIL_PASSWORD="${POSTHASTE_MOCK_GMAIL_PASSWORD:-app-password}"
+
 if [[ -z "${POSTHASTE_BOOTSTRAP_PATH:-}" ]]; then
   generated_dir="$POSTHASTE_STATE_ROOT/generated"
   mkdir -p "$generated_dir"
@@ -152,6 +160,37 @@ username = "dev"
 kind = "env"
 key = "POSTHASTE_STALWART_USER_PASSWORD"
 EOF
+  if [[ "${POSTHASTE_DEV_GMAIL:-}" == "1" ]]; then
+    cat >> "$generated_bootstrap" <<EOF
+
+[[seed.accounts]]
+id = "local-gmail"
+name = "Mock Gmail"
+fullName = "Gmail Dev"
+emailPatterns = ["dev@gmail.example"]
+driver = "imapSmtp"
+enabled = true
+
+[seed.accounts.transport]
+provider = "gmail"
+auth = "password"
+username = "dev@gmail.example"
+
+[seed.accounts.transport.imap]
+host = "127.0.0.1"
+port = $POSTHASTE_MOCK_GMAIL_IMAP_PORT
+security = "plain"
+
+[seed.accounts.transport.smtp]
+host = "127.0.0.1"
+port = $POSTHASTE_MOCK_GMAIL_IMAP_PORT
+security = "plain"
+
+[seed.accounts.transport.secretRef]
+kind = "env"
+key = "POSTHASTE_MOCK_GMAIL_PASSWORD"
+EOF
+  fi
   export POSTHASTE_BOOTSTRAP_PATH="$generated_bootstrap"
 fi
 
@@ -163,6 +202,9 @@ rm -f "$POSTHASTE_STATE_ROOT/.stalwart-seed-ready"
 log_path="$("$root/tools/dev/overmind/server-log-path.sh")"
 echo "Persisted server log: $log_path (tail with 'just dev log tail')"
 echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, IMAP 127.0.0.1:$POSTHASTE_STALWART_IMAP_PORT, SMTP 127.0.0.1:$POSTHASTE_STALWART_SMTP_PORT, API http://127.0.0.1:$POSTHASTE_SERVER_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
+if [[ "${POSTHASTE_DEV_GMAIL:-}" == "1" ]]; then
+  echo "Mock Gmail: IMAP 127.0.0.1:$POSTHASTE_MOCK_GMAIL_IMAP_PORT, control http://127.0.0.1:$POSTHASTE_MOCK_GMAIL_CONTROL_PORT (account 'local-gmail'; POST /deliver?subject= , /vanish?subject=)"
+fi
 
 if [[ "${POSTHASTE_DEV_STACK_SMOKE:-}" == "1" ]]; then
   require_var_dev_path() {

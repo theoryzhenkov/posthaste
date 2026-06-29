@@ -19,7 +19,9 @@ mod runtime;
 mod stalwart;
 
 pub use fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
-pub use gmail::{GmailImapFixture, SEEDED_FROM_EMAIL, SEEDED_LABELS, SEEDED_SUBJECT};
+pub use gmail::{
+    serve as serve_mock_gmail, GmailImapFixture, SEEDED_FROM_EMAIL, SEEDED_LABELS, SEEDED_SUBJECT,
+};
 pub use harness::Harness;
 pub use paths::{free_loopback_port, stalwart_bin, temp_root, workspace_root};
 pub use runtime::{RuntimeHarness, TestSecretStore, ViewSettlement, ViewWatch};

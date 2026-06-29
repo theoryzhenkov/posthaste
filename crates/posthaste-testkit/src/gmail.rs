@@ -285,6 +285,74 @@ impl RuntimeHarness {
 /// Handle one client connection for the full discovery + sync command set,
 /// reading the shared [`InboxModel`] so SEARCH / FETCH / STATUS answer the
 /// mailbox's current state, and tracking the selected mailbox per connection.
+/// Run the mock Gmail IMAP server on fixed ports indefinitely — the
+/// long-running dev-provider counterpart to [`GmailImapFixture::start`]. Serves
+/// IMAP on `imap_port` and a tiny HTTP control surface on `control_port`:
+///
+/// ```text
+/// curl -XPOST 'http://127.0.0.1:<control_port>/deliver?subject=Hello'
+/// curl -XPOST 'http://127.0.0.1:<control_port>/vanish?subject=Replaced'
+/// ```
+///
+/// so a developer can drive deliveries/expunges against a live account and watch
+/// the next sync take the QRESYNC delta path (`VANISHED` + a changed `FETCH`).
+pub async fn serve(imap_port: u16, control_port: u16) -> std::io::Result<()> {
+    let state = Arc::new(Mutex::new(InboxModel::baseline()));
+    let imap = TcpListener::bind(("127.0.0.1", imap_port)).await?;
+    let control = TcpListener::bind(("127.0.0.1", control_port)).await?;
+    eprintln!(
+        "mock-gmail: IMAP 127.0.0.1:{imap_port}  control http://127.0.0.1:{control_port} (POST /deliver?subject= , /vanish?subject=)"
+    );
+    let imap_state = Arc::clone(&state);
+    let imap_loop = tokio::spawn(async move {
+        while let Ok((stream, _)) = imap.accept().await {
+            tokio::spawn(handle_connection(stream, Arc::clone(&imap_state)));
+        }
+    });
+    let control_loop = tokio::spawn(async move {
+        while let Ok((stream, _)) = control.accept().await {
+            tokio::spawn(handle_control(stream, Arc::clone(&state)));
+        }
+    });
+    let _ = tokio::join!(imap_loop, control_loop);
+    Ok(())
+}
+
+/// Minimal HTTP control surface: parse the request line, drive the inbox model,
+/// reply 200. Just enough for `curl` to trigger a delivery or an expunge.
+async fn handle_control(stream: tokio::net::TcpStream, state: Arc<Mutex<InboxModel>>) {
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).await.unwrap_or(0) == 0 {
+        return;
+    }
+    // e.g. "POST /deliver?subject=Hello HTTP/1.1"
+    let path = request_line.split_whitespace().nth(1).unwrap_or("/");
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    let subject = query
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("subject="))
+        .map(|value| value.replace('+', " "))
+        .unwrap_or_else(|| "Dev message".to_string());
+    let body = {
+        let mut model = state.lock().expect("inbox model mutex");
+        match route {
+            "/deliver" => format!("delivered uid {}\n", model.deliver(&subject)),
+            "/vanish" => format!(
+                "vanished + delivered uid {}\n",
+                model.vanish_all_and_deliver(&subject)
+            ),
+            _ => "routes: POST /deliver?subject= , POST /vanish?subject=\n".to_string(),
+        }
+    };
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = writer.write_all(response.as_bytes()).await;
+}
+
 async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<Mutex<InboxModel>>) {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
