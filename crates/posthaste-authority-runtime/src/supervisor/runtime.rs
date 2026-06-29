@@ -1,5 +1,7 @@
 use super::*;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 /// Main event loop for an account: polls on timer, push notifications, and
 /// manual sync commands. Runs until the task is aborted.
 ///
@@ -25,6 +27,11 @@ pub(crate) async fn run_account_runtime(
         CACHE_WORKER_INTERVAL,
     );
     cache_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut snooze_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + SNOOZE_INITIAL_DELAY,
+        SNOOZE_INTERVAL,
+    );
+    snooze_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     shared
         .set_runtime_overview_for_generation(
             &account_id,
@@ -73,6 +80,9 @@ pub(crate) async fn run_account_runtime(
                     CACHE_BACKGROUND_PRESSURE,
                     None,
                 ).await;
+            }
+            _ = snooze_interval.tick() => {
+                handle_snooze_tick(&shared, &account_id).await;
             }
             _ = async {
                 match oauth_refresh_interval.as_mut() {
@@ -219,6 +229,30 @@ pub(crate) async fn handle_cache_tick(
         operation_id,
     )
     .await;
+}
+
+/// Snooze scheduler tick: return every due snoozed message to the Inbox. The
+/// move reuses the client path's `replace_mailboxes` write-through, so the
+/// provider move is enqueued (flushed on the next sync) + the store invariant
+/// clears the snooze row immediately. Not user-initiated → no undo step.
+///
+/// @spec docs/eph/DESIGN-L2-snooze
+pub(crate) async fn handle_snooze_tick(shared: &Arc<SupervisorShared>, account_id: &AccountId) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    match shared.service.auto_return_snoozed_messages(account_id, now).await {
+        Ok(count) if count > 0 => {
+            ph_debug!(
+                events::SUPERVISOR_SNOOZE_AUTO_RETURNED,
+                account_id = %account_id,
+                count,
+                "snooze scheduler returned messages to the inbox"
+            );
+        }
+        _ => {}
+    }
 }
 
 pub(crate) async fn handle_runtime_command(

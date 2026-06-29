@@ -320,25 +320,38 @@ impl SnoozeStore for TestStore {
     fn insert_snooze(
         &self,
         _account_id: &AccountId,
-        _message_id: &MessageId,
-        _until: i64,
+        message_id: &MessageId,
+        until: i64,
     ) -> Result<(), StoreError> {
+        let mut snoozes = self.snoozes.lock().expect("snoozes lock poisoned");
+        if let Some(entry) = snoozes.iter_mut().find(|(id, _)| id == message_id) {
+            entry.1 = until; // upsert — replace the until on conflict
+        } else {
+            snoozes.push((message_id.clone(), until));
+        }
         Ok(())
     }
 
     fn delete_snooze(
         &self,
         _account_id: &AccountId,
-        _message_id: &MessageId,
+        message_id: &MessageId,
     ) -> Result<(), StoreError> {
+        let mut snoozes = self.snoozes.lock().expect("snoozes lock poisoned");
+        snoozes.retain(|(id, _)| id != message_id);
         Ok(())
     }
 
     fn list_due_snoozes(
         &self,
         _account_id: &AccountId,
-        _now: i64,
+        now: i64,
     ) -> Result<Vec<(MessageId, i64)>, StoreError> {
-        Ok(Vec::new())
+        let snoozes = self.snoozes.lock().expect("snoozes lock poisoned");
+        Ok(snoozes
+            .iter()
+            .filter(|(_, until)| *until <= now)
+            .cloned()
+            .collect())
     }
 }
