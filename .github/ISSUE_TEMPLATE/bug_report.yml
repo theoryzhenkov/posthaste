@@ -13,7 +13,7 @@ body:
     id: version
     attributes:
       label: App version and release channel
-      description: Find this in Settings → About (e.g. `0.2.0-nightly.36` / nightly).
+      description: Use **Settings → Troubleshooting → Copy diagnostics** to capture this automatically; otherwise the Settings rail shows the channel (nightly/stable) and the version is in the release you downloaded (e.g. `0.2.0-nightly.36` / nightly).
       placeholder: "0.2.0-nightly.36 (nightly)"
     validations:
       required: true
