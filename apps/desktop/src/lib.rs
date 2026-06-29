@@ -124,6 +124,8 @@ pub fn run() {
         client_connection::client_local_daemon_read,
         client_connection::request_database_repair,
         client_connection::request_factory_reset,
+        client_connection::get_diagnostics_info,
+        client_connection::reveal_log_folder,
         e2e::posthaste_e2e_result
     ]);
     #[cfg(not(feature = "e2e-testing"))]
@@ -140,7 +142,9 @@ pub fn run() {
         client_connection::client_token_delete,
         client_connection::client_local_daemon_read,
         client_connection::request_database_repair,
-        client_connection::request_factory_reset
+        client_connection::request_factory_reset,
+        client_connection::get_diagnostics_info,
+        client_connection::reveal_log_folder
     ]);
 
     let builder = builder.setup(|app| {
