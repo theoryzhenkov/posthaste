@@ -109,5 +109,5 @@ debug = "line-tables-only"
 [patch.crates-io]
 # Forked from duesee/imap-codec to include the vendored Gmail-extension patches
 # and the CONDSTORE/QRESYNC capability-parser fix (see posthaste-vendor branch).
-imap-codec = { git = "https://github.com/theoryzhenkov/imap-codec.git", rev = "2d19dd1799c8bb04b1ca62bb0d5b87566d398303" }
-imap-types = { git = "https://github.com/theoryzhenkov/imap-codec.git", rev = "2d19dd1799c8bb04b1ca62bb0d5b87566d398303" }
+imap-codec = { git = "https://github.com/theoryzhenkov/imap-codec.git", rev = "2f3b5fe14343c34bc3c984e0adfda9a7769a8289" }
+imap-types = { git = "https://github.com/theoryzhenkov/imap-codec.git", rev = "2f3b5fe14343c34bc3c984e0adfda9a7769a8289" }

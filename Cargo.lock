@@ -2523,7 +2523,7 @@ dependencies = [
 [[package]]
 name = "imap-codec"
 version = "2.0.0-alpha.7"
-source = "git+https://github.com/theoryzhenkov/imap-codec.git?rev=2d19dd1799c8bb04b1ca62bb0d5b87566d398303#2d19dd1799c8bb04b1ca62bb0d5b87566d398303"
+source = "git+https://github.com/theoryzhenkov/imap-codec.git?rev=2f3b5fe14343c34bc3c984e0adfda9a7769a8289#2f3b5fe14343c34bc3c984e0adfda9a7769a8289"
 dependencies = [
  "abnf-core",
  "base64 0.22.1",
@@ -2550,7 +2550,7 @@ dependencies = [
 [[package]]
 name = "imap-types"
 version = "2.0.0-alpha.6"
-source = "git+https://github.com/theoryzhenkov/imap-codec.git?rev=2d19dd1799c8bb04b1ca62bb0d5b87566d398303#2d19dd1799c8bb04b1ca62bb0d5b87566d398303"
+source = "git+https://github.com/theoryzhenkov/imap-codec.git?rev=2f3b5fe14343c34bc3c984e0adfda9a7769a8289#2f3b5fe14343c34bc3c984e0adfda9a7769a8289"
 dependencies = [
  "base64 0.22.1",
  "bounded-static",
