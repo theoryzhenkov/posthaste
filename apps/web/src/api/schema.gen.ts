@@ -1331,12 +1331,18 @@ export interface components {
          *     @spec docs/eph/DESIGN-L2-appearance-toml
          */
         Appearance: {
-            /** Format: int32 */
-            accentHue?: number | null;
+            dark?: null | components["schemas"]["ThemeColors"];
             density?: null | components["schemas"]["UiDensity"];
             glassTheme?: null | components["schemas"]["GlassTheme"];
+            light?: null | components["schemas"]["ThemeColors"];
             mode?: null | components["schemas"]["ThemeMode"];
-            palettePreset?: null | components["schemas"]["PalettePresetId"];
+            /**
+             * @description Theme identifier. Free-form (not an enum) so user-created themes are
+             *     expressible without a schema change; the built-ins are `"neutral"`
+             *     (displayed "Classic") and `"glass"`. Pass-through: the renderer resolves
+             *     the id to a palette and treats an unknown id as the default.
+             */
+            theme?: string | null;
         };
         /**
          * @description Supported effects for automation rules.
@@ -1971,15 +1977,6 @@ export interface components {
          */
         OperationState: "pending" | "inflight" | "applied" | "failed";
         /**
-         * @description Palette preset identifier (the renderer resolves these to concrete palettes).
-         *     Matches the renderer's `PalettePresetId` set; extend both together when a
-         *     preset is added.
-         *
-         *     @spec docs/eph/DESIGN-L2-appearance-toml
-         * @enum {string}
-         */
-        PalettePresetId: "neutral" | "paperInk" | "brutalist" | "glass" | "acid" | "marzipan" | "botanical";
-        /**
          * @description Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
          *
          *     @spec docs/L1-api#account-crud-lifecycle
@@ -2591,6 +2588,33 @@ export interface components {
             totalMessages: number;
             /** Format: int64 */
             unreadMessages: number;
+        };
+        /**
+         * @description Per-mode color overrides for a theme. The named knobs (`accent_hue`,
+         *     `surface_hue`) are the curated UX; `tokens` is the open escape hatch.
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         */
+        ThemeColors: {
+            /**
+             * Format: int32
+             * @description Accent color hue (0–360).
+             */
+            accentHue?: number | null;
+            /**
+             * Format: int32
+             * @description Base/surface color hue (0–360) — the "main color", today a fixed grey.
+             */
+            surfaceHue?: number | null;
+            /**
+             * @description Arbitrary CSS custom-property overrides (`--token` → value). The
+             *     foundation for user-supplied themes / imported CSS: a future loader
+             *     parses a `.css` file into this map. Pass-through storage — the renderer
+             *     applies recognized tokens and ignores the rest; absent today's UI.
+             */
+            tokens?: {
+                [key: string]: string;
+            };
         };
         /**
          * @description Theme mode: light, dark, or follow the OS preference.

@@ -4550,13 +4550,15 @@
         "type": "object",
         "description": "App-level appearance/theme preferences — the renderer's visual settings,\nstored in `[appearance]` of `app.toml` as the single source of truth (moved\nout of the opaque `localStorage` \"client-preferences\" snapshot).\n\nThe backend treats appearance as **pass-through storage**: it does not\ninterpret theme values (the renderer applies them). The enums give the\nOpenAPI schema self-documentation and reject typos at the parse boundary.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
         "properties": {
-          "accentHue": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "minimum": 0
+          "dark": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ThemeColors"
+              }
+            ]
           },
           "density": {
             "oneOf": [
@@ -4578,6 +4580,17 @@
               }
             ]
           },
+          "light": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ThemeColors",
+                "description": "Per-mode color overrides. Light/dark are customized independently (a\nlegacy single `accent_hue` in an older `app.toml` seeds both)."
+              }
+            ]
+          },
           "mode": {
             "oneOf": [
               {
@@ -4588,15 +4601,12 @@
               }
             ]
           },
-          "palettePreset": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/PalettePresetId"
-              }
-            ]
+          "theme": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Theme identifier. Free-form (not an enum) so user-created themes are\nexpressible without a schema change; the built-ins are `\"neutral\"`\n(displayed \"Classic\") and `\"glass\"`. Pass-through: the renderer resolves\nthe id to a palette and treats an unknown id as the default."
           }
         }
       },
@@ -6097,19 +6107,6 @@
           "inflight",
           "applied",
           "failed"
-        ]
-      },
-      "PalettePresetId": {
-        "type": "string",
-        "description": "Palette preset identifier (the renderer resolves these to concrete palettes).\nMatches the renderer's `PalettePresetId` set; extend both together when a\npreset is added.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
-        "enum": [
-          "neutral",
-          "paperInk",
-          "brutalist",
-          "glass",
-          "acid",
-          "marzipan",
-          "botanical"
         ]
       },
       "PatchAccountRequest": {
@@ -7705,6 +7702,40 @@
           "unreadMessages": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "ThemeColors": {
+        "type": "object",
+        "description": "Per-mode color overrides for a theme. The named knobs (`accent_hue`,\n`surface_hue`) are the curated UX; `tokens` is the open escape hatch.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "properties": {
+          "accentHue": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Accent color hue (0–360).",
+            "minimum": 0
+          },
+          "surfaceHue": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Base/surface color hue (0–360) — the \"main color\", today a fixed grey.",
+            "minimum": 0
+          },
+          "tokens": {
+            "type": "object",
+            "description": "Arbitrary CSS custom-property overrides (`--token` → value). The\nfoundation for user-supplied themes / imported CSS: a future loader\nparses a `.css` file into this map. Pass-through storage — the renderer\napplies recognized tokens and ignores the rest; absent today's UI.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           }
         }
       },
