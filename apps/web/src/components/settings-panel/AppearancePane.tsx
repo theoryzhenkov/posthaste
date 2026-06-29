@@ -3,7 +3,7 @@ import { useDesignTheme } from '@/hooks/useDesignTheme'
 import { SettingsPage, SettingsPageHeader } from './shared'
 import { GlassMeshEditor } from './appearance/GlassMeshEditor'
 import {
-  AccentSection,
+  ColorsSection,
   DensitySection,
   ModeSection,
   ThemeSection,
@@ -21,7 +21,7 @@ export function AppearancePane() {
 
       <div>
         <ThemeSection theme={theme} />
-        <AccentSection theme={theme} />
+        <ColorsSection theme={theme} />
         {theme.theme === 'glass' && <GlassMeshEditor />}
         <ModeSection theme={theme} />
         <DensitySection theme={theme} />

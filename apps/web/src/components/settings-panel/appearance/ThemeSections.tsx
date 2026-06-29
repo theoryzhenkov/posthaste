@@ -1,9 +1,12 @@
-import { Check } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Check, RotateCcw } from 'lucide-react'
 
 import {
   accentColor,
   builtInThemeIds,
   builtInThemes,
+  defaultAccentHue,
+  defaultSurfaceHue,
   resolvedThemeModes,
   themeModes,
   uiDensities,
@@ -79,31 +82,75 @@ export function ThemeSection({ theme }: { theme: DesignTheme }) {
   )
 }
 
-function AccentModeRow({
-  mode,
+function HueControl({
+  label,
   hue,
+  defaultHue,
   onChange,
 }: {
-  mode: ResolvedThemeMode
+  label: string
   hue: number
+  defaultHue: number
   onChange: (hue: number) => void
 }) {
+  // The numeric field keeps a local draft while focused so multi-digit typing
+  // isn't fought by the controlled value, and commits once (on blur/Enter)
+  // rather than firing a write-through PATCH per keystroke. Commit reads the
+  // input's live DOM value via a ref (robust regardless of which input event
+  // fired). The slider commits live (its drag is discrete + bounded).
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = () => {
+    const digits = (inputRef.current?.value ?? '').replace(/[^0-9]/g, '')
+    const next = Number(digits)
+    if (digits !== '' && Number.isFinite(next)) {
+      onChange(next)
+    }
+    setDraft(null)
+  }
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <span
-          className="size-7 shrink-0 rounded-md border border-border-soft shadow-[var(--shadow-pane)]"
+          className="size-6 shrink-0 rounded-md border border-border-soft shadow-[var(--shadow-pane)]"
           style={{ backgroundColor: accentColor(hue) }}
         />
         <span className="flex-1 text-[12px] font-medium text-foreground">
-          {modeLabels[mode]}
+          {label}
         </span>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {hue}°
-        </span>
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          value={draft ?? String(hue)}
+          onChange={(event) =>
+            setDraft(event.target.value.replace(/[^0-9]/g, '').slice(0, 3))
+          }
+          onFocus={(event) => event.currentTarget.select()}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              commit()
+              event.currentTarget.blur()
+            }
+          }}
+          aria-label={`${label} hue`}
+          className="ph-focus-ring h-7 w-14 rounded-md border border-border-soft bg-bg-elev/45 px-2 text-right font-mono text-[11px] text-foreground"
+        />
+        <span className="text-[11px] text-muted-foreground">°</span>
+        <button
+          type="button"
+          disabled={hue === defaultHue}
+          onClick={() => onChange(defaultHue)}
+          title="Reset to default"
+          aria-label={`Reset ${label} to default`}
+          className="ph-focus-ring flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground disabled:opacity-35"
+        >
+          <RotateCcw size={13} strokeWidth={1.7} />
+        </button>
       </div>
       <label className="block">
-        <span className="sr-only">{modeLabels[mode]} accent hue</span>
+        <span className="sr-only">{label} hue slider</span>
         <input
           type="range"
           min={0}
@@ -119,22 +166,54 @@ function AccentModeRow({
   )
 }
 
-export function AccentSection({ theme }: { theme: DesignTheme }) {
+function ModeColorGroup({
+  theme,
+  mode,
+}: {
+  theme: DesignTheme
+  mode: ResolvedThemeMode
+}) {
+  // Glass derives its surface from the mesh editor, not the base surface
+  // tokens, so a surface-hue control would be a no-op there — show it only for
+  // the solid (Classic-style) themes.
+  const showSurface = theme.theme !== 'glass'
   return (
-    <SettingsSection title="Accent color">
-      <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3 rounded-lg border border-border-soft bg-bg-elev/35 p-3">
+      <span className="text-[12px] font-semibold text-foreground">
+        {modeLabels[mode]} mode
+      </span>
+      <HueControl
+        label="Accent"
+        hue={theme[mode].accentHue}
+        defaultHue={defaultAccentHue}
+        onChange={(hue) => theme.setAccentHue(mode, hue)}
+      />
+      {showSurface && (
+        <HueControl
+          label="Surface"
+          hue={theme[mode].surfaceHue}
+          defaultHue={defaultSurfaceHue}
+          onChange={(hue) => theme.setSurfaceHue(mode, hue)}
+        />
+      )}
+    </div>
+  )
+}
+
+export function ColorsSection({ theme }: { theme: DesignTheme }) {
+  return (
+    <SettingsSection title="Colors">
+      <div className="flex flex-col gap-3">
         <p className="text-[12px] leading-5 text-muted-foreground">
-          The interactive/brand hue, set independently for light and dark mode.
-          Contrast and saturation stay within the app range.
+          Set the accent (brand) and surface (main background) hues
+          independently for light and dark mode. Enter a precise hue or reset to
+          the default.
         </p>
-        {resolvedThemeModes.map((mode) => (
-          <AccentModeRow
-            key={mode}
-            mode={mode}
-            hue={theme[mode].accentHue}
-            onChange={(hue) => theme.setAccentHue(mode, hue)}
-          />
-        ))}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {resolvedThemeModes.map((mode) => (
+            <ModeColorGroup key={mode} theme={theme} mode={mode} />
+          ))}
+        </div>
       </div>
     </SettingsSection>
   )
