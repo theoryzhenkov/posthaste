@@ -1,11 +1,14 @@
+import { messageRowHeight } from '@/design'
+
 import type { MessageSummary } from '@/api/types'
 import type { EmailActions } from '@/hooks/useEmailActions'
+import { useDesignTheme } from '@/hooks/useDesignTheme'
 
 import { MessageRow } from '../MessageRow'
 import type { ColumnId, ThreadListLayout } from '../thread-list/columns'
 import { MessageListErrorBanner } from './MessageListErrorBanner'
 import { EmptyMessages, LoadingRows } from './MessageListStates'
-import { messageKey, OVERSCAN_ROWS, ROW_HEIGHT } from './model'
+import { messageKey, OVERSCAN_ROWS } from './model'
 
 export interface MessageListErrorState {
   errorMessage: string
@@ -47,11 +50,17 @@ export function MessageListRows({
   viewRole: string | null
   viewportHeight: number
 }) {
-  const virtual = virtualizeMessages(messages, scrollTop, viewportHeight)
+  const rowHeight = messageRowHeight(useDesignTheme().density)
+  const virtual = virtualizeMessages(
+    messages,
+    scrollTop,
+    viewportHeight,
+    rowHeight,
+  )
 
   return (
     <>
-      {isLoading && <LoadingRows />}
+      {isLoading && <LoadingRows rowHeight={rowHeight} />}
       {errorState.showError && (
         <MessageListErrorBanner
           errorMessage={errorState.errorMessage}
@@ -72,7 +81,7 @@ export function MessageListRows({
             style={{ height: virtual.topSpacerHeight }}
           />
           {virtual.visibleMessages.map((message, index) => (
-            <div key={messageKey(message)} style={{ height: ROW_HEIGHT }}>
+            <div key={messageKey(message)} style={{ height: rowHeight }}>
               <MessageRow
                 message={message}
                 isSelected={messageKey(message) === selectedKey}
@@ -104,21 +113,22 @@ function virtualizeMessages(
   messages: MessageSummary[],
   scrollTop: number,
   viewportHeight: number,
+  rowHeight: number,
 ) {
   const totalRows = messages.length
-  const safeViewportHeight = viewportHeight || ROW_HEIGHT * 8
+  const safeViewportHeight = viewportHeight || rowHeight * 8
   const startIndex = Math.max(
     0,
-    Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS,
+    Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS,
   )
   const endIndex = Math.min(
     totalRows,
-    Math.ceil((scrollTop + safeViewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS,
+    Math.ceil((scrollTop + safeViewportHeight) / rowHeight) + OVERSCAN_ROWS,
   )
   return {
-    bottomSpacerHeight: (totalRows - endIndex) * ROW_HEIGHT,
+    bottomSpacerHeight: (totalRows - endIndex) * rowHeight,
     startIndex,
-    topSpacerHeight: startIndex * ROW_HEIGHT,
+    topSpacerHeight: startIndex * rowHeight,
     visibleMessages: messages.slice(startIndex, endIndex),
   }
 }

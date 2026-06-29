@@ -17,6 +17,7 @@ export {
 export {
   defaultUiDensity,
   isUiDensity,
+  messageRowHeight,
   uiDensities,
   uiDensitySettings,
   type UiDensity,
