@@ -4,30 +4,48 @@ export type UiDensity = (typeof uiDensities)[number]
 
 export const defaultUiDensity = 'compact' as const satisfies UiDensity
 
+/**
+ * Canonical per-density layout dimensions, in pixels.
+ *
+ * These mirror the `--density-*` custom properties defined per
+ * `[data-ui-density]` in `index.css` — keep the two in sync. The CSS vars drive
+ * the non-virtualized surfaces (toolbar, sidebar rows, pane padding) via
+ * `var(--density-*)`; `messageRowHeight` additionally feeds the message list's
+ * hand-rolled virtualizer, which needs a JS number for its spacer/index math.
+ */
 export const uiDensitySettings = {
   compact: {
-    rowHeight: 78,
-    controlHeight: 28,
-    gap: 6,
+    toolbarHeight: 38,
+    sidebarRowHeight: 24,
+    messageRowHeight: 24,
+    panePadding: 10,
   },
   cozy: {
-    rowHeight: 88,
-    controlHeight: 32,
-    gap: 8,
+    toolbarHeight: 42,
+    sidebarRowHeight: 28,
+    messageRowHeight: 30,
+    panePadding: 12,
   },
   comfortable: {
-    rowHeight: 100,
-    controlHeight: 36,
-    gap: 10,
+    toolbarHeight: 46,
+    sidebarRowHeight: 32,
+    messageRowHeight: 48,
+    panePadding: 16,
   },
 } as const satisfies Record<
   UiDensity,
   {
-    rowHeight: number
-    controlHeight: number
-    gap: number
+    toolbarHeight: number
+    sidebarRowHeight: number
+    messageRowHeight: number
+    panePadding: number
   }
 >
+
+/** The message-list row height (px) for `density` — feeds the virtualizer. */
+export function messageRowHeight(density: UiDensity): number {
+  return uiDensitySettings[density].messageRowHeight
+}
 
 export function isUiDensity(value: string): value is UiDensity {
   return uiDensities.includes(value as UiDensity)

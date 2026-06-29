@@ -29,7 +29,7 @@ export function sortSmartMailboxes(
 
 export function itemButtonClass(isSelected: boolean, depth = 0): string {
   return cn(
-    'mx-1.5 flex h-[28px] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] pr-2 text-left text-[13px] font-medium transition-colors',
+    'mx-1.5 flex h-[var(--density-sidebar-row-height)] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] pr-2 text-left text-[13px] font-medium transition-colors',
     'ph-focus-ring hover:bg-[var(--sidebar-accent)]',
     isSelected &&
       'bg-[var(--list-selection)] text-[var(--list-selection-foreground)]',
