@@ -1,0 +1,39 @@
+# MCP server + posthastectl CLI (one operation registry, two front-ends)
+
+set working-directory := '../..'
+
+# Typecheck, test, and verify formatting
+check:
+    bun --cwd=apps/mcp run check
+
+# Typecheck only
+typecheck:
+    bun --cwd=apps/mcp run typecheck
+
+# Run the registry + CLI tests
+test:
+    bun --cwd=apps/mcp run test
+
+# Format sources
+fmt:
+    bun --cwd=apps/mcp run format
+
+# Check formatting
+fmt-check:
+    bun --cwd=apps/mcp run format:check
+
+# Run the MCP stdio server
+mcp:
+    bun --cwd=apps/mcp run start
+
+# Run the posthastectl CLI (pass args after `--`)
+cli *args:
+    bun --cwd=apps/mcp run cli {{ args }}
+
+# Compile the standalone posthastectl binary to apps/mcp/dist/posthastectl
+build-cli:
+    bun --cwd=apps/mcp run build:cli
+
+# Regenerate the typed API schema from openapi.json
+api-generate:
+    bun --cwd=apps/mcp run api:generate

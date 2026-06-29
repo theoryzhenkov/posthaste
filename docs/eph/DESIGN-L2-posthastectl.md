@@ -1,9 +1,9 @@
 ---
 scope: L2
 summary: "Design for posthastectl — a scriptable CLI over the existing API surface, built as a SECOND front-end alongside the MCP server over one shared operation registry + API client (in apps/mcp). No new API surface; a human (CLI) and an LLM (MCP) get identical capabilities by construction. Adds an event tap for reactive scripting; ships as a standalone binary via bun --compile."
-modified: 2026-06-28
-reviewed: 2026-06-28
-state: planned
+modified: 2026-06-29
+reviewed: 2026-06-29
+state: implemented
 depends:
   - path: docs/api/L1
     section: "OpenAPI surface"
@@ -14,11 +14,40 @@ depends:
 
 # DESIGN — posthastectl (scriptable CLI, unified with MCP)
 
-Status: **proposal** (`state: planned`). Realizes the "configurable + scriptable"
-goal of [RFC-L2-configuration-surface](RFC-L2-configuration-surface.md) for
-*actions* (the config RFC covered declarative settings).
+Status: **implemented** (CLI + shared registry built 2026-06-29). Realizes the
+"configurable + scriptable" goal of
+[RFC-L2-configuration-surface](RFC-L2-configuration-surface.md) for *actions*
+(the config RFC covered declarative settings).
 
-## 1. Goal & principles [::state planned]
+## 0. Implementation status [::state implemented]
+
+Built in `apps/mcp` (one registry, two front-ends):
+
+- **Registry** — `src/operations/{read,commands,types}.ts`: each operation is a
+  front-end-agnostic `Operation` (`mcpName`, `description`, `argSchema`,
+  `handler`, `cli` binding). `src/index.ts` (MCP) and `src/cli.ts` (CLI) both
+  render it. 11 operations (the original 9 MCP tools + additive `list_mailboxes`
+  and `trigger_sync`).
+- **MCP** — unchanged tool names (a documented contract); read ops now carry
+  `readOnlyHint`. Verified by `test/operations.test.ts`.
+- **CLI** — `posthastectl`: subcommands from the registry, kebab flags + a
+  primary positional, `-i/--input` (inline / `-` stdin / `@file`), pretty-vs-
+  compact JSON, exit codes `0/2/3/4`. Pure `run(argv, deps)` core, fully tested
+  (`test/cli.test.ts`, stubbed fetch — no daemon needed). `just mcp build-cli`
+  compiles a standalone binary via `bun build --compile`.
+- **`just mcp {check,test,build-cli}`** wired into the root `check`/`test`/`fmt`.
+
+**Open — the event tap's server endpoint.** `posthastectl events` (client-side
+SSE → NDJSON) is built and tested, but `GET /v1/events` was **removed** as
+vestigial (commit `cce95402c`, 2026-06-25) while it had no consumer — three days
+before this design was reviewed. The runtime machinery is intact
+(`runtime.subscribe_events` → replay + live broadcast); only the ~40-line HTTP
+handler + route were deleted, and `asyncapi.json` still documents the channel
+(a doc/route mismatch). Restoring it is the remaining work for a live event tap;
+`posthastectl` is precisely the consumer that justifies its return. Pending a
+decision (it touches the Rust server, against principle §6.5).
+
+## 1. Goal & principles [::state implemented]
 
 A CLI an LLM or a shell script can drive the app with — **no GUI, no harness**.
 Four principles:
@@ -36,7 +65,7 @@ desktop/renderer operations (Tauri commands + IndexedDB), not API endpoints, so
 they stay GUI-only (see RFC §4). The CLI is a general API driver, not a repair
 tool.
 
-## 2. Architecture — one core, two front-ends [::state planned]
+## 2. Architecture — one core, two front-ends [::state implemented]
 
 `apps/mcp` already holds both halves a CLI needs: `client.ts` (the stateless API
 client + `daemon.json` discovery) and `tools/` (the operation definitions). MCP
@@ -57,7 +86,7 @@ apps/mcp  (renamed conceptually to the "operations core")
 renderings of the same registry entry. "No new surface" and "CLI ≡ MCP" become
 structural — neither front-end can drift from the other or from the API.
 
-## 3. The operation registry [::state planned]
+## 3. The operation registry [::state implemented]
 
 Today `registerReadTools`/`registerCommandTools` register tools *imperatively*
 against the MCP `server` (`server.registerTool(name, schema, handler)`). The
@@ -83,7 +112,7 @@ interface Operation {
 The split between read and command operations is preserved (it maps to safe vs
 mutating, useful for both MCP annotations and CLI confirmations).
 
-## 4. The CLI front-end — posthastectl [::state planned]
+## 4. The CLI front-end — posthastectl [::state implemented]
 
 **Commands** (mirror the registry; examples):
 `posthastectl mailboxes list` · `messages search <query>` · `messages get <id>` ·
@@ -107,13 +136,13 @@ resumes; `--topic`/`--account` filter (the existing `EventFilter`). This is the
 scriptable "what happened" feed; the lower-level runtime down-channel SSE
 (`link.rs`, view-frame assertions) is **not** exposed (view-internal — see §8 Q1).
 
-## 5. Distribution [::state planned]
+## 5. Distribution [::state implemented]
 
 `bun build --compile` produces a standalone `posthastectl` executable — no Node
 runtime to ship — so the "single static binary" benefit doesn't require Rust.
 The MCP server continues to run under bun/node as today.
 
-## 6. Decisions (settled) [::state planned]
+## 6. Decisions (settled) [::state implemented]
 
 1. **TS, in `apps/mcp`, not a new Rust binary.** Reusing `client.ts` + the
    operation registry beats duplicating them in Rust; `bun --compile` still
@@ -126,28 +155,38 @@ The MCP server continues to run under bun/node as today.
    exposed.
 5. **No new API surface; CLI ≡ MCP** — guaranteed by the shared registry.
 
-## 7. Refactor / migration plan [::state planned]
+## 7. Refactor / migration plan [::state partial]
 
-- **P1 — extract the registry.** Convert `tools/{read,commands}.ts` from
-  `server.registerTool(...)` calls into an exported `Operation[]`; make
-  `index.ts` register them (no behavior change for MCP consumers; the existing
-  MCP tests must stay green).
-- **P2 — the CLI front-end.** `cli.ts`: arg-parser (e.g. a small command tree)
-  that renders the registry as subcommands + `--json`/exit-code I/O; wire
-  `bun build --compile`.
-- **P3 — the event tap.** `events --follow` over the domain-event SSE
-  (NDJSON, `--after-seq`/`--topic`/`--account`).
-- **P4 — packaging.** Ship the compiled binary in the release; docs +
-  shell-completion (registry-derived).
+- **P1 — extract the registry. ✅ done.** `tools/{read,commands}.ts` lifted into
+  `operations/` as an exported `Operation[]`; `index.ts` registers them. MCP tool
+  names unchanged (no existing MCP tests; their names are pinned by
+  `test/operations.test.ts`). `fetch` is now injectable via `Connection.fetch`
+  (global by default) so handlers are testable.
+- **P2 — the CLI front-end. ✅ done.** `cli.ts` + `cli/` render the registry as
+  subcommands with `-i/--input` stdin, exit codes, and pretty/compact JSON.
+  `bun build --compile` wired (`just mcp build-cli`).
+- **P3 — the event tap. ◐ client built; server endpoint pending.** `events`
+  streams `GET /v1/events` (SSE → NDJSON, `--after-seq`/`--topic`/`--account`/
+  `--mailbox`) and is tested against a stubbed stream. The daemon route was
+  removed (see §0); restoring it is the only remaining work. Open decision
+  (§8 Q1, principle §6.5).
+- **P4 — packaging. ◐ binary + docs done; release wiring + completions pending.**
+  `bun --compile` binary, README, and the `just mcp` recipes exist; shipping the
+  binary in the release artifacts and registry-derived shell-completion are not
+  yet done.
 
-## 8. Out of scope & open questions [::state planned]
+## 8. Out of scope & open questions [::state partial]
 
 - **Out of scope:** repair/factory-reset (local, not API); the desktop
-  `connections.json` profile store (v1 uses discovery + flags); any new endpoint.
-- **Q1 — event stream:** domain-event SSE assumed for `events --follow`; confirm
-  the runtime down-channel (view frames) is genuinely not wanted for scripting.
-- **Q2 — auth scope:** the CLI inherits the token's full power (an LLM with
-  `posthastectl` can do anything the GUI can, incl. send/delete) — acceptable for
-  a power tool, but worth a note in user docs.
-- **Q3 — naming:** keep `apps/mcp` as the package, or rename to reflect it now
-  hosts both front-ends (e.g. `apps/cli` / `apps/agent-bridge`)?
+  `connections.json` profile store (v1 uses discovery + flags).
+- **Q1 — event stream: open (the one live blocker).** The domain-event SSE
+  (`GET /v1/events`) is the right feed (the runtime view-frame stream stays
+  view-internal). But the route was removed as vestigial (§0). Decision needed:
+  restore the ~40-line handler (machinery intact; `asyncapi.json` still documents
+  it) so `posthastectl events` works live. Recommended: yes.
+- **Q2 — auth scope: noted in user docs.** The CLI inherits the token's full
+  power; the README capability-scoping caveat now calls this out for both
+  front-ends. Tightening waits on the trust-model scoping work.
+- **Q3 — naming: resolved — keep `apps/mcp`.** The package name stays; the README
+  reframes it as "one registry, two front-ends" rather than renaming (avoids
+  churning the MCP host config + the published package identity).

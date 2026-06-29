@@ -13,6 +13,9 @@
     "apps/mcp": {
       "name": "posthaste-mcp",
       "version": "0.0.0",
+      "bin": {
+        "posthastectl": "src/cli.ts",
+      },
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
         "zod": "4.3.6",
@@ -20,6 +23,7 @@
       "devDependencies": {
         "@types/node": "^25.9.1",
         "openapi-typescript": "^7.13.0",
+        "prettier": "^3.8.3",
         "typescript": "^6.0.3",
       },
     },
