@@ -61,6 +61,7 @@ just mcp build-cli            # → apps/mcp/dist/posthastectl
 | `messages send`           | `POST /sources/{src}/commands/send`                       |
 | `sync <src>`              | `POST /sources/{src}/commands/sync`                       |
 | `events`                  | `GET /v1/events` (SSE → NDJSON; see below)                |
+| `watch`                   | run a command / emit JSON per new matching message        |
 
 ### I/O contract (scriptable)
 
@@ -101,6 +102,73 @@ stream is intentionally **not** exposed (view-internal).
 > projection of the same `DomainEvent` broadcast the UI consumes in view-coupled
 > form (the runtime session stream's `Notification` frames). See
 > DESIGN-L2-posthastectl §0/§3.
+
+### Run a script on new mail (`watch`)
+
+`watch` is the turnkey layer over `events`: for each **new arrival** it fetches
+the full message and runs your command (detail JSON on stdin), so you don't
+hand-build the stream → filter → fetch → dispatch loop. The CLI owns the
+plumbing; your script owns the _condition + action_ (it is deliberately **not** a
+rules engine — for declarative tag/move/flag rules, use the app's built-in
+automation rules instead).
+
+```
+posthastectl watch [--account A] [--mailbox M] [--keyword TAG] \
+                   [--all-updates] [--exec CMD] [--cursor FILE]
+```
+
+- Fires on genuine arrivals (`--all-updates` for any change). `--account`
+  filters server-side; `--keyword` (a JMAP keyword / **tag**) and `--mailbox`
+  filter on the fetched message.
+- `--exec CMD` runs a shell command per match with the `MessageDetail` JSON on
+  **stdin** and `PH_ACCOUNT_ID` / `PH_MESSAGE_ID` / `PH_SEQ` / `PH_TOPIC` /
+  `PH_KEYWORDS` / `PH_MAILBOX_IDS` in the env. Without `--exec` it prints the
+  detail as one JSON line (so it still composes with pipes).
+- `--cursor FILE` persists the last-processed `seq`; on restart the daemon
+  replays the gap (at-least-once). The cursor advances after every event, so a
+  poison message never wedges the stream; a non-zero `--exec` exit is logged but
+  does not rewind — make your action idempotent.
+
+**Example — "if a message tagged `nebula-command` arrives, send its body to a
+local AI agent":**
+
+```sh
+posthastectl watch --keyword nebula-command --exec ./to-agent.sh
+```
+
+```sh
+#!/usr/bin/env bash
+# to-agent.sh — receives the full MessageDetail JSON on stdin.
+jq -r '.bodyText // .bodyHtml' \
+  | curl -sS -X POST http://localhost:7070/agent --data-binary @-
+```
+
+The one fetch yields both the tag (`.keywords`) and the body (`.bodyText`) —
+no second call. Run it set-and-forget as a user service:
+
+```ini
+# ~/.config/systemd/user/posthaste-watch.service
+[Unit]
+Description=posthastectl watch — nebula-command → local AI agent
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/posthastectl watch --keyword nebula-command \
+  --exec %h/.local/bin/to-agent.sh --cursor %h/.local/state/posthaste-watch.seq
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+```
+
+```sh
+systemctl --user enable --now posthaste-watch.service
+```
+
+> Security: `--exec` runs a command triggered by **attacker-influenced input**
+> (email). The `--keyword` gate is convenience, _not_ an auth boundary (a sender
+> may be able to set keywords). Treat the payload as untrusted in your script.
 
 ## posthaste-mcp (MCP server)
 

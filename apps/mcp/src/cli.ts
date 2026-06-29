@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 
 import { resolveConnection } from "./client.js";
 import { operations } from "./operations/index.js";
@@ -17,6 +18,39 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/**
+ * Run a `watch --exec` command via the shell with `input` on stdin and `env`
+ * merged in. The child inherits stdout/stderr so its output is visible. Resolves
+ * with the exit code; a spawn failure resolves to 127 (never rejects), so a bad
+ * command logs rather than crashing the watcher.
+ */
+function runCommand(
+  command: string,
+  input: string,
+  env: Record<string, string>,
+): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(command, {
+      shell: true,
+      env: { ...process.env, ...env },
+      stdio: ["pipe", "inherit", "inherit"],
+    });
+    child.on("error", (error) => {
+      process.stderr.write(
+        `posthastectl: failed to run --exec command: ${error.message}\n`,
+      );
+      resolve(127);
+    });
+    child.on("close", (code) => resolve(code ?? 0));
+    if (child.stdin) {
+      child.stdin.on("error", () => {
+        /* child closed stdin early; ignore EPIPE */
+      });
+      child.stdin.end(input);
+    }
+  });
+}
+
 async function main(): Promise<void> {
   // Ctrl-C cleanly ends the `events` stream (and any in-flight request).
   const controller = new AbortController();
@@ -31,6 +65,8 @@ async function main(): Promise<void> {
     env: process.env,
     readStdin,
     readFile: (path) => readFile(path, "utf8"),
+    writeFile: (path, content) => writeFile(path, content, "utf8"),
+    runCommand,
     fetch: globalThis.fetch,
     version: CLI_VERSION,
     signal: controller.signal,

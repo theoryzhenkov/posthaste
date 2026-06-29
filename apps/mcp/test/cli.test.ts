@@ -54,6 +54,7 @@ function harness(
     env: {},
     readStdin: async () => opts.stdin ?? "",
     readFile: async () => opts.file ?? "",
+    writeFile: async () => {},
     fetch: opts.fetch ?? defaultFetch,
     version: "9.9.9",
   };
