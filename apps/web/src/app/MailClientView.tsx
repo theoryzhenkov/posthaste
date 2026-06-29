@@ -22,10 +22,12 @@ export function MailClientView(props: MailClientViewProps) {
         onArchive={props.onArchive}
         onClearSearch={props.onClearSearch}
         onCompose={props.onCompose}
+        onForward={props.onForward}
         onOpenCommandPalette={props.onOpenCommandPalette}
         onOpenFocusedMessage={props.onOpenFocusedMessage}
-        onPlaceholderAction={props.onPlaceholderAction}
         onReply={props.onReply}
+        onReplyAll={props.onReplyAll}
+        onSnooze={props.onSnooze}
         onShowShortcuts={props.onShowShortcuts}
         onTag={() => props.onSetTagEditorOpen(true)}
         onToggleFlag={props.onToggleFlag}
