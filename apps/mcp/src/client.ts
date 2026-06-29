@@ -17,7 +17,26 @@ export interface Connection {
   baseUrl: string;
   token: string | undefined;
   /** Where the connection was resolved from, for diagnostics. */
-  source: "env" | "daemon.json";
+  source: "env" | "daemon.json" | "flag";
+  /**
+   * Optional `fetch` implementation. Defaults to the global `fetch`; the CLI
+   * front-end threads its own (injectable) impl through here so operation
+   * handlers are testable without real sockets. The MCP front-end leaves it
+   * unset (global `fetch`).
+   */
+  fetch?: typeof fetch;
+}
+
+/**
+ * Explicit connection overrides, supplied by the CLI's `--base-url` / `--token`
+ * flags. A `baseUrl` override bypasses env + port-file discovery entirely (used
+ * verbatim, the caller includes the `/v1` prefix); a `token` override replaces
+ * whatever token discovery resolved. Both are absent for the MCP front-end,
+ * which calls [`resolveConnection`] with no arguments.
+ */
+export interface ConnectionOverrides {
+  baseUrl?: string;
+  token?: string;
 }
 
 /**
@@ -124,7 +143,37 @@ function readPortFile(): PortFile | undefined {
  * expected to include the `/v1` prefix). If only the port-file is found, the
  * base is `http://127.0.0.1:<port>/v1`.
  */
-export function resolveConnection(): Connection {
+export function resolveConnection(
+  overrides: ConnectionOverrides = {},
+): Connection {
+  if (overrides.baseUrl && overrides.baseUrl.length > 0) {
+    return {
+      baseUrl: overrides.baseUrl.replace(/\/+$/, ""),
+      token:
+        overrides.token && overrides.token.length > 0
+          ? overrides.token
+          : envOrUndefined(process.env.POSTHASTE_TOKEN),
+      source: "flag",
+    };
+  }
+
+  const discovered = resolveDiscovered();
+  if (overrides.token && overrides.token.length > 0) {
+    return { ...discovered, token: overrides.token };
+  }
+  return discovered;
+}
+
+/** Coerce an empty/undefined env var to `undefined`. */
+function envOrUndefined(value: string | undefined): string | undefined {
+  return value && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Resolve the connection from env vars then the daemon port-file (the original
+ * discovery order, unchanged). Throws [`ConnectionError`] if neither is found.
+ */
+function resolveDiscovered(): Connection {
   const envUrl = process.env.POSTHASTE_API_URL;
   const envToken = process.env.POSTHASTE_TOKEN;
   if (envUrl && envUrl.length > 0) {
@@ -194,9 +243,10 @@ export async function apiFetch<T>(
     bodyText = JSON.stringify(opts.body);
   }
 
+  const doFetch = conn.fetch ?? fetch;
   let res: Response;
   try {
-    res = await fetch(url, { method, headers, body: bodyText });
+    res = await doFetch(url, { method, headers, body: bodyText });
   } catch (cause) {
     throw new ApiError(
       0,
