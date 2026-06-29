@@ -1,5 +1,5 @@
 use jmap_client::mailbox;
-use posthaste_domain::{AccountId, GatewayError, SendMessageRequest};
+use posthaste_domain::{GatewayError, SendMessageRequest};
 
 use crate::compose::{recipient_to_address, render_markdown};
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
@@ -15,7 +15,6 @@ use crate::live_compose::identity::fetch_send_identity;
 /// @spec docs/L1-jmap#methods-used
 pub(crate) async fn send_message(
     gateway: &LiveJmapGateway,
-    account_id: &AccountId,
     request_data: &SendMessageRequest,
 ) -> Result<(), GatewayError> {
     let identity = fetch_send_identity(gateway, request_data.from.as_ref()).await?;
@@ -26,8 +25,7 @@ pub(crate) async fn send_message(
         .fetch_mailbox_id_by_role(mailbox::Role::Sent)
         .await?;
     let html_body = render_markdown(&request_data.body);
-    let uploaded_attachments =
-        upload_send_attachments(gateway, account_id, &request_data.attachments).await?;
+    let uploaded_attachments = upload_send_attachments(gateway, &request_data.attachments).await?;
 
     let mut request = gateway.client().build();
     let email_obj = request.set_email().create();

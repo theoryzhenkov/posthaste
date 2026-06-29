@@ -18,7 +18,6 @@ use crate::live_compose::identity::fetch_draft_sender;
 /// @spec docs/L1-jmap#methods-used
 pub(crate) async fn save_draft(
     gateway: &LiveJmapGateway,
-    account_id: &AccountId,
     request_data: &SendMessageRequest,
     replace: Option<&MessageId>,
 ) -> Result<MessageId, GatewayError> {
@@ -30,8 +29,7 @@ pub(crate) async fn save_draft(
         .fetch_mailbox_id_by_role(mailbox::Role::Drafts)
         .await?;
     let html_body = render_markdown(&request_data.body);
-    let uploaded_attachments =
-        upload_send_attachments(gateway, account_id, &request_data.attachments).await?;
+    let uploaded_attachments = upload_send_attachments(gateway, &request_data.attachments).await?;
 
     let mut request = gateway.client().build();
     let email_set = request.set_email();
