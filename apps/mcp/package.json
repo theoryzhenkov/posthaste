@@ -3,11 +3,20 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "posthastectl": "src/cli.ts"
+  },
   "scripts": {
     "api:generate": "openapi-typescript ../../openapi.json -o src/schema.gen.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun test && prettier . --check",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
     "build": "tsc",
-    "start": "bun run src/index.ts"
+    "build:cli": "bun build --compile --minify src/cli.ts --outfile dist/posthastectl",
+    "start": "bun run src/index.ts",
+    "cli": "bun run src/cli.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -16,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "openapi-typescript": "^7.13.0",
+    "prettier": "^3.8.3",
     "typescript": "^6.0.3"
   }
 }

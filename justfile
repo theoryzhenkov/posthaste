@@ -4,6 +4,7 @@ mod template
 mod mkdocs
 mod backend 'crates/justfile'
 mod web 'apps/web/justfile'
+mod mcp 'apps/mcp/justfile'
 mod site 'apps/site/justfile'
 mod desktop 'apps/desktop/justfile'
 mod dev 'tools/dev/justfile'
@@ -25,12 +26,14 @@ install:
 fmt:
     just backend fmt
     just web fmt
+    just mcp fmt
     just site fmt
 
 # Check formatting without modifying files
 fmt-check:
     just backend fmt-check
     just web fmt-check
+    just mcp fmt-check
     just site fmt-check
 
 # Validate a Posthaste config directory. No production config is committed, so
@@ -44,6 +47,7 @@ check:
     just fmt-check
     just backend check
     just web check
+    just mcp check
     just site check
     just docs build
 
@@ -53,6 +57,7 @@ test *args:
     just backend test {{ args }}
     just desktop test
     just web test
+    just mcp test
 
 # Build everything
 build:

@@ -3,25 +3,64 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import {
+  ApiError,
   ConnectionError,
   resolveConnection,
   type Connection,
 } from "./client.js";
-import { registerCommandTools } from "./tools/commands.js";
-import { registerReadTools } from "./tools/read.js";
-import { wrapTool } from "./tools/wrap.js";
+import { operations } from "./operations/index.js";
 
 /**
- * Build the MCP server and register the tool set. Each tool maps 1:1 to one
- * documented `/v1` operation; the daemon does the work, this is a thin adapter.
+ * Render an operation's result (or error) as an MCP tool result. JSON text
+ * content on success; the typed `ApiErrorBody` message as a tool error on
+ * failure. (This is the MCP front-end's rendering of the shared registry; the
+ * CLI renders the same operations to stdout/exit-codes instead.)
+ */
+async function runAsTool(
+  fn: () => Promise<unknown>,
+): Promise<{ content: { type: "text"; text: string }[]; isError?: true }> {
+  try {
+    const result = await fn();
+    return {
+      content: [
+        { type: "text", text: JSON.stringify(result ?? null, null, 2) },
+      ],
+    };
+  } catch (error) {
+    const message =
+      error instanceof ApiError || error instanceof ConnectionError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    return { isError: true, content: [{ type: "text", text: message }] };
+  }
+}
+
+/**
+ * Build the MCP server and register the operation registry as tools. Each tool
+ * maps 1:1 to one documented `/v1` operation; the daemon does the work, this is
+ * a thin adapter. The `readOnlyHint` annotation comes from the operation's
+ * `mutates` flag.
  */
 function buildServer(conn: Connection): McpServer {
   const server = new McpServer(
     { name: "posthaste-mcp", version: "0.0.0" },
     { capabilities: { tools: {} } },
   );
-  registerReadTools(server, conn, wrapTool);
-  registerCommandTools(server, conn, wrapTool);
+  for (const op of operations) {
+    server.registerTool(
+      op.mcpName,
+      {
+        title: op.title,
+        description: op.description,
+        inputSchema: op.argSchema,
+        annotations: { readOnlyHint: !op.mutates },
+      },
+      (args) =>
+        runAsTool(() => op.handler(conn, args as Record<string, unknown>)),
+    );
+  }
   return server;
 }
 
