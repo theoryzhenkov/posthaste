@@ -243,3 +243,37 @@ pub trait RevLogStore: Send + Sync {
         redo_tail: &[String],
     ) -> Result<(), StoreError>;
 }
+
+/// Snooze state: a Posthaste-local return time for a message in the Snoozed
+/// mailbox. Not provider-synced. The scheduler (supervisor snooze tick) scans
+/// `list_due_snoozes` for due rows + auto-returns them.
+///
+/// @spec docs/eph/DESIGN-L2-snooze
+pub trait SnoozeStore: Send + Sync {
+    /// Insert (or replace) a snooze row for a message. Called by `message.snooze`
+    /// after the move to the Snoozed mailbox.
+    fn insert_snooze(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        until: i64,
+    ) -> Result<(), StoreError>;
+
+    /// Delete a message's snooze row. Called by `message.unsnooze` + the scheduler
+    /// auto-return. (The store invariant in `replace_mailboxes_tx` also deletes
+    /// the row whenever a message leaves the Snoozed mailbox, so this is
+    /// idempotent.)
+    fn delete_snooze(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), StoreError>;
+
+    /// Messages whose snooze return time has arrived (`until <= now`), for the
+    /// scheduler tick.
+    fn list_due_snoozes(
+        &self,
+        account_id: &AccountId,
+        now: i64,
+    ) -> Result<Vec<(MessageId, i64)>, StoreError>;
+}

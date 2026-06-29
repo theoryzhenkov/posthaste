@@ -179,6 +179,7 @@ mod imap_snapshots;
 mod imap_state_locations;
 mod mailbox_role_overrides;
 mod mailbox_snapshots;
+mod snooze;
 mod message_queries;
 mod message_snapshots;
 mod mutation_cursors;

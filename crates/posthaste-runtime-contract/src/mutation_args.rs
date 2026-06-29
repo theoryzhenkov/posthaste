@@ -95,6 +95,25 @@ pub struct MessageTargetArgs {
     pub message_id: String,
 }
 
+/// `message.snooze`: move a message to the Snoozed mailbox + record the return
+/// time. `until` is unix seconds (UTC). @spec docs/eph/DESIGN-L2-snooze
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSnoozeArgs {
+    pub source_id: String,
+    pub message_id: String,
+    pub until: i64,
+}
+
+/// `message.unsnooze`: move a snoozed message back to the Inbox + clear its
+/// return time. @spec docs/eph/DESIGN-L2-snooze
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageUnsnoozeArgs {
+    pub source_id: String,
+    pub message_id: String,
+}
+
 /// `message.applyDiff`: apply an invertible change-diff (add/remove keywords +
 /// add/remove mailboxes) to one message. The undo/redo vehicle — undo submits
 /// `inverse(diff)`, redo submits `diff` — and an ordinary optimistic mutation
