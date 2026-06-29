@@ -14,6 +14,7 @@ import { AppearancePane } from './AppearancePane'
 import { GeneralPane } from './GeneralPane'
 import { NotificationsPane } from './NotificationsPane'
 import { StoragePane } from './StoragePane'
+import { TroubleshootingPane } from './TroubleshootingPane'
 import {
   SmartMailboxesPane,
   type MailboxEditorTarget,
@@ -190,6 +191,12 @@ export function SettingsPanelContent({
             onAutomationSettingsSaved={onAutomationSettingsSaved}
             onDeleted={onDeletedSmartMailbox}
           />
+        )}
+
+        {activeCategory === 'troubleshooting' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <TroubleshootingPane />
+          </div>
         )}
       </div>
     </main>
