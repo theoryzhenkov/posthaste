@@ -98,14 +98,19 @@ build-serve:
     just web build
     just backend build-release
 
-# Create a local browser-localhost tarball under target/distribute/.
-package-serve:
-    just build-serve
-    bash tools/package/serve.sh
+# Package the standalone daemon binary (posthasted) under target/distribute/.
+package-daemon:
+    just backend build-release
+    bash tools/package/daemon.sh
+
+# Package the browser-localhost web frontend under target/distribute/.
+package-web:
+    just web build
+    bash tools/package/web.sh
 
 # Run browser-localhost mode from the built frontend.
 serve *args:
-    cargo run --bin posthaste -- serve --frontend-dist apps/web/dist {{ args }}
+    cargo run --bin posthasted -- serve --frontend-dist apps/web/dist {{ args }}
 
 # Print the browser automation environment exposed by the dev shell.
 browser-env:
