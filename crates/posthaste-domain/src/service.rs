@@ -89,3 +89,31 @@ impl MailService {
         }
     }
 }
+
+/// Serialize an operation payload, mapping the JSON error to a rejected-gateway
+/// `ServiceError`. `context` names what was being serialized, e.g.
+/// `encode_payload(command, "keyword command")` -> `"failed to serialize keyword
+/// command: <err>"`.
+pub(crate) fn encode_payload<T: serde::Serialize>(
+    value: T,
+    context: &str,
+) -> Result<serde_json::Value, ServiceError> {
+    serde_json::to_value(value).map_err(|error| {
+        ServiceError::from(GatewayError::Rejected(format!(
+            "failed to serialize {context}: {error}"
+        )))
+    })
+}
+
+/// Deserialize an operation payload, mapping the JSON error to a rejected-gateway
+/// `ServiceError`. `context` names the payload, e.g.
+/// `decode_payload(payload, "setKeywords payload")` -> `"invalid setKeywords
+/// payload: <err>"`.
+pub(crate) fn decode_payload<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
+    context: &str,
+) -> Result<T, ServiceError> {
+    serde_json::from_value(value).map_err(|error| {
+        ServiceError::from(GatewayError::Rejected(format!("invalid {context}: {error}")))
+    })
+}
