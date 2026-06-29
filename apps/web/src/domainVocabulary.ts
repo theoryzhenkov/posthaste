@@ -14,6 +14,7 @@ export const MAILBOX_ROLES = {
   Sent: 'sent',
   Junk: 'junk',
   Trash: 'trash',
+  Snooze: 'snooze',
 } as const satisfies Record<string, KnownMailboxRole>
 
 export const KNOWN_MAILBOX_ROLES = [
@@ -23,6 +24,7 @@ export const KNOWN_MAILBOX_ROLES = [
   MAILBOX_ROLES.Sent,
   MAILBOX_ROLES.Junk,
   MAILBOX_ROLES.Trash,
+  MAILBOX_ROLES.Snooze,
 ] as const satisfies readonly KnownMailboxRole[]
 
 /** The `defaultKey` of the built-in All Mail smart mailbox (empty rule,

@@ -33,6 +33,7 @@ const mailboxRoleOptions: Array<{
   { value: 'sent', label: 'Sent' },
   { value: 'junk', label: 'Junk' },
   { value: 'trash', label: 'Trash' },
+  { value: 'snooze', label: 'Snoozed' },
 ]
 
 export function SourceMailboxEditor({
