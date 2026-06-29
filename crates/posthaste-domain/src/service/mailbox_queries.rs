@@ -66,6 +66,26 @@ impl MailService {
                 .map(|mailbox| mailbox.id),
             None => None,
         };
+        if is_local_only_role(role) {
+            // Posthaste-specific roles (e.g. "snooze") have no provider
+            // equivalent — JMAP/IMAP reject them as a mailbox `role`. Write the
+            // local override (which updates `mailbox.role` directly) + skip the
+            // gateway round-trip. @spec docs/eph/DESIGN-L2-snooze
+            self.mailbox_role_overrides.set_mailbox_role_override(
+                account_id,
+                mailbox_id,
+                role,
+                clear_role_from.as_ref(),
+            )?;
+            let event = self.events.append_event(
+                account_id,
+                EVENT_TOPIC_MAILBOX_UPDATED,
+                Some(mailbox_id),
+                None,
+                json!({ "mailboxId": mailbox_id.as_str() }),
+            )?;
+            return Ok(vec![event]);
+        }
         gateway
             .set_mailbox_role(
                 account_id,
@@ -78,4 +98,21 @@ impl MailService {
         self.sync_account(account_id, SyncTrigger::Manual, gateway, None)
             .await
     }
+}
+
+/// Whether `role` is a provider-native mailbox role (one JMAP/IMAP accepts on
+/// the mailbox itself), vs a Posthaste-local role like "snooze".
+fn is_provider_role(role: &str) -> bool {
+    matches!(
+        crate::MailboxRole::parse(role),
+        Some(role) if role != crate::MailboxRole::Snooze
+    )
+}
+
+/// Whether `role` is Posthaste-local (no provider equivalent) — the gateway
+/// round-trip is skipped + the local override is written instead. `None`
+/// (clearing) is NOT local-only: clearing a provider role still goes through the
+/// gateway.
+fn is_local_only_role(role: Option<&str>) -> bool {
+    role.map(|r| !is_provider_role(r)).unwrap_or(false)
 }
