@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// App-level appearance/theme preferences — the renderer's visual settings,
 /// stored in `[appearance]` of `app.toml` as the single source of truth (moved
@@ -14,10 +15,38 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Appearance {
     pub mode: Option<ThemeMode>,
-    pub palette_preset: Option<PalettePresetId>,
+    /// Theme identifier. Free-form (not an enum) so user-created themes are
+    /// expressible without a schema change; the built-ins are `"neutral"`
+    /// (displayed "Classic") and `"glass"`. Pass-through: the renderer resolves
+    /// the id to a palette and treats an unknown id as the default.
+    #[serde(alias = "palettePreset")]
+    pub theme: Option<String>,
     pub density: Option<UiDensity>,
-    pub accent_hue: Option<u32>,
+    /// Per-mode color overrides. Light/dark are customized independently (a
+    /// legacy single `accent_hue` in an older `app.toml` seeds both).
+    pub light: Option<ThemeColors>,
+    pub dark: Option<ThemeColors>,
     pub glass_theme: Option<GlassTheme>,
+}
+
+/// Per-mode color overrides for a theme. The named knobs (`accent_hue`,
+/// `surface_hue`) are the curated UX; `tokens` is the open escape hatch.
+///
+/// @spec docs/eph/DESIGN-L2-appearance-toml
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ThemeColors {
+    /// Accent color hue (0–360).
+    pub accent_hue: Option<u32>,
+    /// Base/surface color hue (0–360) — the "main color", today a fixed grey.
+    pub surface_hue: Option<u32>,
+    /// Arbitrary CSS custom-property overrides (`--token` → value). The
+    /// foundation for user-supplied themes / imported CSS: a future loader
+    /// parses a `.css` file into this map. Pass-through storage — the renderer
+    /// applies recognized tokens and ignores the rest; absent today's UI.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tokens: BTreeMap<String, String>,
 }
 
 /// Theme mode: light, dark, or follow the OS preference.
@@ -42,24 +71,6 @@ pub enum UiDensity {
     Compact,
     Cozy,
     Comfortable,
-}
-
-/// Palette preset identifier (the renderer resolves these to concrete palettes).
-/// Matches the renderer's `PalettePresetId` set; extend both together when a
-/// preset is added.
-///
-/// @spec docs/eph/DESIGN-L2-appearance-toml
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub enum PalettePresetId {
-    Neutral,
-    PaperInk,
-    Brutalist,
-    Glass,
-    Acid,
-    Marzipan,
-    Botanical,
 }
 
 /// Advanced glass-theme parameters: a set of decorative "blooms" rendered as the

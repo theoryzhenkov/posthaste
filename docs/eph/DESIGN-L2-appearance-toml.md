@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Migrate UI appearance prefs (theme mode/palette/density/accent/glass) from the renderer's localStorage snapshot into TOML as the single source of truth, with a derived localStorage boot-cache to avoid FOUC. Implements P1.4b of the configuration-surface RFC."
-modified: 2026-06-28
-reviewed: 2026-06-28
+modified: 2026-06-29
+reviewed: 2026-06-29
 state: implemented
 depends:
   - path: docs/eph/RFC-L2-configuration-surface
@@ -27,7 +27,8 @@ so it is LLM/CLI-editable like the rest of the config — no GUI harness require
 ## Scope [::state implemented]
 
 **In scope** — the full appearance object, modelled in TOML + the domain wire:
-`mode` · `palette_preset` · `density` · `accent_hue` · `glass_theme` (nested
+`mode` · `theme` (free-form id) · `density` · per-mode `light`/`dark`
+(`accent_hue` · `surface_hue` · `tokens`) · `glass_theme` (nested
 blooms array). Including `glass_theme` avoids a split-home (basics-in-TOML /
 glass-in-localStorage) that would defeat single-source-of-truth.
 
@@ -65,28 +66,46 @@ This matches the RFC's *spirit* (files are truth) without regressing boot UX.
 ```rust
 struct Appearance {
     mode: Option<ThemeMode>,            // light | dark | system
-    palette_preset: Option<PalettePresetId>, // neutral | paperInk | brutalist | glass | acid | marzipan | botanical
+    theme: Option<String>,              // free-form id; built-ins "neutral" ("Classic") / "glass"
     density: Option<UiDensity>,         // compact | cozy | comfortable
-    accent_hue: Option<u32>,            // 0–360
+    light: Option<ThemeColors>,         // per-mode color overrides
+    dark: Option<ThemeColors>,
     glass_theme: Option<GlassTheme>,    // nested
+}
+struct ThemeColors {
+    accent_hue: Option<u32>,            // 0–360
+    surface_hue: Option<u32>,           // base/"main" color hue, today fixed grey
+    tokens: BTreeMap<String, String>,   // arbitrary CSS custom-property overrides
 }
 struct GlassTheme { blooms: Vec<GlassBloom> }
 struct GlassBloom { id: String, hue: u32, x: f64, y: f64, opacity: f64, radius: f64 }
 ```
 
-Enums use `#[serde(rename_all = "camelCase")]` so `PaperInk` → `"paperInk"`
-(matches the TS `PalettePresetId` set). The backend treats appearance as
-**pass-through storage** (it does not interpret theme values); enums give
-schema self-documentation + typo rejection at the parse boundary.
+The backend treats appearance as **pass-through storage** (it does not interpret
+theme values). `theme` is a **free-form string** (not an enum) so user-created
+themes are expressible without a schema change — the built-ins are `"neutral"`
+(displayed "Classic") and `"glass"`. Color customization is **per-mode**
+(`light`/`dark`). `ThemeColors.tokens` is the **foundation for user-supplied
+themes / imported CSS**: a future loader parses a `.css` file's custom-property
+declarations into this map; the renderer applies recognized tokens and ignores
+the rest. (Earlier shape: a `PalettePresetId` enum + single top-level
+`accent_hue` — both retired; see back-compat below.)
 
 ### TOML file (`posthaste-config`, snake_case — `app.toml`)
 
 ```toml
 [appearance]
 mode = "dark"
-palette_preset = "neutral"
+theme = "glass"
 density = "compact"
+
+[appearance.light]
+accent_hue = 210
+surface_hue = 40
+
+[appearance.dark]
 accent_hue = 250
+surface_hue = 260
 
 [[appearance.glass_theme.blooms]]
 id = "bloom-1"
@@ -98,8 +117,18 @@ radius = 45
 ```
 
 Written via `write_managed_toml` (lossless: comments/unknown sections survive).
-`APP_TOML_MANAGED_KEYS` gains `"appearance"`. `AppearanceToml` mirrors the domain
-struct with `Option<_>` fields; a cleared `Option` removes its key.
+`APP_TOML_MANAGED_KEYS` includes `"appearance"`. `AppearanceToml` mirrors the
+domain struct with `Option<_>` fields; a cleared `Option` removes its key.
+
+**Back-compat** (files shipped since .30): an older `palette_preset` reads into
+`theme` (serde alias), and a legacy top-level `accent_hue` seeds both `light` and
+`dark` when neither is set. Neither legacy key is written back — the next save
+re-serializes the per-mode shape, migrating the file in place.
+
+**Transitional render bridge**: the design layer is still single-accent +
+`palettePreset`, so `wireMapping` currently collapses the per-mode accent to one
+and reads `theme` as the palette id. The design-layer revamp (per-mode colors +
+`surface_hue` + `tokens`, owned by the sibling) makes it lossless.
 
 ## Vertical [::state in-progress]
 

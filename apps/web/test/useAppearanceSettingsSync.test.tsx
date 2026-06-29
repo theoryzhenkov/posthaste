@@ -70,9 +70,9 @@ describe('useAppearanceSettingsSync', () => {
 
     const tomlAppearance: Appearance = {
       mode: 'light',
-      palettePreset: 'paperInk',
+      theme: 'glass',
       density: 'comfortable',
-      accentHue: 200,
+      light: { accentHue: 200 },
       glassTheme: null,
     }
     mockFetchSettings({ ...DEFAULT_SETTINGS, appearance: tomlAppearance })
@@ -85,7 +85,7 @@ describe('useAppearanceSettingsSync', () => {
     await waitFor(() => {
       expect(store.getSnapshot().appearance.mode).toBe('light')
     })
-    expect(store.getSnapshot().appearance.palettePreset).toBe('paperInk')
+    expect(store.getSnapshot().appearance.palettePreset).toBe('glass')
     expect(store.getSnapshot().appearance.accentHue).toBe(200)
   })
 
@@ -110,7 +110,7 @@ describe('useAppearanceSettingsSync', () => {
       expect(importSpy).toHaveBeenCalledTimes(1)
     })
     const patchArg = importSpy.mock.calls[0][0]
-    expect(patchArg.appearance?.accentHue).toBe(210)
+    expect(patchArg.appearance?.light?.accentHue).toBe(210)
     expect(window.localStorage.getItem('posthaste.appearance.imported')).toBe(
       '1',
     )
