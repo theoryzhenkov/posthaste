@@ -285,3 +285,41 @@ pub struct SendMessageRequest {
     #[serde(default)]
     pub draft_id: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::format_forwarded_body;
+
+    #[test]
+    fn forwarded_body_includes_attribution_headers_then_body() {
+        let block = format_forwarded_body(
+            Some("Ada <ada@example.com>"),
+            Some("2026-06-29T12:00:00Z"),
+            Some("Subject"),
+            Some("you@example.com"),
+            "original body",
+        );
+        assert_eq!(
+            block,
+            "---------- Forwarded message ----------\n\
+             From: Ada <ada@example.com>\n\
+             Date: 2026-06-29T12:00:00Z\n\
+             Subject: Subject\n\
+             To: you@example.com\n\
+             \n\
+             original body"
+        );
+    }
+
+    #[test]
+    fn forwarded_body_omits_absent_or_blank_headers() {
+        let block = format_forwarded_body(Some("ada@example.com"), None, Some("   "), None, "body");
+        assert_eq!(
+            block,
+            "---------- Forwarded message ----------\n\
+             From: ada@example.com\n\
+             \n\
+             body"
+        );
+    }
+}
