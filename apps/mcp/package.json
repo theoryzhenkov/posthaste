@@ -14,7 +14,7 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "build": "tsc",
-    "build:cli": "bun build --compile --minify src/cli.ts --outfile dist/posthastectl",
+    "build:cli": "bun run scripts/build-cli.ts",
     "start": "bun run src/index.ts",
     "cli": "bun run src/cli.ts"
   },
