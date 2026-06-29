@@ -52,6 +52,7 @@ const APP_TOML_MANAGED_KEYS: &[&str] = &[
     "cache",
     "appearance",
     "notifications",
+    "mailbox_colors",
     "link",
 ];
 
@@ -346,8 +347,21 @@ radius = 45
             "glass bloom did not parse"
         );
 
-        // Round-trip: AppSettings -> AppToml -> lossless write.
+        // Back-compat: legacy `palette_preset` reads into `theme`, and the legacy
+        // top-level `accent_hue` seeds both per-mode color tables.
         let settings = app.to_app_settings().unwrap();
+        let appearance = settings.appearance.as_ref().unwrap();
+        assert_eq!(appearance.theme.as_deref(), Some("glass"));
+        assert_eq!(
+            appearance.light.as_ref().and_then(|c| c.accent_hue),
+            Some(250)
+        );
+        assert_eq!(
+            appearance.dark.as_ref().and_then(|c| c.accent_hue),
+            Some(250)
+        );
+
+        // Round-trip: AppSettings -> AppToml -> lossless write.
         let toml_struct = AppToml::from_app_settings(&settings, &app);
         write_app_toml(&dir, &toml_struct).unwrap();
 
@@ -357,11 +371,73 @@ radius = 45
             "appearance section dropped:\n{after}"
         );
         assert!(after.contains("glass"), "palette value dropped:\n{after}");
+        // The legacy keys are migrated away on write (per-mode shape replaces them).
+        assert!(
+            after.contains("theme = \"glass\"") && !after.contains("palette_preset"),
+            "theme not migrated:\n{after}"
+        );
+        assert!(
+            after.contains("[appearance.light]") && after.contains("[appearance.dark]"),
+            "per-mode color tables not written:\n{after}"
+        );
         assert!(
             after.contains("[[appearance.glass_theme.blooms]]"),
             "blooms array dropped:\n{after}"
         );
         assert!(after.contains("bloom-1"), "bloom id dropped:\n{after}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_app_toml_round_trips_mailbox_colors() {
+        let dir = std::env::temp_dir().join(format!(
+            "ph-cfg-mboxcolor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("app.toml");
+        std::fs::write(
+            &path,
+            r#"[[mailbox_colors]]
+source_id = "primary"
+mailbox_id = "INBOX"
+hue = 200
+
+[[mailbox_colors]]
+source_id = "primary"
+mailbox_id = "Receipts"
+hue = 45
+
+[custom]
+k = 1
+"#,
+        )
+        .unwrap();
+
+        let app = read_app_toml(&dir).unwrap();
+        let settings = app.to_app_settings().unwrap();
+        assert_eq!(settings.mailbox_colors.len(), 2);
+        assert_eq!(settings.mailbox_colors[0].mailbox_id.as_str(), "INBOX");
+        assert_eq!(settings.mailbox_colors[0].hue, 200);
+
+        // Lossless round-trip: AppSettings -> AppToml -> write.
+        let toml_struct = AppToml::from_app_settings(&settings, &app);
+        write_app_toml(&dir, &toml_struct).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("[[mailbox_colors]]") && after.contains("Receipts"),
+            "mailbox_colors dropped:\n{after}"
+        );
+        // The unmanaged section survives the lossless write.
+        assert!(
+            after.contains("[custom]"),
+            "unknown section dropped:\n{after}"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

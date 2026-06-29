@@ -1317,6 +1317,14 @@ export interface components {
             automationRules?: components["schemas"]["AutomationRule"][];
             cachePolicy?: components["schemas"]["CachePolicy"];
             defaultAccountId?: null | components["schemas"]["AccountId"];
+            /**
+             * @description Per-mailbox sidebar color overrides. Each entry overrides the renderer's
+             *     default (hash-derived) color for one provider mailbox. Pure presentation,
+             *     keyed by `(source_id, mailbox_id)`; TOML source of truth.
+             *
+             *     @spec docs/eph/RFC-L2-configuration-matrix
+             */
+            mailboxColors?: components["schemas"]["MailboxColor"][];
             notifications?: null | components["schemas"]["Notifications"];
         };
         /**
@@ -1715,6 +1723,22 @@ export interface components {
             sortKey?: Record<string, never>;
         };
         /**
+         * @description A per-mailbox sidebar color override (presentation only). Overrides the
+         *     renderer's default hash-derived color for the mailbox identified by
+         *     `(source_id, mailbox_id)`.
+         *
+         *     @spec docs/eph/RFC-L2-configuration-matrix
+         */
+        MailboxColor: {
+            /**
+             * Format: int32
+             * @description Color hue (0–360).
+             */
+            hue: number;
+            mailboxId: components["schemas"]["MailboxId"];
+            sourceId: components["schemas"]["AccountId"];
+        };
+        /**
          * @description Opaque server-assigned identifier for a mailbox (folder or label).
          *
          *     @spec docs/L1-jmap#core-types
@@ -2013,6 +2037,7 @@ export interface components {
             automationRules?: components["schemas"]["AutomationRule"][] | null;
             cachePolicy?: null | components["schemas"]["CachePolicy"];
             defaultAccountId?: string | null;
+            mailboxColors?: components["schemas"]["MailboxColor"][] | null;
             notifications?: null | components["schemas"]["Notifications"];
         };
         /**

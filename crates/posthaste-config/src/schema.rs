@@ -1,8 +1,8 @@
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
     AppSettings, Appearance, AutomationAction, AutomationRule, AutomationTrigger, CachePolicy,
-    GlassTheme, ImapTransportSettings, MailboxId, Notifications, ProviderAuthKind, ProviderHint,
-    SecretKind, SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
+    GlassTheme, ImapTransportSettings, MailboxColor, MailboxId, Notifications, ProviderAuthKind,
+    ProviderHint, SecretKind, SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
     SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
     SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
     SmtpTransportSettings, ThemeColors, ThemeMode, TransportSecurity, UiDensity, RFC3339_EPOCH,

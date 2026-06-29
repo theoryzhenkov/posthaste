@@ -13,6 +13,7 @@ pub struct PatchSettingsRequest {
     pub automation_drafts: Option<Vec<AutomationRule>>,
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
+    pub mailbox_colors: Option<Vec<MailboxColor>>,
 }
 
 /// Request body for `POST /v1/automation-rules:preview`.
@@ -110,6 +111,7 @@ pub async fn patch_settings(
                 automation_drafts: request.automation_drafts,
                 appearance: request.appearance,
                 notifications: request.notifications,
+                mailbox_colors: request.mailbox_colors,
             },
         )
         .await

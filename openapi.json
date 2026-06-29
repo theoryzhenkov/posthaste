@@ -4533,6 +4533,13 @@
               }
             ]
           },
+          "mailboxColors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailboxColor"
+            },
+            "description": "Per-mailbox sidebar color overrides. Each entry overrides the renderer's\ndefault (hash-derived) color for one provider mailbox. Pure presentation,\nkeyed by `(source_id, mailbox_id)`; TOML source of truth.\n\n@spec docs/eph/RFC-L2-configuration-matrix"
+          },
           "notifications": {
             "oneOf": [
               {
@@ -5500,6 +5507,29 @@
           }
         }
       },
+      "MailboxColor": {
+        "type": "object",
+        "description": "A per-mailbox sidebar color override (presentation only). Overrides the\nrenderer's default hash-derived color for the mailbox identified by\n`(source_id, mailbox_id)`.\n\n@spec docs/eph/RFC-L2-configuration-matrix",
+        "required": [
+          "sourceId",
+          "mailboxId",
+          "hue"
+        ],
+        "properties": {
+          "hue": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Color hue (0–360).",
+            "minimum": 0
+          },
+          "mailboxId": {
+            "$ref": "#/components/schemas/MailboxId"
+          },
+          "sourceId": {
+            "$ref": "#/components/schemas/AccountId"
+          }
+        }
+      },
       "MailboxId": {
         "type": "string",
         "description": "Opaque server-assigned identifier for a mailbox (folder or label).\n\n@spec docs/L1-jmap#core-types"
@@ -6247,6 +6277,15 @@
               "string",
               "null"
             ]
+          },
+          "mailboxColors": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MailboxColor"
+            }
           },
           "notifications": {
             "oneOf": [

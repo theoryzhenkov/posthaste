@@ -16,12 +16,12 @@ use futures_util::stream::BoxStream;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
     Appearance, AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult,
-    DomainEvent, DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxId,
-    MailboxSummary, MessageAttachment, MessageId, MessageSummary, Notifications, Operation,
-    OperationId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand,
-    SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings,
-    SyncMode, TagSummary, ValidationError,
+    DomainEvent, DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxColor,
+    MailboxId, MailboxSummary, MessageAttachment, MessageId, MessageSummary, Notifications,
+    Operation, OperationId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary,
+    SmtpTransportSettings, SyncMode, TagSummary, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -241,6 +241,7 @@ pub struct PatchAppSettingsMutation {
     pub automation_drafts: Option<Vec<AutomationRule>>,
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
+    pub mailbox_colors: Option<Vec<MailboxColor>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
