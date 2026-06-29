@@ -15,7 +15,6 @@ mod fixture;
 mod gmail;
 mod harness;
 mod paths;
-mod replica_probe;
 mod runtime;
 mod stalwart;
 
@@ -23,6 +22,5 @@ pub use fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureM
 pub use gmail::{GmailImapFixture, SEEDED_FROM_EMAIL, SEEDED_LABELS, SEEDED_SUBJECT};
 pub use harness::Harness;
 pub use paths::{free_loopback_port, stalwart_bin, temp_root, workspace_root};
-pub use replica_probe::{FlickerLog, RenderSnapshot, RenderedRow};
-pub use runtime::{FrameCapture, RuntimeHarness, TestSecretStore, ViewSettlement, ViewWatch};
+pub use runtime::{RuntimeHarness, TestSecretStore, ViewSettlement, ViewWatch};
 pub use stalwart::StalwartFixture;

@@ -1,9 +1,5 @@
 use crate::LogEvent;
 
-pub const API_REQUEST_COMPLETED: LogEvent = LogEvent::new("api.request.completed");
-pub const API_REQUEST_FAILED: LogEvent = LogEvent::new("api.request.failed");
-pub const API_REQUEST_STARTED: LogEvent = LogEvent::new("api.request.started");
-
 pub const ACCOUNT_CREATE_COMPENSATION_FAILED: LogEvent =
     LogEvent::new("account.create.compensation_failed");
 pub const ACCOUNT_SECRET_DELETE_FAILED: LogEvent = LogEvent::new("account.secret.delete_failed");
@@ -55,26 +51,16 @@ pub const CACHE_SEARCH_VISIBILITY_SCOPE_COUNT_FAILED: LogEvent =
 
 pub const CONFIG_DEFAULT_INITIALIZED: LogEvent = LogEvent::new("config.default_initialized");
 pub const CONFIG_BOOTSTRAP_IMPORTED: LogEvent = LogEvent::new("config.bootstrap_imported");
-pub const CONFIG_INITIALIZED: LogEvent = LogEvent::new("config.initialized");
 pub const DATABASE_OPENED: LogEvent = LogEvent::new("database.opened");
 pub const DATABASE_CORRUPT_REPAIRED: LogEvent = LogEvent::new("database.corrupt.repaired");
-pub const DAEMON_EVENT_MALFORMED: LogEvent = LogEvent::new("daemon.event.malformed");
 pub const DESKTOP_BACKEND_STARTED: LogEvent = LogEvent::new("desktop.backend.started");
 pub const DESKTOP_RELEASE_CHANNEL: LogEvent = LogEvent::new("desktop.release_channel");
-pub const FRONTEND_CONSOLE_OUTPUT: LogEvent = LogEvent::new("frontend.console.output");
-pub const FRONTEND_ERROR_UNCAUGHT: LogEvent = LogEvent::new("frontend.error.uncaught");
-pub const FRONTEND_ERROR_UNHANDLED_REJECTION: LogEvent =
-    LogEvent::new("frontend.error.unhandled_rejection");
 pub const HTTP_REQUEST_COMPLETED: LogEvent = LogEvent::new("http.request.completed");
 pub const LOGGING_INITIALIZED: LogEvent = LogEvent::new("logging.initialized");
 pub const SERVER_LISTENING: LogEvent = LogEvent::new("server.listening");
 pub const LINK_SURFACE_SERVED: LogEvent = LogEvent::new("link.surface_served");
-pub const SEND_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
-    LogEvent::new("send.followup_sync_trigger_failed");
 pub const SEND_SENDER_CACHE_UPDATE_FAILED: LogEvent =
     LogEvent::new("send.sender_cache_update_failed");
-pub const DRAFT_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
-    LogEvent::new("draft.followup_sync_trigger_failed");
 pub const OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("outbox.followup_sync_trigger_failed");
 
@@ -177,13 +163,9 @@ pub const SUPERVISOR_AUTOMATION_BACKFILL_COMPLETED: LogEvent =
     LogEvent::new("supervisor.automation_backfill.completed");
 pub const SUPERVISOR_AUTOMATION_BACKFILL_FAILED: LogEvent =
     LogEvent::new("supervisor.automation_backfill.failed");
-pub const SUPERVISOR_OUTBOX_FLUSH_FAILED: LogEvent =
-    LogEvent::new("supervisor.outbox.flush_failed");
 pub const SUPERVISOR_SYNC_COMPLETED: LogEvent = LogEvent::new("supervisor.sync.completed");
 pub const SUPERVISOR_SYNC_FAILED: LogEvent = LogEvent::new("supervisor.sync.failed");
 pub const SUPERVISOR_SYNC_STARTED: LogEvent = LogEvent::new("supervisor.sync.started");
-pub const SUPERVISOR_SYNC_TRIGGER_IGNORED: LogEvent =
-    LogEvent::new("supervisor.sync.trigger_ignored");
 pub const SUPERVISOR_SYNC_TRIGGER_COALESCED: LogEvent =
     LogEvent::new("supervisor.sync.trigger_coalesced");
 pub const SUPERVISOR_OAUTH_REFRESH_FAILED: LogEvent =

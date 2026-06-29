@@ -22,12 +22,10 @@ use posthaste_domain::{
 };
 use posthaste_observability::{events, ph_debug, ph_info};
 
-use crate::discovery::connect_authenticated_client;
 use crate::mailbox::examine_selected_mailbox;
 use crate::message::imap_flags_include_deleted;
 use crate::{
-    imap_header_message_record_with_gmail_metadata, normalize_imap_capabilities, ImapAdapterError,
-    ImapConnectionConfig, ImapFetchedHeader, ImapMappedHeader,
+    imap_header_message_record_with_gmail_metadata, ImapAdapterError, ImapFetchedHeader, ImapMappedHeader,
 };
 
 const UID_FETCH_CHUNK_SIZE: usize = 128;
@@ -38,11 +36,7 @@ mod headers;
 mod items;
 mod types;
 
-pub use changed_since::fetch_mailbox_changed_since_snapshot;
 pub(crate) use changed_since::fetch_mailbox_changed_since_snapshot_with_client;
-pub use headers::{
-    fetch_mailbox_header_records, fetch_mailbox_header_snapshot, fetch_mailbox_headers_after_uid,
-};
 pub(crate) use headers::{
     fetch_mailbox_header_snapshot_with_client, fetch_mailbox_headers_after_uid_with_client,
     fetch_selected_mailbox_headers,
