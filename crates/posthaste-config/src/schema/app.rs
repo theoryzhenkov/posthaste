@@ -24,8 +24,38 @@ pub struct AppToml {
     pub appearance: Option<AppearanceToml>,
     #[serde(default)]
     pub notifications: Option<NotificationsToml>,
+    #[serde(default, rename = "mailbox_colors")]
+    pub mailbox_colors: Vec<MailboxColorToml>,
     #[serde(default)]
     pub link: LinkToml,
+}
+
+/// TOML representation of a per-mailbox color override (`[[mailbox_colors]]`).
+///
+/// @spec docs/eph/RFC-L2-configuration-matrix
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct MailboxColorToml {
+    pub source_id: String,
+    pub mailbox_id: String,
+    pub hue: u32,
+}
+
+impl MailboxColorToml {
+    fn to_mailbox_color(&self) -> MailboxColor {
+        MailboxColor {
+            source_id: AccountId::from(self.source_id.as_str()),
+            mailbox_id: MailboxId::from(self.mailbox_id.as_str()),
+            hue: self.hue,
+        }
+    }
+
+    fn from_mailbox_color(color: &MailboxColor) -> Self {
+        Self {
+            source_id: color.source_id.to_string(),
+            mailbox_id: color.mailbox_id.as_str().to_string(),
+            hue: color.hue,
+        }
+    }
 }
 
 /// Runtime↔backend link settings (`[link]`). Default: in-process, link not
@@ -248,6 +278,11 @@ impl AppToml {
                 .collect::<Result<Vec<_>, _>>()?,
             appearance: self.appearance.as_ref().map(|a| a.to_appearance()),
             notifications: self.notifications.as_ref().map(|n| n.to_notifications()),
+            mailbox_colors: self
+                .mailbox_colors
+                .iter()
+                .map(MailboxColorToml::to_mailbox_color)
+                .collect(),
         })
     }
 
@@ -283,6 +318,11 @@ impl AppToml {
                 .notifications
                 .as_ref()
                 .map(NotificationsToml::from_notifications),
+            mailbox_colors: settings
+                .mailbox_colors
+                .iter()
+                .map(MailboxColorToml::from_mailbox_color)
+                .collect(),
             link: existing.link.clone(),
         }
     }

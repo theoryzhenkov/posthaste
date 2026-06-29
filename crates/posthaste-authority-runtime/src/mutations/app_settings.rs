@@ -68,6 +68,16 @@ impl AccountMutationService {
                     Ok(())
                 }),
             },
+            AppSettingsFieldPatch {
+                name: "mailbox_colors",
+                present: request.mailbox_colors.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(mailbox_colors) = &request.mailbox_colors {
+                        settings.mailbox_colors.clone_from(mailbox_colors);
+                    }
+                    Ok(())
+                }),
+            },
         ];
 
         let mut changed = Vec::new();

@@ -24,6 +24,28 @@ pub struct AppSettings {
     /// @spec docs/eph/RFC-L2-configuration-matrix
     #[serde(default)]
     pub notifications: Option<Notifications>,
+    /// Per-mailbox sidebar color overrides. Each entry overrides the renderer's
+    /// default (hash-derived) color for one provider mailbox. Pure presentation,
+    /// keyed by `(source_id, mailbox_id)`; TOML source of truth.
+    ///
+    /// @spec docs/eph/RFC-L2-configuration-matrix
+    #[serde(default)]
+    pub mailbox_colors: Vec<MailboxColor>,
+}
+
+/// A per-mailbox sidebar color override (presentation only). Overrides the
+/// renderer's default hash-derived color for the mailbox identified by
+/// `(source_id, mailbox_id)`.
+///
+/// @spec docs/eph/RFC-L2-configuration-matrix
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MailboxColor {
+    pub source_id: AccountId,
+    pub mailbox_id: MailboxId,
+    /// Color hue (0–360).
+    pub hue: u32,
 }
 
 /// Backend driver type for an account.

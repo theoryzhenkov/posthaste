@@ -32,6 +32,7 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
                 cache_policy: None,
                 appearance: None,
                 notifications: None,
+                mailbox_colors: None,
             }),
         )
         .await,

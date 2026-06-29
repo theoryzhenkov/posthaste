@@ -31,6 +31,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
                 automation_drafts: None,
                 appearance: None,
                 notifications: None,
+                mailbox_colors: None,
             }),
         )
         .await,
@@ -79,6 +80,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
                 automation_drafts: None,
                 appearance: None,
                 notifications: None,
+                mailbox_colors: None,
             }),
         )
         .await,
@@ -114,6 +116,7 @@ async fn patch_settings_can_update_cache_policy() {
                 automation_drafts: None,
                 appearance: None,
                 notifications: None,
+                mailbox_colors: None,
             }),
         )
         .await,
@@ -160,6 +163,7 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
                 automation_drafts: Some(vec![draft]),
                 appearance: None,
                 notifications: None,
+                mailbox_colors: None,
             }),
         )
         .await,
@@ -192,6 +196,7 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
             automation_drafts: None,
             appearance: None,
             notifications: None,
+            mailbox_colors: None,
         }),
     )
     .await
@@ -232,6 +237,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
             automation_drafts: None,
             appearance: None,
             notifications: None,
+            mailbox_colors: None,
         }),
     )
     .await
@@ -273,6 +279,7 @@ async fn patch_settings_persists_appearance_to_app_toml() {
                 automation_rules: None,
                 automation_drafts: None,
                 notifications: None,
+                mailbox_colors: None,
                 appearance: Some(Appearance {
                     mode: Some(ThemeMode::Dark),
                     theme: Some("glass".to_string()),
@@ -331,4 +338,41 @@ async fn patch_settings_persists_appearance_to_app_toml() {
         app_toml["appearance"]["glass_theme"]["blooms"][0]["id"].as_str(),
         Some("bloom-1"),
     );
+}
+
+#[tokio::test]
+async fn patch_settings_persists_mailbox_colors_to_app_toml() {
+    let harness = SettingsHarness::new();
+
+    let Json(settings) = expect_settings_ok(
+        patch_settings(
+            State(harness.state.clone()),
+            Json(PatchSettingsRequest {
+                default_account_id: None,
+                cache_policy: None,
+                automation_rules: None,
+                automation_drafts: None,
+                appearance: None,
+                notifications: None,
+                mailbox_colors: Some(vec![MailboxColor {
+                    source_id: AccountId::from("primary"),
+                    mailbox_id: MailboxId::from("INBOX"),
+                    hue: 200,
+                }]),
+            }),
+        )
+        .await,
+    );
+
+    assert_eq!(settings.mailbox_colors.len(), 1);
+    assert_eq!(settings.mailbox_colors[0].mailbox_id.as_str(), "INBOX");
+    assert_eq!(settings.mailbox_colors[0].hue, 200);
+
+    // The TOML file is the source of truth: a `[[mailbox_colors]]` array table.
+    let app_toml = harness.app_toml();
+    assert_eq!(
+        app_toml["mailbox_colors"][0]["mailbox_id"].as_str(),
+        Some("INBOX"),
+    );
+    assert_eq!(app_toml["mailbox_colors"][0]["hue"].as_integer(), Some(200),);
 }
