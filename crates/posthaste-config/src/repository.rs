@@ -79,6 +79,7 @@ impl TomlConfigRepository {
             cache: Default::default(),
             appearance: Default::default(),
             notifications: Default::default(),
+            mailbox_colors: Vec::new(),
             link: Default::default(),
         };
         write_app_toml(&self.config_root, &app)?;

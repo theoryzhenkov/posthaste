@@ -19,7 +19,7 @@ use posthaste_domain::{
     AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult,
     ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, DraftContent, EventFilter, Id, Identity,
-    ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary, MessageAttachment,
+    ImapTransportSettings, MailboxColor, MailboxId, MailboxRole, MailboxSummary, MessageAttachment,
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
     Notifications, Operation, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
