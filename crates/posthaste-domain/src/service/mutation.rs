@@ -160,6 +160,51 @@ impl MailService {
         )
     }
 
+    /// Snooze scheduler: return every due snoozed message to the Inbox.
+    /// Each move is the same `replace_mailboxes` write-through the client path
+    /// uses, so the provider move is enqueued (flushed on the next sync) + the
+    /// store invariant clears the snooze row immediately (no re-query next
+    /// tick). Server-owned → cross-device coherent; not user-initiated → no
+    /// undo step. Returns the count of messages returned.
+    ///
+    /// @spec docs/eph/DESIGN-L2-snooze
+    pub async fn auto_return_snoozed_messages(
+        &self,
+        account_id: &AccountId,
+        now: i64,
+    ) -> Result<usize, ServiceError> {
+        let due = self.snooze_reader.list_due_snoozes(account_id, now)?;
+        if due.is_empty() {
+            return Ok(0);
+        }
+        let inbox_id = self
+            .mailbox_reader
+            .list_mailboxes(account_id)?
+            .into_iter()
+            .find(|mailbox| mailbox.role.as_deref() == Some("inbox"))
+            .map(|mailbox| mailbox.id);
+        let Some(inbox_id) = inbox_id else {
+            return Ok(0);
+        };
+        let mut returned = 0;
+        for (message_id, _until) in due {
+            if self
+                .replace_mailboxes(
+                    account_id,
+                    &message_id,
+                    &ReplaceMailboxesCommand {
+                        mailbox_ids: vec![inbox_id.clone()],
+                    },
+                )
+                .await
+                .is_ok()
+            {
+                returned += 1;
+            }
+        }
+        Ok(returned)
+    }
+
     /// Atomically replace all mailbox memberships for a message, local-first.
     ///
     /// @spec docs/L1-api#message-commands

@@ -9,6 +9,8 @@ pub(crate) const CACHE_STALE_RESCORE_AFTER: Duration = Duration::from_secs(6 * 6
 pub(crate) const CACHE_WORKER_INITIAL_DELAY: Duration = Duration::from_secs(5);
 pub(crate) const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const OAUTH_TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+pub(crate) const SNOOZE_INITIAL_DELAY: Duration = Duration::from_secs(30);
+pub(crate) const SNOOZE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.

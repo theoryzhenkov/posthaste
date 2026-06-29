@@ -28,5 +28,6 @@ mod message_mutation_cursors;
 mod message_mutation_retries;
 mod outbox;
 mod smart_mailboxes;
+mod snooze;
 mod source_cleanup;
 mod sync_cache_candidates;
