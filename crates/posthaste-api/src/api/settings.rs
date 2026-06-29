@@ -11,6 +11,7 @@ pub struct PatchSettingsRequest {
     pub cache_policy: Option<CachePolicy>,
     pub automation_rules: Option<Vec<AutomationRule>>,
     pub automation_drafts: Option<Vec<AutomationRule>>,
+    pub appearance: Option<Appearance>,
 }
 
 /// Request body for `POST /v1/automation-rules:preview`.
@@ -106,6 +107,7 @@ pub async fn patch_settings(
                 cache_policy: request.cache_policy,
                 automation_rules: request.automation_rules,
                 automation_drafts: request.automation_drafts,
+                appearance: request.appearance,
             },
         )
         .await

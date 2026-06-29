@@ -14,6 +14,11 @@ pub struct AppSettings {
     pub automation_rules: Vec<AutomationRule>,
     #[serde(default)]
     pub automation_drafts: Vec<AutomationRule>,
+    /// UI appearance/theme prefs (TOML source of truth; renderer mirrors for boot).
+    ///
+    /// @spec docs/eph/DESIGN-L2-appearance-toml
+    #[serde(default)]
+    pub appearance: Option<Appearance>,
 }
 
 /// Backend driver type for an account.

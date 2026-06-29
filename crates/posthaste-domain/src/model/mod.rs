@@ -241,6 +241,7 @@ pub const ALL_EVENT_TOPICS: &[&str] = &[
 
 mod account_overview;
 mod account_settings;
+mod appearance;
 mod automation;
 mod commands;
 mod conversations;
@@ -254,6 +255,7 @@ mod sync;
 
 pub use account_overview::*;
 pub use account_settings::*;
+pub use appearance::*;
 pub use automation::*;
 pub use commands::*;
 pub use conversations::*;

@@ -50,6 +50,7 @@ const APP_TOML_MANAGED_KEYS: &[&str] = &[
     "daemon",
     "logging",
     "cache",
+    "appearance",
     "link",
 ];
 
@@ -301,6 +302,69 @@ mod lossless_write_tests {
         );
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_app_toml_preserves_appearance_and_glass_blooms() {
+        let dir = std::env::temp_dir().join(format!(
+            "ph-cfg-appearance-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("app.toml");
+        std::fs::write(
+            &path,
+            r#"# note
+[appearance]
+mode = "dark"
+palette_preset = "paperInk"
+density = "compact"
+accent_hue = 250
+[[appearance.glass_theme.blooms]]
+id = "bloom-1"
+hue = 285
+x = 20
+y = 10
+opacity = 0.35
+radius = 45
+"#,
+        )
+        .unwrap();
+
+        // Parse: [appearance] + the glass blooms array deserialize.
+        let app = read_app_toml(&dir).unwrap();
+        assert!(app.appearance.is_some(), "appearance did not parse");
+        let glass = app.appearance.as_ref().unwrap().glass_theme.as_ref();
+        assert!(
+            glass.is_some() && glass.unwrap().blooms.len() == 1,
+            "glass bloom did not parse"
+        );
+
+        // Round-trip: AppSettings -> AppToml -> lossless write.
+        let settings = app.to_app_settings().unwrap();
+        let toml_struct = AppToml::from_app_settings(&settings, &app);
+        write_app_toml(&dir, &toml_struct).unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("[appearance]"),
+            "appearance section dropped:\n{after}"
+        );
+        assert!(
+            after.contains("paperInk"),
+            "palette value dropped:\n{after}"
+        );
+        assert!(
+            after.contains("[[appearance.glass_theme.blooms]]"),
+            "blooms array dropped:\n{after}"
+        );
+        assert!(after.contains("bloom-1"), "bloom id dropped:\n{after}");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

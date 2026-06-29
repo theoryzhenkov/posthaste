@@ -30,6 +30,7 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
                 automation_rules: None,
                 automation_drafts: None,
                 cache_policy: None,
+                appearance: None,
             }),
         )
         .await,

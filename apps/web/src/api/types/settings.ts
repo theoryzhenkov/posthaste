@@ -1,3 +1,4 @@
+import type { Appearance } from './appearance'
 import type { AutomationRule } from './automation'
 
 export interface AppSettings {
@@ -5,6 +6,7 @@ export interface AppSettings {
   cachePolicy: CachePolicy
   automationRules: AutomationRule[]
   automationDrafts: AutomationRule[]
+  appearance?: Appearance | null
 }
 
 /** @spec docs/L1-sync#local-cache-planning */
