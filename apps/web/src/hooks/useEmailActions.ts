@@ -278,6 +278,27 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       moveToRole(target, MAILBOX_ROLES.Trash, 'Message trashed'),
     moveToInbox: (target: SourceMessageRef) =>
       moveToRole(target, MAILBOX_ROLES.Inbox, 'Moved to Inbox'),
+    snooze: (target: SourceMessageRef, until: number) =>
+      dispatch({
+        label: 'Message snoozed',
+        run: () =>
+          runtimeMutations.messages.snooze(
+            { messageId: target.messageId, sourceId: target.sourceId, until },
+            // A user snooze is a structural move (undoable via the RevLog).
+            { userInitiated: true },
+          ),
+        undoSourceId: target.sourceId,
+      }),
+    unsnooze: (target: SourceMessageRef) =>
+      dispatch({
+        label: 'Message unsnoozed',
+        run: () =>
+          runtimeMutations.messages.unsnooze(
+            { messageId: target.messageId, sourceId: target.sourceId },
+            { userInitiated: true },
+          ),
+        undoSourceId: target.sourceId,
+      }),
     deletePermanently: (target: SourceMessageRef) =>
       dispatch({
         label: 'Permanently deleted',

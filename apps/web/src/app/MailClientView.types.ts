@@ -38,6 +38,7 @@ export interface MailClientViewProps {
   viewRole: string | null
   onApplySearch: (query: string) => void
   onArchive: () => void
+  onSnooze: (until: number) => void
   onClearSearch: () => void
   onClearSelectedMessage: () => void
   onCloseCommandPalette: () => void

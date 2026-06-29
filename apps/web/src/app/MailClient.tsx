@@ -224,6 +224,7 @@ export function MailClient({
         viewRole={viewRole}
         onApplySearch={handlers.handleApplySearch}
         onArchive={handlers.handleArchive}
+        onSnooze={handlers.handleSnooze}
         onEditDraft={handlers.handleEditDraft}
         onClearSearch={handlers.handleRejectSearchPreview}
         onClearSelectedMessage={handlers.handleClearSelectedMessage}

@@ -161,6 +161,37 @@ export const runtimeMutations = {
       })
       return confirmedMessageCommandResult(receipt)
     },
+    async snooze(
+      request: { sourceId: string; messageId: string; until: number },
+      options?: { userInitiated?: boolean },
+    ): Promise<MessageCommandResult> {
+      const receipt = await runtimeSessionClient.runMutation({
+        name: 'message.snooze',
+        args: {
+          sourceId: request.sourceId,
+          messageId: request.messageId,
+          until: request.until,
+        },
+        sourceId: request.sourceId,
+        ...(options?.userInitiated ? { context: { userInitiated: true } } : {}),
+      })
+      return confirmedMessageCommandResult(receipt)
+    },
+    async unsnooze(
+      request: { sourceId: string; messageId: string },
+      options?: { userInitiated?: boolean },
+    ): Promise<MessageCommandResult> {
+      const receipt = await runtimeSessionClient.runMutation({
+        name: 'message.unsnooze',
+        args: {
+          sourceId: request.sourceId,
+          messageId: request.messageId,
+        },
+        sourceId: request.sourceId,
+        ...(options?.userInitiated ? { context: { userInitiated: true } } : {}),
+      })
+      return confirmedMessageCommandResult(receipt)
+    },
     send(request: {
       sourceId: string
       input: SendMessageInput

@@ -117,6 +117,15 @@ export function FocusedSurface({
             messageId: surface.params.messageId,
           })
         }
+        onSnooze={(until: number) =>
+          actions.snooze(
+            {
+              sourceId: surface.params.sourceId,
+              messageId: surface.params.messageId,
+            },
+            until,
+          )
+        }
         onEditDraft={() =>
           editDraft(surface.params.sourceId, surface.params.messageId)
         }
