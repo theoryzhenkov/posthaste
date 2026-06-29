@@ -6,9 +6,11 @@ import {
   Mailbox,
   Palette,
   Settings as SettingsIcon,
+  Wrench,
 } from 'lucide-react'
 
 import { brandAccents } from '../../design/tokens'
+import { isTauriRuntime } from '../../desktop'
 import { cn } from '../../lib/utils'
 import { isNightly, releaseChannel } from '../../runtime/releaseChannel'
 import type { SettingsSurfaceCategory } from '../../surfaces'
@@ -59,6 +61,13 @@ const SETTINGS_CATEGORIES = [
     icon: FolderSearch,
     accent: brandAccents.violet,
   },
+  {
+    id: 'troubleshooting',
+    label: 'Troubleshooting',
+    description: 'Repair, reset, and developer tools.',
+    icon: Wrench,
+    accent: brandAccents.coralDeep,
+  },
 ] as const
 
 export function SettingsRail({
@@ -74,6 +83,12 @@ export function SettingsRail({
   onClose?: () => void
   onSelect: (category: SettingsCategory) => void
 }) {
+  const categories = isTauriRuntime()
+    ? SETTINGS_CATEGORIES
+    : SETTINGS_CATEGORIES.filter(
+        (category) => category.id !== 'troubleshooting',
+      )
+
   return (
     <aside className="flex max-h-[190px] min-h-0 w-full shrink-0 flex-col border-b border-sidebar-border bg-sidebar text-sidebar-foreground md:h-full md:max-h-none md:w-[210px] md:border-b-0 md:border-r">
       <div className="flex h-12 shrink-0 items-center px-4 md:h-14">
@@ -96,7 +111,7 @@ export function SettingsRail({
           Preferences
         </p>
         <div className="space-y-1">
-          {SETTINGS_CATEGORIES.map((category) => {
+          {categories.map((category) => {
             const Icon = category.icon
             const isActive = category.id === activeCategory
             const count =
