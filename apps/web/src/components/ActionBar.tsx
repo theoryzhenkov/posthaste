@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Archive,
   Clock3,
@@ -17,7 +18,9 @@ import {
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { snoozePresets } from './message-detail/snoozePresets'
 import { NotificationsButton } from './NotificationsButton'
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { TrafficLightInset, WINDOW_TITLEBAR_HEIGHT } from './WindowChrome'
 
 interface ActionBarProps {
@@ -29,10 +32,12 @@ interface ActionBarProps {
   onArchive: () => void
   onClearSearch: () => void
   onCompose: () => void
+  onForward: () => void
   onOpenCommandPalette: () => void
   onOpenFocusedMessage: () => void
-  onPlaceholderAction: (label: string) => void
   onReply: () => void
+  onReplyAll: () => void
+  onSnooze: (until: number) => void
   onShowShortcuts: () => void
   onTag: () => void
   onToggleFlag: () => void
@@ -91,6 +96,48 @@ function ToolbarChip({
   )
 }
 
+function SnoozeChip({
+  disabled,
+  onSnooze,
+}: {
+  disabled?: boolean
+  onSnooze: (until: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          title="Snooze"
+          className={cn(
+            'ph-focus-ring inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-chrome-foreground/70 transition-colors',
+            'hover:bg-[var(--hover-bg)] hover:text-chrome-foreground disabled:opacity-35',
+          )}
+        >
+          <Clock3 size={14} strokeWidth={1.6} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-44">
+        {snoozePresets().map((preset) => (
+          <button
+            key={preset.label}
+            type="button"
+            onClick={() => {
+              onSnooze(preset.until)
+              setOpen(false)
+            }}
+            className="ph-focus-ring flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-[var(--hover-bg)]"
+          >
+            {preset.label}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function CommandSearchControl({
   searchQuery,
   onClearSearch,
@@ -142,10 +189,12 @@ export function ActionBar({
   onArchive,
   onClearSearch,
   onCompose,
+  onForward,
   onOpenCommandPalette,
   onOpenFocusedMessage,
-  onPlaceholderAction,
   onReply,
+  onReplyAll,
+  onSnooze,
   onShowShortcuts,
   onTag,
   onToggleFlag,
@@ -177,13 +226,14 @@ export function ActionBar({
         hint="⇧⌘R"
         disabled={!isMessageSelected}
         icon={<ReplyAll size={14} strokeWidth={1.6} />}
-        onClick={() => onPlaceholderAction('Reply all')}
+        onClick={onReplyAll}
         title="Reply all"
       />
       <ToolbarChip
         hint="⇧⌘F"
+        disabled={!isMessageSelected}
         icon={<Forward size={14} strokeWidth={1.6} />}
-        onClick={() => onPlaceholderAction('Forward')}
+        onClick={onForward}
         title="Forward"
       />
       <Divider />
@@ -209,12 +259,7 @@ export function ActionBar({
         onClick={onToggleFlag}
         title="Flag"
       />
-      <ToolbarChip
-        hint="H"
-        icon={<Clock3 size={14} strokeWidth={1.6} />}
-        onClick={() => onPlaceholderAction('Snooze')}
-        title="Snooze"
-      />
+      <SnoozeChip disabled={!isMessageSelected} onSnooze={onSnooze} />
       <ToolbarChip
         hint="L"
         disabled={!isMessageSelected}
