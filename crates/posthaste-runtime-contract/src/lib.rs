@@ -205,6 +205,7 @@ pub struct CreateAccountMutation {
     pub id: Option<String>,
     pub name: String,
     pub full_name: Option<String>,
+    pub signature: Option<String>,
     #[serde(default)]
     pub email_patterns: Vec<String>,
     pub driver: Option<AccountDriver>,
@@ -221,6 +222,7 @@ pub struct CreateAccountMutation {
 pub struct PatchAccountMutation {
     pub name: Option<String>,
     pub full_name: Option<String>,
+    pub signature: Option<String>,
     pub email_patterns: Option<Vec<String>>,
     pub driver: Option<AccountDriver>,
     pub enabled: Option<bool>,

@@ -84,6 +84,7 @@ impl RuntimeHarness {
             driver: Some(AccountDriver::Mock),
             enabled: Some(true),
             full_name: None,
+            signature: None,
             email_patterns: Vec::new(),
             appearance: None,
             transport: AccountTransportMutation::default(),
@@ -118,6 +119,7 @@ impl RuntimeHarness {
             driver: Some(AccountDriver::Jmap),
             enabled: Some(true),
             full_name: Some("Dev Account".to_string()),
+            signature: None,
             email_patterns: vec![stalwart.email()],
             appearance: None,
             transport: AccountTransportMutation {

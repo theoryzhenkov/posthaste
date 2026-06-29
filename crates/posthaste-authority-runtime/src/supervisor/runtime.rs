@@ -242,7 +242,11 @@ pub(crate) async fn handle_snooze_tick(shared: &Arc<SupervisorShared>, account_i
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    match shared.service.auto_return_snoozed_messages(account_id, now).await {
+    match shared
+        .service
+        .auto_return_snoozed_messages(account_id, now)
+        .await
+    {
         Ok(count) if count > 0 => {
             ph_debug!(
                 events::SUPERVISOR_SNOOZE_AUTO_RETURNED,

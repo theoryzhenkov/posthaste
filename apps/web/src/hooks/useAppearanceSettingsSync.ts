@@ -79,7 +79,7 @@ export function useAppearanceSettingsSync(
       .catch(() => {
         // Non-fatal: retry on next boot. The cache remains the working state.
       })
-  }, [settings])
+  }, [settings, store])
 }
 
 /** Mounts the appearance↔TOML reconciliation. Render inside DesignThemeProvider. */

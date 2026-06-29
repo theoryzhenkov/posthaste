@@ -275,6 +275,23 @@ function IdentitySection({
 
       <label className="grid gap-1.5 text-[13px]">
         <span className="text-[12px] font-medium text-muted-foreground">
+          Signature
+        </span>
+        <textarea
+          className="min-h-[72px] w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-[13px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          value={form.signature}
+          placeholder="Optional signature appended to composed messages."
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              signature: event.target.value,
+            }))
+          }
+        />
+      </label>
+
+      <label className="grid gap-1.5 text-[13px]">
+        <span className="text-[12px] font-medium text-muted-foreground">
           Email addresses
         </span>
         <textarea

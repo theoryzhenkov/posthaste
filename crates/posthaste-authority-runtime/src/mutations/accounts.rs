@@ -9,6 +9,7 @@ impl AccountMutationService {
             id,
             name,
             full_name,
+            signature,
             email_patterns,
             driver,
             enabled,
@@ -30,6 +31,7 @@ impl AccountMutationService {
             id: account_id,
             name: name.trim().to_string(),
             full_name: normalize_optional(full_name.as_deref()),
+            signature: normalize_optional(signature.as_deref()),
             email_patterns,
             driver: driver.unwrap_or(AccountDriver::Jmap),
             enabled: enabled.unwrap_or(true),
@@ -92,6 +94,7 @@ impl AccountMutationService {
             id: None,
             name: identity_email.clone(),
             full_name: None,
+            signature: None,
             email_patterns: vec![identity_email.clone()],
             driver: Some(AccountDriver::ImapSmtp),
             enabled: Some(true),
@@ -123,6 +126,7 @@ impl AccountMutationService {
             PatchAccountMutation {
                 name: None,
                 full_name: None,
+                signature: None,
                 email_patterns: None,
                 driver: None,
                 enabled: None,
@@ -279,6 +283,7 @@ fn apply_account_patch(account: &mut AccountSettings, request: &PatchAccountMuta
     let PatchAccountMutation {
         name,
         full_name,
+        signature,
         email_patterns,
         driver,
         enabled,
@@ -292,6 +297,9 @@ fn apply_account_patch(account: &mut AccountSettings, request: &PatchAccountMuta
     }
     if full_name.is_some() {
         account.full_name = normalize_optional(full_name.as_deref());
+    }
+    if signature.is_some() {
+        account.signature = normalize_optional(signature.as_deref());
     }
     if let Some(email_patterns) = email_patterns {
         account.email_patterns = normalize_email_patterns(email_patterns);
