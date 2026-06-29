@@ -1,3 +1,7 @@
+use std::convert::Infallible;
+
+use axum::response::sse::Event;
+
 use super::*;
 
 /// Default page size when no `limit` query parameter is provided.
@@ -37,6 +41,16 @@ pub(super) fn matches_event(event: &DomainEvent, filter: &EventFilter) -> bool {
         }
     }
     true
+}
+
+/// Convert a domain event into an SSE frame with `id` set to the sequence number.
+///
+/// @spec docs/L1-api#sse-event-stream
+pub(super) fn event_to_sse(event: DomainEvent) -> Result<Event, Infallible> {
+    Ok(Event::default()
+        .id(event.seq.to_string())
+        .json_data(event)
+        .unwrap_or_else(|_| Event::default().data("{}")))
 }
 
 /// Resolve and validate the conversation page limit, defaulting to 100.

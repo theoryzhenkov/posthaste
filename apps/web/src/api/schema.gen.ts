@@ -236,6 +236,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream events
+         * @description Opens a Server-Sent Events stream of domain events. When afterSeq is provided, replays matching backlog events before switching to the live stream.
+         */
+        get: operations["stream_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/health": {
         parameters: {
             query?: never;
@@ -3247,6 +3267,40 @@ export interface operations {
             };
             /** @description Configuration reload failed */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    stream_events: {
+        parameters: {
+            query?: {
+                accountId?: string | null;
+                topic?: string | null;
+                mailboxId?: string | null;
+                afterSeq?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-sent event stream of domain events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Invalid filter */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

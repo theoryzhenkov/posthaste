@@ -97,9 +97,10 @@ done
 `--topic` / `--account` / `--mailbox` filter. The lower-level runtime view-frame
 stream is intentionally **not** exposed (view-internal).
 
-> Note: `GET /v1/events` must be served by the daemon for this command. See
-> DESIGN-L2-posthastectl §3/§8 — the route was removed as vestigial while it had
-> no consumer; `posthastectl events` is that consumer.
+> `events` consumes the daemon's `GET /v1/events` SSE — the flat, view-less
+> projection of the same `DomainEvent` broadcast the UI consumes in view-coupled
+> form (the runtime session stream's `Notification` frames). See
+> DESIGN-L2-posthastectl §0/§3.
 
 ## posthaste-mcp (MCP server)
 
