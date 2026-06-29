@@ -66,16 +66,18 @@
  * coral brand/flag, and blue unread signals.
  */
 :root {
+  --ph-surface-hue: 70;
+  --ph-surface-chroma: 0.007;
   --radius: 0.25rem;
 
   color-scheme: light;
 
   /* Surfaces */
-  --background: oklch(0.985 0.005 80);
+  --background: oklch(0.985 var(--ph-surface-chroma) var(--ph-surface-hue));
   --foreground: oklch(0.22 0.01 60);
-  --card: oklch(0.97 0.006 75);
+  --card: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
   --card-foreground: oklch(0.22 0.01 60);
-  --popover: #fff;
+  --popover: oklch(0.99 var(--ph-surface-chroma) var(--ph-surface-hue));
   --popover-foreground: oklch(0.22 0.01 60);
 
   /* Primary = brand coral */
@@ -83,33 +85,33 @@
   --primary-foreground: #fff;
 
   /* Secondary = raised neutral */
-  --secondary: oklch(0.97 0.006 75);
+  --secondary: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
   --secondary-foreground: oklch(0.46 0.01 60);
 
   /* Muted = subdued elements */
-  --muted: oklch(0.97 0.006 75);
+  --muted: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
   --muted-foreground: oklch(0.46 0.01 60);
 
   /* Accent = hover wash */
-  --accent: oklch(0.94 0.008 70);
+  --accent: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
   --accent-foreground: oklch(0.22 0.01 60);
 
   /* Destructive */
   --destructive: oklch(0.58 0.22 25);
 
   /* Borders & inputs */
-  --border: oklch(0.88 0.008 70);
-  --input: oklch(0.88 0.008 70);
+  --border: oklch(0.88 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --input: oklch(0.88 var(--ph-surface-chroma) var(--ph-surface-hue));
   --ring: oklch(0.62 0.15 250);
 
   /* Sidebar */
-  --sidebar: oklch(0.955 0.008 70);
+  --sidebar: oklch(0.955 var(--ph-surface-chroma) var(--ph-surface-hue));
   --sidebar-foreground: oklch(0.22 0.01 60);
   --sidebar-primary: oklch(0.68 0.17 45);
   --sidebar-primary-foreground: #fff;
-  --sidebar-accent: oklch(0.94 0.008 70);
+  --sidebar-accent: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
   --sidebar-accent-foreground: oklch(0.22 0.01 60);
-  --sidebar-border: oklch(0.88 0.008 70);
+  --sidebar-border: oklch(0.88 var(--ph-surface-chroma) var(--ph-surface-hue));
   --sidebar-ring: oklch(0.62 0.15 250);
 
   /*
@@ -117,14 +119,14 @@
    * These sit above shadcn's generic tokens and give the mail client stable
    * names for dense shell/chrome work without coupling components to a preset.
    */
-  --chrome: oklch(0.945 0.008 70);
+  --chrome: oklch(0.945 var(--ph-surface-chroma) var(--ph-surface-hue));
   --chrome-foreground: oklch(0.22 0.01 60);
-  --panel: #fff;
+  --panel: oklch(0.99 var(--ph-surface-chroma) var(--ph-surface-hue));
   --panel-foreground: oklch(0.22 0.01 60);
-  --panel-muted: oklch(0.97 0.006 75);
-  --bg-elev: oklch(0.97 0.006 75);
-  --border-soft: oklch(0.93 0.006 70);
-  --border-strong: oklch(0.78 0.01 70);
+  --panel-muted: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --bg-elev: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-soft: oklch(0.93 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-strong: oklch(0.78 var(--ph-surface-chroma) var(--ph-surface-hue));
   --signal-unread: oklch(0.65 0.13 245);
   --signal-flag: oklch(0.68 0.17 45);
   --brand-coral: oklch(0.68 0.17 45);
@@ -132,14 +134,14 @@
   --brand-coral-soft: oklch(0.92 0.055 50);
   --brand-coral-deep: oklch(0.52 0.18 38);
   --sidebar-section-label: oklch(0.65 0.008 60);
-  --list-header: oklch(0.945 0.008 70);
-  --list-zebra: oklch(0.98 0.005 80);
-  --list-zebra-alt: oklch(0.965 0.006 75);
-  --list-hover: oklch(0.94 0.008 70);
+  --list-header: oklch(0.945 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra: oklch(0.98 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra-alt: oklch(0.965 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-hover: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
   --list-selection: oklch(0.88 0.02 250);
   --list-selection-foreground: oklch(0.22 0.05 250);
-  --list-divider: oklch(0.93 0.006 70);
-  --hover-bg: oklch(0.94 0.008 70);
+  --list-divider: oklch(0.93 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --hover-bg: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
   --focus-soft: color-mix(in oklab, var(--ring) 24%, transparent);
   --shadow-popover: 0 20px 48px rgb(40 30 20 / 0.14);
   --shadow-pane:
@@ -162,42 +164,44 @@
 }
 
 .dark {
+  --ph-surface-hue: 58;
+  --ph-surface-chroma: 0.008;
   color-scheme: dark;
 
-  --background: oklch(0.22 0.008 60);
+  --background: oklch(0.22 var(--ph-surface-chroma) var(--ph-surface-hue));
   --foreground: oklch(0.94 0.005 80);
-  --card: oklch(0.25 0.008 60);
+  --card: oklch(0.25 var(--ph-surface-chroma) var(--ph-surface-hue));
   --card-foreground: oklch(0.94 0.005 80);
-  --popover: oklch(0.25 0.008 60);
+  --popover: oklch(0.25 var(--ph-surface-chroma) var(--ph-surface-hue));
   --popover-foreground: oklch(0.94 0.005 80);
   --primary: oklch(0.65 0.13 245);
   --primary-foreground: oklch(0.18 0.008 55);
-  --secondary: oklch(0.27 0.008 60);
+  --secondary: oklch(0.27 var(--ph-surface-chroma) var(--ph-surface-hue));
   --secondary-foreground: oklch(0.82 0.008 72);
-  --muted: oklch(0.27 0.008 60);
+  --muted: oklch(0.27 var(--ph-surface-chroma) var(--ph-surface-hue));
   --muted-foreground: oklch(0.72 0.008 70);
-  --accent: oklch(0.29 0.008 60);
+  --accent: oklch(0.29 var(--ph-surface-chroma) var(--ph-surface-hue));
   --accent-foreground: oklch(0.94 0.005 80);
   --destructive: #f87171;
-  --border: oklch(0.32 0.008 60);
-  --input: oklch(0.32 0.008 60);
+  --border: oklch(0.32 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --input: oklch(0.32 var(--ph-surface-chroma) var(--ph-surface-hue));
   --ring: oklch(0.68 0.15 250);
-  --sidebar: oklch(0.195 0.008 55);
+  --sidebar: oklch(0.195 var(--ph-surface-chroma) var(--ph-surface-hue));
   --sidebar-foreground: oklch(0.9 0.005 78);
   --sidebar-primary: #6fade8;
   --sidebar-primary-foreground: #0e1114;
-  --sidebar-accent: oklch(0.26 0.008 58);
+  --sidebar-accent: oklch(0.26 var(--ph-surface-chroma) var(--ph-surface-hue));
   --sidebar-accent-foreground: oklch(0.94 0.005 80);
-  --sidebar-border: oklch(0.28 0.008 60);
+  --sidebar-border: oklch(0.28 var(--ph-surface-chroma) var(--ph-surface-hue));
   --sidebar-ring: #77b1ec;
-  --chrome: oklch(0.185 0.008 55);
+  --chrome: oklch(0.185 var(--ph-surface-chroma) var(--ph-surface-hue));
   --chrome-foreground: oklch(0.9 0.005 78);
-  --panel: oklch(0.27 0.008 60);
+  --panel: oklch(0.27 var(--ph-surface-chroma) var(--ph-surface-hue));
   --panel-foreground: oklch(0.94 0.005 80);
-  --panel-muted: oklch(0.25 0.008 60);
-  --bg-elev: oklch(0.26 0.008 60);
-  --border-soft: oklch(0.28 0.008 60);
-  --border-strong: oklch(0.4 0.01 60);
+  --panel-muted: oklch(0.25 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --bg-elev: oklch(0.26 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-soft: oklch(0.28 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-strong: oklch(0.4 var(--ph-surface-chroma) var(--ph-surface-hue));
   --signal-unread: oklch(0.65 0.13 245);
   --signal-flag: oklch(0.68 0.17 45);
   --brand-coral: oklch(0.68 0.17 45);
@@ -205,14 +209,14 @@
   --brand-coral-soft: oklch(0.92 0.055 50);
   --brand-coral-deep: oklch(0.52 0.18 38);
   --sidebar-section-label: oklch(0.55 0.008 65);
-  --list-header: oklch(0.205 0.008 55);
-  --list-zebra: oklch(0.235 0.008 60);
-  --list-zebra-alt: oklch(0.255 0.008 60);
-  --list-hover: oklch(0.29 0.008 60);
+  --list-header: oklch(0.205 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra: oklch(0.235 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra-alt: oklch(0.255 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-hover: oklch(0.29 var(--ph-surface-chroma) var(--ph-surface-hue));
   --list-selection: oklch(0.34 0.06 250);
   --list-selection-foreground: oklch(0.98 0.01 250);
-  --list-divider: oklch(0.28 0.008 60);
-  --hover-bg: oklch(0.29 0.008 60);
+  --list-divider: oklch(0.28 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --hover-bg: oklch(0.29 var(--ph-surface-chroma) var(--ph-surface-hue));
   --focus-soft: color-mix(in oklab, var(--ring) 34%, transparent);
   --shadow-popover: 0 32px 96px rgb(0 0 0 / 0.58);
   --shadow-pane: 0 2px 6px rgb(0 0 0 / 0.32), 0 18px 44px rgb(0 0 0 / 0.24);

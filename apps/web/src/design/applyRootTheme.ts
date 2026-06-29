@@ -104,9 +104,19 @@ export function applyRootTheme(
   root.setAttribute(designDataAttributes.uiDensity, density)
   root.classList.toggle(designClassNames.dark, resolvedMode === 'dark')
   root.style.setProperty('--ph-accent-hue', String(accentHue))
-  // Surface hue is plumbed now; the surface tokens are parameterized by it in a
-  // follow-up so this var becoming live is a CSS-only change.
+  // Surface hue + chroma drive the parameterized surface tokens. At the default
+  // hue the chroma stays near-grey (preserving the shipped neutral look); any
+  // custom hue lifts the chroma so the chosen color visibly tints the surfaces.
+  const surfaceCustomized = colors.surfaceHue !== defaultSurfaceHue
+  const surfaceChroma = surfaceCustomized
+    ? resolvedMode === 'dark'
+      ? 0.03
+      : 0.022
+    : resolvedMode === 'dark'
+      ? 0.008
+      : 0.007
   root.style.setProperty('--ph-surface-hue', String(colors.surfaceHue))
+  root.style.setProperty('--ph-surface-chroma', String(surfaceChroma))
   root.style.setProperty(
     '--primary',
     resolvedMode === 'dark' ? accentStrong : accent,
