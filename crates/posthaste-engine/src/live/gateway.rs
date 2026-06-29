@@ -164,10 +164,10 @@ impl MailGateway for LiveJmapGateway {
     /// @spec docs/L1-jmap#methods-used
     async fn send_message(
         &self,
-        account_id: &AccountId,
+        _account_id: &AccountId,
         request_data: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
-        crate::live_compose::send_message(self, account_id, request_data).await
+        crate::live_compose::send_message(self, request_data).await
     }
 
     /// Persist a draft to the Drafts mailbox via `Email/set`, returning the
@@ -178,11 +178,11 @@ impl MailGateway for LiveJmapGateway {
     /// @spec docs/L1-jmap#methods-used
     async fn save_draft(
         &self,
-        account_id: &AccountId,
+        _account_id: &AccountId,
         request_data: &SendMessageRequest,
         replace: Option<&MessageId>,
     ) -> Result<MessageId, GatewayError> {
-        crate::live_compose::save_draft(self, account_id, request_data, replace).await
+        crate::live_compose::save_draft(self, request_data, replace).await
     }
 
     /// Destroy a draft message from the Drafts mailbox via `Email/set`.

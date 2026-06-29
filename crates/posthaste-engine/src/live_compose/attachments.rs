@@ -1,5 +1,5 @@
 use base64::Engine;
-use posthaste_domain::{AccountId, GatewayError, SendMessageAttachment};
+use posthaste_domain::{GatewayError, SendMessageAttachment};
 
 use crate::live::{map_gateway_error, LiveJmapGateway};
 
@@ -11,16 +11,19 @@ pub(crate) struct UploadedSendAttachment {
 
 pub(crate) async fn upload_send_attachments(
     gateway: &LiveJmapGateway,
-    account_id: &AccountId,
     attachments: &[SendMessageAttachment],
 ) -> Result<Vec<UploadedSendAttachment>, GatewayError> {
     let mut uploaded = Vec::with_capacity(attachments.len());
     for attachment in attachments {
         let bytes = decode_attachment_bytes(attachment)?;
+        // Blobs are per-account in JMAP, and `Email/set` references them under the
+        // client's default (server) account id. The upload must target that same
+        // account id — not the Posthaste-internal AccountId — or `Email/set`
+        // rejects the blob with `blobNotFound`.
         let response = gateway
             .client()
             .upload(
-                Some(account_id.as_str()),
+                Some(gateway.server_account_id()),
                 bytes,
                 Some(normalized_attachment_mime_type(attachment).as_str()),
             )
