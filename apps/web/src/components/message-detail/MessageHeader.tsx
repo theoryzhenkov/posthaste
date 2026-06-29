@@ -199,11 +199,10 @@ function HeaderActions({
         <ReplyAll size={14} strokeWidth={1.6} />
       </Button>
       <Button
-        aria-label="Forward (not available yet)"
-        disabled
+        aria-label="Forward"
         onClick={onForward}
         size="icon-sm"
-        title="Forward will be enabled after forwarded headers and attachments are implemented"
+        title="Forward"
         type="button"
         variant="ghost"
       >

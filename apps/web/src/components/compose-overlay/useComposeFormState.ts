@@ -104,14 +104,16 @@ export function useComposeFormState({
     // original Cc) with the user's own address excluded. A plain reply uses the
     // original From only; forward starts empty.
     const { to, cc } =
-      intentKind === 'replyAll'
-        ? replyAllRecipients(
-            replyContext.to,
-            replyContext.originalTo,
-            replyContext.cc,
-            identity?.email,
-          )
-        : { to: replyContext.to, cc: [] }
+      intentKind === 'forward'
+        ? { to: [], cc: [] }
+        : intentKind === 'replyAll'
+          ? replyAllRecipients(
+              replyContext.to,
+              replyContext.originalTo,
+              replyContext.cc,
+              identity?.email,
+            )
+          : { to: replyContext.to, cc: [] }
     return {
       from: '',
       to: formatRecipients(to),
