@@ -1,11 +1,11 @@
 use crate::{
-    AccountId, AddToMailboxCommand, CommandAck, GatewayError, MailboxId, MessageId, Operation,
+    AccountId, AddToMailboxCommand, CommandAck, MailboxId, MessageId, Operation,
     OperationEntity, OperationEntityKind, OperationKind, RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, StoreError,
     EVENT_TOPIC_MESSAGE_UPDATED,
 };
 
-use super::MailService;
+use super::{decode_payload, encode_payload, MailService};
 
 impl MailService {
     fn queue_message_operation(
@@ -101,22 +101,14 @@ impl MailService {
     ) -> Result<(), ServiceError> {
         match operation.kind {
             OperationKind::SetKeywords => {
-                let command: SetKeywordsCommand = serde_json::from_value(operation.payload.clone())
-                    .map_err(|error| {
-                        ServiceError::from(GatewayError::Rejected(format!(
-                            "invalid setKeywords payload: {error}"
-                        )))
-                    })?;
+                let command: SetKeywordsCommand =
+                    decode_payload(operation.payload.clone(), "setKeywords payload")?;
                 self.message_commands
                     .set_keywords(account_id, message_id, None, &command)?;
             }
             OperationKind::ReplaceMailboxes => {
                 let command: ReplaceMailboxesCommand =
-                    serde_json::from_value(operation.payload.clone()).map_err(|error| {
-                        ServiceError::from(GatewayError::Rejected(format!(
-                            "invalid replaceMailboxes payload: {error}"
-                        )))
-                    })?;
+                    decode_payload(operation.payload.clone(), "replaceMailboxes payload")?;
                 self.message_commands
                     .replace_mailboxes(account_id, message_id, None, &command)?;
             }
@@ -143,11 +135,7 @@ impl MailService {
         message_id: &MessageId,
         command: &SetKeywordsCommand,
     ) -> Result<CommandAck, ServiceError> {
-        let payload = serde_json::to_value(command).map_err(|error| {
-            ServiceError::from(GatewayError::Rejected(format!(
-                "failed to serialize keyword command: {error}"
-            )))
-        })?;
+        let payload = encode_payload(command, "keyword command")?;
         self.queue_then_emit_message_operation(
             account_id,
             message_id,
@@ -216,11 +204,7 @@ impl MailService {
         message_id: &MessageId,
         command: &ReplaceMailboxesCommand,
     ) -> Result<CommandAck, ServiceError> {
-        let payload = serde_json::to_value(command).map_err(|error| {
-            ServiceError::from(GatewayError::Rejected(format!(
-                "failed to serialize mailbox command: {error}"
-            )))
-        })?;
+        let payload = encode_payload(command, "mailbox command")?;
         self.queue_then_emit_message_operation(
             account_id,
             message_id,
