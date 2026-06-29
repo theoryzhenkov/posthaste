@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, RefreshCw, Settings } from 'lucide-react'
 
 import type { AccountAppearance, Mailbox } from '@/api/types'
+import { useMailboxColorLookup } from '@/hooks/useMailboxColors'
 
 import { AccountMark } from '../AccountMark'
 import type { SidebarSelection } from '../Sidebar'
@@ -38,6 +39,7 @@ export function SourceSection({
   onSyncSource: (sourceId: string) => void
 }) {
   const [collapsed, setCollapsed] = useState(false)
+  const mailboxColorHue = useMailboxColorLookup()
   const unreadTotal = useMemo(
     () =>
       source.mailboxes.reduce((sum, mailbox) => sum + mailbox.unreadEmails, 0),
@@ -106,6 +108,7 @@ export function SourceSection({
               sourceId={source.id}
               sourceName={source.name}
               mailbox={mailbox}
+              colorHue={mailboxColorHue(source.id, mailbox.id)}
               depth={1}
               onOpenAccountSettings={onOpenAccountSettings}
               isSelected={

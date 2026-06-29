@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Edit3, MailOpen, RefreshCw, Settings } from 'lucide-react'
 
 import type { Mailbox, TagSummary } from '@/api/types'
+import { accentColor } from '@/design'
 import { cn } from '@/lib/utils'
 import {
   mailboxRoleAccent,
@@ -115,6 +116,7 @@ export function MailboxItem({
   sourceId,
   sourceName,
   mailbox,
+  colorHue,
   isSelected,
   depth = 0,
   onOpenAccountSettings,
@@ -124,12 +126,16 @@ export function MailboxItem({
   sourceId: string
   sourceName: string
   mailbox: Mailbox
+  /** Per-mailbox color override (hue); falls back to the role accent. */
+  colorHue?: number
   isSelected: boolean
   depth?: number
   onOpenAccountSettings: (sourceId: string) => void
   onSelect: () => void
   onSyncSource: (sourceId: string) => void
 }) {
+  const iconColor =
+    colorHue != null ? accentColor(colorHue) : mailboxRoleAccent(mailbox.role)
   const button = (
     <button
       className={itemButtonClass(isSelected, depth)}
@@ -137,10 +143,7 @@ export function MailboxItem({
       onContextMenu={onSelect}
       type="button"
     >
-      <span
-        className="flex w-4 justify-center"
-        style={{ color: mailboxRoleAccent(mailbox.role) }}
-      >
+      <span className="flex w-4 justify-center" style={{ color: iconColor }}>
         {roleIcon(mailbox.role)}
       </span>
       <span className="min-w-0 flex-1 truncate">{mailbox.name}</span>
