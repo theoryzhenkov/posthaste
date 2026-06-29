@@ -1,8 +1,6 @@
 import type { MouseEvent } from 'react'
 import { Inbox, MousePointerClick } from 'lucide-react'
 
-import { ROW_HEIGHT } from './model'
-
 export function NoMailboxSelected({
   onMouseDown,
 }: {
@@ -31,7 +29,7 @@ export function NoMailboxSelected({
   )
 }
 
-export function LoadingRows() {
+export function LoadingRows({ rowHeight }: { rowHeight: number }) {
   return (
     <div
       className="space-y-0 bg-[var(--list-zebra)]"
@@ -41,7 +39,7 @@ export function LoadingRows() {
         <div
           key={i}
           className="border-b border-[var(--list-divider)] px-4 py-3"
-          style={{ height: ROW_HEIGHT }}
+          style={{ height: rowHeight }}
         >
           <div className="flex items-center gap-3">
             <div className="h-3.5 w-28 animate-pulse rounded bg-muted" />
