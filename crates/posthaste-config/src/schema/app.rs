@@ -21,6 +21,8 @@ pub struct AppToml {
     #[serde(default)]
     pub cache: CachePolicyToml,
     #[serde(default)]
+    pub appearance: Option<AppearanceToml>,
+    #[serde(default)]
     pub link: LinkToml,
 }
 
@@ -83,6 +85,42 @@ impl CachePolicyToml {
     }
 }
 
+/// TOML representation of `[appearance]` (UI theme prefs). Mirrors the domain
+/// `Appearance` but with snake_case keys to match the rest of `app.toml`; the
+/// enum *values* stay camelCase (e.g. `paperInk`) to match the renderer's set.
+///
+/// @spec docs/eph/DESIGN-L2-appearance-toml
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct AppearanceToml {
+    pub mode: Option<ThemeMode>,
+    pub palette_preset: Option<PalettePresetId>,
+    pub density: Option<UiDensity>,
+    pub accent_hue: Option<u32>,
+    pub glass_theme: Option<GlassTheme>,
+}
+
+impl AppearanceToml {
+    fn to_appearance(&self) -> Appearance {
+        Appearance {
+            mode: self.mode,
+            palette_preset: self.palette_preset,
+            density: self.density,
+            accent_hue: self.accent_hue,
+            glass_theme: self.glass_theme.clone(),
+        }
+    }
+
+    fn from_appearance(appearance: &Appearance) -> Self {
+        Self {
+            mode: appearance.mode,
+            palette_preset: appearance.palette_preset,
+            density: appearance.density,
+            accent_hue: appearance.accent_hue,
+            glass_theme: appearance.glass_theme.clone(),
+        }
+    }
+}
+
 /// Daemon-specific settings read only at startup (bind address, CORS, poll
 /// interval).
 ///
@@ -115,6 +153,7 @@ impl AppToml {
                 .iter()
                 .map(convert_automation_rule)
                 .collect::<Result<Vec<_>, _>>()?,
+            appearance: self.appearance.as_ref().map(|a| a.to_appearance()),
         })
     }
 
@@ -142,6 +181,10 @@ impl AppToml {
             daemon: existing.daemon.clone(),
             logging: existing.logging.clone(),
             cache: CachePolicyToml::from_cache_policy(&settings.cache_policy),
+            appearance: settings
+                .appearance
+                .as_ref()
+                .map(AppearanceToml::from_appearance),
             link: existing.link.clone(),
         }
     }

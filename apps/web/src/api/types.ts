@@ -1,4 +1,5 @@
 export * from './types/accounts'
+export * from './types/appearance'
 export * from './types/automation'
 export * from './types/compose'
 export * from './types/events'

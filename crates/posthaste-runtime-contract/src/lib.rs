@@ -15,13 +15,13 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
-    AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult, DomainEvent,
-    DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxId, MailboxSummary,
-    MessageAttachment, MessageId, MessageSummary, Operation, OperationId, ProviderAuthKind,
-    ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
-    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox,
-    SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings, SyncMode,
-    TagSummary, ValidationError,
+    Appearance, AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult,
+    DomainEvent, DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxId,
+    MailboxSummary, MessageAttachment, MessageId, MessageSummary, Operation, OperationId,
+    ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand,
+    SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings,
+    SyncMode, TagSummary, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -237,6 +237,7 @@ pub struct PatchAppSettingsMutation {
     pub cache_policy: Option<CachePolicy>,
     pub automation_rules: Option<Vec<AutomationRule>>,
     pub automation_drafts: Option<Vec<AutomationRule>>,
+    pub appearance: Option<Appearance>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

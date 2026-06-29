@@ -29,6 +29,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
                 cache_policy: None,
                 automation_rules: Some(vec![source_rule("primary")]),
                 automation_drafts: None,
+                appearance: None,
             }),
         )
         .await,
@@ -75,6 +76,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
                 cache_policy: None,
                 automation_rules: None,
                 automation_drafts: None,
+                appearance: None,
             }),
         )
         .await,
@@ -108,6 +110,7 @@ async fn patch_settings_can_update_cache_policy() {
                 }),
                 automation_rules: None,
                 automation_drafts: None,
+                appearance: None,
             }),
         )
         .await,
@@ -152,6 +155,7 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
                 cache_policy: None,
                 automation_rules: None,
                 automation_drafts: Some(vec![draft]),
+                appearance: None,
             }),
         )
         .await,
@@ -182,6 +186,7 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
             cache_policy: None,
             automation_rules: None,
             automation_drafts: None,
+            appearance: None,
         }),
     )
     .await
@@ -220,6 +225,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
             cache_policy: None,
             automation_rules: Some(vec![invalid_rule]),
             automation_drafts: None,
+            appearance: None,
         }),
     )
     .await
@@ -245,5 +251,61 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
             .expect("automations should serialize as an array")
             .len(),
         0
+    );
+}
+
+#[tokio::test]
+async fn patch_settings_persists_appearance_to_app_toml() {
+    let harness = SettingsHarness::new();
+
+    let Json(settings) = expect_settings_ok(
+        patch_settings(
+            State(harness.state.clone()),
+            Json(PatchSettingsRequest {
+                default_account_id: None,
+                cache_policy: None,
+                automation_rules: None,
+                automation_drafts: None,
+                appearance: Some(Appearance {
+                    mode: Some(ThemeMode::Dark),
+                    palette_preset: Some(PalettePresetId::PaperInk),
+                    density: Some(UiDensity::Compact),
+                    accent_hue: Some(250),
+                    glass_theme: Some(GlassTheme {
+                        blooms: vec![GlassBloom {
+                            id: "bloom-1".to_string(),
+                            hue: 285,
+                            x: 20.0,
+                            y: 10.0,
+                            opacity: 0.35,
+                            radius: 45.0,
+                        }],
+                    }),
+                }),
+            }),
+        )
+        .await,
+    );
+
+    let appearance = settings.appearance.expect("appearance should be set");
+    assert_eq!(appearance.mode, Some(ThemeMode::Dark));
+    assert_eq!(appearance.palette_preset, Some(PalettePresetId::PaperInk));
+    assert_eq!(appearance.accent_hue, Some(250));
+    let glass = appearance.glass_theme.expect("glass theme should be set");
+    assert_eq!(glass.blooms.len(), 1);
+    assert_eq!(glass.blooms[0].id, "bloom-1");
+
+    // The TOML file is the source of truth: the appearance round-trips through it
+    // with snake_case keys and camelCase enum values (e.g. paperInk).
+    let app_toml = harness.app_toml();
+    assert_eq!(app_toml["appearance"]["mode"].as_str(), Some("dark"));
+    assert_eq!(
+        app_toml["appearance"]["palette_preset"].as_str(),
+        Some("paperInk"),
+    );
+    assert_eq!(app_toml["appearance"]["accent_hue"].as_integer(), Some(250),);
+    assert_eq!(
+        app_toml["appearance"]["glass_theme"]["blooms"][0]["id"].as_str(),
+        Some("bloom-1"),
     );
 }

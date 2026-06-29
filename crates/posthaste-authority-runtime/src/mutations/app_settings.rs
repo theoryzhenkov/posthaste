@@ -48,6 +48,16 @@ impl AccountMutationService {
                     Ok(())
                 }),
             },
+            AppSettingsFieldPatch {
+                name: "appearance",
+                present: request.appearance.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(appearance) = &request.appearance {
+                        settings.appearance = Some(appearance.clone());
+                    }
+                    Ok(())
+                }),
+            },
         ];
 
         let mut changed = Vec::new();
