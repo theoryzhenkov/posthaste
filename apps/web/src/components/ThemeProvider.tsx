@@ -8,7 +8,7 @@ import {
   type AppliedRootTheme,
   type GlassBloomId,
   type GlassBloomPatch,
-  type PalettePresetId,
+  type ResolvedThemeMode,
   type ThemeMode,
   type UiDensity,
 } from '@/design'
@@ -63,29 +63,22 @@ export function DesignThemeProvider({
     store.getSnapshot,
     store.getServerSnapshot,
   )
-  const { accentHue, density, glassTheme, mode, palettePreset } = preferences
+  const { density, glassTheme, light, dark, mode, theme } = preferences
 
   const [applied, setApplied] = useState<AppliedRootTheme>(() => ({
-    accentHue,
-    glassTheme,
     mode,
     resolvedMode: mode === 'dark' ? 'dark' : 'light',
-    palettePreset,
+    theme,
     density,
+    light,
+    dark,
+    glassTheme,
   }))
 
   useEffect(() => {
     const root = window.document.documentElement
-    const apply = () =>
-      setApplied(
-        applyRootTheme(root, {
-          mode,
-          palettePreset,
-          density,
-          accentHue,
-          glassTheme,
-        }),
-      )
+    const state = { mode, theme, density, light, dark, glassTheme }
+    const apply = () => setApplied(applyRootTheme(root, state))
 
     apply()
 
@@ -95,17 +88,11 @@ export function DesignThemeProvider({
 
     const query = window.matchMedia('(prefers-color-scheme: dark)')
     const handleSystemChange = () =>
-      setApplied(
-        applyRootTheme(
-          root,
-          { mode, palettePreset, density, accentHue, glassTheme },
-          getSystemThemeMode(),
-        ),
-      )
+      setApplied(applyRootTheme(root, state, getSystemThemeMode()))
 
     query.addEventListener('change', handleSystemChange)
     return () => query.removeEventListener('change', handleSystemChange)
-  }, [accentHue, density, glassTheme, mode, palettePreset])
+  }, [density, glassTheme, light, dark, mode, theme])
 
   const updatePreferences = useCallback(
     (updater: (current: DesignThemePreferences) => DesignThemePreferences) => {
@@ -133,10 +120,26 @@ export function DesignThemeProvider({
   )
 
   const setAccentHue = useCallback(
-    (nextHue: number) => {
+    (targetMode: ResolvedThemeMode, nextHue: number) => {
       updatePreferences((current) => ({
         ...current,
-        accentHue: normalizeAccentHue(nextHue),
+        [targetMode]: {
+          ...current[targetMode],
+          accentHue: normalizeAccentHue(nextHue),
+        },
+      }))
+    },
+    [updatePreferences],
+  )
+
+  const setSurfaceHue = useCallback(
+    (targetMode: ResolvedThemeMode, nextHue: number) => {
+      updatePreferences((current) => ({
+        ...current,
+        [targetMode]: {
+          ...current[targetMode],
+          surfaceHue: normalizeAccentHue(nextHue),
+        },
       }))
     },
     [updatePreferences],
@@ -181,11 +184,11 @@ export function DesignThemeProvider({
     [updatePreferences],
   )
 
-  const setPalettePreset = useCallback(
-    (nextPreset: PalettePresetId) => {
+  const setTheme = useCallback(
+    (nextTheme: string) => {
       updatePreferences((current) => ({
         ...current,
-        palettePreset: nextPreset,
+        theme: nextTheme,
       }))
     },
     [updatePreferences],
@@ -204,20 +207,22 @@ export function DesignThemeProvider({
       addGlassBloom,
       removeGlassBloom,
       setAccentHue,
+      setSurfaceHue,
       setGlassBloom,
       setDensity,
       setMode,
-      setPalettePreset,
+      setTheme,
     }),
     [
       applied,
       addGlassBloom,
       removeGlassBloom,
       setAccentHue,
+      setSurfaceHue,
       setGlassBloom,
       setDensity,
       setMode,
-      setPalettePreset,
+      setTheme,
     ],
   )
 

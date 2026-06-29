@@ -1,5 +1,11 @@
 export const defaultAccentHue = 45
 
+/**
+ * Default surface hue — the "main color" of panes/background. 60 is the neutral
+ * grey the app shipped with; users can shift it per light/dark mode.
+ */
+export const defaultSurfaceHue = 60
+
 export function normalizeAccentHue(value: number): number {
   if (!Number.isFinite(value)) {
     return defaultAccentHue

@@ -14,13 +14,13 @@ setupDomEnvironment()
 
 function ThemeProbe() {
   const theme = useDesignTheme()
-  return <span data-testid="palette-preset">{theme.palettePreset}</span>
+  return <span data-testid="theme-id">{theme.theme}</span>
 }
 
 function ThemePaletteButton() {
   const theme = useDesignTheme()
   return (
-    <button type="button" onClick={() => theme.setPalettePreset('glass')}>
+    <button type="button" onClick={() => theme.setTheme('glass')}>
       Use glass
     </button>
   )
@@ -51,11 +51,9 @@ describe('DesignThemeProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use glass' }))
 
     await waitFor(() =>
-      expect(screen.getByTestId('palette-preset').textContent).toBe('glass'),
+      expect(screen.getByTestId('theme-id').textContent).toBe('glass'),
     )
-    expect(window.localStorage.getItem(designStorageKeys.palettePreset)).toBe(
-      'glass',
-    )
+    expect(window.localStorage.getItem(designStorageKeys.theme)).toBe('glass')
   })
 
   it('applies appearance changes written by another window', async () => {
@@ -67,7 +65,7 @@ describe('DesignThemeProvider', () => {
 
     const screen = within(view.container)
 
-    expect(screen.getByTestId('palette-preset').textContent).toBe('neutral')
+    expect(screen.getByTestId('theme-id').textContent).toBe('neutral')
     await waitFor(() =>
       expect(
         document.documentElement.getAttribute(
@@ -77,10 +75,10 @@ describe('DesignThemeProvider', () => {
     )
 
     act(() => {
-      window.localStorage.setItem(designStorageKeys.palettePreset, 'glass')
+      window.localStorage.setItem(designStorageKeys.theme, 'glass')
       window.dispatchEvent(
         new StorageEvent('storage', {
-          key: designStorageKeys.palettePreset,
+          key: designStorageKeys.theme,
           newValue: 'glass',
           oldValue: 'neutral',
           storageArea: window.localStorage,
@@ -89,7 +87,7 @@ describe('DesignThemeProvider', () => {
     })
 
     await waitFor(() =>
-      expect(screen.getByTestId('palette-preset').textContent).toBe('glass'),
+      expect(screen.getByTestId('theme-id').textContent).toBe('glass'),
     )
     expect(
       document.documentElement.getAttribute(designDataAttributes.palettePreset),

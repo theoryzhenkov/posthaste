@@ -1,4 +1,8 @@
-import { defaultAccentHue, normalizeAccentHue } from './accent'
+import {
+  defaultAccentHue,
+  defaultSurfaceHue,
+  normalizeAccentHue,
+} from './accent'
 import { designClassNames, designDataAttributes } from './attributes'
 import { defaultUiDensity, type UiDensity } from './density'
 import {
@@ -7,29 +11,40 @@ import {
   type GlassThemeParameters,
 } from './glassTheme'
 import {
-  defaultPalettePresetId,
+  defaultThemeId,
   defaultThemeMode,
-  palettePresets,
-  resolvePaletteMode,
-  type PalettePresetId,
+  themeStyle,
   type ResolvedThemeMode,
   type ThemeMode,
 } from './theme'
 
+/** Per-mode color knobs (mirrors `ThemeColors` in `themeSettings`). */
+export type RootThemeColors = {
+  readonly accentHue?: number
+  readonly surfaceHue?: number
+}
+
 export type RootThemeState = {
   readonly mode?: ThemeMode
-  readonly palettePreset?: PalettePresetId
+  readonly theme?: string
   readonly density?: UiDensity
-  readonly accentHue?: number
+  readonly light?: RootThemeColors
+  readonly dark?: RootThemeColors
   readonly glassTheme?: GlassThemeParameters
+}
+
+export type AppliedThemeColors = {
+  readonly accentHue: number
+  readonly surfaceHue: number
 }
 
 export type AppliedRootTheme = {
   readonly mode: ThemeMode
   readonly resolvedMode: ResolvedThemeMode
-  readonly palettePreset: PalettePresetId
+  readonly theme: string
   readonly density: UiDensity
-  readonly accentHue: number
+  readonly light: AppliedThemeColors
+  readonly dark: AppliedThemeColors
   readonly glassTheme: GlassThemeParameters
 }
 
@@ -49,19 +64,29 @@ export function getSystemThemeMode(
   return 'light'
 }
 
+function resolveColors(
+  colors: RootThemeColors | undefined,
+): AppliedThemeColors {
+  return {
+    accentHue: normalizeAccentHue(colors?.accentHue ?? defaultAccentHue),
+    surfaceHue: normalizeAccentHue(colors?.surfaceHue ?? defaultSurfaceHue),
+  }
+}
+
 export function applyRootTheme(
   root: HTMLElement,
   state: RootThemeState,
   systemMode: ResolvedThemeMode = getSystemThemeMode(),
 ): AppliedRootTheme {
   const mode = state.mode ?? defaultThemeMode
-  const palettePreset = state.palettePreset ?? defaultPalettePresetId
+  const theme = state.theme ?? defaultThemeId
   const density = state.density ?? defaultUiDensity
-  const accentHue = normalizeAccentHue(state.accentHue ?? defaultAccentHue)
+  const light = resolveColors(state.light)
+  const dark = resolveColors(state.dark)
   const glassTheme = state.glassTheme ?? defaultGlassThemeParameters
-  const requestedMode = resolveThemeMode(mode, systemMode)
-  const resolvedMode = resolvePaletteMode(palettePreset, requestedMode)
-  const palette = palettePresets[palettePreset]
+  const resolvedMode = resolveThemeMode(mode, systemMode)
+  const colors = resolvedMode === 'dark' ? dark : light
+  const accentHue = colors.accentHue
   const accent = `oklch(0.68 0.17 ${accentHue})`
   const accentStrong = `oklch(0.72 0.16 ${accentHue})`
   const accentDeep = `oklch(0.50 0.18 ${accentHue})`
@@ -74,11 +99,14 @@ export function applyRootTheme(
 
   root.setAttribute(designDataAttributes.themeMode, mode)
   root.setAttribute(designDataAttributes.resolvedThemeMode, resolvedMode)
-  root.setAttribute(designDataAttributes.palettePreset, palettePreset)
-  root.setAttribute(designDataAttributes.paletteStyle, palette.style)
+  root.setAttribute(designDataAttributes.palettePreset, theme)
+  root.setAttribute(designDataAttributes.paletteStyle, themeStyle(theme))
   root.setAttribute(designDataAttributes.uiDensity, density)
   root.classList.toggle(designClassNames.dark, resolvedMode === 'dark')
   root.style.setProperty('--ph-accent-hue', String(accentHue))
+  // Surface hue is plumbed now; the surface tokens are parameterized by it in a
+  // follow-up so this var becoming live is a CSS-only change.
+  root.style.setProperty('--ph-surface-hue', String(colors.surfaceHue))
   root.style.setProperty(
     '--primary',
     resolvedMode === 'dark' ? accentStrong : accent,
@@ -92,7 +120,7 @@ export function applyRootTheme(
   root.style.setProperty('--brand-coral-foreground', accentForeground)
   root.style.setProperty(
     '--brand-coral-soft',
-    palettePreset === 'glass' ? accentGlassSoft : accentSoft,
+    theme === 'glass' ? accentGlassSoft : accentSoft,
   )
   root.style.setProperty('--brand-coral-deep', accentDeep)
   root.style.setProperty(
@@ -121,9 +149,10 @@ export function applyRootTheme(
   return {
     mode,
     resolvedMode,
-    palettePreset,
+    theme,
     density,
-    accentHue,
+    light,
+    dark,
     glassTheme,
   }
 }
