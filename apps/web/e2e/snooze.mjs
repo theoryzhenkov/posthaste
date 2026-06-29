@@ -50,9 +50,14 @@ async function inboxRows(page) {
 const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errs = []
-page.on(
-  'console',
-  (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)),
+page.on('console', (m) => {
+  const t = m.text()
+  if (m.type() === 'error') errs.push(t.slice(0, 200))
+  if (/snooze|mutation|applyDiff|captureMutation|userInitiated/i.test(t))
+    console.log('  [console]', m.type(), t.slice(0, 160))
+})
+page.on('pageerror', (e) =>
+  console.log('  [pageerror]', e.message.slice(0, 200)),
 )
 
 try {
@@ -79,10 +84,21 @@ try {
   console.log('snooze target (first Inbox row):', snoozedSubject)
 
   // Select the first message → the detail header shows the Snooze button.
+  // (There are two "Snooze" buttons — the message-list quick action + the
+  // detail-header popover trigger; target the latter via its popover role.)
   await page.locator(ROWSEL).first().click()
   await page.waitForTimeout(800)
-  await page.getByRole('button', { name: 'Snooze' }).click()
-  await page.getByText('Tomorrow').click()
+  await page
+    .locator('[data-slot="popover-trigger"][aria-label="Snooze"]')
+    .click()
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: '/tmp/snooze-popover.png' })
+  const tomorrow = page.getByRole('button', { name: 'Tomorrow' })
+  console.log(
+    'Tomorrow button visible:',
+    await tomorrow.isVisible().catch(() => false),
+  )
+  await tomorrow.click()
   // Let the optimistic move + settlement settle.
   await page.waitForTimeout(2500)
 

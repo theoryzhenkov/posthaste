@@ -5,7 +5,7 @@ modified: 2026-06-28
 reviewed: 2026-06-28
 lifecycle: ephemeral
 type: DESIGN
-status: "Implementation in progress (Option B: separate `message_snooze` table). Slices 1–4 shipped; Slice 5 undo-integration verified (applyDiff → replace_mailboxes → invariant clears the row, locked with an authority-runtime test) + e2e caught a JMAP designation gap (set_mailbox_role gateway round-trip rejects 'snooze'; needs a local-override path for non-provider roles)."
+status: "Implementation in progress (Option B: separate `message_snooze` table). Slices 1–5 shipped + e2e-verified end-to-end: designate a Snoozed mailbox (local-override path, no gateway round-trip for the Posthaste-local `snooze` role) → snooze leaves the Inbox → undo restores it. The undo's cross-device RevLog cursor-sync (revCursor) is rejected the same way archive's is (pre-existing Phase 2 condition; local undo unaffected)."
 depends:
   - path: docs/eph/DESIGN-L2-undo-redo-revlog-contract
     note: "undo integration — snooze is a user-initiated mutation that records a rev_log step; the scheduler's auto-return must not"
@@ -57,15 +57,18 @@ including Gmail. This matches how every other third-party client does it.
   rejects with a clear error (the UI prompts the user to designate one). v1
   doesn't auto-create/auto-designate; that's a follow-up (would need a gateway
   `create_mailbox`).
-  > **Gap (found by the Slice 5 e2e):** `set_mailbox_role` does an unconditional
-  > gateway round-trip (`gateway.set_mailbox_role`), so designating a mailbox
-  > with the `snooze` role FAILS for JMAP providers — JMAP's mailbox `role`
-  > property only accepts standard roles (inbox/archive/drafts/sent/junk/trash),
-  > so Stalwart rejects `"snooze"` (`gateway_rejected: invalidProperties: role`).
-  > The local `mailbox_role_override` table exists but `set_mailbox_role` never
-  > writes it. Fix direction: write the local `mailbox_role_override` + skip the
-  > gateway round-trip for non-provider roles (like `snooze`). Until fixed, the
-  > snooze UI can't designate a Snoozed mailbox on JMAP accounts.
+  > **Fixed (the Slice 5 e2e found + drove this):** `set_mailbox_role` used to do
+  > an unconditional gateway round-trip (`gateway.set_mailbox_role`), so
+  > designating a mailbox with the `snooze` role FAILED for JMAP — JMAP's mailbox
+  > `role` property only accepts standard roles, so Stalwart rejected `"snooze"`
+  > (`gateway_rejected: invalidProperties: role`). Fix: `set_mailbox_role` now
+  > detects a **Posthaste-local role** (one with no provider equivalent —
+  > currently just `snooze`) + writes the local `mailbox_role_override` (which
+  > updates `mailbox.role` directly, so `list_mailboxes` sees it) + emits a
+  > `mailbox.updated` event, **skipping the gateway round-trip**. Standard roles
+  > still go through the gateway (so the provider also knows them). Verified
+  > e2e: PATCH `snooze` succeeds, the snooze mutation finds the mailbox, snooze
+  > leaves the Inbox, + undo restores it.
 - A **separate `message_snooze` store table**
   `(account_id TEXT, message_id TEXT, until INTEGER NOT NULL, PRIMARY KEY (account_id, message_id))`
   with an index on `(account_id, until)` for the scheduler. The return time is
@@ -156,10 +159,16 @@ path).
 - **Slice 5 — undo integration + e2e**: confirm the store invariant clears the
   snooze row on undo (✅ verified — `applyDiff` → `replace_mailboxes` → the
   invariant fires; locked with an authority-runtime test). Playwright e2e
-  (snooze → assert leaves Inbox + appears in Snoozed → undo → back in Inbox;
-  advance the scheduler / wait → auto-return) — ⚠️ blocked on the JMAP
-  designation gap above (can't designate a Snoozed mailbox on the dev stack's
-  Stalwart account until `set_mailbox_role` gets a local-override path).
+  (✅ PASSES: designate a Snoozed mailbox → snooze → leaves Inbox → undo → back
+  in Inbox). The e2e drove two fixes: the `set_mailbox_role` local-override path
+  (above) + a WASM rebuild (Slice 2 added `snooze` to link-contract's
+  `MessageMutation`/`to_assertion_with_roles`, but the committed replica WASM
+  predated it — so client optimism + undo-diff capture didn't recognize
+  `message.snooze` until rebuilt). Note: the undo's cross-device RevLog cursor
+  sync (`revCursor`) is rejected identically for archive + snooze (a pre-existing
+  Phase 2 condition — the forward action appends no server rev_log step, so the
+  cursor referencing it is unknown; local undo is unaffected). Out of scope for
+  snooze; a Phase 2 follow-up.
 
 ## Open questions / follow-ups
 

@@ -9,16 +9,16 @@ use crate::{
     ConfigDiff, ConfigRepository, ConversationCursor, ConversationId, ConversationPage,
     ConversationReadStore, ConversationSortField, ConversationView, DraftContent,
     DraftContentResult, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
-    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetail, MessageDetailStore,
-    MessageId, MessageListStore, MessageMailboxStore, MessagePage, MessageSortField,
-    MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
-    OperationOutboxStore, OperationOutcome, OperationSettlement, OperationState, Recipient,
-    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    MailboxRoleOverrideStore, MailboxSummary, MessageCommandStore, MessageCursor, MessageDetail,
+    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
+    MessageSortField, MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId,
+    OperationKind, OperationOutboxStore, OperationOutcome, OperationSettlement, OperationState,
+    Recipient, ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
     SharedConfigRepository, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxStore,
     SmartMailboxSummary, SnoozeStore, SortDirection, SourceDataStore, SourceProjectionStore,
     StoreError, SyncMode, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore,
-    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_OPERATION_SETTLED,
-    EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_UPDATED,
+    EVENT_TOPIC_OPERATION_SETTLED, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -45,6 +45,7 @@ mod tests;
 pub struct MailService {
     config: SharedConfigRepository,
     mailbox_reader: Arc<dyn MailboxReadStore>,
+    mailbox_role_overrides: Arc<dyn MailboxRoleOverrideStore>,
     message_lister: Arc<dyn MessageListStore>,
     tag_reader: Arc<dyn TagReadStore>,
     conversation_reader: Arc<dyn ConversationReadStore>,
@@ -72,6 +73,7 @@ impl MailService {
         Self {
             config,
             mailbox_reader: store.clone(),
+            mailbox_role_overrides: store.clone(),
             message_lister: store.clone(),
             tag_reader: store.clone(),
             conversation_reader: store.clone(),
