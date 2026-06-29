@@ -1,0 +1,86 @@
+---
+name: Bug report
+description: Report a bug in a Posthaste build
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more detail you
+        provide, the faster we can reproduce and fix it. If a maintainer asks
+        for logs, see the Diagnostic logs section of the README.
+  - type: input
+    id: version
+    attributes:
+      label: App version and release channel
+      description: Find this in Settings → About (e.g. `0.2.0-nightly.36` / nightly).
+      placeholder: "0.2.0-nightly.36 (nightly)"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform / OS
+      options:
+        - Linux
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Other / browser-localhost build
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider type
+      description: JMAP (Fastmail, Stalwart) is the primary path; IMAP/SMTP is beta-limited.
+      options:
+        - JMAP (Fastmail)
+        - JMAP (Stalwart / self-hosted)
+        - IMAP/SMTP (Gmail)
+        - IMAP/SMTP (other)
+    validations:
+      required: true
+  - type: input
+    id: sync-mode
+    attributes:
+      label: Sync mode
+      description: Leave blank if unsure. E.g. "bundled desktop (embedded server)" or "split daemon + browser".
+      placeholder: bundled desktop (embedded server)
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. Steps to reproduce are ideal.
+      placeholder: |
+        1. Open the Inbox
+        2. Select a message
+        3. Click Forward
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: The forwarded compose window should open with the original message quoted.
+    validations:
+      required: true
+  - type: textarea
+    id: errors
+    attributes:
+      label: Recent errors or log output
+      description: Paste any error text or relevant JSON-lines log snippets. Please redact email addresses, tokens, and secrets before pasting.
+      render: shell
+  - type: input
+    id: logs
+    attributes:
+      label: Log file reference
+      description: The dated log file path, if a maintainer asked for it (e.g. `~/.local/share/posthaste/logs/posthaste.2026-06-29`).
+      placeholder: "~/.local/share/posthaste/logs/posthaste.YYYY-MM-DD"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Screenshots, workarounds you tried, or other context.
+---
