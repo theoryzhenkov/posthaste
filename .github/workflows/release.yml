@@ -163,6 +163,63 @@ jobs:
           if-no-files-found: error
           path: target/distribute/PosthasteWeb*.tar.gz
 
+  build-cli:
+    name: Build posthastectl CLI
+    needs: resolve-channel
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve channel policy
+        shell: bash
+        env:
+          POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+        run: bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
+
+      - name: Cross-compile posthastectl per target
+        shell: bash
+        run: |
+          mkdir -p target/distribute
+          # Bun target -> release artifact platform suffix.
+          targets=(
+            "bun-linux-x64:linux-x64"
+            "bun-linux-arm64:linux-arm64"
+            "bun-darwin-x64:darwin-x64"
+            "bun-darwin-arm64:darwin-arm64"
+            "bun-windows-x64:windows-x64"
+          )
+          for entry in "${targets[@]}"; do
+            bun_target="${entry%%:*}"
+            platform="${entry##*:}"
+            # build-cli.ts prints the final artifact path (incl. .exe for
+            # windows) as its last stdout line; capture + verify it exists.
+            artifact="$(bun run apps/mcp/scripts/build-cli.ts -- "$bun_target" "target/distribute/${POSTHASTE_CLI_NAME}-${platform}" | tail -1)"
+            test -n "$artifact" && test -f "$artifact" || { echo "build failed for $bun_target" >&2; exit 1; }
+            echo "built $bun_target -> $artifact"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-cli
+          if-no-files-found: error
+          path: target/distribute/PosthasteCTL*
+
   build-desktop:
     name: Build desktop ${{ matrix.platform }}
     needs: resolve-channel
@@ -500,6 +557,7 @@ jobs:
     needs:
       - build-daemon
       - build-web
+      - build-cli
       - build-desktop
       - resolve-channel
     runs-on: ubuntu-latest
