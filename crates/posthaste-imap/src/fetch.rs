@@ -25,7 +25,8 @@ use posthaste_observability::{events, ph_debug, ph_info};
 use crate::mailbox::examine_selected_mailbox;
 use crate::message::imap_flags_include_deleted;
 use crate::{
-    imap_header_message_record_with_gmail_metadata, ImapAdapterError, ImapFetchedHeader, ImapMappedHeader,
+    imap_header_message_record_with_gmail_metadata, ImapAdapterError, ImapFetchedHeader,
+    ImapMappedHeader,
 };
 
 const UID_FETCH_CHUNK_SIZE: usize = 128;

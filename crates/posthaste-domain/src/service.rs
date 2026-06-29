@@ -116,6 +116,8 @@ pub(crate) fn decode_payload<T: serde::de::DeserializeOwned>(
     context: &str,
 ) -> Result<T, ServiceError> {
     serde_json::from_value(value).map_err(|error| {
-        ServiceError::from(GatewayError::Rejected(format!("invalid {context}: {error}")))
+        ServiceError::from(GatewayError::Rejected(format!(
+            "invalid {context}: {error}"
+        )))
     })
 }

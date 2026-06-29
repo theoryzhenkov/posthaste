@@ -1,8 +1,7 @@
 use crate::{
-    AccountId, AddToMailboxCommand, CommandAck, MailboxId, MessageId, Operation,
-    OperationEntity, OperationEntityKind, OperationKind, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, StoreError,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    AccountId, AddToMailboxCommand, CommandAck, MailboxId, MessageId, Operation, OperationEntity,
+    OperationEntityKind, OperationKind, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    ServiceError, SetKeywordsCommand, StoreError, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 
 use super::{decode_payload, encode_payload, MailService};

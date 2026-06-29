@@ -23,8 +23,8 @@ use posthaste_domain::{
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MutationNotification,
     MutationReceipt, MutationRequest, RuntimeCaller, RuntimeCore, RuntimeFrame,
-    RuntimeFrameSubscription, RuntimeSessionSeq, SecretWriteMode,
-    SecretWriteMutation, ViewDescriptor, ViewId, ViewSnapshot,
+    RuntimeFrameSubscription, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation,
+    ViewDescriptor, ViewId, ViewSnapshot,
 };
 
 use crate::fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
@@ -373,7 +373,6 @@ impl RuntimeHarness {
             _phantom: PhantomData,
         }
     }
-
 }
 
 /// A live subscription to one view's frame stream, kept open across an external
