@@ -279,6 +279,7 @@ async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
     let mutation_id = mutation_body["runtimeMutationId"]
         .as_str()
         .expect("runtime mutation id should serialize");
+    assert!(!mutation_id.is_empty(), "{mutation_body}");
 
     let (stream_status, frame) = harness
         .get_text_frame(
@@ -287,12 +288,14 @@ async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
         )
         .await;
     assert_eq!(stream_status, StatusCode::OK);
-    assert!(frame.contains(r#""type":"mutationSettlement""#), "{frame}");
     assert!(
-        frame.contains(&format!(r#""mutationId":"{mutation_id}""#)),
+        frame.contains(r#""type":"mutationNotification""#),
         "{frame}"
     );
-    assert!(frame.contains(r#""status":"confirmed""#), "{frame}");
+    assert!(
+        frame.contains(r#""notification":{"type":"confirmed"}"#),
+        "{frame}"
+    );
     assert!(
         frame.contains(r#""clientMutationId":"client-1""#),
         "{frame}"
