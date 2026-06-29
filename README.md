@@ -123,8 +123,9 @@ mailboxes, search (preview-limited as noted above), and the local-first replica.
   [bug-report template](https://github.com/theoryzhenkov/posthaste/issues/new/choose)
   or discuss releases in the
   [releases discussion](https://github.com/theoryzhenkov/posthaste/discussions/categories/releases).
-- Always include: app version and release channel (visible in **Settings →
-  About**), platform/OS, provider type (JMAP/IMAP), and a description of what
+- Always include: app version and release channel (capture via **Settings →
+  Troubleshooting → Copy diagnostics**), platform/OS, provider type
+  (JMAP/IMAP), and a description of what
   you were doing.
 
 ### Diagnostic logs
