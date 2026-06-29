@@ -4,7 +4,7 @@ set working-directory := '..'
 
 # Run the local server
 run *args:
-    cargo run --bin posthaste -- serve {{args}}
+    cargo run --bin posthasted -- serve {{args}}
 
 # Build all crates
 build:
