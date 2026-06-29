@@ -35,6 +35,10 @@ Built in `apps/mcp` (one registry, two front-ends):
   compact JSON, exit codes `0/2/3/4`. Pure `run(argv, deps)` core, fully tested
   (`test/cli.test.ts`, stubbed fetch — no daemon needed). `just mcp build-cli`
   compiles a standalone binary via `bun build --compile`.
+- **`watch`** — the turnkey "run a script on new mail" runner over the event tap
+  (`cli/watch.ts`): arrival-gate → fetch detail → `--keyword`/`--mailbox` filter
+  → `--exec` (detail on stdin + `PH_*` env) or emit JSON; `--cursor` resume.
+  Tested in `test/watch.test.ts` + a live mock-daemon smoke. See §4.
 - **`just mcp {check,test,build-cli}`** wired into the root `check`/`test`/`fmt`.
 
 **Event tap — `GET /v1/events` restored (2026-06-29).** `posthastectl events`
@@ -125,6 +129,20 @@ mutating, useful for both MCP annotations and CLI confirmations).
 `posthastectl mailboxes list` · `messages search <query>` · `messages get <id>` ·
 `messages move|flag|... <id>` · `send` (body via `--json -` / flags) ·
 `sync <account>` · `events --follow`.
+
+**`watch` — the turnkey scripting layer (implemented).** `posthastectl watch
+[--account A] [--mailbox M] [--keyword TAG] [--all-updates] [--exec CMD]
+[--cursor FILE]` is a thin runner over the `events` tap, for the most common
+automation ("run a script on new mail"). Per genuine arrival it fetches the
+full `MessageDetail` (one call → both the tag in `.keywords` and the body in
+`.bodyText`), applies the client-side `--keyword`/`--mailbox` filters, then runs
+`--exec` with the detail JSON on stdin + `PH_*` env (or emits JSON without
+`--exec`). `--cursor` persists the last `seq` for at-least-once resume. Design
+boundary (avoid a 2nd rules engine): the CLI owns the **plumbing** (loop, resume,
+arrival-gate, fetch, dispatch); the script owns the **policy** (condition +
+action). The ONE semantic filter is `--keyword` (tags are the app's first-class
+label); `--from`/`--subject`/regex/multi-condition stay in the user's script.
+Declarative tag/move/flag belongs in the app's native automation-rules, not here.
 
 **Connection (stateless).** Reuses `client.ts::resolveConnection`: default
 **auto-discovers the local daemon** via `daemon.json` (`{port, token}` under the

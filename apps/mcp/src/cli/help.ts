@@ -27,7 +27,7 @@ export function topLevelHelp(operations: Operation[]): string {
 
   const width = Math.max(
     ...operations.map((op) => op.cli.path.join(" ").length),
-    "events".length,
+    "watch".length,
   );
   for (const op of operations) {
     const path = op.cli.path.join(" ").padEnd(width);
@@ -35,6 +35,9 @@ export function topLevelHelp(operations: Operation[]): string {
   }
   lines.push(
     `  ${"events".padEnd(width)}  Stream domain events as newline-delimited JSON`,
+  );
+  lines.push(
+    `  ${"watch".padEnd(width)}  Run a command (or emit JSON) per new matching message`,
   );
   lines.push("");
   lines.push(`Run '${PROG} <command> --help' for command details.`);

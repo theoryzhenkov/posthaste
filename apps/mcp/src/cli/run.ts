@@ -8,6 +8,7 @@ import type { Operation } from "../operations/index.js";
 import { parseOperationArgs, UsageError } from "./args.js";
 import { streamEvents, type EventsOptions } from "./events.js";
 import { commandHelp, topLevelHelp } from "./help.js";
+import { watchEvents, type WatchOptions } from "./watch.js";
 
 /**
  * Exit codes (the scriptable contract). `0` success; everything else carries
@@ -33,9 +34,16 @@ export interface RunDeps {
   env: Record<string, string | undefined>;
   readStdin: () => Promise<string>;
   readFile: (path: string) => Promise<string>;
+  writeFile: (path: string, content: string) => Promise<void>;
   fetch: typeof fetch;
+  /** Run a `watch --exec` command; resolves with the exit code (never rejects). */
+  runCommand?: (
+    command: string,
+    input: string,
+    env: Record<string, string>,
+  ) => Promise<number>;
   version: string;
-  /** Aborts the `events` stream (Ctrl-C). */
+  /** Aborts the `events`/`watch` stream (Ctrl-C). */
   signal?: AbortSignal;
 }
 
@@ -58,6 +66,27 @@ Filters:
   --topic <topic>    Only events with this topic (e.g. sync.completed)
   --account <id>     Only events for this account
   --mailbox <id>     Only events for this mailbox`;
+
+const WATCH_HELP = `Usage: posthastectl watch [filters] [--exec <command>]
+
+Watch for new mail and run a command (or emit JSON) per matching message. For
+each genuine arrival it fetches the full message, applies the filters, then runs
+--exec with the MessageDetail JSON on stdin and PH_* env vars set
+(PH_ACCOUNT_ID, PH_MESSAGE_ID, PH_SEQ, PH_TOPIC, PH_KEYWORDS, PH_MAILBOX_IDS).
+Without --exec it prints the matching MessageDetail as one JSON line.
+
+Filters:
+  --account <id>     Only this account (server-side)
+  --mailbox <id>     Only messages in this mailbox
+  --keyword <tag>    Only messages carrying this tag (JMAP keyword)
+  --all-updates      Fire on any message change, not just genuine arrivals
+
+Dispatch & resume:
+  --exec <command>   Shell command to run per match (detail JSON on stdin)
+  --cursor <file>    Persist the last-processed seq here; resume on restart
+
+The --exec command runs on attacker-influenced input (email). The --keyword gate
+is convenience, not an auth boundary — treat the payload as untrusted.`;
 
 /** Pull the known global flags out of argv, leaving the command tokens. */
 function extractGlobals(argv: string[]): { globals: Globals; rest: string[] } {
@@ -178,6 +207,30 @@ function parseEventsOptions(tokens: string[]): EventsOptions {
   return opts;
 }
 
+/** Parse the `watch` subcommand's flags. */
+function parseWatchOptions(tokens: string[]): WatchOptions {
+  const opts: WatchOptions = {};
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i] ?? "";
+    const eq = token.indexOf("=");
+    const name = eq >= 0 ? token.slice(0, eq) : token;
+    const value = (): string => {
+      if (eq >= 0) return token.slice(eq + 1);
+      const next = tokens[++i];
+      if (next === undefined) throw new UsageError(`${name} requires a value`);
+      return next;
+    };
+    if (name === "--account") opts.account = value();
+    else if (name === "--mailbox") opts.mailbox = value();
+    else if (name === "--keyword") opts.keyword = value();
+    else if (name === "--exec") opts.exec = value();
+    else if (name === "--cursor") opts.cursorFile = value();
+    else if (name === "--all-updates") opts.allUpdates = true;
+    else throw new UsageError(`unknown flag ${name} for 'watch'`);
+  }
+  return opts;
+}
+
 /**
  * Run one CLI invocation. `argv` is the args after the program name
  * (`process.argv.slice(2)`). Returns the process exit code; never throws.
@@ -194,6 +247,30 @@ export async function run(argv: string[], deps: RunDeps): Promise<number> {
   if (globals.version) {
     deps.stdout(`posthastectl ${deps.version}\n`);
     return ExitCode.Ok;
+  }
+
+  // The `watch` runner is a streaming command, not a registry operation.
+  if (rest[0] === "watch") {
+    if (globals.help) {
+      deps.stdout(`${WATCH_HELP}\n`);
+      return ExitCode.Ok;
+    }
+    try {
+      const opts = parseWatchOptions(rest.slice(1));
+      const conn = connect(deps, globals);
+      await watchEvents(conn, opts, {
+        fetch: conn.fetch ?? deps.fetch,
+        emit: (line) => deps.stdout(`${line}\n`),
+        log: (line) => deps.stderr(`posthastectl: ${line}\n`),
+        runCommand: deps.runCommand,
+        readFile: deps.readFile,
+        writeFile: deps.writeFile,
+        signal: deps.signal,
+      });
+      return ExitCode.Ok;
+    } catch (error) {
+      return failRuntime(error, deps);
+    }
   }
 
   // The `events` tap is a streaming command, not a registry operation.

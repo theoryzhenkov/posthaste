@@ -8,16 +8,6 @@ export interface EventsOptions {
   mailbox?: string;
 }
 
-/** Injectable side-effects, so the tap is testable without real sockets. */
-export interface EventsDeps {
-  fetch: typeof fetch;
-  /** Emit one event as a single NDJSON line (the newline is added by the caller). */
-  emit: (line: string) => void;
-  /** Diagnostics (e.g. the resolved last seq). */
-  log?: (line: string) => void;
-  signal?: AbortSignal;
-}
-
 /** Build the `GET /v1/events` URL with the active filters applied. */
 function eventsUrl(conn: Connection, opts: EventsOptions): URL {
   const url = new URL(conn.baseUrl + "/events");
@@ -31,18 +21,16 @@ function eventsUrl(conn: Connection, opts: EventsOptions): URL {
 }
 
 /**
- * Stream the daemon's domain-event SSE (`GET /v1/events`) as newline-delimited
- * JSON: one `DomainEvent` object per line, for `while read` / `jq` pipelines.
- * Resumes from `afterSeq` (the server replays matching backlog, then goes live).
- *
- * Resolves only when the stream ends or `signal` aborts; rejects with an
- * [`ApiError`] on a non-2xx open or a transport failure.
+ * Open the daemon's `GET /v1/events` SSE and return the response byte stream
+ * (or `undefined` if the request was aborted or has no body). Throws an
+ * [`ApiError`] on a non-2xx open or a transport failure. Shared by the `events`
+ * tap and the `watch` runner.
  */
-export async function streamEvents(
+export async function openEventStream(
   conn: Connection,
   opts: EventsOptions,
-  deps: EventsDeps,
-): Promise<void> {
+  deps: { fetch: typeof fetch; signal?: AbortSignal },
+): Promise<ReadableStream<Uint8Array> | undefined> {
   const url = eventsUrl(conn, opts);
   const headers: Record<string, string> = { accept: "text/event-stream" };
   if (conn.token) headers.authorization = `Bearer ${conn.token}`;
@@ -55,7 +43,7 @@ export async function streamEvents(
       signal: deps.signal,
     });
   } catch (cause) {
-    if (deps.signal?.aborted) return;
+    if (deps.signal?.aborted) return undefined;
     throw new ApiError(
       0,
       undefined,
@@ -85,18 +73,37 @@ export async function streamEvents(
     );
   }
 
-  if (!res.body) return;
-  await consumeSse(res.body, deps);
+  return res.body ?? undefined;
+}
+
+/** One parsed SSE frame: the joined `data:` payload and the optional `id:`. */
+interface SseFrame {
+  data: string;
+  id?: string;
+}
+
+/** Parse a single SSE frame into its data payload + id (comments ignored). */
+function parseFrame(frame: string): SseFrame | undefined {
+  const dataLines: string[] = [];
+  let id: string | undefined;
+  for (const line of frame.split("\n")) {
+    if (line.startsWith(":")) continue; // comment / keep-alive
+    if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    else if (line.startsWith("id:")) id = line.slice(3).trim();
+  }
+  if (dataLines.length === 0) return undefined;
+  return { data: dataLines.join("\n"), id };
 }
 
 /**
- * Parse an SSE byte stream into `data:` payloads. Each complete event (frames
- * separated by a blank line) is emitted as one NDJSON line; the SSE `id:`
- * (the event seq) is reported via `log` for resume diagnostics.
+ * Consume an SSE byte stream, **awaiting** `onData` for each complete event
+ * (frames separated by a blank line). Awaiting gives serial back-pressure: the
+ * next frame is not read until the current one is fully handled — exactly what
+ * `watch` needs so one message is processed (fetched + dispatched) at a time.
  */
-async function consumeSse(
+export async function consumeSse(
   body: ReadableStream<Uint8Array>,
-  deps: EventsDeps,
+  onData: (data: string, id?: string) => Promise<void> | void,
 ): Promise<void> {
   const decoder = new TextDecoder();
   const reader = body.getReader();
@@ -112,7 +119,8 @@ async function consumeSse(
       while ((boundary = buffer.indexOf("\n\n")) >= 0) {
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        emitFrame(frame, deps);
+        const parsed = parseFrame(frame);
+        if (parsed) await onData(parsed.data, parsed.id);
       }
     }
   } finally {
@@ -120,17 +128,33 @@ async function consumeSse(
   }
 }
 
-/** Emit a single parsed SSE frame's data payload as one NDJSON line. */
-function emitFrame(frame: string, deps: EventsDeps): void {
-  const dataLines: string[] = [];
-  let id: string | undefined;
-  for (const line of frame.split("\n")) {
-    if (line.startsWith(":")) continue; // comment / keep-alive
-    if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-    else if (line.startsWith("id:")) id = line.slice(3).trim();
-  }
-  if (dataLines.length === 0) return;
-  const data = dataLines.join("\n");
-  deps.emit(data);
-  if (id && deps.log) deps.log(`seq=${id}`);
+/** Injectable side-effects for the `events` tap. */
+export interface EventsDeps {
+  fetch: typeof fetch;
+  /** Emit one event as a single NDJSON line (the newline is added here). */
+  emit: (line: string) => void;
+  /** Diagnostics (e.g. the resolved last seq). */
+  log?: (line: string) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * Stream the daemon's domain-event SSE (`GET /v1/events`) as newline-delimited
+ * JSON: one `DomainEvent` object per line, for `while read` / `jq` pipelines.
+ * Resumes from `afterSeq` (the server replays matching backlog, then goes live).
+ */
+export async function streamEvents(
+  conn: Connection,
+  opts: EventsOptions,
+  deps: EventsDeps,
+): Promise<void> {
+  const body = await openEventStream(conn, opts, {
+    fetch: deps.fetch,
+    signal: deps.signal,
+  });
+  if (!body) return;
+  await consumeSse(body, (data, id) => {
+    deps.emit(data);
+    if (id && deps.log) deps.log(`seq=${id}`);
+  });
 }
