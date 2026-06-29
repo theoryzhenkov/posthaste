@@ -25,6 +25,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -34,6 +35,13 @@ import {
   DesignThemeContext,
   type DesignThemeContextValue,
 } from './themeContext'
+
+/**
+ * Debounce window for the write-through appearance PATCH. A hue-slider drag
+ * fires many `onChange` ticks; this coalesces them into one trailing PATCH with
+ * the final value (the local cache updates instantly on every tick regardless).
+ */
+const APPEARANCE_PATCH_DEBOUNCE_MS = 250
 
 interface DesignThemeProviderProps {
   children: ReactNode
@@ -64,6 +72,41 @@ export function DesignThemeProvider({
     store.getServerSnapshot,
   )
   const { density, glassTheme, light, dark, mode, theme } = preferences
+
+  // Coalesce write-through PATCHes: a continuous gesture (dragging a hue slider
+  // fires onChange per tick) would otherwise storm `PATCH /v1/settings` with a
+  // burst of concurrent config writes. We apply each change to the cache
+  // immediately (instant local recolor) but debounce the network PATCH to one
+  // trailing call with the final value; the rollback baseline is the state
+  // before the burst started.
+  const patchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const patchBaselineRef = useRef<DesignThemePreferences | null>(null)
+
+  const flushAppearancePatch = useCallback(() => {
+    if (patchTimerRef.current) {
+      clearTimeout(patchTimerRef.current)
+      patchTimerRef.current = null
+    }
+    const baseline = patchBaselineRef.current
+    if (baseline === null) {
+      return
+    }
+    patchBaselineRef.current = null
+    const latest = store.getSnapshot().appearance
+    void runtimeMutations.settings
+      .patch({ appearance: designToWireAppearance(latest) })
+      .then((updated) => {
+        queryClient.setQueryData(queryKeys.settings, updated)
+      })
+      .catch(() => {
+        store.setAppearance(baseline)
+        toast.error('Appearance change could not be saved.')
+      })
+  }, [store])
+
+  // Flush any pending appearance PATCH on unmount so a change made just before
+  // the settings panel closes still persists to TOML.
+  useEffect(() => flushAppearancePatch, [flushAppearancePatch])
 
   const [applied, setApplied] = useState<AppliedRootTheme>(() => ({
     mode,
@@ -101,22 +144,23 @@ export function DesignThemeProvider({
         return
       }
       // Write-through (Option A): optimistically apply to the localStorage
-      // cache (instant UI, no flash) + PATCH TOML (source of truth). Roll back
-      // on failure so the cache never diverges from what persisted.
+      // cache (instant UI, no flash) + PATCH TOML (source of truth), debounced
+      // (see `flushAppearancePatch`). Roll back to the burst baseline on
+      // failure so the cache never diverges from what persisted.
       const current = store.getSnapshot().appearance
-      const next = updater(current)
-      store.setAppearance(next)
-      void runtimeMutations.settings
-        .patch({ appearance: designToWireAppearance(next) })
-        .then((updated) => {
-          queryClient.setQueryData(queryKeys.settings, updated)
-        })
-        .catch(() => {
-          store.setAppearance(current)
-          toast.error('Appearance change could not be saved.')
-        })
+      if (patchBaselineRef.current === null) {
+        patchBaselineRef.current = current
+      }
+      store.setAppearance(updater(current))
+      if (patchTimerRef.current) {
+        clearTimeout(patchTimerRef.current)
+      }
+      patchTimerRef.current = setTimeout(
+        flushAppearancePatch,
+        APPEARANCE_PATCH_DEBOUNCE_MS,
+      )
     },
-    [store, writeThrough],
+    [store, writeThrough, flushAppearancePatch],
   )
 
   const setAccentHue = useCallback(
