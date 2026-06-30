@@ -99,6 +99,52 @@ function mergeHeaders(
   return headers
 }
 
+/**
+ * Cap concurrent API requests.
+ *
+ * The Tauri macOS webview (WKWebView) talks to the embedded daemon over HTTP/1.1
+ * on loopback, which allows only ~6 connections per host; SSE streams hold some
+ * of those for their lifetime. A burst of fetches beyond that limit — the
+ * conversation view opening many threads at once is the worst offender — makes
+ * WKWebView drop connections, surfacing as "network connection was lost" and
+ * "access control checks" (a dropped/early-closed response arrives without the
+ * CORS headers). React Query retries, so requests still succeed, but the console
+ * fills with errors. Queue the overflow client-side instead so the webview never
+ * sees more than a handful of in-flight requests. Harmless in real browsers,
+ * which already queue per host. SSE (`fetchEventSource`) and blob downloads use
+ * their own fetches and are intentionally not gated.
+ */
+const MAX_CONCURRENT_REQUESTS = 4
+let inFlightRequests = 0
+const requestWaiters: Array<() => void> = []
+
+function acquireRequestSlot(): Promise<void> {
+  if (inFlightRequests < MAX_CONCURRENT_REQUESTS) {
+    inFlightRequests += 1
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve) => requestWaiters.push(resolve))
+}
+
+function releaseRequestSlot(): void {
+  const next = requestWaiters.shift()
+  if (next) {
+    // Hand the slot straight to the next waiter; in-flight count is unchanged.
+    next()
+  } else {
+    inFlightRequests -= 1
+  }
+}
+
+async function withRequestSlot<T>(run: () => Promise<T>): Promise<T> {
+  await acquireRequestSlot()
+  try {
+    return await run()
+  } finally {
+    releaseRequestSlot()
+  }
+}
+
 /** Low-level fetch wrapper that throws {@link ApiError} on non-OK responses. */
 export async function request<T>(
   path: string,
@@ -124,19 +170,37 @@ export async function request<T>(
     },
     'api request started',
   )
-  let response: Response
-  try {
-    response = await fetch(`${baseUrl()}${path}`, {
-      ...fetchInit,
-      headers: mergeHeaders(headers, {
-        ...observabilityHeaders(context),
-        ...authHeaders(),
-      }),
-    })
-  } catch (error) {
-    apiLogger.warn(
+  return withRequestSlot(async () => {
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl()}${path}`, {
+        ...fetchInit,
+        headers: mergeHeaders(headers, {
+          ...observabilityHeaders(context),
+          ...authHeaders(),
+        }),
+      })
+    } catch (error) {
+      apiLogger.warn(
+        {
+          event: LOG_EVENTS.apiRequestFailed,
+          requestId: context.requestId,
+          operationId: context.operationId,
+          operationKind: context.operationKind,
+          operationSource: context.operationSource,
+          sessionId: context.sessionId,
+          method,
+          path: requestPath,
+          durationMs: Math.round(performance.now() - started),
+          error,
+        },
+        'api request failed before response',
+      )
+      throw error
+    }
+    apiLogger.debug(
       {
-        event: LOG_EVENTS.apiRequestFailed,
+        event: LOG_EVENTS.apiRequestCompleted,
         requestId: context.requestId,
         operationId: context.operationId,
         operationKind: context.operationKind,
@@ -144,32 +208,16 @@ export async function request<T>(
         sessionId: context.sessionId,
         method,
         path: requestPath,
+        status: response.status,
         durationMs: Math.round(performance.now() - started),
-        error,
       },
-      'api request failed before response',
+      'api request completed',
     )
-    throw error
-  }
-  apiLogger.debug(
-    {
-      event: LOG_EVENTS.apiRequestCompleted,
-      requestId: context.requestId,
-      operationId: context.operationId,
-      operationKind: context.operationKind,
-      operationSource: context.operationSource,
-      sessionId: context.sessionId,
-      method,
-      path: requestPath,
-      status: response.status,
-      durationMs: Math.round(performance.now() - started),
-    },
-    'api request completed',
-  )
-  if (!response.ok) {
-    return parseError(response)
-  }
-  return response.json() as Promise<T>
+    if (!response.ok) {
+      return parseError(response)
+    }
+    return (await response.json()) as T
+  })
 }
 
 /** Convenience wrapper for JSON-bodied requests (POST / PATCH). */
