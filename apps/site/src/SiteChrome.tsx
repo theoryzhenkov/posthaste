@@ -28,7 +28,7 @@ function DiscordMark() {
 export function InstallHeader({
   active,
 }: {
-  active?: 'home' | 'releases'
+  active?: 'home' | 'releases' | 'wizard'
 } = {}) {
   return (
     <header className="install-header" aria-label="Install and navigation">
@@ -56,6 +56,12 @@ export function InstallHeader({
           aria-current={active === 'releases' ? 'page' : undefined}
         >
           Releases
+        </a>
+        <a
+          href="/wizard"
+          aria-current={active === 'wizard' ? 'page' : undefined}
+        >
+          Wizard
         </a>
         <a href={DOCS_URL} target="_blank" rel="noreferrer">
           Docs
