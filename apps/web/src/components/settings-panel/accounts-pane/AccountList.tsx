@@ -3,6 +3,8 @@ import { Plus, UserPlus } from 'lucide-react'
 import type { AccountOverview } from '../../../api/types'
 import { AccountMark } from '../../AccountMark'
 import { Button } from '../../ui/button'
+import { SortableList, SortableRow } from '../../ui/SortableList'
+import { useSidebarReorder } from '../../sidebar/useSidebarReorder'
 import { SyncProgressMeter } from '../SyncProgressMeter'
 import { SettingsEmptyState, SettingsList, StatusDot } from '../shared'
 
@@ -15,6 +17,7 @@ export function AccountList({
   onCreateAccount: () => void
   onSelectAccount: (accountId: string) => void
 }) {
+  const { reorderAccounts } = useSidebarReorder()
   if (accounts.length === 0) {
     return (
       <div className="mt-10">
@@ -41,21 +44,27 @@ export function AccountList({
         </Button>
       }
     >
-      {accounts.map((account) => (
-        <AccountListRow
-          key={account.id}
-          account={account}
-          label={account.name}
-          sublabel={
-            account.emailPatterns?.[0] ??
-            account.connection.username ??
-            account.fullName ??
-            undefined
-          }
-          isDefault={account.isDefault}
-          onClick={() => onSelectAccount(account.id)}
-        />
-      ))}
+      <SortableList
+        ids={accounts.map((account) => account.id)}
+        onReorder={reorderAccounts}
+      >
+        {accounts.map((account) => (
+          <SortableRow key={account.id} id={account.id}>
+            <AccountListRow
+              account={account}
+              label={account.name}
+              sublabel={
+                account.emailPatterns?.[0] ??
+                account.connection.username ??
+                account.fullName ??
+                undefined
+              }
+              isDefault={account.isDefault}
+              onClick={() => onSelectAccount(account.id)}
+            />
+          </SortableRow>
+        ))}
+      </SortableList>
     </SettingsList>
   )
 }

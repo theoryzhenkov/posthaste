@@ -6,7 +6,6 @@
  */
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ArrowDown, ArrowUp } from 'lucide-react'
 import type {
   AccountOverview,
   AppSettings,
@@ -16,7 +15,15 @@ import type {
   UpdateSmartMailboxInput,
 } from '../../api/types'
 import { runtimeMutations } from '../../runtime/mutations'
+import { ASSIGNABLE_MAILBOX_ROLES } from '../../domainVocabulary'
 import { Button } from '../ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select'
 import { SmartMailboxAutomationFields } from './AutomationActionsEditor'
 import { EMPTY_SMART_MAILBOX_FORM, formFromSmartMailbox } from './helpers'
 import { RuleGroupEditor } from './RuleGroupEditor'
@@ -29,14 +36,20 @@ import {
 } from './shared'
 import type { SmartMailboxEditorTarget } from './types'
 
+const NO_ROLE = '__none__'
+
+function roleLabel(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1)
+}
+
 function smartMailboxFieldsSignature(form: {
   name: string
-  position: number
+  role: string | null
   rule: unknown
 }): string {
   return JSON.stringify({
     name: form.name.trim(),
-    position: form.position,
+    role: form.role,
     rule: form.rule,
   })
 }
@@ -52,25 +65,19 @@ function smartMailboxFieldsSignature(form: {
 export function SmartMailboxEditor({
   editorTarget,
   editingSmartMailbox,
-  summary,
   accounts,
   settings,
   onSaved,
   onAutomationSettingsSaved,
   onDeleted,
-  onReorder,
-  reorderPendingKey,
 }: {
   editorTarget: SmartMailboxEditorTarget
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
-  summary: SmartMailboxSummary | null
   accounts: AccountOverview[]
   settings: AppSettings | null
   onSaved: (smartMailbox: SmartMailbox) => Promise<void>
   onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
   onDeleted: (smartMailboxId: string) => Promise<void>
-  onReorder: (mailbox: SmartMailboxSummary, position: number) => void
-  reorderPendingKey: string | null
 }) {
   const [form, setForm] = useState(() =>
     editingSmartMailbox
@@ -88,7 +95,7 @@ export function SmartMailboxEditor({
       if (editorTarget === 'new') {
         const payload: CreateSmartMailboxInput = {
           name: currentForm.name.trim(),
-          position: currentForm.position,
+          role: currentForm.role,
           rule: currentForm.rule,
         }
         return runtimeMutations.smartMailboxes.create(payload)
@@ -96,7 +103,8 @@ export function SmartMailboxEditor({
 
       const payload: UpdateSmartMailboxInput = {
         name: currentForm.name.trim(),
-        position: currentForm.position,
+        // Empty string clears the role; a value sets it.
+        role: currentForm.role ?? '',
         rule: currentForm.rule,
       }
       return runtimeMutations.smartMailboxes.update(editorTarget, payload)
@@ -132,34 +140,6 @@ export function SmartMailboxEditor({
             ? 'A saved message query that powers a virtual mailbox.'
             : 'Saved queries power unified mailboxes and custom filtered views.'
         }
-        actions={
-          isEditing && summary ? (
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                type="button"
-                onClick={() =>
-                  onReorder(summary, Math.max(0, summary.position - 1))
-                }
-                disabled={reorderPendingKey !== null}
-                aria-label="Move up"
-              >
-                <ArrowUp size={14} strokeWidth={1.75} />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                type="button"
-                onClick={() => onReorder(summary, summary.position + 1)}
-                disabled={reorderPendingKey !== null}
-                aria-label="Move down"
-              >
-                <ArrowDown size={14} strokeWidth={1.75} />
-              </Button>
-            </>
-          ) : null
-        }
       />
 
       <SettingsSection title="Definition">
@@ -171,6 +151,36 @@ export function SmartMailboxEditor({
             setForm((current) => ({ ...current, name: value }))
           }
         />
+        <div className="grid gap-3 sm:grid-cols-[1fr_280px] sm:items-center">
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium text-foreground">Role</p>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              Give this view a built-in role's icon, color, and contextual
+              actions. The rule still decides which messages appear.
+            </p>
+          </div>
+          <Select
+            value={form.role ?? NO_ROLE}
+            onValueChange={(value) =>
+              setForm((current) => ({
+                ...current,
+                role: value === NO_ROLE ? null : value,
+              }))
+            }
+          >
+            <SelectTrigger className="h-8 w-full rounded-md border-border bg-background text-[13px] shadow-none">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_ROLE}>No role</SelectItem>
+              {ASSIGNABLE_MAILBOX_ROLES.map((role) => (
+                <SelectItem key={role} value={role}>
+                  {roleLabel(role)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Rules">

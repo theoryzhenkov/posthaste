@@ -25,6 +25,7 @@ export interface AccountFormState {
 /** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailboxFormState {
   name: string
-  position: number
+  /** Optional view role; `null` for a plain saved query. */
+  role: string | null
   rule: SmartMailboxRule
 }

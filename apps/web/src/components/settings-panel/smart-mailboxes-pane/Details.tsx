@@ -16,36 +16,25 @@ import { SmartMailboxesEmptyState } from './EmptyState'
 
 export function SmartMailboxDetail({
   target,
-  smartMailboxes,
   editingSmartMailbox,
   editorKey,
   accounts,
   settings,
-  actionPendingKey,
   onCreateMailbox,
   onSaved,
   onAutomationSettingsSaved,
   onDeleted,
-  onReorderMailbox,
 }: {
   target: SmartMailboxEditorTarget
-  smartMailboxes: SmartMailboxSummary[]
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
   editorKey: string
   accounts: AccountOverview[]
   settings: AppSettings | null
-  actionPendingKey: string | null
   onCreateMailbox: () => void
   onSaved: (mailbox: SmartMailbox) => Promise<void>
   onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
   onDeleted: (mailboxId: string) => Promise<void>
-  onReorderMailbox: (mailbox: SmartMailboxSummary, position: number) => void
 }) {
-  const selectedMailbox =
-    target === 'new'
-      ? null
-      : (smartMailboxes.find((mailbox) => mailbox.id === target) ?? null)
-
   if (target !== 'new' && !editingSmartMailbox) {
     return <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
   }
@@ -55,14 +44,11 @@ export function SmartMailboxDetail({
       key={editorKey}
       editorTarget={target}
       editingSmartMailbox={editingSmartMailbox}
-      summary={selectedMailbox}
       accounts={accounts}
       settings={settings}
       onSaved={onSaved}
       onAutomationSettingsSaved={onAutomationSettingsSaved}
       onDeleted={onDeleted}
-      onReorder={onReorderMailbox}
-      reorderPendingKey={actionPendingKey}
     />
   )
 }

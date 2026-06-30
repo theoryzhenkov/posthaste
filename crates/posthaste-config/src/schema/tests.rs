@@ -197,6 +197,8 @@ fn app_toml_round_trips() {
         appearance: Default::default(),
         notifications: Default::default(),
         mailbox_colors: Vec::new(),
+        smart_mailbox_order: Vec::new(),
+        account_order: Vec::new(),
         link: LinkToml::default(),
     };
     let toml_struct = AppToml::from_app_settings(&settings, &existing);

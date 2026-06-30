@@ -587,7 +587,7 @@ export interface paths {
         head?: never;
         /**
          * Update smart mailbox
-         * @description Merges name, position, and rule fields. Omitted fields are preserved.
+         * @description Merges name and rule fields. Omitted fields are preserved.
          */
         patch: operations["patch_smart_mailbox"];
         trace?: never;
@@ -1332,6 +1332,14 @@ export interface components {
          *     @spec docs/L1-accounts#toml-schema
          */
         AppSettings: {
+            /**
+             * @description User's explicit sidebar arrangement of accounts (by id). Same override
+             *     semantics as [`smart_mailbox_order`](Self::smart_mailbox_order); accounts
+             *     absent from the list fall back to name order.
+             *
+             *     @spec docs/L1-accounts#sidebar-ordering
+             */
+            accountOrder?: components["schemas"]["AccountId"][];
             appearance?: null | components["schemas"]["Appearance"];
             automationDrafts?: components["schemas"]["AutomationRule"][];
             automationRules?: components["schemas"]["AutomationRule"][];
@@ -1346,6 +1354,15 @@ export interface components {
              */
             mailboxColors?: components["schemas"]["MailboxColor"][];
             notifications?: null | components["schemas"]["Notifications"];
+            /**
+             * @description User's explicit sidebar arrangement of smart mailboxes (by id). Acts as
+             *     an override: ids listed here come first, in this order; any smart mailbox
+             *     absent from the list falls back to the canonical default order (built-ins
+             *     first) then creation order. Stale ids are ignored. Pure presentation.
+             *
+             *     @spec docs/L1-accounts#sidebar-ordering
+             */
+            smartMailboxOrder?: components["schemas"]["SmartMailboxId"][];
         };
         /**
          * @description App-level appearance/theme preferences — the renderer's visual settings,
@@ -1608,8 +1625,7 @@ export interface components {
          */
         CreateSmartMailboxRequest: {
             name: string;
-            /** Format: int64 */
-            position?: number | null;
+            role?: string | null;
             rule: components["schemas"]["SmartMailboxRule"];
         };
         /** @description Request body for `POST /v1/sources/{source_id}/commands/delete-draft`. */
@@ -2052,6 +2068,7 @@ export interface components {
          *     @spec docs/L1-api#settings
          */
         PatchSettingsRequest: {
+            accountOrder?: components["schemas"]["AccountId"][] | null;
             appearance?: null | components["schemas"]["Appearance"];
             automationDrafts?: components["schemas"]["AutomationRule"][] | null;
             automationRules?: components["schemas"]["AutomationRule"][] | null;
@@ -2064,6 +2081,8 @@ export interface components {
             forceBackfill?: boolean;
             mailboxColors?: components["schemas"]["MailboxColor"][] | null;
             notifications?: null | components["schemas"]["Notifications"];
+            /** @description Explicit sidebar arrangement (ids); overwrites the stored list wholesale. */
+            smartMailboxOrder?: components["schemas"]["SmartMailboxId"][] | null;
         };
         /**
          * @description Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.
@@ -2072,8 +2091,11 @@ export interface components {
          */
         PatchSmartMailboxRequest: {
             name?: string | null;
-            /** Format: int64 */
-            position?: number | null;
+            /**
+             * @description Absent leaves the role unchanged; a known role sets it; an empty string
+             *     clears it.
+             */
+            role?: string | null;
             rule?: null | components["schemas"]["SmartMailboxRule"];
         };
         /**
@@ -2408,8 +2430,6 @@ export interface components {
             kind: components["schemas"]["SmartMailboxKind"];
             name: string;
             parentId?: null | components["schemas"]["SmartMailboxId"];
-            /** Format: int64 */
-            position: number;
             /**
              * @description The mailbox role whose semantics apply to this view (e.g. `"trash"`),
              *     driving contextual actions like Delete Permanently. Set on the built-in
@@ -2509,8 +2529,6 @@ export interface components {
             kind: components["schemas"]["SmartMailboxKind"];
             name: string;
             parentId?: null | components["schemas"]["SmartMailboxId"];
-            /** Format: int64 */
-            position: number;
             role?: string | null;
             /** Format: int64 */
             totalMessages: number;

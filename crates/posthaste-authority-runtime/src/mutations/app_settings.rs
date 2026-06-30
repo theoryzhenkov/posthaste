@@ -78,6 +78,26 @@ impl AccountMutationService {
                     Ok(())
                 }),
             },
+            AppSettingsFieldPatch {
+                name: "smartMailboxOrder",
+                present: request.smart_mailbox_order.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(order) = &request.smart_mailbox_order {
+                        settings.smart_mailbox_order.clone_from(order);
+                    }
+                    Ok(())
+                }),
+            },
+            AppSettingsFieldPatch {
+                name: "accountOrder",
+                present: request.account_order.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(order) = &request.account_order {
+                        settings.account_order.clone_from(order);
+                    }
+                    Ok(())
+                }),
+            },
         ];
 
         let mut changed = Vec::new();

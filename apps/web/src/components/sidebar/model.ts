@@ -17,14 +17,13 @@ export function fallbackAccountAppearance(
   }
 }
 
-/** Smart mailboxes in declared order (`position`, then name). */
+/** Smart mailboxes as the backend resolved them: the user's explicit
+ * `smartMailboxOrder` first, then the canonical/default fallback. The renderer
+ * preserves this order verbatim. */
 export function sortSmartMailboxes(
   smartMailboxes: SmartMailboxSummary[],
 ): SmartMailboxSummary[] {
-  return [...smartMailboxes].sort(
-    (left, right) =>
-      left.position - right.position || left.name.localeCompare(right.name),
-  )
+  return smartMailboxes
 }
 
 export function itemButtonClass(isSelected: boolean, depth = 0): string {

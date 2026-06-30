@@ -52,7 +52,7 @@ pub async fn create_smart_mailbox(
             RuntimeCaller::api(),
             CreateSmartMailboxMutation {
                 name: request.name,
-                position: request.position,
+                role: request.role,
                 rule: request.rule,
             },
         )
@@ -90,7 +90,7 @@ pub async fn get_smart_mailbox(
 
 /// PATCH /v1/smart-mailboxes/{id}
 ///
-/// Merges name, position, and rule fields. Omitted fields are preserved.
+/// Merges name and rule fields. Omitted fields are preserved.
 ///
 /// @spec docs/L1-api#smart-mailbox-crud
 #[utoipa::path(
@@ -98,7 +98,7 @@ pub async fn get_smart_mailbox(
     path = "/v1/smart-mailboxes/{smart_mailbox_id}",
     tag = "smart-mailboxes",
     summary = "Update smart mailbox",
-    description = "Merges name, position, and rule fields. Omitted fields are preserved.",
+    description = "Merges name and rule fields. Omitted fields are preserved.",
     params(("smart_mailbox_id" = String, Path, description = "Smart mailbox identifier")),
     request_body = PatchSmartMailboxRequest,
     responses(
@@ -119,7 +119,7 @@ pub async fn patch_smart_mailbox(
             SmartMailboxId::from(smart_mailbox_id),
             PatchSmartMailboxMutation {
                 name: request.name,
-                position: request.position,
+                role: request.role,
                 rule: request.rule,
             },
         )

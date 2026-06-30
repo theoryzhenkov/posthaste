@@ -14,6 +14,9 @@ pub struct PatchSettingsRequest {
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
     pub mailbox_colors: Option<Vec<MailboxColor>>,
+    /// Explicit sidebar arrangement (ids); overwrites the stored list wholesale.
+    pub smart_mailbox_order: Option<Vec<SmartMailboxId>>,
+    pub account_order: Option<Vec<AccountId>>,
     /// When true, re-run the current backfill rules against existing messages
     /// after persisting (on-demand "backfill now").
     #[serde(default)]
@@ -116,6 +119,8 @@ pub async fn patch_settings(
                 appearance: request.appearance,
                 notifications: request.notifications,
                 mailbox_colors: request.mailbox_colors,
+                smart_mailbox_order: request.smart_mailbox_order,
+                account_order: request.account_order,
                 force_backfill: request.force_backfill,
             },
         )

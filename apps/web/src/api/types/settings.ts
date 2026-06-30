@@ -10,6 +10,11 @@ export interface AppSettings {
   appearance?: Appearance | null
   notifications?: Notifications | null
   mailboxColors: MailboxColor[]
+  /** Explicit sidebar arrangement of smart mailboxes (ids); an override list,
+   *  ids absent fall back to the canonical/default order. */
+  smartMailboxOrder: string[]
+  /** Explicit sidebar arrangement of accounts (ids); same override semantics. */
+  accountOrder: string[]
 }
 
 /**

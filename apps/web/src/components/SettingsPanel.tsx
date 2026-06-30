@@ -13,7 +13,6 @@ import type {
   AppSettings,
   CachePolicy,
   Notifications,
-  SmartMailboxSummary,
 } from '../api/types'
 import { runtimeMutations } from '../runtime/mutations'
 import { runtimeViews } from '../runtime/views'
@@ -279,14 +278,6 @@ export function SettingsPanel({
           await runtimeMutations.smartMailboxes.delete(mailboxId)
           await invalidateSmartMailboxQueries()
           onNavigate(settingsCategorySurface('mailboxes'))
-        }}
-        onReorderSmartMailbox={(mailbox: SmartMailboxSummary, position) => {
-          void runSmartMailboxAction(`reorder:${mailbox.id}`, async () => {
-            await runtimeMutations.smartMailboxes.update(mailbox.id, {
-              position,
-            })
-            await invalidateSmartMailboxQueries(mailbox.id)
-          })
         }}
         onResetSmartMailboxes={() => {
           void runSmartMailboxAction('reset-defaults', async () => {

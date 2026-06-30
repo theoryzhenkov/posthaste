@@ -84,9 +84,23 @@ impl ConfigRepository for TomlConfigRepository {
         Ok(())
     }
 
-    /// Lists all account sources from the cached snapshot.
+    /// Lists account sources in the user's sidebar order: ids pinned in
+    /// `account_order` first, then the rest by name (the fallback).
     fn list_sources(&self) -> Result<Vec<AccountSettings>, ConfigError> {
-        Ok(self.snapshot.read().map_err(lock_error)?.sources.clone())
+        let snapshot = self.snapshot.read().map_err(lock_error)?;
+        let mut sources = snapshot.sources.clone();
+        sources.sort_by(|a, b| a.name.cmp(&b.name));
+        let order: Vec<&str> = snapshot
+            .app_settings
+            .account_order
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        Ok(posthaste_domain::apply_explicit_order(
+            sources,
+            &order,
+            |source| source.id.as_str(),
+        ))
     }
 
     /// Looks up a single account source by ID from the cached snapshot.
@@ -163,13 +177,31 @@ impl ConfigRepository for TomlConfigRepository {
     }
 
     /// Lists all smart mailboxes from the cached snapshot.
+    /// Lists smart mailboxes in the user's sidebar order: ids pinned in
+    /// `smart_mailbox_order` first, then the rest by the canonical fallback
+    /// (built-ins in default order, then user mailboxes by created_at/name).
     fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ConfigError> {
-        Ok(self
-            .snapshot
-            .read()
-            .map_err(lock_error)?
-            .smart_mailboxes
-            .clone())
+        let snapshot = self.snapshot.read().map_err(lock_error)?;
+        let mut mailboxes = snapshot.smart_mailboxes.clone();
+        mailboxes.sort_by(|a, b| {
+            posthaste_domain::smart_mailbox_fallback_rank(a.default_key.as_deref())
+                .cmp(&posthaste_domain::smart_mailbox_fallback_rank(
+                    b.default_key.as_deref(),
+                ))
+                .then_with(|| a.created_at.cmp(&b.created_at))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        let order: Vec<&str> = snapshot
+            .app_settings
+            .smart_mailbox_order
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        Ok(posthaste_domain::apply_explicit_order(
+            mailboxes,
+            &order,
+            |mailbox| mailbox.id.as_str(),
+        ))
     }
 
     /// Looks up a single smart mailbox by ID from the cached snapshot.
@@ -250,10 +282,16 @@ impl ConfigRepository for TomlConfigRepository {
             }
         }
 
-        // Sort by position
-        snapshot
-            .smart_mailboxes
-            .sort_by(|a, b| a.position.cmp(&b.position).then(a.name.cmp(&b.name)));
+        // Canonical fallback order (built-ins first); the user's explicit
+        // arrangement is applied at read time in `list_smart_mailboxes`.
+        snapshot.smart_mailboxes.sort_by(|a, b| {
+            posthaste_domain::smart_mailbox_fallback_rank(a.default_key.as_deref())
+                .cmp(&posthaste_domain::smart_mailbox_fallback_rank(
+                    b.default_key.as_deref(),
+                ))
+                .then_with(|| a.created_at.cmp(&b.created_at))
+                .then_with(|| a.name.cmp(&b.name))
+        });
 
         Ok(snapshot.smart_mailboxes.clone())
     }

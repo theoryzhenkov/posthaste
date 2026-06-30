@@ -148,7 +148,6 @@ pub struct SmartMailboxRule {
 pub struct SmartMailbox {
     pub id: SmartMailboxId,
     pub name: String,
-    pub position: i64,
     pub kind: SmartMailboxKind,
     /// Identifies built-in smart mailboxes (e.g. "inbox", "trash").
     pub default_key: Option<String>,
@@ -171,7 +170,6 @@ pub struct SmartMailbox {
 pub struct SmartMailboxSummary {
     pub id: SmartMailboxId,
     pub name: String,
-    pub position: i64,
     pub kind: SmartMailboxKind,
     pub default_key: Option<String>,
     pub role: Option<String>,
@@ -180,4 +178,95 @@ pub struct SmartMailboxSummary {
     pub total_messages: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Canonical order of the built-in smart mailboxes by `default_key`. This is the
+/// single source of truth for default arrangement (replacing per-item integer
+/// positions); it is the fallback order for any default not pinned by the user's
+/// explicit [`AppSettings::smart_mailbox_order`](crate::AppSettings).
+///
+/// @spec docs/L1-accounts#sidebar-ordering
+pub const DEFAULT_SMART_MAILBOX_ORDER: &[&str] =
+    &["inbox", "archive", "drafts", "sent", "junk", "trash", "all-mail"];
+
+/// Fallback sort rank for a smart mailbox when it is not pinned by the user's
+/// explicit order: built-ins first in [`DEFAULT_SMART_MAILBOX_ORDER`], then user
+/// mailboxes. The returned tuple sorts built-ins ahead of user mailboxes, and is
+/// combined with `(created_at, name)` by the caller to break ties stably.
+pub fn smart_mailbox_fallback_rank(default_key: Option<&str>) -> usize {
+    default_key
+        .and_then(|key| DEFAULT_SMART_MAILBOX_ORDER.iter().position(|k| *k == key))
+        .unwrap_or(DEFAULT_SMART_MAILBOX_ORDER.len())
+}
+
+/// Reorder `items` to honor a user's explicit `order` of ids. Items whose id is
+/// listed come first, in the listed sequence; the rest keep their incoming order
+/// (the caller pre-sorts them by the domain's fallback order). Ids in `order`
+/// with no matching item are ignored. This is the single ordering primitive
+/// behind sidebar/settings drag-to-reorder for both smart mailboxes and
+/// accounts — order is an explicit list, never a per-item integer.
+///
+/// @spec docs/L1-accounts#sidebar-ordering
+pub fn apply_explicit_order<T>(
+    items: Vec<T>,
+    order: &[&str],
+    id_of: impl Fn(&T) -> &str,
+) -> Vec<T> {
+    let rank: std::collections::HashMap<&str, usize> =
+        order.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+    // `partition` is stable, so `rest` preserves the caller's fallback order.
+    let (mut pinned, rest): (Vec<T>, Vec<T>) =
+        items.into_iter().partition(|item| rank.contains_key(id_of(item)));
+    pinned.sort_by_key(|item| rank[id_of(item)]);
+    pinned.into_iter().chain(rest).collect()
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+
+    fn ids(items: Vec<&str>) -> Vec<String> {
+        items.into_iter().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn pinned_ids_lead_in_listed_order_rest_keep_input_order() {
+        let items = ids(vec!["a", "b", "c", "d"]);
+        let order = ["c", "a"];
+        let result = apply_explicit_order(items, &order, |s| s.as_str());
+        // c, a pinned (in list order); b, d follow in their original order.
+        assert_eq!(result, ids(vec!["c", "a", "b", "d"]));
+    }
+
+    #[test]
+    fn stale_order_ids_are_ignored_and_unpinned_items_still_appear() {
+        let items = ids(vec!["a", "b"]);
+        let order = ["ghost", "b", "gone"];
+        let result = apply_explicit_order(items, &order, |s| s.as_str());
+        // Only "b" is real (pinned first); "a" was never in the list — it follows.
+        assert_eq!(result, ids(vec!["b", "a"]));
+    }
+
+    #[test]
+    fn empty_order_preserves_input_order() {
+        let items = ids(vec!["x", "y", "z"]);
+        let result = apply_explicit_order(items, &[], |s| s.as_str());
+        assert_eq!(result, ids(vec!["x", "y", "z"]));
+    }
+
+    #[test]
+    fn default_fallback_rank_orders_builtins_then_user() {
+        assert_eq!(smart_mailbox_fallback_rank(Some("inbox")), 0);
+        assert_eq!(smart_mailbox_fallback_rank(Some("trash")), 5);
+        assert_eq!(smart_mailbox_fallback_rank(Some("all-mail")), 6);
+        // Unknown/user mailboxes (no default_key) sort after every built-in.
+        assert_eq!(
+            smart_mailbox_fallback_rank(None),
+            DEFAULT_SMART_MAILBOX_ORDER.len()
+        );
+        assert_eq!(
+            smart_mailbox_fallback_rank(Some("nope")),
+            DEFAULT_SMART_MAILBOX_ORDER.len()
+        );
+    }
 }

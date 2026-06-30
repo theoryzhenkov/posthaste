@@ -71,7 +71,6 @@ export interface SmartMailboxRule {
 export interface SmartMailbox {
   id: string
   name: string
-  position: number
   kind: SmartMailboxKind
   defaultKey: string | null
   /** The mailbox role whose semantics apply to this view (e.g. 'trash'),
@@ -88,7 +87,6 @@ export interface SmartMailbox {
 export interface SmartMailboxSummary {
   id: string
   name: string
-  position: number
   kind: SmartMailboxKind
   defaultKey: string | null
   role: string | null
@@ -101,13 +99,16 @@ export interface SmartMailboxSummary {
 
 export interface CreateSmartMailboxInput {
   name: string
-  position?: number
+  /** Optional view role (e.g. 'archive') giving the smart mailbox a built-in
+   *  role's icon/accent and contextual actions. */
+  role?: string | null
   rule: SmartMailboxRule
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export interface UpdateSmartMailboxInput {
   name?: string
-  position?: number
+  /** Set a role, or pass an empty string to clear it. Omit to leave unchanged. */
+  role?: string | null
   rule?: SmartMailboxRule
 }

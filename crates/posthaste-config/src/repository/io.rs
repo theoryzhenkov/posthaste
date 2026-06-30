@@ -124,7 +124,8 @@ pub(super) fn load_sources(config_root: &Path) -> Result<Vec<AccountSettings>, C
 }
 
 /// Reads all `smart-mailboxes/*.toml` files, validates filename-ID match, and
-/// returns mailboxes sorted by position then name.
+/// returns mailboxes in a stable id order. The user-facing sidebar order is
+/// resolved at read time in `list_smart_mailboxes` (explicit order + fallback).
 ///
 /// @spec docs/L1-accounts#config-directory-layout
 pub(super) fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbox>, ConfigError> {
@@ -148,7 +149,7 @@ pub(super) fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbo
             mailboxes.push(mailbox);
         }
     }
-    mailboxes.sort_by(|a, b| a.position.cmp(&b.position).then(a.name.cmp(&b.name)));
+    mailboxes.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
     Ok(mailboxes)
 }
 

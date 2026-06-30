@@ -408,7 +408,6 @@ mod tests {
         SmartMailbox {
             id: SmartMailboxId::from(id),
             name: "Mailbox".to_string(),
-            position: 0,
             kind: SmartMailboxKind::User,
             default_key: None,
             role: None,
