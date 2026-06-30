@@ -79,6 +79,16 @@ impl AccountMutationService {
                 }),
             },
             AppSettingsFieldPatch {
+                name: "tags",
+                present: request.tags.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(tags) = &request.tags {
+                        settings.tags.clone_from(tags);
+                    }
+                    Ok(())
+                }),
+            },
+            AppSettingsFieldPatch {
                 name: "smartMailboxOrder",
                 present: request.smart_mailbox_order.is_some(),
                 apply: Box::new(|settings: &mut AppSettings| {

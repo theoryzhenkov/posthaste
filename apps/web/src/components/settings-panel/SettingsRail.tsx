@@ -7,6 +7,7 @@ import {
   Palette,
   Send,
   Settings as SettingsIcon,
+  Tags,
   Wrench,
 } from 'lucide-react'
 
@@ -68,6 +69,13 @@ const SETTINGS_CATEGORIES = [
     description: 'Smart mailboxes and rules that shape your views.',
     icon: FolderSearch,
     accent: brandAccents.violet,
+  },
+  {
+    id: 'tags',
+    label: 'Tags',
+    description: 'Colors and icons for your tags.',
+    icon: Tags,
+    accent: brandAccents.amber,
   },
   {
     id: 'troubleshooting',

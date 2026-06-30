@@ -27,7 +27,7 @@ use posthaste_domain::{
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
     SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncMode,
-    TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    TagAppearance, TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use posthaste_runtime_contract::{

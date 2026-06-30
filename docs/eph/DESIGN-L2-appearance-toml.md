@@ -1,8 +1,8 @@
 ---
 scope: L2
-summary: "Migrate UI appearance prefs (theme mode/palette/density/accent/glass) from the renderer's localStorage snapshot into TOML as the single source of truth, with a derived localStorage boot-cache to avoid FOUC. Implements P1.4b of the configuration-surface RFC."
-modified: 2026-06-29
-reviewed: 2026-06-29
+summary: "Migrate UI appearance prefs (theme mode/palette/density/accent/glass) from the renderer's localStorage snapshot into TOML as the single source of truth, with a derived localStorage boot-cache to avoid FOUC. Implements P1.4b of the configuration-surface RFC. Also home to the sibling per-entity presentation overlays in app.toml (tags)."
+modified: 2026-06-30
+reviewed: 2026-06-30
 state: implemented
 depends:
   - path: docs/eph/RFC-L2-configuration-surface
@@ -139,3 +139,53 @@ and reads `theme` as the palette id. The design-layer revamp (per-mode colors +
 5. `posthaste-api` — `PatchSettingsRequest.appearance` + regenerate `openapi.json` + `schema.gen.ts`.
 6. `apps/web` — `AppearancePane` reads/writes via `PATCH /v1/settings`; `ThemeProvider` boot-cache + reconcile (Option A); one-time import. (Flag sibling — both in `apps/web`.)
 7. Tests — config lossless round-trip (glass array preserved), domain serde, openapi contract.
+
+## Tags appearance overlay [::state implemented]
+
+A sibling presentation overlay that lives in the same `app.toml` and rides the
+same TOML-is-truth + `PATCH /v1/settings` + `write_managed_toml` machinery as
+`[appearance]` (and the older `[[mailbox_colors]]`). Documented here because the
+new code points its `@spec` at this design.
+
+**Model.** Tags are *keyword-derived* — a tag exists because some message carries
+a non-`$` keyword; there is no tag entity. Appearance is therefore an **overlay
+keyed by tag name**, **global** (a `work` tag looks the same across accounts),
+and pure presentation. Every field is optional; an absent field falls back to the
+renderer's name-derived default (a subtle tint of the name accent + the generic
+tag icon), so unconfigured tags still render as colored chips.
+
+```rust
+// posthaste-domain, camelCase via AppSettings.tags: Vec<TagAppearance>
+struct TagAppearance {
+    name: String,            // the tag (keyword) this override applies to
+    fg: Option<String>,      // foreground/text color (CSS color string)
+    bg: Option<String>,      // background color (CSS color string)
+    icon: Option<String>,    // lucide icon name, e.g. "briefcase"
+}
+```
+
+```toml
+# app.toml — an [[tags]] array table; absent optional fields are omitted.
+[[tags]]
+name = "work"
+fg = "#1f2937"
+bg = "#dbeafe"
+icon = "briefcase"
+```
+
+**Vertical** (mirrors the appearance one): `posthaste-domain` `TagAppearance` +
+`AppSettings.tags` (openapi `ToSchema`); `posthaste-runtime-contract`
+`PatchAppSettingsMutation.tags`; `posthaste-authority-runtime` an `AppSettingsFieldPatch`
+entry (audit name `"tags"`); `posthaste-config` `TagAppearanceToml` + round-trip +
+**`APP_TOML_MANAGED_KEYS` gains `"tags"`** (the allowlist silently drops unlisted
+keys on write); `posthaste-api` `PatchSettingsRequest.tags` + regenerated
+`openapi.json`/`schema.gen.ts`. Tests: `patch_settings_persists_tag_appearance_to_app_toml`.
+
+**Render** (`apps/web`). `components/tags/model.tsx` owns the curated color
+swatches + lucide icon set and `resolveTagStyle(name, override)`; `<TagChip>` +
+`useTagAppearanceLookup` apply it (reactive to the settings query) in the tag
+editor and the message-list tags column. The **Tags** settings pane edits the
+overlay via the optimistic `useTagAppearanceMutation` (same shape as
+`useMailboxColorMutation`). Color is a **curated fg/bg palette** and icon a
+**curated lucide grid** for v1; the stored model (free-form color strings +
+icon name) already allows arbitrary values later without a schema change.

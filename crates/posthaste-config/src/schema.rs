@@ -5,7 +5,8 @@ use posthaste_domain::{
     ProviderHint, SecretKind, SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
     SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
     SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
-    SmtpTransportSettings, ThemeColors, ThemeMode, TransportSecurity, UiDensity, RFC3339_EPOCH,
+    SmtpTransportSettings, TagAppearance, ThemeColors, ThemeMode, TransportSecurity, UiDensity,
+    RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 

@@ -53,6 +53,7 @@ const APP_TOML_MANAGED_KEYS: &[&str] = &[
     "appearance",
     "notifications",
     "mailbox_colors",
+    "tags",
     "link",
 ];
 

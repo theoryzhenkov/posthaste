@@ -15,6 +15,7 @@ import { GeneralPane } from './GeneralPane'
 import { NotificationsPane } from './NotificationsPane'
 import { OutboxPane } from './OutboxPane'
 import { StoragePane } from './StoragePane'
+import { TagsPane } from './TagsPane'
 import { TroubleshootingPane } from './TroubleshootingPane'
 import {
   SmartMailboxesPane,
@@ -192,6 +193,12 @@ export function SettingsPanelContent({
             onAutomationSettingsSaved={onAutomationSettingsSaved}
             onDeleted={onDeletedSmartMailbox}
           />
+        )}
+
+        {activeCategory === 'tags' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <TagsPane settings={settings} />
+          </div>
         )}
 
         {activeCategory === 'troubleshooting' && (

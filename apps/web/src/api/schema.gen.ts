@@ -1363,6 +1363,16 @@ export interface components {
              *     @spec docs/L1-accounts#sidebar-ordering
              */
             smartMailboxOrder?: components["schemas"]["SmartMailboxId"][];
+            /**
+             * @description Per-tag presentation overrides (color + icon), keyed by tag name. Tags
+             *     themselves are keyword-derived and have no entity; this overlay gives a
+             *     tag a foreground/background color and a lucide icon. Pure presentation,
+             *     global by name; TOML source of truth. Absent fields fall back to the
+             *     renderer's name-derived defaults.
+             *
+             *     @spec docs/eph/DESIGN-L2-appearance-toml
+             */
+            tags?: components["schemas"]["TagAppearance"][];
         };
         /**
          * @description App-level appearance/theme preferences — the renderer's visual settings,
@@ -2083,6 +2093,8 @@ export interface components {
             notifications?: null | components["schemas"]["Notifications"];
             /** @description Explicit sidebar arrangement (ids); overwrites the stored list wholesale. */
             smartMailboxOrder?: components["schemas"]["SmartMailboxId"][] | null;
+            /** @description Per-tag presentation overrides (color + icon); overwrites the stored list. */
+            tags?: components["schemas"]["TagAppearance"][] | null;
         };
         /**
          * @description Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.
@@ -2642,6 +2654,23 @@ export interface components {
          * @enum {string}
          */
         SyncTrigger: "startup" | "poll" | "push" | "manual";
+        /**
+         * @description A per-tag presentation override (presentation only), keyed by tag `name`.
+         *     Each field is optional and overrides the renderer's name-derived default for
+         *     that aspect; an absent field keeps the default.
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         */
+        TagAppearance: {
+            /** @description Background color (CSS color string, e.g. `#dbeafe`). */
+            bg?: string | null;
+            /** @description Foreground/text color (CSS color string, e.g. `#1f2937`). */
+            fg?: string | null;
+            /** @description Lucide icon name (e.g. `briefcase`). */
+            icon?: string | null;
+            /** @description The tag (keyword) this override applies to. */
+            name: string;
+        };
         TagListReadResult: {
             items: components["schemas"]["TagSummary"][];
         };

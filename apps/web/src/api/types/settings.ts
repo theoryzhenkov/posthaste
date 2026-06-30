@@ -10,6 +10,9 @@ export interface AppSettings {
   appearance?: Appearance | null
   notifications?: Notifications | null
   mailboxColors: MailboxColor[]
+  /** Per-tag presentation overrides (color + icon), keyed by name. Pure
+   *  presentation; absent fields fall back to name-derived defaults. */
+  tags: TagAppearance[]
   /** Explicit sidebar arrangement of smart mailboxes (ids); an override list,
    *  ids absent fall back to the canonical/default order. */
   smartMailboxOrder: string[]
@@ -35,6 +38,22 @@ export interface MailboxColor {
   mailboxId: string
   /** Color hue (0–360). */
   hue: number
+}
+
+/**
+ * A per-tag presentation override (presentation only), keyed by tag `name`.
+ * Each optional field overrides the renderer's name-derived default for that
+ * aspect; absent fields keep the default.
+ */
+export interface TagAppearance {
+  /** The tag (keyword) this override applies to. */
+  name: string
+  /** Foreground/text color (CSS color string). */
+  fg?: string | null
+  /** Background color (CSS color string). */
+  bg?: string | null
+  /** Lucide icon name (e.g. `briefcase`). */
+  icon?: string | null
 }
 
 /** @spec docs/L1-sync#local-cache-planning */

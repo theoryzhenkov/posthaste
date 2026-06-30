@@ -26,6 +26,9 @@ pub struct AppToml {
     pub notifications: Option<NotificationsToml>,
     #[serde(default, rename = "mailbox_colors")]
     pub mailbox_colors: Vec<MailboxColorToml>,
+    /// Per-tag presentation overrides (`[[tags]]`).
+    #[serde(default)]
+    pub tags: Vec<TagAppearanceToml>,
     /// User's explicit sidebar arrangement (ids). Override lists; absent ids
     /// fall back to the canonical/default order at read time.
     #[serde(default)]
@@ -60,6 +63,40 @@ impl MailboxColorToml {
             source_id: color.source_id.to_string(),
             mailbox_id: color.mailbox_id.as_str().to_string(),
             hue: color.hue,
+        }
+    }
+}
+
+/// TOML representation of a per-tag presentation override (`[[tags]]`).
+///
+/// @spec docs/eph/DESIGN-L2-appearance-toml
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct TagAppearanceToml {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+impl TagAppearanceToml {
+    fn to_tag_appearance(&self) -> TagAppearance {
+        TagAppearance {
+            name: self.name.clone(),
+            fg: self.fg.clone(),
+            bg: self.bg.clone(),
+            icon: self.icon.clone(),
+        }
+    }
+
+    fn from_tag_appearance(tag: &TagAppearance) -> Self {
+        Self {
+            name: tag.name.clone(),
+            fg: tag.fg.clone(),
+            bg: tag.bg.clone(),
+            icon: tag.icon.clone(),
         }
     }
 }
@@ -289,6 +326,11 @@ impl AppToml {
                 .iter()
                 .map(MailboxColorToml::to_mailbox_color)
                 .collect(),
+            tags: self
+                .tags
+                .iter()
+                .map(TagAppearanceToml::to_tag_appearance)
+                .collect(),
             smart_mailbox_order: self
                 .smart_mailbox_order
                 .iter()
@@ -339,12 +381,21 @@ impl AppToml {
                 .iter()
                 .map(MailboxColorToml::from_mailbox_color)
                 .collect(),
+            tags: settings
+                .tags
+                .iter()
+                .map(TagAppearanceToml::from_tag_appearance)
+                .collect(),
             smart_mailbox_order: settings
                 .smart_mailbox_order
                 .iter()
                 .map(|id| id.to_string())
                 .collect(),
-            account_order: settings.account_order.iter().map(|id| id.to_string()).collect(),
+            account_order: settings
+                .account_order
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
             link: existing.link.clone(),
         }
     }
