@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 
 import {
+  conversationViewQuery,
   normalizeValidAppliedSearchQuery,
   prepareServerSearchQuery,
 } from '../src/searchQuery'
@@ -33,5 +34,21 @@ describe('server search query preparation', () => {
     )
     expect(normalizeValidAppliedSearchQuery('   ')).toBe('')
     expect(normalizeValidAppliedSearchQuery('tag:')).toBeNull()
+  })
+
+  it('builds a valid conversation filter the renderer will not block', () => {
+    // The "View conversation" contextual action emits this query; if the
+    // renderer's vocabulary lacked the conversation: prefix it would be
+    // silently rejected (isBlocked) before reaching the backend.
+    const query = conversationViewQuery('conversation-1')
+    expect(query).toBe('conversation:conversation-1')
+    expect(prepareServerSearchQuery(query)).toEqual({
+      query: 'conversation:conversation-1',
+      validation: { state: 'valid' },
+      isBlocked: false,
+    })
+    expect(normalizeValidAppliedSearchQuery(query)).toBe(
+      'conversation:conversation-1',
+    )
   })
 })

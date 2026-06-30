@@ -39,6 +39,24 @@ export function viewKey(
   return `source:${selectedView.sourceId}:${selectedView.mailboxId}${query}${sortKey}`
 }
 
+/**
+ * Stable identity for a view's display mode (messages vs conversations),
+ * independent of sort so toggling the mode survives re-sorting the same view.
+ */
+export function viewModeKey(
+  selectedView: SidebarSelection | null,
+  searchQuery: string | undefined,
+): string {
+  const query = searchQuery ? `?q=${searchQuery}` : ''
+  if (!selectedView) {
+    return `none${query}`
+  }
+  if (selectedView.kind === 'smart-mailbox') {
+    return `smart:${selectedView.id}${query}`
+  }
+  return `source:${selectedView.sourceId}:${selectedView.mailboxId}${query}`
+}
+
 function serverSortField(sort: SortConfig): MessageSortField {
   switch (sort.columnId) {
     case 'date':

@@ -22,15 +22,19 @@ import type { MailSelection } from '../mailState'
 import { createOperationContext } from '../observability'
 import { queryKeys } from '../queryKeys'
 import type { PreparedServerSearchQuery } from '../searchQuery'
+import { flatMessageRows } from './message-list/conversationTree'
 import {
   MessageListRows,
   type MessageListErrorState,
 } from './message-list/MessageListRows'
 import { NoMailboxSelected } from './message-list/MessageListStates'
-import { selectionKey, viewKey } from './message-list/model'
+import { selectionKey, viewKey, viewModeKey } from './message-list/model'
+import { useConversationTree } from './message-list/useConversationTree'
 import { useRuntimeMailListView } from './message-list/useRuntimeMailListView'
 import { useMessageListNavigation } from './message-list/useMessageListNavigation'
 import { useMessageListScroll } from './message-list/useMessageListScroll'
+import { useViewMode } from './message-list/useViewMode'
+import { ViewModeToggle } from './message-list/ViewModeToggle'
 import type { SidebarSelection } from './Sidebar'
 import { buildThreadListLayout } from './thread-list/columns'
 import { ThreadListHeader } from './thread-list/ThreadListHeader'
@@ -46,6 +50,8 @@ interface MessageListProps {
   actions: EmailActions
   /** Mailbox role of the current view (null when ambiguous); drives row actions. */
   viewRole: string | null
+  /** Filter the view to a message's conversation (contextual action). */
+  onViewConversation: (message: MessageSummary) => void
   searchQuery?: string
   preparedSearchQuery: PreparedServerSearchQuery
 }
@@ -67,6 +73,7 @@ export function MessageList({
   onClearSearchQuery,
   actions,
   viewRole,
+  onViewConversation,
   searchQuery,
   preparedSearchQuery,
 }: MessageListProps) {
@@ -76,9 +83,15 @@ export function MessageList({
     () => buildThreadListLayout(columns, widths),
     [columns, widths],
   )
+  const viewModeKeyValue = useMemo(
+    () => viewModeKey(selectedView, searchQuery),
+    [selectedView, searchQuery],
+  )
+  const { mode, setMode } = useViewMode(viewModeKeyValue)
+  const treeMode = mode === 'conversations'
   const currentViewKey = useMemo(
-    () => viewKey(selectedView, searchQuery, sort),
-    [selectedView, searchQuery, sort],
+    () => `${viewKey(selectedView, searchQuery, sort)}#mode=${mode}`,
+    [selectedView, searchQuery, sort, mode],
   )
   const operationEntry = useMemo(() => {
     const source =
@@ -124,6 +137,18 @@ export function MessageList({
     () => applyAccountNamesToMessages(rawMessages, accountDirectory),
     [accountDirectory, rawMessages],
   )
+  // Conversation view groups the same messages into a two-level tree; the flat
+  // list maps straight through. Both feed one renderer + the same navigation.
+  const conversationTree = useConversationTree({
+    anchors: messages,
+    enabled: treeMode && !preparedSearchQuery.isBlocked,
+    accountDirectory,
+  })
+  const rows = useMemo(
+    () => (treeMode ? conversationTree.rows : flatMessageRows(messages)),
+    [treeMode, conversationTree.rows, messages],
+  )
+  const navMessages = treeMode ? conversationTree.visibleMessages : messages
   const selectedKey = selectionKey(selection)
   // A fatal view-open failure surfaces here as an inline error + retry (instead
   // of an infinite skeleton); search-syntax errors still flow through
@@ -139,7 +164,7 @@ export function MessageList({
 
   useMessageListNavigation({
     currentViewKey,
-    messages,
+    messages: navMessages,
     onClearSelection,
     onSelectMessage,
     selectedKey,
@@ -153,7 +178,7 @@ export function MessageList({
       hasNextPage: runtimeMailListView.hasMore,
       isFetchingNextPage: runtimeMailListView.isLoadingMore,
       isSearchBlocked: preparedSearchQuery.isBlocked,
-      messageCount: messages.length,
+      messageCount: rows.length,
     })
 
   const handleBackgroundMouseDown = useCallback(
@@ -184,6 +209,9 @@ export function MessageList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--list-zebra)]">
+      <div className="flex shrink-0 items-center justify-end border-b border-border-soft bg-[var(--list-header)] px-2 py-1">
+        <ViewModeToggle mode={mode} onChange={setMode} />
+      </div>
       <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-[var(--list-zebra)]">
         <div
           className="flex h-full min-h-0 flex-col"
@@ -222,11 +250,14 @@ export function MessageList({
               isFetchingNextPage={runtimeMailListView.isLoadingMore}
               isLoading={runtimeMailListView.isLoading}
               layout={tableLayout}
-              messages={messages}
               onClearSearchQuery={onClearSearchQuery}
               onDismissError={() => setDismissedErrorKey(errorKey)}
               onRetry={() => runtimeMailListView.retry()}
               onSelectRowMessage={handleSelectRowMessage}
+              onViewConversation={onViewConversation}
+              onToggleCollapse={conversationTree.toggleCollapse}
+              rows={rows}
+              treeMode={treeMode}
               scrollTop={scrollTop}
               selectedKey={selectedKey}
               viewRole={viewRole}
