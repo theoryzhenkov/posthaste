@@ -52,7 +52,10 @@ function actionsForRole(viewRole: string | null): ContextualAction[] {
   return buildMessageContextActions(
     makeActions(calls),
     { message, target, viewRole, surface: 'context-menu' },
-    { onOpen: () => calls.push('open') },
+    {
+      onOpen: () => calls.push('open'),
+      onViewConversation: () => calls.push('viewConversation'),
+    },
   )
 }
 
@@ -72,6 +75,7 @@ describe('contextual message actions', () => {
       null,
       [
         'builtin.open',
+        'builtin.view-conversation',
         'builtin.toggle-read',
         'builtin.toggle-flag',
         'builtin.archive',
@@ -82,6 +86,7 @@ describe('contextual message actions', () => {
       'inbox',
       [
         'builtin.open',
+        'builtin.view-conversation',
         'builtin.toggle-read',
         'builtin.toggle-flag',
         'builtin.archive',
@@ -92,6 +97,7 @@ describe('contextual message actions', () => {
       'archive',
       [
         'builtin.open',
+        'builtin.view-conversation',
         'builtin.toggle-read',
         'builtin.toggle-flag',
         'builtin.move-to-inbox',
@@ -102,6 +108,7 @@ describe('contextual message actions', () => {
       'junk',
       [
         'builtin.open',
+        'builtin.view-conversation',
         'builtin.toggle-read',
         'builtin.toggle-flag',
         'builtin.archive',
@@ -113,6 +120,7 @@ describe('contextual message actions', () => {
       'trash',
       [
         'builtin.open',
+        'builtin.view-conversation',
         'builtin.toggle-read',
         'builtin.toggle-flag',
         'builtin.move-to-inbox',
@@ -144,10 +152,14 @@ describe('contextual message actions', () => {
     const actions = buildMessageContextActions(
       makeActions(calls),
       { message, target, viewRole: 'trash', surface: 'context-menu' },
-      { onOpen: () => calls.push('open') },
+      {
+        onOpen: () => calls.push('open'),
+        onViewConversation: () => calls.push('viewConversation'),
+      },
     )
 
     runAction(actions, 'builtin.open')
+    runAction(actions, 'builtin.view-conversation')
     runAction(actions, 'builtin.toggle-read')
     runAction(actions, 'builtin.toggle-flag')
     runAction(actions, 'builtin.move-to-inbox')
@@ -155,6 +167,7 @@ describe('contextual message actions', () => {
 
     expect(calls).toEqual([
       'open',
+      'viewConversation',
       'toggleRead',
       'toggleFlag',
       'moveToInbox',

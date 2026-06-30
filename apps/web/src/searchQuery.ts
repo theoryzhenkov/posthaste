@@ -10,6 +10,16 @@ export function normalizeAppliedSearchQuery(value: string): string {
   return value.trim().replace(/\s+/g, ' ')
 }
 
+/**
+ * Build the query that filters a view to a single message's conversation. The
+ * backend search supports the `conversation:` prefix (matching
+ * `SmartMailboxField::ConversationId`); conversation ids are whitespace-free
+ * tokens, so no quoting is needed.
+ */
+export function conversationViewQuery(conversationId: string): string {
+  return `conversation:${conversationId}`
+}
+
 export function normalizeValidAppliedSearchQuery(value: string): string | null {
   const prepared = prepareServerSearchQuery(value)
   if (prepared.isBlocked) {
