@@ -14,14 +14,18 @@
 mod certs;
 mod fetch;
 mod install;
+mod interactive;
 mod render;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub use fetch::{Channel, GithubSource, ReleaseSource, Version};
-pub use install::{apply_join, detect_platform, install, InstallOptions, Installed};
-pub use render::{client_profile_json, render_app_toml, render_systemd_unit};
+pub use install::{apply_join, detect_platform, install, InstallOptions, Installed, ServiceScope};
+pub use interactive::{guided_install, GuidedInstall};
+pub use render::{
+    client_profile_json, launchd_label, render_app_toml, render_launchd_plist, render_systemd_unit,
+};
 
 /// The role a node plays — selects which binary it runs and which config the
 /// wizard writes. Mirrors the build matrix in the self-host plan.
@@ -137,7 +141,9 @@ pub fn provision(plan: &Plan) -> Result<Provisioned, String> {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("create unit dir {}: {e}", parent.display()))?;
             }
-            let unit = render_systemd_unit(plan);
+            // The manual `provision --systemd` path always writes a user-style
+            // unit; `install` owns the system/launchd variants.
+            let unit = render_systemd_unit(plan, None);
             write(path, &unit)?;
             Some(path.clone())
         }

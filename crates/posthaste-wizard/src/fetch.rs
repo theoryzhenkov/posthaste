@@ -282,6 +282,7 @@ mod tests {
     /// Build a gzip tarball with `bin/<binary>` holding `contents`, matching the
     /// layout `tools/package/bin.sh` produces.
     fn make_tarball(name: &str, binary: &str, contents: &[u8]) -> Vec<u8> {
+        use std::io::Write;
         let mut tar = tar::Builder::new(Vec::new());
         let mut header = tar::Header::new_gnu();
         header.set_size(contents.len() as u64);
@@ -291,7 +292,6 @@ mod tests {
             .unwrap();
         let tar_bytes = tar.into_inner().unwrap();
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        use std::io::Write;
         gz.write_all(&tar_bytes).unwrap();
         gz.finish().unwrap()
     }
@@ -354,7 +354,7 @@ mod tests {
         );
         let sums = format!("{}  {}\n", sha256_hex(&good), tarball_name);
         let mut map = HashMap::new();
-        let mut tampered = good.clone();
+        let mut tampered = good;
         *tampered.last_mut().unwrap() ^= 0xff;
         map.insert(("nightly".into(), tarball_name), tampered);
         map.insert(("nightly".into(), "SHA256SUMS".into()), sums.into_bytes());
