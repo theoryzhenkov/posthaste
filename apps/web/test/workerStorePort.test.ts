@@ -13,7 +13,9 @@ import {
 class LoopbackWorker implements ReplicaWorkerLike {
   private listener: ((event: { data: StoreWorkerOutbound }) => void) | null =
     null
+  private errorListener: ((event: { message?: string }) => void) | null = null
   readonly received: StoreWorkerRequest[] = []
+  terminated = false
 
   constructor(
     private readonly respond: (
@@ -22,10 +24,16 @@ class LoopbackWorker implements ReplicaWorkerLike {
   ) {}
 
   addEventListener(
-    _type: 'message',
-    listener: (event: { data: StoreWorkerOutbound }) => void,
+    type: 'message' | 'error',
+    listener:
+      | ((event: { data: StoreWorkerOutbound }) => void)
+      | ((event: { message?: string }) => void),
   ): void {
-    this.listener = listener
+    if (type === 'error') {
+      this.errorListener = listener as (event: { message?: string }) => void
+    } else {
+      this.listener = listener as (event: { data: StoreWorkerOutbound }) => void
+    }
   }
 
   postMessage(request: StoreWorkerRequest): void {
@@ -35,9 +43,18 @@ class LoopbackWorker implements ReplicaWorkerLike {
     )
   }
 
+  terminate(): void {
+    this.terminated = true
+  }
+
   /** Simulate the worker's readiness handshake. */
   emitReady(message: StoreWorkerOutbound): void {
     this.listener?.({ data: message })
+  }
+
+  /** Simulate the worker thread dying (the `error` event). */
+  emitError(message: string): void {
+    this.errorListener?.({ message })
   }
 }
 
@@ -91,6 +108,33 @@ describe('WorkerStorePort', () => {
     }))
     const port = new WorkerStorePort(worker)
     await expect(port.ingestBatchJson('[]')).rejects.toThrow('boom')
+  })
+
+  it('rejects in-flight + future calls when the worker dies after init (no hang)', async () => {
+    // A worker that never answers, so the calls stay in-flight until it dies.
+    const worker = new LoopbackWorker(
+      () => new Promise<StoreWorkerResponse>(() => {}),
+    )
+    const port = new WorkerStorePort(worker)
+    const inflight = port.drainDirtyJson()
+    worker.emitError('worker crashed')
+    // The in-flight call rejects (instead of hanging the controller's queue)...
+    await expect(inflight).rejects.toThrow(/replica worker error/)
+    // ...and any subsequent call fails fast too.
+    await expect(port.projectViewJson('v1')).rejects.toThrow(
+      /no longer available/,
+    )
+  })
+
+  it('terminate() tears down the worker and fails outstanding calls', async () => {
+    const worker = new LoopbackWorker(
+      () => new Promise<StoreWorkerResponse>(() => {}),
+    )
+    const port = new WorkerStorePort(worker)
+    const inflight = port.drainDirtyJson()
+    port.terminate()
+    expect(worker.terminated).toBe(true)
+    await expect(inflight).rejects.toThrow(/terminated/)
   })
 
   it('matches responses to calls by id even when they return out of order', async () => {
