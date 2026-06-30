@@ -39,6 +39,7 @@ export function SmartMailboxItem({
   unreadMessages,
   accent,
   isSelected,
+  isFocused = false,
   onOpenSettings,
   onSelect,
 }: {
@@ -49,12 +50,13 @@ export function SmartMailboxItem({
   unreadMessages?: number
   accent?: string
   isSelected: boolean
+  isFocused?: boolean
   onOpenSettings: (smartMailboxId: string) => void
   onSelect: () => void
 }) {
   const button = (
     <button
-      className={itemButtonClass(isSelected)}
+      className={itemButtonClass(isSelected, 0, isFocused)}
       onClick={onSelect}
       onContextMenu={onSelect}
       type="button"
@@ -96,6 +98,7 @@ export function MailboxItem({
   mailbox,
   colorHue,
   isSelected,
+  isFocused = false,
   depth = 0,
   onOpenAccountSettings,
   onSelect,
@@ -107,6 +110,7 @@ export function MailboxItem({
   /** Per-mailbox color override (hue); falls back to the role accent. */
   colorHue?: number
   isSelected: boolean
+  isFocused?: boolean
   depth?: number
   onOpenAccountSettings: (sourceId: string) => void
   onSelect: () => void
@@ -116,7 +120,7 @@ export function MailboxItem({
     colorHue != null ? accentColor(colorHue) : mailboxRoleAccent(mailbox.role)
   const button = (
     <button
-      className={itemButtonClass(isSelected, depth)}
+      className={itemButtonClass(isSelected, depth, isFocused)}
       onClick={onSelect}
       onContextMenu={onSelect}
       type="button"

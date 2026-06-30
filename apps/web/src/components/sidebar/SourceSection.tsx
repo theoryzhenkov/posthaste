@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { ChevronDown, ChevronRight, RefreshCw, Settings } from 'lucide-react'
 
 import type { AccountAppearance, Mailbox } from '@/api/types'
@@ -19,6 +19,9 @@ export function SourceSection({
   source,
   appearance,
   selectedView,
+  focusedKey,
+  collapsed,
+  onToggleCollapsed,
   onOpenAccountSettings,
   onSelectSourceMailbox,
   onSyncSource,
@@ -30,6 +33,10 @@ export function SourceSection({
   }
   appearance: AccountAppearance
   selectedView: SidebarSelection | null
+  /** Nav key of the roving cursor, or null when the sidebar is unfocused. */
+  focusedKey: string | null
+  collapsed: boolean
+  onToggleCollapsed: () => void
   onOpenAccountSettings: (sourceId: string) => void
   onSelectSourceMailbox: (
     sourceId: string,
@@ -38,7 +45,6 @@ export function SourceSection({
   ) => void
   onSyncSource: (sourceId: string) => void
 }) {
-  const [collapsed, setCollapsed] = useState(false)
   const mailboxColorHue = useMailboxColorLookup()
   const unreadTotal = useMemo(
     () =>
@@ -50,7 +56,7 @@ export function SourceSection({
     <button
       type="button"
       className="ph-focus-ring mx-1.5 mt-1 flex h-[30px] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] px-2 text-left transition-colors hover:bg-[var(--sidebar-accent)]"
-      onClick={() => setCollapsed((prev) => !prev)}
+      onClick={onToggleCollapsed}
     >
       {collapsed ? (
         <ChevronRight
@@ -85,7 +91,7 @@ export function SourceSection({
       <ContextMenu>
         <ContextMenuTrigger asChild>{headerButton}</ContextMenuTrigger>
         <ContextMenuContent className="min-w-48">
-          <ContextMenuItem onSelect={() => setCollapsed((prev) => !prev)}>
+          <ContextMenuItem onSelect={onToggleCollapsed}>
             {collapsed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             {collapsed ? 'Expand' : 'Collapse'}
           </ContextMenuItem>
@@ -116,6 +122,7 @@ export function SourceSection({
                 selectedView.sourceId === source.id &&
                 selectedView.mailboxId === mailbox.id
               }
+              isFocused={focusedKey === `src:${source.id}:${mailbox.id}`}
               onSelect={() =>
                 onSelectSourceMailbox(
                   source.id,
