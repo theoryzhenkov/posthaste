@@ -1,11 +1,53 @@
 import type { MouseEvent } from 'react'
-import { Inbox, Loader2, MousePointerClick } from 'lucide-react'
+import { Inbox, Loader2, MailPlus, MousePointerClick } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { openFocusedSurface } from '@/hooks/useSurfaceRouting'
+import { settingsCategorySurface } from '@/surfaces'
 
 export function NoMailboxSelected({
   onMouseDown,
+  hasNoAccounts = false,
 }: {
   onMouseDown: (event: MouseEvent<HTMLDivElement>) => void
+  hasNoAccounts?: boolean
 }) {
+  // With no enabled accounts the runtime serves no view, so the list lands here
+  // on first launch. That's onboarding, not a missing selection — offer a direct
+  // path into account setup instead of the dead-end "pick a mailbox".
+  if (hasNoAccounts) {
+    return (
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3 bg-panel p-6"
+        data-message-list-empty="true"
+        onMouseDown={onMouseDown}
+      >
+        <MailPlus
+          size={40}
+          strokeWidth={1.5}
+          className="text-muted-foreground/40"
+        />
+        <div className="text-center">
+          <p className="text-sm font-medium text-muted-foreground">
+            No accounts yet
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground/60">
+            Add an email account to start receiving mail
+          </p>
+        </div>
+        <Button
+          size="sm"
+          className="mt-1"
+          onClick={() =>
+            openFocusedSurface(settingsCategorySurface('accounts'))
+          }
+        >
+          <MailPlus />
+          Add an account
+        </Button>
+      </div>
+    )
+  }
   return (
     <div
       className="flex h-full flex-col items-center justify-center gap-3 bg-panel p-6"
