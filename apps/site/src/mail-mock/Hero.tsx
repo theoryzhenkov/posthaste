@@ -17,11 +17,17 @@ export function Hero({ messages }: { messages: SiteMessage[] }) {
   const [selectedMailbox, setSelectedMailbox] = useState<MailboxView>(
     persistedState.selectedMailbox === 'archive' ? 'archive' : 'inbox',
   )
+  const initialSelectedId =
+    persistedState.selectedMessageId ?? messages[0]?.id ?? null
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(
-    persistedState.selectedMessageId ?? messages[0]?.id ?? null,
+    initialSelectedId,
   )
   const [readMessageIds, setReadMessageIds] = useState<ReadonlySet<string>>(
-    () => persistedSet(persistedState.readMessageIds),
+    () => {
+      // The message that opens on load is focused, so it starts read.
+      const seed = persistedSet(persistedState.readMessageIds)
+      return initialSelectedId ? new Set(seed).add(initialSelectedId) : seed
+    },
   )
   const [archivedMessageIds, setArchivedMessageIds] = useState<
     ReadonlySet<string>
