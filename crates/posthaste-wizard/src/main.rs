@@ -1,14 +1,23 @@
-//! `posthaste-wizard` CLI: provision a node for a role, then print where its
-//! config + TLS material landed and the client connection profile to hand out.
+//! `posthaste-wizard` CLI: provision or install a node for a role.
 //!
-//! Example — provision a TLS runtime node over a remote backend:
+//! `provision` writes config + TLS for a binary you already have. `install` is
+//! the one-button path — it fetches the role binary from the release, verifies
+//! it, installs it, provisions the node, and registers a `systemd --user`
+//! service that keeps it running.
+//!
+//! Example — install a TLS backend node, then a runtime node that joins it:
 //!
 //! ```text
-//! posthaste-wizard provision \
-//!   --role runtime --config-root ~/.config/mail --state-root ~/.local/share/mail \
-//!   --bind 0.0.0.0:3001 --tls --host mail.lan --host 192.168.1.10 \
-//!   --link-backend-url https://backend.lan:3002/v1 --link-token <secret> \
-//!   --exec /usr/local/bin/posthaste_runtime_daemon --systemd ./posthaste-runtime.service
+//! # On the backend machine:
+//! posthaste-wizard install --role backend --tls --host backend.lan \
+//!   --bind 0.0.0.0:3002 --link-token <secret> \
+//!   --config-root ~/.config/mail --state-root ~/.local/share/mail
+//! #   ... prints a one-line join string ...
+//!
+//! # On the runtime machine — one command, no manual URL/token/CA copying:
+//! posthaste-wizard install --role runtime --bind 0.0.0.0:3001 \
+//!   --config-root ~/.config/mail --state-root ~/.local/share/mail \
+//!   --join <join-string-from-backend>
 //! ```
 //!
 //! @spec docs/eph/PLAN-L2-install-wizard
@@ -16,12 +25,15 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use posthaste_wizard::{provision, Plan, Role};
+use posthaste_wizard::{
+    apply_join, install, provision, Channel, GithubSource, InstallOptions, Plan, Role, Version,
+};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("provision") => run_provision(&args[1..]),
+        Some("install") => run_install(&args[1..]),
         Some("--help") | Some("-h") | None => {
             print!("{}", usage());
             ExitCode::SUCCESS
@@ -34,12 +46,13 @@ fn main() -> ExitCode {
 }
 
 fn run_provision(args: &[String]) -> ExitCode {
-    let plan = match parse_plan(args) {
+    let raw = match RawArgs::parse(args) {
+        Ok(raw) => raw,
+        Err(e) => return arg_error(&e),
+    };
+    let plan = match raw.into_plan() {
         Ok(plan) => plan,
-        Err(e) => {
-            eprintln!("error: {e}\n\n{}", usage());
-            return ExitCode::from(2);
-        }
+        Err(e) => return arg_error(&e),
     };
     match provision(&plan) {
         Ok(out) => {
@@ -69,77 +82,223 @@ fn run_provision(args: &[String]) -> ExitCode {
     }
 }
 
-fn parse_plan(args: &[String]) -> Result<Plan, String> {
-    let mut role: Option<Role> = None;
-    let mut config_root: Option<PathBuf> = None;
-    let mut state_root: Option<PathBuf> = None;
-    let mut bind = String::from("127.0.0.1:3001");
-    let mut tls = false;
-    let mut hosts: Vec<String> = Vec::new();
-    let mut link_serve_token: Option<String> = None;
-    let mut link_backend_url: Option<String> = None;
-    let mut link_token: Option<String> = None;
-    let mut exec_path: Option<PathBuf> = None;
-    let mut systemd_unit_path: Option<PathBuf> = None;
+fn run_install(args: &[String]) -> ExitCode {
+    let raw = match RawArgs::parse(args) {
+        Ok(raw) => raw,
+        Err(e) => return arg_error(&e),
+    };
 
-    let mut i = 0;
-    while i < args.len() {
-        let flag = args[i].as_str();
-        // A small helper to read the next arg as this flag's value.
-        let mut value = || -> Result<String, String> {
-            i += 1;
-            args.get(i)
-                .cloned()
-                .ok_or_else(|| format!("{flag} requires a value"))
-        };
-        match flag {
-            "--role" => role = Some(Role::parse(&value()?)?),
-            "--config-root" => config_root = Some(PathBuf::from(value()?)),
-            "--state-root" => state_root = Some(PathBuf::from(value()?)),
-            "--bind" => bind = value()?,
-            "--tls" => tls = true,
-            "--host" => hosts.push(value()?),
-            "--link-token" => {
-                // The link secret serves double duty: the backend role *serves*
-                // it, the runtime role *presents* it. Store it in both slots and
-                // let the role select which one is rendered.
-                let v = value()?;
-                link_serve_token = Some(v.clone());
-                link_token = Some(v);
-            }
-            "--link-backend-url" => link_backend_url = Some(value()?),
-            "--exec" => exec_path = Some(PathBuf::from(value()?)),
-            "--systemd" => systemd_unit_path = Some(PathBuf::from(value()?)),
-            other => return Err(format!("unknown flag '{other}'")),
+    // Capture install-only options before consuming `raw` into the plan.
+    let version = match &raw.version {
+        Some(tag) => Version::Pinned(tag.clone()),
+        None => Version::Channel(Channel::Nightly),
+    };
+    let platform = raw.platform.clone();
+    let join = raw.join.clone();
+    let bin_dir = match raw.bin_dir.clone() {
+        Some(dir) => dir,
+        None => match default_bin_dir() {
+            Ok(dir) => dir,
+            Err(e) => return arg_error(&e),
+        },
+    };
+
+    let mut plan = match raw.into_plan_for_install() {
+        Ok(plan) => plan,
+        Err(e) => return arg_error(&e),
+    };
+
+    // A runtime node can wire itself from a join string — set backend URL +
+    // token (+ CA) before provisioning.
+    if let Some(join) = &join {
+        match apply_join(&mut plan, join) {
+            Ok(Some(ca)) => println!("trusting backend CA: {}", ca.display()),
+            Ok(None) => {}
+            Err(e) => return arg_error(&e),
         }
-        i += 1;
     }
 
-    let role = role.ok_or("--role is required")?;
-    let config_root = config_root.ok_or("--config-root is required")?;
-    let state_root = state_root.ok_or("--state-root is required")?;
+    let opts = InstallOptions {
+        version,
+        platform,
+        bin_dir,
+        register_service: true,
+        enable_linger: true,
+    };
+    let source = GithubSource::posthaste();
 
-    Ok(Plan {
-        role,
-        config_root,
-        state_root,
-        bind,
-        tls,
-        hosts,
-        link_serve_token,
-        link_backend_url,
-        link_token,
-        exec_path,
-        systemd_unit_path,
-    })
+    match install(plan, &opts, &source) {
+        Ok(out) => {
+            println!("installed {}", out.binary_path.display());
+            println!("  config:  {}", out.provisioned.app_toml_path.display());
+            if let Some(unit) = &out.provisioned.systemd_unit_path {
+                println!("  service: {} (systemctl --user)", unit.display());
+            }
+            for w in &out.warnings {
+                eprintln!("warning: {w}");
+            }
+            if let Some(join) = &out.join_string {
+                println!(
+                    "\nRun this on the runtime machine to join it to this node:\n\n  \
+                     posthaste-wizard install --role runtime \\\n    \
+                     --config-root <dir> --state-root <dir> --join {join}\n"
+                );
+            } else {
+                println!("\nclient connection profile:");
+                println!("{}", out.provisioned.client_profile_json);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("install failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn arg_error(msg: &str) -> ExitCode {
+    eprintln!("error: {msg}\n\n{}", usage());
+    ExitCode::from(2)
+}
+
+/// `~/.local/bin`, the XDG user binary dir.
+fn default_bin_dir() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".local").join("bin"))
+        .ok_or_else(|| "HOME is not set; pass --bin-dir explicitly".into())
+}
+
+/// All flags either command accepts, parsed once. Each command then projects
+/// this into the fields it needs (and rejects the ones it doesn't).
+struct RawArgs {
+    role: Option<Role>,
+    config_root: Option<PathBuf>,
+    state_root: Option<PathBuf>,
+    bind: String,
+    tls: bool,
+    hosts: Vec<String>,
+    link_serve_token: Option<String>,
+    link_backend_url: Option<String>,
+    link_token: Option<String>,
+    exec_path: Option<PathBuf>,
+    systemd_unit_path: Option<PathBuf>,
+    // install-only
+    version: Option<String>,
+    platform: Option<String>,
+    join: Option<String>,
+    bin_dir: Option<PathBuf>,
+}
+
+impl RawArgs {
+    fn parse(args: &[String]) -> Result<RawArgs, String> {
+        let mut raw = RawArgs {
+            role: None,
+            config_root: None,
+            state_root: None,
+            bind: String::from("127.0.0.1:3001"),
+            tls: false,
+            hosts: Vec::new(),
+            link_serve_token: None,
+            link_backend_url: None,
+            link_token: None,
+            exec_path: None,
+            systemd_unit_path: None,
+            version: None,
+            platform: None,
+            join: None,
+            bin_dir: None,
+        };
+
+        let mut i = 0;
+        while i < args.len() {
+            let flag = args[i].as_str();
+            let mut value = || -> Result<String, String> {
+                i += 1;
+                args.get(i)
+                    .cloned()
+                    .ok_or_else(|| format!("{flag} requires a value"))
+            };
+            match flag {
+                "--role" => raw.role = Some(Role::parse(&value()?)?),
+                "--config-root" => raw.config_root = Some(PathBuf::from(value()?)),
+                "--state-root" => raw.state_root = Some(PathBuf::from(value()?)),
+                "--bind" => raw.bind = value()?,
+                "--tls" => raw.tls = true,
+                "--host" => raw.hosts.push(value()?),
+                "--link-token" => {
+                    // The link secret serves double duty: the backend role
+                    // *serves* it, the runtime role *presents* it.
+                    let v = value()?;
+                    raw.link_serve_token = Some(v.clone());
+                    raw.link_token = Some(v);
+                }
+                "--link-backend-url" => raw.link_backend_url = Some(value()?),
+                "--exec" => raw.exec_path = Some(PathBuf::from(value()?)),
+                "--systemd" => raw.systemd_unit_path = Some(PathBuf::from(value()?)),
+                "--version" => raw.version = Some(value()?),
+                "--platform" => raw.platform = Some(value()?),
+                "--join" => raw.join = Some(value()?),
+                "--bin-dir" => raw.bin_dir = Some(PathBuf::from(value()?)),
+                other => return Err(format!("unknown flag '{other}'")),
+            }
+            i += 1;
+        }
+        Ok(raw)
+    }
+
+    fn require_common(&self) -> Result<(Role, PathBuf, PathBuf), String> {
+        let role = self.role.ok_or("--role is required")?;
+        let config_root = self
+            .config_root
+            .clone()
+            .ok_or("--config-root is required")?;
+        let state_root = self.state_root.clone().ok_or("--state-root is required")?;
+        Ok((role, config_root, state_root))
+    }
+
+    fn into_plan(self) -> Result<Plan, String> {
+        let (role, config_root, state_root) = self.require_common()?;
+        Ok(Plan {
+            role,
+            config_root,
+            state_root,
+            bind: self.bind,
+            tls: self.tls,
+            hosts: self.hosts,
+            link_serve_token: self.link_serve_token,
+            link_backend_url: self.link_backend_url,
+            link_token: self.link_token,
+            exec_path: self.exec_path,
+            systemd_unit_path: self.systemd_unit_path,
+        })
+    }
+
+    /// Like [`into_plan`], but for `install`: `--exec`/`--systemd` are filled in
+    /// by the installer, so reject them here to avoid silent confusion.
+    fn into_plan_for_install(self) -> Result<Plan, String> {
+        if self.exec_path.is_some() {
+            return Err("--exec is not used with `install` (the binary path is the install dir + role); use `provision` for an existing binary".into());
+        }
+        if self.systemd_unit_path.is_some() {
+            return Err("--systemd is not used with `install` (the unit is registered under systemctl --user automatically)".into());
+        }
+        self.into_plan()
+    }
 }
 
 fn usage() -> &'static str {
-    "usage: posthaste-wizard provision --role <daemon|backend|runtime> \\\n\
-     \x20 --config-root <dir> --state-root <dir> [--bind <addr>] [--tls]\n\
-     \x20 [--host <name>]... [--link-backend-url <url>] [--link-token <secret>]\n\
-     \x20 [--exec <binary-path>] [--systemd <unit-path>]\n\
+    "usage:\n\
+     \x20 posthaste-wizard install --role <daemon|backend|runtime> \\\n\
+     \x20   --config-root <dir> --state-root <dir> [--bind <addr>] [--tls]\n\
+     \x20   [--host <name>]... [--link-token <secret>] [--link-backend-url <url>]\n\
+     \x20   [--version <tag>] [--platform <p>] [--join <string>] [--bin-dir <dir>]\n\
      \n\
-     Provisions one node's app.toml (+ a local CA/leaf under --tls) and prints\n\
-     the client connection profile. One-shot: delete the wizard afterward.\n"
+     \x20 posthaste-wizard provision --role <daemon|backend|runtime> \\\n\
+     \x20   --config-root <dir> --state-root <dir> [--bind <addr>] [--tls]\n\
+     \x20   [--host <name>]... [--link-backend-url <url>] [--link-token <secret>]\n\
+     \x20   [--exec <binary-path>] [--systemd <unit-path>]\n\
+     \n\
+     install fetches + verifies the role binary from the release, installs it to\n\
+     ~/.local/bin, provisions the node, and registers a systemctl --user service.\n\
+     provision only writes config + TLS for a binary you already have.\n"
 }

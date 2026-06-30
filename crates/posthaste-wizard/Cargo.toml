@@ -17,17 +17,28 @@ name = "posthaste_wizard"
 path = "src/lib.rs"
 
 [dependencies]
+flate2 = "1"
 rcgen = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = "0.4"
 time = { workspace = true }
 toml = { workspace = true }
+# Sync HTTP for the fetch step. `tls` pulls rustls; the provider must be ring
+# (not the aws-lc-rs default) to match the workspace + avoid the C/cmake backend
+# the release CI image lacks. Verified ring-only via `cargo tree`.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [dev-dependencies]
 # Round-trip proof only: the daemon's own schema reads back what the wizard
 # writes. A dev-dep, so the shipped wizard never links the config graph.
 posthaste-config = { path = "../posthaste-config" }
 tempfile = "3"
+# Already runtime deps; re-declared so the live install integration test (a
+# separate crate) can build a release tarball to serve over localhost.
+flate2 = "1"
+tar = "0.4"
 
 [lints]
 workspace = true

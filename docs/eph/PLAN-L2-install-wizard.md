@@ -1,6 +1,6 @@
 ---
 scope: L2
-summary: "Plan for the install wizard: a local, one-shot, CLI (later GUI) installer for advanced users to provision the role a chosen topology needs (posthaste_daemon / posthaste_backend / posthaste_runtime_daemon), generate its TLS material, bootstrap the [tls]/[link] config + a systemd/launchd unit, then be deleted. Wiring stays the user's job in the apps' own control pane. First slice (headless CLI + in-daemon TLS) is realized in `crates/posthaste-wizard`; the config-1/config-2 client UX it ultimately serves is still in flight."
+summary: "Plan for the install wizard: a local, one-shot, CLI (later GUI) installer for advanced users to provision the role a chosen topology needs (posthaste_daemon / posthaste_backend / posthaste_runtime_daemon), generate its TLS material, bootstrap the [tls]/[link] config + a systemd/launchd unit, then be deleted. Wiring stays the user's job in the apps' own control pane. First two slices are realized in `crates/posthaste-wizard`: provisioning + in-daemon TLS, then fetch+install+systemd-user registration (`install` subcommand) over release-packaged role binaries; the config-1/config-2 client UX it ultimately serves is still in flight."
 modified: 2026-06-30
 reviewed: 2026-06-30
 lifecycle: ephemeral
@@ -28,11 +28,30 @@ macaroon token). Live-verified end-to-end: wizard-provisioned TLS node →
 `posthaste_daemon serve` → authed `GET /v1/accounts` over HTTPS = 200; no token = 401;
 plaintext + untrusted-CA rejected.
 
-**Still ahead** (the original deferral, narrowed): release-packaging the
-backend/runtimed/thin-desktop binaries for distribution, the in-app control pane
-for ongoing wiring, the config-1 thin-web client, a GUI face, and ACME/rotation.
-The wizard installs locally-built binaries today (the `--exec` path); fetching
-distributed artifacts is the packaging follow-on. See §5 for the dependency order.
+**Second slice realized (2026-06-30): fetch + install + service registration.**
+The role binaries (`posthaste_backend`, `posthaste_runtime_daemon`) and the
+wizard itself are now release-packaged (`tools/package/bin.sh`, channel-aware
+names via `channel-policy.sh`, in `release.yml`'s build-daemon job), and the
+wizard grew an `install` subcommand that turns provisioning into one command:
+it fetches the role tarball from the GitHub release (rolling `nightly`/`stable`
+tag, or `--version` to pin), verifies it against `SHA256SUMS`, extracts +
+installs the binary to `~/.local/bin` (`--bin-dir` to override), runs the
+existing `provision` step, then registers + starts a `systemctl --user` unit
+(best-effort `loginctl enable-linger` so it survives logout). HTTP is in-process
+(`ureq`, ring-only rustls — no aws-lc/cmake) so the wizard depends on no system
+fetch/extract tools. A backend/daemon install emits a one-line **join string**
+(URL + link token + CA) that a runtime node consumes with `--join`, making the
+second machine a single command. Live-verified end-to-end over a localhost
+release server (`tests/install_live.rs`): real fetch → SHA256 verify → extract →
+executable placement → provision → unit references the installed binary.
+
+**Still ahead** (the original deferral, narrowed further): the thin-desktop
+binary in the release matrix, the in-app control pane for ongoing wiring, the
+config-1 thin-web client, a GUI face, launchd (macOS) + `--system` (root)
+service variants, and ACME/rotation. The link-over-TLS trust wiring (a runtime
+presenting the join's backend CA to its link client) is a config-schema
+follow-on; the join writes `backend-ca.crt` and sets URL + token today. See §5
+for the dependency order.
 
 ### Config surface the wizard writes
 
@@ -58,10 +77,10 @@ The topology *mechanism* is realized (see
     default, OR a lean near-node over a remote backend when `[link] backend_url`
     is set. **The only role binary packaged in the release today.**
   - `posthaste_backend` (`src/bin/backend.rs`) — the lean far node; serves only
-    the authenticated link. Built, not yet packaged for distribution.
+    the authenticated link. Release-packaged as `PosthasteBackend{Nightly}`.
   - `posthaste_runtime_daemon` — the lean remote-runtime daemon (near node over a
-    remote backend, serves `/v1`, links no store/engine/imap). Built, not yet
-    packaged.
+    remote backend, serves `/v1`, links no store/engine/imap). Release-packaged
+    as `PosthasteRuntimeDaemon{Nightly}`.
 - **Link auth** — bearer-token + macaroon HMAC on both the `/v1` perimeter and
   the runtime↔backend link, with an attenuating token CLI.
 - **Split is exercised over real HTTP** — `tests/backend_link_split.rs`.
