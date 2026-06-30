@@ -1,7 +1,11 @@
 import { useLayoutEffect } from 'react'
 import type { HomeContent } from './content/types'
 import { FooterSection, InstallHeader } from './SiteChrome'
-import { LandscapeValuesSection, ScreenshotsSection } from './HomeSections'
+import {
+  LandscapeValuesSection,
+  ScreenshotsSection,
+  WizardSection,
+} from './HomeSections'
 import { useReveal } from './hooks'
 import { Hero } from './mail-mock/Hero'
 
@@ -20,6 +24,7 @@ export function App({ content }: { content: HomeContent }) {
       <InstallHeader active="home" />
       <Hero messages={content.messages} />
       <ScreenshotsSection />
+      <WizardSection />
       <LandscapeValuesSection content={content.openSource} />
       <FooterSection content={content.footer} />
     </main>

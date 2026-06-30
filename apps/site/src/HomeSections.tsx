@@ -1,3 +1,4 @@
+import { Terminal } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { HomeContent } from './content/types'
 import { useLandscapeTime } from './hooks'
@@ -47,6 +48,28 @@ export function ScreenshotsSection() {
           </figure>
         ))}
       </div>
+    </section>
+  )
+}
+
+export function WizardSection() {
+  return (
+    <section
+      className="wizard-teaser"
+      aria-labelledby="wizard-teaser-title"
+      data-reveal
+    >
+      <Terminal className="wizard-teaser-icon" aria-hidden="true" />
+      <div className="wizard-teaser-body">
+        <h2 id="wizard-teaser-title">Run Posthaste on your own server</h2>
+        <p>
+          Self-host the backend and join runtime nodes across machines —
+          distributed, TLS-ready, and one command away.
+        </p>
+      </div>
+      <a className="wizard-teaser-link" href="/wizard">
+        Wizard guide →
+      </a>
     </section>
   )
 }
