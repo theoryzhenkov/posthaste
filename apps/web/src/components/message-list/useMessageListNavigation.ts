@@ -1,28 +1,29 @@
 import { useCallback, useEffect, useRef } from 'react'
 
 import type { MessageSummary } from '@/api/types'
-import type { EmailActions } from '@/hooks/useEmailActions'
 import type { MailSelection } from '@/mailState'
 
-import { isEditableKeyboardTarget } from '../keyboard/inputTargets'
+import { useFocusedPaneHandler } from '../keyboard/usePane'
 import { messageKey } from './model'
 
+/**
+ * Within-list `j`/`k` navigation, registered as the `list` pane's focused-key
+ * handler. The keyboard controller owns the window listener and routes keys
+ * here only when the list (or detail, which reuses it) is focused; archive and
+ * trash live in the controller as selection-scoped actions.
+ */
 export function useMessageListNavigation({
-  actions,
   currentViewKey,
   messages,
   onClearSelection,
   onSelectMessage,
   selectedKey,
-  selection,
 }: {
-  actions: EmailActions
   currentViewKey: string
   messages: MessageSummary[]
   onClearSelection: () => void
   onSelectMessage: (message: MailSelection) => void
   selectedKey: string | null
-  selection: MailSelection | null
 }) {
   const lastSelectedSlotRef = useRef<{ viewKey: string; index: number } | null>(
     null,
@@ -76,45 +77,23 @@ export function useMessageListNavigation({
     [messages, onSelectMessage, selectedKey, currentViewKey],
   )
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (isEditableKeyboardTarget(event.target)) return
-      if (event.metaKey || event.ctrlKey || event.altKey) return
-
-      switch (event.key) {
-        case 'j':
-        case 'ArrowDown':
-          event.preventDefault()
-          navigateMessage(1)
-          break
-        case 'k':
-        case 'ArrowUp':
-          event.preventDefault()
-          navigateMessage(-1)
-          break
-        case 'e':
-          if (selection) {
-            actions.archive({
-              sourceId: selection.sourceId,
-              messageId: selection.messageId,
-            })
-          }
-          break
-        case '#':
-        case 'Backspace':
-          if (selection) {
-            actions.trash({
-              sourceId: selection.sourceId,
-              messageId: selection.messageId,
-            })
-          }
-          break
-      }
+  useFocusedPaneHandler('list', (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return false
+    switch (event.key) {
+      case 'j':
+      case 'ArrowDown':
+        event.preventDefault()
+        navigateMessage(1)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        event.preventDefault()
+        navigateMessage(-1)
+        return true
+      default:
+        return false
     }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [actions, navigateMessage, selection])
+  })
 }
 
 function toSelection(message: MessageSummary): MailSelection {

@@ -26,13 +26,18 @@ export function sortSmartMailboxes(
   return smartMailboxes
 }
 
-export function itemButtonClass(isSelected: boolean, depth = 0): string {
+export function itemButtonClass(
+  isSelected: boolean,
+  depth = 0,
+  isFocused = false,
+): string {
   return cn(
     'mx-1.5 flex h-[var(--density-sidebar-row-height)] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] pr-2 text-left text-[13px] font-medium transition-colors',
     'ph-focus-ring hover:bg-[var(--sidebar-accent)]',
     isSelected &&
       'bg-[var(--list-selection)] text-[var(--list-selection-foreground)]',
     !isSelected && 'text-sidebar-foreground/92',
+    isFocused && 'ring-1 ring-inset ring-ring/70',
     depth > 0 ? 'pl-[22px]' : 'pl-2',
   )
 }

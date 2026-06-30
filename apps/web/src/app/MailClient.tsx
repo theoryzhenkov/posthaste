@@ -13,7 +13,8 @@ import { invalidateSyncStartedReadModels } from '@/domainCache'
 import { useAutoMarkRead } from '@/hooks/useAutoMarkRead'
 import { useDesignTheme } from '@/hooks/useDesignTheme'
 import { useEmailActions } from '@/hooks/useEmailActions'
-import { useGlobalMailShortcuts } from '@/hooks/useGlobalMailShortcuts'
+import { KeyboardController } from '@/components/keyboard/KeyboardController'
+import { useGotoNavigation } from '@/components/keyboard/useGotoNavigation'
 import { useMailboxRole, useSmartMailboxRole } from '@/hooks/useMailboxRole'
 import { useMailLayoutPersistence } from '@/hooks/useMailLayoutPersistence'
 import { closeWebSurface, useEffectiveSurface } from '@/hooks/useSurfaceRouting'
@@ -163,28 +164,10 @@ export function MailClient({
     setShowShortcuts,
   })
 
-  useGlobalMailShortcuts({
-    effectiveSurface,
-    isCommandPaletteOpen,
-    isComposeOpen: handlers.composeIntent !== null,
-    isSettingsSurfaceOpen,
-    isShortcutReferenceOpen: showShortcuts,
-    isTagEditorOpen,
-    onClearSearchQuery: handlers.handleRejectSearchPreview,
-    onClearSelectedMessage: handlers.handleClearSelectedMessage,
-    onCompose: handlers.handleCompose,
-    onOpenCommandPalette: handlers.handleOpenCommandPalette,
-    onOpenFocusedMessage: handlers.handleOpenFocusedMessage,
-    onOpenSettings: handlers.handleOpenSettingsShortcut,
-    onOpenTagEditor: handlers.handleOpenTagEditor,
-    onRedo: undoRedo.redo,
-    onReply: handlers.handleReply,
-    onReplyAll: handlers.handleReplyAll,
-    onToggleFlag: handlers.handleToggleFlag,
-    onToggleShortcuts: handlers.handleToggleShortcuts,
-    onUndo: undoRedo.undo,
-    searchQuery,
-    selectedMessage,
+  const gotoNavigation = useGotoNavigation({
+    effectiveView,
+    onSelectSmartMailbox: handlers.handleSelectSmartMailbox,
+    onSelectSourceMailbox: handlers.handleSelectSourceMailbox,
   })
 
   const appReadinessState = appReadinessStateFromAccountsQuery({
@@ -200,60 +183,89 @@ export function MailClient({
   return (
     <>
       <RevLogMirrors accountIds={enabledAccountIds} />
-      <MailClientView
-        actions={actions}
-        appReadinessState={appReadinessState}
-        closeCompose={handlers.closeCompose}
-        composeIntent={handlers.composeIntent}
-        effectiveSurface={effectiveSurface}
-        effectiveView={effectiveView}
-        invalidSurfaceRoute={invalidSurfaceRoute}
-        isCommandPaletteOpen={isCommandPaletteOpen}
-        isDarkMode={theme.resolvedMode === 'dark'}
+      <KeyboardController
+        effectiveSurfaceOpen={effectiveSurface !== null}
+        overlayOwnsInput={
+          isCommandPaletteOpen ||
+          handlers.composeIntent !== null ||
+          showShortcuts ||
+          isTagEditorOpen
+        }
         isMessageDetailOpen={isMessageDetailOpen}
-        isSettingsSurfaceOpen={isSettingsSurfaceOpen}
-        isTagEditorOpen={isTagEditorOpen}
-        messageDefaultLayout={layout.messageDefaultLayout}
-        preparedSearchQuery={preparedSearchQuery}
-        searchQuery={searchQuery}
-        selectedMessage={selectedMessage}
-        selectedMessageData={selectedMessageQuery.data}
-        shellDefaultLayout={layout.shellDefaultLayout}
-        showShortcuts={showShortcuts}
-        tags={tagsQuery.data ?? []}
-        viewRole={viewRole}
-        onApplySearch={handlers.handleApplySearch}
-        onArchive={handlers.handleArchive}
-        onSnooze={handlers.handleSnooze}
-        onEditDraft={handlers.handleEditDraft}
-        onClearSearch={handlers.handleRejectSearchPreview}
-        onClearSelectedMessage={handlers.handleClearSelectedMessage}
-        onCloseCommandPalette={handlers.handleCloseCommandPalette}
-        onCompose={handlers.handleCompose}
-        onForward={handlers.handleForward}
-        onReplyAll={handlers.handleReplyAll}
-        onMessageLayoutChanged={layout.onMessageLayoutChanged}
+        hasSelectedMessage={selectedMessage !== null}
+        hasSearchQuery={searchQuery.trim().length > 0}
         onOpenCommandPalette={handlers.handleOpenCommandPalette}
-        onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
-        onOpenSettings={handlers.handleOpenSettings}
-        onPlaceholderAction={handlers.handlePlaceholderAction}
-        onRejectSearchPreview={handlers.handleRejectSearchPreview}
+        onOpenSettings={handlers.handleOpenSettingsShortcut}
+        onCompose={handlers.handleCompose}
         onReply={handlers.handleReply}
-        onSearch={handlers.handleSearch}
-        onSelectMessage={handlers.handleSelectMessage}
-        onSelectMessageRef={handlers.handleSelectMessageRef}
-        onSelectSmartMailbox={handlers.handleSelectSmartMailbox}
-        onSelectSourceMailbox={handlers.handleSelectSourceMailbox}
-        onSetTagEditorOpen={setIsTagEditorOpen}
-        onShellLayoutChanged={layout.onShellLayoutChanged}
-        onShowShortcuts={handlers.handleShowShortcuts}
-        onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
+        onReplyAll={handlers.handleReplyAll}
         onToggleFlag={handlers.handleToggleFlag}
-        onToggleShortcuts={handlers.handleToggleShortcuts}
-        onToggleSettings={handlers.handleToggleSettings}
-        onToggleTheme={handleToggleTheme}
+        onUndo={undoRedo.undo}
+        onRedo={undoRedo.redo}
+        onArchive={handlers.handleArchive}
         onTrash={handlers.handleTrash}
-      />
+        onOpenTagEditor={handlers.handleOpenTagEditor}
+        onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
+        onClearSelectedMessage={handlers.handleClearSelectedMessage}
+        onClearSearchQuery={handlers.handleRejectSearchPreview}
+        onToggleShortcuts={handlers.handleToggleShortcuts}
+        onGoto={gotoNavigation.goto}
+      >
+        <MailClientView
+          actions={actions}
+          appReadinessState={appReadinessState}
+          closeCompose={handlers.closeCompose}
+          composeIntent={handlers.composeIntent}
+          effectiveSurface={effectiveSurface}
+          effectiveView={effectiveView}
+          invalidSurfaceRoute={invalidSurfaceRoute}
+          isCommandPaletteOpen={isCommandPaletteOpen}
+          isDarkMode={theme.resolvedMode === 'dark'}
+          isMessageDetailOpen={isMessageDetailOpen}
+          isSettingsSurfaceOpen={isSettingsSurfaceOpen}
+          isTagEditorOpen={isTagEditorOpen}
+          messageDefaultLayout={layout.messageDefaultLayout}
+          preparedSearchQuery={preparedSearchQuery}
+          searchQuery={searchQuery}
+          selectedMessage={selectedMessage}
+          selectedMessageData={selectedMessageQuery.data}
+          shellDefaultLayout={layout.shellDefaultLayout}
+          showShortcuts={showShortcuts}
+          tags={tagsQuery.data ?? []}
+          viewRole={viewRole}
+          onApplySearch={handlers.handleApplySearch}
+          onArchive={handlers.handleArchive}
+          onSnooze={handlers.handleSnooze}
+          onEditDraft={handlers.handleEditDraft}
+          onClearSearch={handlers.handleRejectSearchPreview}
+          onClearSelectedMessage={handlers.handleClearSelectedMessage}
+          onCloseCommandPalette={handlers.handleCloseCommandPalette}
+          onCompose={handlers.handleCompose}
+          onForward={handlers.handleForward}
+          onReplyAll={handlers.handleReplyAll}
+          onMessageLayoutChanged={layout.onMessageLayoutChanged}
+          onOpenCommandPalette={handlers.handleOpenCommandPalette}
+          onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
+          onOpenSettings={handlers.handleOpenSettings}
+          onPlaceholderAction={handlers.handlePlaceholderAction}
+          onRejectSearchPreview={handlers.handleRejectSearchPreview}
+          onReply={handlers.handleReply}
+          onSearch={handlers.handleSearch}
+          onSelectMessage={handlers.handleSelectMessage}
+          onSelectMessageRef={handlers.handleSelectMessageRef}
+          onSelectSmartMailbox={handlers.handleSelectSmartMailbox}
+          onSelectSourceMailbox={handlers.handleSelectSourceMailbox}
+          onSetTagEditorOpen={setIsTagEditorOpen}
+          onShellLayoutChanged={layout.onShellLayoutChanged}
+          onShowShortcuts={handlers.handleShowShortcuts}
+          onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
+          onToggleFlag={handlers.handleToggleFlag}
+          onToggleShortcuts={handlers.handleToggleShortcuts}
+          onToggleSettings={handlers.handleToggleSettings}
+          onToggleTheme={handleToggleTheme}
+          onTrash={handlers.handleTrash}
+        />
+      </KeyboardController>
     </>
   )
 }

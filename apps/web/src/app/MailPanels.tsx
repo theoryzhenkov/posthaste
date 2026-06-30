@@ -1,3 +1,7 @@
+import type { ReactNode } from 'react'
+
+import { useActivePane } from '@/components/keyboard/usePane'
+import type { PaneId } from '@/components/keyboard/dispatch'
 import { MessageDetail as MessageDetailPane } from '@/components/MessageDetail'
 import { MessageList } from '@/components/MessageList'
 import { Sidebar } from '@/components/Sidebar'
@@ -8,6 +12,31 @@ import {
 } from '@/components/ui/resizable'
 
 import type { MailClientViewProps } from './MailClientView.types'
+
+/**
+ * Marks its region as the keyboard-focused pane on pointer-down and draws a
+ * subtle inset ring while active, so `h`/`l` movement and `j`/`k` routing have
+ * a visible anchor.
+ */
+function PaneFocusRegion({
+  pane,
+  children,
+}: {
+  pane: PaneId
+  children: ReactNode
+}) {
+  const { activePane, focusPane } = useActivePane()
+  return (
+    <div
+      data-pane={pane}
+      data-pane-active={activePane === pane}
+      onMouseDownCapture={() => focusPane(pane)}
+      className="h-full min-h-0 ring-ring/45 data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-inset"
+    >
+      {children}
+    </div>
+  )
+}
 
 export function MailPanels(props: MailClientViewProps) {
   return (
@@ -24,18 +53,20 @@ export function MailPanels(props: MailClientViewProps) {
         maxSize="420px"
         groupResizeBehavior="preserve-pixel-size"
       >
-        <Sidebar
-          selectedView={props.effectiveView}
-          onOpenAccountSettings={(sourceId) =>
-            props.onOpenSettings('accounts', { accountId: sourceId })
-          }
-          onOpenSmartMailboxSettings={(smartMailboxId) =>
-            props.onOpenSettings('mailboxes', { smartMailboxId })
-          }
-          onSelectSmartMailbox={props.onSelectSmartMailbox}
-          onSelectSourceMailbox={props.onSelectSourceMailbox}
-          onSyncSource={props.onSyncSource}
-        />
+        <PaneFocusRegion pane="sidebar">
+          <Sidebar
+            selectedView={props.effectiveView}
+            onOpenAccountSettings={(sourceId) =>
+              props.onOpenSettings('accounts', { accountId: sourceId })
+            }
+            onOpenSmartMailboxSettings={(smartMailboxId) =>
+              props.onOpenSettings('mailboxes', { smartMailboxId })
+            }
+            onSelectSmartMailbox={props.onSelectSmartMailbox}
+            onSelectSourceMailbox={props.onSelectSourceMailbox}
+            onSyncSource={props.onSyncSource}
+          />
+        </PaneFocusRegion>
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel
@@ -63,37 +94,41 @@ function MessagePanels(props: MailClientViewProps) {
         minSize="360px"
         maxSize={props.isMessageDetailOpen ? '960px' : undefined}
       >
-        <MessageList
-          selectedView={props.effectiveView}
-          selection={props.selectedMessage}
-          onSelectMessage={props.onSelectMessageRef}
-          onClearSelection={props.onClearSelectedMessage}
-          onClearSearchQuery={props.onRejectSearchPreview}
-          actions={props.actions}
-          viewRole={props.viewRole}
-          searchQuery={props.searchQuery}
-          preparedSearchQuery={props.preparedSearchQuery}
-        />
+        <PaneFocusRegion pane="list">
+          <MessageList
+            selectedView={props.effectiveView}
+            selection={props.selectedMessage}
+            onSelectMessage={props.onSelectMessageRef}
+            onClearSelection={props.onClearSelectedMessage}
+            onClearSearchQuery={props.onRejectSearchPreview}
+            actions={props.actions}
+            viewRole={props.viewRole}
+            searchQuery={props.searchQuery}
+            preparedSearchQuery={props.preparedSearchQuery}
+          />
+        </PaneFocusRegion>
       </ResizablePanel>
       {props.isMessageDetailOpen && (
         <>
           <ResizableHandle />
           <ResizablePanel id="message-detail" minSize="300px">
-            <MessageDetailPane
-              selection={props.selectedMessage}
-              onArchive={props.onArchive}
-              onSnooze={props.onSnooze}
-              onEditDraft={props.onEditDraft}
-              onForward={props.onForward}
-              onOpenFocusedMessage={props.onOpenFocusedMessage}
-              onReply={props.onReply}
-              onReplyAll={props.onReplyAll}
-              onSelectMessage={props.onSelectMessage}
-              onSearch={props.onSearch}
-              onTag={() => props.onSetTagEditorOpen(true)}
-              onToggleFlag={props.onToggleFlag}
-              onTrash={props.onTrash}
-            />
+            <PaneFocusRegion pane="detail">
+              <MessageDetailPane
+                selection={props.selectedMessage}
+                onArchive={props.onArchive}
+                onSnooze={props.onSnooze}
+                onEditDraft={props.onEditDraft}
+                onForward={props.onForward}
+                onOpenFocusedMessage={props.onOpenFocusedMessage}
+                onReply={props.onReply}
+                onReplyAll={props.onReplyAll}
+                onSelectMessage={props.onSelectMessage}
+                onSearch={props.onSearch}
+                onTag={() => props.onSetTagEditorOpen(true)}
+                onToggleFlag={props.onToggleFlag}
+                onTrash={props.onTrash}
+              />
+            </PaneFocusRegion>
           </ResizablePanel>
         </>
       )}
