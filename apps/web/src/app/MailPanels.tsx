@@ -5,6 +5,7 @@ import type { PaneId } from '@/components/keyboard/dispatch'
 import { MessageDetail as MessageDetailPane } from '@/components/MessageDetail'
 import { MessageList } from '@/components/MessageList'
 import { Sidebar } from '@/components/Sidebar'
+import { conversationViewQuery } from '@/searchQuery'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -103,6 +104,9 @@ function MessagePanels(props: MailClientViewProps) {
             onClearSearchQuery={props.onRejectSearchPreview}
             actions={props.actions}
             viewRole={props.viewRole}
+            onViewConversation={(message) =>
+              props.onSearch(conversationViewQuery(message.conversationId))
+            }
             searchQuery={props.searchQuery}
             preparedSearchQuery={props.preparedSearchQuery}
           />

@@ -6,6 +6,7 @@ import { useDesignTheme } from '@/hooks/useDesignTheme'
 
 import { MessageRow } from '../MessageRow'
 import type { ColumnId, ThreadListLayout } from '../thread-list/columns'
+import type { ConversationTreeRow } from './conversationTree'
 import { MessageListErrorBanner } from './MessageListErrorBanner'
 import { EmptyMessages, LoadingRows } from './MessageListStates'
 import { messageKey, OVERSCAN_ROWS } from './model'
@@ -24,11 +25,14 @@ export function MessageListRows({
   isFetchingNextPage,
   isLoading,
   layout,
-  messages,
   onClearSearchQuery,
   onDismissError,
   onRetry,
   onSelectRowMessage,
+  onViewConversation,
+  onToggleCollapse,
+  rows,
+  treeMode,
   scrollTop,
   selectedKey,
   viewRole,
@@ -40,23 +44,21 @@ export function MessageListRows({
   isFetchingNextPage: boolean
   isLoading: boolean
   layout: ThreadListLayout
-  messages: MessageSummary[]
+  rows: ConversationTreeRow[]
+  treeMode: boolean
   onClearSearchQuery: () => void
   onDismissError: () => void
   onRetry: () => void
   onSelectRowMessage: (message: MessageSummary) => void
+  onViewConversation: (message: MessageSummary) => void
+  onToggleCollapse: (conversationId: string) => void
   scrollTop: number
   selectedKey: string | null
   viewRole: string | null
   viewportHeight: number
 }) {
   const rowHeight = messageRowHeight(useDesignTheme().density)
-  const virtual = virtualizeMessages(
-    messages,
-    scrollTop,
-    viewportHeight,
-    rowHeight,
-  )
+  const virtual = virtualizeRows(rows, scrollTop, viewportHeight, rowHeight)
 
   return (
     <>
@@ -71,26 +73,32 @@ export function MessageListRows({
           onRetry={onRetry}
         />
       )}
-      {!isLoading && !errorState.showError && messages.length === 0 && (
+      {!isLoading && !errorState.showError && rows.length === 0 && (
         <EmptyMessages />
       )}
-      {messages.length > 0 && (
+      {rows.length > 0 && (
         <>
           <div
             data-message-list-empty="true"
             style={{ height: virtual.topSpacerHeight }}
           />
-          {virtual.visibleMessages.map((message, index) => (
-            <div key={messageKey(message)} style={{ height: rowHeight }}>
+          {virtual.visibleRows.map((row, index) => (
+            <div
+              key={`${row.conversationId}:${messageKey(row.message)}:${row.depth}`}
+              style={{ height: rowHeight }}
+            >
               <MessageRow
-                message={message}
-                isSelected={messageKey(message) === selectedKey}
+                message={row.message}
+                isSelected={messageKey(row.message) === selectedKey}
                 isStriped={(virtual.startIndex + index) % 2 === 1}
                 columns={columns}
                 layout={layout}
                 actions={actions}
                 viewRole={viewRole}
                 onSelectMessage={onSelectRowMessage}
+                onViewConversation={onViewConversation}
+                treeRow={treeMode ? row : undefined}
+                onToggleCollapse={onToggleCollapse}
               />
             </div>
           ))}
@@ -109,13 +117,13 @@ export function MessageListRows({
   )
 }
 
-function virtualizeMessages(
-  messages: MessageSummary[],
+function virtualizeRows(
+  rows: ConversationTreeRow[],
   scrollTop: number,
   viewportHeight: number,
   rowHeight: number,
 ) {
-  const totalRows = messages.length
+  const totalRows = rows.length
   const safeViewportHeight = viewportHeight || rowHeight * 8
   const startIndex = Math.max(
     0,
@@ -129,6 +137,6 @@ function virtualizeMessages(
     bottomSpacerHeight: (totalRows - endIndex) * rowHeight,
     startIndex,
     topSpacerHeight: startIndex * rowHeight,
-    visibleMessages: messages.slice(startIndex, endIndex),
+    visibleRows: rows.slice(startIndex, endIndex),
   }
 }

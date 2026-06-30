@@ -18,6 +18,7 @@ import {
   EyeOff,
   Inbox,
   MailOpen,
+  MessagesSquare,
   Star,
   Trash2,
 } from 'lucide-react'
@@ -68,7 +69,7 @@ function isRestorableRole(role: string | null): boolean {
 export function buildMessageContextActions(
   actions: EmailActions,
   ctx: MessageActionContext,
-  hooks: { onOpen: () => void },
+  hooks: { onOpen: () => void; onViewConversation: () => void },
 ): ContextualAction[] {
   const { message, target, viewRole } = ctx
   const list: ContextualAction[] = [
@@ -78,6 +79,13 @@ export function buildMessageContextActions(
       title: 'Open',
       icon: MailOpen,
       run: hooks.onOpen,
+    },
+    {
+      id: 'builtin.view-conversation',
+      group: 'open',
+      title: 'View conversation',
+      icon: MessagesSquare,
+      run: hooks.onViewConversation,
     },
     {
       id: 'builtin.toggle-read',

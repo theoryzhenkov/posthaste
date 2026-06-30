@@ -124,6 +124,13 @@ export const PREFIX_DEFINITIONS = [
     description: 'Exact thread ID',
     valueHint: 'thread-id',
   },
+  {
+    primary: 'conversation',
+    aliases: ['conv', 'conversationid'],
+    label: 'conversation:',
+    description: 'Exact conversation ID',
+    valueHint: 'conversation-id',
+  },
 ] as const satisfies readonly QueryPrefixDefinition[]
 
 export const PREFIX_BY_NAME = new Map<string, QueryPrefixDefinition>(
@@ -187,4 +194,10 @@ export const HELP_ENTRIES: QueryHelpEntry[] = [
   help('date:', 'Exact YYYY-MM-DD date', 'date:', 'calendar day'),
   help('id:', 'Exact message ID', 'id:', 'message id'),
   help('thread:', 'Exact thread ID', 'thread:', 'thread id'),
+  help(
+    'conversation:',
+    'Exact conversation ID',
+    'conversation:',
+    'conversation thread',
+  ),
 ]
