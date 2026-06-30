@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "posthaste-runtimed"
+name = "posthaste_runtime_daemon"
 path = "src/main.rs"
 
 # The lean remote runtime daemon: a runtime near node over a remote backend that

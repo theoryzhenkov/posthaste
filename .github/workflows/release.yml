@@ -96,7 +96,7 @@ jobs:
 
       - name: Build daemon binary
         shell: bash
-        run: cargo build --release --bin posthasted
+        run: cargo build --release --bin posthaste_daemon
 
       - name: Package daemon
         shell: bash

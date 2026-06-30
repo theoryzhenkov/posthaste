@@ -8,7 +8,7 @@ name = "posthaste_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "posthasted"
+name = "posthaste_daemon"
 path = "src/main.rs"
 # The CLI has no unit tests. Library and integration tests cover server
 # behavior, so skip the otherwise empty libtest harness for this binary.
@@ -16,7 +16,7 @@ test = false
 
 [[bin]]
 # The standalone backend role (L5 §4): serves only the authenticated link.
-name = "posthaste-backend"
+name = "posthaste_backend"
 path = "src/bin/backend.rs"
 test = false
 
