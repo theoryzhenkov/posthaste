@@ -75,7 +75,9 @@ function compactError(text: string): string {
 }
 
 /** Project an account down to the structural fields the bundle includes. */
-export function summarizeAccount(account: AccountOverview): DiagnosticsAccountSummary {
+export function summarizeAccount(
+  account: AccountOverview,
+): DiagnosticsAccountSummary {
   return {
     driver: account.driver,
     enabled: account.enabled,

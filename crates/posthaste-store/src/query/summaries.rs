@@ -129,13 +129,17 @@ fn fetch_versions_bulk(
     Ok(versions)
 }
 
+/// A message's threading headers: `(rfc_message_id, in_reply_to)`, both
+/// optional (`None` for a row with no stored header).
+pub(crate) type ThreadingHeaders = (Option<String>, Option<String>);
+
 /// Bulk-fetches the RFC `Message-ID` and `In-Reply-To` headers for a set of
 /// messages, row-aligned, so the conversation view can build a real reply tree.
 /// `(None, None)` for a message row with no stored headers.
 fn fetch_threading_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
-) -> Result<Vec<(Option<String>, Option<String>)>, StoreError> {
+) -> Result<Vec<ThreadingHeaders>, StoreError> {
     const CHUNK_SIZE: usize = 300;
 
     let mut threading = vec![(None, None); rows.len()];
