@@ -94,15 +94,47 @@ jobs:
             mold \
             pkg-config
 
-      - name: Build daemon binary
+      - name: Build server-side binaries
         shell: bash
-        run: cargo build --release --bin posthaste_daemon
+        # Build the daemon plus the distributed-topology role binaries and the
+        # one-shot install wizard in a single cargo pass: they share the
+        # workspace dependency graph, so one build is far cheaper than separate
+        # jobs. The wizard's posthaste-config dep is dev-only, so a --bin build
+        # never pulls the config graph into the release artifact.
+        run: cargo build --release --bin posthaste_daemon --bin posthaste_backend --bin posthaste_runtime_daemon --bin posthaste-wizard
 
       - name: Package daemon
         shell: bash
         env:
           POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
         run: bash tools/package/daemon.sh
+
+      - name: Package backend node binary
+        shell: bash
+        env:
+          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
+          POSTHASTE_BIN: posthaste_backend
+          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_BACKEND_NAME }}
+          POSTHASTE_BIN_LABEL: Posthaste backend node
+        run: bash tools/package/bin.sh
+
+      - name: Package runtime node binary
+        shell: bash
+        env:
+          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
+          POSTHASTE_BIN: posthaste_runtime_daemon
+          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_RUNTIME_NAME }}
+          POSTHASTE_BIN_LABEL: Posthaste runtime node
+        run: bash tools/package/bin.sh
+
+      - name: Package install wizard
+        shell: bash
+        env:
+          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
+          POSTHASTE_BIN: posthaste-wizard
+          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_WIZARD_NAME }}
+          POSTHASTE_BIN_LABEL: Posthaste install wizard
+        run: bash tools/package/bin.sh
 
       - name: Print sccache stats
         if: always()
@@ -114,6 +146,24 @@ jobs:
           name: posthaste-daemon-${{ matrix.platform }}
           if-no-files-found: error
           path: target/distribute/PosthasteDaemon*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-backend-${{ matrix.platform }}
+          if-no-files-found: error
+          path: target/distribute/PosthasteBackend*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-runtime-${{ matrix.platform }}
+          if-no-files-found: error
+          path: target/distribute/PosthasteRuntimeDaemon*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-wizard-${{ matrix.platform }}
+          if-no-files-found: error
+          path: target/distribute/PosthasteWizard*.tar.gz
 
   build-web:
     name: Build web frontend
