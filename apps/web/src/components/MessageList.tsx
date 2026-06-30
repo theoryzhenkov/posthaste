@@ -148,6 +148,21 @@ export function MessageList({
     [treeMode, conversationTree.rows, messages],
   )
   const navMessages = treeMode ? conversationTree.visibleMessages : messages
+  // Whether the view's account(s) are mid-sync, so an empty list shows a
+  // "Syncing…" state instead of bare "no messages" (e.g. during a post-repair
+  // full re-sync, where the projection is legitimately empty while mail loads).
+  const isSyncing = useMemo(() => {
+    const accounts = accountDirectory.accounts
+    if (selectedView?.kind === 'source-mailbox') {
+      return (
+        accounts.find((account) => account.id === selectedView.sourceId)
+          ?.runtime.status === 'syncing'
+      )
+    }
+    return accounts.some(
+      (account) => account.enabled && account.runtime.status === 'syncing',
+    )
+  }, [accountDirectory.accounts, selectedView])
   const selectedKey = selectionKey(selection)
   // A fatal view-open failure surfaces here as an inline error + retry (instead
   // of an infinite skeleton); search-syntax errors still flow through
@@ -245,6 +260,7 @@ export function MessageList({
               errorState={errorState}
               isFetchingNextPage={runtimeMailListView.isLoadingMore}
               isLoading={runtimeMailListView.isLoading}
+              isSyncing={isSyncing}
               layout={tableLayout}
               onClearSearchQuery={onClearSearchQuery}
               onDismissError={() => setDismissedErrorKey(errorKey)}

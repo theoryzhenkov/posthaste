@@ -1,5 +1,5 @@
 import type { MouseEvent } from 'react'
-import { Inbox, MousePointerClick } from 'lucide-react'
+import { Inbox, Loader2, MousePointerClick } from 'lucide-react'
 
 export function NoMailboxSelected({
   onMouseDown,
@@ -53,7 +53,31 @@ export function LoadingRows({ rowHeight }: { rowHeight: number }) {
   )
 }
 
-export function EmptyMessages() {
+export function EmptyMessages({ isSyncing = false }: { isSyncing?: boolean }) {
+  // During an initial/repair sync the projection is legitimately empty while
+  // mail streams in — show a syncing state rather than a bare "no messages".
+  if (isSyncing) {
+    return (
+      <div
+        className="flex flex-col items-center gap-3 px-3 py-12"
+        data-message-list-empty="true"
+      >
+        <Loader2
+          size={32}
+          strokeWidth={1.6}
+          className="animate-spin text-muted-foreground/50"
+        />
+        <div className="text-center">
+          <p className="text-sm font-medium text-muted-foreground">
+            Syncing your mail…
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground/60">
+            Messages will appear as they arrive
+          </p>
+        </div>
+      </div>
+    )
+  }
   return (
     <div
       className="flex flex-col items-center gap-3 px-3 py-12"
