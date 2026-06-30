@@ -26,6 +26,9 @@ posthaste-domain = { path = "../posthaste-domain", features = ["openapi"] }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-runtime-contract = { path = "../posthaste-runtime-contract", features = ["openapi"] }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio-rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
@@ -47,6 +50,7 @@ uuid = { workspace = true }
 posthaste-store = { path = "../posthaste-store" }
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+reqwest = { workspace = true }
 
 [lints]
 workspace = true

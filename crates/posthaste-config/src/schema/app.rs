@@ -37,6 +37,11 @@ pub struct AppToml {
     pub account_order: Vec<String>,
     #[serde(default)]
     pub link: LinkToml,
+    /// Optional in-daemon TLS (`[tls]` cert+key). When present the daemon serves
+    /// HTTPS over the bound address; absent = plaintext loopback (the default
+    /// bundled behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsToml>,
 }
 
 /// TOML representation of a per-mailbox color override (`[[mailbox_colors]]`).
@@ -297,8 +302,22 @@ pub struct DaemonToml {
     pub cors_origin: Option<String>,
     pub poll_interval_seconds: Option<u64>,
     pub require_auth: Option<bool>,
+    /// Extra hosts admitted by the `Host`-header DNS-rebinding guard beyond the
+    /// loopback + bind-host defaults. Needed for remote clients over a hostname
+    /// (e.g. a TLS deployment reached as `mail.host:3001`) — a wildcard
+    /// `0.0.0.0` bind alone admits no external host.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_hosts: Vec<String>,
     #[serde(default, skip_serializing_if = "DaemonRuntimeTuning::is_default")]
     pub runtime: DaemonRuntimeTuning,
+}
+
+/// Optional `[tls]` config for in-daemon TLS. Both `cert` and `key` must be
+/// present together; a partial config is rejected at startup (fail closed).
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct TlsToml {
+    pub cert: Option<std::path::PathBuf>,
+    pub key: Option<std::path::PathBuf>,
 }
 
 impl AppToml {
@@ -397,6 +416,9 @@ impl AppToml {
                 .map(|id| id.to_string())
                 .collect(),
             link: existing.link.clone(),
+            // TLS is daemon-side config, never derived from AppSettings; preserve
+            // whatever the existing file declared.
+            tls: existing.tls.clone(),
         }
     }
 }

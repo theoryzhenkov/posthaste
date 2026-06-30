@@ -50,6 +50,19 @@ pub struct DaemonSettings {
     /// Runtime role: when set, this process connects to a remote backend at this
     /// base URL over the link instead of using the in-process one.
     pub link_backend_url: Option<String>,
+    /// Optional in-daemon TLS (`[tls]` cert+key paths). Present ⇒ serve HTTPS
+    /// over the bound address; absent = plaintext loopback.
+    pub tls: Option<TlsConfig>,
+    /// Extra hosts admitted by the `Host`-header DNS-rebinding guard (remote
+    /// clients over a hostname; a wildcard bind admits no external host).
+    pub allowed_hosts: Vec<String>,
+}
+
+/// Resolved `[tls]` config: filesystem paths to a PEM cert chain + private key.
+#[derive(Clone, Debug)]
+pub struct TlsConfig {
+    pub cert_path: std::path::PathBuf,
+    pub key_path: std::path::PathBuf,
 }
 
 /// Resolve config, state, and bootstrap paths from environment variables
@@ -150,6 +163,26 @@ pub fn read_daemon_settings(
         .filter(|url| !url.is_empty())
         .or(app_toml.link.backend_url);
 
+    // Optional in-daemon TLS. Both cert+key must be present together; a partial
+    // [tls] table is a validation error (fail closed, not silent plaintext).
+    let tls = app_toml
+        .tls
+        .as_ref()
+        .map(|t| {
+            let cert_path = t.cert.clone().ok_or_else(|| {
+                ConfigError::Validation("[tls] cert is required when [tls] is present".into())
+            })?;
+            let key_path = t.key.clone().ok_or_else(|| {
+                ConfigError::Validation("[tls] key is required when [tls] is present".into())
+            })?;
+            Ok::<_, ConfigError>(TlsConfig {
+                cert_path,
+                key_path,
+            })
+        })
+        .transpose()?;
+    let allowed_hosts = app_toml.daemon.allowed_hosts;
+
     Ok(DaemonSettings {
         bind_address: bind,
         cors_origin,
@@ -159,6 +192,8 @@ pub fn read_daemon_settings(
         link_serve,
         link_token,
         link_backend_url,
+        tls,
+        allowed_hosts,
     })
 }
 

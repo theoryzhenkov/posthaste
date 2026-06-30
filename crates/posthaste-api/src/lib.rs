@@ -17,6 +17,7 @@ pub mod observability;
 pub mod openapi;
 pub mod sanitize;
 pub mod secret;
+pub mod tls;
 pub mod token;
 
 mod app_state;
@@ -45,6 +46,7 @@ const SEND_MESSAGE_BODY_LIMIT_BYTES: usize = 40 * 1024 * 1024;
 pub use app_state::{AppState, ServerConfig, ServerHandle};
 pub use config::{
     load_daemon_settings, read_daemon_settings, resolve_roots, DaemonSettings, ResolvedRoots,
+    TlsConfig,
 };
 pub use router::build_api_router;
 pub use secret::SystemSecretStore;

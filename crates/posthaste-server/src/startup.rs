@@ -144,6 +144,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         config_root_display: roots.config_root.display().to_string(),
         log_guard,
         runtime_shutdown,
+        tls: daemon.tls.clone(),
     })
     .await
 }

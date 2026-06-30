@@ -84,6 +84,7 @@ impl TomlConfigRepository {
             smart_mailbox_order: Vec::new(),
             account_order: Vec::new(),
             link: Default::default(),
+            tls: None,
         };
         write_app_toml(&self.config_root, &app)?;
 
