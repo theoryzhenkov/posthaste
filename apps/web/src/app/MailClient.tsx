@@ -51,7 +51,7 @@ const DEFAULT_VIEW: SidebarSelection = {
  * and keyboard-accessible email actions.
  *
  * @spec docs/L1-ui#component-hierarchy
- * @spec docs/L0-ui#navigation-model
+ * @spec docs/ui/L0#navigation-model
  */
 export function MailClient({
   invalidSurfaceRoute,

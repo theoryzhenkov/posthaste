@@ -8,7 +8,7 @@
  *  - `gq{i,a,t,d,s,j}` — always the smart mailbox for the given role, ignoring
  *    context.
  *
- * @spec docs/L0-ui#navigation-model
+ * @spec docs/ui/L0#navigation-model
  */
 import type { MailViewSelection } from '@/mailState'
 

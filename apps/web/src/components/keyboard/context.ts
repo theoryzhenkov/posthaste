@@ -2,7 +2,7 @@
  * Shared context for the mail keyboard controller. Kept apart from the provider
  * component so the consumer hooks can live in a component-free module.
  *
- * @spec docs/L0-ui#navigation-model
+ * @spec docs/ui/L0#navigation-model
  */
 import { createContext, useContext } from 'react'
 
