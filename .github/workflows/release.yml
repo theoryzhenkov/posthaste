@@ -676,6 +676,13 @@ jobs:
         shell: bash
         run: cp keys/release-gpg-public.asc release-assets/
 
+      - name: Add wizard bootstrap script
+        shell: bash
+        # Ship install.sh as a release asset so it is checksummed + signed
+        # alongside the binaries. It is also published to the rolling channel
+        # release below for a stable `curl | sh` URL.
+        run: cp tools/install/install.sh release-assets/
+
       - name: Add macOS launch note
         shell: bash
         run: |
@@ -807,3 +814,30 @@ jobs:
           make_latest: false
           fail_on_unmatched_files: true
           files: release-assets/${{ env.POSTHASTE_UPDATER_MANIFEST }}
+
+      # Publish the wizard bootstrap to the rolling channel release so
+      # `releases/download/<channel>/install.sh` is a stable `curl | sh` URL
+      # that always resolves the latest build. Runs unconditionally (unlike the
+      # manifest step, which needs updater signing), creating the rolling
+      # release if it does not yet exist. Listed after the manifest step so its
+      # release name/body wins; existing assets (the manifest) are preserved.
+      - name: Publish wizard bootstrap to rolling channel release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.POSTHASTE_RELEASE_CHANNEL }}
+          name: ${{ env.POSTHASTE_PRODUCT_NAME }}
+          body: |
+            Rolling release for the `${{ env.POSTHASTE_RELEASE_CHANNEL }}` channel.
+
+            Holds the wizard bootstrap (`install.sh`) and, when updater signing
+            is configured, the Tauri updater manifest. Both point at the latest
+            versioned build; download installers from the versioned release tags,
+            not from here.
+
+            Bootstrap the install wizard:
+
+                curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ env.POSTHASTE_RELEASE_CHANNEL }}/install.sh | sh
+          prerelease: ${{ env.POSTHASTE_PRERELEASE == 'true' }}
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: release-assets/install.sh
