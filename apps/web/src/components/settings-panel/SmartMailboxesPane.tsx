@@ -4,14 +4,14 @@
  * @spec docs/L1-api#smart-mailbox-crud
  * @spec docs/L1-api#mailbox-metadata
  */
-import { FolderSearch, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import type {
   AccountOverview,
   AppSettings,
   SmartMailbox,
   SmartMailboxSummary,
 } from '../../api/types'
-import { smartMailboxAccent } from '../../mailboxRoles'
+import { renderSmartMailboxIcon, smartMailboxAccent } from '../../mailboxRoles'
 import { Button } from '../ui/button'
 import { SortableList, SortableRow } from '../ui/SortableList'
 import { useSidebarReorder } from '../sidebar/useSidebarReorder'
@@ -167,7 +167,11 @@ export function SmartMailboxesPane({
                 <SortableRow key={mailbox.id} id={mailbox.id}>
                   <MailboxListRow
                     accent={smartMailboxAccent(mailbox.role, mailbox.name)}
-                    icon={<FolderSearch size={15} strokeWidth={1.45} />}
+                    icon={renderSmartMailboxIcon(
+                      mailbox.role,
+                      mailbox.defaultKey,
+                      15,
+                    )}
                     label={mailbox.name}
                     sublabel={`${mailbox.totalMessages} messages · ${mailbox.unreadMessages} unread`}
                     badge={mailbox.kind === 'default' ? 'default' : null}

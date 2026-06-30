@@ -1,5 +1,5 @@
 import type { MailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
-import { renderMailboxRoleIcon, smartMailboxFallbackIcon } from '@/mailboxRoles'
+import { renderMailboxRoleIcon, renderSmartMailboxIcon } from '@/mailboxRoles'
 
 import { matchesQuery } from '../match'
 import type { CommandPaletteEntry, SearchProvider } from '../types'
@@ -22,10 +22,10 @@ export function createMailboxProvider(input: {
           label: smartMailbox.name,
           subtitle: 'Smart mailbox',
           keywords: smartMailbox.name,
-          icon: renderMailboxRoleIcon(
+          icon: renderSmartMailboxIcon(
             smartMailbox.role,
+            smartMailbox.defaultKey,
             15,
-            smartMailboxFallbackIcon(smartMailbox.defaultKey),
           ),
           action: {
             kind: 'open-smart-mailbox',
