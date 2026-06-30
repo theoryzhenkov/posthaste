@@ -130,3 +130,14 @@ export function smartMailboxFallbackIcon(
 ): LucideIcon {
   return defaultKey === ALL_MAIL_DEFAULT_KEY ? Mail : Folder
 }
+
+/** The icon for a smart mailbox: its assigned role's icon, else the All
+ *  Mail/Folder fallback. The single source of truth for smart-mailbox icons,
+ *  shared by the sidebar and settings so they never diverge. */
+export function renderSmartMailboxIcon(
+  role: string | null,
+  defaultKey: string | null,
+  size = 14,
+): React.ReactNode {
+  return renderMailboxRoleIcon(role, size, smartMailboxFallbackIcon(defaultKey))
+}

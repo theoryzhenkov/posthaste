@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import {
   mailboxRoleAccent,
   renderMailboxRoleIcon,
-  smartMailboxFallbackIcon,
+  renderSmartMailboxIcon,
 } from '@/mailboxRoles'
 
 import {
@@ -21,14 +21,6 @@ import { itemButtonClass } from './model'
 
 function roleIcon(role: Mailbox['role'], size = 14): ReactNode {
   return renderMailboxRoleIcon(role, size)
-}
-
-function smartMailboxIcon(
-  role: string | null,
-  defaultKey: string | null,
-  size = 14,
-): ReactNode {
-  return renderMailboxRoleIcon(role, size, smartMailboxFallbackIcon(defaultKey))
 }
 
 export function SmartMailboxItem({
@@ -65,7 +57,7 @@ export function SmartMailboxItem({
         className="flex w-4 justify-center"
         style={accent ? { color: accent } : undefined}
       >
-        {smartMailboxIcon(role, defaultKey)}
+        {renderSmartMailboxIcon(role, defaultKey)}
       </span>
       <span className="min-w-0 flex-1 truncate">{name}</span>
       {unreadMessages != null && unreadMessages > 0 && (
