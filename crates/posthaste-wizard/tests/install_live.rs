@@ -10,7 +10,9 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 
-use posthaste_wizard::{install, Channel, GithubSource, InstallOptions, Plan, Role, Version};
+use posthaste_wizard::{
+    install, Channel, GithubSource, InstallOptions, Plan, Role, ServiceScope, Version,
+};
 use sha2::{Digest, Sha256};
 
 /// Build a gzip tarball with `bin/<binary>` holding `contents`, matching the
@@ -115,7 +117,7 @@ fn install_fetches_verifies_and_provisions_over_http() {
     let sums = format!("{}  {}\n", sha256_hex(&tarball), tarball_name);
 
     let (base_url, server) = serve(vec![
-        (tarball_name.clone(), tarball.clone()),
+        (tarball_name, tarball),
         ("SHA256SUMS".to_string(), sums.into_bytes()),
     ]);
 
@@ -128,9 +130,10 @@ fn install_fetches_verifies_and_provisions_over_http() {
         version: Version::Channel(Channel::Nightly),
         platform: Some("linux-x86_64".into()),
         bin_dir: bin_dir.clone(),
-        // The transport + provisioning is what we are proving; systemd
-        // registration is environment-specific and covered by unit tests.
-        register_service: false,
+        // Write the user systemd unit (into the tempdir XDG above) so we can
+        // assert it references the installed binary; the actual `systemctl`
+        // call is absent here and surfaces as a harmless warning.
+        service: ServiceScope::UserSystemd,
         enable_linger: false,
     };
 
@@ -156,8 +159,8 @@ fn install_fetches_verifies_and_provisions_over_http() {
         "backend writes a [link] section"
     );
     let unit_path = installed
-        .provisioned
-        .systemd_unit_path
+        .service_path
+        .clone()
         .expect("a user unit path is computed");
     let unit = std::fs::read_to_string(&unit_path).unwrap();
     assert!(
