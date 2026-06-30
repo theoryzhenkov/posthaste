@@ -43,6 +43,7 @@ const GQ_ROLE: Record<string, GotoRole> = {
 
 export type GotoPrefixStep =
   | { type: 'goto'; role: GotoRole; forceSmart: boolean }
+  | { type: 'goto-conversation' }
   | { type: 'await-q' }
   | { type: 'cancel' }
 
@@ -57,6 +58,8 @@ export function stepGotoPrefix(
   const lower = key.toLowerCase()
   if (prefix === 'g') {
     if (lower === 'q') return { type: 'await-q' }
+    // `gc` — filter to the current message's conversation ("goto conversation").
+    if (lower === 'c') return { type: 'goto-conversation' }
     const role = G_ROLE[lower]
     return role ? { type: 'goto', role, forceSmart: false } : { type: 'cancel' }
   }

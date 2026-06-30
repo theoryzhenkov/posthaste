@@ -3,8 +3,9 @@
  *
  * One window listener (owned by {@link ./KeyboardController}) routes every key
  * through this function: modifier chords first, then mail-surface single keys,
- * pane-focus movement (`h`/`l`), and finally the focused pane's own handler
- * (`j`/`k`). Keeping it pure makes the precedence order testable without a DOM.
+ * pane rotation (`Shift+H`/`Shift+L` — `Tab` is left to native focus traversal
+ * for accessibility), and finally the focused pane's own handler (`j`/`k`,
+ * `h`/`l`). Keeping it pure makes the precedence order testable without a DOM.
  *
  * @spec docs/ui/L0#navigation-model
  * @spec docs/ui/L1#keyboard-shortcuts
@@ -15,7 +16,7 @@ import { isEditableKeyboardTarget } from './inputTargets'
 /** The three keyboard-navigable regions of the mail shell. */
 export type PaneId = 'sidebar' | 'list' | 'detail'
 
-/** Left-to-right pane order; drives `h`/`l` focus movement. */
+/** Left-to-right pane order; drives `Shift+H`/`Shift+L` pane rotation. */
 export const PANE_ORDER: readonly PaneId[] = ['sidebar', 'list', 'detail']
 
 /**
@@ -41,6 +42,8 @@ export interface KeyboardDispatchContext {
   pendingPrefix: GotoPrefix
   setPendingPrefix: (prefix: GotoPrefix) => void
   onGoto: (role: GotoRole, options: { forceSmart: boolean }) => void
+  /** `gc` — filter the list to the selected message's conversation. */
+  onGotoConversation: () => void
   onOpenCommandPalette: () => void
   onOpenSettings: () => void
   onCompose: () => void
@@ -174,6 +177,12 @@ export function dispatchMailKey(
       ctx.onGoto(step.role, { forceSmart: step.forceSmart })
       return
     }
+    if (step.type === 'goto-conversation') {
+      event.preventDefault()
+      ctx.setPendingPrefix(null)
+      if (ctx.hasSelectedMessage) ctx.onGotoConversation()
+      return
+    }
     if (step.type === 'await-q') {
       event.preventDefault()
       ctx.setPendingPrefix('gq')
@@ -188,20 +197,24 @@ export function dispatchMailKey(
     return
   }
 
-  // Pane-focus movement (Vim-style); wraps at the ends.
-  if (lower === 'h') {
+  // Pane rotation: `Shift+H`/`Shift+L` (Vim-style, wraps at the ends). `Tab` is
+  // deliberately NOT hijacked — it keeps its native focus-traversal behavior so
+  // keyboard/AT users can still reach controls within a pane. Plain `h`/`l` fall
+  // through to the focused pane's handler (the list collapses/expands threads).
+  if (event.shiftKey && lower === 'h') {
     event.preventDefault()
     moveFocus(ctx, -1)
     return
   }
-  if (lower === 'l') {
+  if (event.shiftKey && lower === 'l') {
     event.preventDefault()
     moveFocus(ctx, 1)
     return
   }
 
-  // Within-pane navigation (j/k) belongs to the focused pane; detail reuses the
-  // list's navigator so reading a message still steps through the list.
+  // Within-pane navigation (j/k vertical, h/l horizontal) belongs to the focused
+  // pane; detail reuses the list's navigator so reading a message still steps
+  // through the list.
   const paneHandler = ctx.resolvePaneHandler(ctx.activePane)
   if (paneHandler && paneHandler(event)) return
 

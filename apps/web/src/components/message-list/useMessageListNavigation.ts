@@ -18,12 +18,19 @@ export function useMessageListNavigation({
   onClearSelection,
   onSelectMessage,
   selectedKey,
+  onCollapseFocused,
+  onExpandFocused,
 }: {
   currentViewKey: string
   messages: MessageSummary[]
   onClearSelection: () => void
   onSelectMessage: (message: MailSelection) => void
   selectedKey: string | null
+  /** Collapse the focused conversation node (`h`/←). Tree view only; a no-op on
+   *  a leaf or already-collapsed node. Absent in flat list mode. */
+  onCollapseFocused?: () => void
+  /** Expand the focused conversation node (`l`/→). Tree view only. */
+  onExpandFocused?: () => void
 }) {
   const lastSelectedSlotRef = useRef<{ viewKey: string; index: number } | null>(
     null,
@@ -78,7 +85,8 @@ export function useMessageListNavigation({
   )
 
   useFocusedPaneHandler('list', (event) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) return false
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
+      return false
     switch (event.key) {
       case 'j':
       case 'ArrowDown':
@@ -89,6 +97,20 @@ export function useMessageListNavigation({
       case 'ArrowUp':
         event.preventDefault()
         navigateMessage(-1)
+        return true
+      case 'h':
+      case 'ArrowLeft':
+        // Tree view: collapse the focused conversation (VS Code left-arrow).
+        if (!onCollapseFocused) return false
+        event.preventDefault()
+        onCollapseFocused()
+        return true
+      case 'l':
+      case 'ArrowRight':
+        // Tree view: expand the focused conversation (VS Code right-arrow).
+        if (!onExpandFocused) return false
+        event.preventDefault()
+        onExpandFocused()
         return true
       default:
         return false
