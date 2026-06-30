@@ -164,12 +164,6 @@ export function useMailClientHandlers(input: {
       setSelectedView({ kind: 'source-mailbox', sourceId, mailboxId, name })
       setSelectedMessage(null)
     },
-    handleSelectTag: (tag: string) => {
-      const normalizedTag = tag.trim()
-      if (!normalizedTag || normalizedTag.startsWith('$')) return
-      applySearchQuery(`tag:${normalizedTag}`)
-      setSelectedMessage(null)
-    },
     handleShowShortcuts: () => setShowShortcuts(true),
     handleToggleFlag,
     handleToggleSettings: () => toggleSettingsSurface({ effectiveSurface }),

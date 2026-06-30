@@ -56,10 +56,14 @@ interface MessageDetailProps {
   onSnooze: (until: number) => void
   onEditDraft?: () => void
   onForward: () => void
+  onOpenFocusedMessage?: () => void
   onReply: () => void
   onReplyAll: () => void
   onSelectMessage: (message: MessageSummary) => void
   onSearch?: (query: string, append?: boolean) => void
+  onTag?: () => void
+  onToggleFlag?: () => void
+  onTrash?: () => void
 }
 
 /**
@@ -73,10 +77,14 @@ export function MessageDetail({
   onSnooze,
   onEditDraft,
   onForward,
+  onOpenFocusedMessage,
   onReply,
   onReplyAll,
   onSelectMessage,
   onSearch,
+  onTag,
+  onToggleFlag,
+  onTrash,
 }: MessageDetailProps) {
   const queryClient = useQueryClient()
   const conversationQueryKey = useMemo(
@@ -188,9 +196,13 @@ export function MessageDetail({
         onSnooze={onSnooze}
         onEditDraft={onEditDraft}
         onForward={onForward}
+        onOpenFocusedMessage={onOpenFocusedMessage}
         onReply={onReply}
         onReplyAll={onReplyAll}
         onSearch={onSearch}
+        onTag={onTag}
+        onToggleFlag={onToggleFlag}
+        onTrash={onTrash}
         threadMessages={threadMessages}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
