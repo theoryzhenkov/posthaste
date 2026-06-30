@@ -2,8 +2,6 @@ import type { CSSProperties } from 'react'
 import type { HomeContent } from './content/types'
 import { useLandscapeTime } from './hooks'
 
-const palette = ['blue', 'coral', 'sage', 'amber', 'violet']
-
 export function LandscapeValuesSection({
   content,
 }: {
@@ -63,52 +61,5 @@ function LandscapeSegment() {
         />
       </svg>
     </div>
-  )
-}
-
-export function NotesSection({ content }: { content: HomeContent }) {
-  return (
-    <section className="notes-section" id="notes" aria-labelledby="notes-title">
-      <div className="section-header" data-reveal>
-        <h2 id="notes-title">{content.notesHeading.title}</h2>
-      </div>
-      <div className="note-list">
-        {content.notes.map((note) => (
-          <article className="note-row" data-reveal key={note.label}>
-            <span>{note.label}</span>
-            <h3>{note.title}</h3>
-            <div dangerouslySetInnerHTML={{ __html: note.html }} />
-          </article>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-export function ThemeSection({ content }: { content: HomeContent['theme'] }) {
-  return (
-    <section
-      className="theme-section"
-      id="themes"
-      aria-labelledby="themes-title"
-    >
-      <div className="theme-copy" data-reveal>
-        <h2 id="themes-title">{content.title}</h2>
-        <div dangerouslySetInnerHTML={{ __html: content.html }} />
-      </div>
-      <div className="glass-panel" data-reveal>
-        <div className="glass-title">Theme preview</div>
-        <div className="swatch-row" aria-hidden="true">
-          {palette.map((color) => (
-            <span className={color} key={color} />
-          ))}
-        </div>
-        <div className="glass-lines" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </section>
   )
 }

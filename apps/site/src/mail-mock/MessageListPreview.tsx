@@ -35,24 +35,14 @@ export function MessageListPreview({
   messages,
   selectedMessageId,
   selectedMailbox,
-  horseClicks,
-  isHorseLaunching,
-  isSecretThemeUnlocked,
-  onSecretHorseClick,
   onSelectMessage,
 }: {
   messages: MessagePreview[]
   selectedMessageId: string | null
   selectedMailbox: MailboxView
-  horseClicks: number
-  isHorseLaunching: boolean
-  isSecretThemeUnlocked: boolean
-  onSecretHorseClick: () => void
   onSelectMessage: (messageId: string) => void
 }) {
   const isZeroInbox = selectedMailbox === 'inbox' && messages.length === 0
-
-  const scatterActive = isZeroInbox && !isSecretThemeUnlocked
 
   return (
     <section className="mock-list" aria-label="Conversation list preview">
@@ -80,17 +70,15 @@ export function MessageListPreview({
                 <span
                   key={`${letter}-${index}`}
                   style={
-                    scatterActive
-                      ? ({
-                          animationDelay: `${p.delay}ms`,
-                          '--ax': `${p.ax}px`,
-                          '--ay': `${p.ay}px`,
-                          '--ar': `${p.ar}deg`,
-                          '--px': `${p.px}px`,
-                          '--py': `${p.py}px`,
-                          '--pr': `${p.pr}deg`,
-                        } as CSSProperties)
-                      : ({ animationName: 'none' } as CSSProperties)
+                    {
+                      animationDelay: `${p.delay}ms`,
+                      '--ax': `${p.ax}px`,
+                      '--ay': `${p.ay}px`,
+                      '--ar': `${p.ar}deg`,
+                      '--px': `${p.px}px`,
+                      '--py': `${p.py}px`,
+                      '--pr': `${p.pr}deg`,
+                    } as CSSProperties
                   }
                 >
                   {letter === ' ' ? '\u00a0' : letter}
@@ -98,34 +86,6 @@ export function MessageListPreview({
               )
             })}
           </p>
-          {!isSecretThemeUnlocked ? (
-            <button
-              type="button"
-              className={`secret-horse click-${Math.min(horseClicks, 5)} ${
-                isHorseLaunching ? 'launching' : ''
-              }`}
-              onClick={onSecretHorseClick}
-              aria-label="Secret easter egg"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect
-                  x="5"
-                  y="5"
-                  width="14"
-                  height="14"
-                  rx="4"
-                  fill="rgb(255 255 255 / 0.22)"
-                />
-                <path
-                  d="M8 9h8M8 13h5"
-                  stroke="white"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-                <circle cx="17" cy="17" r="2" fill="oklch(0.95 0.1 86)" />
-              </svg>
-            </button>
-          ) : null}
         </div>
       ) : null}
       {messages.map((message, index) => (
