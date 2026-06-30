@@ -12,11 +12,15 @@
 //! @spec docs/eph/PLAN-L2-install-wizard
 
 mod certs;
+mod fetch;
+mod install;
 mod render;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub use fetch::{Channel, GithubSource, ReleaseSource, Version};
+pub use install::{apply_join, detect_platform, install, InstallOptions, Installed};
 pub use render::{client_profile_json, render_app_toml, render_systemd_unit};
 
 /// The role a node plays — selects which binary it runs and which config the
@@ -127,6 +131,12 @@ pub fn provision(plan: &Plan) -> Result<Provisioned, String> {
 
     let systemd_unit_path = match &plan.systemd_unit_path {
         Some(path) => {
+            // The unit dir (e.g. ~/.config/systemd/user) often does not exist on
+            // a fresh node, so create it before writing rather than failing.
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("create unit dir {}: {e}", parent.display()))?;
+            }
             let unit = render_systemd_unit(plan);
             write(path, &unit)?;
             Some(path.clone())
