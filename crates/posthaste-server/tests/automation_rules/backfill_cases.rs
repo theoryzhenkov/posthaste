@@ -117,3 +117,68 @@ async fn durable_backfill_job_completes_current_rules_and_reruns_changed_rules()
     );
     assert_eq!(gateway.mutations().len(), 2);
 }
+
+#[tokio::test]
+async fn force_backfill_reset_reruns_a_completed_job() {
+    let harness = RuleHarness::new();
+    harness.save_account("primary", "Primary");
+    let gateway = ScriptedGateway::new(
+        vec![mailbox("inbox", "Inbox", Some("inbox"))],
+        vec![message(
+            "message-1",
+            &["inbox"],
+            "Posthaste",
+            "one@posthaste.test",
+            &[],
+        )],
+    );
+    harness.sync("primary", &gateway).await;
+    harness.save_rules(vec![rule(
+        "tag-existing-posthaste",
+        vec![source_is("primary"), from_contains("Posthaste")],
+        vec![AutomationAction::ApplyTag {
+            tag: "newsletter".to_string(),
+        }],
+    )]);
+
+    // Run the job to completion against the unchanged ruleset.
+    assert_eq!(
+        harness.process_backfill_job("primary", &gateway, 10).await,
+        (true, false)
+    );
+    assert_eq!(
+        harness.process_backfill_job("primary", &gateway, 10).await,
+        (false, false)
+    );
+    assert_eq!(
+        harness.current_backfill_status("primary"),
+        Some(AutomationBackfillJobStatus::Completed)
+    );
+
+    // Without a reset, a completed job stays completed and never re-runs even
+    // though the rules are unchanged.
+    assert_eq!(
+        harness.process_backfill_job("primary", &gateway, 10).await,
+        (false, false)
+    );
+
+    // On-demand "backfill now" forces the completed job back to pending so the
+    // next batch re-applies the rules (idempotent, so keywords are unchanged).
+    harness.reset_backfill();
+    assert_eq!(
+        harness.current_backfill_status("primary"),
+        Some(AutomationBackfillJobStatus::Pending)
+    );
+    assert_eq!(
+        harness.process_backfill_job("primary", &gateway, 10).await,
+        (true, false)
+    );
+    assert_eq!(
+        harness.current_backfill_status("primary"),
+        Some(AutomationBackfillJobStatus::Completed)
+    );
+    assert_eq!(
+        harness.message_keywords("primary", "message-1"),
+        vec!["newsletter".to_string()]
+    );
+}

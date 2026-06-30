@@ -242,6 +242,10 @@ pub struct PatchAppSettingsMutation {
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
     pub mailbox_colors: Option<Vec<MailboxColor>>,
+    /// Force the current backfill rules to re-run after persisting, even when
+    /// the rule fingerprint is unchanged (on-demand "backfill now").
+    #[serde(default)]
+    pub force_backfill: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

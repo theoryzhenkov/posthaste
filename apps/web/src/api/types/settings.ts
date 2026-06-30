@@ -13,6 +13,15 @@ export interface AppSettings {
 }
 
 /**
+ * Sparse settings patch payload. `forceBackfill` is a transient command flag
+ * (not persisted state): when true, the backend re-runs the current backfill
+ * rules against existing messages after saving.
+ */
+export interface PatchSettingsInput extends Partial<AppSettings> {
+  forceBackfill?: boolean
+}
+
+/**
  * A per-mailbox sidebar color override (presentation only). Overrides the
  * renderer's default hash-derived color for `(sourceId, mailboxId)`.
  */

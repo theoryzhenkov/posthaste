@@ -4,6 +4,7 @@ import type {
   AppSettings,
   AutomationRulePreviewInput,
   AutomationRulePreviewResponse,
+  PatchSettingsInput,
   ReadRequest,
   ReadResponse,
 } from '../types'
@@ -14,7 +15,7 @@ export async function fetchSettings(): Promise<AppSettings> {
 
 /** @spec docs/L1-api#endpoint-table */
 export async function patchSettings(
-  input: Partial<AppSettings>,
+  input: PatchSettingsInput,
 ): Promise<AppSettings> {
   return jsonRequest<AppSettings>('/settings', 'PATCH', input)
 }

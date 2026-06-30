@@ -25,6 +25,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                force_backfill: false,
                 default_account_id: None,
                 cache_policy: None,
                 automation_rules: Some(vec![source_rule("primary")]),
@@ -74,6 +75,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                force_backfill: false,
                 default_account_id: Some(None),
                 cache_policy: None,
                 automation_rules: None,
@@ -104,6 +106,7 @@ async fn patch_settings_can_update_cache_policy() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                force_backfill: false,
                 default_account_id: None,
                 cache_policy: Some(CachePolicy {
                     soft_cap_bytes: 64 * 1024 * 1024,
@@ -157,6 +160,7 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                force_backfill: false,
                 default_account_id: None,
                 cache_policy: None,
                 automation_rules: None,
@@ -190,6 +194,7 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
     let error = patch_settings(
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
+                force_backfill: false,
             default_account_id: Some(Some("missing".to_string())),
             cache_policy: None,
             automation_rules: None,
@@ -231,6 +236,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
     let error = patch_settings(
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
+                force_backfill: false,
             default_account_id: None,
             cache_policy: None,
             automation_rules: Some(vec![invalid_rule]),
@@ -274,6 +280,7 @@ async fn patch_settings_persists_appearance_to_app_toml() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                force_backfill: false,
                 default_account_id: None,
                 cache_policy: None,
                 automation_rules: None,
@@ -348,6 +355,7 @@ async fn patch_settings_persists_mailbox_colors_to_app_toml() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                force_backfill: false,
                 default_account_id: None,
                 cache_policy: None,
                 automation_rules: None,

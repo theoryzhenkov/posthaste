@@ -10,6 +10,7 @@ import type {
   OkResponse,
   Operation,
   PatchMailboxInput,
+  PatchSettingsInput,
   SaveDraftInput,
   SendMessageInput,
   SmartMailbox,
@@ -226,7 +227,7 @@ export const runtimeMutations = {
     },
   },
   settings: {
-    patch(input: Partial<AppSettings>): Promise<AppSettings> {
+    patch(input: PatchSettingsInput): Promise<AppSettings> {
       return getRuntimeAdapter().patchSettings(input)
     },
     previewAutomationRule(

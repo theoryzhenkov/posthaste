@@ -36,6 +36,8 @@ export function AutomationRuleList({
   onChange,
   onSaveItem,
   onRemoveItem,
+  onBackfillItem,
+  backfillNoticeFor,
   previewConditionForDraft,
 }: {
   title: string
@@ -53,6 +55,8 @@ export function AutomationRuleList({
   onChange: (ruleId: string, patch: Partial<AutomationRuleDraft>) => void
   onSaveItem: (draft: AutomationRuleDraft) => void
   onRemoveItem: (draft: AutomationRuleDraft) => void
+  onBackfillItem: (draft: AutomationRuleDraft) => void
+  backfillNoticeFor: string | null
   previewConditionForDraft: (draft: AutomationRuleDraft) => SmartMailboxRule
 }) {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
@@ -131,6 +135,8 @@ export function AutomationRuleList({
               onRemoveItem(editingItem.draft)
               setEditingRuleId(null)
             }}
+            onBackfill={() => onBackfillItem(editingItem.draft)}
+            backfillNoticeFor={backfillNoticeFor}
           />
         </AutomationRuleEditorPortal>
       )}
