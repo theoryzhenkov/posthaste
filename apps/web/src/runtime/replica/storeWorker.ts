@@ -10,12 +10,16 @@
  * @spec docs/eph/DESIGN-L2-replica-worker-isolation
  */
 import { loadEntityStoreHandleFactory, type EntityStoreHandle } from './handle'
-import type { StoreWorkerRequest, StoreWorkerResponse } from './workerStorePort'
+import type {
+  StoreWorkerOutbound,
+  StoreWorkerRequest,
+  StoreWorkerResponse,
+} from './workerStorePort'
 
 // Cast the worker global so this file is independent of the DOM/WebWorker lib
 // split — it only needs `postMessage` + `addEventListener('message')`.
 const ctx = globalThis as unknown as {
-  postMessage(message: StoreWorkerResponse): void
+  postMessage(message: StoreWorkerOutbound): void
   addEventListener(
     type: 'message',
     listener: (event: { data: StoreWorkerRequest }) => void,
@@ -23,9 +27,22 @@ const ctx = globalThis as unknown as {
 }
 
 let handle: EntityStoreHandle | null = null
+// Init the WASM store, then post the readiness handshake so the host can decide
+// worker-vs-in-process. A failure here (e.g. the webview can't run the worker)
+// is reported as `ready: false` rather than left to hang.
 const ready: Promise<void> = (async () => {
-  const factory = await loadEntityStoreHandleFactory()
-  handle = factory()
+  try {
+    const factory = await loadEntityStoreHandleFactory()
+    handle = factory()
+    ctx.postMessage({ type: 'ready', ok: true })
+  } catch (error) {
+    ctx.postMessage({
+      type: 'ready',
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 })()
 
 function run(request: StoreWorkerRequest): StoreWorkerResponse {
