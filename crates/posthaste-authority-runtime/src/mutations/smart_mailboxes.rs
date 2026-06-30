@@ -103,9 +103,7 @@ impl AccountMutationService {
 /// (`None`), and accepts only the user-assignable mailbox roles — everything the
 /// vocab knows except the system-managed `snooze`. Returns the canonical role
 /// string so storage is normalized regardless of input casing/whitespace.
-fn normalize_smart_mailbox_role(
-    role: Option<String>,
-) -> Result<Option<String>, RuntimeError> {
+fn normalize_smart_mailbox_role(role: Option<String>) -> Result<Option<String>, RuntimeError> {
     let Some(role) = role else {
         return Ok(None);
     };

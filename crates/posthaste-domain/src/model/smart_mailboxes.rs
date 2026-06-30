@@ -186,8 +186,9 @@ pub struct SmartMailboxSummary {
 /// explicit [`AppSettings::smart_mailbox_order`](crate::AppSettings).
 ///
 /// @spec docs/L1-accounts#sidebar-ordering
-pub const DEFAULT_SMART_MAILBOX_ORDER: &[&str] =
-    &["inbox", "archive", "drafts", "sent", "junk", "trash", "all-mail"];
+pub const DEFAULT_SMART_MAILBOX_ORDER: &[&str] = &[
+    "inbox", "archive", "drafts", "sent", "junk", "trash", "all-mail",
+];
 
 /// Fallback sort rank for a smart mailbox when it is not pinned by the user's
 /// explicit order: built-ins first in [`DEFAULT_SMART_MAILBOX_ORDER`], then user
@@ -215,8 +216,9 @@ pub fn apply_explicit_order<T>(
     let rank: std::collections::HashMap<&str, usize> =
         order.iter().enumerate().map(|(i, id)| (*id, i)).collect();
     // `partition` is stable, so `rest` preserves the caller's fallback order.
-    let (mut pinned, rest): (Vec<T>, Vec<T>) =
-        items.into_iter().partition(|item| rank.contains_key(id_of(item)));
+    let (mut pinned, rest): (Vec<T>, Vec<T>) = items
+        .into_iter()
+        .partition(|item| rank.contains_key(id_of(item)));
     pinned.sort_by_key(|item| rank[id_of(item)]);
     pinned.into_iter().chain(rest).collect()
 }
