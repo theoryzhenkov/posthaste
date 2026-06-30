@@ -20,3 +20,9 @@ check:
 # Build for release
 build *args:
     bun run tauri build {{args}}
+
+# Regenerate the nightly-channel app icon set from its SVG master. The release
+# workflow points `bundle.icon` at `icons-nightly/` for the nightly channel
+# (see tools/release/channel-policy.sh). Run this after editing the master.
+regen-nightly-icons:
+    bun run tauri icon apps/web/public/favicon-night.svg -o apps/desktop/icons-nightly
