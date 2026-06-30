@@ -104,7 +104,9 @@ export function useDiagnosticsBundle(): UseDiagnosticsBundleResult {
     const bundle = formatDiagnosticsBundle({
       appVersion: info?.appVersion ?? releaseChannel,
       releaseChannel,
-      os: info?.os ?? (typeof navigator !== 'undefined' ? navigator.platform : 'unknown'),
+      os:
+        info?.os ??
+        (typeof navigator !== 'undefined' ? navigator.platform : 'unknown'),
       arch: info?.arch ?? '',
       logDirPath: info?.logDirPath ?? null,
       accounts,

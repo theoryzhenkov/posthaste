@@ -7,10 +7,15 @@ import {
   sanitizeText,
   summarizeAccount,
 } from '../src/diagnostics'
-import type { AccountOverview, DiagnosticsBundleInput } from '../src/diagnostics'
+import type {
+  AccountOverview,
+  DiagnosticsBundleInput,
+} from '../src/diagnostics'
 
 /** Minimal valid `AccountOverview` for the pure-function tests (no react-query). */
-function accountOverview(overrides: Partial<AccountOverview> = {}): AccountOverview {
+function accountOverview(
+  overrides: Partial<AccountOverview> = {},
+): AccountOverview {
   return {
     id: 'primary',
     name: 'Primary',
@@ -62,9 +67,7 @@ describe('redactSecrets', () => {
       'Authorization: [redacted]',
     )
     expect(redactSecrets('password=hunter2pass1234')).toBe('[redacted]')
-    expect(redactSecrets('api_key=sk_live_0123456789abcdef')).toBe(
-      '[redacted]',
-    )
+    expect(redactSecrets('api_key=sk_live_0123456789abcdef')).toBe('[redacted]')
   })
 
   it('redacts long opaque base64-ish blobs', () => {
@@ -97,7 +100,8 @@ describe('summarizeAccount', () => {
           status: 'authError',
           push: 'unsupported',
           lastSyncAt: null,
-          lastSyncError: 'invalid creds for admin@example.com (token=SECRET1234567890)',
+          lastSyncError:
+            'invalid creds for admin@example.com (token=SECRET1234567890)',
           lastSyncErrorCode: 'E_AUTH',
           syncProgress: null,
         },
@@ -138,7 +142,9 @@ describe('formatDiagnosticsBundle', () => {
     expect(text).toContain('Platform: linux x86_64')
     expect(text).toContain('Accounts (1):')
     expect(text).toContain('[mock] ready')
-    expect(text).toContain('Log location: /home/user/.local/share/posthaste/logs')
+    expect(text).toContain(
+      'Log location: /home/user/.local/share/posthaste/logs',
+    )
   })
 
   it('handles zero accounts', () => {
