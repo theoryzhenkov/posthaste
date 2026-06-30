@@ -31,6 +31,15 @@ pub struct AppSettings {
     /// @spec docs/eph/RFC-L2-configuration-matrix
     #[serde(default)]
     pub mailbox_colors: Vec<MailboxColor>,
+    /// Per-tag presentation overrides (color + icon), keyed by tag name. Tags
+    /// themselves are keyword-derived and have no entity; this overlay gives a
+    /// tag a foreground/background color and a lucide icon. Pure presentation,
+    /// global by name; TOML source of truth. Absent fields fall back to the
+    /// renderer's name-derived defaults.
+    ///
+    /// @spec docs/eph/DESIGN-L2-appearance-toml
+    #[serde(default)]
+    pub tags: Vec<TagAppearance>,
     /// User's explicit sidebar arrangement of smart mailboxes (by id). Acts as
     /// an override: ids listed here come first, in this order; any smart mailbox
     /// absent from the list falls back to the canonical default order (built-ins
@@ -61,6 +70,28 @@ pub struct MailboxColor {
     pub mailbox_id: MailboxId,
     /// Color hue (0–360).
     pub hue: u32,
+}
+
+/// A per-tag presentation override (presentation only), keyed by tag `name`.
+/// Each field is optional and overrides the renderer's name-derived default for
+/// that aspect; an absent field keeps the default.
+///
+/// @spec docs/eph/DESIGN-L2-appearance-toml
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TagAppearance {
+    /// The tag (keyword) this override applies to.
+    pub name: String,
+    /// Foreground/text color (CSS color string, e.g. `#1f2937`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+    /// Background color (CSS color string, e.g. `#dbeafe`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg: Option<String>,
+    /// Lucide icon name (e.g. `briefcase`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// Backend driver type for an account.

@@ -7,6 +7,7 @@ export type SettingsSurfaceCategory =
   | 'accounts'
   | 'outbox'
   | 'mailboxes'
+  | 'tags'
   | 'storage'
   | 'notifications'
   | 'troubleshooting'

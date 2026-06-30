@@ -4639,6 +4639,13 @@
               "$ref": "#/components/schemas/SmartMailboxId"
             },
             "description": "User's explicit sidebar arrangement of smart mailboxes (by id). Acts as\nan override: ids listed here come first, in this order; any smart mailbox\nabsent from the list falls back to the canonical default order (built-ins\nfirst) then creation order. Stale ids are ignored. Pure presentation.\n\n@spec docs/L1-accounts#sidebar-ordering"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagAppearance"
+            },
+            "description": "Per-tag presentation overrides (color + icon), keyed by tag name. Tags\nthemselves are keyword-derived and have no entity; this overlay gives a\ntag a foreground/background color and a lucide icon. Pure presentation,\nglobal by name; TOML source of truth. Absent fields fall back to the\nrenderer's name-derived defaults.\n\n@spec docs/eph/DESIGN-L2-appearance-toml"
           }
         }
       },
@@ -6407,6 +6414,16 @@
               "$ref": "#/components/schemas/SmartMailboxId"
             },
             "description": "Explicit sidebar arrangement (ids); overwrites the stored list wholesale."
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TagAppearance"
+            },
+            "description": "Per-tag presentation overrides (color + icon); overwrites the stored list."
           }
         }
       },
@@ -7808,6 +7825,40 @@
           "push",
           "manual"
         ]
+      },
+      "TagAppearance": {
+        "type": "object",
+        "description": "A per-tag presentation override (presentation only), keyed by tag `name`.\nEach field is optional and overrides the renderer's name-derived default for\nthat aspect; an absent field keeps the default.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "bg": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Background color (CSS color string, e.g. `#dbeafe`)."
+          },
+          "fg": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Foreground/text color (CSS color string, e.g. `#1f2937`)."
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Lucide icon name (e.g. `briefcase`)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The tag (keyword) this override applies to."
+          }
+        }
       },
       "TagListReadResult": {
         "type": "object",

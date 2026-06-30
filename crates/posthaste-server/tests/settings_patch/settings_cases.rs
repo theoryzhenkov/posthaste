@@ -35,6 +35,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
                 appearance: None,
                 notifications: None,
                 mailbox_colors: None,
+                tags: None,
             }),
         )
         .await,
@@ -87,6 +88,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
                 appearance: None,
                 notifications: None,
                 mailbox_colors: None,
+                tags: None,
             }),
         )
         .await,
@@ -126,6 +128,7 @@ async fn patch_settings_can_update_cache_policy() {
                 appearance: None,
                 notifications: None,
                 mailbox_colors: None,
+                tags: None,
             }),
         )
         .await,
@@ -176,6 +179,7 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
                 appearance: None,
                 notifications: None,
                 mailbox_colors: None,
+                tags: None,
             }),
         )
         .await,
@@ -202,9 +206,9 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
     let error = patch_settings(
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
-                force_backfill: false,
-                smart_mailbox_order: None,
-                account_order: None,
+            force_backfill: false,
+            smart_mailbox_order: None,
+            account_order: None,
             default_account_id: Some(Some("missing".to_string())),
             cache_policy: None,
             automation_rules: None,
@@ -212,6 +216,7 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
             appearance: None,
             notifications: None,
             mailbox_colors: None,
+            tags: None,
         }),
     )
     .await
@@ -246,9 +251,9 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
     let error = patch_settings(
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
-                force_backfill: false,
-                smart_mailbox_order: None,
-                account_order: None,
+            force_backfill: false,
+            smart_mailbox_order: None,
+            account_order: None,
             default_account_id: None,
             cache_policy: None,
             automation_rules: Some(vec![invalid_rule]),
@@ -256,6 +261,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
             appearance: None,
             notifications: None,
             mailbox_colors: None,
+            tags: None,
         }),
     )
     .await
@@ -301,6 +307,7 @@ async fn patch_settings_persists_appearance_to_app_toml() {
                 automation_drafts: None,
                 notifications: None,
                 mailbox_colors: None,
+                tags: None,
                 appearance: Some(Appearance {
                     mode: Some(ThemeMode::Dark),
                     theme: Some("glass".to_string()),
@@ -383,6 +390,7 @@ async fn patch_settings_persists_mailbox_colors_to_app_toml() {
                     mailbox_id: MailboxId::from("INBOX"),
                     hue: 200,
                 }]),
+                tags: None,
             }),
         )
         .await,
@@ -399,4 +407,45 @@ async fn patch_settings_persists_mailbox_colors_to_app_toml() {
         Some("INBOX"),
     );
     assert_eq!(app_toml["mailbox_colors"][0]["hue"].as_integer(), Some(200),);
+}
+
+#[tokio::test]
+async fn patch_settings_persists_tag_appearance_to_app_toml() {
+    let harness = SettingsHarness::new();
+
+    let Json(settings) = expect_settings_ok(
+        patch_settings(
+            State(harness.state.clone()),
+            Json(PatchSettingsRequest {
+                force_backfill: false,
+                smart_mailbox_order: None,
+                account_order: None,
+                default_account_id: None,
+                cache_policy: None,
+                automation_rules: None,
+                automation_drafts: None,
+                appearance: None,
+                notifications: None,
+                mailbox_colors: None,
+                tags: Some(vec![TagAppearance {
+                    name: "work".to_string(),
+                    fg: Some("#1f2937".to_string()),
+                    bg: Some("#dbeafe".to_string()),
+                    icon: Some("briefcase".to_string()),
+                }]),
+            }),
+        )
+        .await,
+    );
+
+    assert_eq!(settings.tags.len(), 1);
+    assert_eq!(settings.tags[0].name, "work");
+    assert_eq!(settings.tags[0].icon.as_deref(), Some("briefcase"));
+
+    // The TOML file is the source of truth: a `[[tags]]` array table. Absent
+    // optional fields are omitted (skip_serializing_if).
+    let app_toml = harness.app_toml();
+    assert_eq!(app_toml["tags"][0]["name"].as_str(), Some("work"));
+    assert_eq!(app_toml["tags"][0]["bg"].as_str(), Some("#dbeafe"));
+    assert_eq!(app_toml["tags"][0]["icon"].as_str(), Some("briefcase"));
 }
