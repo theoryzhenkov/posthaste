@@ -7,6 +7,4 @@ time: '09:05'
 color: violet
 ---
 
-Posthaste's wizard provides a _magical_ installation experience. When you download Posthaste, you are downloading a tiny orchestration binary that will let you configure what exact experience do you want to have.
-
-For most people, that will be a bundled desktop app, but Posthaste can separate its runtime from the client — allowing you to host a runtime on a server and share across different clients.
+Posthaste can be deployed in a variety of self-hosted configurations, allowing multiple clients to talk to the same runtime or putting runtime on a near node separate from remote backend. Posthaste's wizard is a CLI utility software that assists with distributed Posthaste deployment. It provides a _magical_ installation experience: when you download the Wizard, you are downloading a tiny orchestration binary that will let you configure the exact experience you want to have with Posthaste.
