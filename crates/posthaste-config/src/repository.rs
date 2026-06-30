@@ -80,6 +80,8 @@ impl TomlConfigRepository {
             appearance: Default::default(),
             notifications: Default::default(),
             mailbox_colors: Vec::new(),
+            smart_mailbox_order: Vec::new(),
+            account_order: Vec::new(),
             link: Default::default(),
         };
         write_app_toml(&self.config_root, &app)?;

@@ -11,8 +11,6 @@ use super::*;
 pub struct SmartMailboxToml {
     pub id: String,
     pub name: String,
-    #[serde(default)]
-    pub position: i64,
     #[serde(default = "default_user_kind")]
     pub kind: SmartMailboxKindToml,
     pub default_key: Option<String>,

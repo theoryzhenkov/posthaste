@@ -27,6 +27,17 @@ export const KNOWN_MAILBOX_ROLES = [
   MAILBOX_ROLES.Snooze,
 ] as const satisfies readonly KnownMailboxRole[]
 
+/** Roles a user can assign to a smart mailbox — the provider roles, excluding
+ *  the system-managed `snooze`. Mirrors the backend's accepted set. */
+export const ASSIGNABLE_MAILBOX_ROLES = [
+  MAILBOX_ROLES.Inbox,
+  MAILBOX_ROLES.Archive,
+  MAILBOX_ROLES.Drafts,
+  MAILBOX_ROLES.Sent,
+  MAILBOX_ROLES.Junk,
+  MAILBOX_ROLES.Trash,
+] as const satisfies readonly KnownMailboxRole[]
+
 /** The `defaultKey` of the built-in All Mail smart mailbox (empty rule,
  *  matches every message). Shared so the predicate resolver + any presenter
  *  agree on the single key. */

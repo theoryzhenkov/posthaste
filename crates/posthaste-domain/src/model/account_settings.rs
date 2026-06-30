@@ -31,6 +31,21 @@ pub struct AppSettings {
     /// @spec docs/eph/RFC-L2-configuration-matrix
     #[serde(default)]
     pub mailbox_colors: Vec<MailboxColor>,
+    /// User's explicit sidebar arrangement of smart mailboxes (by id). Acts as
+    /// an override: ids listed here come first, in this order; any smart mailbox
+    /// absent from the list falls back to the canonical default order (built-ins
+    /// first) then creation order. Stale ids are ignored. Pure presentation.
+    ///
+    /// @spec docs/L1-accounts#sidebar-ordering
+    #[serde(default)]
+    pub smart_mailbox_order: Vec<SmartMailboxId>,
+    /// User's explicit sidebar arrangement of accounts (by id). Same override
+    /// semantics as [`smart_mailbox_order`](Self::smart_mailbox_order); accounts
+    /// absent from the list fall back to name order.
+    ///
+    /// @spec docs/L1-accounts#sidebar-ordering
+    #[serde(default)]
+    pub account_order: Vec<AccountId>,
 }
 
 /// A per-mailbox sidebar color override (presentation only). Overrides the

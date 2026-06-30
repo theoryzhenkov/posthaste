@@ -11,30 +11,23 @@ use posthaste_domain::{
 /// @spec docs/L1-accounts#smart-mailbox-defaults
 pub fn default_smart_mailboxes() -> Vec<SmartMailbox> {
     vec![
-        role_mailbox("default-inbox", "Inbox", 0, "inbox", "inbox"),
-        role_mailbox("default-archive", "Archive", 1, "archive", "archive"),
-        role_mailbox("default-drafts", "Drafts", 2, "drafts", "drafts"),
-        role_mailbox("default-sent", "Sent", 3, "sent", "sent"),
-        role_mailbox("default-junk", "Junk", 4, "junk", "junk"),
-        role_mailbox("default-trash", "Trash", 5, "trash", "trash"),
+        role_mailbox("default-inbox", "Inbox", "inbox", "inbox"),
+        role_mailbox("default-archive", "Archive", "archive", "archive"),
+        role_mailbox("default-drafts", "Drafts", "drafts", "drafts"),
+        role_mailbox("default-sent", "Sent", "sent", "sent"),
+        role_mailbox("default-junk", "Junk", "junk", "junk"),
+        role_mailbox("default-trash", "Trash", "trash", "trash"),
         all_mail_mailbox(),
     ]
 }
 
 /// Constructs a default smart mailbox that filters messages by a single
 /// `mailbox_role` condition.
-fn role_mailbox(
-    id: &str,
-    name: &str,
-    position: i64,
-    default_key: &str,
-    role: &str,
-) -> SmartMailbox {
+fn role_mailbox(id: &str, name: &str, default_key: &str, role: &str) -> SmartMailbox {
     let timestamp = RFC3339_EPOCH.to_string();
     SmartMailbox {
         id: SmartMailboxId::from(id),
         name: name.to_string(),
-        position,
         kind: SmartMailboxKind::Default,
         default_key: Some(default_key.to_string()),
         role: Some(role.to_string()),
@@ -63,7 +56,6 @@ fn all_mail_mailbox() -> SmartMailbox {
     SmartMailbox {
         id: SmartMailboxId::from("default-all-mail"),
         name: "All Mail".to_string(),
-        position: 6,
         kind: SmartMailboxKind::Default,
         default_key: Some("all-mail".to_string()),
         role: None,

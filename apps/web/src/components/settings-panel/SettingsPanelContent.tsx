@@ -56,10 +56,6 @@ interface SettingsPanelContentProps {
   onCreateMailbox: () => void
   onDefaultAccountChange: (accountId: string | null) => void
   onDeletedSmartMailbox: (mailboxId: string) => Promise<void>
-  onReorderSmartMailbox: (
-    mailbox: SmartMailboxSummary,
-    position: number,
-  ) => void
   onResetSmartMailboxes: () => void
   onSavedAccount: (account: AccountOverview) => Promise<void>
   onSavedSmartMailbox: (mailbox: SmartMailbox) => Promise<void>
@@ -96,7 +92,6 @@ export function SettingsPanelContent({
   onCreateMailbox,
   onDefaultAccountChange,
   onDeletedSmartMailbox,
-  onReorderSmartMailbox,
   onResetSmartMailboxes,
   onSavedAccount,
   onSavedSmartMailbox,
@@ -193,7 +188,6 @@ export function SettingsPanelContent({
             onBackToMailboxes={onBackToMailboxes}
             onCreateMailbox={onCreateMailbox}
             onResetDefaults={onResetSmartMailboxes}
-            onReorderMailbox={onReorderSmartMailbox}
             onSaved={onSavedSmartMailbox}
             onAutomationSettingsSaved={onAutomationSettingsSaved}
             onDeleted={onDeletedSmartMailbox}

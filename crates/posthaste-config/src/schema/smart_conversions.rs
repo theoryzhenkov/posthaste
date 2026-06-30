@@ -9,7 +9,6 @@ impl SmartMailboxToml {
         Ok(SmartMailbox {
             id: SmartMailboxId::from(self.id.as_str()),
             name: self.name.clone(),
-            position: self.position,
             kind: self.kind.to_domain(),
             default_key: self.default_key.clone(),
             role: self.role.clone(),
@@ -36,7 +35,6 @@ impl SmartMailboxToml {
         Self {
             id: mailbox.id.to_string(),
             name: mailbox.name.clone(),
-            position: mailbox.position,
             kind: SmartMailboxKindToml::from_domain(&mailbox.kind),
             default_key: mailbox.default_key.clone(),
             role: mailbox.role.clone(),

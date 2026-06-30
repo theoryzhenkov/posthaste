@@ -10,10 +10,9 @@ impl AccountMutationService {
         let smart_mailbox = SmartMailbox {
             id: Id::generate().into(),
             name: request.name,
-            position: request.position.unwrap_or(0),
             kind: SmartMailboxKind::User,
             default_key: None,
-            role: None,
+            role: normalize_smart_mailbox_role(request.role)?,
             parent_id: None,
             rule: request.rule,
             created_at: timestamp.clone(),
@@ -43,8 +42,8 @@ impl AccountMutationService {
         if let Some(name) = request.name {
             smart_mailbox.name = name;
         }
-        if let Some(position) = request.position {
-            smart_mailbox.position = position;
+        if let Some(role) = request.role {
+            smart_mailbox.role = normalize_smart_mailbox_role(Some(role))?;
         }
         if let Some(rule) = request.rule {
             smart_mailbox.rule = rule;
@@ -97,5 +96,28 @@ impl AccountMutationService {
             ),
         )?;
         Ok(self.reads.list_smart_mailboxes()?)
+    }
+}
+
+/// Validate an optional smart-mailbox view role: trims, treats empty as cleared
+/// (`None`), and accepts only the user-assignable mailbox roles — everything the
+/// vocab knows except the system-managed `snooze`. Returns the canonical role
+/// string so storage is normalized regardless of input casing/whitespace.
+fn normalize_smart_mailbox_role(
+    role: Option<String>,
+) -> Result<Option<String>, RuntimeError> {
+    let Some(role) = role else {
+        return Ok(None);
+    };
+    let trimmed = role.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    match posthaste_domain::MailboxRole::parse(trimmed) {
+        Some(posthaste_domain::MailboxRole::Snooze) | None => Err(RuntimeError::new(
+            RuntimeErrorCode::InvalidMutation,
+            format!("'{trimmed}' is not an assignable smart mailbox role"),
+        )),
+        Some(parsed) => Ok(Some(parsed.as_str().to_string())),
     }
 }
