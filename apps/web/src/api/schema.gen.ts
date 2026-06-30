@@ -2057,6 +2057,11 @@ export interface components {
             automationRules?: components["schemas"]["AutomationRule"][] | null;
             cachePolicy?: null | components["schemas"]["CachePolicy"];
             defaultAccountId?: string | null;
+            /**
+             * @description When true, re-run the current backfill rules against existing messages
+             *     after persisting (on-demand "backfill now").
+             */
+            forceBackfill?: boolean;
             mailboxColors?: components["schemas"]["MailboxColor"][] | null;
             notifications?: null | components["schemas"]["Notifications"];
         };

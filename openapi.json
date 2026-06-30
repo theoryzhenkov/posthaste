@@ -6353,6 +6353,10 @@
               "null"
             ]
           },
+          "forceBackfill": {
+            "type": "boolean",
+            "description": "When true, re-run the current backfill rules against existing messages\nafter persisting (on-demand \"backfill now\")."
+          },
           "mailboxColors": {
             "type": [
               "array",

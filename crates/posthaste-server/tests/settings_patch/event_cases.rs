@@ -26,6 +26,7 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                force_backfill: false,
                 default_account_id: Some(Some("primary".to_string())),
                 automation_rules: None,
                 automation_drafts: None,
