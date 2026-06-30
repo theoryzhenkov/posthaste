@@ -25,7 +25,19 @@ impl MailService {
         gateway: &dyn MailGateway,
     ) -> Result<Identity, ServiceError> {
         match gateway.fetch_identity(account_id).await {
-            Ok(identity) => Ok(identity),
+            Ok(mut identity) => {
+                // The locally configured display name (`full_name`) overrides the
+                // provider's, which is often the bare account username (e.g.
+                // "theor"). Only the name is overridden: the server `id` and
+                // `email` are kept so `EmailSubmission/set`'s `identityId`
+                // stays valid and delivery uses the real address.
+                //
+                // @spec docs/L1-compose#sender-selection
+                if let Some(full_name) = self.configured_display_name(account_id)? {
+                    identity.name = full_name;
+                }
+                Ok(identity)
+            }
             Err(error) => match self.configured_sender_identity(account_id)? {
                 Some(identity) => Ok(identity),
                 None => Err(error.into()),
@@ -72,6 +84,23 @@ impl MailService {
             name,
             email,
         }))
+    }
+
+    /// The account's configured display name (`full_name`), when set and
+    /// non-empty. Used to override the provider identity's name.
+    fn configured_display_name(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<String>, ServiceError> {
+        let Some(account) = self.config.get_source(account_id)? else {
+            return Ok(None);
+        };
+        Ok(account
+            .full_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string))
     }
 
     /// Fetch reply/forward metadata for composing a response.

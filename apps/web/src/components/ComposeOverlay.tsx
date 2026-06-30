@@ -35,6 +35,10 @@ export function ComposeOverlay({
 }: ComposeOverlayProps) {
   const queries = useComposeQueries({ intent })
   const forwardAttachments = useForwardAttachments({ intent })
+  const signature =
+    queries.accountsQuery.data?.find(
+      (account) => account.id === intent.sourceId,
+    )?.signature ?? null
   const formState = useComposeFormState({
     composeKey: queries.composeKey,
     draftSeed: queries.draftSeed,
@@ -43,6 +47,7 @@ export function ComposeOverlay({
     intentKind: intent.kind,
     isMessageBasedCompose: queries.isMessageBasedCompose,
     replyContext: queries.replyContextQuery.data,
+    signature,
   })
   const displayedFromOptions = useDisplayedFromOptions({
     formFrom: formState.form.from,
