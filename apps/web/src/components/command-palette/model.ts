@@ -23,6 +23,28 @@ export function isItemRow(
   return row.kind === 'item'
 }
 
+/** What pressing Enter in the palette should do, given the current state. */
+export type PaletteEnterAction = 'apply' | 'run' | 'navigate' | 'none'
+
+/**
+ * Resolve the Enter key:
+ * - Shift+Enter applies the typed query as the app-wide mail filter.
+ * - Enter on a highlighted item runs it.
+ * - Enter with nothing highlighted navigates into the in-pane results (selects
+ *   the first result) rather than applying an app-wide filter.
+ * - Enter with no results is a no-op.
+ */
+export function resolvePaletteEnter(input: {
+  shiftKey: boolean
+  hasHighlightedItem: boolean
+  hasItems: boolean
+}): PaletteEnterAction {
+  if (input.shiftKey) return 'apply'
+  if (input.hasHighlightedItem) return 'run'
+  if (input.hasItems) return 'navigate'
+  return 'none'
+}
+
 export function currentSearchableServerQuery(query: string): string {
   const validation = validateSearchQuery(query)
   if (validation.state !== 'valid') return ''
