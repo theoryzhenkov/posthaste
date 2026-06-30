@@ -9,6 +9,7 @@ import { loadEntityStoreHandleFactory } from './replica/handle'
 import { defaultOutboxStore } from './replica/outboxStore'
 import { markEntityStoreActive } from './entityStoreState'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
+import { createWorkerStorePort } from './replica/workerStorePort'
 import type { RuntimeAdapter } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
@@ -139,10 +140,16 @@ let entityStoreInstall: Promise<void> | undefined
  */
 export function installEntityStoreAdapter(): Promise<void> {
   entityStoreInstall ??= (async () => {
-    const makeHandle = await loadEntityStoreHandleFactory()
+    // Worker mode (off by default) runs the WASM store off the UI thread; until
+    // it is validated in the Tauri webviews the in-process store stays default,
+    // so set `VITE_REPLICA_WORKER=true` to opt in.
+    const useWorker = import.meta.env?.VITE_REPLICA_WORKER === 'true'
+    const storeDeps = useWorker
+      ? { makeStore: createWorkerStorePort }
+      : { makeHandle: await loadEntityStoreHandleFactory() }
     activeRuntimeAdapter = createEntityStoreAdapter({
       base: activeRuntimeAdapter,
-      makeHandle,
+      ...storeDeps,
       outbox: defaultOutboxStore(),
     })
     markEntityStoreActive()
@@ -151,8 +158,9 @@ export function installEntityStoreAdapter(): Promise<void> {
         event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
         entityStore: true,
         adapterMode: injectedRuntimeMode() ?? 'loopback',
+        store: useWorker ? 'worker' : 'in-process',
       },
-      'entity-store adapter installed and active',
+      `entity-store adapter installed (${useWorker ? 'worker' : 'in-process'} store)`,
     )
   })()
   return entityStoreInstall
