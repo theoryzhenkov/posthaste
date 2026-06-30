@@ -79,6 +79,31 @@ impl AutomationBackfillStore for DatabaseStore {
         let connection = self.read_connection()?;
         fetch_automation_backfill_job(&connection, account_id, rule_fingerprint)
     }
+
+    fn reset_automation_backfill_job(
+        &self,
+        account_id: &AccountId,
+        rule_fingerprint: &str,
+    ) -> Result<AutomationBackfillJob, StoreError> {
+        self.write_transaction(|tx| {
+            let timestamp = now_iso8601()?;
+            tx.execute(
+                "INSERT INTO automation_backfill_job (
+                    account_id, rule_fingerprint, status, attempts, last_error, queued_at, updated_at
+                 )
+                 VALUES (?1, ?2, 'pending', 0, NULL, ?3, ?3)
+                 ON CONFLICT(account_id, rule_fingerprint) DO UPDATE SET
+                    status = 'pending',
+                    attempts = 0,
+                    last_error = NULL,
+                    updated_at = ?3",
+                params![account_id.as_str(), rule_fingerprint, timestamp],
+            )
+            .map_err(sql_to_store_error)?;
+            fetch_automation_backfill_job(tx, account_id, rule_fingerprint)?
+                .ok_or_else(|| StoreError::Failure("automation backfill job was not reset".to_string()))
+        })
+    }
 }
 
 fn fetch_automation_backfill_job(

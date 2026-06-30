@@ -33,6 +33,8 @@ export function AutomationRuleEditor({
   onSave,
   onChange,
   onRemove,
+  onBackfill,
+  backfillNoticeFor,
 }: {
   draft: AutomationRuleDraft
   state: AutomationRuleState
@@ -45,6 +47,13 @@ export function AutomationRuleEditor({
   onSave: () => void
   onChange: (patch: Partial<AutomationRuleDraft>) => void
   onRemove: () => void
+  onBackfill: () => void
+  /**
+   * Rule id whose backfill request was accepted by the server, or null. The
+   * list owns the mutation, so this reflects actual success (not the click) and
+   * is keyed by rule id so the note only shows for the relevant rule.
+   */
+  backfillNoticeFor: string | null
 }) {
   const previewKey = JSON.stringify(previewCondition)
   const previewMutation = useMutation({
@@ -88,34 +97,63 @@ export function AutomationRuleEditor({
         Actions
       </SettingsBackButton>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-[14px] font-semibold text-foreground">
-            {draft.name.trim() || 'Untitled rule'}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-[14px] font-semibold text-foreground">
+              {draft.name.trim() || 'Untitled rule'}
+            </p>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              {saveStatus}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={onSave}
+              disabled={savePending}
+              className="bg-brand-coral text-white hover:bg-brand-coral/90"
+            >
+              {savePending ? 'Saving' : 'Save action'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="rounded-md border-border bg-background"
+              onClick={() => {
+                // Backfilling makes this a backfill rule; keep the checkbox in
+                // sync with what gets persisted.
+                if (!draft.backfill) {
+                  onChange({ backfill: true })
+                }
+                onBackfill()
+              }}
+              disabled={!isComplete || savePending}
+              title="Apply this rule's actions to all existing matching messages"
+            >
+              Backfill
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2 text-muted-foreground hover:text-destructive"
+              onClick={onRemove}
+              disabled={savePending}
+            >
+              Remove
+            </Button>
+          </div>
+        </div>
+
+        {backfillNoticeFor === draft.id && (
+          <p className="text-[12px] text-muted-foreground">
+            Backfill started — this rule is being applied to existing matching
+            messages in the background.
           </p>
-          <p className="mt-1 text-[12px] text-muted-foreground">{saveStatus}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            onClick={onSave}
-            disabled={savePending}
-            className="bg-brand-coral text-white hover:bg-brand-coral/90"
-          >
-            {savePending ? 'Saving' : 'Save action'}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-8 px-2 text-muted-foreground hover:text-destructive"
-            onClick={onRemove}
-            disabled={savePending}
-          >
-            Remove
-          </Button>
-        </div>
+        )}
       </div>
 
       <RuleEditorSection title="Basics">

@@ -14,6 +14,10 @@ pub struct PatchSettingsRequest {
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
     pub mailbox_colors: Option<Vec<MailboxColor>>,
+    /// When true, re-run the current backfill rules against existing messages
+    /// after persisting (on-demand "backfill now").
+    #[serde(default)]
+    pub force_backfill: bool,
 }
 
 /// Request body for `POST /v1/automation-rules:preview`.
@@ -112,6 +116,7 @@ pub async fn patch_settings(
                 appearance: request.appearance,
                 notifications: request.notifications,
                 mailbox_colors: request.mailbox_colors,
+                force_backfill: request.force_backfill,
             },
         )
         .await

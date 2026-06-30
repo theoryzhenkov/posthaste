@@ -19,6 +19,7 @@ import type {
   OkResponse,
   Operation,
   PatchMailboxInput,
+  PatchSettingsInput,
   ReadRequest,
   ReplyContext,
   ReadResponse,
@@ -440,7 +441,7 @@ export interface RuntimeAdapter {
     mailboxId: string,
     input: PatchMailboxInput,
   ): Promise<Mailbox[]>
-  patchSettings(input: Partial<AppSettings>): Promise<AppSettings>
+  patchSettings(input: PatchSettingsInput): Promise<AppSettings>
   previewAutomationRule(
     input: AutomationRulePreviewInput,
   ): Promise<AutomationRulePreviewResponse>

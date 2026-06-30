@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AutomationRule,
   Mailbox,
+  PatchSettingsInput,
   SmartMailboxRule,
 } from '../../../api/types'
 import type { AutomationRuleDraft } from '../../../automationRules'
@@ -49,8 +50,13 @@ export function LinkedAutomationRuleFields({
   const [items, setItems] = useState<AutomationRuleItem[]>(() =>
     itemsFromSettings(settings),
   )
+  // Rule id whose backfill request the server accepted; drives the editor's
+  // confirmation note so it reflects success rather than the click.
+  const [backfillNoticeFor, setBackfillNoticeFor] = useState<string | null>(
+    null,
+  )
   const persistMutation = useMutation({
-    mutationFn: (input: Partial<AppSettings>) =>
+    mutationFn: (input: PatchSettingsInput) =>
       runtimeMutations.settings.patch(input),
     onSuccess: async (savedSettings) => {
       setItems(itemsFromSettings(savedSettings))
@@ -59,6 +65,7 @@ export function LinkedAutomationRuleFields({
   })
 
   function persistItem(draft: AutomationRuleDraft) {
+    setBackfillNoticeFor(null)
     const rule = draftToRule(draft)
     const complete = isDraftComplete(draft)
     persistMutation.mutate({
@@ -71,7 +78,31 @@ export function LinkedAutomationRuleFields({
     })
   }
 
+  // "Backfill now": ensure this rule is a complete, backfill-enabled active
+  // rule, then ask the backend to re-apply the current backfill rules to
+  // existing messages (idempotent). A no-op for incomplete drafts.
+  function backfillItem(draft: AutomationRuleDraft) {
+    if (!isDraftComplete(draft)) {
+      return
+    }
+    const rule = { ...draftToRule(draft), backfill: true }
+    persistMutation.mutate(
+      {
+        automationRules: upsertRule(settings.automationRules ?? [], rule),
+        automationDrafts: removeRule(settings.automationDrafts ?? [], rule.id),
+        forceBackfill: true,
+      },
+      {
+        // Only confirm once the server accepts the request; on failure the
+        // shared error banner surfaces the message instead.
+        onSuccess: () => setBackfillNoticeFor(rule.id),
+        onError: () => setBackfillNoticeFor(null),
+      },
+    )
+  }
+
   function removeItem(draft: AutomationRuleDraft) {
+    setBackfillNoticeFor(null)
     const ruleId = draft.id.trim()
     setItems((current) =>
       current.filter((item) => item.draft.id.trim() !== ruleId),
@@ -118,6 +149,8 @@ export function LinkedAutomationRuleFields({
       }
       onSaveItem={persistItem}
       onRemoveItem={removeItem}
+      onBackfillItem={backfillItem}
+      backfillNoticeFor={backfillNoticeFor}
       previewConditionForDraft={previewConditionForDraft}
     />
   )

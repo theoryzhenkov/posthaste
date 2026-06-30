@@ -108,6 +108,12 @@ impl RuleHarness {
         (outcome.ran, outcome.has_more)
     }
 
+    pub(super) fn reset_backfill(&self) {
+        self.service
+            .reset_automation_backfills_for_current_rules()
+            .expect("backfill reset should succeed");
+    }
+
     pub(super) fn current_backfill_status(
         &self,
         account_id: &str,

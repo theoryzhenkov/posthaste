@@ -231,4 +231,14 @@ pub trait AutomationBackfillStore: Send + Sync {
         account_id: &AccountId,
         rule_fingerprint: &str,
     ) -> Result<Option<AutomationBackfillJob>, StoreError>;
+
+    /// Force a job back to pending (creating it if absent), so an on-demand
+    /// backfill re-runs even when the same rules previously completed.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    fn reset_automation_backfill_job(
+        &self,
+        account_id: &AccountId,
+        rule_fingerprint: &str,
+    ) -> Result<AutomationBackfillJob, StoreError>;
 }

@@ -103,7 +103,14 @@ impl AccountMutationService {
                 }),
             ),
         )?;
-        if request.automation_rules.is_some() {
+        // On-demand "backfill now" resets the current ruleset's job to pending so
+        // the supervisor re-applies it even when nothing in the fingerprint
+        // changed (actions are idempotent). Reset creates the job if absent, so
+        // it fully supersedes the ensure-on-rules-change path below.
+        if request.force_backfill {
+            self.service
+                .reset_automation_backfills_for_current_rules()?;
+        } else if request.automation_rules.is_some() {
             self.service
                 .ensure_automation_backfills_for_current_rules()?;
         }

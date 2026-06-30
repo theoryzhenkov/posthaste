@@ -27,6 +27,33 @@ impl MailService {
             .collect()
     }
 
+    /// Force the current backfill rules to re-run for every enabled account.
+    ///
+    /// Unlike `ensure_*`, this resets completed jobs back to pending so an
+    /// on-demand "backfill now" re-applies the rules even when nothing in the
+    /// fingerprint changed. Returns an empty list when no rule is
+    /// backfill-eligible (enabled + backfill).
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    pub fn reset_automation_backfills_for_current_rules(
+        &self,
+    ) -> Result<Vec<AutomationBackfillJob>, ServiceError> {
+        let settings = self.config.get_app_settings()?;
+        let Some(rule_fingerprint) = automation_backfill_fingerprint(&settings)? else {
+            return Ok(Vec::new());
+        };
+        self.config
+            .list_sources()?
+            .into_iter()
+            .filter(|source| source.enabled)
+            .map(|source| {
+                self.automation_backfills
+                    .reset_automation_backfill_job(&source.id, &rule_fingerprint)
+                    .map_err(Into::into)
+            })
+            .collect()
+    }
+
     /// Return the current-rules backfill job for an account, if applicable.
     ///
     /// @spec docs/L1-sync#automation-actions
