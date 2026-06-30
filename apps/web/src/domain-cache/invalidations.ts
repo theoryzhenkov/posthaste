@@ -145,6 +145,11 @@ export function invalidateAccountReadModels(
     void queryClient.invalidateQueries({
       queryKey: queryKeys.account(accountId),
     })
+    // The compose sender identity derives from account config (`full_name`),
+    // so an account edit must refresh it or compose keeps the stale name.
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.identity(accountId),
+    })
     if (!skipStoreOwned) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.mailboxes(accountId),

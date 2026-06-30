@@ -7,6 +7,9 @@ pub(super) struct MutationGateway {
     /// reconciliation set, exercising the progressive-delivery service path.
     pub(super) stream: Option<(Vec<SyncBatch>, crate::SyncReconciliation)>,
     pub(super) fetch_body_result: Mutex<Option<Result<FetchedBody, GatewayError>>>,
+    /// Result returned by `fetch_identity`; `None` falls back to an error (the
+    /// default unused stub), preserving the pre-change test behavior.
+    pub(super) fetch_identity_result: Mutex<Option<Result<Identity, GatewayError>>>,
     pub(super) fetch_attempts: Mutex<Vec<MessageId>>,
     /// Results returned by `save_draft`, popped front-first; empty falls back to
     /// a generated provider id.
@@ -44,6 +47,7 @@ impl MutationGateway {
             batch: None,
             stream: None,
             fetch_body_result: Mutex::new(None),
+            fetch_identity_result: Mutex::new(None),
             fetch_attempts: Mutex::new(Vec::new()),
             save_draft_results: Mutex::new(Vec::new()),
             save_draft_calls: Mutex::new(Vec::new()),
@@ -65,6 +69,13 @@ impl MutationGateway {
     pub(super) fn with_fetch_body_result(result: Result<FetchedBody, GatewayError>) -> Self {
         Self {
             fetch_body_result: Mutex::new(Some(result)),
+            ..Self::with_revision(1)
+        }
+    }
+
+    pub(super) fn with_identity(identity: Identity) -> Self {
+        Self {
+            fetch_identity_result: Mutex::new(Some(Ok(identity))),
             ..Self::with_revision(1)
         }
     }
@@ -208,7 +219,11 @@ impl MailGateway for MutationGateway {
     }
 
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
-        Err(GatewayError::Rejected("unused".to_string()))
+        self.fetch_identity_result
+            .lock()
+            .expect("fetch identity result lock poisoned")
+            .take()
+            .unwrap_or_else(|| Err(GatewayError::Rejected("unused".to_string())))
     }
 
     async fn fetch_reply_context(

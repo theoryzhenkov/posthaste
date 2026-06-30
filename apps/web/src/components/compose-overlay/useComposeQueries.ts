@@ -16,7 +16,7 @@ import {
 
 export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   const identityQuery = useQuery({
-    queryKey: ['identity', intent.sourceId],
+    queryKey: queryKeys.identity(intent.sourceId),
     queryFn: () => runtimeViews.compose.identity(intent.sourceId),
   })
   const accountsQuery = useQuery({
