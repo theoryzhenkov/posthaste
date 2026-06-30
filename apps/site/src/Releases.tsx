@@ -3,34 +3,13 @@ import { useSyncExternalStore } from 'react'
 import type {
   HomeContent,
   ReleaseAsset,
+  ReleaseChannel,
   ReleaseEntry,
   ReleaseOs,
 } from './content/types'
 import { FooterSection, InstallHeader } from './SiteChrome'
 
-/** App screenshots for the gallery, captured from a seeded demo account. */
-const SCREENSHOTS = [
-  {
-    src: '/screenshots/conversations.png',
-    caption: 'Threaded conversation view',
-    alt: 'Posthaste inbox showing a threaded conversation with nested replies',
-  },
-  {
-    src: '/screenshots/reader.png',
-    caption: 'Reading a thread',
-    alt: 'Posthaste reading pane with an open email thread',
-  },
-  {
-    src: '/screenshots/compose.png',
-    caption: 'Compose',
-    alt: 'Posthaste compose window with a draft reply',
-  },
-  {
-    src: '/screenshots/command-palette.png',
-    caption: 'Command palette',
-    alt: 'Posthaste command palette open over the inbox',
-  },
-]
+const REPO = 'https://github.com/theoryzhenkov/posthaste'
 
 const OS_ORDER: ReleaseOs[] = ['macOS', 'Windows', 'Linux']
 
@@ -40,7 +19,7 @@ const OS_ICON: Record<ReleaseOs, typeof Apple> = {
   Linux: Terminal,
 }
 
-/** Human label for an installer kind. */
+/** Human label for a desktop installer kind. */
 const KIND_LABEL: Record<string, string> = {
   dmg: 'Disk image (.dmg)',
   exe: 'Installer (.exe)',
@@ -49,6 +28,11 @@ const KIND_LABEL: Record<string, string> = {
   deb: 'Debian / Ubuntu (.deb)',
   rpm: 'Fedora / RHEL (.rpm)',
 }
+
+const CHANNELS: { id: ReleaseChannel; label: string }[] = [
+  { id: 'stable', label: 'Stable' },
+  { id: 'nightly', label: 'Nightly' },
+]
 
 function formatSize(bytes: number): string {
   if (!bytes) return ''
@@ -65,6 +49,15 @@ function formatDate(iso: string): string {
     day: 'numeric',
     timeZone: 'UTC',
   })
+}
+
+/** Short, button-friendly label for a desktop installer. */
+function assetLabel(asset: ReleaseAsset): string {
+  return KIND_LABEL[asset.kind] ?? asset.kind
+}
+
+function tagUrl(tag: string): string {
+  return `${REPO}/releases/tag/${tag}`
 }
 
 function groupByOs(assets: ReleaseAsset[]): [ReleaseOs, ReleaseAsset[]][] {
@@ -88,8 +81,8 @@ const noopSubscribe = () => () => {}
 
 /**
  * Resolve the visitor's OS only after hydration: the server snapshot is null
- * (so SSR markup highlights nothing and matches first client render), then the
- * client snapshot detects the platform.
+ * (so SSR markup highlights nothing and matches the first client render), then
+ * the client snapshot detects the platform.
  */
 function useDetectedOs(): ReleaseOs | null {
   return useSyncExternalStore(
@@ -97,6 +90,48 @@ function useDetectedOs(): ReleaseOs | null {
     () => detectOs(),
     () => null,
   )
+}
+
+const CHANNEL_EVENT = 'posthaste:channelchange'
+
+function channelSnapshot(): ReleaseChannel {
+  if (typeof window === 'undefined') return 'stable'
+  return new URLSearchParams(window.location.search).get('channel') ===
+    'nightly'
+    ? 'nightly'
+    : 'stable'
+}
+
+function subscribeChannel(onChange: () => void): () => void {
+  window.addEventListener('popstate', onChange)
+  window.addEventListener(CHANNEL_EVENT, onChange)
+  return () => {
+    window.removeEventListener('popstate', onChange)
+    window.removeEventListener(CHANNEL_EVENT, onChange)
+  }
+}
+
+/**
+ * Selected release channel, held in the URL (`?channel=nightly`) so it's
+ * shareable and survives reloads. The store reads from the URL — server and
+ * first client render both resolve to stable, then the client adopts the URL.
+ */
+function useChannel(): [ReleaseChannel, (channel: ReleaseChannel) => void] {
+  const channel = useSyncExternalStore<ReleaseChannel>(
+    subscribeChannel,
+    channelSnapshot,
+    () => 'stable',
+  )
+
+  const select = (next: ReleaseChannel) => {
+    const url = new URL(window.location.href)
+    if (next === 'stable') url.searchParams.delete('channel')
+    else url.searchParams.set('channel', next)
+    window.history.replaceState({}, '', url)
+    window.dispatchEvent(new Event(CHANNEL_EVENT))
+  }
+
+  return [channel, select]
 }
 
 export function Releases({
@@ -107,7 +142,13 @@ export function Releases({
   footer: HomeContent['footer']
 }) {
   const detectedOs = useDetectedOs()
-  const latest = releases[0]
+  const [channel, setChannel] = useChannel()
+
+  const channelReleases = releases.filter((r) => r.channel === channel)
+  const latest = channelReleases[0]
+  const desktopAssets = latest
+    ? latest.assets.filter((a) => a.product === 'desktop')
+    : []
 
   return (
     <main className="site-shell">
@@ -115,37 +156,31 @@ export function Releases({
 
       <section className="releases-hero" aria-labelledby="releases-title">
         <h1 id="releases-title">
-          Try Posthaste{latest ? ` ${latest.version}` : ''}
+          Install Posthaste{latest ? ` ${latest.version}` : ''}
         </h1>
-        {latest ? (
-          <p className="releases-subtitle">
-            Released {formatDate(latest.date)} ·{' '}
-            <a
-              href={`https://github.com/theoryzhenkov/posthaste/releases/tag/${latest.tag}`}
-            >
-              {latest.tag}
-            </a>
-          </p>
-        ) : null}
 
-        {latest ? null : (
-          <div className="releases-empty">
-            <p>
-              No stable release yet. Beta builds for macOS, Windows, and Linux
-              ship on GitHub while we get there.
-            </p>
-            <a
-              className="releases-empty-link"
-              href="https://github.com/theoryzhenkov/posthaste/releases"
+        <div
+          className="channel-switch"
+          role="tablist"
+          aria-label="Release channel"
+        >
+          {CHANNELS.map((c) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={channel === c.id}
+              className={`channel-tab${channel === c.id ? ' active' : ''}`}
+              key={c.id}
+              onClick={() => setChannel(c.id)}
             >
-              Beta builds on GitHub →
-            </a>
-          </div>
-        )}
+              {c.label}
+            </button>
+          ))}
+        </div>
 
-        {latest ? (
+        {desktopAssets.length > 0 ? (
           <div className="download-grid">
-            {groupByOs(latest.assets).map(([os, assets]) => {
+            {groupByOs(desktopAssets).map(([os, assets]) => {
               const Icon = OS_ICON[os]
               const recommended = detectedOs === os
               return (
@@ -167,7 +202,7 @@ export function Releases({
                     {assets.map((asset) => (
                       <li key={asset.name}>
                         <a href={asset.url} download>
-                          <span>{KIND_LABEL[asset.kind] ?? asset.kind}</span>
+                          <span>{assetLabel(asset)}</span>
                           <span className="download-size">
                             {formatSize(asset.size)}
                           </span>
@@ -179,7 +214,32 @@ export function Releases({
               )
             })}
           </div>
-        ) : null}
+        ) : (
+          <div className="releases-empty">
+            {channel === 'stable' ? (
+              <>
+                <p>
+                  No stable release yet. Stable builds will land here once the
+                  first one ships.
+                </p>
+                <button
+                  type="button"
+                  className="releases-empty-link"
+                  onClick={() => setChannel('nightly')}
+                >
+                  Get the latest nightly →
+                </button>
+              </>
+            ) : (
+              <>
+                <p>No nightly build is available right now.</p>
+                <a className="releases-empty-link" href={`${REPO}/releases`}>
+                  Browse releases on GitHub →
+                </a>
+              </>
+            )}
+          </div>
+        )}
 
         {latest?.sha256sums || latest?.gpgKey ? (
           <p className="releases-verify">
@@ -193,36 +253,17 @@ export function Releases({
         ) : null}
       </section>
 
-      <section className="screenshots" aria-labelledby="screenshots-title">
-        <h2 id="screenshots-title">A look inside</h2>
-        <div className="screenshot-grid">
-          {SCREENSHOTS.map((shot) => (
-            <figure className="screenshot" key={shot.src}>
-              <img
-                src={shot.src}
-                alt={shot.alt}
-                width={1440}
-                height={900}
-                loading="lazy"
-                decoding="async"
-              />
-              <figcaption>{shot.caption}</figcaption>
-            </figure>
-          ))}
-        </div>
-      </section>
-
-      {releases.length > 0 ? (
+      {channelReleases.length > 0 ? (
         <section className="changelog" aria-labelledby="changelog-title">
           <h2 id="changelog-title">Changelog</h2>
           <ol className="changelog-list">
-            {releases.map((release) => (
+            {channelReleases.map((release) => (
               <li className="changelog-entry" key={release.version}>
                 <div className="changelog-meta">
                   <h3>
                     {release.version}
                     {release.prerelease ? (
-                      <span className="changelog-tag">pre-release</span>
+                      <span className="changelog-tag">nightly</span>
                     ) : null}
                   </h3>
                   <time dateTime={release.date}>
@@ -237,16 +278,21 @@ export function Releases({
                     />
                   ) : null}
                   <div className="changelog-downloads">
-                    {release.assets.map((asset) => (
-                      <a
-                        className="changelog-download"
-                        href={asset.url}
-                        download
-                        key={asset.name}
-                      >
-                        {asset.os} {asset.kind}
-                      </a>
-                    ))}
+                    {release.assets
+                      .filter((asset) => asset.product === 'desktop')
+                      .map((asset) => (
+                        <a
+                          className="changelog-download"
+                          href={asset.url}
+                          download
+                          key={asset.name}
+                        >
+                          {asset.os} · {assetLabel(asset)}
+                        </a>
+                      ))}
+                    <a className="changelog-source" href={tagUrl(release.tag)}>
+                      Release & all assets on GitHub →
+                    </a>
                   </div>
                 </div>
               </li>
