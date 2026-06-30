@@ -26,6 +26,12 @@ pub struct AppToml {
     pub notifications: Option<NotificationsToml>,
     #[serde(default, rename = "mailbox_colors")]
     pub mailbox_colors: Vec<MailboxColorToml>,
+    /// User's explicit sidebar arrangement (ids). Override lists; absent ids
+    /// fall back to the canonical/default order at read time.
+    #[serde(default)]
+    pub smart_mailbox_order: Vec<String>,
+    #[serde(default)]
+    pub account_order: Vec<String>,
     #[serde(default)]
     pub link: LinkToml,
 }
@@ -283,6 +289,16 @@ impl AppToml {
                 .iter()
                 .map(MailboxColorToml::to_mailbox_color)
                 .collect(),
+            smart_mailbox_order: self
+                .smart_mailbox_order
+                .iter()
+                .map(|id| SmartMailboxId::from(id.as_str()))
+                .collect(),
+            account_order: self
+                .account_order
+                .iter()
+                .map(|id| AccountId::from(id.as_str()))
+                .collect(),
         })
     }
 
@@ -323,6 +339,12 @@ impl AppToml {
                 .iter()
                 .map(MailboxColorToml::from_mailbox_color)
                 .collect(),
+            smart_mailbox_order: settings
+                .smart_mailbox_order
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
+            account_order: settings.account_order.iter().map(|id| id.to_string()).collect(),
             link: existing.link.clone(),
         }
     }

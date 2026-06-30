@@ -38,7 +38,6 @@ impl MailService {
             summaries.push(SmartMailboxSummary {
                 id: mailbox.id,
                 name: mailbox.name,
-                position: mailbox.position,
                 kind: mailbox.kind,
                 default_key: mailbox.default_key,
                 role: mailbox.role,

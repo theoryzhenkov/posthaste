@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react'
 
 import { useMailboxNavigationReadModels } from '../mailboxNavigationReadModels'
 import { sortSmartMailboxes } from './sidebar/model'
+import { useSidebarReorder } from './sidebar/useSidebarReorder'
 import {
   AccountsSection,
   SidebarError,
@@ -60,6 +61,7 @@ export function Sidebar({
 }: SidebarProps) {
   const { error, isLoading, refetchBootstrap, smartMailboxes, sources } =
     useMailboxNavigationReadModels()
+  const { reorderSmartMailboxes, reorderAccounts } = useSidebarReorder()
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false)
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
@@ -81,6 +83,7 @@ export function Sidebar({
               selectedView={selectedView}
               onOpenSmartMailboxSettings={onOpenSmartMailboxSettings}
               onSelectSmartMailbox={onSelectSmartMailbox}
+              onReorder={reorderSmartMailboxes}
               onToggle={() => setMailboxesCollapsed((prev) => !prev)}
             />
             <AccountsSection
@@ -90,6 +93,7 @@ export function Sidebar({
               onOpenAccountSettings={onOpenAccountSettings}
               onSelectSourceMailbox={onSelectSourceMailbox}
               onSyncSource={onSyncSource}
+              onReorder={reorderAccounts}
               onToggle={() => setSourcesCollapsed((prev) => !prev)}
             />
           </>

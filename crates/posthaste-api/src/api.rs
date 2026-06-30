@@ -144,7 +144,8 @@ pub struct HealthResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSmartMailboxRequest {
     pub name: String,
-    pub position: Option<i64>,
+    #[serde(default)]
+    pub role: Option<String>,
     pub rule: SmartMailboxRule,
 }
 
@@ -155,7 +156,10 @@ pub struct CreateSmartMailboxRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PatchSmartMailboxRequest {
     pub name: Option<String>,
-    pub position: Option<i64>,
+    /// Absent leaves the role unchanged; a known role sets it; an empty string
+    /// clears it.
+    #[serde(default)]
+    pub role: Option<String>,
     pub rule: Option<SmartMailboxRule>,
 }
 

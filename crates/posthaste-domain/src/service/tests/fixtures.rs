@@ -4,7 +4,6 @@ pub(super) fn sample_smart_mailbox() -> SmartMailbox {
     SmartMailbox {
         id: SmartMailboxId::from("default-inbox"),
         name: "Inbox".to_string(),
-        position: 0,
         kind: SmartMailboxKind::Default,
         default_key: Some("inbox".to_string()),
         role: None,

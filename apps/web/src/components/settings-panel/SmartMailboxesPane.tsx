@@ -13,6 +13,8 @@ import type {
 } from '../../api/types'
 import { smartMailboxAccent } from '../../mailboxRoles'
 import { Button } from '../ui/button'
+import { SortableList, SortableRow } from '../ui/SortableList'
+import { useSidebarReorder } from '../sidebar/useSidebarReorder'
 import {
   FeedbackBanner,
   SettingsBackButton,
@@ -47,7 +49,6 @@ export function SmartMailboxesPane({
   onBackToMailboxes,
   onCreateMailbox,
   onResetDefaults,
-  onReorderMailbox,
   onSaved,
   onAutomationSettingsSaved,
   onDeleted,
@@ -65,11 +66,11 @@ export function SmartMailboxesPane({
   onBackToMailboxes: () => void
   onCreateMailbox: () => void
   onResetDefaults: () => void
-  onReorderMailbox: (mailbox: SmartMailboxSummary, position: number) => void
   onSaved: (mailbox: SmartMailbox) => Promise<void>
   onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
   onDeleted: (mailboxId: string) => Promise<void>
 }) {
+  const { reorderSmartMailboxes } = useSidebarReorder()
   if (selectedMailboxTarget !== null) {
     return (
       <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
@@ -88,17 +89,14 @@ export function SmartMailboxesPane({
           {selectedMailboxTarget.kind === 'smart' ? (
             <SmartMailboxDetail
               target={selectedMailboxTarget.id}
-              smartMailboxes={smartMailboxes}
               editingSmartMailbox={editingSmartMailbox}
               editorKey={editorKey}
               accounts={accounts}
               settings={settings}
-              actionPendingKey={actionPendingKey}
               onCreateMailbox={onCreateMailbox}
               onSaved={onSaved}
               onAutomationSettingsSaved={onAutomationSettingsSaved}
               onDeleted={onDeleted}
-              onReorderMailbox={onReorderMailbox}
             />
           ) : (
             <SourceMailboxDetail
@@ -161,17 +159,23 @@ export function SmartMailboxesPane({
               <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
             </div>
           ) : (
-            smartMailboxes.map((mailbox) => (
-              <MailboxListRow
-                key={mailbox.id}
-                accent={smartMailboxAccent(mailbox.role, mailbox.name)}
-                icon={<FolderSearch size={15} strokeWidth={1.45} />}
-                label={mailbox.name}
-                sublabel={`${mailbox.totalMessages} messages · ${mailbox.unreadMessages} unread`}
-                badge={mailbox.kind === 'default' ? 'default' : null}
-                onClick={() => onSelectSmartMailbox(mailbox.id)}
-              />
-            ))
+            <SortableList
+              ids={smartMailboxes.map((mailbox) => mailbox.id)}
+              onReorder={reorderSmartMailboxes}
+            >
+              {smartMailboxes.map((mailbox) => (
+                <SortableRow key={mailbox.id} id={mailbox.id}>
+                  <MailboxListRow
+                    accent={smartMailboxAccent(mailbox.role, mailbox.name)}
+                    icon={<FolderSearch size={15} strokeWidth={1.45} />}
+                    label={mailbox.name}
+                    sublabel={`${mailbox.totalMessages} messages · ${mailbox.unreadMessages} unread`}
+                    badge={mailbox.kind === 'default' ? 'default' : null}
+                    onClick={() => onSelectSmartMailbox(mailbox.id)}
+                  />
+                </SortableRow>
+              ))}
+            </SortableList>
           )}
         </SettingsList>
 

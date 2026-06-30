@@ -242,6 +242,10 @@ pub struct PatchAppSettingsMutation {
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
     pub mailbox_colors: Option<Vec<MailboxColor>>,
+    /// Explicit sidebar arrangement (ids). Overwrites the stored list wholesale
+    /// — the drag-to-reorder primitive (see [`AppSettings::smart_mailbox_order`]).
+    pub smart_mailbox_order: Option<Vec<SmartMailboxId>>,
+    pub account_order: Option<Vec<AccountId>>,
     /// Force the current backfill rules to re-run after persisting, even when
     /// the rule fingerprint is unchanged (on-demand "backfill now").
     #[serde(default)]
@@ -266,7 +270,11 @@ pub struct AutomationRulePreviewResult {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSmartMailboxMutation {
     pub name: String,
-    pub position: Option<i64>,
+    /// Optional view role (e.g. `"archive"`) tagging this smart mailbox with a
+    /// built-in role's icon/accent and contextual actions. `None` for a plain
+    /// saved query. Validated against the known mailbox roles.
+    #[serde(default)]
+    pub role: Option<String>,
     pub rule: SmartMailboxRule,
 }
 
@@ -274,7 +282,12 @@ pub struct CreateSmartMailboxMutation {
 #[serde(rename_all = "camelCase")]
 pub struct PatchSmartMailboxMutation {
     pub name: Option<String>,
-    pub position: Option<i64>,
+    /// Sparse: absent leaves the role unchanged; a known role string sets it; an
+    /// empty string clears it. (An empty-string sentinel, rather than a JSON
+    /// `null`, because plain `Option<Option<_>>` can't distinguish a present
+    /// `null` from an absent field over the wire.)
+    #[serde(default)]
+    pub role: Option<String>,
     pub rule: Option<SmartMailboxRule>,
 }
 

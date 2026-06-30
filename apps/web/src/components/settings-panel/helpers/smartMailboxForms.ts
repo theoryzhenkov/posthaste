@@ -13,7 +13,7 @@ import type { SmartMailboxFormState } from '../types'
 /** Default empty form state for creating a new smart mailbox. */
 export const EMPTY_SMART_MAILBOX_FORM: SmartMailboxFormState = {
   name: '',
-  position: 0,
+  role: null,
   rule: defaultEmptyRule(),
 }
 
@@ -33,7 +33,7 @@ export function formFromSmartMailbox(
 ): SmartMailboxFormState {
   return {
     name: smartMailbox.name,
-    position: smartMailbox.position,
+    role: smartMailbox.role,
     rule:
       'rule' in smartMailbox
         ? smartMailbox.rule

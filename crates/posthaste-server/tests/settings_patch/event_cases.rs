@@ -27,6 +27,8 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
                 force_backfill: false,
+                smart_mailbox_order: None,
+                account_order: None,
                 default_account_id: Some(Some("primary".to_string())),
                 automation_rules: None,
                 automation_drafts: None,
@@ -97,7 +99,7 @@ async fn smart_mailbox_mutations_publish_resource_events() {
             State(harness.state.clone()),
             Json(CreateSmartMailboxRequest {
                 name: "Work".to_string(),
-                position: Some(10),
+                role: None,
                 rule: smart_rule_for_source("primary"),
             }),
         )
@@ -117,7 +119,7 @@ async fn smart_mailbox_mutations_publish_resource_events() {
             Path(created.id.as_str().to_string()),
             Json(PatchSmartMailboxRequest {
                 name: Some("Work updated".to_string()),
-                position: None,
+                role: None,
                 rule: None,
             }),
         )
@@ -187,4 +189,55 @@ async fn reset_default_smart_mailboxes_publishes_resource_event() {
     assert_eq!(event.topic, EVENT_TOPIC_SMART_MAILBOX_RESET);
     assert_eq!(event.payload["resources"][0]["kind"], "smartMailbox");
     assert_eq!(event.payload["resources"][0]["operation"], "reset");
+}
+
+#[tokio::test]
+async fn smart_mailbox_role_is_assignable_and_validated() {
+    let harness = SettingsHarness::new();
+    harness.save_account("primary", "Primary");
+
+    // Create a user smart mailbox tagged with a built-in view role.
+    let created = expect_api_ok(
+        create_smart_mailbox(
+            State(harness.state.clone()),
+            Json(CreateSmartMailboxRequest {
+                name: "Work Archive".to_string(),
+                role: Some("archive".to_string()),
+                rule: smart_rule_for_source("primary"),
+            }),
+        )
+        .await,
+        "create with a role should succeed",
+    )
+    .0;
+    assert_eq!(created.role.as_deref(), Some("archive"));
+
+    // Patch clears the role (empty-string sentinel).
+    let cleared = expect_api_ok(
+        patch_smart_mailbox(
+            State(harness.state.clone()),
+            Path(created.id.as_str().to_string()),
+            Json(PatchSmartMailboxRequest {
+                name: None,
+                role: Some(String::new()),
+                rule: None,
+            }),
+        )
+        .await,
+        "patch clearing the role should succeed",
+    )
+    .0;
+    assert_eq!(cleared.role, None);
+
+    // An unknown role string is rejected.
+    let rejected = create_smart_mailbox(
+        State(harness.state.clone()),
+        Json(CreateSmartMailboxRequest {
+            name: "Bogus".to_string(),
+            role: Some("nonsense".to_string()),
+            rule: smart_rule_for_source("primary"),
+        }),
+    )
+    .await;
+    assert!(rejected.is_err(), "an unknown role must be rejected");
 }

@@ -1987,7 +1987,7 @@
           "smart-mailboxes"
         ],
         "summary": "Update smart mailbox",
-        "description": "Merges name, position, and rule fields. Omitted fields are preserved.",
+        "description": "Merges name and rule fields. Omitted fields are preserved.",
         "operationId": "patch_smart_mailbox",
         "parameters": [
           {
@@ -4572,6 +4572,13 @@
         "type": "object",
         "description": "Global application settings shared across all accounts.\n\n@spec docs/L1-accounts#toml-schema",
         "properties": {
+          "accountOrder": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountId"
+            },
+            "description": "User's explicit sidebar arrangement of accounts (by id). Same override\nsemantics as [`smart_mailbox_order`](Self::smart_mailbox_order); accounts\nabsent from the list fall back to name order.\n\n@spec docs/L1-accounts#sidebar-ordering"
+          },
           "appearance": {
             "oneOf": [
               {
@@ -4625,6 +4632,13 @@
                 "description": "Notification policy (TOML source of truth; OS delivery permission stays local).\n\n@spec docs/eph/RFC-L2-configuration-matrix"
               }
             ]
+          },
+          "smartMailboxOrder": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SmartMailboxId"
+            },
+            "description": "User's explicit sidebar arrangement of smart mailboxes (by id). Acts as\nan override: ids listed here come first, in this order; any smart mailbox\nabsent from the list falls back to the canonical default order (built-ins\nfirst) then creation order. Stale ids are ignored. Pure presentation.\n\n@spec docs/L1-accounts#sidebar-ordering"
           }
         }
       },
@@ -5282,12 +5296,11 @@
           "name": {
             "type": "string"
           },
-          "position": {
+          "role": {
             "type": [
-              "integer",
+              "string",
               "null"
-            ],
-            "format": "int64"
+            ]
           },
           "rule": {
             "$ref": "#/components/schemas/SmartMailboxRule"
@@ -6309,6 +6322,15 @@
         "type": "object",
         "description": "Request body for `PATCH /v1/settings`.\n\n@spec docs/L1-api#settings",
         "properties": {
+          "accountOrder": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AccountId"
+            }
+          },
           "appearance": {
             "oneOf": [
               {
@@ -6375,6 +6397,16 @@
                 "$ref": "#/components/schemas/Notifications"
               }
             ]
+          },
+          "smartMailboxOrder": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SmartMailboxId"
+            },
+            "description": "Explicit sidebar arrangement (ids); overwrites the stored list wholesale."
           }
         }
       },
@@ -6388,12 +6420,12 @@
               "null"
             ]
           },
-          "position": {
+          "role": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
-            "format": "int64"
+            "description": "Absent leaves the role unchanged; a known role sets it; an empty string\nclears it."
           },
           "rule": {
             "oneOf": [
@@ -7268,7 +7300,6 @@
         "required": [
           "id",
           "name",
-          "position",
           "kind",
           "rule",
           "createdAt",
@@ -7303,10 +7334,6 @@
                 "$ref": "#/components/schemas/SmartMailboxId"
               }
             ]
-          },
-          "position": {
-            "type": "integer",
-            "format": "int64"
           },
           "role": {
             "type": [
@@ -7505,7 +7532,6 @@
         "required": [
           "id",
           "name",
-          "position",
           "kind",
           "unreadMessages",
           "totalMessages",
@@ -7540,10 +7566,6 @@
                 "$ref": "#/components/schemas/SmartMailboxId"
               }
             ]
-          },
-          "position": {
-            "type": "integer",
-            "format": "int64"
           },
           "role": {
             "type": [

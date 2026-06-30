@@ -5,6 +5,7 @@ import { smartMailboxAccent } from '@/mailboxRoles'
 import type { useMailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
 
 import type { SidebarSelection } from '../Sidebar'
+import { SortableList, SortableRow } from '../ui/SortableList'
 import { fallbackAccountAppearance } from './model'
 import { SectionHeader, SourceSection } from './SourceSection'
 import { SmartMailboxItem } from './SidebarItems'
@@ -53,6 +54,7 @@ export function SmartMailboxSection({
   selectedView,
   onOpenSmartMailboxSettings,
   onSelectSmartMailbox,
+  onReorder,
   onToggle,
 }: {
   collapsed: boolean
@@ -60,6 +62,7 @@ export function SmartMailboxSection({
   selectedView: SidebarSelection | null
   onOpenSmartMailboxSettings: (smartMailboxId: string) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
+  onReorder: (orderedIds: string[]) => void
   onToggle: () => void
 }) {
   return (
@@ -67,25 +70,34 @@ export function SmartMailboxSection({
       <SectionHeader label="Smart" collapsed={collapsed} onToggle={onToggle} />
       {!collapsed && (
         <div className="space-y-0.5 py-1">
-          {mailboxes.map((smartMailbox) => (
-            <SmartMailboxItem
-              key={smartMailbox.id}
-              id={smartMailbox.id}
-              name={smartMailbox.name}
-              role={smartMailbox.role}
-              defaultKey={smartMailbox.defaultKey}
-              unreadMessages={smartMailbox.unreadMessages}
-              accent={smartMailboxAccent(smartMailbox.role, smartMailbox.name)}
-              isSelected={
-                selectedView?.kind === 'smart-mailbox' &&
-                selectedView.id === smartMailbox.id
-              }
-              onSelect={() =>
-                onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
-              }
-              onOpenSettings={onOpenSmartMailboxSettings}
-            />
-          ))}
+          <SortableList
+            ids={mailboxes.map((mailbox) => mailbox.id)}
+            onReorder={onReorder}
+          >
+            {mailboxes.map((smartMailbox) => (
+              <SortableRow key={smartMailbox.id} id={smartMailbox.id}>
+                <SmartMailboxItem
+                  id={smartMailbox.id}
+                  name={smartMailbox.name}
+                  role={smartMailbox.role}
+                  defaultKey={smartMailbox.defaultKey}
+                  unreadMessages={smartMailbox.unreadMessages}
+                  accent={smartMailboxAccent(
+                    smartMailbox.role,
+                    smartMailbox.name,
+                  )}
+                  isSelected={
+                    selectedView?.kind === 'smart-mailbox' &&
+                    selectedView.id === smartMailbox.id
+                  }
+                  onSelect={() =>
+                    onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
+                  }
+                  onOpenSettings={onOpenSmartMailboxSettings}
+                />
+              </SortableRow>
+            ))}
+          </SortableList>
         </div>
       )}
     </>
@@ -99,6 +111,7 @@ export function AccountsSection({
   onOpenAccountSettings,
   onSelectSourceMailbox,
   onSyncSource,
+  onReorder,
   onToggle,
 }: {
   collapsed: boolean
@@ -111,6 +124,7 @@ export function AccountsSection({
     name: string,
   ) => void
   onSyncSource: (sourceId: string) => void
+  onReorder: (orderedIds: string[]) => void
   onToggle: () => void
 }) {
   return (
@@ -122,20 +136,26 @@ export function AccountsSection({
       />
       {!collapsed && (
         <div className="space-y-2 py-1">
-          {sources.map((source) => (
-            <SourceSection
-              key={source.id}
-              source={source}
-              appearance={
-                source.appearance ??
-                fallbackAccountAppearance(source.id, source.name)
-              }
-              selectedView={selectedView}
-              onOpenAccountSettings={onOpenAccountSettings}
-              onSelectSourceMailbox={onSelectSourceMailbox}
-              onSyncSource={onSyncSource}
-            />
-          ))}
+          <SortableList
+            ids={sources.map((source) => source.id)}
+            onReorder={onReorder}
+          >
+            {sources.map((source) => (
+              <SortableRow key={source.id} id={source.id}>
+                <SourceSection
+                  source={source}
+                  appearance={
+                    source.appearance ??
+                    fallbackAccountAppearance(source.id, source.name)
+                  }
+                  selectedView={selectedView}
+                  onOpenAccountSettings={onOpenAccountSettings}
+                  onSelectSourceMailbox={onSelectSourceMailbox}
+                  onSyncSource={onSyncSource}
+                />
+              </SortableRow>
+            ))}
+          </SortableList>
         </div>
       )}
     </>
