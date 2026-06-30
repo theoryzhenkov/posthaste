@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Package the standalone daemon binary (posthasted) into a release archive.
+# Package the standalone daemon binary (posthaste_daemon) into a release archive.
 # The web frontend is packaged separately by web.sh (split topology).
 #
-# Requires: cargo build --release --bin posthasted already run.
+# Requires: cargo build --release --bin posthaste_daemon already run.
 # Env:
 #   POSTHASTE_DAEMON_NAME      - release artifact base name (from channel-policy.sh)
 #   POSTHASTE_PACKAGE_PLATFORM - e.g. linux-x86_64 (defaults to host)
@@ -16,13 +16,13 @@ name="${POSTHASTE_DAEMON_NAME:-posthaste-daemon}-${platform}"
 out_root="$root/target/distribute"
 out_dir="$out_root/$name"
 
-binary_name="posthasted"
-if [[ -f "$root/target/release/posthasted.exe" ]]; then
-  binary_name="posthasted.exe"
+binary_name="posthaste_daemon"
+if [[ -f "$root/target/release/posthaste_daemon.exe" ]]; then
+  binary_name="posthaste_daemon.exe"
 fi
 
 if [[ ! -x "$root/target/release/$binary_name" ]]; then
-  echo "missing target/release/$binary_name; run 'cargo build --release --bin posthasted' first" >&2
+  echo "missing target/release/$binary_name; run 'cargo build --release --bin posthaste_daemon' first" >&2
   exit 1
 fi
 
