@@ -1,5 +1,5 @@
 ---
-title: Open source mail you can build on
+title: OSS Statement
 ---
 
-Posthaste is free and open source under the MIT License. The modular backend, API, events, and MCP adapter are there to inspect, run, and build against.
+Posthaste is free. Posthaste is fully local, and doesn't store any data or telemetry. Posthaste forever will be open to the public to fork, modify and use.

@@ -24,8 +24,6 @@ export function InstallHeader({ active }: { active?: 'releases' } = {}) {
         <span>Try beta</span>
       </a>
       <nav className="install-header-nav" aria-label="Site">
-        <a href="/#notes">Builders</a>
-        <a href="/#themes">Interface</a>
         <a
           href="/releases"
           aria-current={active === 'releases' ? 'page' : undefined}

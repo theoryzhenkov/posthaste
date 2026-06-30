@@ -16,10 +16,6 @@ export interface SiteMessage extends TitledHtmlPiece {
   unread?: boolean
 }
 
-export interface SiteNote extends TitledHtmlPiece {
-  label: string
-}
-
 export type ReleaseOs = 'macOS' | 'Windows' | 'Linux'
 
 export interface ReleaseAsset {
@@ -49,11 +45,6 @@ export interface ReleaseEntry {
 export interface HomeContent {
   messages: SiteMessage[]
   openSource: TitledHtmlPiece
-  notesHeading: TitledHtmlPiece
-  notes: SiteNote[]
-  theme: TitledHtmlPiece & {
-    eyebrow: string
-  }
   footer: {
     brand: string
     html: string
