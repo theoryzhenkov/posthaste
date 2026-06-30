@@ -13,6 +13,7 @@ import type { ComposeIntent } from '@/composeIntent'
 import type { MarkdownComposerEditorHandle } from '../MarkdownComposerEditor'
 import {
   EMPTY_FORM,
+  appendSignature,
   composeAttachmentFromFile,
   formatRecipient,
   formatRecipients,
@@ -59,6 +60,7 @@ export function useComposeFormState({
   intentKind,
   isMessageBasedCompose,
   replyContext,
+  signature,
 }: {
   composeKey: string
   draftSeed:
@@ -76,6 +78,7 @@ export function useComposeFormState({
   intentKind: ComposeIntent['kind']
   isMessageBasedCompose: boolean
   replyContext: ReplyContext | undefined
+  signature: string | null
 }) {
   const bodyRef = useRef<MarkdownComposerEditorHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -143,6 +146,7 @@ export function useComposeFormState({
   const [isReadingAttachments, setIsReadingAttachments] = useState(false)
   const editedResetKeyRef = useRef<string | null>(null)
   const seededAttachmentsKeyRef = useRef<string | null>(null)
+  const seededSignatureKeyRef = useRef<string | null>(null)
 
   const needsFormReset = composeState.resetKey !== formResetKey
   const form = needsFormReset ? initialForm : composeState.form
@@ -253,6 +257,27 @@ export function useComposeFormState({
         : { ...current, attachments: forwardAttachments },
     )
   }, [intentKind, forwardAttachments, formResetKey, setForm])
+
+  useEffect(() => {
+    // Seed the account's signature into the body once per fresh composition
+    // (new/reply/forward) so it is visible and editable. Skipped for a resumed
+    // draft, which carries its own body (and may already include a signature);
+    // the ref guard prevents re-inserting it across re-renders or account-list
+    // reloads, so a user edit is never clobbered.
+    //
+    // @spec docs/L1-compose#sender-selection
+    if (!signature || intentKind === 'draft') {
+      return
+    }
+    if (seededSignatureKeyRef.current === formResetKey) {
+      return
+    }
+    seededSignatureKeyRef.current = formResetKey
+    setForm((current) => ({
+      ...current,
+      body: appendSignature(current.body, signature),
+    }))
+  }, [signature, intentKind, formResetKey, setForm])
 
   return {
     bodyRef,

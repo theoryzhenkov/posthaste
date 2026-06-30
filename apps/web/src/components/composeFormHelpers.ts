@@ -55,6 +55,16 @@ export function optionLabel(option: FromAddressOption): string {
   return option.name ? `${option.name} <${option.email}>` : option.email
 }
 
+/** Append a signature to a compose body using the conventional `-- ` separator
+ * (RFC 3676 §4.3). The signature lands at the bottom of the body — visible and
+ * editable — so the user can adjust or remove it per message. Seeded into fresh
+ * compositions only (not resumed drafts), so it is never double-inserted.
+ *
+ * @spec docs/L1-compose#sender-selection */
+export function appendSignature(body: string, signature: string): string {
+  return `${body}\n\n-- \n${signature}`
+}
+
 export function accountFromOptions(
   accounts: AccountOverview[],
   identity: Recipient | null,
