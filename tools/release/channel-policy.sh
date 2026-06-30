@@ -25,6 +25,7 @@ case "$channel" in
     daemon_name="PosthasteDaemonNightly"
     cli_name="PosthasteCTLNightly"
     web_name="PosthasteWebNightly"
+    icon_dir="icons-nightly"
     ;;
   stable)
     identifier="com.posthaste.mail"
@@ -37,6 +38,7 @@ case "$channel" in
     daemon_name="PosthasteDaemon"
     cli_name="PosthasteCTL"
     web_name="PosthasteWeb"
+    icon_dir="icons"
     ;;
   *)
     echo "error: unknown channel '$channel' (expected: nightly|stable)" >&2
@@ -55,5 +57,6 @@ POSTHASTE_IS_STABLE=$is_stable
 POSTHASTE_DAEMON_NAME=$daemon_name
 POSTHASTE_CLI_NAME=$cli_name
 POSTHASTE_WEB_NAME=$web_name
+POSTHASTE_ICON_DIR=$icon_dir
 POSTHASTE_RUN_ARTIFACT_SMOKE=true
 EOF
