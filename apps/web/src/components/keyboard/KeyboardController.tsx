@@ -7,8 +7,8 @@
  * in with `useFocusedPaneHandler`; cross-cutting keys are handled by
  * {@link dispatchMailKey}.
  *
- * @spec docs/L0-ui#navigation-model
- * @spec docs/L1-ui#keyboard-shortcuts
+ * @spec docs/ui/L0#navigation-model
+ * @spec docs/ui/L1#keyboard-shortcuts
  */
 import {
   useCallback,

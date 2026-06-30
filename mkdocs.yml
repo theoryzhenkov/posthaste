@@ -93,6 +93,9 @@ nav:
       - State contract (L1): client/L1.md
       - Mail runtime (L2): client/L2.md
       - Adapter patterns (L3): client/L3.md
+  - UI:
+      - Navigation model (L0): ui/L0.md
+      - Keyboard contract (L1): ui/L1.md
   - Testing:
       - Domain (L0): testing/L0.md
       - Contracts (L1): testing/L1.md
