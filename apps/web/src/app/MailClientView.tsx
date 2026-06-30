@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 
 import { ActionBar } from '@/components/ActionBar'
+import { viewModeKey } from '@/components/message-list/model'
 import type { EmailActions } from '@/hooks/useEmailActions'
 
 import { MailOverlays } from './MailOverlays'
@@ -17,6 +18,12 @@ export function MailClientView(props: MailClientViewProps) {
         isDarkMode={props.isDarkMode}
         isSettingsOpen={props.isSettingsSurfaceOpen}
         searchQuery={props.searchQuery}
+        viewModeKey={
+          props.isSettingsSurfaceOpen ||
+          (props.effectiveView === null && !props.searchQuery.trim())
+            ? null
+            : viewModeKey(props.effectiveView, props.searchQuery)
+        }
         onClearSearch={props.onClearSearch}
         onCompose={props.onCompose}
         onOpenCommandPalette={props.onOpenCommandPalette}
