@@ -151,6 +151,9 @@ export function MessageList({
   // Whether the view's account(s) are mid-sync, so an empty list shows a
   // "Syncing…" state instead of bare "no messages" (e.g. during a post-repair
   // full re-sync, where the projection is legitimately empty while mail loads).
+  // No accounts configured at all → the empty list is onboarding, not an empty
+  // mailbox; the empty state offers an "Add an account" CTA instead.
+  const hasNoAccounts = accountDirectory.accounts.length === 0
   const isSyncing = useMemo(() => {
     const accounts = accountDirectory.accounts
     if (selectedView?.kind === 'source-mailbox') {
@@ -218,7 +221,12 @@ export function MessageList({
   )
 
   if (!selectedView) {
-    return <NoMailboxSelected onMouseDown={handleBackgroundMouseDown} />
+    return (
+      <NoMailboxSelected
+        onMouseDown={handleBackgroundMouseDown}
+        hasNoAccounts={hasNoAccounts}
+      />
+    )
   }
 
   return (
