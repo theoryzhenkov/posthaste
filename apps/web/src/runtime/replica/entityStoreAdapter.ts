@@ -477,8 +477,16 @@ class EntityStoreController {
     const frames = this.pendingFrames
     this.pendingFrames = []
     void this.enqueue(async () => {
+      // P3: fold the whole burst into ONE store ingest (not one per frame) so a
+      // coalesced flush is a single round-trip over a WorkerStorePort instead
+      // of N. The mailbox→account tracking stays on the main thread.
+      const updates: StoreUpdate[] = []
       for (const frame of frames) {
-        await this.ingestMessageEvent(frame.payload as DomainEvent)
+        const update = this.storeUpdateFromEvent(frame.payload as DomainEvent)
+        if (update) updates.push(update)
+      }
+      if (updates.length) {
+        await this.store.ingestBatchJson(JSON.stringify(updates))
       }
       await this.drainAndEmit()
       await this.clearRetired()
@@ -707,7 +715,10 @@ class EntityStoreController {
   }
 
   /** Ingest a `message.updated` event's projection + count deltas into the store. */
-  private async ingestMessageEvent(event: DomainEvent): Promise<void> {
+  /** Build a single store update from a `message.updated` event (or null if
+   *  there's nothing to materialize), tracking mailbox→account on the side.
+   *  Extracted so a coalesced flush can fold a whole burst into one ingest. */
+  private storeUpdateFromEvent(event: DomainEvent): StoreUpdate | null {
     const inner = event.payload as
       | {
           messageId?: string
@@ -718,7 +729,7 @@ class EntityStoreController {
       | undefined
     const messageId = inner?.messageId
     if (typeof messageId !== 'string') {
-      return
+      return null
     }
     const deleted = inner?.deleted === true
     const projection = inner?.projection ?? null
@@ -726,20 +737,23 @@ class EntityStoreController {
     // Not deleted + no projection: nothing to materialize (shouldn't happen —
     // 2c attaches the projection to every non-destroy event).
     if (!deleted && !projection) {
-      return
+      return null
     }
-    const batch: StoreUpdate[] = [
-      {
-        message: { messageId, projection, deleted, countDeltas },
-      },
-    ]
-    await this.store.ingestBatchJson(JSON.stringify(batch))
     const accountId = event.accountId
     if (accountId) {
       for (const delta of countDeltas) {
         this.mailboxAccount.set(delta.mailboxId, accountId)
       }
     }
+    return { message: { messageId, projection, deleted, countDeltas } }
+  }
+
+  private async ingestMessageEvent(event: DomainEvent): Promise<void> {
+    const update = this.storeUpdateFromEvent(event)
+    if (!update) {
+      return
+    }
+    await this.store.ingestBatchJson(JSON.stringify([update]))
   }
 
   /** The account's role→mailbox-id map from the cached mailbox list, so role
