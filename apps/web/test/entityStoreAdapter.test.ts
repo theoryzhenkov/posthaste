@@ -475,6 +475,67 @@ describe('entityStoreAdapter', () => {
     expect(keywordsOf(frames, 'm2')).toContain('$flagged')
   })
 
+  it('folds a multi-frame flush into a SINGLE store ingest (P3 batching)', async () => {
+    // Count ingestBatchJson on the real handle: a coalesced flush must apply the
+    // whole burst in one ingest, not one per frame (the round-trip that made the
+    // worker drain 16x slower before P3).
+    let ingestCount = 0
+    const real = makeRealHandle()
+    const countingHandle = new Proxy(real, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver)
+        if (typeof value !== 'function') return value
+        if (prop === 'ingestBatchJson') {
+          return (...args: unknown[]) => {
+            ingestCount += 1
+            return (value as (...a: unknown[]) => unknown).apply(target, args)
+          }
+        }
+        return (value as (...a: unknown[]) => unknown).bind(target)
+      },
+    }) as EntityStoreHandle
+
+    let scheduledFlush: (() => void) | null = null
+    const harness = makeBase([
+      row('m1', '2026-04-29T10:00:00Z'),
+      row('m2', '2026-04-28T10:00:00Z'),
+    ])
+    const adapter = createEntityStoreAdapter({
+      base: harness.base,
+      makeHandle: () => countingHandle,
+      outbox: new MemoryOutboxStore(),
+      now: () => 1,
+      scheduleFlush: (cb) => {
+        scheduledFlush = cb
+        return () => {
+          scheduledFlush = null
+        }
+      },
+    })
+    adapter.subscribeRuntimeFrames({ sessionId: 'sess' }, { onFrame: () => {} })
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+
+    const ingestsAfterOpen = ingestCount
+    const flagged = (id: string, receivedAt: string) =>
+      messageUpdated(id, {
+        id,
+        sourceId: 's',
+        receivedAt,
+        keywords: ['$flagged'],
+        mailboxIds: ['inbox'],
+        isRead: false,
+        isFlagged: true,
+        subject: id,
+      })
+    harness.push(flagged('m1', '2026-04-29T10:00:00Z'))
+    harness.push(flagged('m2', '2026-04-28T10:00:00Z'))
+    scheduledFlush!()
+    await tick()
+
+    // Two frames in the flush → exactly ONE ingest, not two.
+    expect(ingestCount - ingestsAfterOpen).toBe(1)
+  })
+
   it('extend seeds the store so a later message.updated keeps the extended rows', async () => {
     const built = build()
     const { adapter, frames } = built
