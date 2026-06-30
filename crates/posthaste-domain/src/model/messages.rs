@@ -60,6 +60,19 @@ pub struct MessageSummary {
     /// @spec docs/eph/DESIGN-L2-message-authority-version
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u64>,
+    /// This message's RFC822 `Message-ID`, when known. With [`in_reply_to`] it
+    /// lets the conversation view build a real reply tree (match a reply's
+    /// `in_reply_to` to its parent's `rfc_message_id`). `None` for providers/
+    /// messages without one.
+    ///
+    /// [`in_reply_to`]: Self::in_reply_to
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rfc_message_id: Option<String>,
+    /// The `Message-ID` this message is a reply to (its `In-Reply-To` header),
+    /// i.e. the parent in the reply tree. `None` for thread roots / messages
+    /// without the header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_reply_to: Option<String>,
 }
 
 /// Column by which message lists can be sorted.

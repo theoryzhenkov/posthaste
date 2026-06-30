@@ -39,7 +39,8 @@ export function useConversationTree({
 }): {
   rows: ConversationTreeRow[]
   visibleMessages: MessageSummary[]
-  toggleCollapse: (conversationId: string) => void
+  /** Toggle the collapse of one node, keyed by its message key. */
+  toggleCollapse: (messageKey: string) => void
 } {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -83,13 +84,13 @@ export function useConversationTree({
     [anchors, messagesByConversation, collapsed],
   )
 
-  const toggleCollapse = useCallback((conversationId: string) => {
+  const toggleCollapse = useCallback((messageKey: string) => {
     setCollapsed((previous) => {
       const next = new Set(previous)
-      if (next.has(conversationId)) {
-        next.delete(conversationId)
+      if (next.has(messageKey)) {
+        next.delete(messageKey)
       } else {
-        next.add(conversationId)
+        next.add(messageKey)
       }
       return next
     })

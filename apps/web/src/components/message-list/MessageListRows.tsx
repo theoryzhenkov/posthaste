@@ -51,7 +51,7 @@ export function MessageListRows({
   onRetry: () => void
   onSelectRowMessage: (message: MessageSummary) => void
   onViewConversation: (message: MessageSummary) => void
-  onToggleCollapse: (conversationId: string) => void
+  onToggleCollapse: (messageKey: string) => void
   scrollTop: number
   selectedKey: string | null
   viewRole: string | null

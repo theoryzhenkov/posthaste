@@ -12,7 +12,7 @@ pub(crate) fn query_message_detail_tx(
         .prepare_cached(
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
-                    m.is_read, m.is_flagged, m.draft_id
+                    m.is_read, m.is_flagged, m.draft_id, m.rfc_message_id, m.in_reply_to
              FROM message m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
@@ -43,6 +43,8 @@ pub(crate) fn query_message_detail_tx(
                     mailbox_ids: Vec::new(),
                     keywords: Vec::new(),
                     version: None,
+                    rfc_message_id: row.get(15)?,
+                    in_reply_to: row.get(16)?,
                 },
             ))
         })
@@ -113,7 +115,7 @@ pub(crate) fn query_message_summary_tx(
         .prepare_cached(
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
-                    m.is_read, m.is_flagged
+                    m.is_read, m.is_flagged, m.rfc_message_id, m.in_reply_to
              FROM message m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
@@ -140,6 +142,8 @@ pub(crate) fn query_message_summary_tx(
                 mailbox_ids: Vec::new(),
                 keywords: Vec::new(),
                 version: None,
+                rfc_message_id: row.get(14)?,
+                in_reply_to: row.get(15)?,
             })
         })
         .optional()

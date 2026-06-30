@@ -46,6 +46,10 @@ export interface MessageSummary {
   /** Per-message authority-state version (IMAP `max(modseq)`); `null` for
    * providers without one (JMAP/mock). Drives the replica's stale-re-serve guard. */
   version?: number | null
+  /** RFC822 `Message-ID`; with `inReplyTo` builds the conversation reply tree. */
+  rfcMessageId?: string | null
+  /** `Message-ID` this is a reply to (parent in the reply tree). */
+  inReplyTo?: string | null
 }
 
 /** @spec docs/L1-api#cursor-pagination */

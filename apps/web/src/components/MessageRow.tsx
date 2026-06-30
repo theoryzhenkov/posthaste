@@ -16,6 +16,7 @@ import type { MessageSummary } from '../api/types'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { cn } from '../lib/utils'
 import type { ConversationTreeRow } from './message-list/conversationTree'
+import { messageKey } from './message-list/model'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -44,14 +45,14 @@ interface MessageRowProps {
   onViewConversation: (message: MessageSummary) => void
   /** Tree placement in conversation view; undefined in the flat list. */
   treeRow?: ConversationTreeRow
-  /** Toggle a conversation's collapse state (conversation view only). */
-  onToggleCollapse?: (conversationId: string) => void
+  /** Toggle one node's collapse state, keyed by message key (conversation view
+   *  only). */
+  onToggleCollapse?: (messageKey: string) => void
 }
 
-/** Indent applied to reply rows, per depth level. */
+/** Left offset applied per reply depth. The root (depth 0) gets none, so it sits
+ *  flush with the flat list; each reply level indents further. */
 const TREE_INDENT_PX = 22
-/** Width reserved for the root chevron so root content aligns across rows. */
-const TREE_CHEVRON_PX = 22
 
 /**
  * Fixed-height message row displaying sender, subject,
@@ -161,40 +162,40 @@ export const MessageRow = memo(function MessageRow({
 })
 
 /**
- * Leading gutter for conversation view: a collapse chevron on root rows and a
- * matching indent on reply rows, so children sit offset under their root.
+ * Leading gutter for conversation view: an indent that grows with reply depth
+ * (the root has none, so it stays flush with the flat list) plus a collapse
+ * chevron on any node that has replies. The chevron is absolutely positioned so
+ * it sits just left of the content without adding to the indent — the root's
+ * chevron hangs over its lead padding rather than offsetting it.
  */
 function TreeGutter({
   treeRow,
   onToggleCollapse,
 }: {
   treeRow: ConversationTreeRow
-  onToggleCollapse?: (conversationId: string) => void
+  onToggleCollapse?: (messageKey: string) => void
 }) {
   const indent = treeRow.depth * TREE_INDENT_PX
-  const showChevron = treeRow.isRoot && treeRow.childCount > 0
   const Chevron = treeRow.collapsed ? ChevronRight : ChevronDown
+  const isRoot = treeRow.depth === 0
   return (
     <span
-      aria-hidden={!showChevron}
-      className="flex h-full shrink-0 items-center justify-center"
-      style={{ width: indent + TREE_CHEVRON_PX, paddingLeft: indent }}
+      aria-hidden={!treeRow.hasChildren}
+      className="relative flex h-full shrink-0 items-center overflow-visible"
+      style={{ width: indent }}
     >
-      {showChevron && (
+      {treeRow.hasChildren && (
         <span
           role="button"
           tabIndex={-1}
-          aria-label={
-            treeRow.collapsed ? 'Expand conversation' : 'Collapse conversation'
-          }
-          title={
-            treeRow.collapsed ? 'Expand conversation' : 'Collapse conversation'
-          }
+          aria-label={treeRow.collapsed ? 'Expand replies' : 'Collapse replies'}
+          title={treeRow.collapsed ? 'Expand replies' : 'Collapse replies'}
           onClick={(event) => {
             event.stopPropagation()
-            onToggleCollapse?.(treeRow.conversationId)
+            onToggleCollapse?.(messageKey(treeRow.message))
           }}
-          className="flex size-4 items-center justify-center rounded-[3px] text-muted-foreground transition-colors hover:bg-[var(--hover-bg)] hover:text-foreground"
+          className="absolute flex size-4 items-center justify-center rounded-[3px] text-muted-foreground transition-colors hover:bg-[var(--hover-bg)] hover:text-foreground"
+          style={isRoot ? { left: 0 } : { right: 0 }}
         >
           <Chevron size={13} strokeWidth={1.8} />
         </span>

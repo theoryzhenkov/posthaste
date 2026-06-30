@@ -5862,6 +5862,13 @@
           "id": {
             "$ref": "#/components/schemas/MessageId"
           },
+          "inReplyTo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `Message-ID` this message is a reply to (its `In-Reply-To` header),\ni.e. the parent in the reply tree. `None` for thread roots / messages\nwithout the header."
+          },
           "isFlagged": {
             "type": "boolean"
           },
@@ -5888,6 +5895,13 @@
           },
           "receivedAt": {
             "type": "string"
+          },
+          "rfcMessageId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "This message's RFC822 `Message-ID`, when known. With [`in_reply_to`] it\nlets the conversation view build a real reply tree (match a reply's\n`in_reply_to` to its parent's `rfc_message_id`). `None` for providers/\nmessages without one.\n\n[`in_reply_to`]: Self::in_reply_to"
           },
           "sourceId": {
             "$ref": "#/components/schemas/AccountId"

@@ -1877,12 +1877,27 @@ export interface components {
             fromName?: string | null;
             hasAttachment: boolean;
             id: components["schemas"]["MessageId"];
+            /**
+             * @description The `Message-ID` this message is a reply to (its `In-Reply-To` header),
+             *     i.e. the parent in the reply tree. `None` for thread roots / messages
+             *     without the header.
+             */
+            inReplyTo?: string | null;
             isFlagged: boolean;
             isRead: boolean;
             keywords: string[];
             mailboxIds: components["schemas"]["MailboxId"][];
             preview?: string | null;
             receivedAt: string;
+            /**
+             * @description This message's RFC822 `Message-ID`, when known. With [`in_reply_to`] it
+             *     lets the conversation view build a real reply tree (match a reply's
+             *     `in_reply_to` to its parent's `rfc_message_id`). `None` for providers/
+             *     messages without one.
+             *
+             *     [`in_reply_to`]: Self::in_reply_to
+             */
+            rfcMessageId?: string | null;
             sourceId: components["schemas"]["AccountId"];
             sourceName: string;
             sourceThreadId: components["schemas"]["ThreadId"];
