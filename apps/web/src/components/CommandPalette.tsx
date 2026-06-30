@@ -19,6 +19,7 @@ import {
   COMMAND_PANEL_STORAGE_KEY,
   commandPaletteEntryValue,
   NO_COMMAND_PALETTE_SELECTION,
+  resolvePaletteEnter,
 } from './command-palette/model'
 import { useCommandPaletteSearch } from './command-palette/useCommandPaletteSearch'
 import { usePaletteActions } from './command-palette/usePaletteActions'
@@ -76,8 +77,8 @@ export function CommandPalette({
 
   // The typed query never touches the underlying mail view while typing — it
   // only filters palette candidates — so a selected message stays in scope. The
-  // mail-view filter is applied here, on Enter, and only when no palette item is
-  // highlighted (see handlePaletteKeyDown).
+  // app-wide mail-view filter is applied here, only on Shift+Enter; a plain
+  // Enter navigates into the in-pane results instead (see handlePaletteKeyDown).
   function applyCurrentQuery() {
     const normalized = normalizeAppliedSearchQuery(query)
     if (!normalized || validateSearchQuery(query).state !== 'valid') return
@@ -151,15 +152,24 @@ export function CommandPalette({
     }
     if (event.key === 'Enter') {
       event.preventDefault()
-      if (event.shiftKey || event.altKey) {
-        applyCurrentQuery()
-        return
+      const action = resolvePaletteEnter({
+        shiftKey: event.shiftKey,
+        hasHighlightedItem: activeSelectedIndex !== -1,
+        hasItems: itemRows.length > 0,
+      })
+      switch (action) {
+        case 'apply':
+          applyCurrentQuery()
+          break
+        case 'run':
+          runCandidate(itemRows[activeSelectedIndex].candidate)
+          break
+        case 'navigate':
+          moveSelection(1)
+          break
+        case 'none':
+          break
       }
-      if (activeSelectedIndex !== -1) {
-        runCandidate(itemRows[activeSelectedIndex].candidate)
-        return
-      }
-      applyCurrentQuery()
     }
   }
 
