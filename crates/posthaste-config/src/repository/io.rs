@@ -55,6 +55,7 @@ const APP_TOML_MANAGED_KEYS: &[&str] = &[
     "mailbox_colors",
     "tags",
     "link",
+    "tls",
 ];
 
 /// Atomically write `value`'s managed top-level keys into the existing file at

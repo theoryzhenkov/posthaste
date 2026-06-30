@@ -40,7 +40,8 @@ pub fn build_app_state(
         .bind_address_override
         .clone()
         .unwrap_or_else(|| daemon.bind_address.clone());
-    let host_allowlist = auth::host_allowlist(&bind_address);
+    let mut host_allowlist = auth::host_allowlist(&bind_address);
+    host_allowlist.extend(daemon.allowed_hosts.iter().cloned());
 
     Arc::new(AppState {
         runtime,
@@ -69,6 +70,8 @@ pub struct ServeOptions {
     pub config_root_display: String,
     pub log_guard: WorkerGuard,
     pub runtime_shutdown: RuntimeShutdownHandle,
+    /// Optional in-daemon TLS; present ⇒ serve HTTPS via `crate::tls`.
+    pub tls: Option<crate::config::TlsConfig>,
 }
 
 /// Apply the runtime-only outer layers (CORS + request tracing), nest under
@@ -88,7 +91,14 @@ pub async fn serve(opts: ServeOptions) -> ServerHandle {
         config_root_display,
         log_guard,
         runtime_shutdown,
+        tls,
     } = opts;
+
+    // Build the TLS acceptor up front so an invalid [tls] config fails fast at
+    // startup (before the listener is announced), not on the first connection.
+    let tls_acceptor = tls
+        .as_ref()
+        .map(|config| crate::tls::build_tls_acceptor(config).expect("invalid [tls] configuration"));
 
     let origins: Vec<axum::http::HeaderValue> = cors_origins
         .iter()
@@ -164,14 +174,25 @@ pub async fn serve(opts: ServeOptions) -> ServerHandle {
     ph_info!(
         events::SERVER_LISTENING,
         address = %addr,
+        tls = tls_acceptor.is_some(),
         config_root = %config_root_display,
         "posthaste listening"
     );
 
     let join_handle = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("posthaste server failed");
+        match tls_acceptor {
+            Some(acceptor) => {
+                let tls_listener = crate::tls::TlsListener::new(listener, acceptor);
+                axum::serve(tls_listener, app)
+                    .await
+                    .expect("posthaste server failed");
+            }
+            None => {
+                axum::serve(listener, app)
+                    .await
+                    .expect("posthaste server failed");
+            }
+        }
     });
 
     ServerHandle {

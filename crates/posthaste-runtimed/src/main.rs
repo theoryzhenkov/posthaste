@@ -73,6 +73,7 @@ async fn main() {
         config_root_display: roots.config_root.display().to_string(),
         log_guard,
         runtime_shutdown: build.shutdown,
+        tls: daemon.tls.clone(),
     })
     .await;
 
