@@ -76,11 +76,13 @@ jobs:
             pkg-config
 
       # The daemon binary does not embed the frontend (it serves it at runtime),
-      # so a frontend build is unnecessary here. Compile only the Rust artifacts
-      # to populate the cache `release.yml`'s `cargo build --release --bin
-      # posthaste_daemon` will restore.
+      # so a frontend build is unnecessary here. Compile the daemon plus the
+      # distributed-topology role binaries and the install wizard to populate
+      # the cache `release.yml`'s single `cargo build --release --bin ...` pass
+      # will restore. Keep this bin list in sync with release.yml's build-daemon
+      # job.
       - name: Warm release binary compilation
-        run: cargo build --release --bin posthaste_daemon
+        run: cargo build --release --bin posthaste_daemon --bin posthaste_backend --bin posthaste_runtime_daemon --bin posthaste-wizard
 
       - name: Print sccache stats
         if: always()

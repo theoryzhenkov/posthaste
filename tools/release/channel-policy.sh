@@ -25,6 +25,9 @@ case "$channel" in
     daemon_name="PosthasteDaemonNightly"
     cli_name="PosthasteCTLNightly"
     web_name="PosthasteWebNightly"
+    backend_name="PosthasteBackendNightly"
+    runtime_name="PosthasteRuntimeDaemonNightly"
+    wizard_name="PosthasteWizardNightly"
     icon_dir="icons-nightly"
     ;;
   stable)
@@ -38,6 +41,9 @@ case "$channel" in
     daemon_name="PosthasteDaemon"
     cli_name="PosthasteCTL"
     web_name="PosthasteWeb"
+    backend_name="PosthasteBackend"
+    runtime_name="PosthasteRuntimeDaemon"
+    wizard_name="PosthasteWizard"
     icon_dir="icons"
     ;;
   *)
@@ -57,6 +63,9 @@ POSTHASTE_IS_STABLE=$is_stable
 POSTHASTE_DAEMON_NAME=$daemon_name
 POSTHASTE_CLI_NAME=$cli_name
 POSTHASTE_WEB_NAME=$web_name
+POSTHASTE_BACKEND_NAME=$backend_name
+POSTHASTE_RUNTIME_NAME=$runtime_name
+POSTHASTE_WIZARD_NAME=$wizard_name
 POSTHASTE_ICON_DIR=$icon_dir
 POSTHASTE_RUN_ARTIFACT_SMOKE=true
 EOF
