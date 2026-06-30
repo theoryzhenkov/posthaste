@@ -24,6 +24,7 @@ export function MessageListRows({
   errorState,
   isFetchingNextPage,
   isLoading,
+  isSyncing,
   layout,
   onClearSearchQuery,
   onDismissError,
@@ -43,6 +44,7 @@ export function MessageListRows({
   errorState: MessageListErrorState
   isFetchingNextPage: boolean
   isLoading: boolean
+  isSyncing: boolean
   layout: ThreadListLayout
   rows: ConversationTreeRow[]
   treeMode: boolean
@@ -74,7 +76,7 @@ export function MessageListRows({
         />
       )}
       {!isLoading && !errorState.showError && rows.length === 0 && (
-        <EmptyMessages />
+        <EmptyMessages isSyncing={isSyncing} />
       )}
       {rows.length > 0 && (
         <>

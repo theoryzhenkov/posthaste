@@ -48,12 +48,12 @@ import type {
 } from '../types'
 import type { OkResponse } from '../../api/types'
 import type {
-  EntityStoreHandle,
   EntityStoreHandleFactory,
   MessageChangeDiff,
   ReplicaAssertion,
   SettlementVerdict,
 } from './handle'
+import { InProcessStorePort, type StorePort } from './storePort'
 import { settlementVerdict } from './mapping'
 import {
   buildMailListPredicateContext,
@@ -101,14 +101,60 @@ interface CountDelta {
 /** A dirty key from `drainDirtyJson` (`{message|mailbox|view: id}`). */
 type DirtyKey = { message: string } | { mailbox: string } | { view: string }
 
+/** Cancels a scheduled coalesced flush. */
+type FlushCanceller = () => void
+
+/**
+ * Schedules `cb` to run on the next frame, returning a canceller. The default
+ * uses `requestAnimationFrame`; when it is unavailable (non-DOM / tests) it runs
+ * `cb` synchronously so per-frame behavior is preserved without coalescing.
+ */
+type FlushScheduler = (cb: () => void) => FlushCanceller
+
+function defaultFlushScheduler(cb: () => void): FlushCanceller {
+  if (typeof requestAnimationFrame === 'function') {
+    const id = requestAnimationFrame(() => cb())
+    return () => cancelAnimationFrame(id)
+  }
+  cb()
+  return () => {}
+}
+
+/**
+ * Cap on buffered sync frames before a synchronous flush. Bounds the per-flush
+ * batch (one projection covers at most this many ingests) and guarantees
+ * forward progress + bounded memory if `requestAnimationFrame` is throttled
+ * (e.g. a backgrounded tab).
+ */
+const SYNC_FLUSH_CAP = 256
+
+type MailListFrame = RuntimeFrame<RuntimeMailListViewState>
+type NotificationFrame = Extract<MailListFrame, { type: 'notification' }>
+
+function isMessageUpdatedNotification(
+  frame: MailListFrame,
+): frame is NotificationFrame {
+  return (
+    frame.type === 'notification' &&
+    (frame.payload as DomainEvent | undefined)?.topic === 'message.updated'
+  )
+}
+
 export interface EntityStoreAdapterDeps {
   base: RuntimeAdapter
-  makeHandle: EntityStoreHandleFactory
+  /** Builds the in-process store. Required unless `makeStore` is given. */
+  makeHandle?: EntityStoreHandleFactory
+  /** Overrides the store entirely — e.g. a `WorkerStorePort` running the WASM
+   *  store off the UI thread. Takes precedence over `makeHandle`. */
+  makeStore?: () => StorePort
   outbox: OutboxStore
   /** React Query cache the adapter writes mailbox counts into. Defaults to the
    * app singleton. */
   queryClient?: QueryClient
   now?: () => number
+  /** Coalesces the `message.updated` sync burst (default: one flush per
+   * animation frame). Injected synchronously in tests. */
+  scheduleFlush?: FlushScheduler
 }
 
 interface ViewEntry {
@@ -168,14 +214,44 @@ class EntityStoreController {
   private seq = 1_000_000
   private readonly now: () => number
   private readonly deps: EntityStoreAdapterDeps
-  private readonly handle: EntityStoreHandle
+  private readonly store: StorePort
   private readonly queryClient: QueryClient
+  // Serializes store operations so a flush/snapshot/mutation/settle never
+  // interleaves another's awaits — the correctness keystone once the store is
+  // behind an async (eventually cross-thread) boundary.
+  private storeQueue: Promise<unknown> = Promise.resolve()
+  // Buffer of `message.updated` frames awaiting a coalesced flush, plus the
+  // canceller for the scheduled flush (null when none is pending).
+  private pendingFrames: NotificationFrame[] = []
+  private cancelScheduledFlush: FlushCanceller | null = null
+  private readonly scheduleFlush: FlushScheduler
 
   constructor(deps: EntityStoreAdapterDeps) {
     this.deps = deps
-    this.handle = deps.makeHandle()
+    if (deps.makeStore) {
+      this.store = deps.makeStore()
+    } else if (deps.makeHandle) {
+      this.store = new InProcessStorePort(deps.makeHandle())
+    } else {
+      throw new Error('entityStoreAdapter requires makeHandle or makeStore')
+    }
     this.queryClient = deps.queryClient ?? singletonQueryClient
     this.now = deps.now ?? (() => Date.now())
+    this.scheduleFlush = deps.scheduleFlush ?? defaultFlushScheduler
+  }
+
+  /**
+   * Run `op` after all previously-enqueued store ops, so dependent store calls
+   * (ingest → drain → project) stay atomic relative to other ops. Enqueued ops
+   * must NOT call `enqueue` themselves (that would deadlock on the running op).
+   */
+  private enqueue<T>(op: () => Promise<T>): Promise<T> {
+    const result = this.storeQueue.then(op, op)
+    this.storeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
   }
 
   async openMailListView(
@@ -185,6 +261,14 @@ class EntityStoreController {
     // `viewSnapshot`/`viewReplace` and the store re-derives from `message.updated`.
     const result =
       await this.deps.base.openRuntimeSessionMessageListView(request)
+    return this.enqueue(() => this.seedOpenedView(request, result))
+  }
+
+  /** Seed a freshly-opened view + rehydrate durable intent, as one store op. */
+  private async seedOpenedView(
+    request: RuntimeSessionViewRequest,
+    result: RuntimeOpenMessageListViewResult,
+  ): Promise<RuntimeOpenMessageListViewResult> {
     const { viewId, snapshot } = result
     const rows = snapshot.data.rows
     const predicate = resolveMailListPredicate(
@@ -192,7 +276,7 @@ class EntityStoreController {
       request.view.sort,
       buildMailListPredicateContext(this.queryClient),
     )
-    this.handle.registerViewJson(
+    await this.store.registerViewJson(
       viewId,
       JSON.stringify({
         predicate,
@@ -202,13 +286,15 @@ class EntityStoreController {
       }),
     )
     // P1: seed the rows' message bases + place the rows in one atomic batch.
-    this.handle.ingestBatchJson(JSON.stringify(projectionBatchFromRows(rows)))
-    this.handle.setViewRowsJson(
+    await this.store.ingestBatchJson(
+      JSON.stringify(projectionBatchFromRows(rows)),
+    )
+    await this.store.setViewRowsJson(
       viewId,
       JSON.stringify(rows.map(toStoreRow)),
       JSON.stringify(watermarkFromSnapshot(snapshot, rows)),
     )
-    this.handle.drainDirtyJson()
+    await this.store.drainDirtyJson()
     // Rehydrate durable intent over the freshly-served base.
     //
     // A record already sent to the runtime (`runtimeMutationId !== null`) is
@@ -231,7 +317,7 @@ class EntityStoreController {
         continue
       }
       try {
-        this.handle.acceptMutationJson(
+        await this.store.acceptMutationJson(
           JSON.stringify({
             mutationId: record.clientMutationId,
             messageId: record.messageId,
@@ -260,7 +346,7 @@ class EntityStoreController {
         'dropped already-sent outbox records on rehydration (runtime-owned)',
       )
     }
-    const projected = this.projectView(viewId)
+    const projected = await this.projectView(viewId)
     const entry: ViewEntry = {
       predicate,
       lastSnapshot: snapshot,
@@ -290,21 +376,25 @@ class EntityStoreController {
       return result
     }
     const rows = result.snapshot.data.rows
-    this.handle.ingestBatchJson(JSON.stringify(projectionBatchFromRows(rows)))
-    this.handle.setViewRowsJson(
-      result.viewId,
-      JSON.stringify(rows.map(toStoreRow)),
-      JSON.stringify(watermarkFromSnapshot(result.snapshot, rows)),
-    )
-    entry.lastSnapshot = result.snapshot
-    this.handle.drainDirtyJson()
-    entry.lastProjectionJson = this.projectView(result.viewId).json
+    await this.enqueue(async () => {
+      await this.store.ingestBatchJson(
+        JSON.stringify(projectionBatchFromRows(rows)),
+      )
+      await this.store.setViewRowsJson(
+        result.viewId,
+        JSON.stringify(rows.map(toStoreRow)),
+        JSON.stringify(watermarkFromSnapshot(result.snapshot, rows)),
+      )
+      entry.lastSnapshot = result.snapshot
+      await this.store.drainDirtyJson()
+      entry.lastProjectionJson = (await this.projectView(result.viewId)).json
+    })
     return result
   }
 
   closeView(request: RuntimeSessionViewCloseRequest): Promise<OkResponse> {
-    this.handle.closeView(request.viewId)
     this.views.delete(request.viewId)
+    void this.enqueue(() => this.store.closeView(request.viewId))
     return this.deps.base.closeRuntimeSessionView(request)
   }
 
@@ -315,15 +405,87 @@ class EntityStoreController {
     this.sink = handlers
     const wrapped: RuntimeFrameHandlers = {
       ...handlers,
-      onFrame: (frame) => this.onBaseFrame(frame, handlers),
+      onFrame: (frame) => this.routeFrame(frame, handlers),
     }
     const unsubscribe = this.deps.base.subscribeRuntimeFrames(request, wrapped)
     return () => {
+      if (this.cancelScheduledFlush) {
+        this.cancelScheduledFlush()
+        this.cancelScheduledFlush = null
+      }
+      this.pendingFrames = []
       if (this.sink === handlers) {
         this.sink = null
       }
       unsubscribe()
     }
+  }
+
+  /**
+   * Coalesce the `message.updated` sync burst. During a full re-sync (e.g. after
+   * repair) the runtime streams thousands of per-message frames; processing
+   * each one immediately re-projects the dirty views and re-renders the list
+   * per message — O(events x rows) on the UI thread. Buffer them and apply one
+   * batch per animation frame instead: ingest all, re-project once, forward
+   * downstream within a single task (so React batches the renders).
+   *
+   * Other frames (view snapshots, mutation verdicts) are order-sensitive and
+   * low-volume, so they flush the buffer first to preserve arrival order, then
+   * apply immediately.
+   */
+  private routeFrame(
+    frame: RuntimeFrame<RuntimeMailListViewState>,
+    handlers: RuntimeFrameHandlers,
+  ): void {
+    if (isMessageUpdatedNotification(frame)) {
+      this.pendingFrames.push(frame)
+      if (this.pendingFrames.length >= SYNC_FLUSH_CAP) {
+        this.flushPendingFrames(handlers)
+      } else {
+        this.ensureFlushScheduled(handlers)
+      }
+      return
+    }
+    this.flushPendingFrames(handlers)
+    this.onBaseFrame(frame, handlers)
+  }
+
+  private ensureFlushScheduled(handlers: RuntimeFrameHandlers): void {
+    if (this.cancelScheduledFlush) {
+      return
+    }
+    let ranSynchronously = false
+    const canceller = this.scheduleFlush(() => {
+      ranSynchronously = true
+      this.cancelScheduledFlush = null
+      this.flushPendingFrames(handlers)
+    })
+    // A synchronous scheduler (tests / non-DOM) already flushed; nothing to hold.
+    if (!ranSynchronously) {
+      this.cancelScheduledFlush = canceller
+    }
+  }
+
+  private flushPendingFrames(handlers: RuntimeFrameHandlers): void {
+    if (this.cancelScheduledFlush) {
+      this.cancelScheduledFlush()
+      this.cancelScheduledFlush = null
+    }
+    if (this.pendingFrames.length === 0) {
+      return
+    }
+    const frames = this.pendingFrames
+    this.pendingFrames = []
+    void this.enqueue(async () => {
+      for (const frame of frames) {
+        await this.ingestMessageEvent(frame.payload as DomainEvent)
+      }
+      await this.drainAndEmit()
+      await this.clearRetired()
+      for (const frame of frames) {
+        handlers.onFrame(frame)
+      }
+    })
   }
 
   async runMutation(request: RuntimeRunMutationRequest) {
@@ -349,34 +511,40 @@ class EntityStoreController {
     const isUserInitiated =
       (request.context as { userInitiated?: boolean } | null | undefined)
         ?.userInitiated === true
-    let capturedDiff: MessageChangeDiff | null = null
-    if (!isUndoVehicle && isUserInitiated) {
-      const diffJson = this.handle.captureMutationDiffJson(
-        translated.messageId,
-        JSON.stringify(translated.assertion),
-      )
-      if (diffJson !== 'null') {
-        capturedDiff = JSON.parse(diffJson) as MessageChangeDiff
+    // Atomic optimism: capture the undo diff, fold the assertion, persist the
+    // outbox record, and re-project — serialized against flushes/settles so the
+    // fold never interleaves another store op.
+    const capturedDiff = await this.enqueue(async () => {
+      let diff: MessageChangeDiff | null = null
+      if (!isUndoVehicle && isUserInitiated) {
+        const diffJson = await this.store.captureMutationDiffJson(
+          translated.messageId,
+          JSON.stringify(translated.assertion),
+        )
+        if (diffJson !== 'null') {
+          diff = JSON.parse(diffJson) as MessageChangeDiff
+        }
       }
-    }
-    this.handle.acceptMutationJson(
-      JSON.stringify({
-        mutationId: clientMutationId,
+      await this.store.acceptMutationJson(
+        JSON.stringify({
+          mutationId: clientMutationId,
+          messageId: translated.messageId,
+          assertion: translated.assertion,
+        }),
+      )
+      await this.deps.outbox.put({
+        clientMutationId,
         messageId: translated.messageId,
-        assertion: translated.assertion,
-      }),
-    )
-    await this.deps.outbox.put({
-      clientMutationId,
-      messageId: translated.messageId,
-      assertion: translated.assertion as ReplicaAssertion,
-      runtimeMutationId: null,
-      acceptedAt: this.now(),
-      // Store the original send so a never-dispatched record can be replayed
-      // verbatim on rehydration (outbox-rehydrate-resend).
-      request,
+        assertion: translated.assertion as ReplicaAssertion,
+        runtimeMutationId: null,
+        acceptedAt: this.now(),
+        // Store the original send so a never-dispatched record can be replayed
+        // verbatim on rehydration (outbox-rehydrate-resend).
+        request,
+      })
+      await this.drainAndEmit()
+      return diff
     })
-    this.drainAndEmit()
 
     const receipt = await this.dispatchToRuntime(request, clientMutationId)
     // Record the forward action in the client history once the runtime has
@@ -482,25 +650,29 @@ class EntityStoreController {
         // A served snapshot / page / resync: re-seed the rows' bases + place
         // them (P1), then re-project from the store.
         const rows = frame.snapshot.data.rows
-        this.handle.ingestBatchJson(
-          JSON.stringify(projectionBatchFromRows(rows)),
-        )
-        this.handle.setViewRowsJson(
-          frame.viewId,
-          JSON.stringify(rows.map(toStoreRow)),
-          JSON.stringify(watermarkFromSnapshot(frame.snapshot, rows)),
-        )
-        entry.lastSnapshot = frame.snapshot
-        this.drainAndEmit()
-        void this.clearRetired()
+        void this.enqueue(async () => {
+          await this.store.ingestBatchJson(
+            JSON.stringify(projectionBatchFromRows(rows)),
+          )
+          await this.store.setViewRowsJson(
+            frame.viewId,
+            JSON.stringify(rows.map(toStoreRow)),
+            JSON.stringify(watermarkFromSnapshot(frame.snapshot, rows)),
+          )
+          entry.lastSnapshot = frame.snapshot
+          await this.drainAndEmit()
+          await this.clearRetired()
+        })
         return
       }
       case 'notification': {
         const event = frame.payload as DomainEvent | undefined
         if (event?.topic === 'message.updated') {
-          this.ingestMessageEvent(event)
-          this.drainAndEmit()
-          void this.clearRetired()
+          void this.enqueue(async () => {
+            await this.ingestMessageEvent(event)
+            await this.drainAndEmit()
+            await this.clearRetired()
+          })
         }
         // Pass through: `useDaemonEvents` still handles non-store invalidations
         // (conversations, tags, smart-mailboxes) until 2e.3 retires the
@@ -535,7 +707,7 @@ class EntityStoreController {
   }
 
   /** Ingest a `message.updated` event's projection + count deltas into the store. */
-  private ingestMessageEvent(event: DomainEvent): void {
+  private async ingestMessageEvent(event: DomainEvent): Promise<void> {
     const inner = event.payload as
       | {
           messageId?: string
@@ -561,7 +733,7 @@ class EntityStoreController {
         message: { messageId, projection, deleted, countDeltas },
       },
     ]
-    this.handle.ingestBatchJson(JSON.stringify(batch))
+    await this.store.ingestBatchJson(JSON.stringify(batch))
     const accountId = event.accountId
     if (accountId) {
       for (const delta of countDeltas) {
@@ -596,24 +768,26 @@ class EntityStoreController {
     clientMutationId: string,
     verdict: SettlementVerdict,
   ): Promise<void> {
-    this.handle.settle(clientMutationId, verdict)
-    await this.clearRetired()
-    this.drainAndEmit()
+    await this.enqueue(async () => {
+      await this.store.settle(clientMutationId, verdict)
+      await this.clearRetired()
+      await this.drainAndEmit()
+    })
   }
 
   /** Clear durable-outbox records for ops the engine retired since the last
    *  drain (settle-confirm or base catch-up). An un-retired op stays durable so
    *  it survives a reload to be replayed. (outbox D) */
   private async clearRetired(): Promise<void> {
-    const retired = JSON.parse(this.handle.drainRetiredJson()) as string[]
+    const retired = JSON.parse(await this.store.drainRetiredJson()) as string[]
     if (retired.length) {
       await Promise.all(retired.map((id) => this.deps.outbox.remove(id)))
     }
   }
 
   /** Drain the store's dirty keys, re-project the dirty views, and write counts. */
-  private drainAndEmit(): void {
-    const dirty = JSON.parse(this.handle.drainDirtyJson()) as DirtyKey[]
+  private async drainAndEmit(): Promise<void> {
+    const dirty = JSON.parse(await this.store.drainDirtyJson()) as DirtyKey[]
     // Re-project ONLY the views the store flagged dirty. The store now marks a
     // view dirty on any change to a row it holds — including a content-only
     // flag/read toggle (via its message→views reverse index) — so the drained
@@ -621,18 +795,22 @@ class EntityStoreController {
     // (`adapter-reproject-all`). The JSON-diff gate in `emitChangedViews` stays
     // the safety net against a true no-op rederive.
     const dirtyViews = new Set<string>()
+    const dirtyMailboxes: string[] = []
     for (const key of dirty) {
       if ('view' in key) {
         dirtyViews.add(key.view)
       } else if ('mailbox' in key) {
-        this.writeMailboxCount(key.mailbox)
+        dirtyMailboxes.push(key.mailbox)
       }
     }
-    this.emitChangedViews(dirtyViews)
+    for (const mailboxId of dirtyMailboxes) {
+      await this.writeMailboxCount(mailboxId)
+    }
+    await this.emitChangedViews(dirtyViews)
   }
 
   /** Emit a synthesized `viewReplace` for each dirty view whose projection moved. */
-  private emitChangedViews(dirtyViews: Set<string>): void {
+  private async emitChangedViews(dirtyViews: Set<string>): Promise<void> {
     if (!this.sink) {
       return
     }
@@ -641,7 +819,7 @@ class EntityStoreController {
       if (!entry) {
         continue
       }
-      const projected = this.projectView(viewId)
+      const projected = await this.projectView(viewId)
       if (projected.json === entry.lastProjectionJson) {
         continue
       }
@@ -658,11 +836,11 @@ class EntityStoreController {
   }
 
   /** Re-project a view from the store: the joined rows → renderer rows. */
-  private projectView(viewId: string): {
+  private async projectView(viewId: string): Promise<{
     json: string
     rows: RuntimeMailListRowState[]
-  } {
-    const json = this.handle.projectViewJson(viewId)
+  }> {
+    const json = await this.store.projectViewJson(viewId)
     const projected = JSON.parse(json) as
       | { rowKey: string; projection: unknown }[]
       | null
@@ -680,12 +858,12 @@ class EntityStoreController {
   }
 
   /** Write a dirty mailbox's counts straight into the React Query cache. */
-  private writeMailboxCount(mailboxId: string): void {
+  private async writeMailboxCount(mailboxId: string): Promise<void> {
     const accountId = this.mailboxAccount.get(mailboxId)
     if (!accountId) {
       return
     }
-    const counts = JSON.parse(this.handle.mailboxJson(mailboxId)) as {
+    const counts = JSON.parse(await this.store.mailboxJson(mailboxId)) as {
       unreadCount: number
       totalCount: number
     } | null

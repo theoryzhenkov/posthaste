@@ -252,6 +252,9 @@ function build() {
   return { adapter, outbox, frames, harness, queryClient }
 }
 
+/** Drain all pending microtasks (the serialized store queue) via a macrotask. */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
 describe('entityStoreAdapter', () => {
   it('returns the served base as the initial projected snapshot', async () => {
     const { adapter } = build()
@@ -295,8 +298,7 @@ describe('entityStoreAdapter', () => {
         },
       },
     })
-    await Promise.resolve()
-    await Promise.resolve()
+    await tick()
 
     expect(await outbox.all()).toHaveLength(0)
     expect(keywordsOf(frames, 'm1')).not.toContain('$flagged')
@@ -318,8 +320,7 @@ describe('entityStoreAdapter', () => {
       clientMutationId: 'c1',
       notification: { type: 'confirmed' },
     })
-    await Promise.resolve()
-    await Promise.resolve()
+    await tick()
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
     expect(await outbox.all()).toHaveLength(1)
 
@@ -340,8 +341,7 @@ describe('entityStoreAdapter', () => {
         [],
       ),
     )
-    await Promise.resolve()
-    await Promise.resolve()
+    await tick()
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
     expect(await outbox.all()).toHaveLength(0)
   })
@@ -398,9 +398,81 @@ describe('entityStoreAdapter', () => {
         [{ mailboxId: 'inbox', unreadCount: 2, totalCount: 2 }],
       ),
     )
-    await Promise.resolve()
+    await tick()
 
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+  })
+
+  it('coalesces a message.updated burst into one re-projection per flush', async () => {
+    // Manual scheduler: capture the flush instead of running it, so we can drive
+    // a burst and assert it is applied as a single batch (the sync-burst fix).
+    let scheduledFlush: (() => void) | null = null
+    const harness = makeBase([
+      row('m1', '2026-04-29T10:00:00Z'),
+      row('m2', '2026-04-28T10:00:00Z'),
+    ])
+    const queryClient = new QueryClient()
+    queryClient.setQueryData<Mailbox[]>(queryKeys.mailboxes('s'), [
+      {
+        id: 'inbox',
+        name: 'Inbox',
+        role: 'inbox',
+        unreadEmails: 2,
+        totalEmails: 2,
+      },
+    ])
+    const adapter = createEntityStoreAdapter({
+      base: harness.base,
+      makeHandle: () => makeRealHandle(),
+      outbox: new MemoryOutboxStore(),
+      queryClient,
+      now: () => 1,
+      scheduleFlush: (cb) => {
+        scheduledFlush = cb
+        return () => {
+          scheduledFlush = null
+        }
+      },
+    })
+    const frames: RuntimeFrame<RuntimeMailListViewState>[] = []
+    adapter.subscribeRuntimeFrames(
+      { sessionId: 'sess' },
+      { onFrame: (f) => frames.push(f) },
+    )
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    const viewReplacesBefore = frames.filter(
+      (f) => f.type === 'viewReplace',
+    ).length
+
+    // A burst: m1 + m2 both gain $flagged.
+    const flagged = (id: string, receivedAt: string) =>
+      messageUpdated(id, {
+        id,
+        sourceId: 's',
+        receivedAt,
+        keywords: ['$flagged'],
+        mailboxIds: ['inbox'],
+        isRead: false,
+        isFlagged: true,
+        subject: id,
+      })
+    harness.push(flagged('m1', '2026-04-29T10:00:00Z'))
+    harness.push(flagged('m2', '2026-04-28T10:00:00Z'))
+
+    // Buffered: nothing re-projected yet, and exactly one flush is scheduled.
+    expect(frames.filter((f) => f.type === 'viewReplace').length).toBe(
+      viewReplacesBefore,
+    )
+    expect(scheduledFlush).not.toBeNull()
+
+    // One flush projects the whole batch → a SINGLE viewReplace with both rows.
+    scheduledFlush!()
+    await tick()
+    expect(frames.filter((f) => f.type === 'viewReplace').length).toBe(
+      viewReplacesBefore + 1,
+    )
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+    expect(keywordsOf(frames, 'm2')).toContain('$flagged')
   })
 
   it('extend seeds the store so a later message.updated keeps the extended rows', async () => {
@@ -432,7 +504,7 @@ describe('entityStoreAdapter', () => {
         subject: 'm1',
       }),
     )
-    await Promise.resolve()
+    await tick()
 
     const replace = [...frames].reverse().find((f) => f.type === 'viewReplace')
     expect(replace?.type).toBe('viewReplace')
@@ -467,7 +539,7 @@ describe('entityStoreAdapter', () => {
         [{ mailboxId: 'inbox', unreadCount: 1, totalCount: 2 }],
       ),
     )
-    await Promise.resolve()
+    await tick()
 
     const mailboxes = queryClient.getQueryData<Mailbox[]>(
       queryKeys.mailboxes('s'),
@@ -490,8 +562,7 @@ describe('entityStoreAdapter', () => {
 
     await adapter.openRuntimeSessionMessageListView(viewRequest)
     // The replay is fire-and-forget; let its microtasks settle.
-    await Promise.resolve()
-    await Promise.resolve()
+    await tick()
 
     expect(harness.mutations.map((m) => m.clientMutationId)).toEqual([
       'c-orphan',
@@ -524,8 +595,7 @@ describe('entityStoreAdapter', () => {
     })
 
     await built.adapter.openRuntimeSessionMessageListView(viewRequest)
-    await Promise.resolve()
-    await Promise.resolve()
+    await tick()
 
     expect(built.harness.mutations).toHaveLength(0)
     // Unrelated sanity: a fresh adapter with no outbox sends nothing.
