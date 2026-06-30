@@ -1,6 +1,7 @@
 import { Command, Moon, PenSquare, Settings, SunMedium, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { ViewModeToggle } from './message-list/ViewModeToggle'
 import { NotificationsButton } from './NotificationsButton'
 import { TrafficLightInset, WINDOW_TITLEBAR_HEIGHT } from './WindowChrome'
 
@@ -16,6 +17,9 @@ interface ActionBarProps {
   isDarkMode: boolean
   isSettingsOpen: boolean
   searchQuery: string
+  /** Per-view key for the conversation/flat toggle, or null to hide it (no mail
+   *  view is active, e.g. settings is open). */
+  viewModeKey: string | null
   onClearSearch: () => void
   onCompose: () => void
   onOpenCommandPalette: () => void
@@ -94,6 +98,7 @@ export function ActionBar({
   isDarkMode,
   isSettingsOpen,
   searchQuery,
+  viewModeKey,
   onClearSearch,
   onCompose,
   onOpenCommandPalette,
@@ -115,6 +120,8 @@ export function ActionBar({
       />
 
       <div data-tauri-drag-region className="flex-1 self-stretch" />
+
+      {viewModeKey !== null && <ViewModeToggle viewModeKey={viewModeKey} />}
 
       <CommandSearchControl
         searchQuery={searchQuery}
