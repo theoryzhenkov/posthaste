@@ -209,7 +209,10 @@ export function MessageList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--list-zebra)]">
-      <div className="flex shrink-0 items-center justify-end border-b border-border-soft bg-[var(--list-header)] px-2 py-1">
+      <div
+        data-tour-anchor="conversation-view"
+        className="flex shrink-0 items-center justify-end border-b border-border-soft bg-[var(--list-header)] px-2 py-1"
+      >
         <ViewModeToggle mode={mode} onChange={setMode} />
       </div>
       <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-[var(--list-zebra)]">

@@ -11,6 +11,7 @@ const allowedStorageFiles = new Set([
   'src/components/message-list/useViewMode.ts',
   'src/components/thread-list/useColumnConfig.ts',
   'src/connection/store.ts',
+  'src/onboarding/store.ts',
   'src/developerTools.ts',
   'src/hooks/useDaemonEvents.ts',
   'src/hooks/useMailLayoutPersistence.ts',
