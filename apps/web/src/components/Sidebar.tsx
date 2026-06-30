@@ -1,9 +1,10 @@
 /**
  * Left-pane sidebar with smart mailbox and source mailbox navigation.
  *
- * Renders normalized account, mailbox, and smart mailbox read models, owns the
- * `j`/`k` roving cursor used when the sidebar pane has keyboard focus, and wires
- * drag-to-reorder for smart mailboxes and accounts.
+ * Renders normalized account, mailbox, and smart mailbox read models, handles
+ * `j`/`k` keyboard navigation (which selects the adjacent mailbox immediately
+ * when the sidebar pane has focus), and wires drag-to-reorder for smart
+ * mailboxes and accounts.
  *
  * @spec docs/L1-ui#component-hierarchy
  * @spec docs/ui/L0#navigation-model
@@ -75,12 +76,11 @@ export function Sidebar({
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false)
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
-  // Per-source collapse is owned here (not in SourceSection) so the roving
-  // cursor only ever lands on rows that are actually visible.
+  // Per-source collapse is owned here (not in SourceSection) so `j`/`k` only ever
+  // land on rows that are actually visible.
   const [collapsedSourceIds, setCollapsedSourceIds] = useState<
     ReadonlySet<string>
   >(() => new Set())
-  const [focusedKey, setFocusedKey] = useState<SidebarNavKey | null>(null)
 
   const { activePane } = useActivePane()
   const isSidebarActive = activePane === 'sidebar'
@@ -141,34 +141,31 @@ export function Sidebar({
     sourcesCollapsed,
   ])
 
-  // The cursor defaults to the current view's row until the user moves it, so
-  // the first `j`/`k` steps from where they already are.
+  // `j`/`k` select immediately — there is no separate roving cursor. The selected
+  // mailbox's own highlight is the cursor, so navigation needs no extra `Enter`
+  // and is always visible; stepping is relative to the current selection.
   const selectionKey = sidebarSelectionKey(selectedView)
-  const baseKey = focusedKey ?? selectionKey
-  const highlightKey = isSidebarActive ? baseKey : null
+  const highlightKey = isSidebarActive ? selectionKey : null
 
   useFocusedPaneHandler('sidebar', (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return false
-    const keys = navItems.map((item) => item.key)
+    const selectAdjacent = (direction: 1 | -1): boolean => {
+      const keys = navItems.map((item) => item.key)
+      const nextKey = moveRovingKey(keys, selectionKey, direction)
+      const next = navItems.find((item) => item.key === nextKey)
+      if (!next) return false
+      next.activate()
+      return true
+    }
     switch (event.key) {
       case 'j':
       case 'ArrowDown':
         event.preventDefault()
-        setFocusedKey(moveRovingKey(keys, baseKey, 1))
-        return true
+        return selectAdjacent(1)
       case 'k':
       case 'ArrowUp':
         event.preventDefault()
-        setFocusedKey(moveRovingKey(keys, baseKey, -1))
-        return true
-      case 'Enter':
-      case ' ': {
-        const index = baseKey ? keys.indexOf(baseKey) : -1
-        if (index === -1) return false
-        event.preventDefault()
-        navItems[index].activate()
-        return true
-      }
+        return selectAdjacent(-1)
       default:
         return false
     }
