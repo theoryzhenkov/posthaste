@@ -1,22 +1,14 @@
 import matter from 'gray-matter'
 import { marked } from 'marked'
-import type {
-  HomeContent,
-  SiteMessage,
-  SiteNote,
-  TitledHtmlPiece,
-} from './types'
-import ametRaw from './home/messages/amet.md?raw'
-import communityExtensionsRaw from './home/messages/community-extensions.md?raw'
-import dolorRaw from './home/messages/dolor.md?raw'
+import type { HomeContent, SiteMessage, TitledHtmlPiece } from './types'
 import welcomeRaw from './home/messages/welcome.md?raw'
-import noteDolorRaw from './home/notes/dolor.md?raw'
-import noteIpsumRaw from './home/notes/ipsum.md?raw'
-import noteLoremRaw from './home/notes/lorem.md?raw'
+import performanceRaw from './home/messages/performance.md?raw'
+import wizardRaw from './home/messages/magick.md?raw'
+import visualsRaw from './home/messages/visuals.md?raw'
+import communityRaw from './home/messages/community.md?raw'
+import supportRaw from './home/messages/support.md?raw'
 import footerRaw from './home/footer.md?raw'
-import notesHeadingRaw from './home/notes-heading.md?raw'
 import openSourceRaw from './home/open-source.md?raw'
-import themeRaw from './home/theme.md?raw'
 
 interface MarkdownDocument {
   data: Record<string, unknown>
@@ -79,56 +71,30 @@ async function parseMessage(raw: string, file: string): Promise<SiteMessage> {
   }
 }
 
-async function parseNote(raw: string, file: string): Promise<SiteNote> {
-  const document = await parseDocument(raw)
-
-  return {
-    label: requireString(document.data, 'label', file),
-    title: requireString(document.data, 'title', file),
-    html: document.html,
-  }
-}
-
 export async function getHomeContent(): Promise<HomeContent> {
   const [
     welcome,
-    communityExtensions,
-    dolor,
-    amet,
+    performance,
+    wizard,
+    visuals,
+    community,
+    support,
     openSource,
-    notesHeading,
-    noteLorem,
-    noteIpsum,
-    noteDolor,
-    themeDocument,
     footerDocument,
   ] = await Promise.all([
     parseMessage(welcomeRaw, 'home/messages/welcome.md'),
-    parseMessage(
-      communityExtensionsRaw,
-      'home/messages/community-extensions.md',
-    ),
-    parseMessage(dolorRaw, 'home/messages/dolor.md'),
-    parseMessage(ametRaw, 'home/messages/amet.md'),
+    parseMessage(performanceRaw, 'home/messages/performance.md'),
+    parseMessage(wizardRaw, 'home/messages/magick.md'),
+    parseMessage(visualsRaw, 'home/messages/visuals.md'),
+    parseMessage(communityRaw, 'home/messages/community.md'),
+    parseMessage(supportRaw, 'home/messages/support.md'),
     parseTitledPiece(openSourceRaw, 'home/open-source.md'),
-    parseTitledPiece(notesHeadingRaw, 'home/notes-heading.md'),
-    parseNote(noteLoremRaw, 'home/notes/lorem.md'),
-    parseNote(noteIpsumRaw, 'home/notes/ipsum.md'),
-    parseNote(noteDolorRaw, 'home/notes/dolor.md'),
-    parseDocument(themeRaw),
     parseDocument(footerRaw),
   ])
 
   return {
-    messages: [welcome, communityExtensions, dolor, amet],
+    messages: [welcome, performance, wizard, visuals, community, support],
     openSource,
-    notesHeading,
-    notes: [noteLorem, noteIpsum, noteDolor],
-    theme: {
-      title: requireString(themeDocument.data, 'title', 'home/theme.md'),
-      html: themeDocument.html,
-      eyebrow: requireString(themeDocument.data, 'eyebrow', 'home/theme.md'),
-    },
     footer: {
       brand: requireString(footerDocument.data, 'brand', 'home/footer.md'),
       html: footerDocument.html,

@@ -8,7 +8,6 @@ export interface Mailbox {
 }
 
 export type MailboxView = Mailbox['id']
-export type MockTheme = 'baseline' | 'glass' | 'typewriter' | 'pigeon'
 
 export interface PersistedMockState {
   selectedMailbox?: MailboxView
@@ -16,8 +15,6 @@ export interface PersistedMockState {
   readMessageIds?: string[]
   archivedMessageIds?: string[]
   flaggedMessageIds?: string[]
-  mockTheme?: MockTheme
-  hasUnlockedSecretTheme?: boolean
 }
 
 export interface MessagePreview extends SiteMessage {

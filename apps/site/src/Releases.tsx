@@ -8,6 +8,30 @@ import type {
 } from './content/types'
 import { FooterSection, InstallHeader } from './SiteChrome'
 
+/** App screenshots for the gallery, captured from a seeded demo account. */
+const SCREENSHOTS = [
+  {
+    src: '/screenshots/conversations.png',
+    caption: 'Threaded conversation view',
+    alt: 'Posthaste inbox showing a threaded conversation with nested replies',
+  },
+  {
+    src: '/screenshots/reader.png',
+    caption: 'Reading a thread',
+    alt: 'Posthaste reading pane with an open email thread',
+  },
+  {
+    src: '/screenshots/compose.png',
+    caption: 'Compose',
+    alt: 'Posthaste compose window with a draft reply',
+  },
+  {
+    src: '/screenshots/command-palette.png',
+    caption: 'Command palette',
+    alt: 'Posthaste command palette open over the inbox',
+  },
+]
+
 const OS_ORDER: ReleaseOs[] = ['macOS', 'Windows', 'Linux']
 
 const OS_ICON: Record<ReleaseOs, typeof Apple> = {
@@ -90,7 +114,6 @@ export function Releases({
       <InstallHeader active="releases" />
 
       <section className="releases-hero" aria-labelledby="releases-title">
-        <p className="releases-eyebrow">Download Posthaste</p>
         <h1 id="releases-title">
           Try Posthaste{latest ? ` ${latest.version}` : ''}
         </h1>
@@ -103,14 +126,22 @@ export function Releases({
               {latest.tag}
             </a>
           </p>
-        ) : (
-          <p className="releases-subtitle">No releases published yet.</p>
-        )}
+        ) : null}
 
-        <p className="releases-subtitle">
-          Early builds are for dogfooding and beta testing. Keep another mail
-          client available if you try them today.
-        </p>
+        {latest ? null : (
+          <div className="releases-empty">
+            <p>
+              No stable release yet. Beta builds for macOS, Windows, and Linux
+              ship on GitHub while we get there.
+            </p>
+            <a
+              className="releases-empty-link"
+              href="https://github.com/theoryzhenkov/posthaste/releases"
+            >
+              Beta builds on GitHub →
+            </a>
+          </div>
+        )}
 
         {latest ? (
           <div className="download-grid">
@@ -162,44 +193,67 @@ export function Releases({
         ) : null}
       </section>
 
-      <section className="changelog" aria-labelledby="changelog-title">
-        <h2 id="changelog-title">Changelog</h2>
-        <ol className="changelog-list">
-          {releases.map((release) => (
-            <li className="changelog-entry" key={release.version}>
-              <div className="changelog-meta">
-                <h3>
-                  {release.version}
-                  {release.prerelease ? (
-                    <span className="changelog-tag">pre-release</span>
-                  ) : null}
-                </h3>
-                <time dateTime={release.date}>{formatDate(release.date)}</time>
-              </div>
-              <div className="changelog-body">
-                {release.notesHtml ? (
-                  <div
-                    className="changelog-notes"
-                    dangerouslySetInnerHTML={{ __html: release.notesHtml }}
-                  />
-                ) : null}
-                <div className="changelog-downloads">
-                  {release.assets.map((asset) => (
-                    <a
-                      className="changelog-download"
-                      href={asset.url}
-                      download
-                      key={asset.name}
-                    >
-                      {asset.os} {asset.kind}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            </li>
+      <section className="screenshots" aria-labelledby="screenshots-title">
+        <h2 id="screenshots-title">A look inside</h2>
+        <div className="screenshot-grid">
+          {SCREENSHOTS.map((shot) => (
+            <figure className="screenshot" key={shot.src}>
+              <img
+                src={shot.src}
+                alt={shot.alt}
+                width={1440}
+                height={900}
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>{shot.caption}</figcaption>
+            </figure>
           ))}
-        </ol>
+        </div>
       </section>
+
+      {releases.length > 0 ? (
+        <section className="changelog" aria-labelledby="changelog-title">
+          <h2 id="changelog-title">Changelog</h2>
+          <ol className="changelog-list">
+            {releases.map((release) => (
+              <li className="changelog-entry" key={release.version}>
+                <div className="changelog-meta">
+                  <h3>
+                    {release.version}
+                    {release.prerelease ? (
+                      <span className="changelog-tag">pre-release</span>
+                    ) : null}
+                  </h3>
+                  <time dateTime={release.date}>
+                    {formatDate(release.date)}
+                  </time>
+                </div>
+                <div className="changelog-body">
+                  {release.notesHtml ? (
+                    <div
+                      className="changelog-notes"
+                      dangerouslySetInnerHTML={{ __html: release.notesHtml }}
+                    />
+                  ) : null}
+                  <div className="changelog-downloads">
+                    {release.assets.map((asset) => (
+                      <a
+                        className="changelog-download"
+                        href={asset.url}
+                        download
+                        key={asset.name}
+                      >
+                        {asset.os} {asset.kind}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       <FooterSection content={footer} />
     </main>

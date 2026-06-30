@@ -1,4 +1,4 @@
-import type { MockTheme, PersistedMockState } from './types'
+import type { PersistedMockState } from './types'
 
 export const MOCK_STATE_STORAGE_KEY = 'posthaste-site-mail-mock-state-v1'
 
@@ -20,13 +20,4 @@ export function persistedSet(
   values: string[] | undefined,
 ): ReadonlySet<string> {
   return new Set(values ?? [])
-}
-
-export function isMockTheme(value: unknown): value is MockTheme {
-  return (
-    value === 'baseline' ||
-    value === 'glass' ||
-    value === 'typewriter' ||
-    value === 'pigeon'
-  )
 }
