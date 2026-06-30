@@ -15,7 +15,6 @@ import {
   SidebarError,
   SidebarLoading,
   SmartMailboxSection,
-  TagsSection,
 } from './sidebar/SidebarContent'
 
 /**
@@ -42,7 +41,6 @@ interface SidebarProps {
     mailboxId: string,
     name: string,
   ) => void
-  onSelectTag: (tag: string) => void
   onSyncSource: (sourceId: string) => void
 }
 
@@ -58,10 +56,9 @@ export function Sidebar({
   onOpenSmartMailboxSettings,
   onSelectSmartMailbox,
   onSelectSourceMailbox,
-  onSelectTag,
   onSyncSource,
 }: SidebarProps) {
-  const { error, isLoading, refetchBootstrap, smartMailboxes, sources, tags } =
+  const { error, isLoading, refetchBootstrap, smartMailboxes, sources } =
     useMailboxNavigationReadModels()
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false)
@@ -86,7 +83,6 @@ export function Sidebar({
               onSelectSmartMailbox={onSelectSmartMailbox}
               onToggle={() => setMailboxesCollapsed((prev) => !prev)}
             />
-            <TagsSection tags={tags} onSelectTag={onSelectTag} />
             <AccountsSection
               collapsed={sourcesCollapsed}
               selectedView={selectedView}

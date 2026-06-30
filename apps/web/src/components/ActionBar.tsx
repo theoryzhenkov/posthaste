@@ -1,140 +1,50 @@
-import { useState } from 'react'
-import {
-  Archive,
-  Clock3,
-  Command,
-  Flag,
-  Forward,
-  Maximize2,
-  Moon,
-  PenSquare,
-  Reply,
-  ReplyAll,
-  Settings,
-  SunMedium,
-  Tag,
-  Trash2,
-  X,
-} from 'lucide-react'
+import { Command, Moon, PenSquare, Settings, SunMedium, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { snoozePresets } from './message-detail/snoozePresets'
 import { NotificationsButton } from './NotificationsButton'
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { TrafficLightInset, WINDOW_TITLEBAR_HEIGHT } from './WindowChrome'
 
+/**
+ * Top window chrome: global controls only.
+ *
+ * Message-level actions (reply, forward, archive, trash, flag, snooze, tag,
+ * open) live in the message detail header, where they are only meaningful once
+ * a message is selected. The keyboard shortcuts for those actions are handled
+ * globally by `useGlobalMailShortcuts` and remain available regardless.
+ */
 interface ActionBarProps {
   isDarkMode: boolean
-  isFlagged: boolean
-  isMessageSelected: boolean
   isSettingsOpen: boolean
   searchQuery: string
-  onArchive: () => void
   onClearSearch: () => void
   onCompose: () => void
-  onForward: () => void
   onOpenCommandPalette: () => void
-  onOpenFocusedMessage: () => void
-  onReply: () => void
-  onReplyAll: () => void
-  onSnooze: (until: number) => void
   onShowShortcuts: () => void
-  onTag: () => void
-  onToggleFlag: () => void
   onToggleSettings: () => void
   onToggleTheme: () => void
-  onTrash: () => void
-}
-
-interface ToolbarChipProps {
-  active?: boolean
-  disabled?: boolean
-  tagEditorTrigger?: boolean
-  hint?: string
-  icon: React.ReactNode
-  label?: string
-  onClick: () => void
-  title: string
-}
-
-function Divider() {
-  return <div className="mx-1.5 h-[18px] w-px bg-border-soft" />
 }
 
 function ToolbarChip({
-  active,
-  disabled,
-  tagEditorTrigger,
-  hint,
   icon,
-  label,
   onClick,
   title,
-}: ToolbarChipProps) {
+}: {
+  icon: React.ReactNode
+  onClick: () => void
+  title: string
+}) {
   return (
     <button
       type="button"
-      data-tag-editor-trigger={tagEditorTrigger ? 'true' : undefined}
       title={title}
-      disabled={disabled}
       onClick={onClick}
       className={cn(
-        'ph-focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[12px] font-medium text-chrome-foreground/70 transition-colors',
-        'hover:bg-[var(--hover-bg)] hover:text-chrome-foreground disabled:opacity-35',
-        label ? 'pr-2.5' : 'w-7 justify-center px-0',
-        active && 'bg-brand-coral-soft text-[var(--brand-coral-deep)]',
+        'ph-focus-ring inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] px-0 text-chrome-foreground/70 transition-colors',
+        'hover:bg-[var(--hover-bg)] hover:text-chrome-foreground',
       )}
     >
       <span className="shrink-0">{icon}</span>
-      {label && <span>{label}</span>}
-      {label && hint && (
-        <span className="rounded-[4px] bg-black/6 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-chrome-foreground/52">
-          {hint}
-        </span>
-      )}
     </button>
-  )
-}
-
-function SnoozeChip({
-  disabled,
-  onSnooze,
-}: {
-  disabled?: boolean
-  onSnooze: (until: number) => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          title="Snooze"
-          className={cn(
-            'ph-focus-ring inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-chrome-foreground/70 transition-colors',
-            'hover:bg-[var(--hover-bg)] hover:text-chrome-foreground disabled:opacity-35',
-          )}
-        >
-          <Clock3 size={14} strokeWidth={1.6} />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-44">
-        {snoozePresets().map((preset) => (
-          <button
-            key={preset.label}
-            type="button"
-            onClick={() => {
-              onSnooze(preset.until)
-              setOpen(false)
-            }}
-            className="ph-focus-ring flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-[var(--hover-bg)]"
-          >
-            {preset.label}
-          </button>
-        ))}
-      </PopoverContent>
-    </Popover>
   )
 }
 
@@ -182,25 +92,14 @@ function CommandSearchControl({
 
 export function ActionBar({
   isDarkMode,
-  isFlagged,
-  isMessageSelected,
   isSettingsOpen,
   searchQuery,
-  onArchive,
   onClearSearch,
   onCompose,
-  onForward,
   onOpenCommandPalette,
-  onOpenFocusedMessage,
-  onReply,
-  onReplyAll,
-  onSnooze,
   onShowShortcuts,
-  onTag,
-  onToggleFlag,
   onToggleSettings,
   onToggleTheme,
-  onTrash,
 }: ActionBarProps) {
   return (
     <header
@@ -213,67 +112,6 @@ export function ActionBar({
         icon={<PenSquare size={14} strokeWidth={1.6} />}
         onClick={onCompose}
         title="Compose"
-      />
-      <Divider />
-      <ToolbarChip
-        hint="⌘R"
-        disabled={!isMessageSelected}
-        icon={<Reply size={14} strokeWidth={1.6} />}
-        onClick={onReply}
-        title="Reply"
-      />
-      <ToolbarChip
-        hint="⇧⌘R"
-        disabled={!isMessageSelected}
-        icon={<ReplyAll size={14} strokeWidth={1.6} />}
-        onClick={onReplyAll}
-        title="Reply all"
-      />
-      <ToolbarChip
-        hint="⇧⌘F"
-        disabled={!isMessageSelected}
-        icon={<Forward size={14} strokeWidth={1.6} />}
-        onClick={onForward}
-        title="Forward"
-      />
-      <Divider />
-      <ToolbarChip
-        hint="E"
-        disabled={!isMessageSelected}
-        icon={<Archive size={14} strokeWidth={1.6} />}
-        onClick={onArchive}
-        title="Archive"
-      />
-      <ToolbarChip
-        hint="⌫"
-        disabled={!isMessageSelected}
-        icon={<Trash2 size={14} strokeWidth={1.6} />}
-        onClick={onTrash}
-        title="Trash"
-      />
-      <ToolbarChip
-        active={isFlagged}
-        hint="⇧⌘L"
-        disabled={!isMessageSelected}
-        icon={<Flag size={14} strokeWidth={1.6} />}
-        onClick={onToggleFlag}
-        title="Flag"
-      />
-      <SnoozeChip disabled={!isMessageSelected} onSnooze={onSnooze} />
-      <ToolbarChip
-        hint="L"
-        disabled={!isMessageSelected}
-        tagEditorTrigger
-        icon={<Tag size={14} strokeWidth={1.6} />}
-        onClick={onTag}
-        title="Tag"
-      />
-      <ToolbarChip
-        hint="O"
-        disabled={!isMessageSelected}
-        icon={<Maximize2 size={14} strokeWidth={1.6} />}
-        onClick={onOpenFocusedMessage}
-        title="Open message"
       />
 
       <div data-tauri-drag-region className="flex-1 self-stretch" />

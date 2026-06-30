@@ -2,12 +2,15 @@ import { useState, type MouseEvent } from 'react'
 import {
   Archive,
   Clock,
-  Ellipsis,
+  Flag,
   Forward,
+  Maximize2,
   Paperclip,
   Pencil,
   Reply,
   ReplyAll,
+  Tag,
+  Trash2,
 } from 'lucide-react'
 
 import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
@@ -31,10 +34,14 @@ export function MessageHeader({
   onArchive,
   onEditDraft,
   onForward,
+  onOpenFocusedMessage,
   onReply,
   onReplyAll,
   onSearch,
   onSnooze,
+  onTag,
+  onToggleFlag,
+  onTrash,
   threadMessages,
 }: {
   conversationSubject: string | null | undefined
@@ -42,10 +49,14 @@ export function MessageHeader({
   onArchive: () => void
   onEditDraft?: () => void
   onForward: () => void
+  onOpenFocusedMessage?: () => void
   onReply: () => void
   onReplyAll: () => void
   onSearch?: (query: string, append?: boolean) => void
   onSnooze: (until: number) => void
+  onTag?: () => void
+  onToggleFlag?: () => void
+  onTrash?: () => void
   threadMessages: MessageSummary[]
 }) {
   const isDraft = message.keywords.includes(SYSTEM_KEYWORDS.Draft)
@@ -87,12 +98,17 @@ export function MessageHeader({
             </div>
             <HeaderActions
               isDraft={isDraft}
+              isFlagged={message.isFlagged}
               onArchive={onArchive}
               onEditDraft={onEditDraft}
               onForward={onForward}
+              onOpenFocusedMessage={onOpenFocusedMessage}
               onReply={onReply}
               onReplyAll={onReplyAll}
               onSnooze={onSnooze}
+              onTag={onTag}
+              onToggleFlag={onToggleFlag}
+              onTrash={onTrash}
             />
           </div>
           <MessageTagRow
@@ -142,20 +158,30 @@ function SenderButtons({
 
 function HeaderActions({
   isDraft,
+  isFlagged,
   onArchive,
   onEditDraft,
   onForward,
+  onOpenFocusedMessage,
   onReply,
   onReplyAll,
   onSnooze,
+  onTag,
+  onToggleFlag,
+  onTrash,
 }: {
   isDraft: boolean
+  isFlagged: boolean
   onArchive: () => void
   onEditDraft?: () => void
   onForward: () => void
+  onOpenFocusedMessage?: () => void
   onReply: () => void
   onReplyAll: () => void
   onSnooze: (until: number) => void
+  onTag?: () => void
+  onToggleFlag?: () => void
+  onTrash?: () => void
 }) {
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   if (isDraft && onEditDraft) {
@@ -218,6 +244,18 @@ function HeaderActions({
       >
         <Archive size={14} strokeWidth={1.6} />
       </Button>
+      {onTrash && (
+        <Button
+          aria-label="Trash"
+          onClick={onTrash}
+          size="icon-sm"
+          title="Trash"
+          type="button"
+          variant="ghost"
+        >
+          <Trash2 size={14} strokeWidth={1.6} />
+        </Button>
+      )}
       <Popover open={snoozeOpen} onOpenChange={setSnoozeOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -248,9 +286,44 @@ function HeaderActions({
           ))}
         </PopoverContent>
       </Popover>
-      <Button disabled size="icon-sm" type="button" variant="ghost">
-        <Ellipsis size={14} strokeWidth={1.6} />
-      </Button>
+      {onToggleFlag && (
+        <Button
+          aria-label="Flag"
+          onClick={onToggleFlag}
+          size="icon-sm"
+          title="Flag"
+          type="button"
+          variant="ghost"
+          className={isFlagged ? 'text-signal-flag' : undefined}
+        >
+          <Flag size={14} strokeWidth={1.6} />
+        </Button>
+      )}
+      {onTag && (
+        <Button
+          aria-label="Tag"
+          data-tag-editor-trigger="true"
+          onClick={onTag}
+          size="icon-sm"
+          title="Tag"
+          type="button"
+          variant="ghost"
+        >
+          <Tag size={14} strokeWidth={1.6} />
+        </Button>
+      )}
+      {onOpenFocusedMessage && (
+        <Button
+          aria-label="Open message"
+          onClick={onOpenFocusedMessage}
+          size="icon-sm"
+          title="Open message"
+          type="button"
+          variant="ghost"
+        >
+          <Maximize2 size={14} strokeWidth={1.6} />
+        </Button>
+      )}
     </div>
   )
 }

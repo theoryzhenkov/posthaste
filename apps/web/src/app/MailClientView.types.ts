@@ -65,7 +65,6 @@ export interface MailClientViewProps {
     mailboxId: string,
     name: string,
   ) => void
-  onSelectTag: (tag: string) => void
   onSetTagEditorOpen: (open: boolean) => void
   onShellLayoutChanged: LayoutHandler
   onShowShortcuts: () => void
