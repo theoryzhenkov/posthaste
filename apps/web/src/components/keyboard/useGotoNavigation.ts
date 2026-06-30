@@ -3,7 +3,7 @@
  * view-selection handlers, returning a single `goto(role, options)` callback
  * for the keyboard controller.
  *
- * @spec docs/L0-ui#navigation-model
+ * @spec docs/ui/L0#navigation-model
  */
 import { useQuery } from '@tanstack/react-query'
 import { useCallback } from 'react'

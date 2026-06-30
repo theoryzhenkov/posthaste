@@ -6,8 +6,8 @@
  * pane-focus movement (`h`/`l`), and finally the focused pane's own handler
  * (`j`/`k`). Keeping it pure makes the precedence order testable without a DOM.
  *
- * @spec docs/L0-ui#navigation-model
- * @spec docs/L1-ui#keyboard-shortcuts
+ * @spec docs/ui/L0#navigation-model
+ * @spec docs/ui/L1#keyboard-shortcuts
  */
 import { stepGotoPrefix, type GotoPrefix, type GotoRole } from './goto'
 import { isEditableKeyboardTarget } from './inputTargets'

@@ -1,7 +1,7 @@
 /**
  * Keyboard shortcut reference overlay, toggled with `?`.
  *
- * @spec docs/L1-ui#keyboard-shortcuts
+ * @spec docs/ui/L1#keyboard-shortcuts
  */
 import { Keyboard } from 'lucide-react'
 

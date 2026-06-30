@@ -6,7 +6,7 @@
  * drag-to-reorder for smart mailboxes and accounts.
  *
  * @spec docs/L1-ui#component-hierarchy
- * @spec docs/L0-ui#navigation-model
+ * @spec docs/ui/L0#navigation-model
  */
 import { useCallback, useMemo, useState } from 'react'
 
@@ -30,7 +30,7 @@ import {
 
 /**
  * Discriminated union representing the current sidebar selection.
- * @spec docs/L0-ui#navigation-model
+ * @spec docs/ui/L0#navigation-model
  */
 export type SidebarSelection =
   | { kind: 'smart-mailbox'; id: string; name: string }
@@ -59,7 +59,7 @@ interface SidebarProps {
  * Sidebar navigation with smart mailbox and source mailbox sections.
  *
  * @spec docs/L1-ui#component-hierarchy
- * @spec docs/L0-ui#navigation-model
+ * @spec docs/ui/L0#navigation-model
  */
 export function Sidebar({
   selectedView,

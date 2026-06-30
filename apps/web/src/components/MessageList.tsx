@@ -6,7 +6,7 @@
  * conversation, but the middle pane itself does not collapse rows by thread.
  *
  * @spec docs/L1-ui#messagelist
- * @spec docs/L1-ui#keyboard-shortcuts
+ * @spec docs/ui/L1#keyboard-shortcuts
  */
 import { useCallback, useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
@@ -63,7 +63,7 @@ interface MessageListProps {
  * domain events, per-view scroll restoration, and keyboard shortcuts.
  *
  * @spec docs/L1-ui#messagelist
- * @spec docs/L1-ui#keyboard-shortcuts
+ * @spec docs/ui/L1#keyboard-shortcuts
  */
 export function MessageList({
   selectedView,
