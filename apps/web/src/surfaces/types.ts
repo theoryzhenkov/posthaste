@@ -5,6 +5,7 @@ export type SettingsSurfaceCategory =
   | 'general'
   | 'appearance'
   | 'accounts'
+  | 'outbox'
   | 'mailboxes'
   | 'storage'
   | 'notifications'

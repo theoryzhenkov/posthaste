@@ -240,6 +240,7 @@ function isSettingsSurfaceCategory(
     value === 'general' ||
     value === 'appearance' ||
     value === 'accounts' ||
+    value === 'outbox' ||
     value === 'mailboxes' ||
     value === 'storage' ||
     value === 'notifications' ||

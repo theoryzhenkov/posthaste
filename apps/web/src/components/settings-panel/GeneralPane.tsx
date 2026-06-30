@@ -13,7 +13,6 @@ import {
   SelectValue,
 } from '../ui/select'
 import { SettingsPage, SettingsPageHeader, SettingsSection } from './shared'
-import { OutboxSection } from './OutboxSection'
 import { UpdatesSection } from './UpdatesSection'
 
 export function GeneralPane({
@@ -65,8 +64,6 @@ export function GeneralPane({
           </Select>
         </div>
       </SettingsSection>
-
-      <OutboxSection />
 
       {isTauriRuntime() && <UpdatesSection />}
     </SettingsPage>
