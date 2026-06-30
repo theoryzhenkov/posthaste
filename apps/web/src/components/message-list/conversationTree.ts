@@ -2,13 +2,16 @@
  * Conversation-view tree model.
  *
  * Conversation view keeps the same individual message rows as the flat list,
- * but groups them by conversation into a two-level tree: the oldest message of
- * a conversation is the root (depth 0), and every later message is a reply
- * (depth 1) rendered with a left offset. (Message summaries carry no per-message
- * reply parent, so the tree is intentionally two levels, not arbitrary nesting.)
+ * but groups them by conversation into a real reply tree: the oldest message is
+ * the root (depth 0, no offset), and every later message hangs under the parent
+ * it replied to — resolved by matching its `inReplyTo` to another message's
+ * `rfcMessageId` within the thread. Depth is the length of that parent chain, so
+ * rows are offset by how deep the reply sits. Messages whose parent isn't in the
+ * thread (missing/broken headers) fall back to the conversation root.
  *
- * Collapsed conversations omit their replies from the flattened rows entirely,
- * so virtualization and keyboard navigation skip them with no special-casing.
+ * Collapse is per-message: collapsing any node with children omits its whole
+ * subtree from the flattened rows, so virtualization and keyboard navigation
+ * skip them with no special-casing.
  *
  * The builder is pure so it can be unit-tested and so the React layer only owns
  * fetching + collapse state.
@@ -21,14 +24,13 @@ import { messageKey } from './model'
 
 export interface ConversationTreeRow {
   message: MessageSummary
-  /** 0 for the conversation root (oldest message), 1 for replies. */
+  /** Depth in the reply tree: 0 for the conversation root (no offset), +1 per
+   *  reply level. */
   depth: number
   conversationId: string
-  /** True for the first (root) message of a conversation block. */
-  isRoot: boolean
-  /** Reply count under the root (depth-1 rows), independent of collapse state. */
-  childCount: number
-  /** Whether this conversation is collapsed (only meaningful on the root row). */
+  /** Whether this message has replies under it — i.e. shows a collapse chevron. */
+  hasChildren: boolean
+  /** Whether this node is collapsed (its subtree is hidden). */
   collapsed: boolean
 }
 
@@ -51,7 +53,83 @@ function dedupeByKey(messages: MessageSummary[]): MessageSummary[] {
 }
 
 /**
- * Flatten anchor messages into conversation blocks.
+ * Build one conversation's reply tree into `out` (preorder: parent before its
+ * children, siblings chronological). The oldest message is the root; each later
+ * message's parent is the in-thread message it replied to (`inReplyTo` →
+ * `rfcMessageId`), or the root when that parent isn't present. Requiring the
+ * parent to be strictly older keeps the parent map a tree (no cycles).
+ */
+function buildConversationBlock(
+  messages: MessageSummary[],
+  collapsed: ReadonlySet<string>,
+  out: ConversationTreeRow[],
+): void {
+  const ordered = sortChronologically(dedupeByKey(messages))
+  if (ordered.length === 0) {
+    return
+  }
+  const conversationId = ordered[0].conversationId
+
+  const indexByKey = new Map<string, number>()
+  ordered.forEach((message, index) =>
+    indexByKey.set(messageKey(message), index),
+  )
+
+  const messageByRfcId = new Map<string, MessageSummary>()
+  for (const message of ordered) {
+    if (message.rfcMessageId) {
+      messageByRfcId.set(message.rfcMessageId, message)
+    }
+  }
+
+  const root = ordered[0]
+  const rootKey = messageKey(root)
+
+  // Children of each node, in the chronological order we discover them.
+  const children = new Map<string, MessageSummary[]>()
+  for (let index = 1; index < ordered.length; index += 1) {
+    const message = ordered[index]
+    const key = messageKey(message)
+    const candidate = message.inReplyTo
+      ? messageByRfcId.get(message.inReplyTo)
+      : undefined
+    const candidateKey = candidate ? messageKey(candidate) : null
+    const parentKey =
+      candidateKey !== null &&
+      candidateKey !== key &&
+      (indexByKey.get(candidateKey) ?? Infinity) < index
+        ? candidateKey
+        : rootKey
+    const bucket = children.get(parentKey)
+    if (bucket) {
+      bucket.push(message)
+    } else {
+      children.set(parentKey, [message])
+    }
+  }
+
+  const visit = (message: MessageSummary, depth: number): void => {
+    const key = messageKey(message)
+    const kids = children.get(key) ?? []
+    const isCollapsed = collapsed.has(key)
+    out.push({
+      message,
+      depth,
+      conversationId,
+      hasChildren: kids.length > 0,
+      collapsed: isCollapsed,
+    })
+    if (!isCollapsed) {
+      for (const child of kids) {
+        visit(child, depth + 1)
+      }
+    }
+  }
+  visit(root, 0)
+}
+
+/**
+ * Flatten anchor messages into conversation reply trees.
  *
  * `anchors` is the view-filtered, sorted flat list; conversation order follows
  * each conversation's first appearance there. Each conversation renders from its
@@ -89,33 +167,7 @@ export function buildConversationTree(input: {
       complete && complete.length > 0
         ? complete
         : (anchorsByConversation.get(conversationId) ?? [])
-    const ordered = sortChronologically(dedupeByKey(source))
-    if (ordered.length === 0) {
-      continue
-    }
-
-    const isCollapsed = collapsed.has(conversationId)
-    const childCount = ordered.length - 1
-    rows.push({
-      message: ordered[0],
-      depth: 0,
-      conversationId,
-      isRoot: true,
-      childCount,
-      collapsed: isCollapsed,
-    })
-    if (!isCollapsed) {
-      for (let index = 1; index < ordered.length; index += 1) {
-        rows.push({
-          message: ordered[index],
-          depth: 1,
-          conversationId,
-          isRoot: false,
-          childCount,
-          collapsed: false,
-        })
-      }
-    }
+    buildConversationBlock(source, collapsed, rows)
   }
 
   return { rows, visibleMessages: rows.map((row) => row.message) }
@@ -129,8 +181,7 @@ export function flatMessageRows(
     message,
     depth: 0,
     conversationId: message.conversationId,
-    isRoot: false,
-    childCount: 0,
+    hasChildren: false,
     collapsed: false,
   }))
 }

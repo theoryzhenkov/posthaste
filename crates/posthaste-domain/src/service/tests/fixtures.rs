@@ -60,6 +60,8 @@ pub(super) fn sample_message_summary(id: &str, keywords: Vec<String>) -> Message
         mailbox_ids: vec![MailboxId::from("inbox")],
         keywords,
         version: None,
+        rfc_message_id: None,
+        in_reply_to: None,
     }
 }
 
