@@ -14,7 +14,7 @@ import { queryKeys } from '@/queryKeys'
 import { runtimeMutations } from '@/runtime/mutations'
 import { runtimeViews } from '@/runtime/views'
 
-import { SettingsSection } from './shared'
+import { SettingsPage, SettingsPageHeader } from './shared'
 
 type OutboxEntry = { accountId: string; operation: Operation }
 
@@ -42,7 +42,7 @@ const STATE_LABELS: Record<OperationState, string> = {
   failed: 'Failed',
 }
 
-export function OutboxSection() {
+export function OutboxPane() {
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: runtimeViews.accounts.list,
@@ -84,17 +84,15 @@ export function OutboxSection() {
   }
 
   return (
-    <SettingsSection title="Outbox">
-      <p className="text-[12px] leading-5 text-muted-foreground">
-        Changes made while offline are queued here and sent when your accounts
-        reconnect.
-      </p>
+    <SettingsPage>
+      <SettingsPageHeader
+        title="Outbox"
+        description="Changes made while offline are queued here and sent when your accounts reconnect."
+      />
       {entries.length === 0 ? (
-        <p className="mt-3 text-[13px] text-muted-foreground">
-          Nothing queued.
-        </p>
+        <p className="text-[13px] text-muted-foreground">Nothing queued.</p>
       ) : (
-        <ul className="mt-3 flex flex-col gap-2">
+        <ul className="flex flex-col gap-2">
           {entries.map(({ accountId, operation }) => (
             <li
               key={operation.id}
@@ -142,6 +140,6 @@ export function OutboxSection() {
           ))}
         </ul>
       )}
-    </SettingsSection>
+    </SettingsPage>
   )
 }
