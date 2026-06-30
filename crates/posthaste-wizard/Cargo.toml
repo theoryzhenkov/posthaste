@@ -1,0 +1,33 @@
+[package]
+name = "posthaste-wizard"
+version = "0.1.0"
+edition = "2021"
+
+# The one-shot local composition installer (docs/eph/PLAN-L2-install-wizard).
+# Lean by design — a node ships only what its role needs, so the wizard depends
+# on neither the store/engine graph nor the config crate at runtime. It writes a
+# node's app.toml + TLS material + a service unit, then can be deleted.
+
+[[bin]]
+name = "posthaste-wizard"
+path = "src/main.rs"
+
+[lib]
+name = "posthaste_wizard"
+path = "src/lib.rs"
+
+[dependencies]
+rcgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+# Round-trip proof only: the daemon's own schema reads back what the wizard
+# writes. A dev-dep, so the shipped wizard never links the config graph.
+posthaste-config = { path = "../posthaste-config" }
+tempfile = "3"
+
+[lints]
+workspace = true
