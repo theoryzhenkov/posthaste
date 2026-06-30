@@ -116,6 +116,14 @@ Sync triggers and configuration reload
 | `POST` | `/v1/config:reload` | Reload configuration | `reload_config` |
 | `POST` | `/v1/sources/{source_id}/commands/sync` | Trigger sync | `trigger_sync` |
 
+## events
+
+Server-sent domain event stream
+
+| Method | Path | Summary | Operation |
+| --- | --- | --- | --- |
+| `GET` | `/v1/events` | Stream events | `stream_events` |
+
 ## views
 
 Runtime-owned view snapshots and streams

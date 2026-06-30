@@ -587,7 +587,7 @@ export interface paths {
         head?: never;
         /**
          * Update smart mailbox
-         * @description Merges name, position, and rule fields. Omitted fields are preserved.
+         * @description Merges name and rule fields. Omitted fields are preserved.
          */
         patch: operations["patch_smart_mailbox"];
         trace?: never;
@@ -1332,6 +1332,14 @@ export interface components {
          *     @spec docs/L1-accounts#toml-schema
          */
         AppSettings: {
+            /**
+             * @description User's explicit sidebar arrangement of accounts (by id). Same override
+             *     semantics as [`smart_mailbox_order`](Self::smart_mailbox_order); accounts
+             *     absent from the list fall back to name order.
+             *
+             *     @spec docs/L1-accounts#sidebar-ordering
+             */
+            accountOrder?: components["schemas"]["AccountId"][];
             appearance?: null | components["schemas"]["Appearance"];
             automationDrafts?: components["schemas"]["AutomationRule"][];
             automationRules?: components["schemas"]["AutomationRule"][];
@@ -1346,6 +1354,25 @@ export interface components {
              */
             mailboxColors?: components["schemas"]["MailboxColor"][];
             notifications?: null | components["schemas"]["Notifications"];
+            /**
+             * @description User's explicit sidebar arrangement of smart mailboxes (by id). Acts as
+             *     an override: ids listed here come first, in this order; any smart mailbox
+             *     absent from the list falls back to the canonical default order (built-ins
+             *     first) then creation order. Stale ids are ignored. Pure presentation.
+             *
+             *     @spec docs/L1-accounts#sidebar-ordering
+             */
+            smartMailboxOrder?: components["schemas"]["SmartMailboxId"][];
+            /**
+             * @description Per-tag presentation overrides (color + icon), keyed by tag name. Tags
+             *     themselves are keyword-derived and have no entity; this overlay gives a
+             *     tag a foreground/background color and a lucide icon. Pure presentation,
+             *     global by name; TOML source of truth. Absent fields fall back to the
+             *     renderer's name-derived defaults.
+             *
+             *     @spec docs/eph/DESIGN-L2-appearance-toml
+             */
+            tags?: components["schemas"]["TagAppearance"][];
         };
         /**
          * @description App-level appearance/theme preferences — the renderer's visual settings,
@@ -1608,8 +1635,7 @@ export interface components {
          */
         CreateSmartMailboxRequest: {
             name: string;
-            /** Format: int64 */
-            position?: number | null;
+            role?: string | null;
             rule: components["schemas"]["SmartMailboxRule"];
         };
         /** @description Request body for `POST /v1/sources/{source_id}/commands/delete-draft`. */
@@ -1851,12 +1877,27 @@ export interface components {
             fromName?: string | null;
             hasAttachment: boolean;
             id: components["schemas"]["MessageId"];
+            /**
+             * @description The `Message-ID` this message is a reply to (its `In-Reply-To` header),
+             *     i.e. the parent in the reply tree. `None` for thread roots / messages
+             *     without the header.
+             */
+            inReplyTo?: string | null;
             isFlagged: boolean;
             isRead: boolean;
             keywords: string[];
             mailboxIds: components["schemas"]["MailboxId"][];
             preview?: string | null;
             receivedAt: string;
+            /**
+             * @description This message's RFC822 `Message-ID`, when known. With [`in_reply_to`] it
+             *     lets the conversation view build a real reply tree (match a reply's
+             *     `in_reply_to` to its parent's `rfc_message_id`). `None` for providers/
+             *     messages without one.
+             *
+             *     [`in_reply_to`]: Self::in_reply_to
+             */
+            rfcMessageId?: string | null;
             sourceId: components["schemas"]["AccountId"];
             sourceName: string;
             sourceThreadId: components["schemas"]["ThreadId"];
@@ -2052,13 +2093,23 @@ export interface components {
          *     @spec docs/L1-api#settings
          */
         PatchSettingsRequest: {
+            accountOrder?: components["schemas"]["AccountId"][] | null;
             appearance?: null | components["schemas"]["Appearance"];
             automationDrafts?: components["schemas"]["AutomationRule"][] | null;
             automationRules?: components["schemas"]["AutomationRule"][] | null;
             cachePolicy?: null | components["schemas"]["CachePolicy"];
             defaultAccountId?: string | null;
+            /**
+             * @description When true, re-run the current backfill rules against existing messages
+             *     after persisting (on-demand "backfill now").
+             */
+            forceBackfill?: boolean;
             mailboxColors?: components["schemas"]["MailboxColor"][] | null;
             notifications?: null | components["schemas"]["Notifications"];
+            /** @description Explicit sidebar arrangement (ids); overwrites the stored list wholesale. */
+            smartMailboxOrder?: components["schemas"]["SmartMailboxId"][] | null;
+            /** @description Per-tag presentation overrides (color + icon); overwrites the stored list. */
+            tags?: components["schemas"]["TagAppearance"][] | null;
         };
         /**
          * @description Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.
@@ -2067,8 +2118,11 @@ export interface components {
          */
         PatchSmartMailboxRequest: {
             name?: string | null;
-            /** Format: int64 */
-            position?: number | null;
+            /**
+             * @description Absent leaves the role unchanged; a known role sets it; an empty string
+             *     clears it.
+             */
+            role?: string | null;
             rule?: null | components["schemas"]["SmartMailboxRule"];
         };
         /**
@@ -2403,8 +2457,6 @@ export interface components {
             kind: components["schemas"]["SmartMailboxKind"];
             name: string;
             parentId?: null | components["schemas"]["SmartMailboxId"];
-            /** Format: int64 */
-            position: number;
             /**
              * @description The mailbox role whose semantics apply to this view (e.g. `"trash"`),
              *     driving contextual actions like Delete Permanently. Set on the built-in
@@ -2504,8 +2556,6 @@ export interface components {
             kind: components["schemas"]["SmartMailboxKind"];
             name: string;
             parentId?: null | components["schemas"]["SmartMailboxId"];
-            /** Format: int64 */
-            position: number;
             role?: string | null;
             /** Format: int64 */
             totalMessages: number;
@@ -2619,6 +2669,23 @@ export interface components {
          * @enum {string}
          */
         SyncTrigger: "startup" | "poll" | "push" | "manual";
+        /**
+         * @description A per-tag presentation override (presentation only), keyed by tag `name`.
+         *     Each field is optional and overrides the renderer's name-derived default for
+         *     that aspect; an absent field keeps the default.
+         *
+         *     @spec docs/eph/DESIGN-L2-appearance-toml
+         */
+        TagAppearance: {
+            /** @description Background color (CSS color string, e.g. `#dbeafe`). */
+            bg?: string | null;
+            /** @description Foreground/text color (CSS color string, e.g. `#1f2937`). */
+            fg?: string | null;
+            /** @description Lucide icon name (e.g. `briefcase`). */
+            icon?: string | null;
+            /** @description The tag (keyword) this override applies to. */
+            name: string;
+        };
         TagListReadResult: {
             items: components["schemas"]["TagSummary"][];
         };
