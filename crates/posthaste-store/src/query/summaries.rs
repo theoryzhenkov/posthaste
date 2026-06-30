@@ -45,27 +45,33 @@ pub(crate) fn hydrate_message_summaries(
     let mut mailbox_ids = fetch_mailbox_ids_bulk(connection, &rows)?.into_iter();
     let mut keywords = fetch_keywords_bulk(connection, &rows)?.into_iter();
     let mut versions = fetch_versions_bulk(connection, &rows)?.into_iter();
+    let mut threading = fetch_threading_bulk(connection, &rows)?.into_iter();
 
     Ok(rows
         .into_iter()
-        .map(|row| MessageSummary {
-            id: row.id,
-            source_id: row.source_id,
-            source_name: row.source_name,
-            source_thread_id: row.source_thread_id,
-            conversation_id: row.conversation_id,
-            subject: row.subject,
-            from_name: row.from_name,
-            from_email: row.from_email,
-            to: row.to,
-            preview: row.preview,
-            received_at: row.received_at,
-            has_attachment: row.has_attachment,
-            is_read: row.is_read,
-            is_flagged: row.is_flagged,
-            mailbox_ids: mailbox_ids.next().unwrap_or_default(),
-            keywords: keywords.next().unwrap_or_default(),
-            version: versions.next().flatten(),
+        .map(|row| {
+            let (rfc_message_id, in_reply_to) = threading.next().unwrap_or((None, None));
+            MessageSummary {
+                id: row.id,
+                source_id: row.source_id,
+                source_name: row.source_name,
+                source_thread_id: row.source_thread_id,
+                conversation_id: row.conversation_id,
+                subject: row.subject,
+                from_name: row.from_name,
+                from_email: row.from_email,
+                to: row.to,
+                preview: row.preview,
+                received_at: row.received_at,
+                has_attachment: row.has_attachment,
+                is_read: row.is_read,
+                is_flagged: row.is_flagged,
+                mailbox_ids: mailbox_ids.next().unwrap_or_default(),
+                keywords: keywords.next().unwrap_or_default(),
+                version: versions.next().flatten(),
+                rfc_message_id,
+                in_reply_to,
+            }
         })
         .collect())
 }
@@ -121,6 +127,56 @@ fn fetch_versions_bulk(
     }
 
     Ok(versions)
+}
+
+/// Bulk-fetches the RFC `Message-ID` and `In-Reply-To` headers for a set of
+/// messages, row-aligned, so the conversation view can build a real reply tree.
+/// `(None, None)` for a message row with no stored headers.
+fn fetch_threading_bulk(
+    connection: &Connection,
+    rows: &[MessageSummaryRow],
+) -> Result<Vec<(Option<String>, Option<String>)>, StoreError> {
+    const CHUNK_SIZE: usize = 300;
+
+    let mut threading = vec![(None, None); rows.len()];
+    for (chunk_offset, chunk) in rows.chunks(CHUNK_SIZE).enumerate() {
+        let start_index = chunk_offset * CHUNK_SIZE;
+        let mut params = Vec::with_capacity(chunk.len() * 3);
+        let mut values = Vec::with_capacity(chunk.len());
+        for (offset, row) in chunk.iter().enumerate() {
+            values.push("(?, ?, ?)".to_string());
+            params.push(SqlValue::Integer((start_index + offset) as i64));
+            params.push(SqlValue::Text(row.source_id.as_str().to_string()));
+            params.push(SqlValue::Text(row.id.as_str().to_string()));
+        }
+        let sql = format!(
+            "WITH requested(row_index, account_id, message_id) AS (VALUES {})
+             SELECT requested.row_index, m.rfc_message_id, m.in_reply_to
+               FROM requested
+               JOIN message m
+                 ON m.account_id = requested.account_id
+                AND m.id = requested.message_id",
+            values.join(", ")
+        );
+        let mut statement = connection
+            .prepare_cached(&sql)
+            .map_err(sql_to_store_error)?;
+        let fetched = statement
+            .query_map(params_from_iter(params), |row| {
+                Ok((
+                    row.get::<_, i64>(0)? as usize,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(sql_to_store_error)?;
+        for entry in fetched {
+            let (row_index, rfc, reply) = entry.map_err(sql_to_store_error)?;
+            threading[row_index] = (rfc, reply);
+        }
+    }
+
+    Ok(threading)
 }
 
 /// Maps a database row to a `MessageSummaryRow`.
