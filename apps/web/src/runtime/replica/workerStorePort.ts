@@ -30,13 +30,23 @@ export type StoreWorkerResponse =
   | { id: number; ok: true; result: unknown }
   | { id: number; ok: false; error: string }
 
+/** Worker → main: the one-time readiness handshake. The worker posts this once
+ *  the WASM store has loaded (`ok: true`) or if init failed (`ok: false`). It
+ *  lets the host probe worker viability before relying on it, and fall back to
+ *  the in-process store if a webview can't run the worker. */
+export type StoreWorkerReady =
+  | { type: 'ready'; ok: true }
+  | { type: 'ready'; ok: false; error: string }
+
+export type StoreWorkerOutbound = StoreWorkerResponse | StoreWorkerReady
+
 /** The minimal worker surface used here — satisfied by a real `Worker` and by
  *  the loopback fake the unit tests drive. */
 export interface ReplicaWorkerLike {
   postMessage(message: StoreWorkerRequest): void
   addEventListener(
     type: 'message',
-    listener: (event: { data: StoreWorkerResponse }) => void,
+    listener: (event: { data: StoreWorkerOutbound }) => void,
   ): void
   terminate?(): void
 }
@@ -49,11 +59,37 @@ export class WorkerStorePort implements StorePort {
     { resolve: (value: unknown) => void; reject: (error: unknown) => void }
   >()
 
+  /** Resolves when the worker has loaded its WASM store; rejects if init fails.
+   *  The host awaits this (with a timeout) to decide worker-vs-in-process. */
+  readonly ready: Promise<void>
+  private resolveReady!: () => void
+  private rejectReady!: (error: unknown) => void
+
   constructor(worker: ReplicaWorkerLike) {
     this.worker = worker
+    this.ready = new Promise<void>((resolve, reject) => {
+      this.resolveReady = resolve
+      this.rejectReady = reject
+    })
+    // A rejected `ready` that nobody is awaiting yet must not crash as an
+    // unhandled rejection; the host attaches its own handler.
+    this.ready.catch(() => {})
     this.worker.addEventListener('message', (event) =>
-      this.onResponse(event.data),
+      this.onMessage(event.data),
     )
+  }
+
+  private onMessage(message: StoreWorkerOutbound): void {
+    if ('id' in message) {
+      this.onResponse(message)
+      return
+    }
+    // The readiness handshake (no `id`).
+    if (message.ok) {
+      this.resolveReady()
+    } else {
+      this.rejectReady(new Error(message.error))
+    }
   }
 
   private onResponse(response: StoreWorkerResponse): void {
