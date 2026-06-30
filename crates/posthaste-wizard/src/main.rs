@@ -26,7 +26,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use posthaste_wizard::{
-    apply_join, install, provision, Channel, GithubSource, InstallOptions, Plan, Role, Version,
+    apply_join, guided_install, install, provision, Channel, GithubSource, InstallOptions, Plan,
+    Role, ServiceScope, Version,
 };
 
 fn main() -> ExitCode {
@@ -83,6 +84,12 @@ fn run_provision(args: &[String]) -> ExitCode {
 }
 
 fn run_install(args: &[String]) -> ExitCode {
+    // No args, or an explicit -i/--interactive, drops into the guided flow
+    // rather than erroring on the missing required flags.
+    if args.is_empty() || args.iter().any(|a| a == "-i" || a == "--interactive") {
+        return run_guided_install();
+    }
+
     let raw = match RawArgs::parse(args) {
         Ok(raw) => raw,
         Err(e) => return arg_error(&e),
@@ -95,6 +102,8 @@ fn run_install(args: &[String]) -> ExitCode {
     };
     let platform = raw.platform.clone();
     let join = raw.join.clone();
+    let raw_system = raw.system;
+    let raw_no_service = raw.no_service;
     let bin_dir = match raw.bin_dir.clone() {
         Some(dir) => dir,
         None => match default_bin_dir() {
@@ -103,11 +112,52 @@ fn run_install(args: &[String]) -> ExitCode {
         },
     };
 
-    let mut plan = match raw.into_plan_for_install() {
+    let plan = match raw.into_plan_for_install() {
         Ok(plan) => plan,
         Err(e) => return arg_error(&e),
     };
 
+    let service = if raw_no_service {
+        ServiceScope::None
+    } else {
+        ServiceScope::detect(raw_system)
+    };
+    execute_install(plan, version, platform, service, bin_dir, join)
+}
+
+/// Run the guided prompt flow, then execute the resulting install.
+fn run_guided_install() -> ExitCode {
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let mut out = std::io::stdout();
+    let guided = match guided_install(&mut input, &mut out) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("\n{e}");
+            return ExitCode::from(2);
+        }
+    };
+    execute_install(
+        guided.plan,
+        guided.version,
+        // The guided flow does not ask for a cross-platform override; detect it.
+        None,
+        guided.service,
+        guided.bin_dir,
+        guided.join,
+    )
+}
+
+/// Shared install execution for both the flag and guided paths: apply any join
+/// string, then fetch + install + register and report.
+fn execute_install(
+    mut plan: Plan,
+    version: Version,
+    platform: Option<String>,
+    service: ServiceScope,
+    bin_dir: PathBuf,
+    join: Option<String>,
+) -> ExitCode {
     // A runtime node can wire itself from a join string — set backend URL +
     // token (+ CA) before provisioning.
     if let Some(join) = &join {
@@ -122,7 +172,7 @@ fn run_install(args: &[String]) -> ExitCode {
         version,
         platform,
         bin_dir,
-        register_service: true,
+        service,
         enable_linger: true,
     };
     let source = GithubSource::posthaste();
@@ -131,8 +181,8 @@ fn run_install(args: &[String]) -> ExitCode {
         Ok(out) => {
             println!("installed {}", out.binary_path.display());
             println!("  config:  {}", out.provisioned.app_toml_path.display());
-            if let Some(unit) = &out.provisioned.systemd_unit_path {
-                println!("  service: {} (systemctl --user)", unit.display());
+            if let Some(svc) = &out.service_path {
+                println!("  service: {}", svc.display());
             }
             for w in &out.warnings {
                 eprintln!("warning: {w}");
@@ -187,6 +237,8 @@ struct RawArgs {
     platform: Option<String>,
     join: Option<String>,
     bin_dir: Option<PathBuf>,
+    system: bool,
+    no_service: bool,
 }
 
 impl RawArgs {
@@ -207,6 +259,8 @@ impl RawArgs {
             platform: None,
             join: None,
             bin_dir: None,
+            system: false,
+            no_service: false,
         };
 
         let mut i = 0;
@@ -239,6 +293,8 @@ impl RawArgs {
                 "--platform" => raw.platform = Some(value()?),
                 "--join" => raw.join = Some(value()?),
                 "--bin-dir" => raw.bin_dir = Some(PathBuf::from(value()?)),
+                "--system" => raw.system = true,
+                "--no-service" => raw.no_service = true,
                 other => return Err(format!("unknown flag '{other}'")),
             }
             i += 1;
@@ -291,7 +347,7 @@ fn usage() -> &'static str {
      \x20 posthaste-wizard install --role <daemon|backend|runtime> \\\n\
      \x20   --config-root <dir> --state-root <dir> [--bind <addr>] [--tls]\n\
      \x20   [--host <name>]... [--link-token <secret>] [--link-backend-url <url>]\n\
-     \x20   [--version <tag>] [--platform <p>] [--join <string>] [--bin-dir <dir>]\n\
+     \x20   [--version <tag>] [--platform <p>] [--join <string>] [--bin-dir <dir>] [--system] [--no-service] [-i]\n\
      \n\
      \x20 posthaste-wizard provision --role <daemon|backend|runtime> \\\n\
      \x20   --config-root <dir> --state-root <dir> [--bind <addr>] [--tls]\n\
@@ -299,6 +355,6 @@ fn usage() -> &'static str {
      \x20   [--exec <binary-path>] [--systemd <unit-path>]\n\
      \n\
      install fetches + verifies the role binary from the release, installs it to\n\
-     ~/.local/bin, provisions the node, and registers a systemctl --user service.\n\
-     provision only writes config + TLS for a binary you already have.\n"
+     ~/.local/bin, provisions the node, and registers a service: systemctl --user on Linux, launchd on macOS (--system for a root systemd unit, --no-service to skip).\n\
+     install with no flags (or -i) runs a guided, interactive setup. provision only writes config + TLS for a binary you already have.\n"
 }

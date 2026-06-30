@@ -7,13 +7,43 @@
 //! `systemd --user` service, and (for a two-machine split) emit or consume a
 //! one-line join string so the second node is a single command.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
 use crate::fetch::{self, ReleaseSource, Version};
+use crate::render::{launchd_label, render_launchd_plist, render_systemd_unit};
 use crate::{provision, Plan, Provisioned, Role};
+
+/// Which service manager keeps the node running. Defaults to the platform norm;
+/// `--system` upgrades Linux to a root system unit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceScope {
+    /// Linux `systemctl --user` unit in `~/.config/systemd/user` (default).
+    UserSystemd,
+    /// Linux system unit in `/etc/systemd/system`, run as the invoking user
+    /// (needs root to register).
+    SystemSystemd,
+    /// macOS launchd LaunchAgent in `~/Library/LaunchAgents` (default on macOS).
+    Launchd,
+    /// Write nothing, register nothing.
+    None,
+}
+
+impl ServiceScope {
+    /// The default scope for the host: launchd on macOS, user-systemd on Linux
+    /// (system-systemd when `system` is set). Unknown platforms get `None`.
+    pub fn detect(system: bool) -> ServiceScope {
+        match std::env::consts::OS {
+            "macos" => ServiceScope::Launchd,
+            "linux" if system => ServiceScope::SystemSystemd,
+            "linux" => ServiceScope::UserSystemd,
+            _ => ServiceScope::None,
+        }
+    }
+}
 
 /// Everything `install` needs beyond a provisioning [`Plan`].
 pub struct InstallOptions {
@@ -23,10 +53,11 @@ pub struct InstallOptions {
     pub platform: Option<String>,
     /// Directory the binary is installed into (e.g. `~/.local/bin`).
     pub bin_dir: PathBuf,
-    /// Register + start a `systemd --user` service after provisioning.
-    pub register_service: bool,
-    /// Best-effort `loginctl enable-linger` so the user service survives logout
-    /// (needs root once; a failure is a warning, not an error).
+    /// Which service manager to register the node with after provisioning.
+    pub service: ServiceScope,
+    /// Best-effort `loginctl enable-linger` so a user systemd service survives
+    /// logout (needs root once; a failure is a warning). Ignored for other
+    /// scopes.
     pub enable_linger: bool,
 }
 
@@ -37,14 +68,16 @@ pub struct Installed {
     /// Non-fatal problems (e.g. systemd not present, linger needs root) the CLI
     /// should surface without failing the install.
     pub warnings: Vec<String>,
+    /// The service file written (unit or plist), if a scope was registered.
+    pub service_path: Option<PathBuf>,
     /// For a backend/daemon node: the one-line join string a runtime node feeds
     /// to `--join` to wire itself up. `None` for a runtime node.
     pub join_string: Option<String>,
 }
 
-/// Fetch + install the binary, provision the node, and (optionally) register the
-/// service. `plan.exec_path` and `plan.systemd_unit_path` are filled in here from
-/// `opts`, so callers leave them unset.
+/// Fetch + install the binary, provision the node, and register the service.
+/// `plan.exec_path` is filled in here; `install` owns the service file, so
+/// `plan.systemd_unit_path` is left unset (provision writes no unit).
 pub fn install(
     mut plan: Plan,
     opts: &InstallOptions,
@@ -55,25 +88,29 @@ pub fn install(
         None => detect_platform()?,
     };
 
-    // Place the binary first: provisioning's service unit references this path,
-    // so it must exist before we render the unit.
+    // Place the binary first: the service file references this path, so it must
+    // exist before we render the unit/plist.
     let binary_path = opts.bin_dir.join(plan.role.binary());
     fetch::fetch_and_install(source, plan.role, &opts.version, &platform, &binary_path)
         .map_err(|e| format!("fetch {}: {e}", plan.role.binary()))?;
     plan.exec_path = Some(binary_path.clone());
 
-    let unit_dir = user_unit_dir()?;
-    plan.systemd_unit_path = Some(unit_dir.join(unit_name(plan.role)));
-
     let provisioned = provision(&plan)?;
 
     let mut warnings = Vec::new();
-    if opts.register_service {
-        register_user_service(&unit_name(plan.role), &mut warnings);
-        if opts.enable_linger {
-            enable_linger(&mut warnings);
+    let service_path = if opts.service == ServiceScope::None {
+        None
+    } else {
+        match write_and_register_service(opts.service, &plan, opts.enable_linger, &mut warnings) {
+            Ok(path) => Some(path),
+            Err(e) => {
+                // The binary + config are installed; a service-step failure is a
+                // warning the operator can act on, not a failed install.
+                warnings.push(e);
+                None
+            }
         }
-    }
+    };
 
     // A backend/daemon node emits the join string a runtime node consumes. The
     // link token is operator-supplied at provision time (not the daemon's
@@ -87,8 +124,119 @@ pub fn install(
         binary_path,
         provisioned,
         warnings,
+        service_path,
         join_string,
     })
+}
+
+/// Write the scope's service file (creating its dir) and register it with the
+/// service manager. Returns the path written.
+fn write_and_register_service(
+    scope: ServiceScope,
+    plan: &Plan,
+    enable_linger: bool,
+    warnings: &mut Vec<String>,
+) -> Result<PathBuf, String> {
+    let (path, contents) = service_file(scope, plan)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create service dir {}: {e}", parent.display()))?;
+    }
+    fs::write(&path, contents).map_err(|e| {
+        let hint = if scope == ServiceScope::SystemSystemd {
+            " (a system unit needs root — re-run with sudo, or use the default --user scope)"
+        } else {
+            ""
+        };
+        format!("write service file {}: {e}{hint}", path.display())
+    })?;
+    register(scope, &path, plan.role, enable_linger, warnings);
+    Ok(path)
+}
+
+/// The service file path + contents for a scope.
+fn service_file(scope: ServiceScope, plan: &Plan) -> Result<(PathBuf, String), String> {
+    match scope {
+        ServiceScope::UserSystemd => Ok((
+            user_unit_dir()?.join(unit_name(plan.role)),
+            render_systemd_unit(plan, None),
+        )),
+        ServiceScope::SystemSystemd => {
+            let user = std::env::var("USER").ok();
+            Ok((
+                PathBuf::from("/etc/systemd/system").join(unit_name(plan.role)),
+                render_systemd_unit(plan, user.as_deref()),
+            ))
+        }
+        ServiceScope::Launchd => Ok((
+            launch_agents_dir()?.join(plist_name(plan.role)),
+            render_launchd_plist(plan),
+        )),
+        ServiceScope::None => Err("no service scope to write".into()),
+    }
+}
+
+/// Register + start the written service file with its manager. Manager absence
+/// or a missing privilege is a warning (the file is written either way).
+fn register(
+    scope: ServiceScope,
+    path: &Path,
+    role: Role,
+    enable_linger: bool,
+    warnings: &mut Vec<String>,
+) {
+    match scope {
+        ServiceScope::UserSystemd => {
+            register_user_service(&unit_name(role), warnings);
+            if enable_linger {
+                self::enable_linger(warnings);
+            }
+        }
+        ServiceScope::SystemSystemd => register_system_service(&unit_name(role), warnings),
+        ServiceScope::Launchd => register_launchd(path, &launchd_label(role), warnings),
+        ServiceScope::None => {}
+    }
+}
+
+/// `~/Library/LaunchAgents`, where per-user launchd jobs live.
+fn launch_agents_dir() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join("Library").join("LaunchAgents"))
+        .ok_or_else(|| "HOME is not set; cannot place the launchd agent".into())
+}
+
+/// The launchd plist file name for a role, e.g. `com.posthaste.backend.plist`.
+fn plist_name(role: Role) -> String {
+    format!("{}.plist", launchd_label(role))
+}
+
+/// Reload + `enable --now` a system unit (needs root). Failure is a warning with
+/// a sudo hint.
+fn register_system_service(unit: &str, warnings: &mut Vec<String>) {
+    if run("systemctl", &["daemon-reload"]).is_err() {
+        warnings.push(format!(
+            "could not reload systemd; the unit is written — run \
+             `sudo systemctl enable --now {unit}` to start it"
+        ));
+        return;
+    }
+    if let Err(e) = run("systemctl", &["enable", "--now", unit]) {
+        warnings.push(format!(
+            "could not enable/start {unit} ({e}); run `sudo systemctl enable --now {unit}`"
+        ));
+    }
+}
+
+/// Load a launchd agent. `launchctl load -w` works across macOS versions; its
+/// absence (e.g. on Linux) is a warning.
+fn register_launchd(plist: &Path, label: &str, warnings: &mut Vec<String>) {
+    let plist = plist.display().to_string();
+    if let Err(e) = run("launchctl", &["load", "-w", &plist]) {
+        warnings.push(format!(
+            "could not load {label} ({e}); the plist is written — run \
+             `launchctl load -w {plist}` to start it"
+        ));
+    }
 }
 
 /// Map the host triple to the release platform suffix used by the build matrix
@@ -280,6 +428,71 @@ mod tests {
         assert_eq!(unit_name(Role::Daemon), "posthaste-daemon.service");
         assert_eq!(unit_name(Role::Backend), "posthaste-backend.service");
         assert_eq!(unit_name(Role::Runtime), "posthaste-runtime.service");
+        assert_eq!(plist_name(Role::Backend), "com.posthaste.backend.plist");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detect_picks_systemd_scope_on_linux() {
+        assert_eq!(ServiceScope::detect(false), ServiceScope::UserSystemd);
+        assert_eq!(ServiceScope::detect(true), ServiceScope::SystemSystemd);
+    }
+
+    #[test]
+    fn user_systemd_file_targets_default_and_omits_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let plan = base_plan(Role::Backend, dir.path());
+        temp_env(
+            &[("XDG_CONFIG_HOME", Some("/x/cfg")), ("HOME", None)],
+            || {
+                let (path, body) = service_file(ServiceScope::UserSystemd, &plan).unwrap();
+                assert_eq!(
+                    path,
+                    PathBuf::from("/x/cfg/systemd/user/posthaste-backend.service")
+                );
+                assert!(body.contains("WantedBy=default.target"));
+                assert!(!body.contains("User="), "a user unit must not pin User=");
+            },
+        );
+    }
+
+    #[test]
+    fn system_systemd_file_pins_user_and_multi_user_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let plan = base_plan(Role::Runtime, dir.path());
+        temp_env(&[("USER", Some("mailsvc"))], || {
+            let (path, body) = service_file(ServiceScope::SystemSystemd, &plan).unwrap();
+            assert_eq!(
+                path,
+                PathBuf::from("/etc/systemd/system/posthaste-runtime.service")
+            );
+            assert!(body.contains("WantedBy=multi-user.target"));
+            assert!(body.contains("User=mailsvc"));
+            assert!(body.contains("Group=mailsvc"));
+        });
+    }
+
+    #[test]
+    fn launchd_file_is_a_plist_with_label_and_args() {
+        let dir = tempfile::tempdir().unwrap();
+        // Daemon role exercises the `serve` subcommand in ProgramArguments.
+        let mut plan = base_plan(Role::Daemon, dir.path());
+        plan.exec_path = Some(PathBuf::from("/opt/bin/posthaste_daemon"));
+        temp_env(&[("HOME", Some("/home/u"))], || {
+            let (path, body) = service_file(ServiceScope::Launchd, &plan).unwrap();
+            assert_eq!(
+                path,
+                PathBuf::from("/home/u/Library/LaunchAgents/com.posthaste.daemon.plist")
+            );
+            assert!(body.contains("<key>Label</key>"));
+            assert!(body.contains("<string>com.posthaste.daemon</string>"));
+            assert!(body.contains("<string>/opt/bin/posthaste_daemon</string>"));
+            assert!(
+                body.contains("<string>serve</string>"),
+                "daemon needs the serve arg"
+            );
+            assert!(body.contains("POSTHASTE_CONFIG_ROOT"));
+        });
     }
 
     #[test]

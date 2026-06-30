@@ -90,23 +90,57 @@ pub fn render_app_toml(plan: &Plan, cert: Option<&Path>, key: Option<&Path>) -> 
     header
 }
 
-/// Render a minimal systemd unit that runs the role binary against this config.
-pub fn render_systemd_unit(plan: &Plan) -> String {
-    let exec_bin = plan
-        .exec_path
+/// The binary path this node runs (the installed `--exec`, or a sensible
+/// default if unset).
+fn exec_bin(plan: &Plan) -> String {
+    plan.exec_path
         .as_deref()
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| format!("/usr/local/bin/{}", plan.role.binary()));
-    // Only the all-in-one `posthaste_daemon` is a multi-command binary; it needs
-    // the `serve` subcommand. The lean backend/runtime daemons run directly.
-    let exec = match plan.role {
-        Role::Daemon => format!("{exec_bin} serve"),
-        Role::Backend | Role::Runtime => exec_bin,
-    };
-    let description = match plan.role {
+        .unwrap_or_else(|| format!("/usr/local/bin/{}", plan.role.binary()))
+}
+
+/// The full invocation (program + args). Only the all-in-one `posthaste_daemon`
+/// is a multi-command binary needing the `serve` subcommand; the lean
+/// backend/runtime daemons run directly. Shared by the systemd `ExecStart` and
+/// the launchd `ProgramArguments`.
+fn exec_invocation(plan: &Plan) -> Vec<String> {
+    let bin = exec_bin(plan);
+    match plan.role {
+        Role::Daemon => vec![bin, "serve".to_string()],
+        Role::Backend | Role::Runtime => vec![bin],
+    }
+}
+
+fn role_description(plan: &Plan) -> &'static str {
+    match plan.role {
         Role::Daemon => "Posthaste all-in-one daemon",
         Role::Backend => "Posthaste backend node",
         Role::Runtime => "Posthaste runtime node",
+    }
+}
+
+/// The launchd job label / reverse-DNS id for a role, e.g. `com.posthaste.backend`.
+pub fn launchd_label(role: Role) -> String {
+    let suffix = match role {
+        Role::Daemon => "daemon",
+        Role::Backend => "backend",
+        Role::Runtime => "runtime",
+    };
+    format!("com.posthaste.{suffix}")
+}
+
+/// Render a minimal systemd unit that runs the role binary against this config.
+/// `service_user` is `Some` only for a system unit (`/etc/systemd/system`), where
+/// the service must declare the user to run as; a `--user` unit inherits the
+/// invoking user and leaves it `None`.
+pub fn render_systemd_unit(plan: &Plan, service_user: Option<&str>) -> String {
+    let exec = exec_invocation(plan).join(" ");
+    let description = role_description(plan);
+    // System units target multi-user.target and pin the run-as user; user units
+    // target default.target and run as whoever owns the user manager.
+    let (wanted_by, user_lines) = match service_user {
+        Some(user) => ("multi-user.target", format!("User={user}\nGroup={user}\n")),
+        None => ("default.target", String::new()),
     };
     format!(
         "[Unit]\n\
@@ -116,6 +150,7 @@ pub fn render_systemd_unit(plan: &Plan) -> String {
          \n\
          [Service]\n\
          Type=simple\n\
+         {user_lines}\
          Environment=POSTHASTE_CONFIG_ROOT={config}\n\
          Environment=POSTHASTE_STATE_ROOT={state}\n\
          ExecStart={exec}\n\
@@ -123,10 +158,56 @@ pub fn render_systemd_unit(plan: &Plan) -> String {
          RestartSec=2\n\
          \n\
          [Install]\n\
-         WantedBy=default.target\n",
+         WantedBy={wanted_by}\n",
         config = plan.config_root.display(),
         state = plan.state_root.display(),
     )
+}
+
+/// Render a launchd LaunchAgent plist (macOS) that keeps the role binary running
+/// for the logged-in user. The macOS analogue of the `--user` systemd unit.
+pub fn render_launchd_plist(plan: &Plan) -> String {
+    let label = launchd_label(plan.role);
+    let program_args = exec_invocation(plan)
+        .iter()
+        .map(|a| format!("    <string>{}</string>", xml_escape(a)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
+         \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <plist version=\"1.0\">\n\
+         <dict>\n\
+         \x20 <key>Label</key>\n\
+         \x20 <string>{label}</string>\n\
+         \x20 <key>ProgramArguments</key>\n\
+         \x20 <array>\n\
+         {program_args}\n\
+         \x20 </array>\n\
+         \x20 <key>EnvironmentVariables</key>\n\
+         \x20 <dict>\n\
+         \x20   <key>POSTHASTE_CONFIG_ROOT</key>\n\
+         \x20   <string>{config}</string>\n\
+         \x20   <key>POSTHASTE_STATE_ROOT</key>\n\
+         \x20   <string>{state}</string>\n\
+         \x20 </dict>\n\
+         \x20 <key>RunAtLoad</key>\n\
+         \x20 <true/>\n\
+         \x20 <key>KeepAlive</key>\n\
+         \x20 <true/>\n\
+         </dict>\n\
+         </plist>\n",
+        config = xml_escape(&plan.config_root.display().to_string()),
+        state = xml_escape(&plan.state_root.display().to_string()),
+    )
+}
+
+/// Minimal XML escaping for plist string values (paths can contain `&`).
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The connection profile a client uses to reach this node — the three-mode
