@@ -12,16 +12,27 @@
  * backfill) never clobbers notes a human wrote.
  *
  * Usage:
- *   # one release, fetched from the API by tag
- *   node tools/generate-release-notes.mjs --tag v0.1.0-dogfood.39
- *   # backfill every published release
+ *   # reconcile the site with the live set of *stable* GitHub releases,
+ *   # pruning entries whose release no longer exists (so the site never links
+ *   # to 404s). Nightly/dogfood/RC builds are never listed.
  *   node tools/generate-release-notes.mjs --all
+ *   # one release, fetched from the API by tag (stable only)
+ *   node tools/generate-release-notes.mjs --tag v1.2.3
+ *   # prune the entry for one deleted tag
+ *   node tools/generate-release-notes.mjs --delete v1.2.3
  *   # from a release JSON object on stdin (e.g. the Actions event payload)
  *   gh api /repos/$REPO/releases/tags/$TAG | node tools/generate-release-notes.mjs --stdin
  *
  * GITHUB_TOKEN (optional) lifts the unauthenticated API rate limit.
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import matter from 'gray-matter'
@@ -41,6 +52,17 @@ function versionFromTag(tag) {
   const dogfood = bare.match(/^(\d+)\.(\d+)\.\d+-dogfood\.(\d+)$/)
   if (dogfood) return `${dogfood[1]}.${dogfood[2]}.${dogfood[3]}`
   return bare
+}
+
+/**
+ * Only stable releases get a website entry — a plain semver tag with no
+ * prerelease suffix (e.g. v0.2.0, v1.2.3). Nightly/dogfood/RC builds and the
+ * rolling channel releases (tags `nightly`/`stable`) are deliberately
+ * excluded: they're ephemeral and get pruned from GitHub, which would leave the
+ * downloads page pointing at 404s.
+ */
+function isStableTag(tag) {
+  return /^v?\d+\.\d+\.\d+$/i.test(tag)
 }
 
 /**
@@ -145,16 +167,68 @@ function writeRelease(release) {
   console.log(`wrote ${file} (${count} download${count === 1 ? '' : 's'})`)
 }
 
+/** Fetch every published release, paging until exhausted. */
+async function fetchAllReleases() {
+  const all = []
+  for (let page = 1; ; page += 1) {
+    const batch = await api(`/repos/${REPO}/releases?per_page=100&page=${page}`)
+    all.push(...batch)
+    if (batch.length < 100) break
+  }
+  return all
+}
+
+/** Delete any entry whose version is no longer in the live release set. */
+function pruneStale(liveVersions) {
+  if (!existsSync(RELEASES_DIR)) return
+  const stale = readdirSync(RELEASES_DIR)
+    .filter((f) => f.endsWith('.md'))
+    .filter((f) => !liveVersions.has(f.replace(/\.md$/, '')))
+  for (const file of stale) {
+    unlinkSync(join(RELEASES_DIR, file))
+    console.log(`pruned ${file} (release no longer published)`)
+  }
+}
+
+/** Reconcile the whole collection: write every live stable release, then
+ *  prune entries whose release has been deleted from GitHub. */
+async function reconcileAll() {
+  const releases = await fetchAllReleases()
+  const liveVersions = new Set()
+  for (const release of releases) {
+    if (!isStableTag(release.tag_name)) continue
+    writeRelease(release)
+    liveVersions.add(versionFromTag(release.tag_name))
+  }
+  pruneStale(liveVersions)
+}
+
+function deleteRelease(tag) {
+  const version = versionFromTag(tag)
+  const file = join(RELEASES_DIR, `${version}.md`)
+  if (existsSync(file)) {
+    unlinkSync(file)
+    console.log(`pruned ${version}.md (release deleted)`)
+  } else {
+    console.log(`no entry to prune for ${tag}`)
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2)
   if (args.includes('--stdin')) {
     const release = JSON.parse(readFileSync(0, 'utf8'))
+    if (!isStableTag(release.tag_name)) return
     writeRelease(release)
     return
   }
   if (args.includes('--all')) {
-    const releases = await api(`/repos/${REPO}/releases?per_page=100`)
-    for (const release of releases) writeRelease(release)
+    await reconcileAll()
+    return
+  }
+  const deleteIdx = args.indexOf('--delete')
+  if (deleteIdx !== -1 && args[deleteIdx + 1]) {
+    deleteRelease(args[deleteIdx + 1])
     return
   }
   const tagIdx = args.indexOf('--tag')
@@ -166,7 +240,7 @@ async function main() {
     return
   }
   console.error(
-    'usage: generate-release-notes.mjs [--all | --tag <tag> | --stdin]',
+    'usage: generate-release-notes.mjs [--all | --tag <tag> | --delete <tag> | --stdin]',
   )
   process.exit(1)
 }
