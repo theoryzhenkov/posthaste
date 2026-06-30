@@ -5,6 +5,7 @@ import {
   HardDrive,
   Mailbox,
   Palette,
+  Send,
   Settings as SettingsIcon,
   Wrench,
 } from 'lucide-react'
@@ -39,6 +40,13 @@ const SETTINGS_CATEGORIES = [
     description: 'Connected mail sources, sync state, and credentials.',
     icon: Mailbox,
     accent: brandAccents.coral,
+  },
+  {
+    id: 'outbox',
+    label: 'Outbox',
+    description: 'Queued and failed operations awaiting reconnect.',
+    icon: Send,
+    accent: brandAccents.blue,
   },
   {
     id: 'storage',

@@ -13,6 +13,7 @@ import { AccountsPane } from './AccountsPane'
 import { AppearancePane } from './AppearancePane'
 import { GeneralPane } from './GeneralPane'
 import { NotificationsPane } from './NotificationsPane'
+import { OutboxPane } from './OutboxPane'
 import { StoragePane } from './StoragePane'
 import { TroubleshootingPane } from './TroubleshootingPane'
 import {
@@ -143,6 +144,12 @@ export function SettingsPanelContent({
               }
               isPending={notificationsMutation.isPending}
             />
+          </div>
+        )}
+
+        {activeCategory === 'outbox' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <OutboxPane />
           </div>
         )}
 
