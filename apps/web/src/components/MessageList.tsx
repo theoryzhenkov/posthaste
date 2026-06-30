@@ -138,13 +138,11 @@ export function MessageList({
   })
 
   useMessageListNavigation({
-    actions,
     currentViewKey,
     messages,
     onClearSelection,
     onSelectMessage,
     selectedKey,
-    selection,
   })
   const { handleScroll, scrollContainerRef, scrollTop, viewportHeight } =
     useMessageListScroll({

@@ -52,6 +52,7 @@ export function SmartMailboxSection({
   collapsed,
   mailboxes,
   selectedView,
+  focusedKey,
   onOpenSmartMailboxSettings,
   onSelectSmartMailbox,
   onReorder,
@@ -60,6 +61,7 @@ export function SmartMailboxSection({
   collapsed: boolean
   mailboxes: SmartMailboxSummary[]
   selectedView: SidebarSelection | null
+  focusedKey: string | null
   onOpenSmartMailboxSettings: (smartMailboxId: string) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onReorder: (orderedIds: string[]) => void
@@ -90,6 +92,7 @@ export function SmartMailboxSection({
                     selectedView?.kind === 'smart-mailbox' &&
                     selectedView.id === smartMailbox.id
                   }
+                  isFocused={focusedKey === `smart:${smartMailbox.id}`}
                   onSelect={() =>
                     onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
                   }
@@ -107,15 +110,20 @@ export function SmartMailboxSection({
 export function AccountsSection({
   collapsed,
   selectedView,
+  focusedKey,
+  collapsedSourceIds,
   sources,
   onOpenAccountSettings,
   onSelectSourceMailbox,
   onSyncSource,
   onReorder,
   onToggle,
+  onToggleSourceCollapsed,
 }: {
   collapsed: boolean
   selectedView: SidebarSelection | null
+  focusedKey: string | null
+  collapsedSourceIds: ReadonlySet<string>
   sources: SourceReadModel[]
   onOpenAccountSettings: (sourceId: string) => void
   onSelectSourceMailbox: (
@@ -126,6 +134,7 @@ export function AccountsSection({
   onSyncSource: (sourceId: string) => void
   onReorder: (orderedIds: string[]) => void
   onToggle: () => void
+  onToggleSourceCollapsed: (sourceId: string) => void
 }) {
   return (
     <>
@@ -149,6 +158,9 @@ export function AccountsSection({
                     fallbackAccountAppearance(source.id, source.name)
                   }
                   selectedView={selectedView}
+                  focusedKey={focusedKey}
+                  collapsed={collapsedSourceIds.has(source.id)}
+                  onToggleCollapsed={() => onToggleSourceCollapsed(source.id)}
                   onOpenAccountSettings={onOpenAccountSettings}
                   onSelectSourceMailbox={onSelectSourceMailbox}
                   onSyncSource={onSyncSource}
