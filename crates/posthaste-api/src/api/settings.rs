@@ -14,6 +14,8 @@ pub struct PatchSettingsRequest {
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
     pub mailbox_colors: Option<Vec<MailboxColor>>,
+    /// Per-tag presentation overrides (color + icon); overwrites the stored list.
+    pub tags: Option<Vec<TagAppearance>>,
     /// Explicit sidebar arrangement (ids); overwrites the stored list wholesale.
     pub smart_mailbox_order: Option<Vec<SmartMailboxId>>,
     pub account_order: Option<Vec<AccountId>>,
@@ -119,6 +121,7 @@ pub async fn patch_settings(
                 appearance: request.appearance,
                 notifications: request.notifications,
                 mailbox_colors: request.mailbox_colors,
+                tags: request.tags,
                 smart_mailbox_order: request.smart_mailbox_order,
                 account_order: request.account_order,
                 force_backfill: request.force_backfill,

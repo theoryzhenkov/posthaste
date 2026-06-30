@@ -1,4 +1,4 @@
-import { Tag, X } from 'lucide-react'
+import { Tag } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import type { MessageDetail, TagSummary } from '@/api/types'
@@ -6,6 +6,7 @@ import type { EmailActions } from '@/hooks/useEmailActions'
 import { cn } from '@/lib/utils'
 
 import { FloatingPanel } from './FloatingPanel'
+import { TagChip } from './tags/TagChip'
 
 interface TagEditorProps {
   actions: EmailActions
@@ -119,20 +120,12 @@ export function TagEditor({
             <span className="text-sm text-muted-foreground">No tags</span>
           ) : (
             tags.map((tag) => (
-              <span
+              <TagChip
                 key={tag}
-                className="inline-flex h-7 items-center gap-1.5 rounded-[5px] border border-border bg-[var(--bg-elev)] px-2 font-mono text-[11px] font-semibold"
-              >
-                {tag}
-                <button
-                  type="button"
-                  aria-label={`Remove ${tag}`}
-                  className="ph-focus-ring -mr-1 flex size-5 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-[var(--hover-bg)] hover:text-foreground"
-                  onClick={() => removeTag(tag)}
-                >
-                  <X size={12} strokeWidth={1.8} />
-                </button>
-              </span>
+                name={tag}
+                className="h-7"
+                onRemove={() => removeTag(tag)}
+              />
             ))
           )}
         </div>

@@ -4,6 +4,7 @@ import type { MessageSummary } from '../../api/types'
 import { cn } from '../../lib/utils'
 import { formatRelativeTime } from '../../utils/relativeTime'
 import { userTags } from '../message-detail/model'
+import { TagChip } from '../tags/TagChip'
 
 export type ColumnId =
   | 'unread'
@@ -195,8 +196,10 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
         return null
       }
       return (
-        <span className="min-w-0 truncate font-mono text-[10px] uppercase text-muted-foreground/70">
-          {tags.join(', ')}
+        <span className="flex min-w-0 items-center gap-1 overflow-hidden">
+          {tags.map((tag) => (
+            <TagChip key={tag} name={tag} className="h-5 shrink-0" />
+          ))}
         </span>
       )
     },

@@ -21,7 +21,7 @@ use posthaste_domain::{
     Operation, OperationId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind,
     SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary,
-    SmtpTransportSettings, SyncMode, TagSummary, ValidationError,
+    SmtpTransportSettings, SyncMode, TagAppearance, TagSummary, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -242,6 +242,9 @@ pub struct PatchAppSettingsMutation {
     pub appearance: Option<Appearance>,
     pub notifications: Option<Notifications>,
     pub mailbox_colors: Option<Vec<MailboxColor>>,
+    /// Per-tag presentation overrides (color + icon). Overwrites the stored list
+    /// wholesale.
+    pub tags: Option<Vec<TagAppearance>>,
     /// Explicit sidebar arrangement (ids). Overwrites the stored list wholesale
     /// — the drag-to-reorder primitive (see [`AppSettings::smart_mailbox_order`]).
     pub smart_mailbox_order: Option<Vec<SmartMailboxId>>,

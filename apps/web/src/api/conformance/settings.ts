@@ -4,6 +4,7 @@ import type {
   CachePolicy,
   MailEndpointSettings,
   SecretStatus,
+  TagAppearance,
 } from '../types'
 import type { AssertTrue, Conforms, Wire } from './core'
 
@@ -15,6 +16,9 @@ export type _MailEndpointSettings = AssertTrue<
 // no conformance assertion here.
 export type _AppSettings = AssertTrue<
   Conforms<AppSettings, Wire['AppSettings']>
+>
+export type _TagAppearance = AssertTrue<
+  Conforms<TagAppearance, Wire['TagAppearance']>
 >
 export type _CachePolicy = AssertTrue<
   Conforms<CachePolicy, Wire['CachePolicy']>
