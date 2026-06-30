@@ -12,11 +12,11 @@
  * backfill) never clobbers notes a human wrote.
  *
  * Usage:
- *   # reconcile the site with the live set of *stable* GitHub releases,
- *   # pruning entries whose release no longer exists (so the site never links
- *   # to 404s). Nightly/dogfood/RC builds are never listed.
+ *   # reconcile the site with the live set of stable + nightly GitHub
+ *   # releases, pruning entries whose release no longer exists (so the site
+ *   # never links to 404s). Rolling channel pointers / RC builds are skipped.
  *   node tools/generate-release-notes.mjs --all
- *   # one release, fetched from the API by tag (stable only)
+ *   # one release, fetched from the API by tag (stable or nightly)
  *   node tools/generate-release-notes.mjs --tag v1.2.3
  *   # prune the entry for one deleted tag
  *   node tools/generate-release-notes.mjs --delete v1.2.3
@@ -34,7 +34,7 @@ import {
   unlinkSync,
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import matter from 'gray-matter'
 
 const REPO = process.env.RELEASES_REPO || 'theoryzhenkov/posthaste'
@@ -55,40 +55,92 @@ function versionFromTag(tag) {
 }
 
 /**
- * Only stable releases get a website entry — a plain semver tag with no
- * prerelease suffix (e.g. v0.2.0, v1.2.3). Nightly/dogfood/RC builds and the
- * rolling channel releases (tags `nightly`/`stable`) are deliberately
- * excluded: they're ephemeral and get pruned from GitHub, which would leave the
- * downloads page pointing at 404s.
+ * Map a tag to its release channel, or null for tags we don't list: the
+ * rolling channel pointers (tags `nightly`/`stable`), RC builds, and legacy
+ * dogfood serials.
+ *   v1.2.3              -> 'stable'
+ *   v0.2.0-nightly.44   -> 'nightly'
  */
-function isStableTag(tag) {
-  return /^v?\d+\.\d+\.\d+$/i.test(tag)
+export function channelFromTag(tag) {
+  if (/^v?\d+\.\d+\.\d+$/i.test(tag)) return 'stable'
+  if (/^v?\d+\.\d+\.\d+-nightly\.\d+$/i.test(tag)) return 'nightly'
+  return null
+}
+
+/** Normalise a platform token from an asset name to a release OS. */
+function osFromToken(token) {
+  const t = token.toLowerCase()
+  if (t === 'darwin' || t === 'macos') return 'macOS'
+  if (t === 'windows') return 'Windows'
+  return 'Linux'
 }
 
 /**
- * Classify a release asset into a download platform, or null to drop it from
- * the primary download grid (signatures, checksums, legacy variants, server).
+ * Assets we deliberately never surface as downloads: detached signatures,
+ * checksums, the GPG key, the Tauri updater manifest/bundle, and the web dist
+ * (all still reachable via the GitHub release for the curious).
  */
-function classifyAsset(name) {
-  if (/PosthasteDevTools/i.test(name)) return null // retired dual-build variant
-  if (/\.(asc|sigstore\.json)$/i.test(name)) return null // detached signatures
-  if (/^SHA256SUMS/i.test(name)) return null
-  if (/release-gpg-public\.asc/i.test(name)) return null
-  if (/^MACOS-INSTALL/i.test(name)) return null
-  if (/^posthaste-serve-/i.test(name)) return null // self-host server bundle
+export function isIgnoredAsset(name) {
+  return (
+    /\.(asc|sig|sigstore\.json)$/i.test(name) ||
+    /^SHA256SUMS/i.test(name) ||
+    /release-gpg-public\.asc/i.test(name) ||
+    /^MACOS-INSTALL/i.test(name) ||
+    /^latest\.json$/i.test(name) ||
+    /\.app\.tar\.gz$/i.test(name) ||
+    /PosthasteWeb/i.test(name) ||
+    /PosthasteDevTools/i.test(name)
+  )
+}
 
+/**
+ * Classify a release asset into a downloadable product + platform, or null for
+ * assets we don't surface. Returns { product, os, arch, kind }.
+ */
+export function classifyAsset(name) {
+  if (isIgnoredAsset(name)) return null
+
+  // Desktop app installers.
   if (/_aarch64\.dmg$/i.test(name))
-    return { os: 'macOS', arch: 'Apple Silicon', kind: 'dmg' }
-  if (/_x64_.*\.msi$/i.test(name))
-    return { os: 'Windows', arch: 'x64', kind: 'msi' }
+    return {
+      product: 'desktop',
+      os: 'macOS',
+      arch: 'Apple Silicon',
+      kind: 'dmg',
+    }
+  if (/_x64(_.*)?\.msi$/i.test(name))
+    return { product: 'desktop', os: 'Windows', arch: 'x64', kind: 'msi' }
   if (/_x64-setup\.exe$/i.test(name))
-    return { os: 'Windows', arch: 'x64', kind: 'exe' }
+    return { product: 'desktop', os: 'Windows', arch: 'x64', kind: 'exe' }
   if (/_amd64\.AppImage$/i.test(name))
-    return { os: 'Linux', arch: 'x86_64', kind: 'AppImage' }
+    return { product: 'desktop', os: 'Linux', arch: 'x86_64', kind: 'AppImage' }
   if (/_amd64\.deb$/i.test(name))
-    return { os: 'Linux', arch: 'x86_64', kind: 'deb' }
+    return { product: 'desktop', os: 'Linux', arch: 'x86_64', kind: 'deb' }
   if (/\.x86_64\.rpm$/i.test(name))
-    return { os: 'Linux', arch: 'x86_64', kind: 'rpm' }
+    return { product: 'desktop', os: 'Linux', arch: 'x86_64', kind: 'rpm' }
+
+  // posthastectl — the command-line client.
+  const cli = name.match(/PosthasteCTL\w*-(darwin|linux|windows)-(arm64|x64)/i)
+  if (cli) {
+    return {
+      product: 'cli',
+      os: osFromToken(cli[1]),
+      arch: cli[2].toLowerCase(),
+      kind: 'binary',
+    }
+  }
+
+  // posthaste daemon — the self-host runtime bundle.
+  const daemon = name.match(/PosthasteDaemon\w*-(linux|macos|windows)/i)
+  if (daemon) {
+    const arch = (name.match(/(x86_64|aarch64|arm64)/i) || [])[1] || ''
+    return {
+      product: 'daemon',
+      os: osFromToken(daemon[1]),
+      arch,
+      kind: 'tar.gz',
+    }
+  }
   return null
 }
 
@@ -125,15 +177,39 @@ function frontmatterFor(release) {
     })
     .filter(Boolean)
 
-  const order = { macOS: 0, Windows: 1, Linux: 2 }
+  // Surface artifact-naming drift: anything that matched no classifier and
+  // isn't explicitly ignored would silently disappear from the download UI.
+  const unclassified = (release.assets || [])
+    .map((a) => a.name)
+    .filter((name) => !classifyAsset(name) && !isIgnoredAsset(name))
+  if (unclassified.length > 0) {
+    console.warn(
+      `WARN ${release.tag_name}: ${unclassified.length} asset(s) matched no ` +
+        `classifier and aren't ignored — downloads may be missing: ` +
+        unclassified.join(', '),
+    )
+  }
+  if (!assets.some((a) => a.product === 'desktop')) {
+    console.warn(
+      `WARN ${release.tag_name}: no desktop installers classified — the ` +
+        `install grid will be empty.`,
+    )
+  }
+
+  const productOrder = { desktop: 0, cli: 1, daemon: 2 }
+  const osOrder = { macOS: 0, Windows: 1, Linux: 2 }
   assets.sort(
-    (a, b) => order[a.os] - order[b.os] || a.kind.localeCompare(b.kind),
+    (a, b) =>
+      productOrder[a.product] - productOrder[b.product] ||
+      osOrder[a.os] - osOrder[b.os] ||
+      a.kind.localeCompare(b.kind),
   )
 
   const data = {
     version,
     tag: release.tag_name,
     date: (release.published_at || release.created_at || '').slice(0, 10),
+    channel: channelFromTag(release.tag_name),
     prerelease: Boolean(release.prerelease),
     assets,
   }
@@ -196,7 +272,7 @@ async function reconcileAll() {
   const releases = await fetchAllReleases()
   const liveVersions = new Set()
   for (const release of releases) {
-    if (!isStableTag(release.tag_name)) continue
+    if (!channelFromTag(release.tag_name)) continue
     writeRelease(release)
     liveVersions.add(versionFromTag(release.tag_name))
   }
@@ -218,7 +294,7 @@ async function main() {
   const args = process.argv.slice(2)
   if (args.includes('--stdin')) {
     const release = JSON.parse(readFileSync(0, 'utf8'))
-    if (!isStableTag(release.tag_name)) return
+    if (!channelFromTag(release.tag_name)) return
     writeRelease(release)
     return
   }
@@ -245,7 +321,10 @@ async function main() {
   process.exit(1)
 }
 
-main().catch((err) => {
-  console.error(err.message)
-  process.exit(1)
-})
+// Only run the CLI when invoked directly — importing for tests must not exec.
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+  main().catch((err) => {
+    console.error(err.message)
+    process.exit(1)
+  })
+}
