@@ -386,10 +386,18 @@ jobs:
             echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
           fi
           config="${config},\"identifier\":\"$POSTHASTE_IDENTIFIER\",\"productName\":\"$POSTHASTE_PRODUCT_NAME\",\"plugins\":{\"updater\":{\"endpoints\":[\"$POSTHASTE_UPDATER_ENDPOINT\"]}}}"
+          # Per-channel app icon: merged via a second --config (deep-merge;
+          # arrays replace) so the channel's committed icon set wins without
+          # editing the identity config above. Stable uses the default set.
+          icon_config=()
+          if [ -n "${POSTHASTE_ICON_DIR:-}" ] && [ "$POSTHASTE_ICON_DIR" != "icons" ]; then
+            d="$POSTHASTE_ICON_DIR"
+            icon_config=(--config "{\"bundle\":{\"icon\":[\"$d/32x32.png\",\"$d/128x128.png\",\"$d/128x128@2x.png\",\"$d/icon.icns\",\"$d/icon.ico\"]}}")
+          fi
           # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
           # have no code-signing certs configured, so code signing is a no-op
           # here regardless, while updater signatures (.sig) are now produced.
-          bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config"
+          bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config" "${icon_config[@]}"
 
       - name: Build macOS desktop bundles
         if: runner.os == 'macOS'
@@ -469,6 +477,15 @@ jobs:
             macos_bundle_config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},${identity_config}${updater_config}"
           fi
 
+          # Per-channel app icon: merged via a second --config (deep-merge;
+          # arrays replace) so the channel's committed icon set wins. Stable
+          # uses the default set.
+          icon_config=()
+          if [ -n "${POSTHASTE_ICON_DIR:-}" ] && [ "$POSTHASTE_ICON_DIR" != "icons" ]; then
+            d="$POSTHASTE_ICON_DIR"
+            icon_config=(--config "{\"bundle\":{\"icon\":[\"$d/32x32.png\",\"$d/128x128.png\",\"$d/128x128@2x.png\",\"$d/icon.icns\",\"$d/icon.ico\"]}}")
+          fi
+
           # Tauri's generated bundle_dmg.sh intermittently fails on GitHub macOS
           # runners with hdiutil "Resource busy" while detaching the staging
           # image (tauri-apps/tauri#14686). The app is signed, notarized, and
@@ -490,7 +507,7 @@ jobs:
           while true; do
             if bun run tauri build --ci $devtools_flag \
                 --bundles "${{ matrix.bundle_targets }}" \
-                --config "$macos_bundle_config"; then
+                --config "$macos_bundle_config" "${icon_config[@]}"; then
               break
             fi
             if [ "$attempt" -ge "$attempts" ]; then

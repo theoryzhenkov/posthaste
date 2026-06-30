@@ -1,7 +1,7 @@
 ---
 scope: L2
 summary: "Release channels as a first-class product concept: channel is declared (tag-inferred for push, explicit for manual dispatch), baked into the binary, and drives a single policy table covering distinct per-channel identity, updater manifest, devtools, macOS signing, and smoke gates."
-modified: 2026-06-26
+modified: 2026-06-30
 reviewed: 2026-06-26
 lifecycle: ephemeral
 type: DESIGN
@@ -74,16 +74,23 @@ seam, not a channel selector.
 Each channel is a **distinct installable app**, so nightly and stable coexist
 on the same machine without clobbering each other's data or updater state.
 
-| Channel  | Identifier                 | Product name        | Data root          |
-| -------- | -------------------------- | ------------------- | ------------------ |
-| stable   | `com.posthaste.mail`       | Posthaste           | (from identifier)  |
-| nightly  | `com.posthaste.mail.nightly` | PosthasteNightly | (from identifier)  |
+| Channel  | Identifier                 | Product name        | App icon         | Data root          |
+| -------- | -------------------------- | ------------------- | ---------------- | ------------------ |
+| stable   | `com.posthaste.mail`       | Posthaste           | `icons/`         | (from identifier)  |
+| nightly  | `com.posthaste.mail.nightly` | PosthasteNightly | `icons-nightly/` | (from identifier)  |
 
 Tauri derives per-platform app-data roots from the bundle identifier, so
 distinct identifiers give distinct data roots for free. The checked-in
 `tauri.conf.json` holds the stable identity as the default (so local developer
 builds are the stable identity); the release workflow overrides identifier,
-product name, and updater endpoint at build time via `--config`.
+product name, app icon, and updater endpoint at build time via `--config`.
+
+Each channel carries its own committed, pre-generated icon set (the night
+variant for nightly, generated from `apps/web/public/favicon-night.svg` by
+`just desktop regen-nightly-icons`). `channel-policy.sh` emits the directory as
+`POSTHASTE_ICON_DIR`; the desktop build steps merge a second `--config` that
+repoints `bundle.icon` at it when it is not the default, so the two installs are
+distinguishable in the dock/taskbar.
 
 > Note on the "shared runtime, two clients" fallback: that UX requires the
 > **separated-runtime topology** (one authority runtime, both clients as
