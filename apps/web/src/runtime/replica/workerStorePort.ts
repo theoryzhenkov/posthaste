@@ -48,6 +48,10 @@ export interface ReplicaWorkerLike {
     type: 'message',
     listener: (event: { data: StoreWorkerOutbound }) => void,
   ): void
+  addEventListener(
+    type: 'error',
+    listener: (event: { message?: string }) => void,
+  ): void
   terminate?(): void
 }
 
@@ -64,6 +68,9 @@ export class WorkerStorePort implements StorePort {
   readonly ready: Promise<void>
   private resolveReady!: () => void
   private rejectReady!: (error: unknown) => void
+  /** Set once the worker is unusable (crashed or terminated). Further calls
+   *  reject immediately instead of hanging the controller's store queue. */
+  private dead = false
 
   constructor(worker: ReplicaWorkerLike) {
     this.worker = worker
@@ -77,6 +84,34 @@ export class WorkerStorePort implements StorePort {
     this.worker.addEventListener('message', (event) =>
       this.onMessage(event.data),
     )
+    // A worker that dies AFTER init would otherwise leave every in-flight call
+    // unsettled — and since the controller chains store ops, that hangs the
+    // whole store. Fail fast instead: reject pending + future calls so the
+    // failure surfaces as an error rather than a silent freeze.
+    this.worker.addEventListener('error', (event) =>
+      this.fail(
+        new Error(`replica worker error: ${event.message ?? 'unknown'}`),
+      ),
+    )
+  }
+
+  /** Tear the worker down + reject everything outstanding. Idempotent. */
+  private fail(error: Error): void {
+    if (this.dead) {
+      return
+    }
+    this.dead = true
+    this.rejectReady(error)
+    for (const entry of this.pending.values()) {
+      entry.reject(error)
+    }
+    this.pending.clear()
+  }
+
+  /** Release the worker (e.g. the host probed it unusable and fell back). */
+  terminate(): void {
+    this.fail(new Error('replica worker terminated'))
+    this.worker.terminate?.()
   }
 
   private onMessage(message: StoreWorkerOutbound): void {
@@ -106,6 +141,9 @@ export class WorkerStorePort implements StorePort {
   }
 
   private call<T>(method: StoreMethod, args: unknown[]): Promise<T> {
+    if (this.dead) {
+      return Promise.reject(new Error('replica worker is no longer available'))
+    }
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, {

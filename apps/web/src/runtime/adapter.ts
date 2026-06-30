@@ -10,7 +10,7 @@ import { defaultOutboxStore } from './replica/outboxStore'
 import { markEntityStoreActive } from './entityStoreState'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createWorkerStorePort } from './replica/workerStorePort'
-import { InProcessStorePort, type StorePort } from './replica/storePort'
+import { resolveStorePort } from './replica/storePortResolver'
 import type { RuntimeAdapter } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
@@ -152,7 +152,21 @@ export function installEntityStoreAdapter(): Promise<void> {
     // risk on the Tauri WKWebView/WebView2 targets) is detected via the worker's
     // readiness handshake and falls back to the in-process store, so defaulting
     // it on can't break the mail list anywhere.
-    const store = await resolveStorePort()
+    const store = await resolveStorePort({
+      workerEnabled: import.meta.env?.VITE_REPLICA_WORKER !== 'false',
+      createWorkerStorePort,
+      loadHandle: loadEntityStoreHandleFactory,
+      onFallback: (error) =>
+        syncLogger.warn(
+          {
+            event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
+            store: 'in-process',
+            reason: 'worker-unavailable',
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'replica worker unavailable; falling back to the in-process store',
+        ),
+    })
     activeRuntimeAdapter = createEntityStoreAdapter({
       base: activeRuntimeAdapter,
       makeStore: () => store.port,
@@ -170,49 +184,6 @@ export function installEntityStoreAdapter(): Promise<void> {
     )
   })()
   return entityStoreInstall
-}
-
-/** How long to wait for the worker's readiness handshake before falling back. */
-const WORKER_READY_TIMEOUT_MS = 5000
-
-/**
- * Pick the store: a worker store if the worker initializes within the timeout,
- * else the in-process store. The probe makes worker-by-default safe on webviews
- * that can't run the worker — they degrade instead of breaking.
- */
-async function resolveStorePort(): Promise<{
-  port: StorePort
-  kind: 'worker' | 'in-process'
-}> {
-  if (import.meta.env?.VITE_REPLICA_WORKER === 'false') {
-    const makeHandle = await loadEntityStoreHandleFactory()
-    return { port: new InProcessStorePort(makeHandle()), kind: 'in-process' }
-  }
-  try {
-    const port = createWorkerStorePort()
-    await Promise.race([
-      port.ready,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error('worker readiness timed out')),
-          WORKER_READY_TIMEOUT_MS,
-        ),
-      ),
-    ])
-    return { port, kind: 'worker' }
-  } catch (error) {
-    syncLogger.warn(
-      {
-        event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
-        store: 'in-process',
-        reason: 'worker-unavailable',
-        error: error instanceof Error ? error.message : String(error),
-      },
-      'replica worker unavailable; falling back to the in-process store',
-    )
-    const makeHandle = await loadEntityStoreHandleFactory()
-    return { port: new InProcessStorePort(makeHandle()), kind: 'in-process' }
-  }
 }
 
 // The client-layer entity store is the sole mail-list derivation (rows + counts
