@@ -28,7 +28,12 @@ import {
   type MessageListErrorState,
 } from './message-list/MessageListRows'
 import { NoMailboxSelected } from './message-list/MessageListStates'
-import { selectionKey, viewKey, viewModeKey } from './message-list/model'
+import {
+  messageKey,
+  selectionKey,
+  viewKey,
+  viewModeKey,
+} from './message-list/model'
 import { useConversationTree } from './message-list/useConversationTree'
 import { useRuntimeMailListView } from './message-list/useRuntimeMailListView'
 import { useMessageListNavigation } from './message-list/useMessageListNavigation'
@@ -179,12 +184,35 @@ export function MessageList({
     preparedSearchQuery,
   })
 
+  // The focused tree row (conversation view only), so `h`/`l` can collapse/
+  // expand exactly the node the user is on. Collapse is keyed by the node's
+  // message key, which is also `selectedKey`.
+  const focusedRow =
+    treeMode && selectedKey
+      ? conversationTree.rows.find(
+          (row) => messageKey(row.message) === selectedKey,
+        )
+      : undefined
   useMessageListNavigation({
     currentViewKey,
     messages: navMessages,
     onClearSelection,
     onSelectMessage,
     selectedKey,
+    onCollapseFocused: treeMode
+      ? () => {
+          if (selectedKey && focusedRow?.hasChildren && !focusedRow.collapsed) {
+            conversationTree.toggleCollapse(selectedKey)
+          }
+        }
+      : undefined,
+    onExpandFocused: treeMode
+      ? () => {
+          if (selectedKey && focusedRow?.hasChildren && focusedRow.collapsed) {
+            conversationTree.toggleCollapse(selectedKey)
+          }
+        }
+      : undefined,
   })
   const { handleScroll, scrollContainerRef, scrollTop, viewportHeight } =
     useMessageListScroll({

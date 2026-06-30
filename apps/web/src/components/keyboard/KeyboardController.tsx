@@ -55,6 +55,7 @@ export interface KeyboardControllerProps {
   onClearSearchQuery: () => void
   onToggleShortcuts: () => void
   onGoto: (role: GotoRole, options: { forceSmart: boolean }) => void
+  onGotoConversation: () => void
   children: ReactNode
 }
 
@@ -144,6 +145,7 @@ export function KeyboardController({
         pendingPrefix: pendingPrefixRef.current,
         setPendingPrefix,
         onGoto: p.onGoto,
+        onGotoConversation: p.onGotoConversation,
         onOpenCommandPalette: p.onOpenCommandPalette,
         onOpenSettings: p.onOpenSettings,
         onCompose: p.onCompose,

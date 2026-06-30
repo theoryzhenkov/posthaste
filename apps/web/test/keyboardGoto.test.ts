@@ -61,6 +61,10 @@ describe('stepGotoPrefix', () => {
     expect(stepGotoPrefix('g', 'q')).toEqual({ type: 'await-q' })
   })
 
+  it('maps g c to a goto-conversation step', () => {
+    expect(stepGotoPrefix('g', 'c')).toEqual({ type: 'goto-conversation' })
+  })
+
   it('maps every role under the gq prefix, force-smart', () => {
     const cases: [string, string][] = [
       ['i', 'inbox'],

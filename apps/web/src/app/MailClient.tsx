@@ -33,7 +33,7 @@ import { queryKeys } from '@/queryKeys'
 import { consumeRepairCompletion } from '@/repairFeedback'
 import { runtimeMutations } from '@/runtime/mutations'
 import { runtimeViews } from '@/runtime/views'
-import { prepareServerSearchQuery } from '@/searchQuery'
+import { conversationViewQuery, prepareServerSearchQuery } from '@/searchQuery'
 import { type SurfaceDescriptor } from '@/surfaces'
 import { MailClientView } from './MailClientView'
 import { useMailClientHandlers } from './useMailClientHandlers'
@@ -217,6 +217,13 @@ export function MailClient({
         onClearSearchQuery={handlers.handleRejectSearchPreview}
         onToggleShortcuts={handlers.handleToggleShortcuts}
         onGoto={gotoNavigation.goto}
+        onGotoConversation={() => {
+          if (selectedMessage) {
+            handlers.handleSearch(
+              conversationViewQuery(selectedMessage.conversationId),
+            )
+          }
+        }}
       >
         <MailClientView
           actions={actions}

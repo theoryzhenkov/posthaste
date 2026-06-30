@@ -43,6 +43,7 @@ function makeCtx(over: Partial<KeyboardDispatchContext> = {}): {
     },
     onGoto: (role, options) =>
       gotos.push({ role, forceSmart: options.forceSmart }),
+    onGotoConversation: bump('gotoConversation'),
     onOpenCommandPalette: bump('palette'),
     onOpenSettings: bump('settings'),
     onCompose: bump('compose'),
@@ -98,15 +99,15 @@ describe('dispatchMailKey', () => {
     expect(calls.compose).toBe(1)
   })
 
-  it('moves pane focus right with l, wrapping past the last pane', () => {
+  it('rotates pane focus right with Shift+L, wrapping past the last pane', () => {
     const { ctx, focused } = makeCtx({ activePane: 'detail' })
-    dispatchMailKey(key({ key: 'l' }), ctx)
+    dispatchMailKey(key({ key: 'L', shiftKey: true }), ctx)
     expect(focused).toEqual(['sidebar'])
   })
 
-  it('moves pane focus left with h, wrapping before the first pane', () => {
+  it('rotates pane focus left with Shift+H, wrapping before the first pane', () => {
     const { ctx, focused } = makeCtx({ activePane: 'sidebar' })
-    dispatchMailKey(key({ key: 'h' }), ctx)
+    dispatchMailKey(key({ key: 'H', shiftKey: true }), ctx)
     expect(focused).toEqual(['detail'])
   })
 
@@ -120,6 +121,20 @@ describe('dispatchMailKey', () => {
     dispatchMailKey(key({ key: 'j' }), ctx)
     expect(seen).toBe('j')
     // j is not a focus-movement key, so no pane change.
+    expect(focused).toEqual([])
+  })
+
+  it('routes plain h/l to the focused pane handler (tree collapse/expand)', () => {
+    const seen: string[] = []
+    const handler: PaneKeyHandler = (event) => {
+      seen.push(event.key)
+      return true
+    }
+    const { ctx, focused } = makeCtx({ resolvePaneHandler: () => handler })
+    dispatchMailKey(key({ key: 'h' }), ctx)
+    dispatchMailKey(key({ key: 'l' }), ctx)
+    expect(seen).toEqual(['h', 'l'])
+    // Plain h/l are not pane-rotation keys, so focus does not move.
     expect(focused).toEqual([])
   })
 
@@ -146,7 +161,7 @@ describe('dispatchMailKey', () => {
       effectiveSurfaceOpen: true,
       hasSelectedMessage: true,
     })
-    dispatchMailKey(key({ key: 'l' }), ctx)
+    dispatchMailKey(key({ key: 'L', shiftKey: true }), ctx)
     dispatchMailKey(key({ key: 'e' }), ctx)
     dispatchMailKey(key({ key: 'k', metaKey: true }), ctx)
     expect(calls).toEqual({})
@@ -158,7 +173,7 @@ describe('dispatchMailKey', () => {
       overlayOwnsInput: true,
       hasSelectedMessage: true,
     })
-    dispatchMailKey(key({ key: 'l' }), ctx)
+    dispatchMailKey(key({ key: 'L', shiftKey: true }), ctx)
     dispatchMailKey(key({ key: 'e' }), ctx)
     expect(focused).toEqual([])
     expect(calls.archive).toBeUndefined()
@@ -183,6 +198,22 @@ describe('dispatchMailKey', () => {
     expect(ctx.pendingPrefix).toBe('gq')
     dispatchMailKey(key({ key: 't' }), ctx)
     expect(gotos).toEqual([{ role: 'trash', forceSmart: true }])
+  })
+
+  it('runs gc as a goto-conversation when a message is selected', () => {
+    const { ctx, calls } = makeCtx({ hasSelectedMessage: true })
+    dispatchMailKey(key({ key: 'g' }), ctx)
+    dispatchMailKey(key({ key: 'c' }), ctx)
+    expect(calls.gotoConversation).toBe(1)
+    expect(ctx.pendingPrefix).toBeNull()
+  })
+
+  it('consumes gc but does nothing with no message selected', () => {
+    const { ctx, calls } = makeCtx({ hasSelectedMessage: false })
+    dispatchMailKey(key({ key: 'g' }), ctx)
+    dispatchMailKey(key({ key: 'c' }), ctx)
+    expect(calls.gotoConversation).toBeUndefined()
+    expect(ctx.pendingPrefix).toBeNull()
   })
 
   it('drops a stray prefix and handles the next key normally', () => {
