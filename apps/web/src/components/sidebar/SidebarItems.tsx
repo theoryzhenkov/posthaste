@@ -1,13 +1,12 @@
 import type { ReactNode } from 'react'
 import { Edit3, MailOpen, RefreshCw, Settings } from 'lucide-react'
 
-import type { Mailbox, TagSummary } from '@/api/types'
+import type { Mailbox } from '@/api/types'
 import { accentColor } from '@/design'
 import { cn } from '@/lib/utils'
 import {
   mailboxRoleAccent,
   renderMailboxRoleIcon,
-  smartMailboxAccent,
   smartMailboxFallbackIcon,
 } from '@/mailboxRoles'
 
@@ -88,27 +87,6 @@ export function SmartMailboxItem({
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
-  )
-}
-
-export function TagItem({
-  tag,
-  onSelect,
-}: {
-  tag: TagSummary
-  onSelect: () => void
-}) {
-  return (
-    <button className={itemButtonClass(false)} onClick={onSelect} type="button">
-      <span
-        className="flex w-4 justify-center"
-        style={{ color: smartMailboxAccent(null, tag.name) }}
-      >
-        {smartMailboxIcon(null, null)}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{tag.name}</span>
-      {tag.unreadMessages > 0 && <UnreadCount count={tag.unreadMessages} />}
-    </button>
   )
 }
 

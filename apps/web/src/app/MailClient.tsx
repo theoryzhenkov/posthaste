@@ -244,7 +244,6 @@ export function MailClient({
         onSelectMessageRef={handlers.handleSelectMessageRef}
         onSelectSmartMailbox={handlers.handleSelectSmartMailbox}
         onSelectSourceMailbox={handlers.handleSelectSourceMailbox}
-        onSelectTag={handlers.handleSelectTag}
         onSetTagEditorOpen={setIsTagEditorOpen}
         onShellLayoutChanged={layout.onShellLayoutChanged}
         onShowShortcuts={handlers.handleShowShortcuts}

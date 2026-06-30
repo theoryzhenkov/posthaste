@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { MessageSummary } from '../../api/types'
 import { cn } from '../../lib/utils'
 import { formatRelativeTime } from '../../utils/relativeTime'
+import { userTags } from '../message-detail/model'
 
 export type ColumnId =
   | 'unread'
@@ -188,9 +189,17 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     minWidth: 60,
     grow: 0.5,
     resizable: true,
-    render: () => (
-      <span className="min-w-0 truncate font-mono text-[10px] uppercase text-muted-foreground/40" />
-    ),
+    render: (message) => {
+      const tags = userTags(message.keywords)
+      if (tags.length === 0) {
+        return null
+      }
+      return (
+        <span className="min-w-0 truncate font-mono text-[10px] uppercase text-muted-foreground/70">
+          {tags.join(', ')}
+        </span>
+      )
+    },
   },
 }
 

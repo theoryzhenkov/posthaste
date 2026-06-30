@@ -15,25 +15,14 @@ export function MailClientView(props: MailClientViewProps) {
     >
       <ActionBar
         isDarkMode={props.isDarkMode}
-        isFlagged={props.selectedMessageData?.isFlagged ?? false}
-        isMessageSelected={props.selectedMessage !== null}
         isSettingsOpen={props.isSettingsSurfaceOpen}
         searchQuery={props.searchQuery}
-        onArchive={props.onArchive}
         onClearSearch={props.onClearSearch}
         onCompose={props.onCompose}
-        onForward={props.onForward}
         onOpenCommandPalette={props.onOpenCommandPalette}
-        onOpenFocusedMessage={props.onOpenFocusedMessage}
-        onReply={props.onReply}
-        onReplyAll={props.onReplyAll}
-        onSnooze={props.onSnooze}
         onShowShortcuts={props.onShowShortcuts}
-        onTag={() => props.onSetTagEditorOpen(true)}
-        onToggleFlag={props.onToggleFlag}
         onToggleSettings={props.onToggleSettings}
         onToggleTheme={props.onToggleTheme}
-        onTrash={props.onTrash}
       />
       {props.actions.errorMessage && (
         <ActionErrorBanner actions={props.actions} />

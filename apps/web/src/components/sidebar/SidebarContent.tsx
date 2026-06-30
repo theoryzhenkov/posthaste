@@ -1,13 +1,13 @@
 import { AlertCircle } from 'lucide-react'
 
-import type { SmartMailboxSummary, TagSummary } from '@/api/types'
+import type { SmartMailboxSummary } from '@/api/types'
 import { smartMailboxAccent } from '@/mailboxRoles'
 import type { useMailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
 
 import type { SidebarSelection } from '../Sidebar'
 import { fallbackAccountAppearance } from './model'
 import { SectionHeader, SourceSection } from './SourceSection'
-import { SmartMailboxItem, TagItem } from './SidebarItems'
+import { SmartMailboxItem } from './SidebarItems'
 
 type NavigationReadModels = ReturnType<typeof useMailboxNavigationReadModels>
 
@@ -88,32 +88,6 @@ export function SmartMailboxSection({
           ))}
         </div>
       )}
-    </>
-  )
-}
-
-export function TagsSection({
-  tags,
-  onSelectTag,
-}: {
-  tags: TagSummary[]
-  onSelectTag: (tag: string) => void
-}) {
-  if (tags.length === 0) {
-    return null
-  }
-  return (
-    <>
-      <SectionHeader label="Tags" collapsed={false} onToggle={() => {}} />
-      <div className="space-y-0.5 py-1">
-        {tags.map((tag) => (
-          <TagItem
-            key={tag.name}
-            tag={tag}
-            onSelect={() => onSelectTag(tag.name)}
-          />
-        ))}
-      </div>
     </>
   )
 }
