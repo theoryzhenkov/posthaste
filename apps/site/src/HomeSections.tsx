@@ -2,6 +2,55 @@ import type { CSSProperties } from 'react'
 import type { HomeContent } from './content/types'
 import { useLandscapeTime } from './hooks'
 
+/** App screenshots for the gallery, captured from a seeded demo account. */
+const SCREENSHOTS = [
+  {
+    src: '/screenshots/conversations.png',
+    caption: 'Threaded conversation view',
+    alt: 'Posthaste inbox showing a threaded conversation with nested replies',
+  },
+  {
+    src: '/screenshots/reader.png',
+    caption: 'Reading a thread',
+    alt: 'Posthaste reading pane with an open email thread',
+  },
+  {
+    src: '/screenshots/compose.png',
+    caption: 'Compose',
+    alt: 'Posthaste compose window with a draft reply',
+  },
+  {
+    src: '/screenshots/command-palette.png',
+    caption: 'Command palette',
+    alt: 'Posthaste command palette open over the inbox',
+  },
+]
+
+export function ScreenshotsSection() {
+  return (
+    <section className="screenshots" aria-labelledby="screenshots-title">
+      <div className="section-header" data-reveal>
+        <h2 id="screenshots-title">A look inside</h2>
+      </div>
+      <div className="screenshot-grid">
+        {SCREENSHOTS.map((shot) => (
+          <figure className="screenshot" data-reveal key={shot.src}>
+            <img
+              src={shot.src}
+              alt={shot.alt}
+              width={1440}
+              height={900}
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>{shot.caption}</figcaption>
+          </figure>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export function LandscapeValuesSection({
   content,
 }: {

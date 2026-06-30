@@ -1,6 +1,13 @@
 import matter from 'gray-matter'
 import { marked } from 'marked'
-import type { ReleaseAsset, ReleaseEntry, ReleaseOs } from './types'
+import { compareReleasesDesc } from './releaseOrdering'
+import type {
+  ReleaseAsset,
+  ReleaseChannel,
+  ReleaseEntry,
+  ReleaseOs,
+  ReleaseProduct,
+} from './types'
 
 /**
  * Release entries are the source of truth for the downloads/changelog page.
@@ -16,6 +23,8 @@ const releaseFiles = import.meta.glob<string>('./releases/*.md', {
 })
 
 const VALID_OS: readonly ReleaseOs[] = ['macOS', 'Windows', 'Linux']
+const VALID_PRODUCT: readonly ReleaseProduct[] = ['desktop', 'cli', 'daemon']
+const VALID_CHANNEL: readonly ReleaseChannel[] = ['stable', 'nightly']
 
 function asString(value: unknown, key: string, file: string): string {
   if (typeof value !== 'string' || value.length === 0) {
@@ -37,27 +46,27 @@ function parseAssets(value: unknown, file: string): ReleaseAsset[] {
         `${file} assets[${index}].os "${os}" is not a known platform`,
       )
     }
+    const product = asString(
+      entry.product,
+      `assets[${index}].product`,
+      file,
+    ) as ReleaseProduct
+    if (!VALID_PRODUCT.includes(product)) {
+      throw new Error(
+        `${file} assets[${index}].product "${product}" is not a known product`,
+      )
+    }
     return {
+      product,
       os,
-      arch: asString(entry.arch, `assets[${index}].arch`, file),
+      // arch is display-only and optional (e.g. the universal macOS daemon).
+      arch: typeof entry.arch === 'string' ? entry.arch : '',
       kind: asString(entry.kind, `assets[${index}].kind`, file),
       name: asString(entry.name, `assets[${index}].name`, file),
       url: asString(entry.url, `assets[${index}].url`, file),
       size: typeof entry.size === 'number' ? entry.size : 0,
     }
   })
-}
-
-/** Descending version order: newest release first. */
-function compareVersionsDesc(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  const len = Math.max(pa.length, pb.length)
-  for (let i = 0; i < len; i += 1) {
-    const diff = (pb[i] ?? 0) - (pa[i] ?? 0)
-    if (diff !== 0) return diff
-  }
-  return 0
 }
 
 let cached: ReleaseEntry[] | null = null
@@ -71,10 +80,15 @@ export async function getReleases(): Promise<ReleaseEntry[]> {
       const data = parsed.data as Record<string, unknown>
       const notesHtml = await marked.parse(parsed.content.trim())
 
+      const channel = asString(data.channel, 'channel', file) as ReleaseChannel
+      if (!VALID_CHANNEL.includes(channel)) {
+        throw new Error(`${file} channel "${channel}" is not a known channel`)
+      }
       const entry: ReleaseEntry = {
         version: asString(data.version, 'version', file),
         tag: asString(data.tag, 'tag', file),
         date: asString(data.date, 'date', file),
+        channel,
         prerelease: data.prerelease === true,
         assets: parseAssets(data.assets, file),
         notesHtml,
@@ -86,7 +100,7 @@ export async function getReleases(): Promise<ReleaseEntry[]> {
     }),
   )
 
-  entries.sort((a, b) => compareVersionsDesc(a.version, b.version))
+  entries.sort(compareReleasesDesc)
   cached = entries
   return entries
 }

@@ -163,6 +163,16 @@ a {
   color: rgb(244 241 234 / 0.92);
 }
 
+/* GitHub / Discord brand-mark links. */
+.install-header-icon {
+  padding: 0 7px;
+}
+
+.install-header-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
 .hero {
   min-height: 100svh;
   padding: 82px 18px 0;
@@ -1212,17 +1222,6 @@ h1 {
   letter-spacing: -0.01em;
 }
 
-.releases-subtitle {
-  margin: 0 0 clamp(34px, 5vw, 52px);
-  color: var(--muted);
-  font-size: 16px;
-}
-
-.releases-subtitle a {
-  color: var(--amber);
-  font-family: 'Geist Mono Variable', monospace;
-}
-
 .download-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(252px, 1fr));
@@ -1359,6 +1358,46 @@ h1 {
   font-weight: 600;
   text-decoration-line: underline;
   text-underline-offset: 0.18em;
+  /* Works as both an <a> and a reset <button>. */
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Channel switch (Stable / Nightly). */
+.channel-switch {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 0 clamp(28px, 4vw, 44px);
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-elev);
+}
+
+.channel-tab {
+  padding: 6px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--subtle);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.channel-tab:hover {
+  color: var(--fg);
+}
+
+.channel-tab.active {
+  background: var(--selection);
+  color: var(--fg);
 }
 
 .screenshots {
@@ -1496,6 +1535,14 @@ h1 {
 .changelog-download:hover {
   border-color: oklch(0.68 0.17 45 / 0.6);
   color: var(--fg);
+}
+
+.changelog-source {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--amber);
+  text-decoration-line: underline;
+  text-underline-offset: 0.18em;
 }
 
 @media (max-width: 640px) {

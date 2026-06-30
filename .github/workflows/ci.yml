@@ -66,6 +66,7 @@ jobs:
             ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: bun --cwd=apps/site run check
+      - run: bun --cwd=apps/site run test
       - run: bun --cwd=apps/site run build
 
   mcp:
@@ -142,7 +143,7 @@ jobs:
           cache-on-failure: true
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
-          version: '0.2.117'
+          version: "0.2.117"
       - name: Install binaryen (wasm-opt)
         run: |
           sudo apt-get update
