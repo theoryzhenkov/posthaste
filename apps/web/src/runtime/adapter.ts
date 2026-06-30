@@ -10,6 +10,7 @@ import { defaultOutboxStore } from './replica/outboxStore'
 import { markEntityStoreActive } from './entityStoreState'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createWorkerStorePort } from './replica/workerStorePort'
+import { InProcessStorePort, type StorePort } from './replica/storePort'
 import type { RuntimeAdapter } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
@@ -140,16 +141,21 @@ let entityStoreInstall: Promise<void> | undefined
  */
 export function installEntityStoreAdapter(): Promise<void> {
   entityStoreInstall ??= (async () => {
-    // Worker mode (off by default) runs the WASM store off the UI thread; until
-    // it is validated in the Tauri webviews the in-process store stays default,
-    // so set `VITE_REPLICA_WORKER=true` to opt in.
-    const useWorker = import.meta.env?.VITE_REPLICA_WORKER === 'true'
-    const storeDeps = useWorker
-      ? { makeStore: createWorkerStorePort }
-      : { makeHandle: await loadEntityStoreHandleFactory() }
+    // The WASM entity store runs on a Web Worker by default — the worker keeps
+    // the UI thread responsive during a re-sync burst (validated by
+    // apps/web/e2e/worker-burst-probe.mjs: a 20k-event burst stays at 17ms max
+    // rAF gap vs 50ms jank in-process). Set `VITE_REPLICA_WORKER=false` to force
+    // the in-process store.
+    //
+    // Worker mode is PROBED before use: a webview that can't run the worker
+    // (module-worker/WASM-in-worker/asset-resolution issues — the unvalidated
+    // risk on the Tauri WKWebView/WebView2 targets) is detected via the worker's
+    // readiness handshake and falls back to the in-process store, so defaulting
+    // it on can't break the mail list anywhere.
+    const store = await resolveStorePort()
     activeRuntimeAdapter = createEntityStoreAdapter({
       base: activeRuntimeAdapter,
-      ...storeDeps,
+      makeStore: () => store.port,
       outbox: defaultOutboxStore(),
     })
     markEntityStoreActive()
@@ -158,12 +164,55 @@ export function installEntityStoreAdapter(): Promise<void> {
         event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
         entityStore: true,
         adapterMode: injectedRuntimeMode() ?? 'loopback',
-        store: useWorker ? 'worker' : 'in-process',
+        store: store.kind,
       },
-      `entity-store adapter installed (${useWorker ? 'worker' : 'in-process'} store)`,
+      `entity-store adapter installed (${store.kind} store)`,
     )
   })()
   return entityStoreInstall
+}
+
+/** How long to wait for the worker's readiness handshake before falling back. */
+const WORKER_READY_TIMEOUT_MS = 5000
+
+/**
+ * Pick the store: a worker store if the worker initializes within the timeout,
+ * else the in-process store. The probe makes worker-by-default safe on webviews
+ * that can't run the worker — they degrade instead of breaking.
+ */
+async function resolveStorePort(): Promise<{
+  port: StorePort
+  kind: 'worker' | 'in-process'
+}> {
+  if (import.meta.env?.VITE_REPLICA_WORKER === 'false') {
+    const makeHandle = await loadEntityStoreHandleFactory()
+    return { port: new InProcessStorePort(makeHandle()), kind: 'in-process' }
+  }
+  try {
+    const port = createWorkerStorePort()
+    await Promise.race([
+      port.ready,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('worker readiness timed out')),
+          WORKER_READY_TIMEOUT_MS,
+        ),
+      ),
+    ])
+    return { port, kind: 'worker' }
+  } catch (error) {
+    syncLogger.warn(
+      {
+        event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
+        store: 'in-process',
+        reason: 'worker-unavailable',
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'replica worker unavailable; falling back to the in-process store',
+    )
+    const makeHandle = await loadEntityStoreHandleFactory()
+    return { port: new InProcessStorePort(makeHandle()), kind: 'in-process' }
+  }
 }
 
 // The client-layer entity store is the sole mail-list derivation (rows + counts

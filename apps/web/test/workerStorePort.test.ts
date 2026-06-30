@@ -3,14 +3,15 @@ import { describe, expect, it } from 'bun:test'
 import {
   WorkerStorePort,
   type ReplicaWorkerLike,
+  type StoreWorkerOutbound,
   type StoreWorkerRequest,
   type StoreWorkerResponse,
 } from '../src/runtime/replica/workerStorePort'
 
 /** A loopback "worker": responses are produced by `respond` and delivered
- *  asynchronously, like a real `Worker`. */
+ *  asynchronously, like a real `Worker`. Can also emit the readiness handshake. */
 class LoopbackWorker implements ReplicaWorkerLike {
-  private listener: ((event: { data: StoreWorkerResponse }) => void) | null =
+  private listener: ((event: { data: StoreWorkerOutbound }) => void) | null =
     null
   readonly received: StoreWorkerRequest[] = []
 
@@ -22,7 +23,7 @@ class LoopbackWorker implements ReplicaWorkerLike {
 
   addEventListener(
     _type: 'message',
-    listener: (event: { data: StoreWorkerResponse }) => void,
+    listener: (event: { data: StoreWorkerOutbound }) => void,
   ): void {
     this.listener = listener
   }
@@ -33,9 +34,36 @@ class LoopbackWorker implements ReplicaWorkerLike {
       this.listener?.({ data: response }),
     )
   }
+
+  /** Simulate the worker's readiness handshake. */
+  emitReady(message: StoreWorkerOutbound): void {
+    this.listener?.({ data: message })
+  }
 }
 
 describe('WorkerStorePort', () => {
+  it('resolves `ready` on the worker readiness handshake', async () => {
+    const worker = new LoopbackWorker((request) => ({
+      id: request.id,
+      ok: true,
+      result: undefined,
+    }))
+    const port = new WorkerStorePort(worker)
+    worker.emitReady({ type: 'ready', ok: true })
+    await expect(port.ready).resolves.toBeUndefined()
+  })
+
+  it('rejects `ready` when the worker reports an init failure (drives in-process fallback)', async () => {
+    const worker = new LoopbackWorker((request) => ({
+      id: request.id,
+      ok: true,
+      result: undefined,
+    }))
+    const port = new WorkerStorePort(worker)
+    worker.emitReady({ type: 'ready', ok: false, error: 'wasm init failed' })
+    await expect(port.ready).rejects.toThrow('wasm init failed')
+  })
+
   it('routes a call to the worker with its method + args and resolves the result', async () => {
     const worker = new LoopbackWorker((request) => ({
       id: request.id,
