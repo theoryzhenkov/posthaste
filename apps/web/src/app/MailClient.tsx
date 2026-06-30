@@ -24,6 +24,8 @@ import {
 } from '@/labReadiness'
 import { useMailNavigationReadBootstrap } from '@/mailboxNavigationReadModels'
 import { mailKeys, type MailSelection } from '@/mailState'
+import { OnboardingTour } from '@/onboarding/OnboardingTour'
+import { useOnboardingNeeded } from '@/onboarding/store'
 import { useUndoRedo } from '@/hooks/useUndoRedo'
 import { RevLogMirrors } from '@/hooks/RevLogMirrors'
 import { queryClient } from '@/app/queryClient'
@@ -73,6 +75,7 @@ export function MailClient({
     [searchQuery],
   )
   const theme = useDesignTheme()
+  const onboardingNeeded = useOnboardingNeeded()
   useRepairCompletionToast()
   const undoRedo = useUndoRedo()
   const actions = useEmailActions({ undo: undoRedo.undo })
@@ -180,9 +183,13 @@ export function MailClient({
     return <MailClientLoading />
   }
 
+  const showOnboarding =
+    onboardingNeeded && hasLoadedAccounts && !hasAccountsError
+
   return (
     <>
       <RevLogMirrors accountIds={enabledAccountIds} />
+      {showOnboarding && <OnboardingTour />}
       <KeyboardController
         effectiveSurfaceOpen={effectiveSurface !== null}
         overlayOwnsInput={
