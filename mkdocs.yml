@@ -52,6 +52,8 @@ plugins:
 
 nav:
   - Home: index.md
+  - Architecture:
+      - Crate topology (L2): architecture/L2-crate-topology.md
   - State:
       - Mail:
           - Model (L1): state/mail/L1.md
@@ -76,19 +78,19 @@ nav:
           - Seam contract (L1): replication/client-link/L1.md
           - Components (L2): replication/client-link/L2.md
           - Integration (L3): replication/client-link/L3.md
-      - Runtime↔backend link:
-          - Seam contract (L1): replication/backend-link/L1.md
-          - Components (L2): replication/backend-link/L2.md
-          - Implementation (L3): replication/backend-link/L3.md
+      - Runtime↔authority-server link:
+          - Seam contract (L1): replication/authority-server-link/L1.md
+          - Components (L2): replication/authority-server-link/L2.md
+          - Implementation (L3): replication/authority-server-link/L3.md
   - API:
       - Contracts (L1): api/L1.md
       - Structure and flows (L2): api/L2.md
       - Implementation reference (L3): api/L3.md
       - Endpoint inventory: api/endpoints.md
-  - Backend:
-      - Contracts (L1): backend/L1.md
-      - Structure and flows (L2): backend/L2.md
-      - Adapter patterns (L3): backend/L3.md
+  - Authority server:
+      - Contracts (L1): authority-server/L1.md
+      - Structure and flows (L2): authority-server/L2.md
+      - Adapter patterns (L3): authority-server/L3.md
   - Client:
       - State contract (L1): client/L1.md
       - Mail runtime (L2): client/L2.md
