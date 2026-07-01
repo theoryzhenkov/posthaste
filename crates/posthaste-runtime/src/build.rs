@@ -83,7 +83,7 @@ pub enum BackendTransportConfig {
     Remote {
         base_url: String,
         /// Bearer token presented to the backend's authenticated `link_router`
-        /// (`LinkAuth::Bearer`). `None` for an unauthenticated link.
+        /// (`LinkAuth::PerRuntime`). `None` for an unauthenticated link.
         token: Option<String>,
     },
 }

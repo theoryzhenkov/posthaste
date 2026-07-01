@@ -10,13 +10,14 @@
 //!
 //! @spec docs/replication/backend-link/L2#2-backendapi-implementations-localbackend-remotebackend
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_authority_runtime::RemoteBackend;
 use posthaste_link_contract::{
-    BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
+    BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, RuntimeId,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
@@ -131,4 +132,85 @@ fn link_router_merges_under_a_v1_nest_without_route_conflict() {
     let _app: axum::Router = axum::Router::new()
         .nest("/v1", api)
         .merge(link_router(Arc::new(StubFarNode), LinkAuth::Disabled));
+}
+
+// A far node that captures the `RuntimeId` the link router threaded into
+// `forward_mutation_for` — proves the auth-derived identity reaches the
+// up-channel (S2): a token presented by the near node resolves to a `RuntimeId`
+// on the serve side and is carried into the runtime-aware up-channel call.
+struct CapturingFarNode {
+    seen_runtime_id: Mutex<Option<String>>,
+}
+
+#[async_trait]
+impl BackendApi for CapturingFarNode {
+    async fn forward_mutation(
+        &self,
+        mutation: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        // The link router routes the up-channel through `forward_mutation_for`;
+        // this runtime-naive fallback is only for direct (non-link) callers.
+        self.forward_mutation_for(&RuntimeId::new("<direct>"), mutation)
+            .await
+    }
+
+    async fn forward_mutation_for(
+        &self,
+        runtime_id: &RuntimeId,
+        mutation: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        *self.seen_runtime_id.lock().unwrap() = Some(runtime_id.as_str().to_string());
+        Ok(MutationReceipt {
+            runtime_mutation_id: Some(RuntimeMutationId::new("backend-1")),
+            client_mutation_id: mutation.client_mutation_id,
+            name: mutation.name,
+            state: MutationSettlementState::Confirmed,
+            error: None,
+            output: serde_json::json!({ "events": [] }),
+        })
+    }
+
+    async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+        Ok(Box::pin(futures_util::stream::iter(Vec::new())))
+    }
+}
+
+#[tokio::test]
+async fn link_router_threads_the_authed_runtime_id_into_forward_mutation_for() {
+    let node = Arc::new(CapturingFarNode {
+        seen_runtime_id: Mutex::new(None),
+    });
+    // X = 1: one runtime, "rt-1", authenticated by token "t1".
+    let router = link_router(
+        node.clone(),
+        LinkAuth::PerRuntime(HashMap::from([(
+            "t1".to_string(),
+            RuntimeId::new("rt-1"),
+        )])),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let base_url = format!("http://{addr}");
+
+    // The near node presents "t1"; the backend resolves it to RuntimeId "rt-1".
+    let transport = RemoteBackend::with_token(base_url, Some("t1".to_string()));
+    transport
+        .forward_mutation(MutationRequest {
+            session_id: None,
+            name: "message.setFlaggedState".into(),
+            args: serde_json::json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),
+            client_mutation_id: ClientMutationId::new("c1"),
+            context: None,
+        })
+        .await
+        .expect("the mutation is forwarded");
+
+    assert_eq!(
+        node.seen_runtime_id.lock().unwrap().as_deref(),
+        Some("rt-1"),
+        "the link router must thread the auth-derived RuntimeId into forward_mutation_for"
+    );
 }

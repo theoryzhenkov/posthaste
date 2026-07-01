@@ -166,6 +166,30 @@ impl From<WireMutationId> for MutationId {
     }
 }
 
+/// Stable identity of a runtime near node at the runtime↔backend link
+/// ([replication backend-link L1 §3.1](../replication/backend-link/L1.md)).
+///
+/// A remote runtime establishes its `RuntimeId` with the backend at link
+/// establishment (derived from its authenticated credential); the backend scopes
+/// mutation-id idempotency, the confirmation watermark, and settlement routing
+/// per `RuntimeId`, so two runtimes may independently mint the same
+/// `ClientMutationId` without collision. There is no single-runtime special
+/// case — the co-located runtime is simply the one in-process runtime (X=1),
+/// with a real minted id rather than a sentinel.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RuntimeId(pub String);
+
+impl RuntimeId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Serializable mirror of [`SettlementOutcome`] for the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -238,10 +262,45 @@ pub trait BackendApi: Send + Sync {
         mutation: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError>;
 
+    /// Up-channel, runtime-aware variant of [`forward_mutation`](Self::forward_mutation):
+    /// the far node scopes mutation-id idempotency and confirmation under
+    /// `runtime_id`
+    /// ([replication backend-link L1 §3.1](../replication/backend-link/L1.md)). The
+    /// link server derives `runtime_id` from the connecting runtime's credential
+    /// and threads it here; an in-process caller reaches the same path with its
+    /// minted id. The default delegates to `forward_mutation` (ignoring the id)
+    /// for transports that carry no per-runtime registry — test stubs, and the
+    /// client side which is the runtime itself and has no id of its own to
+    /// present.
+    async fn forward_mutation_for(
+        &self,
+        runtime_id: &RuntimeId,
+        mutation: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        let _ = runtime_id;
+        self.forward_mutation(mutation).await
+    }
+
     /// Down-channel. Subscribe to the far node's ordered stream of base
     /// assertions + per-mutation confirmation for a coverage. The near node
     /// rebases its base cache on each frame and recomputes its derived views.
     async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError>;
+
+    /// Down-channel, runtime-aware variant of [`subscribe`](Self::subscribe): as
+    /// `subscribe` but the far node routes `DownFrame::Settlement` onto the
+    /// originating `runtime_id`'s stream only (merged with the broadcast `Base`)
+    /// — `settlement-routed-to-origin-runtime`. The link server derives
+    /// `runtime_id` from the connecting runtime's credential. The default
+    /// delegates to `subscribe` (ignoring the id) for transports that carry no
+    /// per-runtime sink.
+    async fn subscribe_for(
+        &self,
+        runtime_id: &RuntimeId,
+        coverage: LinkCoverage,
+    ) -> Result<DownStream, RuntimeError> {
+        let _ = runtime_id;
+        self.subscribe(coverage).await
+    }
 
     /// Read channel: compute a page of a mail-list query at the far node (the
     /// query engine is the authority's, [backend-link L3](../replication/backend-link/L3.md)).

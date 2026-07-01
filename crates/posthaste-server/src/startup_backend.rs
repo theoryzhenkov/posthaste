@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use super::*;
+use posthaste_link_contract::RuntimeId;
 
 /// Handle returned by [`start_backend`]: the bound address, the server task, and
 /// the log guard (must outlive the process).
@@ -43,15 +44,20 @@ pub async fn start_backend(server_config: ServerConfig) -> BackendServerHandle {
     .await
     .expect("failed to build backend node");
 
-    // The link is the ONLY surface here; require a token under require_auth and
-    // fail closed if absent (the backend is entirely network-exposed). With
-    // require_auth off (explicit dev opt-out) it serves unauthenticated.
+    // The link is the ONLY surface here; require [link].runtimes under
+    // require_auth and fail closed if absent (the backend is entirely
+    // network-exposed). With require_auth off (explicit dev opt-out) it serves
+    // unauthenticated.
     let link_auth = if runtime.require_auth {
-        match &runtime.link_token {
-            Some(token) => LinkAuth::Bearer(token.clone()),
-            None => panic!(
-                "posthaste-backend requires a [link] token under require_auth \
-                 (set [link].token or POSTHASTE_LINK_TOKEN)"
+        match &runtime.link_runtimes {
+            Some(map) if !map.is_empty() => LinkAuth::PerRuntime(
+                map.iter()
+                    .map(|(token, rid)| (token.clone(), RuntimeId::new(rid.clone())))
+                    .collect(),
+            ),
+            _ => panic!(
+                "posthaste-backend requires [link].runtimes (token → runtime_id) under \
+                 require_auth — one entry per connecting runtime (X ≥ 1)"
             ),
         }
     } else {
