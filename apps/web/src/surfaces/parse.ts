@@ -7,6 +7,7 @@ import {
 } from './factories'
 import {
   SettingsSurfaceTargetKind,
+  SETTINGS_SURFACE_CATEGORIES,
   type AttachmentSurfaceDescriptor,
   type MessageSurfaceDescriptor,
   type SettingsSurfaceCategory,
@@ -236,14 +237,5 @@ function hasOnlySurfaceParams(
 function isSettingsSurfaceCategory(
   value: string,
 ): value is SettingsSurfaceCategory {
-  return (
-    value === 'general' ||
-    value === 'appearance' ||
-    value === 'accounts' ||
-    value === 'outbox' ||
-    value === 'mailboxes' ||
-    value === 'storage' ||
-    value === 'notifications' ||
-    value === 'troubleshooting'
-  )
+  return (SETTINGS_SURFACE_CATEGORIES as readonly string[]).includes(value)
 }
