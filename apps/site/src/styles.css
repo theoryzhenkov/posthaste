@@ -141,6 +141,33 @@ a {
   white-space: nowrap;
 }
 
+/* Secondary "Buy Me A Coffee" CTA — sits next to Install. Outlined so the
+ * Install button stays the primary action; warms to a coffee tint on hover. */
+.install-header-coffee {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 9px;
+  padding: 0 12px;
+  color: rgb(244 241 234 / 0.86);
+  background: rgb(255 255 255 / 0.05);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.install-header-coffee:hover {
+  background: oklch(0.82 0.14 70);
+  color: rgb(18 20 16 / 0.94);
+  border-color: transparent;
+}
+
 .install-header-nav {
   display: flex;
   align-items: center;
@@ -1122,6 +1149,14 @@ h1 {
   .install-header-button {
     margin-left: 9px;
     padding: 0 10px;
+  }
+
+  .install-header-coffee {
+    padding: 0 9px;
+  }
+
+  .install-header-coffee span {
+    display: none;
   }
 
   .install-header-nav {
