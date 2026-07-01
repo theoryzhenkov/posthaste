@@ -7,7 +7,6 @@ import { LOG_EVENTS, syncLogger } from '../logger'
 import { httpRuntimeAdapter } from './httpAdapter'
 import { loadEntityStoreHandleFactory } from './replica/handle'
 import { defaultOutboxStore } from './replica/outboxStore'
-import { markEntityStoreActive } from './entityStoreState'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createWorkerStorePort } from './replica/workerStorePort'
 import { resolveStorePort } from './replica/storePortResolver'
@@ -172,7 +171,6 @@ export function installEntityStoreAdapter(): Promise<void> {
       makeStore: () => store.port,
       outbox: defaultOutboxStore(),
     })
-    markEntityStoreActive()
     syncLogger.info(
       {
         event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
@@ -186,9 +184,20 @@ export function installEntityStoreAdapter(): Promise<void> {
   return entityStoreInstall
 }
 
-// The client-layer entity store is the sole mail-list derivation (rows + counts
-// on one stream) and the read model the runtime no longer re-serves redundantly
-// (option iii). It is unconditional — the prior `VITE_ENTITY_STORE` opt-out was
-// retired so there is no path that depends on the runtime's per-event re-serve.
-// Until the WASM finishes loading the base HTTP adapter serves (bootstrap only).
-void installEntityStoreAdapter()
+// The client-layer WASM entity store is the sole mail-list derivation (rows +
+// counts on one stream) and the read model the runtime no longer re-serves
+// redundantly (option iii). It is unconditional and has NO REST fallback: WASM
+// load is validated across targets, so a failure is an anomaly to surface, not a
+// mode to silently degrade into. On failure the base transport still renders
+// from view frames, but without the store's optimism + count ownership — so the
+// failure is logged at error level rather than swallowed. Until the WASM finishes
+// loading the base HTTP adapter serves (bootstrap only).
+void installEntityStoreAdapter().catch((error) => {
+  syncLogger.error(
+    {
+      event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
+      error: error instanceof Error ? error.message : String(error),
+    },
+    'entity store failed to load — no REST fallback; the mail list will not update optimistically',
+  )
+})

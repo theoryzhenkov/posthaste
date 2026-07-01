@@ -339,8 +339,8 @@ function useSyncSourceMutation() {
   return useMutation({
     mutationFn: (sourceId: string) =>
       runtimeMutations.accounts.sync({ sourceId }),
-    onSuccess: async (_result, sourceId) => {
-      await invalidateSyncStartedReadModels(queryClient, sourceId)
+    onSuccess: async () => {
+      await invalidateSyncStartedReadModels(queryClient)
       toast('Sync started')
     },
     onError: (error) => {
