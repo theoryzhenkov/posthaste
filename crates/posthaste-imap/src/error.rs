@@ -55,6 +55,8 @@ pub enum ImapAdapterError {
     BuildSmtpMessage(String),
     #[error("SMTP transport error: {0}")]
     Smtp(String),
+    #[error("IMAP {operation} did not complete within the deadline")]
+    Timeout { operation: &'static str },
 }
 
 impl From<imap_client::client::tokio::ClientError> for ImapAdapterError {
