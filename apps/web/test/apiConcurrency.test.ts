@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 
-import { request } from '../src/api/client/core'
+import { ApiError } from '../src/api/errors'
+import {
+  request,
+  setRequestSlotTimeoutMsForTesting,
+} from '../src/api/client/core'
 import {
   applyResolvedConnection,
   resetActiveConnectionForTesting,
@@ -76,5 +80,31 @@ describe('API request concurrency cap', () => {
     )
     expect(settled.filter((s) => s.status === 'rejected')).toHaveLength(4)
     expect(settled[4]?.status).toBe('fulfilled')
+  })
+
+  it('rejects a parked waiter with a timeout when no slot frees up (principle VI)', async () => {
+    const restore = setRequestSlotTimeoutMsForTesting(50)
+    applyResolvedConnection(
+      { baseUrl: 'http://127.0.0.1:1/v1', token: 't' },
+      null,
+    )
+    // Fill the concurrency cap with fetches that hang forever (a server that
+    // stopped responding); a 5th request parks in the queue and must reject
+    // with a bounded timeout, not hang indefinitely.
+    const releases: Array<() => void> = []
+    globalThis.fetch = (async () => {
+      await new Promise<void>((resolve) => releases.push(resolve))
+      return jsonOk()
+    }) as typeof fetch
+
+    const inFlight = Array.from({ length: 4 }, () => request('/x'))
+    await tick()
+    const parked = request('/x')
+    await expect(parked).rejects.toBeInstanceOf(ApiError)
+    expect(releases).toHaveLength(4) // the 5th never started a fetch
+    // Release the hung in-flight fetches so the queue drains cleanly.
+    releases.forEach((release) => release())
+    await Promise.allSettled(inFlight)
+    restore()
   })
 })

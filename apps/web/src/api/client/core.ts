@@ -115,22 +115,72 @@ function mergeHeaders(
  * their own fetches and are intentionally not gated.
  */
 const MAX_CONCURRENT_REQUESTS = 4
+/// How long a request may wait for a concurrency slot before failing fast. If
+/// all in-flight requests hang (a server that stopped responding), a parked
+/// waiter must surface a bounded failure rather than hang forever (engineering
+/// principle VI). Generous: normal operation never waits; this only fires when
+/// the queue is genuinely wedged. Held as a `let` so a test can shrink it via
+/// [`setRequestSlotTimeoutMsForTesting`] (principle II: one declared seam a
+/// test can reach).
+let requestSlotTimeoutMs = 30_000
+
+/** Test-only: shrink the slot-acquisition deadline so a wedged queue triggers
+ * the timeout in milliseconds, not 30s. Returns a guard that restores it. */
+export function setRequestSlotTimeoutMsForTesting(ms: number): () => void {
+  const previous = requestSlotTimeoutMs
+  requestSlotTimeoutMs = ms
+  return () => {
+    requestSlotTimeoutMs = previous
+  }
+}
 let inFlightRequests = 0
-const requestWaiters: Array<() => void> = []
+/// A parked waiter for a concurrency slot: resolves when `releaseRequestSlot`
+/// hands a slot over, or rejects when the acquisition deadline fires.
+interface RequestWaiter {
+  resolve: () => void
+  reject: (error: ApiError) => void
+  timer: ReturnType<typeof setTimeout>
+}
+const requestWaiters: RequestWaiter[] = []
 
 function acquireRequestSlot(): Promise<void> {
   if (inFlightRequests < MAX_CONCURRENT_REQUESTS) {
     inFlightRequests += 1
     return Promise.resolve()
   }
-  return new Promise<void>((resolve) => requestWaiters.push(resolve))
+  return new Promise<void>((resolve, reject) => {
+    const waiter: RequestWaiter = {
+      resolve,
+      reject,
+      timer: undefined as never,
+    }
+    requestWaiters.push(waiter)
+    // Bound the wait: if no slot frees up within the deadline, remove the
+    // waiter from the queue and reject so the caller fails fast (and React
+    // Query can surface the error) instead of parking indefinitely.
+    waiter.timer = setTimeout(() => {
+      const index = requestWaiters.indexOf(waiter)
+      if (index !== -1) {
+        requestWaiters.splice(index, 1)
+      }
+      reject(
+        new ApiError(
+          0,
+          'Request Queue Timeout',
+          `no concurrency slot acquired within ${requestSlotTimeoutMs / 1000}s; the server appears unresponsive`,
+        ),
+      )
+    }, requestSlotTimeoutMs)
+  })
 }
 
 function releaseRequestSlot(): void {
   const next = requestWaiters.shift()
   if (next) {
     // Hand the slot straight to the next waiter; in-flight count is unchanged.
-    next()
+    // Clear the acquisition deadline so it cannot fire after the hand-off.
+    clearTimeout(next.timer)
+    next.resolve()
   } else {
     inFlightRequests -= 1
   }
