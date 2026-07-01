@@ -1,9 +1,10 @@
-import { Download, Grip, Pin } from 'lucide-react'
+import { Coffee, Download, Grip, Pin } from 'lucide-react'
 import type { HomeContent } from './content/types'
 
 export const GITHUB_URL = 'https://github.com/theoryzhenkov/posthaste'
 export const DISCORD_URL = 'https://discord.gg/8ARFrDa2Gv'
 export const DOCS_URL = 'https://theoryzhenkov.github.io/posthaste/'
+export const BUY_ME_A_COFFEE_URL = 'https://buymeacoffee.com/theoryzhenkov'
 
 function GithubMark() {
   return (
@@ -46,6 +47,16 @@ export function InstallHeader({
       <a className="install-header-button" href="/releases">
         <Download aria-hidden="true" />
         <span>Install</span>
+      </a>
+      <a
+        className="install-header-coffee"
+        href={BUY_ME_A_COFFEE_URL}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Buy Me A Coffee"
+      >
+        <Coffee aria-hidden="true" />
+        <span>Buy Me A Coffee</span>
       </a>
       <nav className="install-header-nav" aria-label="Site">
         <a href="/" aria-current={active === 'home' ? 'page' : undefined}>
