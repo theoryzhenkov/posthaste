@@ -23,7 +23,9 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     let fetch_vanished = include_vanished && enable_qresync(client).await?;
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
     if include_vanished && !fetch_vanished {
-        let mut uids = client.uid_search([SearchKey::Undeleted]).await?;
+        let mut uids =
+            crate::timeout::with_deadline("uid_search", client.uid_search([SearchKey::Undeleted]))
+                .await?;
         uids.sort_unstable();
         uids.dedup();
         ph_info!(
@@ -53,16 +55,16 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     }
     let sequence_set = SequenceSet::try_from("1:*")
         .map_err(|error| ImapAdapterError::InvalidUidSequence(error.to_string()))?;
-    let snapshot = client
-        .resolve(ChangedSinceFetchTask::new(
+    let snapshot = crate::timeout::with_deadline_resolve(
+        "changed_since_fetch",
+        client.resolve(ChangedSinceFetchTask::new(
             sequence_set,
             fetch_item_names(true, fetch_gmail_metadata),
             since_modseq,
             fetch_vanished,
-        ))
-        .await
-        .map_err(ImapAdapterError::from)?
-        .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
+        )),
+    )
+    .await?;
 
     let mut headers = Vec::with_capacity(snapshot.headers.len());
     let mut vanished_uids = snapshot.vanished_uids;
@@ -94,10 +96,8 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
 async fn enable_qresync(client: &mut ImapClient) -> Result<bool, ImapAdapterError> {
     let capability = CapabilityEnable::try_from("QRESYNC")
         .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
-    let enabled = client
-        .enable([capability])
-        .await
-        .map_err(ImapAdapterError::from)?;
+    let enabled = crate::timeout::with_deadline("enable", client.enable([capability]))
+        .await?;
 
     Ok(enabled
         .unwrap_or_default()

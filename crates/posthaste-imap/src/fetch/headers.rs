@@ -14,7 +14,9 @@ pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
     updated_at: String,
 ) -> Result<ImapMailboxHeaderSnapshot, ImapAdapterError> {
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
-    let mut uids = client.uid_search([SearchKey::Undeleted]).await?;
+    let mut uids =
+        crate::timeout::with_deadline("uid_search", client.uid_search([SearchKey::Undeleted]))
+            .await?;
 
     // Normalize search output before chunking so later sync reconciliation does
     // not depend on provider-specific ordering or duplicate behavior.
@@ -58,7 +60,9 @@ pub(crate) async fn fetch_mailbox_headers_after_uid_with_client(
     updated_at: String,
 ) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
-    let mut uids = client.uid_search([SearchKey::Undeleted]).await?;
+    let mut uids =
+        crate::timeout::with_deadline("uid_search", client.uid_search([SearchKey::Undeleted]))
+            .await?;
 
     uids.sort_unstable();
     uids.dedup();
@@ -110,13 +114,14 @@ pub(crate) async fn fetch_selected_mailbox_headers(
     for (chunk_index, chunk) in uids.chunks(UID_FETCH_CHUNK_SIZE).enumerate() {
         let sequence_set = SequenceSet::try_from(chunk)
             .map_err(|error| ImapAdapterError::InvalidUidSequence(error.to_string()))?;
-        let responses = client
-            .uid_fetch(
+        let responses = crate::timeout::with_deadline(
+            "uid_fetch",
+            client.uid_fetch(
                 sequence_set,
                 fetch_item_names(fetch_modseq, fetch_gmail_metadata),
-            )
-            .await
-            .map_err(ImapAdapterError::from)?;
+            ),
+        )
+        .await?;
 
         for items in responses.into_values() {
             let fetched =

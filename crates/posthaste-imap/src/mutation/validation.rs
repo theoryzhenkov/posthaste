@@ -13,6 +13,7 @@ use imap_client::tasks::Task;
 use posthaste_domain_model::ImapMessageLocation;
 
 use crate::{selected_mailbox_from_examine, ImapAdapterError};
+use crate::timeout::with_deadline;
 
 pub(crate) fn uid_sequence_set(
     location: &ImapMessageLocation,
@@ -27,7 +28,10 @@ pub(crate) async fn select_validated_mailbox(
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<(), ImapAdapterError> {
-    let selected = selected_mailbox_from_examine(mailbox_name, client.select(mailbox_name).await?)?;
+    let selected = selected_mailbox_from_examine(
+        mailbox_name,
+        with_deadline("select", client.select(mailbox_name)).await?,
+    )?;
     if selected.uid_validity != location.uid_validity {
         return Err(ImapAdapterError::UidValidityMismatch {
             mailbox_name: mailbox_name.to_string(),
@@ -42,10 +46,11 @@ pub(crate) async fn verify_uid_fetch_response(
     client: &mut ImapClient,
     location: &ImapMessageLocation,
 ) -> Result<(), ImapAdapterError> {
-    let items = client
-        .uid_fetch_first(uid(location)?, uid_fetch_item_names())
-        .await
-        .map_err(ImapAdapterError::from)?;
+    let items = with_deadline(
+        "uid_fetch_first",
+        client.uid_fetch_first(uid(location)?, uid_fetch_item_names()),
+    )
+    .await?;
     verify_message_data_contains_uid(location, items, "matching UID FETCH response")
 }
 
@@ -78,11 +83,11 @@ pub(crate) async fn uid_expunge(
     client: &mut ImapClient,
     location: &ImapMessageLocation,
 ) -> Result<Vec<NonZeroU32>, ImapAdapterError> {
-    client
-        .resolve(UidExpungeTask::new(uid_sequence_set(location)?))
-        .await
-        .map_err(ImapAdapterError::from)?
-        .map_err(|error| ImapAdapterError::Client(error.to_string()))
+    crate::timeout::with_deadline_resolve(
+        "uid_expunge",
+        client.resolve(UidExpungeTask::new(uid_sequence_set(location)?)),
+    )
+    .await
 }
 
 #[derive(Clone, Debug)]

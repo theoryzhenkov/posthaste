@@ -20,6 +20,7 @@ mod mutation;
 mod provider;
 mod smtp;
 mod sync;
+mod timeout;
 
 pub use body::{
     fetch_message_body_by_location, fetch_raw_message_by_location, fetched_body_from_items,

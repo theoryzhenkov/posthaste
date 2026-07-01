@@ -34,8 +34,10 @@ pub async fn fetch_raw_message_by_location(
     location: &ImapMessageLocation,
 ) -> Result<Vec<u8>, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
-    let selected =
-        selected_mailbox_from_examine(mailbox_name, client.examine(mailbox_name).await?)?;
+    let selected = selected_mailbox_from_examine(
+        mailbox_name,
+        crate::timeout::with_deadline("examine", client.examine(mailbox_name)).await?,
+    )?;
     if selected.uid_validity != location.uid_validity {
         return Err(ImapAdapterError::UidValidityMismatch {
             mailbox_name: mailbox_name.to_string(),
@@ -46,10 +48,11 @@ pub async fn fetch_raw_message_by_location(
 
     let uid = std::num::NonZeroU32::new(location.uid.0)
         .ok_or_else(|| ImapAdapterError::InvalidUidSequence("UID 0".to_string()))?;
-    let items = client
-        .uid_fetch_first(uid, body_fetch_item_names())
-        .await
-        .map_err(ImapAdapterError::from)?;
+    let items = crate::timeout::with_deadline(
+        "uid_fetch_first",
+        client.uid_fetch_first(uid, body_fetch_item_names()),
+    )
+    .await?;
 
     raw_mime_from_items(location, items)
 }
