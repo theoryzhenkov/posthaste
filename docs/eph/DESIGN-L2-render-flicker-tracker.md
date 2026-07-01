@@ -2,7 +2,7 @@
 scope: L2
 summary: "Render-layer flicker probe (RenderProbe/RenderLog) driving the REAL entityStoreAdapter + WASM + hook + render at its injection seams; retires the duplicated Rust ReplicaProbe adapter-port"
 modified: 2026-06-27
-reviewed: 2026-06-27
+reviewed: 2026-07-01
 lifecycle: ephemeral
 type: DESIGN
 depends:

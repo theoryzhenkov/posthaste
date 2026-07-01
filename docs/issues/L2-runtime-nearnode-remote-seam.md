@@ -2,7 +2,7 @@
 scope: L2
 summary: "The runtime near-node tier lags the client tier: it retires its backend-facing outbox unconditionally on receipt (not by absorption), so the flicker reappears one layer down the moment runtime↔backend goes remote. Plus latent remote-seam issues: the outbox overlay isn't account-scoped (cross-account fold + double-fold), phantom seq gaps on collapse, and a dead Conflict arm."
 modified: 2026-06-28
-reviewed: 2026-06-28
+reviewed: 2026-07-01
 lifecycle: ephemeral
 type: ISSUE
 status: open

@@ -1,13 +1,15 @@
 ---
 scope: L2
-summary: "Phase-0 audit + phased plan for productizing the two self-host topologies (remote-backend/local-runtime/many-clients and remote-runtime/thin-web-clients) over the already-landed build seam — with the leanness finding that role binaries are runtime-lean but not compile-lean, so the build matrix needs a crate/feature boundary between store+engine roles and the near-node/client roles"
-modified: 2026-06-25
-reviewed: 2026-06-25
+summary: "Phase-0 audit + phased plan for productizing the two self-host topologies (remote-backend/local-runtime/many-clients and remote-runtime/thin-web-clients) over the already-landed build seam — with the leanness finding that role binaries are runtime-lean but not compile-lean, and the multi-runtime fan-in preset now specified over the runtime↔backend link"
+modified: 2026-07-01
+reviewed: 2026-07-01
 lifecycle: ephemeral
 type: PLAN
 depends:
   - path: docs/replication/L1
     section: "10. Deployment topology"
+  - path: docs/replication/backend-link/L1
+    section: "3.1 Runtime identity and fan-in"
   - path: docs/replication/backend-link/L2
     section: "7. The build seam and role binaries"
   - path: docs/eph/DESIGN-L2-deployment-topology
@@ -33,6 +35,16 @@ The two target topologies:
 - **Config 1 (further out):** backend **and** runtime on the server; **thin web
   clients** connect over an authenticated client link. Needs the WASM replica
   finished + defaulted and client-link auth.
+
+> **Multi-runtime fan-in (2026-07-01).** The `R↔B` link now permits **multiple
+> runtime near nodes** against one backend ([replication L1 §10](../replication/L1.md),
+> [backend-link L1 §3.1](../replication/backend-link/L1.md)) — the `Hosted backend,
+> multi-runtime` preset, with the single-runtime hosted-backend as its N=1 case.
+> Config 2 therefore generalizes to *N runtimes → one remote backend*, each runtime
+> still serving many local clients over `C↔R`. The mechanism is specified but not
+> yet realized; the realization slice is tracked in
+> [deployment-topology DESIGN §4](DESIGN-L2-deployment-topology.md). It does not
+> change the build matrix or the leanness boundary below.
 
 ## 1. Phase 0 findings (ground truth)
 
