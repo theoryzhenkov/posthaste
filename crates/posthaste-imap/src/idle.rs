@@ -109,7 +109,7 @@ async fn connect_idle_client(
     let mut resolved_config = config.clone();
     resolved_config.secret = secret;
     let mut client = connect_authenticated_client(&resolved_config).await?;
-    client.refresh_capabilities().await?;
+    crate::timeout::with_deadline("refresh_capabilities", client.refresh_capabilities()).await?;
     examine_selected_mailbox(&mut client, mailbox_name).await?;
     Ok(client)
 }

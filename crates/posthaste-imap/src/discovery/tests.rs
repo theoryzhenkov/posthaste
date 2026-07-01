@@ -62,6 +62,53 @@ fn maps_gmail_role_aliases_only_with_gmail_provider_policy() {
 /// Capabilities the mock advertises (a Gmail-shaped server).
 const MOCK_GMAIL_CAPS: &str = "IMAP4rev1 CONDSTORE QRESYNC X-GM-EXT-1 IDLE UIDPLUS ENABLE";
 
+/// A server that accepts the TCP connection but never sends anything — a
+/// hung/hostile provider. The first IMAP round-trip (connect handshake or the
+/// first command) must hit the per-op deadline instead of hanging forever.
+async fn spawn_stalling_imap() -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind stalling imap");
+    let addr = listener.local_addr().expect("stalling imap addr");
+    tokio::spawn(async move {
+        // Accept so the TCP connect completes, then hold the stream open without
+        // ever writing a byte. The client awaits the server greeting (or the
+        // first response) forever; the deadline is the only thing that bounds
+        // it. The stream must be kept alive (not dropped) or the client sees an
+        // EOF, not a hang.
+        let (stream, _) = listener.accept().await.expect("accept stalling imap");
+        std::future::pending::<()>().await;
+        drop(stream);
+    });
+    addr
+}
+
+// spec: docs/testing/L1#provider-observation-matrix
+// A hung provider must surface as a typed timeout, not an indefinite hang
+// (engineering principle VI: every wait across an uncontrolled boundary has a
+// deadline).
+#[tokio::test]
+async fn a_hung_imap_server_surfaces_as_a_typed_timeout() {
+    let _restore = crate::timeout::set_op_timeout_ms_for_testing(150);
+    let addr = spawn_stalling_imap().await;
+
+    let error = discover_imap_account(&ImapConnectionConfig {
+        host: "127.0.0.1".to_string(),
+        port: addr.port(),
+        security: TransportSecurity::Plain,
+        username: "user@example.com".to_string(),
+        secret: "secret".to_string(),
+        auth: ProviderAuthKind::Password,
+    })
+    .await
+    .expect_err("a hung server should time out, not return Ok");
+
+    assert!(
+        matches!(error, crate::ImapAdapterError::Timeout { .. }),
+        "expected a typed timeout, got {error:?}"
+    );
+}
+
 // spec: docs/testing/L1#provider-observation-matrix
 #[tokio::test]
 async fn mock_gmail_imap_negotiates_condstore_qresync_and_gmail_extensions() {

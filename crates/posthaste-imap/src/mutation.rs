@@ -75,10 +75,11 @@ pub async fn copy_imap_message_to_mailbox_by_location(
     let mut client = connect_authenticated_client(config).await?;
     select_validated_mailbox(&mut client, source_mailbox_name, location).await?;
     verify_uid_fetch_response(&mut client, location).await?;
-    client
-        .uid_copy(uid_sequence_set(location)?, target_mailbox_name)
-        .await
-        .map_err(ImapAdapterError::from)
+    crate::timeout::with_deadline(
+        "uid_copy",
+        client.uid_copy(uid_sequence_set(location)?, target_mailbox_name),
+    )
+    .await
 }
 
 /// Move one IMAP message to another mailbox with UID MOVE.
@@ -97,10 +98,11 @@ pub async fn move_imap_message_to_mailbox_by_location(
     let mut client = connect_authenticated_client(config).await?;
     select_validated_mailbox(&mut client, source_mailbox_name, location).await?;
     verify_uid_fetch_response(&mut client, location).await?;
-    client
-        .uid_move(uid_sequence_set(location)?, target_mailbox_name)
-        .await
-        .map_err(ImapAdapterError::from)
+    crate::timeout::with_deadline(
+        "uid_move",
+        client.uid_move(uid_sequence_set(location)?, target_mailbox_name),
+    )
+    .await
 }
 
 /// Mark one IMAP message as `\Deleted` without issuing broad EXPUNGE.
@@ -118,10 +120,11 @@ pub async fn mark_imap_message_deleted_by_location(
     let mut client = connect_authenticated_client(config).await?;
     select_validated_mailbox(&mut client, mailbox_name, location).await?;
     verify_uid_fetch_response(&mut client, location).await?;
-    client
-        .uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted])
-        .await
-        .map_err(ImapAdapterError::from)?;
+    crate::timeout::with_deadline(
+        "uid_store",
+        client.uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted]),
+    )
+    .await?;
 
     Ok(MutationOutcome {
         cursor: None,
@@ -142,10 +145,11 @@ pub async fn expunge_imap_message_by_location(
     let mut client = connect_authenticated_client(config).await?;
     select_validated_mailbox(&mut client, mailbox_name, location).await?;
     verify_uid_fetch_response(&mut client, location).await?;
-    client
-        .uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted])
-        .await
-        .map_err(ImapAdapterError::from)?;
+    crate::timeout::with_deadline(
+        "uid_store",
+        client.uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted]),
+    )
+    .await?;
     let _expunged = uid_expunge(&mut client, location).await?;
 
     Ok(MutationOutcome {

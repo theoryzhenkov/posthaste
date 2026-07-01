@@ -58,11 +58,12 @@ pub async fn append_smtp_sent_copy(
     raw_message: &[u8],
 ) -> Result<Option<NonZeroU32>, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
-    client.refresh_capabilities().await?;
-    client
-        .appenduid_or_fallback(sent_mailbox_name, [Flag::Seen], raw_message)
-        .await
-        .map_err(ImapAdapterError::from)
+    crate::timeout::with_deadline("refresh_capabilities", client.refresh_capabilities()).await?;
+    crate::timeout::with_deadline(
+        "append",
+        client.appenduid_or_fallback(sent_mailbox_name, [Flag::Seen], raw_message),
+    )
+    .await
 }
 
 fn smtp_transport(
