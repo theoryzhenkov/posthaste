@@ -52,7 +52,7 @@ export function SmartMailboxSection({
   collapsed,
   mailboxes,
   selectedView,
-  focusedKey,
+  isPaneActive,
   onOpenSmartMailboxSettings,
   onSelectSmartMailbox,
   onReorder,
@@ -61,7 +61,7 @@ export function SmartMailboxSection({
   collapsed: boolean
   mailboxes: SmartMailboxSummary[]
   selectedView: SidebarSelection | null
-  focusedKey: string | null
+  isPaneActive: boolean
   onOpenSmartMailboxSettings: (smartMailboxId: string) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onReorder: (orderedIds: string[]) => void
@@ -92,7 +92,7 @@ export function SmartMailboxSection({
                     selectedView?.kind === 'smart-mailbox' &&
                     selectedView.id === smartMailbox.id
                   }
-                  isFocused={focusedKey === `smart:${smartMailbox.id}`}
+                  isPaneActive={isPaneActive}
                   onSelect={() =>
                     onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
                   }
@@ -110,7 +110,7 @@ export function SmartMailboxSection({
 export function AccountsSection({
   collapsed,
   selectedView,
-  focusedKey,
+  isPaneActive,
   collapsedSourceIds,
   sources,
   onOpenAccountSettings,
@@ -122,7 +122,7 @@ export function AccountsSection({
 }: {
   collapsed: boolean
   selectedView: SidebarSelection | null
-  focusedKey: string | null
+  isPaneActive: boolean
   collapsedSourceIds: ReadonlySet<string>
   sources: SourceReadModel[]
   onOpenAccountSettings: (sourceId: string) => void
@@ -158,7 +158,7 @@ export function AccountsSection({
                     fallbackAccountAppearance(source.id, source.name)
                   }
                   selectedView={selectedView}
-                  focusedKey={focusedKey}
+                  isPaneActive={isPaneActive}
                   collapsed={collapsedSourceIds.has(source.id)}
                   onToggleCollapsed={() => onToggleSourceCollapsed(source.id)}
                   onOpenAccountSettings={onOpenAccountSettings}

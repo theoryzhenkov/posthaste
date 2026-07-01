@@ -36,7 +36,6 @@ const PREFIX_TIMEOUT_MS = 1500
 export interface KeyboardControllerProps {
   effectiveSurfaceOpen: boolean
   overlayOwnsInput: boolean
-  isMessageDetailOpen: boolean
   hasSelectedMessage: boolean
   hasSearchQuery: boolean
   onOpenCommandPalette: () => void
@@ -89,16 +88,10 @@ export function KeyboardController({
     [],
   )
 
-  const availablePanes = useMemo(
-    () =>
-      PANE_ORDER.filter(
-        (pane) => pane !== 'detail' || props.isMessageDetailOpen,
-      ),
-    [props.isMessageDetailOpen],
-  )
+  const availablePanes = PANE_ORDER
 
-  // Derive the effective pane so a closed detail pane never strands focus,
-  // without a setState-in-effect round trip.
+  // Guard against a stale requested pane (e.g. a persisted value) ever stranding
+  // focus on a pane that isn't navigable.
   const activePane = availablePanes.includes(requestedPane)
     ? requestedPane
     : 'list'
@@ -139,9 +132,7 @@ export function KeyboardController({
         activePane: pane,
         availablePanes: panes,
         focusPane: setRequestedPane,
-        resolvePaneHandler: (target) =>
-          handlersRef.current.get(target) ??
-          (target === 'detail' ? handlersRef.current.get('list') : undefined),
+        resolvePaneHandler: (target) => handlersRef.current.get(target),
         pendingPrefix: pendingPrefixRef.current,
         setPendingPrefix,
         onGoto: p.onGoto,

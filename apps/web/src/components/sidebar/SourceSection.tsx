@@ -19,7 +19,7 @@ export function SourceSection({
   source,
   appearance,
   selectedView,
-  focusedKey,
+  isPaneActive,
   collapsed,
   onToggleCollapsed,
   onOpenAccountSettings,
@@ -33,8 +33,8 @@ export function SourceSection({
   }
   appearance: AccountAppearance
   selectedView: SidebarSelection | null
-  /** Nav key of the roving cursor, or null when the sidebar is unfocused. */
-  focusedKey: string | null
+  /** Whether the sidebar is the focused pane (drives accent-vs-grey selection). */
+  isPaneActive: boolean
   collapsed: boolean
   onToggleCollapsed: () => void
   onOpenAccountSettings: (sourceId: string) => void
@@ -122,7 +122,7 @@ export function SourceSection({
                 selectedView.sourceId === source.id &&
                 selectedView.mailboxId === mailbox.id
               }
-              isFocused={focusedKey === `src:${source.id}:${mailbox.id}`}
+              isPaneActive={isPaneActive}
               onSelect={() =>
                 onSelectSourceMailbox(
                   source.id,
