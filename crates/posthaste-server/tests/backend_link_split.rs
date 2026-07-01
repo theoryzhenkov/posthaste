@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_runtime::{
     build_authority_runtime, build_backend_node, build_remote_runtime, BackendTransportConfig,
@@ -30,13 +30,15 @@ use posthaste_domain::{
     SecretStore, SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
     SyncObject, ThreadId,
 };
-use posthaste_link_contract::{BackendApi, LinkCoverage};
+use posthaste_link_contract::{BackendApi, DownFrame, LinkCoverage, RuntimeId};
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,
     RuntimeCore, SecretWriteMutation, ViewDescriptor,
 };
 use posthaste_server::{link_router, LinkAuth};
+
+use futures_util::StreamExt;
 
 #[derive(Default)]
 struct TestSecretStore {
@@ -433,7 +435,7 @@ async fn generated_wire_round_trips_a_read_and_a_write() {
     );
 }
 
-// The link surface, served with `LinkAuth::Bearer`, rejects requests without a
+// The link surface, served with `LinkAuth::PerRuntime`, rejects requests without a
 // matching bearer token and admits those that carry it — the gate a remote mount
 // stands behind.
 //
@@ -452,7 +454,10 @@ async fn link_auth_requires_a_matching_bearer_token() {
     // Serve the link behind a required bearer token.
     let router = link_router(
         backend.backend_link.transport().clone(),
-        LinkAuth::Bearer("s3cret-link-token".to_string()),
+        LinkAuth::PerRuntime(HashMap::from([(
+            "s3cret-link-token".to_string(),
+            RuntimeId::new("rt-test"),
+        )])),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -569,5 +574,106 @@ async fn lean_remote_runtime_drives_the_backend_over_the_link() {
     assert!(
         accounts.ids.contains(&created.id),
         "the lean runtime should serve the account it created over the link"
+    );
+}
+
+// A forwarded mutation's per-mutation confirmation (`DownFrame::Settlement`) is
+// routed onto the originating runtime's down-stream only — the load-bearing
+// multi-runtime invariant (`settlement-routed-to-origin-runtime`). Proved
+// end-to-end over the real wire: a `RemoteBackend` subscribes, forwards a
+// mutation, and its down-stream delivers a Settlement naming it.
+#[tokio::test]
+async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream() {
+    let backend = build_authority_runtime(build_config(temp_root()))
+        .await
+        .expect("backend runtime builds");
+    let account = backend
+        .handle
+        .create_account(RuntimeCaller::test(), account_mutation("settle-account"))
+        .await
+        .expect("account creates");
+    backend
+        .api_bridge
+        .store
+        .apply_sync_batch(
+            &account.id,
+            &SyncBatch {
+                mailboxes: vec![MailboxRecord {
+                    id: MailboxId::from("inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 1,
+                }],
+                messages: vec![MessageRecord {
+                    id: MessageId::from("m-settle"),
+                    source_thread_id: ThreadId::from("thread-m-settle"),
+                    subject: Some("Subject".to_string()),
+                    received_at: "2026-06-24T10:00:00Z".to_string(),
+                    mailbox_ids: vec![MailboxId::from("inbox")],
+                    keywords: vec!["$seen".to_string()],
+                    ..Default::default()
+                }],
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "s1".to_string(),
+                    updated_at: "2026-06-24T10:00:00Z".to_string(),
+                }],
+                ..Default::default()
+            },
+        )
+        .expect("seed applies");
+
+    // Serve the link behind per-runtime auth: one runtime, "rt-1", token "t1".
+    let router = link_router(
+        backend.backend_link.transport().clone(),
+        LinkAuth::PerRuntime(HashMap::from([(
+            "t1".to_string(),
+            RuntimeId::new("rt-1"),
+        )])),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let transport =
+        RemoteBackend::with_token(format!("http://{addr}"), Some("t1".to_string()));
+    // Subscribe first so the settlement sink exists, then forward.
+    let mut down = transport
+        .subscribe(LinkCoverage::Complete)
+        .await
+        .expect("subscribe over the wire");
+    transport
+        .forward_mutation(MutationRequest {
+            session_id: None,
+            name: "message.destroy".to_string(),
+            args: serde_json::json!({
+                "sourceId": account.id.as_str(),
+                "messageId": "m-settle",
+            }),
+            client_mutation_id: ClientMutationId::new("c-settle"),
+            context: None,
+        })
+        .await
+        .expect("forward over the wire");
+
+    // The down-stream must deliver a Settlement for this mutation (the message
+    // update Base may arrive first — skip until the Settlement is seen).
+    let mut saw_settlement = false;
+    for _ in 0..64 {
+        match tokio::time::timeout(Duration::from_secs(2), down.next()).await {
+            Ok(Some(DownFrame::Settlement { .. })) => {
+                saw_settlement = true;
+                break;
+            }
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(
+        saw_settlement,
+        "the originating runtime's down-stream must receive a DownFrame::Settlement"
     );
 }

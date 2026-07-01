@@ -22,15 +22,14 @@ use posthaste_domain::{
     SyncMode, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_link_contract::{
-    BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
+    BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, RuntimeId,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
-    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
-    MutationSettlementState, PatchAccountMutation, PatchAppSettingsMutation,
-    PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError, RuntimeMutationId,
+    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest, PatchAccountMutation,
+    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
     RuntimeResourceBytes,
 };
 
@@ -38,12 +37,33 @@ use crate::backend::Backend;
 
 pub(crate) struct LocalBackend {
     backend: Arc<Backend>,
+    /// The co-located runtime's id — minted once at construction. This is just
+    /// runtime #1 of X (X=1 in-process), not a single-runtime special case: the
+    /// same `forward_mutation_for` / `subscribe_for` path serves it as any
+    /// remote runtime.
+    runtime_id: RuntimeId,
 }
 
 impl LocalBackend {
     pub(crate) fn new(backend: Arc<Backend>) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            runtime_id: RuntimeId::new(uuid::Uuid::new_v4().to_string()),
+        }
     }
+}
+
+/// Map one authoritative event to a `DownFrame::Base` (its message's complete
+/// fold state), or `None` if the event yields no assertion. Reads the current
+/// state from the backend so the assertion carries the *complete* post-state
+/// ([replication backend-link L1 §3](../replication/backend-link/L1.md)).
+fn base_frame_from_event(backend: &Backend, event: &DomainEvent) -> Option<DownFrame> {
+    let current = event
+        .message_id
+        .as_ref()
+        .and_then(|message_id| backend.current_fold_state(&event.account_id, message_id).ok().flatten());
+    message_event_to_assertion(event, current)
+        .map(|assertion| DownFrame::Base { assertions: vec![assertion] })
 }
 
 /// How a message domain event names its message's authoritative base change —
@@ -87,30 +107,28 @@ pub(crate) fn message_event_to_assertion(
 
 #[async_trait]
 impl BackendApi for LocalBackend {
-    /// Up-channel: apply the named mutation to the co-located backend and return
-    /// a receipt carrying the backend's `RuntimeMutationId` (the confirmation
-    /// join key) and the command's events as `output`. In-process this is a
-    /// direct call — no serialization, the mutation is applied (and confirmed)
-    /// before the receipt returns.
+    /// Up-channel: forward the named mutation to the co-located backend under
+    /// this `LocalBackend`'s minted `RuntimeId` (runtime #1 of X). Dedup and
+    /// `RuntimeMutationId` assignment live in `Backend::forward_mutation_for`.
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        let ack = self.backend.apply_named_message_mutation(&mutation).await?;
-        let output = serde_json::to_value(&ack).map_err(|error| {
-            RuntimeError::internal(
-                format!("failed to serialize mutation output: {error}"),
-                None,
-            )
-        })?;
-        Ok(MutationReceipt {
-            runtime_mutation_id: Some(RuntimeMutationId::new(uuid::Uuid::new_v4().to_string())),
-            client_mutation_id: mutation.client_mutation_id,
-            name: mutation.name,
-            state: MutationSettlementState::Accepted,
-            error: None,
-            output,
-        })
+        self.backend
+            .forward_mutation_for(&self.runtime_id, mutation)
+            .await
+    }
+
+    /// Up-channel, runtime-aware: a remote runtime (via `link_router`) forwards
+    /// under its credential-derived `RuntimeId`; the co-located path uses
+    /// [`forward_mutation`](Self::forward_mutation) with this node's minted id.
+    /// Both reach `Backend::forward_mutation_for`.
+    async fn forward_mutation_for(
+        &self,
+        runtime_id: &RuntimeId,
+        mutation: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        self.backend.forward_mutation_for(runtime_id, mutation).await
     }
 
     /// Down-channel: the ordered stream of authoritative base assertions. Each
@@ -449,30 +467,53 @@ impl BackendApi for LocalBackend {
     }
 
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+        Ok(self.build_down_stream(&self.runtime_id))
+    }
+
+    /// Down-channel, runtime-aware: a remote runtime (via `link_router`)
+    /// subscribes under its credential-derived `RuntimeId`; the co-located path
+    /// uses [`subscribe`](Self::subscribe) with this node's minted id. Both merge
+    /// the broadcast `Base` with this runtime's routed `Settlement`s.
+    async fn subscribe_for(
+        &self,
+        runtime_id: &RuntimeId,
+        _coverage: LinkCoverage,
+    ) -> Result<DownStream, RuntimeError> {
+        Ok(self.build_down_stream(runtime_id))
+    }
+}
+
+impl LocalBackend {
+    /// Build the merged down-stream for a runtime: the broadcast `Base` (from the
+    /// authoritative event bus) merged with this runtime's routed `Settlement`
+    /// frames. `Base` is global (every runtime sees the same authoritative
+    /// updates); `Settlement` is per-runtime (only the originator's confirmations)
+    /// — `settlement-routed-to-origin-runtime`.
+    fn build_down_stream(&self, runtime_id: &RuntimeId) -> DownStream {
         let backend = self.backend.clone();
-        let mut receiver = backend.subscribe_events();
-        let stream = async_stream::stream! {
+        let mut base = backend.subscribe_events();
+        let mut settlement = backend.subscribe_settlement(runtime_id);
+        Box::pin(async_stream::stream! {
             loop {
-                match receiver.recv().await {
-                    Ok(event) => {
-                        let current = event
-                            .message_id
-                            .as_ref()
-                            .and_then(|message_id| {
-                                backend.current_fold_state(&event.account_id, message_id).ok().flatten()
-                            });
-                        if let Some(assertion) = message_event_to_assertion(&event, current) {
-                            yield DownFrame::Base {
-                                assertions: vec![assertion],
-                            };
+                tokio::select! {
+                    biased;
+                    ev = base.recv() => match ev {
+                        Ok(event) => {
+                            if let Some(frame) = base_frame_from_event(&backend, &event) {
+                                yield frame;
+                            }
                         }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
+                    frame = settlement.recv() => match frame {
+                        Some(frame) => yield frame,
+                        // Sink sender dropped (backend shutdown) — end the stream.
+                        None => break,
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
-        };
-        Ok(Box::pin(stream))
+        })
     }
 }
 

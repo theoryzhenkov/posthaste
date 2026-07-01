@@ -14,10 +14,11 @@
 //!
 //! @spec docs/replication/backend-link/L2#3-the-link-wire-link_router
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Query, Request, State};
+use axum::extract::{Extension, Query, Request, State};
 use axum::middleware::{from_fn_with_state, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -28,7 +29,7 @@ use posthaste_domain::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
 use posthaste_link_contract::{
-    BackendApi, DownFrame, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
+    BackendApi, DownFrame, LinkCoverage, RuntimeId, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_runtime_contract::{
@@ -44,34 +45,60 @@ struct LinkState {
     transport: Arc<dyn BackendApi>,
 }
 
-/// Authentication policy for the runtime↔backend link surface.
+/// Authentication + identity policy for the runtime↔backend link surface.
 ///
-/// The link is a peer/infrastructure boundary (a split runtime authenticating to
-/// its backend), not the end-user capability surface the `/v1` macaroons govern,
-/// so it uses a shared **bearer token** rather than an attenuable macaroon.
-/// [`Disabled`](LinkAuth::Disabled) is the in-process/test default (no token);
-/// [`Bearer`](LinkAuth::Bearer) requires every request — POST up-channel, SSE
-/// down-channel, and every read/write — to carry `Authorization: Bearer <token>`,
-/// constant-time compared. A remote mount MUST use `Bearer` (the link is
-/// otherwise unauthenticated).
+/// The link is a peer/infrastructure boundary (a split runtime authenticating
+/// to its backend), not the end-user capability surface the `/v1` macaroons
+/// govern, so it authenticates runtimes with bearer tokens rather than
+/// attenuable macaroons. There is no single-runtime special case: every
+/// connecting runtime presents its own token, and the middleware resolves it to
+/// a [`RuntimeId`] (X runtimes, X ≥ 1) so the backend can scope mutation
+/// idempotency and confirmation per runtime
+/// ([replication backend-link L1 §3.1](../replication/backend-link/L1.md)).
+/// [`PerRuntime`](LinkAuth::PerRuntime) carries the `token → RuntimeId` map and
+/// constant-time compares the presented token against each key; the resolved id
+/// is threaded into the up-channel handler. [`Disabled`](LinkAuth::Disabled) is
+/// the in-process/test default (no token; a single anonymous runtime id) — a
+/// remote mount MUST use `PerRuntime` (the link is otherwise unauthenticated).
 pub enum LinkAuth {
     Disabled,
-    Bearer(String),
+    PerRuntime(HashMap<String, RuntimeId>),
 }
 
-/// Middleware: require a matching bearer token on every link request. Reuses the
-/// `/v1` perimeter's bearer parse + constant-time compare + 401.
+/// Middleware (`PerRuntime`): resolve the presented bearer token to a
+/// [`RuntimeId`] via the `token → RuntimeId` map, constant-time comparing the
+/// presented token against each key, then thread the id into the request
+/// extensions for the up-channel handler. An unknown token (or none) is a 401.
 async fn require_link_token(
-    State(expected): State<Arc<str>>,
-    req: Request,
+    State(tokens): State<Arc<HashMap<String, RuntimeId>>>,
+    mut req: Request,
     next: Next,
 ) -> Response {
-    match bearer_token(&req) {
-        Some(presented) if constant_time_eq(presented.as_bytes(), expected.as_bytes()) => {
+    let presented = bearer_token(&req);
+    let runtime_id = presented.and_then(|p| {
+        tokens
+            .iter()
+            .find_map(|(t, id)| constant_time_eq(p.as_bytes(), t.as_bytes()).then(|| id.clone()))
+    });
+    match runtime_id {
+        Some(id) => {
+            req.extensions_mut().insert(id);
             next.run(req).await
         }
         _ => unauthorized().into_response(),
     }
+}
+
+/// Middleware (`Disabled`): thread a single anonymous [`RuntimeId`] so the
+/// up-channel handler's `Extension<RuntimeId>` is satisfied without auth. The
+/// dev/test default — a remote mount MUST use `PerRuntime`.
+async fn inject_runtime_id(
+    State(runtime_id): State<RuntimeId>,
+    mut req: Request,
+    next: Next,
+) -> Response {
+    req.extensions_mut().insert(runtime_id);
+    next.run(req).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,11 +110,12 @@ struct SubscribeQuery {
 /// Up-channel: apply a forwarded named mutation and return the backend's receipt.
 async fn forward_mutation(
     State(state): State<LinkState>,
+    Extension(runtime_id): Extension<RuntimeId>,
     Json(request): Json<MutationRequest>,
 ) -> Result<Json<MutationReceipt>, ApiError> {
     state
         .transport
-        .forward_mutation(request)
+        .forward_mutation_for(&runtime_id, request)
         .await
         .map(Json)
         .map_err(ApiError::from_runtime_error)
@@ -96,6 +124,7 @@ async fn forward_mutation(
 /// Down-channel: stream authoritative base-assertion frames as SSE.
 async fn subscribe(
     State(state): State<LinkState>,
+    Extension(runtime_id): Extension<RuntimeId>,
     Query(query): Query<SubscribeQuery>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let coverage = query
@@ -105,7 +134,7 @@ async fn subscribe(
         .unwrap_or(LinkCoverage::Complete);
     let stream = state
         .transport
-        .subscribe(coverage)
+        .subscribe_for(&runtime_id, coverage)
         .await
         .map_err(ApiError::from_runtime_error)?;
     Ok(Sse::new(stream.map(down_frame_to_sse)).keep_alive(KeepAlive::default()))
@@ -221,9 +250,12 @@ pub fn link_router(transport: Arc<dyn BackendApi>, auth: LinkAuth) -> Router {
     // from the shared link-op table.
     let router = register_generated_link_routes(router).with_state(LinkState { transport });
     match auth {
-        LinkAuth::Disabled => router,
-        LinkAuth::Bearer(token) => {
-            router.layer(from_fn_with_state(Arc::from(token), require_link_token))
+        LinkAuth::Disabled => router.layer(from_fn_with_state(
+            RuntimeId::new(uuid::Uuid::new_v4().to_string()),
+            inject_runtime_id,
+        )),
+        LinkAuth::PerRuntime(tokens) => {
+            router.layer(from_fn_with_state(Arc::new(tokens), require_link_token))
         }
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -43,10 +44,13 @@ pub struct DaemonSettings {
     ///
     /// @spec docs/replication/L1#10-deployment-topology
     pub link_serve: bool,
-    /// Shared bearer token for the link surface — required from connecting
-    /// runtimes when serving, and presented to the remote backend when
-    /// connecting. Serving without a token (under `require_auth`) is refused.
+    /// Connect role: this near node's bearer token, presented to the remote
+    /// backend (single token — the near node is one runtime).
     pub link_token: Option<String>,
+    /// Serve role: the runtimes permitted to connect, as `token → runtime_id`
+    /// (X ≥ 1). Required under `link_serve` + `require_auth`; serving without
+    /// it is refused.
+    pub link_runtimes: Option<HashMap<String, String>>,
     /// Runtime role: when set, this process connects to a remote backend at this
     /// base URL over the link instead of using the in-process one.
     pub link_backend_url: Option<String>,
@@ -162,6 +166,9 @@ pub fn read_daemon_settings(
         .ok()
         .filter(|url| !url.is_empty())
         .or(app_toml.link.backend_url);
+    // Serve role: the `token → runtime_id` map (TOML only — a map is awkward in
+    // env). X runtimes, X ≥ 1.
+    let link_runtimes = app_toml.link.runtimes.clone();
 
     // Optional in-daemon TLS. Both cert+key must be present together; a partial
     // [tls] table is a validation error (fail closed, not silent plaintext).
@@ -191,6 +198,7 @@ pub fn read_daemon_settings(
         require_auth,
         link_serve,
         link_token,
+        link_runtimes,
         link_backend_url,
         tls,
         allowed_hosts,

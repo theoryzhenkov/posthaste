@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::oauth::OAuthFlowStore;
+use posthaste_link_contract::RuntimeId;
 
 /// Initialize the bundled daemon (config, store, supervisor, logging), build the
 /// runtime (in-process backend, or a remote near node when `[link] backend_url`
@@ -104,15 +105,20 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .merge(crate::openapi::openapi_router(crate::openapi::document()));
 
     // Backend role: serve the runtime↔backend link for a remote runtime, with
-    // its OWN bearer-token auth. Fail closed under require_auth without a token.
+    // its OWN per-runtime token auth. Fail closed under require_auth without
+    // [link].runtimes.
     let mut root_merges = Vec::new();
     if let Some(link_transport) = link_serve_transport {
         let link_auth = if daemon.require_auth {
-            match &daemon.link_token {
-                Some(token) => LinkAuth::Bearer(token.clone()),
-                None => panic!(
-                    "[link] serve is enabled under require_auth but no [link] token is set \
-                     (set [link].token or POSTHASTE_LINK_TOKEN)"
+            match &daemon.link_runtimes {
+                Some(map) if !map.is_empty() => LinkAuth::PerRuntime(
+                    map.iter()
+                        .map(|(token, rid)| (token.clone(), RuntimeId::new(rid.clone())))
+                        .collect(),
+                ),
+                _ => panic!(
+                    "[link] serve is enabled under require_auth but no [link].runtimes \
+                     (token → runtime_id) is set — one entry per connecting runtime (X ≥ 1)"
                 ),
             }
         } else {

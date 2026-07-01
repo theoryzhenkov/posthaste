@@ -37,7 +37,7 @@ pub struct RemoteBackend {
     base_url: String,
     client: reqwest::Client,
     /// The link bearer token presented on every request, when the backend's
-    /// `link_router` requires one ([`LinkAuth::Bearer`](posthaste_server)). `None`
+    /// `link_router` requires one ([`LinkAuth::PerRuntime`](posthaste_server)). `None`
     /// for an unauthenticated link (in-process tests / dormant mounts).
     token: Option<String>,
 }
