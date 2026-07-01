@@ -100,7 +100,7 @@ describe('dispatchMailKey', () => {
   })
 
   it('rotates pane focus right with Shift+L, wrapping past the last pane', () => {
-    const { ctx, focused } = makeCtx({ activePane: 'detail' })
+    const { ctx, focused } = makeCtx({ activePane: 'list' })
     dispatchMailKey(key({ key: 'L', shiftKey: true }), ctx)
     expect(focused).toEqual(['sidebar'])
   })
@@ -108,7 +108,7 @@ describe('dispatchMailKey', () => {
   it('rotates pane focus left with Shift+H, wrapping before the first pane', () => {
     const { ctx, focused } = makeCtx({ activePane: 'sidebar' })
     dispatchMailKey(key({ key: 'H', shiftKey: true }), ctx)
-    expect(focused).toEqual(['detail'])
+    expect(focused).toEqual(['list'])
   })
 
   it('routes j/k to the focused pane handler', () => {

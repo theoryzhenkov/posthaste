@@ -34,6 +34,7 @@ import {
 interface MessageRowProps {
   message: MessageSummary
   isSelected: boolean
+  isPaneActive?: boolean
   isStriped: boolean
   onSelectMessage: (message: MessageSummary) => void
   columns: ColumnId[]
@@ -63,6 +64,7 @@ const TREE_INDENT_PX = 22
 export const MessageRow = memo(function MessageRow({
   message,
   isSelected,
+  isPaneActive = false,
   isStriped,
   onSelectMessage,
   columns,
@@ -97,7 +99,11 @@ export const MessageRow = memo(function MessageRow({
         'text-left text-[13px] transition-colors',
         'ph-focus-ring',
         isSelected &&
+          isPaneActive &&
           'bg-[var(--list-selection)] text-[var(--list-selection-foreground)]',
+        isSelected &&
+          !isPaneActive &&
+          'bg-[var(--list-selection-muted)] text-[var(--list-selection-muted-foreground)]',
         !isSelected &&
           (isStriped
             ? 'bg-[var(--list-zebra-alt)] text-panel-foreground hover:bg-[var(--list-hover)]'

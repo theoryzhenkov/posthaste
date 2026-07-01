@@ -198,7 +198,6 @@ export function MailClient({
           showShortcuts ||
           isTagEditorOpen
         }
-        isMessageDetailOpen={isMessageDetailOpen}
         hasSelectedMessage={selectedMessage !== null}
         hasSearchQuery={searchQuery.trim().length > 0}
         onOpenCommandPalette={handlers.handleOpenCommandPalette}

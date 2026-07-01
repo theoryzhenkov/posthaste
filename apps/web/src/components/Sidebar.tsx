@@ -145,7 +145,6 @@ export function Sidebar({
   // mailbox's own highlight is the cursor, so navigation needs no extra `Enter`
   // and is always visible; stepping is relative to the current selection.
   const selectionKey = sidebarSelectionKey(selectedView)
-  const highlightKey = isSidebarActive ? selectionKey : null
 
   useFocusedPaneHandler('sidebar', (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return false
@@ -182,7 +181,7 @@ export function Sidebar({
               collapsed={mailboxesCollapsed}
               mailboxes={sortedSmartMailboxes}
               selectedView={selectedView}
-              focusedKey={highlightKey}
+              isPaneActive={isSidebarActive}
               onOpenSmartMailboxSettings={onOpenSmartMailboxSettings}
               onSelectSmartMailbox={onSelectSmartMailbox}
               onReorder={reorderSmartMailboxes}
@@ -191,7 +190,7 @@ export function Sidebar({
             <AccountsSection
               collapsed={sourcesCollapsed}
               selectedView={selectedView}
-              focusedKey={highlightKey}
+              isPaneActive={isSidebarActive}
               collapsedSourceIds={collapsedSourceIds}
               sources={sources}
               onOpenAccountSettings={onOpenAccountSettings}
