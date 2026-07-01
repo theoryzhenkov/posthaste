@@ -8,6 +8,7 @@ import {
   newAccountSettingsSurface,
   newSmartMailboxSettingsSurface,
   parseSurfaceRoute,
+  SETTINGS_SURFACE_CATEGORIES,
   sourceMailboxSettingsSurface,
   surfaceRoute,
   surfaceRouteStateFromLocation,
@@ -154,6 +155,21 @@ describe('surface routes', () => {
 
   it('rejects unknown settings categories', () => {
     expect(parseSurfaceRoute('/surface/settings?category=advanced')).toBeNull()
+  })
+
+  it('accepts every declared settings category (no validator/type drift)', () => {
+    // Regression: `tags` was present in the type union and the rail but absent
+    // from the route validator's hand-maintained list, so
+    // /surface/settings?category=tags parsed to null → "Surface route
+    // unavailable". The validator now derives from SETTINGS_SURFACE_CATEGORIES.
+    for (const category of SETTINGS_SURFACE_CATEGORIES) {
+      const parsed = parseSurfaceRoute(`/surface/settings?category=${category}`)
+      expect(parsed).not.toBeNull()
+      expect(parsed?.kind).toBe('settings')
+      expect(
+        (parsed as { params: { category?: string } }).params.category,
+      ).toBe(category)
+    }
   })
 
   it('rejects invalid settings targets', () => {

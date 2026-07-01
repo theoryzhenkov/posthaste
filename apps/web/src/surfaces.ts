@@ -18,6 +18,7 @@ export {
   surfaceRouteStateFromLocation,
 } from './surfaces/routes'
 export {
+  SETTINGS_SURFACE_CATEGORIES,
   SettingsSurfaceTargetKind,
   type AttachmentSurfaceDescriptor,
   type ComposeSurfaceDescriptor,
