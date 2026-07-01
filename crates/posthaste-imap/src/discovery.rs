@@ -5,6 +5,7 @@ use posthaste_domain_model::{AccountTransportSettings, ImapCapabilities, Mailbox
 use posthaste_domain_model::MailboxId;
 
 use crate::ImapAdapterError;
+use crate::timeout::with_deadline;
 
 /// Concrete connection details for one IMAP account.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,7 +95,7 @@ pub(crate) async fn connect_authenticated_client(
 pub(crate) async fn discover_authenticated_client(
     client: &mut ImapClient,
 ) -> Result<DiscoveredImapAccount, ImapAdapterError> {
-    client.refresh_capabilities().await?;
+    with_deadline("refresh_capabilities", client.refresh_capabilities()).await?;
 
     let capabilities = normalize_imap_capabilities(
         client
@@ -103,8 +104,7 @@ pub(crate) async fn discover_authenticated_client(
             .map(std::string::ToString::to_string),
     );
     let provider = ProviderProfile::from_imap_capabilities(&capabilities);
-    let mailboxes = client
-        .list("", "*")
+    let mailboxes = with_deadline("list", client.list("", "*"))
         .await?
         .into_iter()
         .map(|(mailbox, _delimiter, attributes)| {
@@ -121,12 +121,14 @@ pub(crate) async fn discover_authenticated_client(
 async fn connect(config: &ImapConnectionConfig) -> Result<ImapClient, ImapAdapterError> {
     match config.security {
         TransportSecurity::Tls => {
-            Ok(ImapClient::rustls(&config.host, config.port, false, None).await?)
+            with_deadline("connect", ImapClient::rustls(&config.host, config.port, false, None)).await
         }
         TransportSecurity::StartTls => {
-            Ok(ImapClient::rustls(&config.host, config.port, true, None).await?)
+            with_deadline("connect", ImapClient::rustls(&config.host, config.port, true, None)).await
         }
-        TransportSecurity::Plain => Ok(ImapClient::insecure(&config.host, config.port).await?),
+        TransportSecurity::Plain => {
+            with_deadline("connect", ImapClient::insecure(&config.host, config.port)).await
+        }
     }
 }
 
@@ -136,14 +138,18 @@ async fn authenticate(
 ) -> Result<(), ImapAdapterError> {
     match config.auth {
         ProviderAuthKind::Password | ProviderAuthKind::AppPassword => {
-            client
-                .authenticate_plain(&config.username, &config.secret)
-                .await?;
+            with_deadline(
+                "authenticate_plain",
+                client.authenticate_plain(&config.username, &config.secret),
+            )
+            .await?;
         }
         ProviderAuthKind::OAuth2 => {
-            client
-                .authenticate_xoauth2(&config.username, &config.secret)
-                .await?;
+            with_deadline(
+                "authenticate_xoauth2",
+                client.authenticate_xoauth2(&config.username, &config.secret),
+            )
+            .await?;
         }
     }
     Ok(())

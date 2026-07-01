@@ -35,11 +35,11 @@ pub(crate) async fn status_imap_mailbox(
     let mailbox = Mailbox::try_from(mailbox_name)
         .map_err(|_| ImapAdapterError::InvalidMailboxName(mailbox_name.to_string()))?
         .into_static();
-    client
-        .resolve(StatusTask::new(mailbox, include_highest_modseq))
-        .await
-        .map_err(ImapAdapterError::from)?
-        .map_err(|error| ImapAdapterError::Client(error.to_string()))
+    crate::timeout::with_deadline_resolve(
+        "status",
+        client.resolve(StatusTask::new(mailbox, include_highest_modseq)),
+    )
+    .await
 }
 
 pub(crate) async fn examine_selected_mailbox(
@@ -49,11 +49,11 @@ pub(crate) async fn examine_selected_mailbox(
     let mailbox = Mailbox::try_from(mailbox_name)
         .map_err(|_| ImapAdapterError::InvalidMailboxName(mailbox_name.to_string()))?
         .into_static();
-    let data = client
-        .resolve(ExamineStateTask::new(mailbox))
-        .await
-        .map_err(ImapAdapterError::from)?
-        .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
+    let data = crate::timeout::with_deadline_resolve(
+        "examine",
+        client.resolve(ExamineStateTask::new(mailbox)),
+    )
+    .await?;
     selected_mailbox_from_examine_state(mailbox_name, data)
 }
 

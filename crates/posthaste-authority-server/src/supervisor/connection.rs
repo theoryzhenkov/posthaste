@@ -316,6 +316,9 @@ pub(crate) fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::InvalidSmtpAddress { .. }
         | ImapAdapterError::BuildSmtpMessage(_) => GatewayError::Rejected(error.to_string()).into(),
         ImapAdapterError::Auth(_) => GatewayError::Auth.into(),
+        ImapAdapterError::Timeout { operation } => {
+            GatewayError::Network(format!("{operation} timed out")).into()
+        }
         ImapAdapterError::Client(message) | ImapAdapterError::Smtp(message) => {
             GatewayError::Network(message).into()
         }
