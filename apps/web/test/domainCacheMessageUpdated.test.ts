@@ -6,13 +6,12 @@ import type { DomainEvent } from '../src/api/types'
 import { applyDomainEvent } from '../src/domainCache'
 import { mailKeys } from '../src/mailState'
 import { queryKeys } from '../src/queryKeys'
-import { setEntityStoreActiveForTesting } from '../src/runtime/entityStoreState'
 
-// `message.updated` is the event the entity store owns when active: it drives
-// the mail-list rows (synthesized view frames) + the mailbox counts
-// (`setQueryData`). 2e.3 retires the redundant REST invalidations for those
-// store-owned keys while keeping the surfaces the store does not own
-// (conversations, smart-mailboxes).
+// `message.updated` is the event the entity store owns: it drives the mail-list
+// rows (synthesized view frames) + the mailbox counts (`setQueryData`). The
+// redundant REST invalidations for those store-owned keys are retired
+// unconditionally (the store has no REST fallback), while the surfaces the store
+// does not own (conversations, smart-mailboxes) still invalidate.
 
 function messageUpdated(changes: {
   arrived?: boolean
@@ -54,37 +53,20 @@ function invalidated(
   return queryClient.getQueryState(key)?.isInvalidated ?? false
 }
 
-describe('applyDomainEvent message.updated (2e.3 store-owned invalidation gate)', () => {
+describe('applyDomainEvent message.updated (store-owned invalidations retired)', () => {
   let queryClient: QueryClient
-  let restore: () => void
 
   beforeEach(() => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
-    restore = () => undefined
   })
 
   afterEach(() => {
-    restore()
     queryClient.clear()
   })
 
-  it('invalidates rows + counts when the store is NOT active (legacy)', () => {
-    restore = setEntityStoreActiveForTesting(false)
-    seed(queryClient)
-
-    applyDomainEvent(queryClient, messageUpdated({ arrived: true }))
-
-    expect(invalidated(queryClient, queryKeys.messagesRoot)).toBe(true)
-    expect(invalidated(queryClient, queryKeys.mailboxes('primary'))).toBe(true)
-    // Non-store surfaces still invalidate.
-    expect(invalidated(queryClient, queryKeys.conversationsRoot)).toBe(true)
-    expect(invalidated(queryClient, queryKeys.smartMailboxes)).toBe(true)
-  })
-
-  it('skips rows + counts when the store IS active (the store owns them)', () => {
-    restore = setEntityStoreActiveForTesting(true)
+  it('skips rows + counts (the store owns them)', () => {
     seed(queryClient)
 
     applyDomainEvent(queryClient, messageUpdated({ arrived: true }))
@@ -98,8 +80,7 @@ describe('applyDomainEvent message.updated (2e.3 store-owned invalidation gate)'
     expect(invalidated(queryClient, queryKeys.smartMailboxes)).toBe(true)
   })
 
-  it('skips rows + counts on a keyword-only change when the store is active', () => {
-    restore = setEntityStoreActiveForTesting(true)
+  it('skips rows + counts on a keyword-only change', () => {
     seed(queryClient)
 
     applyDomainEvent(queryClient, messageUpdated({ keywords: true }))
@@ -110,8 +91,7 @@ describe('applyDomainEvent message.updated (2e.3 store-owned invalidation gate)'
     expect(invalidated(queryClient, queryKeys.smartMailboxes)).toBe(true)
   })
 
-  it('skips rows + counts on a deletion when the store is active', () => {
-    restore = setEntityStoreActiveForTesting(true)
+  it('skips rows + counts on a deletion', () => {
     seed(queryClient)
 
     const event = messageUpdated({})

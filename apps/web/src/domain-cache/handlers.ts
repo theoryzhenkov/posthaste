@@ -16,7 +16,6 @@ import {
   invalidateTargetMessageReadModels,
 } from './invalidations'
 import { pushNotification } from '../notifications/store'
-import { isEntityStoreAdapterActive } from '../runtime/entityStoreState'
 import { payloadString } from './payload'
 import {
   applyResourceInvalidationsOrFallback,
@@ -112,12 +111,12 @@ const eventHandlers = {
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.MessageUpdated]: (queryClient, event) => {
-    // When the entity store is active it owns the mail-list rows (synthesized
-    // view frames) + the mailbox counts (`setQueryData`), so the store-owned
-    // invalidations are skipped to avoid a redundant REST refetch. Surfaces the
-    // store does not own (conversations, smart-mailboxes, tags, mail-navigation,
-    // message detail) still invalidate.
-    const skipStoreOwned = isEntityStoreAdapterActive()
+    // The entity store owns the mail-list rows (synthesized view frames) + the
+    // mailbox counts (`setQueryData`), so the store-owned invalidations are
+    // skipped to avoid a redundant REST refetch. Surfaces the store does not own
+    // (conversations, smart-mailboxes, tags, mail-navigation, message detail)
+    // still invalidate.
+    const skipStoreOwned = true
     invalidateMessageListReadModels(queryClient, { skipStoreOwned })
 
     if (payloadChangeFlag(event, 'arrived')) {
