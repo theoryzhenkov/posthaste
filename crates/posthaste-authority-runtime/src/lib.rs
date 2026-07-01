@@ -18,6 +18,7 @@ mod mail_queries;
 mod mutations;
 pub mod oauth;
 mod push;
+mod runtime_registry;
 pub mod supervisor;
 
 // The far-node crate's own assembly surface.

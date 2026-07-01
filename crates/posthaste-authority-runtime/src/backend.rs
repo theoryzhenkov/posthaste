@@ -31,22 +31,27 @@ use posthaste_domain::{
     SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger,
     TagSummary, EVENT_TOPIC_REV_LOG_APPENDED,
 };
-use posthaste_link_core::MessageFoldState;
+use posthaste_link_core::{MessageChangeDiff, MessageFoldState};
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
-    MailQueryRequest, MessageResourceKind, MutationRequest, PatchAccountMutation,
-    PatchAppSettingsMutation, PatchSmartMailboxMutation, RevCursorArgs, RevStepInput,
-    RuntimeAccountList, RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
+    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
+    MutationSettlementState, PatchAccountMutation, PatchAppSettingsMutation,
+    PatchSmartMailboxMutation, RevCursorArgs, RevStepInput, RuntimeAccountList,
+    RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
-use posthaste_link_contract::message_mutation::MessageMutation;
+use crate::runtime_registry::{ForwardAcceptance, RuntimeRegistry};
+use posthaste_link_contract::{
+    message_mutation::MessageMutation, DownFrame, RuntimeId, WireMutationId,
+    WireSettlementOutcome,
+};
 use posthaste_runtime_contract::mutation_args::keyword_toggle;
 
 /// The backend far node ([replication backend-link L1 §3](../replication/backend-link/L1.md)): owns the
@@ -60,6 +65,7 @@ pub(crate) struct Backend {
     account_mutations: Option<Arc<AccountMutationService>>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     event_sender: broadcast::Sender<DomainEvent>,
+    runtimes: RuntimeRegistry,
 }
 
 impl Backend {
@@ -80,6 +86,7 @@ impl Backend {
             account_mutations,
             live_accounts,
             event_sender,
+            runtimes: RuntimeRegistry::new(),
         }
     }
 
@@ -478,6 +485,16 @@ impl Backend {
         self.event_sender.subscribe()
     }
 
+    /// Get the originating runtime's settlement receiver (for `subscribe_for` to
+    /// merge with this `Base` broadcast). Reconnect-safe: a reconnecting runtime
+    /// gets a fresh receiver (S4).
+    pub(crate) fn subscribe_settlement(
+        &self,
+        runtime_id: &RuntimeId,
+    ) -> mpsc::UnboundedReceiver<DownFrame> {
+        self.runtimes.subscribe_settlement(runtime_id)
+    }
+
     /// The message's current canonical fold state (keywords + mailbox
     /// membership) read from the authoritative store, or `None` if it is gone.
     ///
@@ -837,6 +854,68 @@ impl Backend {
             .await
     }
 
+    /// Up-channel for a (possibly remote) runtime: dedup by
+    /// `(RuntimeId, ClientMutationId)`, then apply the named mutation and return
+    /// a receipt carrying the backend's `RuntimeMutationId` for the confirmation
+    /// join. A retried mutation resolves to its stored record, never a second
+    /// application (`per-runtime-idempotency`). The co-located runtime passes a
+    /// real minted id (it is runtime #1 of X, X=1 in-process — no single-runtime
+    /// special case); a remote runtime's id is derived from its credential.
+    ///
+    /// @spec docs/replication/backend-link/L1#3-the-backendapi-contract
+    pub(crate) async fn forward_mutation_for(
+        &self,
+        runtime_id: &RuntimeId,
+        mutation: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        match self
+            .runtimes
+            .accept(runtime_id, &mutation.client_mutation_id, &mutation.name)
+        {
+            ForwardAcceptance::Existing(receipt) => Ok(receipt),
+            ForwardAcceptance::New { runtime_mutation_id } => {
+                let ack = match self.apply_named_message_mutation(&mutation).await {
+                    Ok(ack) => ack,
+                    Err(error) => {
+                        // The mutation did not apply (atomic): drop the reserved
+                        // entry so a retry re-accepts as New, and surface the error
+                        // on the up-channel. No Settlement — the near node learns of
+                        // the failure from the up-channel error and cannot match a
+                        // Settlement it never received a receipt for.
+                        self.runtimes.reject(runtime_id, &mutation.client_mutation_id);
+                        return Err(error);
+                    }
+                };
+                let output = serde_json::to_value(&ack).map_err(|error| {
+                    RuntimeError::internal(
+                        format!("failed to serialize mutation output: {error}"),
+                        None,
+                    )
+                })?;
+                self.runtimes
+                    .settle_output(runtime_id, &mutation.client_mutation_id, output.clone());
+                // Route the per-mutation confirmation onto the originating
+                // runtime's down-stream only (`settlement-routed-to-origin-runtime`):
+                // never broadcast — a Settlement names one runtime's mutation.
+                self.runtimes.emit_settlement(
+                    runtime_id,
+                    DownFrame::Settlement {
+                        mutation_id: WireMutationId(runtime_mutation_id.as_str().to_string()),
+                        outcome: WireSettlementOutcome::Confirmed,
+                    },
+                );
+                Ok(MutationReceipt {
+                    runtime_mutation_id: Some(runtime_mutation_id),
+                    client_mutation_id: mutation.client_mutation_id,
+                    name: mutation.name,
+                    state: MutationSettlementState::Accepted,
+                    error: None,
+                    output,
+                })
+            }
+        }
+    }
+
     /// Apply one named message mutation — the backend's up-channel handler. This
     /// is the dispatch from a transport-neutral named mutation
     /// (`message.setKeywords` / `message.moveToRole` / …) to the typed command,
@@ -856,37 +935,33 @@ impl Backend {
             return self.apply_rev_cursor(request);
         }
         let mutation = MessageMutation::from_request(request)?;
-        let account_id = mutation.account_id().to_string();
-        let message_id = mutation.message_id().to_string();
+        let account = AccountId(mutation.account_id().to_string());
+        let message = MessageId(mutation.message_id().to_string());
         let ack = match mutation {
             MessageMutation::SetKeywords(args) => {
-                self.set_keywords(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    args.command,
-                )
-                .await
+                self.set_keywords(account.clone(), message.clone(), args.command)
+                    .await
             }
             MessageMutation::SetReadState(args) => {
                 self.set_keywords(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
+                    account.clone(),
+                    message.clone(),
                     keyword_toggle("$seen", args.read),
                 )
                 .await
             }
             MessageMutation::SetFlaggedState(args) => {
                 self.set_keywords(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
+                    account.clone(),
+                    message.clone(),
                     keyword_toggle("$flagged", args.flagged),
                 )
                 .await
             }
             MessageMutation::SetUserTags(args) => {
                 self.set_keywords(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
+                    account.clone(),
+                    message.clone(),
                     SetKeywordsCommand {
                         add: args.add,
                         remove: args.remove,
@@ -896,8 +971,8 @@ impl Backend {
             }
             MessageMutation::MoveToMailbox(args) => {
                 self.replace_mailboxes(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
+                    account.clone(),
+                    message.clone(),
                     ReplaceMailboxesCommand {
                         mailbox_ids: vec![MailboxId(args.mailbox_id)],
                     },
@@ -906,8 +981,8 @@ impl Backend {
             }
             MessageMutation::ReplaceMailboxes(args) => {
                 self.replace_mailboxes(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
+                    account.clone(),
+                    message.clone(),
                     ReplaceMailboxesCommand {
                         mailbox_ids: args.mailbox_ids.into_iter().map(MailboxId).collect(),
                     },
@@ -915,83 +990,75 @@ impl Backend {
                 .await
             }
             MessageMutation::MoveToRole(args) => {
-                self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    args.role,
-                )
-                .await
+                self.move_message_to_role(account.clone(), message.clone(), args.role)
+                    .await
             }
             MessageMutation::Snooze(args) => {
-                self.snooze_message(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    args.until,
-                )
-                .await
-            }
-            MessageMutation::Unsnooze(args) => {
-                self.unsnooze_message(AccountId(args.source_id), MessageId(args.message_id))
+                self.snooze_message(account.clone(), message.clone(), args.until)
                     .await
             }
-            MessageMutation::Destroy(args) => {
-                self.destroy(AccountId(args.source_id), MessageId(args.message_id))
-                    .await
+            MessageMutation::Unsnooze(_) => {
+                self.unsnooze_message(account.clone(), message.clone()).await
             }
-            // `message.applyDiff` is the undo/redo vehicle: apply the invertible
-            // diff as the equivalent keyword add/remove plus a mailbox add/remove.
-            // Keywords are a delta (`SetKeywordsCommand`); mailboxes are computed
-            // against the current membership and applied as one replace. This is
-            // the far-node mirror of the near-node `ApplyDiff` assertion fold.
+            MessageMutation::Destroy(_) => {
+                self.destroy(account.clone(), message.clone()).await
+            }
+            // `message.applyDiff` is the undo/redo vehicle — see `apply_diff`.
             MessageMutation::ApplyDiff(args) => {
-                let account_id = AccountId(args.source_id);
-                let message_id = MessageId(args.message_id);
-                let mut events = Vec::new();
-                if !args.diff.keywords.added.is_empty() || !args.diff.keywords.removed.is_empty() {
-                    let ack = self
-                        .set_keywords(
-                            account_id.clone(),
-                            message_id.clone(),
-                            SetKeywordsCommand {
-                                add: args.diff.keywords.added,
-                                remove: args.diff.keywords.removed,
-                            },
-                        )
-                        .await?;
-                    events.extend(ack.events);
-                }
-                if !args.diff.mailboxes.added.is_empty() || !args.diff.mailboxes.removed.is_empty()
-                {
-                    let mut mailbox_ids: Vec<MailboxId> = self
-                        .current_summary(&account_id, &message_id)
-                        .await?
-                        .map(|summary| summary.mailbox_ids)
-                        .unwrap_or_default();
-                    for added in &args.diff.mailboxes.added {
-                        let id = MailboxId(added.clone());
-                        if !mailbox_ids.contains(&id) {
-                            mailbox_ids.push(id);
-                        }
-                    }
-                    mailbox_ids
-                        .retain(|id| !args.diff.mailboxes.removed.iter().any(|r| r == id.as_str()));
-                    let ack = self
-                        .replace_mailboxes(
-                            account_id,
-                            message_id,
-                            ReplaceMailboxesCommand { mailbox_ids },
-                        )
-                        .await?;
-                    events.extend(ack.events);
-                }
-                Ok(CommandAck { events })
+                self.apply_diff(account.clone(), message.clone(), args.diff).await
             }
         }?;
         // Phase 2: append the reversible-op step on a confirmed forward action
         // whose context carries a `revStep`, + emit the recompute trigger so the
         // `RevLog` synced view re-serves the log + cursor.
-        self.append_rev_log_step_if_present(&account_id, &message_id, &request.context);
+        self.append_rev_log_step_if_present(account.as_str(), message.as_str(), &request.context);
         Ok(ack)
+    }
+
+    /// `message.applyDiff`: apply the invertible diff as the equivalent keyword
+    /// add/remove plus a mailbox add/remove. Keywords are a delta
+    /// (`SetKeywordsCommand`); mailboxes are computed against the current
+    /// membership and applied as one replace. The far-node mirror of the
+    /// near-node `ApplyDiff` assertion fold.
+    async fn apply_diff(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        diff: MessageChangeDiff,
+    ) -> Result<CommandAck, RuntimeError> {
+        let mut events = Vec::new();
+        if !diff.keywords.added.is_empty() || !diff.keywords.removed.is_empty() {
+            let ack = self
+                .set_keywords(
+                    account_id.clone(),
+                    message_id.clone(),
+                    SetKeywordsCommand {
+                        add: diff.keywords.added,
+                        remove: diff.keywords.removed,
+                    },
+                )
+                .await?;
+            events.extend(ack.events);
+        }
+        if !diff.mailboxes.added.is_empty() || !diff.mailboxes.removed.is_empty() {
+            let mut mailbox_ids: Vec<MailboxId> = self
+                .current_summary(&account_id, &message_id)
+                .await?
+                .map(|summary| summary.mailbox_ids)
+                .unwrap_or_default();
+            for added in &diff.mailboxes.added {
+                let id = MailboxId(added.clone());
+                if !mailbox_ids.contains(&id) {
+                    mailbox_ids.push(id);
+                }
+            }
+            mailbox_ids.retain(|id| !diff.mailboxes.removed.iter().any(|r| r == id.as_str()));
+            let ack = self
+                .replace_mailboxes(account_id, message_id, ReplaceMailboxesCommand { mailbox_ids })
+                .await?;
+            events.extend(ack.events);
+        }
+        Ok(CommandAck { events })
     }
 }
 
