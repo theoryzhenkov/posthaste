@@ -36,6 +36,7 @@ export function MessageListRows({
   treeMode,
   scrollTop,
   selectedKey,
+  isPaneActive,
   viewRole,
   viewportHeight,
 }: {
@@ -56,6 +57,7 @@ export function MessageListRows({
   onToggleCollapse: (messageKey: string) => void
   scrollTop: number
   selectedKey: string | null
+  isPaneActive: boolean
   viewRole: string | null
   viewportHeight: number
 }) {
@@ -92,6 +94,7 @@ export function MessageListRows({
               <MessageRow
                 message={row.message}
                 isSelected={messageKey(row.message) === selectedKey}
+                isPaneActive={isPaneActive}
                 isStriped={(virtual.startIndex + index) % 2 === 1}
                 columns={columns}
                 layout={layout}

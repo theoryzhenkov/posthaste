@@ -13,11 +13,13 @@
 import { stepGotoPrefix, type GotoPrefix, type GotoRole } from './goto'
 import { isEditableKeyboardTarget } from './inputTargets'
 
-/** The three keyboard-navigable regions of the mail shell. */
-export type PaneId = 'sidebar' | 'list' | 'detail'
+/** The keyboard-navigable regions of the mail shell. The detail pane is NOT
+ *  focusable — it only displays the list's selected message, and `j`/`k` in the
+ *  list drive it. */
+export type PaneId = 'sidebar' | 'list'
 
 /** Left-to-right pane order; drives `Shift+H`/`Shift+L` pane rotation. */
-export const PANE_ORDER: readonly PaneId[] = ['sidebar', 'list', 'detail']
+export const PANE_ORDER: readonly PaneId[] = ['sidebar', 'list']
 
 /**
  * A pane's focused-key handler. Returns `true` when it consumed the event so
@@ -36,7 +38,7 @@ export interface KeyboardDispatchContext {
   /** Panes currently mountable, in {@link PANE_ORDER}. */
   availablePanes: readonly PaneId[]
   focusPane: (pane: PaneId) => void
-  /** Resolve the active pane's handler, with `detail` falling back to `list`. */
+  /** Resolve the active pane's focused-key handler. */
   resolvePaneHandler: (pane: PaneId) => PaneKeyHandler | undefined
   /** Pending `g`/`gq` goto prefix, read synchronously at event time. */
   pendingPrefix: GotoPrefix
@@ -213,8 +215,8 @@ export function dispatchMailKey(
   }
 
   // Within-pane navigation (j/k vertical, h/l horizontal) belongs to the focused
-  // pane; detail reuses the list's navigator so reading a message still steps
-  // through the list.
+  // pane. While a message is open the list stays the active pane, so j/k there
+  // step the selection — which is what the detail pane shows.
   const paneHandler = ctx.resolvePaneHandler(ctx.activePane)
   if (paneHandler && paneHandler(event)) return
 

@@ -116,7 +116,9 @@ function MessagePanels(props: MailClientViewProps) {
         <>
           <ResizableHandle />
           <ResizablePanel id="message-detail" minSize="300px">
-            <PaneFocusRegion pane="detail">
+            {/* The detail pane is not a keyboard focus region — it displays the
+                list's selected message; `j`/`k` in the list drive it. */}
+            <div className="h-full min-h-0">
               <MessageDetailPane
                 selection={props.selectedMessage}
                 onArchive={props.onArchive}
@@ -132,7 +134,7 @@ function MessagePanels(props: MailClientViewProps) {
                 onToggleFlag={props.onToggleFlag}
                 onTrash={props.onTrash}
               />
-            </PaneFocusRegion>
+            </div>
           </ResizablePanel>
         </>
       )}
