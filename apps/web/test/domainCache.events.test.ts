@@ -1,10 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
 
 import { applyDomainEvent } from '../src/domainCache'
 import { EVENT_TOPICS } from '../src/domainVocabulary'
 import { mailKeys } from '../src/mailState'
 import { queryKeys } from '../src/queryKeys'
-import { setEntityStoreActiveForTesting } from '../src/runtime/entityStoreState'
 import {
   accountOverview,
   createQueryClient,
@@ -14,20 +13,11 @@ import {
 } from './domainCache.fixtures'
 
 describe('frontend domain cache event contracts', () => {
-  // These contracts assert the store-inactive (legacy) invalidation path:
-  // a remote event invalidates the message list + mailbox counts. Pin the
-  // entity-store flag off so the suite is deterministic regardless of the
-  // `installEntityStoreAdapter()` import side effect (which flips the global
-  // flag on) or concurrent test files. The store-active gate is exercised in
-  // `domainCacheMessageUpdated.test.ts`.
-  let restoreStoreFlag: () => void
-  beforeEach(() => {
-    restoreStoreFlag = setEntityStoreActiveForTesting(false)
-  })
-  afterEach(() => {
-    restoreStoreFlag()
-  })
-  it('invalidates message list views when a remote event can change visible rows', () => {
+  it('does not REST-invalidate the store-owned message list on an arrival', () => {
+    // The entity store owns the mail list (SSE-fed view frames) and has no REST
+    // fallback, so a message arrival is not REST-invalidated. Surfaces the store
+    // does not own (smart mailboxes, remote mailbox changes) still invalidate,
+    // covered by the tests below.
     const queryClient = createQueryClient()
     const messageList = queryKeys.messages({
       kind: 'source-mailbox',
@@ -38,7 +28,7 @@ describe('frontend domain cache event contracts', () => {
 
     applyDomainEvent(queryClient, domainEvent())
 
-    expect(queryClient.getQueryState(messageList)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(messageList)?.isInvalidated).toBe(false)
   })
 
   it('invalidates settings and account read models when app settings change', () => {

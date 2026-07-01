@@ -40,10 +40,10 @@ export function useComposeSubmission({
   const sendMutation = useMutation({
     mutationFn: (variables: { sourceId: string; input: SendMessageInput }) =>
       runtimeMutations.messages.send(variables),
-    onSuccess: async (_result, variables) => {
+    onSuccess: async () => {
       // Discard the autosaved draft now that the message has been sent.
       await onSent?.()
-      await invalidateComposeSendReadModels(queryClient, variables.sourceId)
+      await invalidateComposeSendReadModels(queryClient)
       toast('Message sent')
       onClose()
     },
