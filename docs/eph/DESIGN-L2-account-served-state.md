@@ -2,7 +2,7 @@
 scope: L2
 summary: "Account management as a coherent link: serve account state as a runtime view (snapshot, not deltas), and deliver sync progressively. Fixes stuck-syncing and batch-only mail arrival."
 modified: 2026-06-22
-reviewed: 2026-06-22
+reviewed: 2026-07-01
 lifecycle: ephemeral
 type: DESIGN
 depends:
