@@ -2,7 +2,7 @@
 scope: L2
 summary: "Plan for the install wizard: a local, one-shot, CLI (later GUI) installer for advanced users to provision the role a chosen topology needs (posthaste_daemon / posthaste_backend / posthaste_runtime_daemon), generate its TLS material, bootstrap the [tls]/[link] config + a systemd/launchd unit, then be deleted. Wiring stays the user's job in the apps' own control pane. First two slices are realized in `crates/posthaste-wizard`: provisioning + in-daemon TLS, then fetch+install+systemd-user registration (`install` subcommand) over release-packaged role binaries; the config-1/config-2 client UX it ultimately serves is still in flight."
 modified: 2026-06-30
-reviewed: 2026-06-30
+reviewed: 2026-07-01
 lifecycle: ephemeral
 type: PLAN
 depends:

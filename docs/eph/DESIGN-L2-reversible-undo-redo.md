@@ -2,7 +2,7 @@
 scope: L2
 summary: "From-scratch redesign of undo/redo onto the assertion architecture: enrich each message-change signal with an invertible diff so undo = apply the inverse diff as an ordinary optimistic mutation through the existing outbox + replay(base, unsettled) guard — killing the command-based undo stacks, the inverse-command catalog, the role-move resolution gap, and the undo flicker."
 modified: 2026-06-28
-reviewed: 2026-06-28
+reviewed: 2026-07-01
 lifecycle: ephemeral
 type: DESIGN
 depends:
