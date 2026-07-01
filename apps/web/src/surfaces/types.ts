@@ -1,16 +1,25 @@
 import type { ComposeIntent } from '../composeIntent'
 
 export type SurfaceDisposition = 'focused'
+
+/** Every settings surface category. This array is the single source of truth —
+ *  the {@link SettingsSurfaceCategory} type and the route validator both derive
+ *  from it, so the rail, the type, and the parser can never list different
+ *  categories (the bug that dropped `tags` from the validator). */
+export const SETTINGS_SURFACE_CATEGORIES = [
+  'general',
+  'appearance',
+  'accounts',
+  'outbox',
+  'mailboxes',
+  'tags',
+  'storage',
+  'notifications',
+  'troubleshooting',
+] as const
+
 export type SettingsSurfaceCategory =
-  | 'general'
-  | 'appearance'
-  | 'accounts'
-  | 'outbox'
-  | 'mailboxes'
-  | 'tags'
-  | 'storage'
-  | 'notifications'
-  | 'troubleshooting'
+  (typeof SETTINGS_SURFACE_CATEGORIES)[number]
 
 export const SettingsSurfaceTargetKind = {
   Account: 'account',
