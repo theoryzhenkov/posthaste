@@ -11,7 +11,7 @@ Current rewritten specs live in domain directories:
 
 - [Mail state](state/mail/L1.md): canonical mail state, derived projections, query evaluation, and conversation freshness.
 - [Runtime](runtime/L1.md): UI-facing runtime contract for the bundled application, embedded authority server, and future deployment adapters.
-- [Replication](replication/L1.md): coherent links — the optimistic up-channel, authoritative down-channel, and confirmation-watermark convergence that move state between client, runtime, and authority server. Two seams have their own sub-domains: the [client↔runtime link](replication/client-link/L1.md) (the device replica) and the [runtime↔authority-server link](replication/authority-server-link/L1.md) (the AuthorityServerApi seam).
+- [Replication](replication/L1.md): coherent links — the optimistic up-channel, authoritative down-channel, and confirmation-watermark convergence that move state between client, runtime, and authority server. Two seams have their own sub-domains: the [client↔runtime link](replication/client-link/L1.md) (the device replica) and the [runtime↔authority-server link](replication/authority-server-link/L1.md) (the AuthorityServerLink seam).
 - [API](api/L1.md): external `/v1` HTTP and SSE contract over those projections.
 - [Authority server](authority-server/L1.md): the far node's service, store, provider, account-runtime, event, and API implementation boundaries.
 - [Crate topology](architecture/L2-crate-topology.md): the workspace crate set, ownership, dependency hierarchy, and the wasm-pure frontier.

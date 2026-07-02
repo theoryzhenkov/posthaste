@@ -26,7 +26,12 @@ has an emitter/tier, by its emitter (`AuthorityServerFrame`, `RuntimeFrame`).
 The far-node component has exactly one canonical name — **authority server** —
 replacing both "backend" and "authority runtime" (one component, one name;
 "backend" stays available for generic uses like backing stores). A name that
-overclaims ("the contract both links speak") is treated as a bug.
+overclaims ("the contract both links speak") is treated as a bug. A suffix
+carries exactly one meaning everywhere it appears (RFC D32): **`*Api`** = typed
+wire-free RPC surface (`RuntimeApi` + its four subtraits); **`*Link`** =
+replication-link contract (a coherent-link seam: mutation forward + frame
+subscribe + read-through); **`*Handle`** = owning wrapper (`RuntimeHandle`
+pattern); **`*Adapter`** = protocol translation (`HttpApiAdapter`).
 
 ## 1. The crate set (end-state)
 
@@ -55,9 +60,9 @@ DEVIATION-L2-architecture-cleanup rows V1–V6.*
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `posthaste-authority-server-link` | The runtime↔authority-server link surface only: `AuthorityServerApi` trait + `AuthorityServerLink`, `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). | contract-core, domain-model, link-core |
+| `posthaste-authority-server-link` | The runtime↔authority-server seam, mirroring the client↔runtime seam's shape (RFC D33): **`AuthorityServerApi`** (the typed request surface — reads, account/settings ops, `apply_mail_operation`) + **`AuthorityServerLink`** (the coherent-link mechanics — `forward_mutation`, `subscribe(coverage)` → frames, settlement/watermark, outbox op-lifecycle) + `AuthorityServerLinkHandle` (wrapper), `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). *(Split pending: one fused trait until M5b — [::state] per §1 marker.)* | contract-core, domain-model, link-core |
 | `posthaste-runtime-api` | The typed, wire-free client-facing domain RPC extracted from `RuntimeCore` (41 of its 52 methods): returns serde domain types, no frames. **Four traits** — `RuntimeAccountApi`, `RuntimeSettingsApi`, `RuntimeMailReadApi`, `RuntimeMailWriteApi` (whose message commands are one typed `apply_mail_operation(MailOperation) -> CommandAck` entry, not per-command RPCs) — plus an umbrella supertrait; narrow consumers take one trait (`&dyn RuntimeAccountApi`). | contract-core, domain-model |
-| `posthaste-client-link` | The client↔runtime link ops extracted from `RuntimeCore` (**one trait**, 11 methods): `run_mutation` forward, the three stream families (`subscribe_runtime_frames`, `subscribe_events`, session-view snapshots), session open/close, view open/extend/close. | contract-core, domain-model, link-core |
+| `posthaste-client-link` | The client↔runtime link ops extracted from `RuntimeCore` (**one trait, `RuntimeLink`**, 10 methods): `run_mutation` forward, the three stream families (`subscribe_runtime_frames`, `subscribe_events`, session-view snapshots), session open/close, view open/extend/close. | contract-core, domain-model, link-core |
 
 ### 1.4 Node/adapter tier (native)
 
@@ -68,11 +73,11 @@ DEVIATION-L2-architecture-cleanup rows V1–V6.*
 | `posthaste-imap` | IMAP gateway adapter. | domain-service |
 | `posthaste-config` | TOML config persistence (`TomlConfigRepository`, tuning schemas). | domain-service (types via domain-model) |
 | `posthaste-runtime` | The near node: runtime assembly, outbox (`RuntimeAuthorityServerOutbox` over `MessageReplica`), `ReadCache`, the remote authority-server transport (`RemoteAuthorityServer`), implements runtime-api + client-link. | runtime-api, client-link, authority-server-link, link-replica, link-core, domain-service |
-| `posthaste-authority-server` | The far node: `AuthorityServerNode`, account supervision, sync, push, oauth, `AuthorityServerApi` impls (`LocalAuthorityServer`), registry, **and its own link wire** (`link_router` + link auth — the far node owns the surface it serves; it does not borrow the /v1 platform's error/auth vocabulary). No re-exports of near-node symbols. | authority-server-link, runtime, domain-service, engine, imap, store, config |
+| `posthaste-authority-server` | The far node: `AuthorityServerNode`, account supervision, sync, push, oauth, `AuthorityServerLink` impls (`LocalAuthorityServer`), registry, **and its own link wire** (`link_router` + link auth — the far node owns the surface it serves; it does not borrow the /v1 platform's error/auth vocabulary). No re-exports of near-node symbols. | authority-server-link, runtime, domain-service, engine, imap, store, config |
 | `posthaste-link-wasm` | The wasm client replica binding (JSON boundary). | link-core, link-replica, domain-model, contract-core |
-| `posthaste-api` | Client-facing `/v1` HTTP+SSE platform. | runtime-api, client-link, domain-service, config |
-| `posthaste-server` | Composition root: assembles nodes and mounts routers (api's `/v1`, authority-server's link wire), HTTP serving. No facade re-exports; no logic of its own beyond assembly. | api, authority-server, … |
-| `posthaste-runtimed` | Runtime daemon crate. | api, runtime |
+| `posthaste-http-api-adapter` | The HTTP API adapter: serves the /v1 contract over the runtime's typed Api surfaces. | runtime-api, client-link, domain-service, config |
+| `posthaste-server` | Composition root: assembles nodes and mounts routers (http-api-adapter's `/v1`, authority-server's link wire), HTTP serving. No facade re-exports; no logic of its own beyond assembly. | http-api-adapter, authority-server, … |
+| `posthaste-runtimed` | Runtime daemon crate. | http-api-adapter, runtime |
 | `posthaste-observability`, `posthaste-testkit`, `posthaste-bench`, `posthaste-lab`, `posthaste-wizard` | Telemetry, test harness, benches, tooling. | (tier-appropriate) |
 
 ### 1.5 Role binaries
@@ -109,7 +114,7 @@ contract-core ─► authority-server-link              (link surfaces)
 contract-core ─► runtime-api + client-link
         │
         └─► runtime ─► authority-server ─► server   (nodes, roots)
-                 └────► link-wasm / api / runtimed
+                 └────► link-wasm / http-api-adapter / runtimed
 ```
 
 Rules:
