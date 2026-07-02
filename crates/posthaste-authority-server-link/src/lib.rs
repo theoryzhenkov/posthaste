@@ -1,19 +1,17 @@
-//! The shared coherent-link contract — the replication subset both links speak.
+//! The runtime↔authority-server link surface — one coherent link's contract.
 //!
 //! A coherent link ([replication L1 §2](../replication/L1.md)) carries exactly
 //! two channels between a near node and a far node: named mutations forwarded
 //! **up**, authoritative base assertions + per-mutation confirmation streamed
-//! **down**. This crate is the single, transport-neutral definition of those two
-//! channels — *not* the full [`RuntimeCore`] surface, only its replication
-//! subset ([replication authority-server-link L1](../replication/authority-server-link/L1.md)).
+//! **down**. This crate holds the transport-neutral definition of the
+//! runtime↔authority-server instantiation of that shape — *not* the full
+//! [`RuntimeCore`] surface, only its replication subset, and not the
+//! client↔runtime link's own surface (that lives in `posthaste-client-link`)
+//! ([replication authority-server-link L1](../replication/authority-server-link/L1.md)).
+//! The two links share the `MutationRequest`/`MutationReceipt` vocabulary from
+//! `posthaste-contract-core`, not this crate's traits.
 //!
-//! Both seams use it. The client↔runtime link already speaks this vocabulary on
-//! the wire (it `POST`s [`MutationRequest`] → [`MutationReceipt`] and streams
-//! frames), so it is **conformant by construction** — the contract is factored
-//! *from* it, not invented beside it (§4.1). The runtime↔authority-server link adopts the
-//! same shape via [`AuthorityServerLinkHandle`].
-//!
-//! [`AuthorityServerLink`] is the Rust abstraction over one link's two channels; it is
+//! [`AuthorityServerLink`] is the Rust abstraction over this link's two channels; it is
 //! selected by configuration (in-process co-located by default, remote when
 //! split — [replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)). The transport is what
 //! varies across deployments; the contract above it does not. This is the seam
@@ -30,8 +28,6 @@ use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeMap;
-
-pub mod message_mutation;
 
 use posthaste_domain_model::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
@@ -133,37 +129,15 @@ pub enum AuthorityServerFrame {
     /// A forwarded mutation reached its terminal outcome at the far node — the
     /// per-mutation confirmation watermark. Retires the matching outbox entry.
     Settlement {
-        mutation_id: WireMutationId,
+        /// The engine's mutation id, carried directly on the wire (D12 — no
+        /// serde mirror type; `MutationId` is already serde and this crate
+        /// depends on `link-core`).
+        mutation_id: MutationId,
         outcome: WireSettlementOutcome,
     },
     /// Liveness only; carries no state. Lets a remote transport keep the
     /// down-stream open without implying a base change.
     Heartbeat,
-}
-
-/// Serializable mirror of [`MutationId`] for the wire (the engine's `MutationId`
-/// is a plain newtype but lives in `link-core`; re-exposing the wire form here
-/// keeps the contract self-contained).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct WireMutationId(pub String);
-
-impl WireMutationId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<MutationId> for WireMutationId {
-    fn from(id: MutationId) -> Self {
-        Self(id.0)
-    }
-}
-
-impl From<WireMutationId> for MutationId {
-    fn from(id: WireMutationId) -> Self {
-        Self(id.0)
-    }
 }
 
 /// Stable identity of a runtime near node at the runtime↔authority-server link
@@ -1068,7 +1042,7 @@ mod tests {
     #[test]
     fn down_frame_settlement_carries_the_per_mutation_watermark() {
         let frame = AuthorityServerFrame::Settlement {
-            mutation_id: WireMutationId("op1".into()),
+            mutation_id: MutationId("op1".into()),
             outcome: WireSettlementOutcome::Confirmed,
         };
         let json = serde_json::to_value(&frame).expect("serialize");
@@ -1080,12 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_mutation_id_and_outcome_bridge_the_engine_types() {
-        let engine = MutationId("op7".into());
-        let wire: WireMutationId = engine.clone().into();
-        assert_eq!(wire.as_str(), "op7");
-        assert_eq!(MutationId::from(wire), engine);
-
+    fn settlement_outcome_bridges_the_engine_type() {
         assert_eq!(
             SettlementOutcome::from(WireSettlementOutcome::Failed),
             SettlementOutcome::Failed
@@ -1116,7 +1085,7 @@ mod tests {
             Ok(MutationReceipt {
                 runtime_mutation_id: None,
                 client_mutation_id: mutation.client_mutation_id,
-                name: mutation.name,
+                name: mutation.operation.name().to_string(),
                 state: posthaste_contract_core::MutationSettlementState::Accepted,
                 error: None,
                 output: serde_json::Value::Null,
@@ -1135,13 +1104,18 @@ mod tests {
 
         let link = AuthorityServerLinkHandle::new(Arc::new(StubTransport));
         let receipt = link
-            .forward_mutation(MutationRequest {
-                session_id: None,
-                name: "message.setKeywords".into(),
-                args: serde_json::Value::Null,
-                client_mutation_id: ClientMutationId::new("c1"),
-                context: None,
-            })
+            .forward_mutation(
+                serde_json::from_value(serde_json::json!({
+                    "name": "message.setKeywords",
+                    "args": {
+                        "sourceId": "acct",
+                        "messageId": "m1",
+                        "command": {"add": [], "remove": []},
+                    },
+                    "clientMutationId": "c1",
+                }))
+                .expect("request builds from the flat wire shape"),
+            )
             .await
             .expect("forward");
         assert_eq!(receipt.client_mutation_id, ClientMutationId::new("c1"));

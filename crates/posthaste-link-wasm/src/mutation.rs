@@ -2,28 +2,30 @@
 //!
 //! The web client used to maintain a hand-written TypeScript copy of the
 //! name→assertion mapping and the `MessageChangeDiff` inverse. These functions
-//! expose the canonical Rust implementations from `posthaste-authority-server-link`
-//! and `posthaste-link-core` across the WASM boundary, eliminating that drift.
+//! expose the canonical Rust implementations from `posthaste-contract-core`
+//! (the typed `MailOperation` vocabulary + its `fold_effect`) and
+//! `posthaste-link-core` across the WASM boundary, eliminating that drift.
 
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use std::collections::HashMap;
 
-use posthaste_authority_server_link::message_mutation::MessageMutation;
+use posthaste_contract_core::{MailOperation, MutationRequest};
 use posthaste_link_core::{MessageAssertion, MessageChangeDiff};
-use posthaste_contract_core::MutationRequest;
 
-/// Parse a runtime mutation request and return `{ messageId, assertion }` as
-/// JSON when the mutation is locally foldable. Returns `null` for mutations
-/// whose effect cannot be folded from the request alone. `role_map_json` is the
+/// Parse a runtime mutation request (its flattened typed `MailOperation`) and
+/// return `{ messageId, assertion }` as JSON when the operation is locally
+/// foldable. Returns `null` for operations whose effect cannot be folded from
+/// the request alone. `role_map_json` is the
 /// account's role→mailbox-id map (`{"archive": "mbx-..."}`, built client-side
 /// from the mailbox list); it resolves role moves (archive/trash/restoreToInbox/
 /// moveToRole) to `ReplaceMailboxes`. `{}` → role moves get no optimism (graceful
-/// when the mailbox list isn't loaded yet). Mirrors the Rust near-node
-/// `MessageMutation::from_request` + `to_assertion_with_roles` path.
-#[wasm_bindgen(js_name = parseMessageMutation)]
-pub fn parse_message_mutation(
+/// when the mailbox list isn't loaded yet). Consumes the same
+/// `MailOperation::fold_effect_with_roles` projection the Rust near node folds
+/// with (D34 — one local-effect derivation, shared).
+#[wasm_bindgen(js_name = parseMailOperation)]
+pub fn parse_mail_operation(
     request_json: &str,
     role_map_json: &str,
 ) -> Result<Option<String>, JsError> {
@@ -31,18 +33,19 @@ pub fn parse_message_mutation(
         serde_json::from_str(request_json).map_err(|error| JsError::new(&error.to_string()))?;
     let roles: HashMap<String, String> =
         serde_json::from_str(role_map_json).map_err(|error| JsError::new(&error.to_string()))?;
-    // Unknown or non-foldable message mutations are not errors; the adapter
-    // simply passes them through to the runtime.
-    let mutation = match MessageMutation::from_request(&request) {
-        Ok(mutation) => mutation,
-        Err(_) => return Ok(None),
-    };
-    let assertion = match mutation.to_assertion_with_roles(&roles) {
+    let operation: &MailOperation = &request.operation;
+    // Non-foldable operations (role move without a role map, control ops) are not
+    // errors; the adapter simply passes them through to the runtime.
+    let assertion = match operation.fold_effect_with_roles(&roles) {
         Some(assertion) => assertion,
         None => return Ok(None),
     };
+    let message_id = match operation.message_id() {
+        Some(id) => id.to_string(),
+        None => return Ok(None),
+    };
     let output = ParsedMutation {
-        message_id: mutation.message_id().to_string(),
+        message_id,
         assertion,
     };
     serde_json::to_string(&output)
@@ -86,7 +89,7 @@ mod tests {
             },
             "clientMutationId": "op-1"
         });
-        let output = parse_message_mutation(&request.to_string(), "{}")
+        let output = parse_mail_operation(&request.to_string(), "{}")
             .unwrap()
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
@@ -106,7 +109,7 @@ mod tests {
             },
             "clientMutationId": "op-1"
         });
-        let output = parse_message_mutation(&request.to_string(), "{}")
+        let output = parse_mail_operation(&request.to_string(), "{}")
             .unwrap()
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
@@ -129,11 +132,11 @@ mod tests {
             "clientMutationId": "op-1"
         });
         // No role map → no optimism (graceful: mailbox list not loaded yet).
-        assert!(parse_message_mutation(&request.to_string(), "{}")
+        assert!(parse_mail_operation(&request.to_string(), "{}")
             .unwrap()
             .is_none());
         // With the account's archive mailbox → ReplaceMailboxes.
-        let output = parse_message_mutation(&request.to_string(), r#"{"archive":"mbx-a"}"#)
+        let output = parse_mail_operation(&request.to_string(), r#"{"archive":"mbx-a"}"#)
             .unwrap()
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();

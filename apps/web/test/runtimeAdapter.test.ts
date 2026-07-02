@@ -4,7 +4,6 @@ import * as apiClient from '../src/api/client'
 import type {
   ConversationView,
   MessageCommand,
-  MessageCommandResult,
   MessageDetail,
   MessagePage,
 } from '../src/api/types'
@@ -25,11 +24,6 @@ import type {
   RuntimeMailListViewState,
   RuntimeViewSnapshot,
 } from '../src/runtime/types'
-
-const okResult: MessageCommandResult = {
-  detail: null,
-  events: [],
-}
 
 const emptyPage: MessagePage = {
   items: [],
@@ -127,31 +121,30 @@ describe('runtime adapter facade', () => {
     )
   })
 
-  it('routes commands without a named mutation through the adapter (legacy fallback)', async () => {
+  it('routes mailbox-membership commands through the named-mutation pipeline', async () => {
     const fake = createFakeRuntimeAdapter()
-    fake.queueMessageCommandResult(okResult)
     setRuntimeAdapterForTesting(fake)
 
-    // setKeywords/replaceMailboxes/destroy now route through runMutation;
-    // addToMailbox has no named mutation yet, so it keeps the adapter path.
-    const legacyCommand: MessageCommand = {
+    // Post-M5 the typed MailOperation vocabulary covers every command kind:
+    // addToMailbox/removeFromMailbox route through runMutation like the rest —
+    // there is no legacy adapter fallback.
+    const command: MessageCommand = {
       kind: 'addToMailbox',
       mailboxId: 'archive',
     }
     const result = await runtimeMutations.messages.command({
-      command: legacyCommand,
+      command,
       messageId: 'm1',
       sourceId: 'primary',
     })
 
-    expect(result).toBe(okResult)
-    expect(fake.messageCommandCalls).toEqual([
-      {
-        command: legacyCommand,
-        messageId: 'm1',
-        sourceId: 'primary',
-      },
-    ])
+    expect(result.events).toEqual([])
+    expect(fake.messageCommandCalls).toEqual([])
+    expect(fake.runtimeMutationCalls).toHaveLength(1)
+    expect(fake.runtimeMutationCalls[0].request).toMatchObject({
+      name: 'message.addToMailbox',
+      args: { sourceId: 'primary', messageId: 'm1', mailboxId: 'archive' },
+    })
   })
 
   it('dispatches message detail reads through a fake adapter override without a backend', async () => {
@@ -286,30 +279,6 @@ describe('runtime adapter facade', () => {
     expect(getRuntimeAdapter()).toBe(firstFake)
     restoreFirst()
     expect(getRuntimeAdapter()).toBe(httpRuntimeAdapter)
-  })
-
-  it('wraps existing HTTP message command behavior for legacy-fallback commands', async () => {
-    const commandSpy = spyOn(
-      apiClient,
-      'performMessageCommand',
-    ).mockResolvedValue(okResult)
-
-    try {
-      const legacyCommand: MessageCommand = {
-        kind: 'addToMailbox',
-        mailboxId: 'archive',
-      }
-      const result = await runtimeMutations.messages.command({
-        command: legacyCommand,
-        messageId: 'm1',
-        sourceId: 'primary',
-      })
-
-      expect(result).toBe(okResult)
-      expect(commandSpy).toHaveBeenCalledWith('m1', legacyCommand, 'primary')
-    } finally {
-      commandSpy.mockRestore()
-    }
   })
 
   it('wraps existing HTTP message detail reads by default', async () => {

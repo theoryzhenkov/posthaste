@@ -18,7 +18,7 @@ export const entitystorehandle_setViewRowsJson: (a: number, b: number, c: number
 export const entitystorehandle_settle: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
 export const invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
-export const parseMessageMutation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

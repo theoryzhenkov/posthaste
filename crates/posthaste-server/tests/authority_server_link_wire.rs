@@ -38,7 +38,7 @@ impl AuthorityServerLink for StubFarNode {
         Ok(MutationReceipt {
             runtime_mutation_id: Some(RuntimeMutationId::new("authority-server-1")),
             client_mutation_id: mutation.client_mutation_id,
-            name: mutation.name,
+            name: mutation.operation.name().to_string(),
             state: MutationSettlementState::Confirmed,
             error: None,
             output: serde_json::json!({ "events": [] }),
@@ -78,8 +78,11 @@ async fn remote_transport_drives_the_link_router_up_channel() {
     let receipt = transport
         .forward_mutation(MutationRequest {
             session_id: None,
-            name: "message.setFlaggedState".into(),
-            args: serde_json::json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),
+            operation: serde_json::from_value(serde_json::json!({
+                "name": "message.setFlaggedState",
+                "args": serde_json::json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),
+            }))
+            .expect("typed operation parses"),
             client_mutation_id: ClientMutationId::new("c1"),
             context: None,
         })
@@ -163,7 +166,7 @@ impl AuthorityServerLink for CapturingFarNode {
         Ok(MutationReceipt {
             runtime_mutation_id: Some(RuntimeMutationId::new("authority-server-1")),
             client_mutation_id: mutation.client_mutation_id,
-            name: mutation.name,
+            name: mutation.operation.name().to_string(),
             state: MutationSettlementState::Confirmed,
             error: None,
             output: serde_json::json!({ "events": [] }),
@@ -200,8 +203,11 @@ async fn link_router_threads_the_authed_runtime_id_into_forward_mutation_for() {
     transport
         .forward_mutation(MutationRequest {
             session_id: None,
-            name: "message.setFlaggedState".into(),
-            args: serde_json::json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),
+            operation: serde_json::from_value(serde_json::json!({
+                "name": "message.setFlaggedState",
+                "args": serde_json::json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),
+            }))
+            .expect("typed operation parses"),
             client_mutation_id: ClientMutationId::new("c1"),
             context: None,
         })

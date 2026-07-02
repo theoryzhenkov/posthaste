@@ -195,7 +195,7 @@ pub struct VerificationResponse {
     path = "/v1/health",
     tag = "system",
     summary = "Service health check",
-    description = "Returns readiness status. Used by clients to confirm the authority server is reachable.",
+    description = "Returns readiness status. Used by clients to confirm the backend is reachable.",
     responses(
         (status = 200, description = "Service is ready", body = HealthResponse)
     )

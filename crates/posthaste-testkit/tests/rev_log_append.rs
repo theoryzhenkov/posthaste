@@ -6,7 +6,7 @@
 
 use posthaste_domain_service::RevCursor;
 use posthaste_contract_core::{
-    ClientMutationId, MutationNotification, MutationRequest, ViewDescriptor,
+    MutationNotification, MutationRequest, ViewDescriptor,
 };
 use posthaste_testkit::Harness;
 use serde_json::json;
@@ -25,17 +25,16 @@ fn rev_cursor_mutation(
     cursor_step_id: Option<&str>,
     redo_tail: &[&str],
 ) -> MutationRequest {
-    MutationRequest {
-        session_id: None, // settle() assigns the opened session
-        name: "revCursor".to_string(),
-        args: json!({
+    serde_json::from_value(json!({
+        "name": "revCursor",
+        "args": {
             "accountId": account,
             "cursorStepId": cursor_step_id,
             "redoTail": redo_tail,
-        }),
-        client_mutation_id: ClientMutationId::new(cmid),
-        context: None,
-    }
+        },
+        "clientMutationId": cmid,
+    }))
+    .expect("request builds from the flat wire shape")
 }
 
 fn set_keywords_with_rev_step(
@@ -44,22 +43,22 @@ fn set_keywords_with_rev_step(
     cmid: &str,
     step_id: &str,
 ) -> MutationRequest {
-    MutationRequest {
-        session_id: None, // settle() assigns the opened session
-        name: "message.setKeywords".to_string(),
-        args: json!({
+    serde_json::from_value(json!({
+        "name": "message.setKeywords",
+        "args": {
             "sourceId": account,
             "messageId": message_id,
             "command": {"add": ["$flagged"], "remove": []}
-        }),
-        client_mutation_id: ClientMutationId::new(cmid),
-        context: Some(json!({
+        },
+        "clientMutationId": cmid,
+        "context": {
             "revStep": {
                 "stepId": step_id,
                 "diff": {"keywords": {"added": ["$flagged"], "removed": []}}
             }
-        })),
-    }
+        },
+    }))
+    .expect("request builds from the flat wire shape")
 }
 
 #[tokio::test]
@@ -111,17 +110,16 @@ async fn forward_action_without_rev_step_does_not_append() {
     // rev_log append is opt-in (the client supplies the step on actions it
     // wants to be undoable). Idempotency on `step_id` is covered by the store
     // unit tests.
-    let mutation = MutationRequest {
-        session_id: None,
-        name: "message.setKeywords".to_string(),
-        args: json!({
+    let mutation: MutationRequest = serde_json::from_value(json!({
+        "name": "message.setKeywords",
+        "args": {
             "sourceId": account.as_str(),
             "messageId": "m-1",
             "command": {"add": ["$flagged"], "remove": []}
-        }),
-        client_mutation_id: ClientMutationId::new("c-1"),
-        context: None,
-    };
+        },
+        "clientMutationId": "c-1",
+    }))
+    .expect("request builds from the flat wire shape");
     harness
         .settle(mutation, rev_log_view(account.as_str()))
         .await

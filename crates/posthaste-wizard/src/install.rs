@@ -268,7 +268,9 @@ pub fn user_unit_dir() -> Result<PathBuf, String> {
 /// The unit file name for a role, e.g. `posthaste-authority-server.service`.
 pub fn unit_name(role: Role) -> String {
     let suffix = match role {
-        Role::Daemon => "daemon",
+        // The bundled all-in-one runs the `posthaste-authority-runtime-server`
+        // binary (D18); the unit is named after the binary it runs.
+        Role::Daemon => "authority-runtime-server",
         Role::AuthorityServer => "authority-server",
         Role::Runtime => "runtime",
     };
