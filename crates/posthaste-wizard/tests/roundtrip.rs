@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use posthaste_config::TomlConfigRepository;
+use posthaste_config::{read_daemon_settings, TomlConfigRepository};
 use posthaste_wizard::{provision, Plan, Role};
 
 fn base_plan(role: Role, dir: &std::path::Path) -> Plan {
@@ -35,25 +35,27 @@ fn tls_runtime_node_roundtrips_through_the_daemon_schema() {
 
     let out = provision(&plan).expect("provision");
 
-    // The daemon's schema reads the wizard's output without error...
+    // The daemon's config resolver reads the wizard's output without error...
     let repo = TomlConfigRepository::open(&plan.config_root).expect("open config");
-    let app = repo.read_app_toml().expect("read app.toml");
+    let daemon = read_daemon_settings(&repo).expect("read daemon settings");
 
-    // ...and the load-bearing fields survive the round-trip.
-    assert_eq!(app.daemon.bind.as_deref(), Some("0.0.0.0:3001"));
-    assert_eq!(app.daemon.require_auth, Some(true));
-    assert_eq!(app.daemon.allowed_hosts, vec!["mail.lan", "127.0.0.1"]);
+    // ...and the load-bearing fields survive the round-trip. (D25: daemon/link/
+    // tls fields are read via the public `read_daemon_settings` resolver rather
+    // than the now-private raw `AppToml` reader.)
+    assert_eq!(daemon.bind_address, "0.0.0.0:3001");
+    assert!(daemon.require_auth);
+    assert_eq!(daemon.allowed_hosts, vec!["mail.lan", "127.0.0.1"]);
 
-    let tls = app.tls.expect("[tls] present");
-    assert_eq!(tls.cert, Some(out.leaf_cert_path.unwrap()));
-    assert!(tls.key.is_some());
+    let tls = daemon.tls.expect("[tls] present");
+    assert_eq!(tls.cert_path, out.leaf_cert_path.unwrap());
+    assert!(tls.key_path.exists());
 
     assert_eq!(
-        app.link.backend_url.as_deref(),
+        daemon.link_backend_url.as_deref(),
         Some("https://backend.lan:3002/v1")
     );
-    assert_eq!(app.link.token.as_deref(), Some("shared-secret"));
-    assert_eq!(app.link.serve, None); // runtime role does not serve the link
+    assert_eq!(daemon.link_token.as_deref(), Some("shared-secret"));
+    assert!(!daemon.link_serve); // runtime role does not serve the link
 
     // The emitted CA exists on disk for the client to trust.
     assert!(out.ca_cert_path.unwrap().exists());
@@ -68,11 +70,11 @@ fn backend_node_serves_the_link() {
 
     provision(&plan).expect("provision");
     let repo = TomlConfigRepository::open(&plan.config_root).expect("open config");
-    let app = repo.read_app_toml().expect("read app.toml");
+    let daemon = read_daemon_settings(&repo).expect("read daemon settings");
 
-    assert_eq!(app.link.serve, Some(true));
-    assert_eq!(app.link.token.as_deref(), Some("shared-secret"));
-    assert!(app.tls.is_none()); // no --tls in this plan
+    assert!(daemon.link_serve);
+    assert_eq!(daemon.link_token.as_deref(), Some("shared-secret"));
+    assert!(daemon.tls.is_none()); // no --tls in this plan
 }
 
 #[test]
@@ -82,10 +84,10 @@ fn daemon_node_has_no_link_section() {
 
     provision(&plan).expect("provision");
     let repo = TomlConfigRepository::open(&plan.config_root).expect("open config");
-    let app = repo.read_app_toml().expect("read app.toml");
+    let daemon = read_daemon_settings(&repo).expect("read daemon settings");
 
-    assert_eq!(app.link.serve, None);
-    assert_eq!(app.link.backend_url, None);
+    assert!(!daemon.link_serve);
+    assert!(daemon.link_backend_url.is_none());
 }
 
 #[test]

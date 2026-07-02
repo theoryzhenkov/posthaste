@@ -27,7 +27,7 @@ pub async fn start_backend(server_config: ServerConfig) -> BackendServerHandle {
     let settings_repo =
         TomlConfigRepository::open(&roots.config_root).expect("failed to open config directory");
     let runtime =
-        config::read_daemon_settings(&settings_repo).expect("failed to read runtime settings");
+        read_daemon_settings(&settings_repo).expect("failed to read runtime settings");
     drop(settings_repo);
 
     let log_guard = logging::init(&roots.state_root, &runtime.log_level);

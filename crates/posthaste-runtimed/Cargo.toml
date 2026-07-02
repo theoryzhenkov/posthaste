@@ -12,6 +12,7 @@ path = "src/main.rs"
 # (`posthaste-api` + `posthaste-runtime`) — it never links store/engine/imap.
 [dependencies]
 posthaste-api = { path = "../posthaste-api" }
+posthaste-config = { path = "../posthaste-config" }
 posthaste-runtime = { path = "../posthaste-runtime" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 

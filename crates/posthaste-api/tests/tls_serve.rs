@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use axum::routing::get;
 use axum::Router;
 use posthaste_api::tls::{build_tls_acceptor, TlsListener};
-use posthaste_api::TlsConfig;
+use posthaste_config::TlsConfig;
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
