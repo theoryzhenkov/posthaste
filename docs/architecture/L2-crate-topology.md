@@ -42,14 +42,14 @@ DEVIATION-L2-architecture-cleanup rows V1–V6.*
 |---|---|---|
 | `posthaste-link-core` | The effect-fold leaf: `MessageFoldState` predictor, convergence engine (`Replica`, `MessageReplica`, `MutationId`, settlement fold). *Below* domain; domain-free by construction. | — |
 | `posthaste-link-replica` | The keyed reactive store over link-core: `EntityStore`, view rows/predicates, retirement draining. | link-core |
-| `posthaste-domain-model` | The pure domain types: ids, messages, records, commands, outbox/sync/rev-log types, smart mailboxes, account settings/overview, appearance, automation, notifications, vocab (`MailboxRole`, `SystemKeyword`), errors (`GatewayError`, `StoreError`, `ServiceError(Kind)`, `SecretStoreError`, `ConfigError`, `ValidationError`), plus the pure cache/imap/provider type slices the model types embed. | — |
+| `posthaste-domain-model` | The pure domain types: ids, messages, records, commands, outbox/sync/rev-log types, smart mailboxes, account settings/overview, appearance, automation, notifications, vocab (`MailboxRole`, `SystemKeyword`), errors (`GatewayError`, `StoreError`, `ServiceError(Kind)`, `SecretStoreError`, `ConfigError`, `ValidationError`), plus the pure cache/imap/provider slices the model types' inherent impls close over: cache primitives/entities/budget, imap types/sync-state/capabilities/mailbox-roles, and the whole provider profile+policy set (RFC D30). | — |
 | `posthaste-contract-core` | The shared wire vocabulary *above* domain-model: the typed `MailOperation` enum (the one operation vocabulary, parsed once per wire), `MutationRequest`/`MutationReceipt`, `MutationSettlementState`, opaque ids (`RuntimeSessionId`, `ViewId`, `ClientMutationId`, `RuntimeMutationId`, `ViewRevision`), view models (`RuntimeFrame`, `ViewFrame`, `ViewSnapshot`, `MailListViewState`, `CoverageRange`), `RuntimeAdapterError` (+ `From<ServiceErrorKind>`), `mutation_args`, `mail_query`. | domain-model, link-core |
 
 ### 1.2 Domain service tier
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `posthaste-domain-service` | The hexagonal core: `MailService`, all port traits (`MailGateway`, `MailStore` composite, secret/config/push ports), provider policies, imap planning logic, cache scoring/governor, search parsing, `validate_*` functions. Forwards the `openapi` feature to domain-model. | domain-model, link-core, observability |
+| `posthaste-domain-service` | The hexagonal core: `MailService`, all port traits (`MailGateway`, `MailStore` composite, secret/config/push ports), imap planning + identities logic, cache scoring/governor, search parsing, `validate_*` functions. (Provider *policies* are model-resident data per RFC D30; the service owns the behavior consuming them.) Forwards the `openapi` feature to domain-model. | domain-model, link-core, observability |
 
 ### 1.3 Link surface tier
 
