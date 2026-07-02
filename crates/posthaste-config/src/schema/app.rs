@@ -317,8 +317,6 @@ pub struct DaemonToml {
     /// `0.0.0.0` bind alone admits no external host.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_hosts: Vec<String>,
-    #[serde(default, skip_serializing_if = "DaemonRuntimeTuning::is_default")]
-    pub runtime: DaemonRuntimeTuning,
 }
 
 /// Optional `[tls]` config for in-daemon TLS. Both `cert` and `key` must be
