@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
-use posthaste_authority_runtime::{build_authority_runtime, RuntimeBuildConfig};
+use posthaste_authority_runtime::build_authority_runtime;
 use posthaste_domain_service::{
     AccountDriver, AccountId, MessageId, MessageSortField, SecretRef, SecretStore,
     SecretStoreError, SetKeywordsCommand, SortDirection,
@@ -29,6 +29,7 @@ use posthaste_contract_core::{
     MailQueryRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionId, RuntimeSessionSeq,
     SecretWriteMutation, ViewDescriptor, ViewId,
 };
+use posthaste_runtime::RuntimeBuildConfig;
 use posthaste_runtime_api::RuntimeAccountApi;
 use tempfile::TempDir;
 

@@ -24,12 +24,10 @@ use posthaste_api::api::{
 };
 use posthaste_api::AppState;
 use posthaste_authority_runtime::oauth::{
-    OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthFlowCompletion, OAuthProviderProfile,
-    OAuthTokenService, OAuthTokenSet, PendingOAuthFlow,
+    OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthFlowCompletion, OAuthFlowStore,
+    OAuthProviderProfile, OAuthTokenService, OAuthTokenSet, PendingOAuthFlow,
 };
 use posthaste_authority_runtime::AccountMutationService;
-
-use crate::oauth::OAuthFlowStore;
 
 pub(crate) mod handlers;
 mod support;

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
-use posthaste_authority_runtime::{AuthorityRuntimeBuild, RuntimeHandle};
+use posthaste_authority_runtime::AuthorityRuntimeBuild;
 use posthaste_domain_service::{
     AccountDriver, AccountId, DomainEvent, MailStore, MailboxId, MailboxRecord, MessageRecord,
     ProviderAuthKind, ProviderHint, SecretRef, SecretStore, SecretStoreError, SyncBatch,
@@ -26,6 +26,7 @@ use posthaste_contract_core::{
     MutationReceipt, MutationRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionSeq,
     SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewId, ViewSnapshot,
 };
+use posthaste_runtime::RuntimeHandle;
 use posthaste_runtime_api::RuntimeAccountApi;
 
 use crate::fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};

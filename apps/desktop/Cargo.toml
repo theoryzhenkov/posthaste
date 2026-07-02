@@ -27,6 +27,7 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-playwright = { version = "0.2.2", optional = true }
 url = "2.5.8"
+posthaste-api = { path = "../../crates/posthaste-api" }
 posthaste-observability = { path = "../../crates/posthaste-observability" }
 posthaste-server = { path = "../../crates/posthaste-server" }
 serde = { workspace = true }

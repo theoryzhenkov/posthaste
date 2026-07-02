@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::oauth::OAuthFlowStore;
+use posthaste_authority_runtime::oauth::OAuthFlowStore;
 
 /// Initialize the bundled daemon (config, store, supervisor, logging), build the
 /// runtime (in-process backend, or a remote near node when `[link] backend_url`

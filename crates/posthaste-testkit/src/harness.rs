@@ -2,11 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use posthaste_authority_runtime::{build_authority_runtime, RuntimeBuildConfig};
+use posthaste_authority_runtime::build_authority_runtime;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, RFC3339_EPOCH,
 };
+use posthaste_runtime::RuntimeBuildConfig;
 use posthaste_store::DatabaseStore;
 
 use crate::paths::temp_root;

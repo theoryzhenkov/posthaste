@@ -11,10 +11,10 @@ use posthaste_config::TomlConfigRepository;
 use posthaste_domain_service::{
     ConfigRepository, MailService, MailStore, SecretRef, SecretStore, SecretStoreError,
 };
-use posthaste_server::auth::require_auth_layer;
-use posthaste_server::supervisor::AccountSupervisor;
-use posthaste_server::token::{mint_full_scope_token, RootKey};
-use posthaste_server::AppState;
+use posthaste_api::auth::require_auth_layer;
+use posthaste_authority_runtime::AccountSupervisor;
+use posthaste_api::token::{mint_full_scope_token, RootKey};
+use posthaste_api::AppState;
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
@@ -99,8 +99,8 @@ pub(super) fn build_state() -> Arc<AppState> {
         auth_token: full_scope(),
         macaroon_root_key: test_root_key(),
         require_auth: true,
-        origin_allowlist: posthaste_server::auth::origin_allowlist(CORS_ORIGIN, &[]),
-        host_allowlist: posthaste_server::auth::host_allowlist("127.0.0.1:3001"),
+        origin_allowlist: posthaste_api::auth::origin_allowlist(CORS_ORIGIN, &[]),
+        host_allowlist: posthaste_api::auth::host_allowlist("127.0.0.1:3001"),
     })
 }
 

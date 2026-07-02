@@ -1,7 +1,7 @@
 use std::io::Read;
 
-use posthaste_server::config::resolve_roots;
-use posthaste_server::token::attenuate;
+use posthaste_api::config::resolve_roots;
+use posthaste_api::token::attenuate;
 
 fn token_usage() -> &'static str {
     "usage: posthaste token attenuate [--token <macaroon>] \
