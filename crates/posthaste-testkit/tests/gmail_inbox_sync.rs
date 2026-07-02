@@ -20,7 +20,7 @@ use posthaste_client_link::RuntimeLinkOps;
 use posthaste_contract_core::{
     AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot,
 };
-use posthaste_runtime_api::{RuntimeAccountApi, RuntimeMailReadApi};
+use posthaste_runtime_api::RuntimeMailReadApi;
 use posthaste_testkit::{GmailImapFixture, Harness, RuntimeHarness, SEEDED_SUBJECT};
 
 fn mail_list_rows(snapshot: &ViewSnapshot) -> MailListViewState {
