@@ -15,6 +15,7 @@ futures-util = { workspace = true }
 jsonwebtoken = { workspace = true }
 oauth2 = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }
+posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
@@ -22,7 +23,6 @@ posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime = { path = "../posthaste-runtime" }
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 posthaste-store = { path = "../posthaste-store" }
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { workspace = true }
@@ -35,6 +35,11 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
+# The authority-runtime test harness (tests/authority_runtime_handle.rs) drives
+# the near node through the RuntimeCore trait + RuntimeCaller, so it needs
+# runtime-contract (the trait surface). Production code is type-only and uses
+# posthaste-contract-core directly (RFC D5).
+posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 tokio = { workspace = true, features = ["net"] }
 tokio-stream = { workspace = true }
 

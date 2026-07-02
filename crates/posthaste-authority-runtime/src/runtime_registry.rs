@@ -13,7 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use posthaste_link_contract::{DownFrame, RuntimeId};
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationSettlementState, RuntimeMutationId,
 };
 use serde_json::Value;

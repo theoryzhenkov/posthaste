@@ -12,7 +12,7 @@ use posthaste_domain_service::{
     EVENT_TOPIC_SMART_MAILBOX_CREATED, EVENT_TOPIC_SMART_MAILBOX_DELETED,
     EVENT_TOPIC_SMART_MAILBOX_RESET, EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     AccountTransportMutation, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,
     PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeError,

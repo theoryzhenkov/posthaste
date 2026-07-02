@@ -5,7 +5,7 @@ use posthaste_domain_service::{
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue,
 };
-use posthaste_runtime_contract::RuntimeError;
+use posthaste_contract_core::RuntimeError;
 
 use tokenize::tokenize;
 
