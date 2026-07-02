@@ -6,9 +6,8 @@ use posthaste_domain_service::{
     now_iso8601 as domain_now_iso8601, validate_snapshot, AccountDriver, AccountSettings,
     AccountTransportSettings, AppSettings, ConfigRepository, ConfigSnapshot, SecretRef,
 };
+use posthaste_runtime::RuntimeBuildError;
 use serde::Deserialize;
-
-use crate::RuntimeBuildError;
 
 /// Initialize an empty config repository from a bootstrap file, or from default
 /// config and smart mailboxes when no bootstrap is supplied.

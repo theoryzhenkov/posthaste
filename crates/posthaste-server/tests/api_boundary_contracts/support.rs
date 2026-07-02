@@ -12,9 +12,9 @@ use posthaste_domain_service::{
     MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord, SecretRef,
     SecretStore, SecretStoreError, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
-use posthaste_server::api::{ApiError, ListSourceMessagesQuery};
-use posthaste_server::supervisor::AccountSupervisor;
-use posthaste_server::AppState;
+use posthaste_api::api::{ApiError, ListSourceMessagesQuery};
+use posthaste_authority_runtime::AccountSupervisor;
+use posthaste_api::AppState;
 use posthaste_store::DatabaseStore;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -94,7 +94,7 @@ impl ApiHarness {
                     ),
                 account_logo_root: state_root.join("account-assets/logos"),
                 auth_token: "test-token".to_string(),
-                macaroon_root_key: posthaste_server::token::RootKey::from_test_bytes([0u8; 32]),
+                macaroon_root_key: posthaste_api::token::RootKey::from_test_bytes([0u8; 32]),
                 require_auth: false,
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),

@@ -2,7 +2,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
-use posthaste_server::api::{
+use posthaste_api::api::{
     health, list_mailboxes, list_source_messages, read, AccountIdSelector, ReadCall, ReadCallArgs,
     ReadOperation, ReadRequest,
 };
