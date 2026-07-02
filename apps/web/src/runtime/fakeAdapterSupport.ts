@@ -38,8 +38,6 @@ import type {
   RuntimeLinkViewRequest,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
-  RuntimeViewFrame,
-  RuntimeViewSubscriptionRequest,
 } from './types'
 
 export type AccountCommandCall = {
@@ -50,9 +48,6 @@ export type AccountLogoUploadCall = { accountId: string; file: File }
 export type AccountUpdateCall = {
   accountId: string
   input: UpdateAccountInput
-}
-export type ViewSubscriptionCall = {
-  request: RuntimeViewSubscriptionRequest
 }
 export type RuntimeFrameSubscriptionCall = {
   request: RuntimeFrameSubscriptionRequest
@@ -87,8 +82,6 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly runtimeLinkViewCloseCalls: RuntimeLinkViewCloseRequest[]
   readonly runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   readonly runtimeMutationCalls: RuntimeMutationCall[]
-  readonly viewOpenCalls: RuntimeMessagePageRequest[]
-  readonly viewSubscriptionCalls: ViewSubscriptionCall[]
   readonly mailboxCalls: string[]
   readonly messageCalls: MessageDetailCall[]
   readonly messageCommandCalls: RuntimeMessageCommandRequest[]
@@ -102,7 +95,6 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   emitRuntimeFrame(frame: RuntimeFrame<RuntimeMailListViewState>): void
   /** Simulate a hard close of the runtime frame stream (fires `onClosed`). */
   emitRuntimeFrameStreamClosed(error?: unknown): void
-  emitViewFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
   queueAccount(account: AccountOverview): void
   queueAccountError(error: Error): void
   queueAccountOk(result: OkResponse): void
@@ -119,8 +111,6 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   queueMessageCommandError(error: Error): void
   queueMessagePage(page: MessagePage): void
   queueMessagePageError(error: Error): void
-  queueOpenMessageListView(result: RuntimeOpenMessageListViewResult): void
-  queueOpenMessageListViewError(error: Error): void
   queueRuntimeLinkConnection(link: RuntimeLinkConnection): void
   queueRuntimeLinkError(error: Error): void
   queueRuntimeLinkMessageListView(
@@ -164,8 +154,6 @@ export type FakeCallRecords = {
   runtimeLinkViewCloseCalls: RuntimeLinkViewCloseRequest[]
   runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   runtimeMutationCalls: RuntimeMutationCall[]
-  viewOpenCalls: RuntimeMessagePageRequest[]
-  viewSubscriptionCalls: ViewSubscriptionCall[]
   mailboxCalls: string[]
   messageCalls: MessageDetailCall[]
   messageCommandCalls: RuntimeMessageCommandRequest[]
@@ -186,7 +174,6 @@ export type FakeQueues = {
   messages: QueuedOutcome<MessageDetail>[]
   messageCommands: QueuedOutcome<MessageCommandResult>[]
   messagePages: QueuedOutcome<MessagePage>[]
-  openMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
   runtimeLinks: QueuedOutcome<RuntimeLinkConnection>[]
   runtimeLinkMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
   runtimeLinkViews: QueuedOutcome<RuntimeOpenViewResult>[]
@@ -209,7 +196,6 @@ export interface FakeRuntimeAdapterOptions {
   defaultMessage?: MessageDetail
   defaultMessageCommandResult?: MessageCommandResult
   defaultMessagePage?: MessagePage
-  defaultOpenMessageListView?: RuntimeOpenMessageListViewResult
   defaultRuntimeLinkConnection?: RuntimeLinkConnection
   defaultRuntimeLinkMessageListView?: RuntimeOpenMessageListViewResult
   defaultRuntimeLinkView?: RuntimeOpenViewResult
@@ -253,8 +239,6 @@ export function createFakeCallRecords(): FakeCallRecords {
     runtimeLinkViewCloseCalls: [],
     runtimeFrameSubscriptionCalls: [],
     runtimeMutationCalls: [],
-    viewOpenCalls: [],
-    viewSubscriptionCalls: [],
     mailboxCalls: [],
     messageCalls: [],
     messageCommandCalls: [],
@@ -283,8 +267,6 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.runtimeLinkViewCloseCalls.length = 0
   calls.runtimeFrameSubscriptionCalls.length = 0
   calls.runtimeMutationCalls.length = 0
-  calls.viewOpenCalls.length = 0
-  calls.viewSubscriptionCalls.length = 0
   calls.mailboxCalls.length = 0
   calls.messageCalls.length = 0
   calls.messageCommandCalls.length = 0
@@ -306,7 +288,6 @@ export function createFakeQueues(): FakeQueues {
     messages: [],
     messageCommands: [],
     messagePages: [],
-    openMessageListViews: [],
     runtimeLinks: [],
     runtimeLinkMessageListViews: [],
     runtimeLinkViews: [],
@@ -330,7 +311,6 @@ export function resetFakeQueues(queues: FakeQueues): void {
   queues.messages.length = 0
   queues.messageCommands.length = 0
   queues.messagePages.length = 0
-  queues.openMessageListViews.length = 0
   queues.runtimeLinks.length = 0
   queues.runtimeLinkMessageListViews.length = 0
   queues.runtimeLinkViews.length = 0

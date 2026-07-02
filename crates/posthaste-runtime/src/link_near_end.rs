@@ -39,7 +39,7 @@ use posthaste_contract_core::{
     MutationReceipt, MutationRequest, RuntimeError, RuntimeErrorCode,
 };
 use posthaste_link_near_end::{
-    ConnectionStatus, EngineError, FrameSink, GetRequest, NearEnd, NearEndConfig, OutboxHooks,
+    ConnectionStatus, EngineError, FrameSink, GetRequest, NearEnd, NearEndConfig, PendingSetHooks,
     ParsedFrame, PostRequest, PostResponse, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
     Transport, TransportError, Wire,
 };
@@ -383,12 +383,12 @@ impl FrameSink<SequencedFrame> for ChannelFrameSink {
     }
 }
 
-/// The runtime keeps no engine-side outbox at this seam: its own
-/// `RuntimeAuthorityServerOutbox` settles on receipts + down-channel absorption
+/// The runtime keeps no engine-side pending set at this seam: its own
+/// `AuthorityServerPendingSet` settles on receipts + down-channel absorption
 /// (unchanged semantics — only the connection lifecycle moved to the engine).
-struct NoopOutboxHooks;
+struct NoopPendingSetHooks;
 
-impl OutboxHooks for NoopOutboxHooks {
+impl PendingSetHooks for NoopPendingSetHooks {
     fn never_dispatched(&self) -> LocalBoxFuture<'static, Vec<MutationRequest>> {
         futures_util::future::ready(Vec::new()).boxed_local()
     }
@@ -528,7 +528,7 @@ fn engine_thread(
             Rc::new(NativeLinkTransport::new(client, base_url, token)),
             Rc::new(TokioScheduler::new()),
             Rc::new(ChannelFrameSink { frames }),
-            Rc::new(NoopOutboxHooks),
+            Rc::new(NoopPendingSetHooks),
             NearEndConfig::default(),
         );
         let mut started = false;

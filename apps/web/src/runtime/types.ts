@@ -171,7 +171,7 @@ export interface RuntimeAdapterError {
  * `mutationNotification` frame and keyed to the client mutation id. `confirmed`
  * retires the optimistic op by absorption (when the base carries the effect);
  * `rejected` reverts it and surfaces the error. The non-terminal acks are not
- * sent — the client tracks the in-flight op in its own outbox.
+ * sent — the client tracks the in-flight op in its own pending set.
  */
 export type RuntimeMutationNotification =
   | { type: 'confirmed' }
@@ -281,20 +281,14 @@ export interface RuntimeOpenViewResult<TData = unknown> {
   snapshot: RuntimeViewSnapshot<TData>
 }
 
-export interface RuntimeViewSubscriptionRequest {
-  viewId: string
-  afterRevision?: number | null
-  sourceId?: string | null
-}
-
 export interface RuntimeFrameSubscriptionRequest {
   linkId: string
   afterSeq?: number | null
   sourceId?: string | null
 }
 
-export interface RuntimeViewFrameHandlers {
-  onFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
+export interface RuntimeFrameHandlers {
+  onFrame(frame: RuntimeFrame<RuntimeMailListViewState>): void
   onMalformedFrame?(input: { raw: string; error: unknown }): void
   onPermanentError?(error: unknown): void
   onTransientError?(error: unknown): void
@@ -303,16 +297,6 @@ export interface RuntimeViewFrameHandlers {
    * (D49): a detected seq gap the far-end could not replay. Drop stale
    * incremental state; the runtime re-serves whole snapshots that re-seed it.
    */
-  onReset?(): void
-  onClosed?(error: unknown): void
-}
-
-export interface RuntimeFrameHandlers {
-  onFrame(frame: RuntimeFrame<RuntimeMailListViewState>): void
-  onMalformedFrame?(input: { raw: string; error: unknown }): void
-  onPermanentError?(error: unknown): void
-  onTransientError?(error: unknown): void
-  /** See {@link RuntimeViewFrameHandlers.onReset} (D49). */
   onReset?(): void
   onClosed?(error: unknown): void
 }
@@ -409,13 +393,6 @@ export interface RuntimeAdapter {
   subscribeRuntimeFrames(
     request: RuntimeFrameSubscriptionRequest,
     handlers: RuntimeFrameHandlers,
-  ): RuntimeUnsubscribe
-  openMessageListView(
-    request: RuntimeMessagePageRequest,
-  ): Promise<RuntimeOpenMessageListViewResult>
-  subscribeView(
-    request: RuntimeViewSubscriptionRequest,
-    handlers: RuntimeViewFrameHandlers,
   ): RuntimeUnsubscribe
   createAccount(input: CreateAccountInput): Promise<AccountOverview>
   createSmartMailbox(input: CreateSmartMailboxInput): Promise<SmartMailbox>

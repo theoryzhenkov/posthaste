@@ -479,7 +479,7 @@ impl LinkRegistry {
             }
             // No frame on accept: `mutation.notification` carries only terminal
             // verdicts, and the client already tracks the in-flight op in its own
-            // outbox the moment it dispatches it.
+            // pending set the moment it dispatches it.
             Accept::New => Ok(MutationAcceptance::New { mutation_id }),
         }
     }
@@ -805,7 +805,7 @@ fn collapse_link_frames(
     mutations.sort_by(|left, right| left.mutation_id.as_str().cmp(right.mutation_id.as_str()));
     for mutation in mutations {
         // Replay only terminal verdicts on collapse; in-flight ops are re-folded
-        // by the client from its own outbox over the re-served snapshots.
+        // by the client from its own pending set over the re-served snapshots.
         if let Some(frame) = mutation.notification_frame(next()) {
             frames.push(frame);
         }
@@ -1118,9 +1118,9 @@ mod race_tests {
 
     fn registry() -> Arc<LinkRegistry> {
         let (event_sender, _) = broadcast::channel(64);
-        let outbox = Arc::new(crate::near_node::RuntimeAuthorityServerOutbox::new(false));
+        let pending_set = Arc::new(crate::near_node::AuthorityServerPendingSet::new(false));
         let reads = Arc::new(crate::read::ReadCache::passthrough(Arc::new(StubApi)));
-        let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
+        let views = Arc::new(ViewRegistry::new(event_sender.clone(), pending_set, reads));
         Arc::new(LinkRegistry::new(views, event_sender))
     }
 

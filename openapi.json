@@ -3857,71 +3857,6 @@
         }
       }
     },
-    "/v1/views": {
-      "post": {
-        "tags": [
-          "views"
-        ],
-        "summary": "Open a runtime view",
-        "description": "Opens a runtime-owned view and returns its initial snapshot.",
-        "operationId": "open_view",
-        "parameters": [
-          {
-            "name": "sourceId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OpenViewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The opened view snapshot",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpenViewResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid view descriptor",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/views/conversations": {
       "get": {
         "tags": [
@@ -4074,76 +4009,6 @@
           },
           "404": {
             "description": "Conversation not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/views/{view_id}/stream": {
-      "get": {
-        "tags": [
-          "views"
-        ],
-        "summary": "Subscribe to a runtime view stream",
-        "description": "Streams runtime view frames as server-sent events. Event ids are view revisions.",
-        "operationId": "stream_view",
-        "parameters": [
-          {
-            "name": "view_id",
-            "in": "path",
-            "description": "Runtime view id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "afterRevision",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "int64",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "sourceId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "SSE stream of runtime ViewFrame values"
-          },
-          "404": {
-            "description": "Unknown view",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
             "content": {
               "application/json": {
                 "schema": {
@@ -6081,7 +5946,7 @@
             }
           }
         ],
-        "description": "A terminal verdict about a named client mutation, carried by\n[`RuntimeFrame::MutationNotification`] and keyed to the client mutation id.\nThe two outcomes are deliberately the only ones on the wire: `Confirmed` is\notherwise implicit in the base update (it serves the no-op-confirmation and\ndurable-outbox-clear cases), and `Rejected` is the *only* signal a failed\nmutation produces — a rejection changes no state, so no `message.updated`\naccompanies it. The non-terminal acks (Accepted/Queued) are not emitted: the\nclient already tracks the op the moment it enqueues it.\n\n@spec docs/eph/DESIGN-L2-mutation-notification"
+        "description": "A terminal verdict about a named client mutation, carried by\n[`RuntimeFrame::MutationNotification`] and keyed to the client mutation id.\nThe two outcomes are deliberately the only ones on the wire: `Confirmed` is\notherwise implicit in the base update (it serves the no-op-confirmation and\ndurable-pending-set-clear cases), and `Rejected` is the *only* signal a failed\nmutation produces — a rejection changes no state, so no `message.updated`\naccompanies it. The non-terminal acks (Accepted/Queued) are not emitted: the\nclient already tracks the op the moment it enqueues it.\n\n@spec docs/eph/DESIGN-L2-mutation-notification"
       },
       "MutationReceipt": {
         "type": "object",
@@ -6214,32 +6079,6 @@
         "properties": {
           "snapshot": {
             "$ref": "#/components/schemas/ViewSnapshot"
-          },
-          "viewId": {
-            "type": "string"
-          }
-        }
-      },
-      "OpenViewRequest": {
-        "type": "object",
-        "required": [
-          "descriptor"
-        ],
-        "properties": {
-          "descriptor": {
-            "type": "object"
-          }
-        }
-      },
-      "OpenViewResponse": {
-        "type": "object",
-        "required": [
-          "viewId",
-          "snapshot"
-        ],
-        "properties": {
-          "snapshot": {
-            "type": "object"
           },
           "viewId": {
             "type": "string"
@@ -7157,7 +6996,7 @@
           },
           {
             "type": "object",
-            "description": "A verdict about a named client mutation, keyed to its **client** mutation\nid so the client correlates it to the optimistic op in its outbox. The\nauthoritative state change (if any) arrives *separately* as a\n`message.updated` domain fact via [`Self::Notification`] — this frame is\nthe verdict, not the data, and the two are never merged (facts come from\nthe firehose uncorrelated; verdicts come from the command path keyed by\nid). A `Confirmed` retires the op by absorption when the base carries its\neffect (no revert); a `Rejected` reverts the optimism and surfaces the\nerror. Replaces the former `MutationSettlement`\n([mutation.notification design](../../eph/DESIGN-L2-mutation-notification.md)).",
+            "description": "A verdict about a named client mutation, keyed to its **client** mutation\nid so the client correlates it to the optimistic op in its pending set. The\nauthoritative state change (if any) arrives *separately* as a\n`message.updated` domain fact via [`Self::Notification`] — this frame is\nthe verdict, not the data, and the two are never merged (facts come from\nthe firehose uncorrelated; verdicts come from the command path keyed by\nid). A `Confirmed` retires the op by absorption when the base carries its\neffect (no revert); a `Rejected` reverts the optimism and surfaces the\nerror. Replaces the former `MutationSettlement`\n([mutation.notification design](../../eph/DESIGN-L2-mutation-notification.md)).",
             "required": [
               "linkSeq",
               "clientMutationId",
@@ -8283,10 +8122,6 @@
     {
       "name": "events",
       "description": "Server-sent domain event stream"
-    },
-    {
-      "name": "views",
-      "description": "Runtime-owned view snapshots and streams"
     },
     {
       "name": "runtime",

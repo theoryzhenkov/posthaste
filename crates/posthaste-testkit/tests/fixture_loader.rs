@@ -38,9 +38,16 @@ async fn declarative_fixture_loads_accounts_and_messages_into_the_view() {
     assert_eq!(accounts.len(), 1);
     assert_eq!(accounts[0].as_str(), "a");
 
+    let caller = RuntimeCaller::test();
+    let link = harness
+        .core()
+        .open_link(caller.clone())
+        .await
+        .expect("link should open")
+        .link_id;
     let snapshot = harness
         .core()
-        .open_view(RuntimeCaller::test(), common::mail_list_view("in:a/inbox"))
+        .open_link_view(caller, link, common::mail_list_view("in:a/inbox"))
         .await
         .expect("mail list view should open");
     let state: MailListViewState =

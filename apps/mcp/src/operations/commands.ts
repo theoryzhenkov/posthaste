@@ -19,7 +19,8 @@ const attachmentSchema = z.object({
 /**
  * The mutating operations. The first three are the original `tools/commands.ts`
  * handlers, unchanged; `list_mailboxes` and `trigger_sync` are additive thin
- * wrappers over existing `/v1` endpoints, named in DESIGN-L2-posthastectl §4.
+ * wrappers over existing `/v1` endpoints — the "one vocabulary" principle
+ * (docs/eph/RFC-L2-scripting.md §6, D53, the action path).
  */
 export const commandOperations: Operation[] = [
   defineOperation({

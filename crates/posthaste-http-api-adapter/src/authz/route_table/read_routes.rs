@@ -22,16 +22,6 @@ pub(super) const ROUTES: &[Entry] = &[
     },
     Entry {
         method: "POST",
-        template: "/views",
-        authz: filter(Action::Read, ResourceShape::account("sourceId")),
-    },
-    Entry {
-        method: "GET",
-        template: "/views/{view_id}/stream",
-        authz: filter(Action::Read, ResourceShape::account("sourceId")),
-    },
-    Entry {
-        method: "POST",
         template: "/runtime/sessions",
         authz: filter(Action::Read, ResourceShape::account("sourceId")),
     },

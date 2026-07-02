@@ -7,7 +7,7 @@
  * chained undo pops the cursor in memory + returns each step to invert, so N
  * undos do not cost N round trips. The diff is captured client-side
  * (`captureMutationDiffJson`); the runtime's per-link seq-keyed stacks are
- * retired. Persisted alongside the outbox (IndexedDB) so it survives reload.
+ * retired. Persisted alongside the pending set (IndexedDB) so it survives reload.
  *
  * The store is the mirror of the server-authoritative `RevLog` synced view
  * (Phase 2 Slice 5b): `reconcileWithServer` adopts the server's steps + cursor
@@ -470,7 +470,7 @@ function runRequest<T>(request: IDBRequest<T>): Promise<T> {
  * IndexedDB-backed history. Each account's snapshot (steps + cursor) is one
  * record keyed by the accountId — the history is small (capped at
  * `MAX_HISTORY` per account) so there is no per-step indexing. Shares the
- * `posthaste-replica` DB with the outbox. The legacy Phase 1 `'main'` record is
+ * `posthaste-replica` DB with the pending set. The legacy Phase 1 `'main'` record is
  * dropped on load (the mirror re-syncs from the server).
  */
 export class IndexedDbUndoHistoryStore extends BaseMultiAccountUndoHistoryStore {

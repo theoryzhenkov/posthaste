@@ -1,7 +1,7 @@
 /**
  * Repair local state and relaunch — a composite of BOTH durable client stores.
  *
- * 1. Reset the IndexedDB replica (outbox + undo history). This is the store the
+ * 1. Reset the IndexedDB replica (pending set + undo history). This is the store the
  *    reactive mail-list views are computed from; a wedged replica is the real
  *    cause of "views stuck loading forever", and rebuilding `mail.sqlite` alone
  *    never clears it (the prior "repair does nothing" bug).
@@ -10,7 +10,7 @@
  * 3. Relaunch into the fresh replica + rebuilt DB.
  *
  * Accounts and passwords (config + keychain) are unaffected and mail re-syncs;
- * the only loss is never-dispatched outbox mutations. Desktop-only — the browser
+ * the only loss is never-dispatched pending-set mutations. Desktop-only — the browser
  * build cannot relaunch.
  */
 import { isTauriRuntime } from './desktop'

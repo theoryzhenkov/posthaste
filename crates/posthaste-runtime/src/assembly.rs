@@ -14,7 +14,7 @@ use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use tokio::sync::broadcast;
 
 use crate::handle::{RuntimeCoreState, RuntimeHandle};
-use crate::near_node::RuntimeAuthorityServerOutbox;
+use crate::near_node::AuthorityServerPendingSet;
 use crate::read::ReadCache;
 use crate::secret::SystemSecretStore;
 use crate::far_end::links::LinkRegistry;
@@ -47,7 +47,7 @@ pub struct RuntimeBuildConfig {
     /// builder hands it the real (in-process or remote) transport pair as an
     /// [`AuthorityServerLinkHandle`] and uses what it returns. A host/test seam
     /// for *composing over* the transport (e.g. gating the up-channel to
-    /// exercise the near-node outbox) without replacing the full authority
+    /// exercise the near-node pending set) without replacing the full authority
     /// server surface — the decorator delegates everything it does not
     /// intercept to the inner handle. `None` in normal builds.
     pub authority_server_transport_override: Option<AuthorityServerTransportDecorator>,
@@ -246,7 +246,7 @@ pub struct RuntimeAssembly {
     /// The engine-driven down-channel of a remote near node
     /// ([`RemoteAuthorityServer::take_down_channel`]): when `Some`, the
     /// consumer that evicts on assertions and republishes so views recompute is
-    /// spawned over it (and outbox retirement becomes absorption-gated).
+    /// spawned over it (and pending-set retirement becomes absorption-gated).
     /// In-process the runtime shares the authority server's bus, so no bridge
     /// is needed — pass `None`.
     pub down_channel:
@@ -259,7 +259,7 @@ pub struct ComposedRuntime {
     pub shutdown: RuntimeShutdownHandle,
 }
 
-/// Assemble a runtime near node over an authority server link: the outbox, view/link
+/// Assemble a runtime near node over an authority server link: the pending set, view/link
 /// registries, and the handle. The far-node crate calls this to compose an
 /// in-process runtime over a `LocalAuthorityServer`; [`build_remote_runtime`] calls it
 /// over a [`RemoteAuthorityServer`]. Must run within a Tokio runtime when
@@ -277,8 +277,8 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     // Remote authority server (a down-channel is mounted): retirement is
     // absorption-gated on the down-channel base assertion, not the receipt.
     // Co-located: retire on receipt (`colocated-unchanged`). See
-    // [`RuntimeAuthorityServerOutbox`].
-    let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(down_channel.is_some()));
+    // [`AuthorityServerPendingSet`].
+    let pending_set = Arc::new(AuthorityServerPendingSet::new(down_channel.is_some()));
     if let Some(frames) = down_channel {
         // The connection lifecycle (subscribe, reconnect, `afterSeq` resume)
         // lives in the near-end engine that feeds `frames`; this task holds the
@@ -287,21 +287,20 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
             frames,
             reads.clone(),
             event_sender.clone(),
-            outbox.clone(),
+            pending_set.clone(),
         ));
     }
     let views = Arc::new(ViewRegistry::new(
         event_sender.clone(),
-        outbox.clone(),
+        pending_set.clone(),
         reads.clone(),
     ));
-    let links = Arc::new(LinkRegistry::new(views.clone(), event_sender.clone()));
+    let links = Arc::new(LinkRegistry::new(views, event_sender.clone()));
     let core = Arc::new(RuntimeCoreState {
         authority_server_link,
-        outbox,
+        pending_set,
         reads,
         event_sender,
-        views,
         links,
         startup_status,
         stopped: stopped.clone(),

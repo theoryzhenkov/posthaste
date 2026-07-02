@@ -17,8 +17,8 @@
  * - the frame fan-out to the renderer's `RuntimeFrameHandlers`;
  * - the resume-cursor mirror to `sessionStorage` (the engine owns the cursor;
  *   the host only persists it across reloads);
- * - the outbox-hook registry the entity-store adapter plugs its durable
- *   outbox into (the engine decides WHEN to reconcile; the adapter knows HOW
+ * - the pending-set-hook registry the entity-store adapter plugs its durable
+ *   pending set into (the engine decides WHEN to reconcile; the adapter knows HOW
  *   to read/settle records).
  *
  * @spec docs/replication/client-link/L2
@@ -141,7 +141,7 @@ const browserTransportIo: NearEndTransportIo = {
 
 let transportIo: NearEndTransportIo = browserTransportIo
 
-// ---- outbox hooks -------------------------------------------------------------
+// ---- pending-set hooks --------------------------------------------------------
 
 /** A sent-but-unsettled record for the engine's settlement query (D44b). */
 export interface NearEndSentUnsettled {
@@ -151,9 +151,9 @@ export interface NearEndSentUnsettled {
   request?: RuntimeRunMutationRequest
 }
 
-/** The durable-outbox surface the engine's level-triggered reconciler drives.
+/** The durable-pending-set surface the engine's level-triggered reconciler drives.
  * Registered by the entity-store adapter; defaults are inert. */
-export interface NearEndOutboxHooks {
+export interface NearEndPendingSetHooks {
   /** Requests accepted optimistically with no evidence they reached the
    * runtime — replayed on every connect. */
   neverDispatched(): Promise<RuntimeRunMutationRequest[]>
@@ -170,19 +170,19 @@ export interface NearEndOutboxHooks {
   onSettlement(receipt: RuntimeMutationReceipt): Promise<void>
 }
 
-const inertOutboxHooks: NearEndOutboxHooks = {
+const inertPendingSetHooks: NearEndPendingSetHooks = {
   neverDispatched: async () => [],
   onReconciled: async () => {},
   sentUnsettled: async () => [],
   onSettlement: async () => {},
 }
 
-let outboxHooks: NearEndOutboxHooks = inertOutboxHooks
+let pendingSetHooks: NearEndPendingSetHooks = inertPendingSetHooks
 
-/** Plug the durable outbox into the engine's reconciler (the entity-store
+/** Plug the durable pending set into the engine's reconciler (the entity-store
  * adapter calls this once at construction). */
-export function setNearEndOutboxHooks(hooks: NearEndOutboxHooks): void {
-  outboxHooks = hooks
+export function setNearEndPendingSetHooks(hooks: NearEndPendingSetHooks): void {
+  pendingSetHooks = hooks
 }
 
 // ---- engine lifecycle -----------------------------------------------------------
@@ -282,15 +282,15 @@ function buildIo() {
       }
     },
     neverDispatched: async () => {
-      const requests = await outboxHooks.neverDispatched()
+      const requests = await pendingSetHooks.neverDispatched()
       return JSON.stringify(requests.map(wireMutationRequest))
     },
     onReconciled(receiptJson: string) {
       const receipt = JSON.parse(receiptJson) as RuntimeMutationReceipt
-      void outboxHooks.onReconciled(receipt, engine?.linkId() ?? null)
+      void pendingSetHooks.onReconciled(receipt, engine?.linkId() ?? null)
     },
     sentUnsettled: async () => {
-      const records = await outboxHooks.sentUnsettled()
+      const records = await pendingSetHooks.sentUnsettled()
       return JSON.stringify(
         records.map((record) => ({
           linkId: record.linkId,
@@ -303,7 +303,7 @@ function buildIo() {
     },
     onSettlement(receiptJson: string) {
       const receipt = JSON.parse(receiptJson) as RuntimeMutationReceipt
-      void outboxHooks.onSettlement(receipt)
+      void pendingSetHooks.onSettlement(receipt)
     },
   }
 }
@@ -419,6 +419,6 @@ export function setNearEndTransportIoForTesting(io: NearEndTransportIo): void {
 export async function resetNearEndForTesting(): Promise<void> {
   await disconnectNearEnd()
   frameHandlers.clear()
-  outboxHooks = inertOutboxHooks
+  pendingSetHooks = inertPendingSetHooks
   transportIo = browserTransportIo
 }

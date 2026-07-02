@@ -6,7 +6,7 @@ import { LOG_EVENTS, syncLogger } from '../logger'
 
 import { httpRuntimeAdapter } from './httpAdapter'
 import { loadEntityStoreHandleFactory } from './replica/handle'
-import { defaultOutboxStore } from './replica/outboxStore'
+import { defaultPendingSetStore } from './replica/pendingSetStore'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createWorkerStorePort } from './replica/workerStorePort'
 import { resolveStorePort } from './replica/storePortResolver'
@@ -24,13 +24,6 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     closeRuntimeLinkView: () => reject(),
     runRuntimeMutation: () => reject(),
     subscribeRuntimeFrames: (_request, handlers) => {
-      handlers.onPermanentError?.(
-        new Error(`runtime adapter mode ${mode} is not implemented`),
-      )
-      return () => undefined
-    },
-    openMessageListView: () => reject(),
-    subscribeView: (_request, handlers) => {
       handlers.onPermanentError?.(
         new Error(`runtime adapter mode ${mode} is not implemented`),
       )
@@ -169,7 +162,7 @@ export function installEntityStoreAdapter(): Promise<void> {
     activeRuntimeAdapter = createEntityStoreAdapter({
       base: activeRuntimeAdapter,
       makeStore: () => store.port,
-      outbox: defaultOutboxStore(),
+      pendingSet: defaultPendingSetStore(),
     })
     syncLogger.info(
       {

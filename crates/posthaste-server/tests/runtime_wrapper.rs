@@ -103,61 +103,6 @@ async fn get_account_matches_runtime_account_projection() {
 }
 
 #[tokio::test]
-async fn open_mail_list_view_returns_runtime_snapshot() {
-    let harness = Harness::new();
-    harness.save_account("primary", "Primary", true);
-    harness.seed_source("primary", "Primary");
-    harness.seed_messages("primary", "inbox", vec![message("m1", "Subject", "inbox")]);
-    let token = harness.full_scope();
-
-    let (status, body) = harness
-        .post_json(
-            &token,
-            "/v1/views",
-            serde_json::json!({
-                "descriptor": {
-                    "family": "mailList",
-                    "payload": {
-                        "query": "in:primary/inbox",
-                        "presentation": {
-                            "kind": "messages",
-                            "limit": 10,
-                            "cursor": null,
-                            "sortField": "date",
-                            "sortDirection": "desc"
-                        },
-                        "visibility": null
-                    }
-                }
-            }),
-        )
-        .await;
-
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let view_id = body["viewId"].as_str().expect("view id should serialize");
-    assert_eq!(body["snapshot"]["revision"], 1);
-    assert_eq!(
-        body["snapshot"]["data"]["rows"].as_array().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        body["snapshot"]["data"]["rows"][0]["projection"]["id"],
-        "m1"
-    );
-
-    let (stream_status, frame) = harness
-        .get_text_frame(
-            &token,
-            &format!("/v1/views/{view_id}/stream?afterRevision=0"),
-        )
-        .await;
-    assert_eq!(stream_status, StatusCode::OK);
-    assert!(frame.contains("id: 1"), "{frame}");
-    assert!(frame.contains(r#""kind":"snapshot""#), "{frame}");
-    assert!(frame.contains(r#""id":"m1""#), "{frame}");
-}
-
-#[tokio::test]
 async fn runtime_link_stream_returns_collapsed_view_snapshot() {
     let harness = Harness::new();
     harness.save_account("primary", "Primary", true);

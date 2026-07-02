@@ -402,7 +402,7 @@ impl<C: Convergence> Replica<C> {
 ///
 /// Both near nodes compose this one kernel (`one-replica-both-seams`, RFC D34):
 /// the client's `EntityStore` (posthaste-replica-projector) and the runtime's
-/// `RuntimeAuthorityServerOutbox` (posthaste-runtime). The trait is a *view*
+/// `AuthorityServerPendingSet` (posthaste-runtime). The trait is a *view*
 /// over the single-owner [`Replica`] — one store (base + pending), never a
 /// second copy (a split store was considered and rejected, RFC R2). The
 /// version-gated race-free retire lives behind this seam ([`accept_at`]

@@ -248,10 +248,16 @@ async fn remote_runtime_serves_a_mail_list_view_from_the_authority_server() {
     // The Remote runtime opens a mail-list view. Its read source reads through
     // the link, so the rows are the authority server's computed query — even though the
     // runtime's own store is empty.
+    let link = remote
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link opens");
     let snapshot = remote
         .handle
-        .open_view(
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id,
             mail_list_descriptor(&format!("in:{}/inbox", account.id.as_str())),
         )
         .await

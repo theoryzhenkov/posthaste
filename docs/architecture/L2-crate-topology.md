@@ -62,9 +62,9 @@ merge did not land — see §2.1b for the verdict.*
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `posthaste-authority-server-link` | The runtime↔authority-server seam, mirroring the client↔runtime seam's shape (RFC D33): **`AuthorityServerApi`** (the typed request surface — reads, account/settings ops, `apply(op: MailOperation)`) + **`AuthorityServerLink`** (the coherent-link mechanics — `forward_mutation`, `subscribe(coverage)` → frames, settlement/watermark, outbox op-lifecycle) + `AuthorityServerLinkHandle` (wrapper), `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). | contract-core, domain-model, replica-core |
+| `posthaste-authority-server-link` | The runtime↔authority-server seam, mirroring the client↔runtime seam's shape (RFC D33): **`AuthorityServerApi`** (the typed request surface — reads, account/settings ops, `apply(op: MailOperation)`) + **`AuthorityServerLink`** (the coherent-link mechanics — `forward_mutation`, `subscribe(coverage)` → frames, settlement/watermark, pending-set op-lifecycle) + `AuthorityServerLinkHandle` (wrapper), `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). | contract-core, domain-model, replica-core |
 | `posthaste-runtime-api` | The typed, wire-free client-facing domain RPC extracted from `RuntimeCore` (41 of its 52 methods): returns serde domain types, no frames. **Four traits** — `RuntimeAccountApi`, `RuntimeSettingsApi`, `RuntimeMailReadApi`, `RuntimeMailWriteApi` (whose message commands are one typed `apply(op: MailOperation) -> CommandAck` entry (D34), not per-command RPCs) — plus an umbrella supertrait; narrow consumers take one trait (`&dyn RuntimeAccountApi`). | contract-core, domain-model |
-| `posthaste-client-link` | The client↔runtime link ops extracted from `RuntimeCore` (**one trait, `RuntimeLink`**, 10 methods): `forward_mutation` (the up-channel flush, one verb across both seams per D35), the three stream families (`subscribe_runtime_frames`, `subscribe_events`, link-view snapshots), link open/close, view open/extend/close. | contract-core, domain-model, replica-core |
+| `posthaste-client-link` | The client↔runtime link ops extracted from `RuntimeCore` (**one trait, `RuntimeLink`**, 9 methods): `forward_mutation` (the up-channel flush, one verb across both seams per D35), the three stream families (`subscribe_runtime_frames`, `subscribe_events`, link-view snapshots), link open/close, link-view open/extend/close, `mutation_settlement` (the reconciler's cross-link settlement lookup, M9b2). The sessionless `open_view`/`subscribe_view` pair was deleted at M10 (D51: zero call sites). | contract-core, domain-model, replica-core |
 | `posthaste-link-near-end` | The shared near-end engine (D40/D41): `Wire`-generic transport+resilience (deadlines, jittered reconnect, seq cursor, the level-triggered reconciler); the client↔runtime profile (`RuntimeLinkWire`) lives here, wasm-pure. | contract-core, domain-model |
 | `posthaste-link-far-end` | The shared far-end engine (D40): composable sub-stores (dedup, settlement sinks, seq-backlog replay with collapse fallback + expiry) both far-ends (runtime, authority server) assemble. | contract-core, domain-model |
 
@@ -76,7 +76,7 @@ merge did not land — see §2.1b for the verdict.*
 | `posthaste-engine` | JMAP gateway/push adapters. | domain-service |
 | `posthaste-imap` | IMAP gateway adapter. | domain-service |
 | `posthaste-config` | TOML config persistence (`TomlConfigRepository`, tuning schemas). | domain-service (types via domain-model) |
-| `posthaste-runtime` | The near node: runtime assembly, the far-end link registry (`LinkRegistry`, RFC D42), outbox (`RuntimeAuthorityServerOutbox` over `MessageReplica`), `ReadCache`, the remote authority-server transport (`RemoteAuthorityServer`), implements runtime-api + client-link. | runtime-api, client-link, authority-server-link, link-far-end, replica-projector, replica-core, domain-service |
+| `posthaste-runtime` | The near node: runtime assembly, the far-end link registry (`LinkRegistry`, RFC D42), pending set (`AuthorityServerPendingSet` over `MessageReplica`), `ReadCache`, the remote authority-server transport (`RemoteAuthorityServer`), implements runtime-api + client-link. | runtime-api, client-link, authority-server-link, link-far-end, replica-projector, replica-core, domain-service |
 | `posthaste-authority-server` | The far node: `AuthorityServerNode`, account supervision, sync, push, oauth, `AuthorityServerLink` impls (`LocalAuthorityServer`), registry, **and its own link wire** (`link_router` + link auth — the far node owns the surface it serves; it does not borrow the /v1 platform's error/auth vocabulary). No re-exports of near-node symbols. | authority-server-link, runtime, domain-service, engine, imap, store, config |
 | `posthaste-client-node-wasm` | The wasm client node assembly (D41/D43): kernel (replica-core) + projector (replica-projector) + near-end (`posthaste-link-near-end`, wasm32-only cfg), exposed as a wasm-bindgen JSON boundary. | replica-core, replica-projector, link-near-end, domain-model, contract-core |
 | `posthaste-http-api-adapter` | The HTTP API adapter: serves the /v1 contract over the runtime's typed Api surfaces. | runtime-api, client-link, domain-service, config |
@@ -167,15 +167,15 @@ is kernel + projector + near-end — no UI mount required.
 
 ### 2.1 Replica seams
 
-The Link/Replica/Outbox layering is legible **in types**, not only in
+The Link/Replica/PendingSet layering is legible **in types**, not only in
 structure: `replica-core` exposes the explicit `OptimisticReplica` trait (D35a;
-`Link`/`Outbox` views only if a caller benefits) over the single-owner
+`Link`/`PendingSet` views only if a caller benefits) over the single-owner
 `MessageReplica`. There
 is exactly one store — base + pending, optimism folded on read; the seams are
 *views* over that owner, never a second copy (a split store was considered and
 rejected). The version-gated race-free retire invariant lives in the engine
 seam itself, so both convergence consumers — the client `EntityStore` and the
-runtime near node's `RuntimeAuthorityServerOutbox` — inherit it rather than
+runtime near node's `AuthorityServerPendingSet` — inherit it rather than
 re-implementing it.
 
 ## 3. The wasm-pure frontier

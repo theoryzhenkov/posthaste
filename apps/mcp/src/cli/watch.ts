@@ -8,7 +8,7 @@ import { consumeSse, openEventStream } from "./events.js";
  */
 const WATCH_TOPIC = "message.updated";
 
-/** Options for the `watch` runner (DESIGN-L2-posthastectl §4). */
+/** Options for the `watch` runner (docs/eph/RFC-L2-scripting.md §7, the ladder, level 2). */
 export interface WatchOptions {
   /** Server-side account filter. */
   account?: string;

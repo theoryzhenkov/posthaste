@@ -61,8 +61,6 @@ use utoipa::OpenApi;
         crate::api::messages::compose::operations::retry_operation,
         crate::api::sync_events::trigger_sync,
         crate::api::sync_events::stream_events,
-        crate::api::views::open_view,
-        crate::api::views::stream_view,
         crate::api::runtime_stream::links::open_runtime_link,
         crate::api::runtime_stream::links::close_runtime_link,
         crate::api::runtime_stream::links::stream_runtime_link,
@@ -108,8 +106,6 @@ use utoipa::OpenApi;
         crate::api::VerificationResponse,
         crate::api::TriggerSyncRequest,
         crate::api::TriggerSyncResponse,
-        crate::api::views::OpenViewRequest,
-        crate::api::views::OpenViewResponse,
         crate::api::runtime_stream::OpenRuntimeLinkViewRequest,
         crate::api::runtime_stream::OpenRuntimeLinkViewResponse,
         crate::api::runtime_stream::ExtendRuntimeLinkViewRequest,
@@ -238,7 +234,6 @@ use utoipa::OpenApi;
         (name = "settings", description = "Application settings and automation rules"),
         (name = "sync", description = "Sync triggers and configuration reload"),
         (name = "events", description = "Server-sent domain event stream"),
-        (name = "views", description = "Runtime-owned view snapshots and streams"),
         (name = "runtime", description = "Link-scoped runtime frame stream"),
         (name = "auth", description = "Capability-token minting")
     )
