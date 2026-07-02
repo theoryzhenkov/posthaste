@@ -37,9 +37,14 @@ use posthaste_config::DaemonSettings;
 use posthaste_domain_service::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
+use posthaste_domain_service::CommandAck;
 use posthaste_authority_server_link::{
-    AuthorityServerLink, AuthorityServerFrame, LinkCoverage, AuthorityServerLinkId, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
-    LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
+    AddToMailboxRequest, AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink,
+    AuthorityServerLinkHandle, AuthorityServerLinkId, DestroyMessageRequest, LinkCoverage,
+    RemoveFromMailboxRequest, ReplaceMailboxesRequest, SetKeywordsRequest,
+    LINK_ADD_TO_MAILBOX_PATH, LINK_CONVERSATION_PATH, LINK_DESTROY_MESSAGE_PATH, LINK_DETAIL_PATH,
+    LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_REMOVE_FROM_MAILBOX_PATH,
+    LINK_REPLACE_MAILBOXES_PATH, LINK_SET_KEYWORDS_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_contract_core::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeAdapterError,
@@ -48,9 +53,13 @@ use posthaste_contract_core::{
 use serde::Serialize;
 use serde::Deserialize;
 
+/// The wire's shared state: the two trait halves of the one config-selected
+/// transport (D33) — Api ops route through `api`, the replication channels and
+/// op-lifecycle through `link`.
 #[derive(Clone)]
 struct LinkState {
-    transport: Arc<dyn AuthorityServerLink>,
+    api: Arc<dyn AuthorityServerApi>,
+    link: Arc<dyn AuthorityServerLink>,
 }
 
 /// Authentication + identity policy for the runtime↔authority-server link surface.
@@ -285,7 +294,7 @@ async fn forward_mutation(
     Json(request): Json<MutationRequest>,
 ) -> Result<Json<MutationReceipt>, LinkError> {
     state
-        .transport
+        .link
         .forward_mutation_for(&runtime_id, request)
         .await
         .map(Json)
@@ -304,7 +313,7 @@ async fn subscribe(
         .and_then(|raw| serde_json::from_str(raw).ok())
         .unwrap_or(LinkCoverage::Complete);
     let stream = state
-        .transport
+        .link
         .subscribe_for(&runtime_id, coverage)
         .await
         .map_err(LinkError::from_runtime_error)?;
@@ -317,7 +326,7 @@ async fn query_mail_page(
     Json(request): Json<MailQueryRequest>,
 ) -> Result<Json<MailQueryPage>, LinkError> {
     state
-        .transport
+        .api
         .query_mail_page(request)
         .await
         .map(Json)
@@ -337,7 +346,7 @@ async fn current_summary(
     Json(request): Json<SummaryRequest>,
 ) -> Result<Json<Option<MessageSummary>>, LinkError> {
     state
-        .transport
+        .api
         .current_summary(request.account_id, request.message_id)
         .await
         .map(Json)
@@ -350,7 +359,7 @@ async fn message_detail(
     Json(request): Json<SummaryRequest>,
 ) -> Result<Json<Option<MessageDetail>>, LinkError> {
     state
-        .transport
+        .api
         .message_detail(request.account_id, request.message_id)
         .await
         .map(Json)
@@ -369,17 +378,17 @@ async fn conversation(
     Json(request): Json<ConversationRequest>,
 ) -> Result<Json<ConversationView>, LinkError> {
     state
-        .transport
+        .api
         .conversation(request.conversation_id)
         .await
         .map(Json)
         .map_err(LinkError::from_runtime_error)
 }
 
-/// Emit a far-node handler per link-op row + the function that registers them
-/// all. Generated from the shared link-op table so the server surface cannot
-/// drift from the [`RemoteAuthorityServer`](posthaste_authority_server) client.
-macro_rules! emit_link_routes {
+/// Emit a far-node handler per Api-op row + the function that registers them
+/// all. Generated from the shared Api-op table so the server surface cannot
+/// drift from the `RemoteAuthorityServer` client.
+macro_rules! emit_link_api_routes {
     ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
         $(
             // Zero-arg ops leave `req` unused (the request body is `{}`).
@@ -389,17 +398,73 @@ macro_rules! emit_link_routes {
                 Json(req): Json<posthaste_authority_server_link::$req>,
             ) -> Result<Json<$ret>, LinkError> {
                 let result: Result<$ret, RuntimeError> =
-                    state.transport.$method($(req.$field),*).await;
+                    state.api.$method($(req.$field),*).await;
                 result.map(Json).map_err(LinkError::from_runtime_error)
             }
         )*
 
-        fn register_generated_link_routes(router: Router<LinkState>) -> Router<LinkState> {
+        fn register_generated_api_routes(router: Router<LinkState>) -> Router<LinkState> {
             router $( .route($path, post($method)) )*
         }
     };
 }
-posthaste_authority_server_link::for_each_link_op!(emit_link_routes);
+posthaste_authority_server_link::for_each_link_api_op!(emit_link_api_routes);
+
+/// Emit a far-node handler per op-lifecycle row (the Link half's outbox
+/// lifecycle mutations) + the function that registers them.
+macro_rules! emit_link_lifecycle_routes {
+    ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
+        $(
+            async fn $method(
+                State(state): State<LinkState>,
+                Json(req): Json<posthaste_authority_server_link::$req>,
+            ) -> Result<Json<$ret>, LinkError> {
+                let result: Result<$ret, RuntimeError> =
+                    state.link.$method($(req.$field),*).await;
+                result.map(Json).map_err(LinkError::from_runtime_error)
+            }
+        )*
+
+        fn register_generated_lifecycle_routes(router: Router<LinkState>) -> Router<LinkState> {
+            router $( .route($path, post($method)) )*
+        }
+    };
+}
+posthaste_authority_server_link::for_each_link_lifecycle_op!(emit_link_lifecycle_routes);
+
+/// The five preserved message-command routes (M5b): each decodes its pre-split
+/// request struct, rebuilds the typed `MailOperation`, and routes through the
+/// single [`AuthorityServerApi::apply`] entry — one command dispatch per
+/// implementor, not one per route. Paths and JSON are wire-identical to the
+/// pre-split per-command RPCs.
+macro_rules! emit_link_command_routes {
+    ($(($handler:ident, $req:ident, $path:ident);)*) => {
+        $(
+            async fn $handler(
+                State(state): State<LinkState>,
+                Json(req): Json<$req>,
+            ) -> Result<Json<CommandAck>, LinkError> {
+                state
+                    .api
+                    .apply(req.into_operation())
+                    .await
+                    .map(Json)
+                    .map_err(LinkError::from_runtime_error)
+            }
+        )*
+
+        fn register_command_routes(router: Router<LinkState>) -> Router<LinkState> {
+            router $( .route($path, post($handler)) )*
+        }
+    };
+}
+emit_link_command_routes! {
+    (set_keywords_command, SetKeywordsRequest, LINK_SET_KEYWORDS_PATH);
+    (add_to_mailbox_command, AddToMailboxRequest, LINK_ADD_TO_MAILBOX_PATH);
+    (remove_from_mailbox_command, RemoveFromMailboxRequest, LINK_REMOVE_FROM_MAILBOX_PATH);
+    (replace_mailboxes_command, ReplaceMailboxesRequest, LINK_REPLACE_MAILBOXES_PATH);
+    (destroy_message_command, DestroyMessageRequest, LINK_DESTROY_MESSAGE_PATH);
+}
 
 fn down_frame_to_sse(frame: AuthorityServerFrame) -> Result<Event, Infallible> {
     Ok(Event::default()
@@ -407,9 +472,15 @@ fn down_frame_to_sse(frame: AuthorityServerFrame) -> Result<Event, Infallible> {
         .unwrap_or_else(|_| Event::default().data("{}")))
 }
 
-/// Build the far-node link router over a transport — the authority server's in-process
-/// `AuthorityServerLinkHandle` transport in a split deployment.
-pub fn link_router(transport: Arc<dyn AuthorityServerLink>, auth: LinkAuth) -> Router {
+/// Build the far-node link router over a transport pair — the authority server's
+/// in-process `AuthorityServerLinkHandle` in a split deployment. The handle
+/// carries both trait halves of the D33 seam; the wire serves both over the
+/// existing routes (routes/wire unchanged by the split).
+pub fn link_router(transport: AuthorityServerLinkHandle, auth: LinkAuth) -> Router {
+    let state = LinkState {
+        api: transport.api().clone(),
+        link: transport.link().clone(),
+    };
     let router = Router::new()
         .route(LINK_FORWARD_MUTATION_PATH, post(forward_mutation))
         .route(LINK_SUBSCRIBE_PATH, get(subscribe))
@@ -417,9 +488,13 @@ pub fn link_router(transport: Arc<dyn AuthorityServerLink>, auth: LinkAuth) -> R
         .route(LINK_SUMMARY_PATH, post(current_summary))
         .route(LINK_DETAIL_PATH, post(message_detail))
         .route(LINK_CONVERSATION_PATH, post(conversation));
-    // The full request/response surface (reads + typed writes) is generated
-    // from the shared link-op table.
-    let router = register_generated_link_routes(router).with_state(LinkState { transport });
+    // The full request/response surface (reads + typed writes + the preserved
+    // message-command routes + the op-lifecycle) is generated from the shared
+    // link-op tables.
+    let router = register_command_routes(register_generated_lifecycle_routes(
+        register_generated_api_routes(router),
+    ))
+    .with_state(state);
     match auth {
         LinkAuth::Disabled => router.layer(from_fn_with_state(
             AuthorityServerLinkId::new(uuid::Uuid::new_v4().to_string()),

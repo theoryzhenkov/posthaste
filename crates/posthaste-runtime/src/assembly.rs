@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_domain_service::{DomainEvent, SecretStore};
-use posthaste_authority_server_link::{AuthorityServerLink, AuthorityServerLinkHandle};
+use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use tokio::sync::broadcast;
 
 use crate::handle::{RuntimeCoreState, RuntimeHandle};
@@ -43,20 +43,24 @@ pub struct RuntimeBuildConfig {
     /// co-located (assertion `transport-selected-by-config`).
     pub authority_server_transport: AuthorityServerTransportConfig,
     /// A decorator over the config-selected link transport. When set, the
-    /// builder hands it the real (in-process or remote) [`AuthorityServerLink`] and uses
-    /// what it returns. A host/test seam for *composing over* the transport
-    /// (e.g. gating the up-channel to exercise the near-node outbox) without
-    /// replacing the full authority server surface — the decorator delegates everything
-    /// it does not intercept to the inner transport. `None` in normal builds.
+    /// builder hands it the real (in-process or remote) transport pair as an
+    /// [`AuthorityServerLinkHandle`] and uses what it returns. A host/test seam
+    /// for *composing over* the transport (e.g. gating the up-channel to
+    /// exercise the near-node outbox) without replacing the full authority
+    /// server surface — the decorator delegates everything it does not
+    /// intercept to the inner handle. `None` in normal builds.
     pub authority_server_transport_override: Option<AuthorityServerTransportDecorator>,
 }
 
 /// A decorator over the config-selected link transport (see
 /// [`RuntimeBuildConfig::authority_server_transport_override`]): receives the
-/// real [`AuthorityServerLink`] and returns a wrapping one. Composes, so it need not
-/// re-implement the whole surface — only the methods it intercepts.
+/// real transport pair ([`AuthorityServerLinkHandle`]) and returns a wrapping
+/// one. Composes, so it need not re-implement the whole surface — only the
+/// methods it intercepts (per half: wrap with
+/// [`AuthorityServerLinkHandle::new`] for both, or
+/// [`AuthorityServerLinkHandle::from_parts`] to intercept one half only).
 pub type AuthorityServerTransportDecorator =
-    Box<dyn FnOnce(Arc<dyn AuthorityServerLink>) -> Arc<dyn AuthorityServerLink> + Send>;
+    Box<dyn FnOnce(AuthorityServerLinkHandle) -> AuthorityServerLinkHandle + Send>;
 
 /// The runtime↔authority-server link transport, selected by configuration.
 ///
@@ -106,7 +110,7 @@ impl RuntimeBuildConfig {
     /// closure receives the real transport and returns the one the link uses.
     pub fn with_authority_server_transport_override(
         mut self,
-        decorator: impl FnOnce(Arc<dyn AuthorityServerLink>) -> Arc<dyn AuthorityServerLink> + Send + 'static,
+        decorator: impl FnOnce(AuthorityServerLinkHandle) -> AuthorityServerLinkHandle + Send + 'static,
     ) -> Self {
         self.authority_server_transport_override = Some(Box::new(decorator));
         self
@@ -182,14 +186,16 @@ pub fn build_remote_runtime(
     let (event_sender, _) = broadcast::channel(event_channel_capacity);
 
     // The link transport is the remote authority server (optionally decorated by a test
-    // seam); there is no in-process far node to fall back to.
-    let base: Arc<dyn AuthorityServerLink> = Arc::new(RemoteAuthorityServer::with_token(base_url, token));
-    let transport = match authority_server_transport_override {
+    // seam); there is no in-process far node to fall back to. One transport
+    // object carries both trait halves of the seam (D33).
+    let base = AuthorityServerLinkHandle::new(Arc::new(RemoteAuthorityServer::with_token(
+        base_url, token,
+    )));
+    let authority_server_link = match authority_server_transport_override {
         Some(decorate) => decorate(base),
         None => base,
     };
-    let authority_server_link = AuthorityServerLinkHandle::new(transport);
-    let reads = Arc::new(ReadCache::retaining(authority_server_link.transport().clone()));
+    let reads = Arc::new(ReadCache::retaining(authority_server_link.api().clone()));
 
     // No local store; the live account count comes through the link on the
     // `runtime_status` read.
