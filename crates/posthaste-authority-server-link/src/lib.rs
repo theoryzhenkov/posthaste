@@ -11,9 +11,20 @@
 //! The two links share the `MutationRequest`/`MutationReceipt` vocabulary from
 //! `posthaste-contract-core`, not this crate's traits.
 //!
-//! [`AuthorityServerLink`] is the Rust abstraction over this link's two channels; it is
-//! selected by configuration (in-process co-located by default, remote when
-//! split — [replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)). The transport is what
+//! The far-node seam is two traits (D33 seam symmetry, mirroring the
+//! client↔runtime `RuntimeApi`/`RuntimeLink` pair):
+//!
+//! - [`AuthorityServerApi`] — the typed request/response surface: all reads,
+//!   the compose/catalog/settings/account operations, and the single
+//!   direct-apply message-command entry [`apply`](AuthorityServerApi::apply)
+//!   (D34; the five per-command RPCs collapsed into it).
+//! - [`AuthorityServerLink`] — the coherent-link mechanics: `forward_mutation`
+//!   up, `subscribe` down, and the outbox op-lifecycle mutations
+//!   (`retry_operation`/`discard_operation`).
+//!
+//! One transport implements both; it is selected by configuration (in-process
+//! co-located by default, remote when split —
+//! [replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)). The transport is what
 //! varies across deployments; the contract above it does not. This is the seam
 //! the `one-link-transport` assertion guards: one shared contract + one Rust
 //! transport abstraction, never a second bespoke mechanism.
@@ -40,10 +51,10 @@ use posthaste_domain_model::{
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
-    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
-    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest, PatchAccountMutation,
-    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
-    RuntimeErrorCode, RuntimeResourceBytes,
+    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
+    MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
+    PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList,
+    RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
 
 /// Wire path for the link up-channel: a remote near node `POST`s a
@@ -215,15 +226,22 @@ pub enum LinkCoverage {
 /// tagged with the watermark per [`AuthorityServerFrame`].
 pub type DownStream = BoxStream<'static, AuthorityServerFrame>;
 
-/// One link's two channels, transport-neutral. The transport is the only thing
-/// that varies across deployments — in-process and co-located by default
-/// (W1, behavior-preserving), remote when the far node lives elsewhere
-/// (W3) — and is selected by configuration, never at build time
+/// One link's two channels + the outbox op-lifecycle, transport-neutral (the
+/// Link half of the D33 seam). The transport is the only thing that varies
+/// across deployments — in-process and co-located by default (W1,
+/// behavior-preserving), remote when the far node lives elsewhere (W3) — and is
+/// selected by configuration, never at build time
 /// ([replication authority-server-link L2 §6](../replication/authority-server-link/L2.md), assertion `transport-selected-by-config`).
 ///
-/// The same trait carries **both** links (assertion `one-link-transport`): the
-/// client↔runtime link is conformant by construction (the contract is the wire
-/// it already speaks), and the runtime↔authority-server link adopts it via
+/// `forward_mutation` shares its name (not a supertrait) with the client-link
+/// seam's up-channel: the signatures differ for real reasons — `RuntimeLink`
+/// threads a per-call `RuntimeCaller` (one runtime multiplexes many client
+/// sessions) while this seam scopes identity per connection (the `*_for`
+/// variants for fan-in). D35b verdict: same-name convention, no shared
+/// supertrait.
+///
+/// Every transport implements this alongside [`AuthorityServerApi`] (assertion
+/// `one-link-transport`); the runtime holds the pair via
 /// [`AuthorityServerLinkHandle`].
 #[async_trait]
 pub trait AuthorityServerLink: Send + Sync {
@@ -276,6 +294,39 @@ pub trait AuthorityServerLink: Send + Sync {
         self.subscribe(coverage).await
     }
 
+    /// Op-lifecycle: discard a pending outbox operation (a user escape hatch
+    /// for a dead op).
+    async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
+        let _ = operation_id;
+        Err(write_channel_unsupported())
+    }
+
+    /// Op-lifecycle: re-arm a failed outbox operation to pending.
+    async fn retry_operation(
+        &self,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        let _ = (account_id, operation_id);
+        Err(write_channel_unsupported())
+    }
+}
+
+/// The typed request/response surface of the far node (the Api half of the D33
+/// seam): what the nearer tier may *request* — every read (all mirrored 1:1 by
+/// the runtime's `ReadCache`), the compose-outbox creation trio, the
+/// catalog/settings/smart-mailbox/account operations, `sync_account`,
+/// `reload_config`, and the single direct-apply message-command entry
+/// [`apply`](Self::apply) (D34).
+///
+/// Identity is per-connection on this seam (D35b): unlike the client↔runtime
+/// `RuntimeApi` facets there is no per-call caller parameter — a remote runtime
+/// is authenticated once at the link boundary (`link_router`).
+///
+/// Every method defaults to a typed error so a transport that does not carry a
+/// channel (e.g. a write-only test stub) is simply not a source/sink for it.
+#[async_trait]
+pub trait AuthorityServerApi: Send + Sync {
     /// Read channel: compute a page of a mail-list query at the far node (the
     /// query engine is the authority's, [authority-server-link L3](../replication/authority-server-link/L3.md)).
     /// A near node reads through here on a cache miss. The default errors: a
@@ -462,64 +513,28 @@ pub trait AuthorityServerLink: Send + Sync {
 
     // ===== Write channel: typed authority server commands =====
     //
-    // The named up-channel ([`forward_mutation`](Self::forward_mutation)) carries
+    // The named up-channel (`AuthorityServerLink::forward_mutation`) carries
     // session-originated message mutations through the replica; these typed
     // commands are the direct (REST) command surface, applied at the far node
     // and returning the typed ack. Default-erroring so a transport that does not
     // carry the write channel is simply not a command sink (the remote wire is
     // wired per-op alongside the reads).
 
-    /// Write: set/clear keywords on a message.
-    async fn set_keywords(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: SetKeywordsCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        let _ = (account_id, message_id, command);
-        Err(write_channel_unsupported())
-    }
-
-    /// Write: add a message to a mailbox.
-    async fn add_to_mailbox(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: AddToMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        let _ = (account_id, message_id, command);
-        Err(write_channel_unsupported())
-    }
-
-    /// Write: remove a message from a mailbox.
-    async fn remove_from_mailbox(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: RemoveFromMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        let _ = (account_id, message_id, command);
-        Err(write_channel_unsupported())
-    }
-
-    /// Write: replace a message's mailbox membership.
-    async fn replace_mailboxes(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: ReplaceMailboxesCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        let _ = (account_id, message_id, command);
-        Err(write_channel_unsupported())
-    }
-
-    /// Write: destroy a message.
-    async fn destroy_message(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-    ) -> Result<CommandAck, RuntimeError> {
-        let _ = (account_id, message_id);
+    /// Write: apply a mail operation authoritatively and return its command ack
+    /// (D21/D34 — the five per-command message RPCs collapsed into one typed
+    /// entry). This is the **direct-apply** command surface: REST callers are
+    /// not replicas and hold no outbox, so there is no optimistic fold or
+    /// `ClientMutationId` dedup here. The replica (optimistic) path forwards the
+    /// same [`MailOperation`] through `AuthorityServerLink::forward_mutation`
+    /// instead.
+    ///
+    /// Covers the typed command subset the REST surface exposes (set-keywords,
+    /// add/remove-to-mailbox, replace-mailboxes, destroy); operations that only
+    /// exist on the replica forward path (role moves, snooze, applyDiff, the
+    /// `revCursor` control op) are rejected with `InvalidMutation` — see
+    /// [`MailCommandRequest::from_operation`].
+    async fn apply(&self, op: MailOperation) -> Result<CommandAck, RuntimeError> {
+        let _ = op;
         Err(write_channel_unsupported())
     }
 
@@ -562,22 +577,6 @@ pub trait AuthorityServerLink: Send + Sync {
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
         let _ = (account_id, draft_id);
-        Err(write_channel_unsupported())
-    }
-
-    /// Write: discard a pending outbox operation.
-    async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
-        let _ = operation_id;
-        Err(write_channel_unsupported())
-    }
-
-    /// Write: re-arm a failed outbox operation to pending.
-    async fn retry_operation(
-        &self,
-        account_id: AccountId,
-        operation_id: OperationId,
-    ) -> Result<(), RuntimeError> {
-        let _ = (account_id, operation_id);
         Err(write_channel_unsupported())
     }
 
@@ -716,26 +715,53 @@ fn write_channel_unsupported() -> RuntimeError {
 }
 
 /// The runtime↔authority-server link ([replication authority-server-link L1 §3](../replication/authority-server-link/L1.md)): the
-/// runtime's typed handle to the authority server, carried by a swappable
-/// [`AuthorityServerLink`]. The runtime reaches the authority server **only** through these two
-/// channels — never by reading the authority server store across the link (assertion
-/// `authority-server-link-is-replication-only`); reads become state the near node derives
-/// locally from its base cache (W2).
+/// runtime's typed handle to the authority server, carrying the seam's two
+/// trait halves over ONE swappable transport (D33) — the [`AuthorityServerApi`]
+/// request/response surface and the [`AuthorityServerLink`] replication
+/// channels. Both `Arc`s point at the same config-selected transport object;
+/// carrying them separately is what lets a subset consumer (the runtime's
+/// `ReadCache`, the outbox forwarding path) hold only the half it uses.
 ///
 /// This is the runtime↔authority-server *instantiation* of the shared contract. The
 /// client↔runtime link is the same contract carried by the same transport
 /// abstraction, so there is one mechanism, two consumers.
 #[derive(Clone)]
 pub struct AuthorityServerLinkHandle {
-    transport: Arc<dyn AuthorityServerLink>,
+    api: Arc<dyn AuthorityServerApi>,
+    link: Arc<dyn AuthorityServerLink>,
 }
 
 impl AuthorityServerLinkHandle {
-    /// Build an authority-server link over a transport. The transport is config-selected
-    /// upstream ([replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)); this type does not
+    /// Build an authority-server link over a transport implementing both trait
+    /// halves. The transport is config-selected upstream
+    /// ([replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)); this type does not
     /// know or care which one it holds.
-    pub fn new(transport: Arc<dyn AuthorityServerLink>) -> Self {
-        Self { transport }
+    pub fn new<T>(transport: Arc<T>) -> Self
+    where
+        T: AuthorityServerApi + AuthorityServerLink + 'static,
+    {
+        Self {
+            api: transport.clone(),
+            link: transport,
+        }
+    }
+
+    /// Build a handle from separately held halves — the decorator seam: a test
+    /// wrapper may intercept one half (e.g. gate the up-channel) while the
+    /// other keeps pointing at the real transport.
+    pub fn from_parts(api: Arc<dyn AuthorityServerApi>, link: Arc<dyn AuthorityServerLink>) -> Self {
+        Self { api, link }
+    }
+
+    /// The Api half, for consumers that only request (the runtime's `ReadCache`).
+    pub fn api(&self) -> &Arc<dyn AuthorityServerApi> {
+        &self.api
+    }
+
+    /// The Link half, for consumers that only replicate (forwarding, subscribe,
+    /// the op-lifecycle) — and for `link_router` to serve the wire.
+    pub fn link(&self) -> &Arc<dyn AuthorityServerLink> {
+        &self.link
     }
 
     /// Forward a named mutation up to the authority server (up-channel).
@@ -743,13 +769,33 @@ impl AuthorityServerLinkHandle {
         &self,
         mutation: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        self.transport.forward_mutation(mutation).await
+        self.link.forward_mutation(mutation).await
     }
 
     /// Subscribe to the authority server's authoritative base-assertion stream
     /// (down-channel).
     pub async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-        self.transport.subscribe(coverage).await
+        self.link.subscribe(coverage).await
+    }
+
+    /// Op-lifecycle: discard a pending outbox operation at the authority server.
+    pub async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
+        self.link.discard_operation(operation_id).await
+    }
+
+    /// Op-lifecycle: re-arm a failed outbox operation at the authority server.
+    pub async fn retry_operation(
+        &self,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.link.retry_operation(account_id, operation_id).await
+    }
+
+    /// Apply a mail operation authoritatively (the direct-apply command entry,
+    /// D34) and return its ack.
+    pub async fn apply(&self, op: MailOperation) -> Result<CommandAck, RuntimeError> {
+        self.api.apply(op).await
     }
 
     /// Read channel: read a mail-list query page through to the authority server (the
@@ -759,7 +805,7 @@ impl AuthorityServerLinkHandle {
         &self,
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
-        self.transport.query_mail_page(request).await
+        self.api.query_mail_page(request).await
     }
 
     /// Read channel: the current summary of one message through to the authority server.
@@ -768,7 +814,7 @@ impl AuthorityServerLinkHandle {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError> {
-        self.transport.current_summary(account_id, message_id).await
+        self.api.current_summary(account_id, message_id).await
     }
 
     /// Read channel: a message's detail through to the authority server.
@@ -777,7 +823,7 @@ impl AuthorityServerLinkHandle {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        self.transport.message_detail(account_id, message_id).await
+        self.api.message_detail(account_id, message_id).await
     }
 
     /// Read channel: a conversation through to the authority server.
@@ -785,48 +831,49 @@ impl AuthorityServerLinkHandle {
         &self,
         conversation_id: ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
-        self.transport.conversation(conversation_id).await
-    }
-
-    /// The underlying transport, for callers that need to inspect or hold it.
-    pub fn transport(&self) -> &Arc<dyn AuthorityServerLink> {
-        &self.transport
+        self.api.conversation(conversation_id).await
     }
 }
 
-/// Generate `AuthorityServerLinkHandle`'s per-op delegations from the shared link-op table:
-/// each forwards straight to the wrapped transport, so the link surface cannot
-/// drift from [`AuthorityServerLink`]. The up-channel (`forward_mutation`), down-channel
-/// (`subscribe`), the four read-channel methods that are not table rows
-/// (`query_mail_page`/`current_summary`/`message_detail`/`conversation`), and the
-/// `new`/`transport` accessors stay hand-written above.
-macro_rules! authority_server_link_delegations {
+/// Generate `AuthorityServerLinkHandle`'s per-op delegations from the shared
+/// Api-op table: each forwards straight to the wrapped transport's Api half, so
+/// the handle surface cannot drift from [`AuthorityServerApi`]. The Link half
+/// (`forward_mutation`/`subscribe`/`discard_operation`/`retry_operation`), the
+/// direct-apply entry (`apply`), the four read-channel methods that are not
+/// table rows (`query_mail_page`/`current_summary`/`message_detail`/
+/// `conversation`), and the constructors/accessors stay hand-written above.
+macro_rules! authority_server_api_delegations {
     ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
         impl AuthorityServerLinkHandle {
             $(
                 pub async fn $method(&self, $($field: $fty),*) -> Result<$ret, RuntimeError> {
-                    self.transport.$method($($field),*).await
+                    self.api.$method($($field),*).await
                 }
             )*
         }
     };
 }
 
-/// The canonical runtime↔authority-server link op table — one source of truth for the
-/// remote wire ([replication authority-server-link L2 §2](../replication/authority-server-link/L2.md)). Each row is
+/// The canonical runtime↔authority-server **Api-op** table — one source of truth
+/// for the remote wire's [`AuthorityServerApi`] rows
+/// ([replication authority-server-link L2 §2](../replication/authority-server-link/L2.md)). Each row is
 /// `method => "path" => RequestStruct { field: Type, .. } => ReturnType`.
 ///
 /// This is an *x-macro*: invoke it with an emitter macro and it expands to the
 /// emitter applied to the whole table. Three emitters consume it, so the wire
 /// cannot drift — the request structs (here), the [`RemoteAuthorityServer`] client
-/// methods (`authority-runtime`), and the `link_router` handlers + routes
-/// (`posthaste-server`) are all generated from this one list. Types are written
-/// fully-qualified so the table expands correctly in every crate.
+/// methods (`posthaste-runtime`), and the `link_router` handlers + routes
+/// (`posthaste-authority-server`) are all generated from this one list. Types are
+/// written fully-qualified so the table expands correctly in every crate.
 ///
-/// Only the request/response ops live here; the up-channel (`forward_mutation`)
-/// and the SSE down-channel (`subscribe`) keep their bespoke handlers.
+/// Only the Api request/response ops live here. The link mechanics
+/// (`forward_mutation`/`subscribe`) keep their bespoke handlers; the two
+/// op-lifecycle rows live in [`for_each_link_lifecycle_op`]; the five
+/// message-command routes are served by [`MailCommandRequest`] through
+/// [`AuthorityServerApi::apply`] (their paths + request structs are hand-kept
+/// below, wire-identical).
 #[macro_export]
-macro_rules! for_each_link_op {
+macro_rules! for_each_link_api_op {
     ($emit:ident) => {
         $emit! {
             // ===== reads =====
@@ -879,30 +926,6 @@ macro_rules! for_each_link_op {
                 => Option<usize>;
 
             // ===== writes =====
-            set_keywords => "/v1/link/set-keywords" => SetKeywordsRequest {
-                account_id: $crate::reexport::AccountId,
-                message_id: $crate::reexport::MessageId,
-                command: $crate::reexport::SetKeywordsCommand
-            } => $crate::reexport::CommandAck;
-            add_to_mailbox => "/v1/link/add-to-mailbox" => AddToMailboxRequest {
-                account_id: $crate::reexport::AccountId,
-                message_id: $crate::reexport::MessageId,
-                command: $crate::reexport::AddToMailboxCommand
-            } => $crate::reexport::CommandAck;
-            remove_from_mailbox => "/v1/link/remove-from-mailbox" => RemoveFromMailboxRequest {
-                account_id: $crate::reexport::AccountId,
-                message_id: $crate::reexport::MessageId,
-                command: $crate::reexport::RemoveFromMailboxCommand
-            } => $crate::reexport::CommandAck;
-            replace_mailboxes => "/v1/link/replace-mailboxes" => ReplaceMailboxesRequest {
-                account_id: $crate::reexport::AccountId,
-                message_id: $crate::reexport::MessageId,
-                command: $crate::reexport::ReplaceMailboxesCommand
-            } => $crate::reexport::CommandAck;
-            destroy_message => "/v1/link/destroy-message" => DestroyMessageRequest {
-                account_id: $crate::reexport::AccountId,
-                message_id: $crate::reexport::MessageId
-            } => $crate::reexport::CommandAck;
             set_mailbox_role => "/v1/link/set-mailbox-role" => SetMailboxRoleRequest {
                 account_id: $crate::reexport::AccountId,
                 mailbox_id: $crate::reexport::MailboxId,
@@ -921,13 +944,6 @@ macro_rules! for_each_link_op {
                 account_id: $crate::reexport::AccountId,
                 draft_id: $crate::reexport::MessageId
             } => $crate::reexport::Operation;
-            discard_operation => "/v1/link/discard-operation" => DiscardOperationRequest {
-                operation_id: $crate::reexport::OperationId
-            } => ();
-            retry_operation => "/v1/link/retry-operation" => RetryOperationRequest {
-                account_id: $crate::reexport::AccountId,
-                operation_id: $crate::reexport::OperationId
-            } => ();
             sync_account => "/v1/link/sync-account" => SyncAccountRequest {
                 account_id: $crate::reexport::AccountId,
                 mode: $crate::reexport::SyncMode
@@ -973,10 +989,29 @@ macro_rules! for_each_link_op {
     };
 }
 
-/// Re-exports so [`for_each_link_op`] can name `runtime-contract` types with a
-/// single stable path that resolves in every crate that expands the table
-/// (`posthaste_contract_core` may not be a direct dependency name everywhere,
-/// but `posthaste_authority_server_link` always is).
+/// The [`AuthorityServerLink`] op-lifecycle rows of the wire — the two outbox
+/// lifecycle *mutations* that ride the Link half (D33's op-lifecycle rule);
+/// same row shape and emitter protocol as [`for_each_link_api_op`], kept as a
+/// separate table so each emitter can route to the right trait half.
+#[macro_export]
+macro_rules! for_each_link_lifecycle_op {
+    ($emit:ident) => {
+        $emit! {
+            discard_operation => "/v1/link/discard-operation" => DiscardOperationRequest {
+                operation_id: $crate::reexport::OperationId
+            } => ();
+            retry_operation => "/v1/link/retry-operation" => RetryOperationRequest {
+                account_id: $crate::reexport::AccountId,
+                operation_id: $crate::reexport::OperationId
+            } => ();
+        }
+    };
+}
+
+/// Re-exports so [`for_each_link_api_op`] (and its sibling tables) can name
+/// contract types with a single stable path that resolves in every crate that
+/// expands the table (`posthaste_contract_core` may not be a direct dependency
+/// name everywhere, but `posthaste_authority_server_link` always is).
 pub mod reexport {
     pub use posthaste_domain_model::{
         AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress,
@@ -994,8 +1029,9 @@ pub mod reexport {
 }
 
 /// Generate the shared request struct for every link op (one per row of
-/// [`for_each_link_op`]). Both the client and the server deserialize the same
-/// type, so the wire shape has a single definition.
+/// [`for_each_link_api_op`] / [`for_each_link_lifecycle_op`]). Both the client
+/// and the server deserialize the same type, so the wire shape has a single
+/// definition.
 macro_rules! define_link_request_structs {
     ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
         $(
@@ -1005,8 +1041,231 @@ macro_rules! define_link_request_structs {
         )*
     };
 }
-for_each_link_op!(define_link_request_structs);
-for_each_link_op!(authority_server_link_delegations);
+for_each_link_api_op!(define_link_request_structs);
+for_each_link_lifecycle_op!(define_link_request_structs);
+for_each_link_api_op!(authority_server_api_delegations);
+
+// ===== The message-command wire (M5b) =====
+//
+// The five per-command message routes survive the D33/D34 apply-collapse
+// byte-for-byte — same paths, same request/response JSON — but the trait entry
+// is the single `AuthorityServerApi::apply(op)`. `MailCommandRequest` is the
+// bridge: the typed-op ⇄ per-command-wire mapping lives here, once, so the
+// remote client (`RemoteAuthorityServer::apply`) and the far-node handlers
+// (`link_wire`) cannot drift.
+
+/// Wire path for the `message.setKeywords` direct-apply command.
+pub const LINK_SET_KEYWORDS_PATH: &str = "/v1/link/set-keywords";
+/// Wire path for the `message.addToMailbox` direct-apply command.
+pub const LINK_ADD_TO_MAILBOX_PATH: &str = "/v1/link/add-to-mailbox";
+/// Wire path for the `message.removeFromMailbox` direct-apply command.
+pub const LINK_REMOVE_FROM_MAILBOX_PATH: &str = "/v1/link/remove-from-mailbox";
+/// Wire path for the `message.replaceMailboxes` direct-apply command.
+pub const LINK_REPLACE_MAILBOXES_PATH: &str = "/v1/link/replace-mailboxes";
+/// Wire path for the `message.destroy` direct-apply command.
+pub const LINK_DESTROY_MESSAGE_PATH: &str = "/v1/link/destroy-message";
+
+/// `POST /v1/link/set-keywords` request (wire-identical to the pre-split row).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetKeywordsRequest {
+    pub account_id: AccountId,
+    pub message_id: MessageId,
+    pub command: SetKeywordsCommand,
+}
+
+/// `POST /v1/link/add-to-mailbox` request (wire-identical to the pre-split row).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddToMailboxRequest {
+    pub account_id: AccountId,
+    pub message_id: MessageId,
+    pub command: AddToMailboxCommand,
+}
+
+/// `POST /v1/link/remove-from-mailbox` request (wire-identical to the pre-split row).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveFromMailboxRequest {
+    pub account_id: AccountId,
+    pub message_id: MessageId,
+    pub command: RemoveFromMailboxCommand,
+}
+
+/// `POST /v1/link/replace-mailboxes` request (wire-identical to the pre-split row).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceMailboxesRequest {
+    pub account_id: AccountId,
+    pub message_id: MessageId,
+    pub command: ReplaceMailboxesCommand,
+}
+
+/// `POST /v1/link/destroy-message` request (wire-identical to the pre-split row).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DestroyMessageRequest {
+    pub account_id: AccountId,
+    pub message_id: MessageId,
+}
+
+/// One typed message-command wire op: the projection of a direct-apply
+/// [`MailOperation`] onto the five preserved per-command routes. Untagged, so
+/// serializing a variant emits exactly its request struct's JSON — the wire
+/// bytes are unchanged from the pre-split per-command RPCs.
+///
+/// Every implementor of [`AuthorityServerApi::apply`] routes through
+/// [`from_operation`](Self::from_operation), so the op→command dispatch (and
+/// the rejection of replica-only operations) has exactly one home.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum MailCommandRequest {
+    SetKeywords(SetKeywordsRequest),
+    AddToMailbox(AddToMailboxRequest),
+    RemoveFromMailbox(RemoveFromMailboxRequest),
+    ReplaceMailboxes(ReplaceMailboxesRequest),
+    Destroy(DestroyMessageRequest),
+}
+
+impl MailCommandRequest {
+    /// Project a direct-apply operation onto its command wire shape. Operations
+    /// that only exist on the replica forward path (role moves, snooze,
+    /// applyDiff, the `revCursor` control op) have no direct authority command
+    /// and are rejected with `InvalidMutation` — they must flow through
+    /// `AuthorityServerLink::forward_mutation`.
+    pub fn from_operation(op: MailOperation) -> Result<Self, RuntimeError> {
+        let account_id = AccountId(op.account_id().to_string());
+        let message_id = MessageId(
+            op.message_id()
+                .ok_or_else(|| {
+                    RuntimeError::invalid_mutation(format!(
+                        "operation '{}' has no direct-apply command surface",
+                        op.name()
+                    ))
+                })?
+                .to_string(),
+        );
+        Ok(match op {
+            MailOperation::SetKeywords(args) => Self::SetKeywords(SetKeywordsRequest {
+                account_id,
+                message_id,
+                command: args.command,
+            }),
+            MailOperation::AddToMailbox(args) => Self::AddToMailbox(AddToMailboxRequest {
+                account_id,
+                message_id,
+                command: AddToMailboxCommand {
+                    mailbox_id: MailboxId(args.mailbox_id),
+                },
+            }),
+            MailOperation::RemoveFromMailbox(args) => {
+                Self::RemoveFromMailbox(RemoveFromMailboxRequest {
+                    account_id,
+                    message_id,
+                    command: RemoveFromMailboxCommand {
+                        mailbox_id: MailboxId(args.mailbox_id),
+                    },
+                })
+            }
+            MailOperation::ReplaceMailboxes(args) => {
+                Self::ReplaceMailboxes(ReplaceMailboxesRequest {
+                    account_id,
+                    message_id,
+                    command: ReplaceMailboxesCommand {
+                        mailbox_ids: args.mailbox_ids.into_iter().map(MailboxId).collect(),
+                    },
+                })
+            }
+            MailOperation::Destroy(_) => Self::Destroy(DestroyMessageRequest {
+                account_id,
+                message_id,
+            }),
+            other => {
+                return Err(RuntimeError::invalid_mutation(format!(
+                    "operation '{}' has no direct-apply command surface; forward it as a mutation",
+                    other.name()
+                )))
+            }
+        })
+    }
+
+    /// The wire path this command POSTs to (the pre-split per-command route).
+    pub fn path(&self) -> &'static str {
+        match self {
+            Self::SetKeywords(_) => LINK_SET_KEYWORDS_PATH,
+            Self::AddToMailbox(_) => LINK_ADD_TO_MAILBOX_PATH,
+            Self::RemoveFromMailbox(_) => LINK_REMOVE_FROM_MAILBOX_PATH,
+            Self::ReplaceMailboxes(_) => LINK_REPLACE_MAILBOXES_PATH,
+            Self::Destroy(_) => LINK_DESTROY_MESSAGE_PATH,
+        }
+    }
+}
+
+/// The server-side inverse of [`MailCommandRequest::from_operation`]: rebuild
+/// the typed [`MailOperation`] from a decoded per-command request so the far
+/// node's handlers route through [`AuthorityServerApi::apply`] (one dispatch
+/// per implementor, not one per route).
+impl SetKeywordsRequest {
+    pub fn into_operation(self) -> MailOperation {
+        MailOperation::SetKeywords(
+            posthaste_contract_core::mutation_args::MessageSetKeywordsMutationArgs {
+                source_id: self.account_id.as_str().to_string(),
+                message_id: self.message_id.as_str().to_string(),
+                command: self.command,
+            },
+        )
+    }
+}
+
+impl AddToMailboxRequest {
+    pub fn into_operation(self) -> MailOperation {
+        MailOperation::AddToMailbox(
+            posthaste_contract_core::mutation_args::MessageMailboxMembershipArgs {
+                source_id: self.account_id.as_str().to_string(),
+                message_id: self.message_id.as_str().to_string(),
+                mailbox_id: self.command.mailbox_id.as_str().to_string(),
+            },
+        )
+    }
+}
+
+impl RemoveFromMailboxRequest {
+    pub fn into_operation(self) -> MailOperation {
+        MailOperation::RemoveFromMailbox(
+            posthaste_contract_core::mutation_args::MessageMailboxMembershipArgs {
+                source_id: self.account_id.as_str().to_string(),
+                message_id: self.message_id.as_str().to_string(),
+                mailbox_id: self.command.mailbox_id.as_str().to_string(),
+            },
+        )
+    }
+}
+
+impl ReplaceMailboxesRequest {
+    pub fn into_operation(self) -> MailOperation {
+        MailOperation::ReplaceMailboxes(
+            posthaste_contract_core::mutation_args::MessageReplaceMailboxesArgs {
+                source_id: self.account_id.as_str().to_string(),
+                message_id: self.message_id.as_str().to_string(),
+                mailbox_ids: self
+                    .command
+                    .mailbox_ids
+                    .into_iter()
+                    .map(|id| id.as_str().to_string())
+                    .collect(),
+            },
+        )
+    }
+}
+
+impl DestroyMessageRequest {
+    pub fn into_operation(self) -> MailOperation {
+        MailOperation::Destroy(posthaste_contract_core::mutation_args::MessageTargetArgs {
+            source_id: self.account_id.as_str().to_string(),
+            message_id: self.message_id.as_str().to_string(),
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1072,9 +1331,67 @@ mod tests {
         assert_eq!(json["kind"], "complete");
     }
 
-    // A trivial in-memory transport proves the trait is object-safe and usable —
-    // the shape `InProcessTransport` (W1) and `RemoteTransport` (W3) implement.
+    // The op ⇄ command-wire bridge behind `AuthorityServerApi::apply`: the wire
+    // JSON is byte-identical to the pre-split per-command request rows, the
+    // server-side inverse rebuilds the same op, and replica-only operations are
+    // rejected before any wire/store dispatch.
+    #[test]
+    fn direct_apply_command_wire_round_trips_the_operation() {
+        let op: MailOperation = serde_json::from_value(serde_json::json!({
+            "name": "message.setKeywords",
+            "args": {
+                "sourceId": "acct",
+                "messageId": "m1",
+                "command": {"add": ["$flagged"], "remove": []},
+            },
+        }))
+        .expect("typed operation parses");
+
+        let command = MailCommandRequest::from_operation(op.clone()).expect("a command op");
+        assert_eq!(command.path(), LINK_SET_KEYWORDS_PATH);
+        // The untagged wire shape is exactly the pre-split request struct's.
+        let wire = serde_json::to_value(&command).expect("serialize");
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "accountId": "acct",
+                "messageId": "m1",
+                "command": {"add": ["$flagged"], "remove": []},
+            })
+        );
+        // The server-side inverse rebuilds the same typed op.
+        let request: SetKeywordsRequest = serde_json::from_value(wire).expect("deserialize");
+        assert_eq!(request.into_operation(), op);
+    }
+
+    #[test]
+    fn replica_only_operations_are_rejected_by_the_command_bridge() {
+        let op: MailOperation = serde_json::from_value(serde_json::json!({
+            "name": "message.moveToRole",
+            "args": { "sourceId": "acct", "messageId": "m1", "role": "archive" },
+        }))
+        .expect("typed operation parses");
+        let error = MailCommandRequest::from_operation(op).expect_err("no direct-apply surface");
+        assert_eq!(error.envelope().code, RuntimeErrorCode::InvalidMutation);
+
+        let cursor: MailOperation = serde_json::from_value(serde_json::json!({
+            "name": "revCursor",
+            "args": { "accountId": "acct", "cursorStepId": null, "redoTail": [] },
+        }))
+        .expect("typed operation parses");
+        let error =
+            MailCommandRequest::from_operation(cursor).expect_err("control ops target no message");
+        assert_eq!(error.envelope().code, RuntimeErrorCode::InvalidMutation);
+    }
+
+    // A trivial in-memory transport proves the trait pair is object-safe and
+    // usable — the shape `LocalAuthorityServer` (W1) and `RemoteAuthorityServer`
+    // (W3) implement. The Api half is all defaults (this stub carries no read
+    // channel).
     struct StubTransport;
+
+    #[async_trait]
+    impl AuthorityServerApi for StubTransport {}
 
     #[async_trait]
     impl AuthorityServerLink for StubTransport {

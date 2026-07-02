@@ -1,5 +1,6 @@
-//! [`RemoteAuthorityServer`]: the remote [`AuthorityServerLink`] implementation the near node uses
-//! when the authority server lives in another process or host.
+//! [`RemoteAuthorityServer`]: the remote implementation of the far-node trait
+//! pair ([`AuthorityServerApi`] + [`AuthorityServerLink`], D33) the near node
+//! uses when the authority server lives in another process or host.
 //!
 //! The split case ([replication authority-server-link L2 §2](../replication/authority-server-link/L2.md)):
 //! the up-channel `POST`s named mutations, the reads `POST` request/response, and
@@ -14,15 +15,17 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 
 use posthaste_domain_service::{
-    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+    AccountId, CommandAck, ConversationId, ConversationView, MessageDetail, MessageId,
+    MessageSummary,
 };
 use posthaste_authority_server_link::{
-    AuthorityServerLink, AuthorityServerFrame, DownStream, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
-    LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
+    AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, DownStream, LinkCoverage,
+    MailCommandRequest, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_FORWARD_MUTATION_PATH,
+    LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_contract_core::{
-    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeError,
-    RuntimeErrorCode,
+    MailOperation, MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
+    RuntimeError, RuntimeErrorCode,
 };
 
 // The default transport: the runtime calls the co-located authority server directly.
@@ -67,10 +70,10 @@ impl RemoteAuthorityServer {
     }
 
     /// POST a JSON request to a link path and parse the JSON response — the one
-    /// HTTP round-trip the generated [`AuthorityServerLink`] methods (and the bespoke
-    /// request/response ones) share
-    /// ([`for_each_link_op`](posthaste_authority_server_link::for_each_link_op)). Carries
-    /// the link bearer token.
+    /// HTTP round-trip the generated [`AuthorityServerApi`]/[`AuthorityServerLink`]
+    /// methods (and the bespoke request/response ones) share
+    /// ([`for_each_link_api_op`](posthaste_authority_server_link::for_each_link_api_op)).
+    /// Carries the link bearer token.
     async fn post_link<Req, Ret>(&self, path: &str, req: &Req) -> Result<Ret, RuntimeError>
     where
         Req: serde::Serialize,
@@ -122,22 +125,25 @@ pub(crate) fn parse_sse_frame(block: &str) -> Option<AuthorityServerFrame> {
     serde_json::from_str(&data).ok()
 }
 
-/// Emit the full [`RemoteAuthorityServer`] [`AuthorityServerLink`] impl: the bespoke up-channel
-/// (`forward_mutation`) + SSE down-channel (`subscribe`) + the pre-existing read
-/// methods, plus one generated method per link-op row. Emitting the whole
-/// `#[async_trait] impl` from the macro is deliberate: `async_trait` then runs
-/// on the already-expanded impl, so it desugars the generated methods too (a
+/// Emit the full [`RemoteAuthorityServer`] [`AuthorityServerApi`] impl: the
+/// bespoke read methods (`query_mail_page`/`current_summary`/`message_detail`/
+/// `conversation`) + the direct-apply command entry (`apply`, dispatched onto
+/// the five preserved per-command routes via [`MailCommandRequest`]), plus one
+/// generated method per Api-op row. Emitting the whole `#[async_trait] impl`
+/// from the macro is deliberate: `async_trait` then runs on the
+/// already-expanded impl, so it desugars the generated methods too (a
 /// `macro_rules!` invocation *inside* an `#[async_trait]` impl would expand too
 /// late and the generated methods would miss the desugaring).
-macro_rules! remote_authority_server_impl {
+macro_rules! remote_authority_server_api_impl {
     ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
 #[async_trait]
-impl AuthorityServerLink for RemoteAuthorityServer {
-    async fn forward_mutation(
-        &self,
-        mutation: MutationRequest,
-    ) -> Result<MutationReceipt, RuntimeError> {
-        self.post_link(LINK_FORWARD_MUTATION_PATH, &mutation).await
+impl AuthorityServerApi for RemoteAuthorityServer {
+    /// Direct-apply a mail operation: project it onto its preserved per-command
+    /// wire route (byte-identical to the pre-split per-command RPC) and POST.
+    /// Replica-only operations are rejected locally, before any round trip.
+    async fn apply(&self, op: MailOperation) -> Result<CommandAck, RuntimeError> {
+        let command = MailCommandRequest::from_operation(op)?;
+        self.post_link(command.path(), &command).await
     }
 
     async fn query_mail_page(
@@ -182,6 +188,33 @@ impl AuthorityServerLink for RemoteAuthorityServer {
         .await
     }
 
+    // The full request/response surface (reads + typed writes) — generated from
+    // the shared Api-op table so it cannot drift from the server handlers.
+    $(
+        async fn $method(&self, $($field: $fty),*) -> Result<$ret, RuntimeError> {
+            self.post_link($path, &posthaste_authority_server_link::$req { $($field),* }).await
+        }
+    )*
+}
+    };
+}
+posthaste_authority_server_link::for_each_link_api_op!(remote_authority_server_api_impl);
+
+/// Emit the full [`RemoteAuthorityServer`] [`AuthorityServerLink`] impl: the
+/// bespoke up-channel (`forward_mutation`) + SSE down-channel (`subscribe`),
+/// plus one generated method per op-lifecycle row (same whole-impl emission
+/// rationale as [`remote_authority_server_api_impl`]).
+macro_rules! remote_authority_server_link_impl {
+    ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
+#[async_trait]
+impl AuthorityServerLink for RemoteAuthorityServer {
+    async fn forward_mutation(
+        &self,
+        mutation: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        self.post_link(LINK_FORWARD_MUTATION_PATH, &mutation).await
+    }
+
     async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
         let url = format!("{}{}", self.base_url, LINK_SUBSCRIBE_PATH);
         let coverage_param = serde_json::to_string(&coverage).map_err(|error| {
@@ -219,8 +252,8 @@ impl AuthorityServerLink for RemoteAuthorityServer {
         Ok(Box::pin(stream))
     }
 
-    // The full request/response surface (reads + typed writes) — generated from
-    // the shared link-op table so it cannot drift from the server handlers.
+    // The op-lifecycle mutations — generated from the shared lifecycle-op table
+    // so they cannot drift from the server handlers.
     $(
         async fn $method(&self, $($field: $fty),*) -> Result<$ret, RuntimeError> {
             self.post_link($path, &posthaste_authority_server_link::$req { $($field),* }).await
@@ -229,7 +262,7 @@ impl AuthorityServerLink for RemoteAuthorityServer {
 }
     };
 }
-posthaste_authority_server_link::for_each_link_op!(remote_authority_server_impl);
+posthaste_authority_server_link::for_each_link_lifecycle_op!(remote_authority_server_link_impl);
 
 #[cfg(test)]
 mod tests {

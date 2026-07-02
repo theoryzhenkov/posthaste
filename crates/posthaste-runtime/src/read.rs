@@ -1,14 +1,16 @@
 //! The runtime's read path as a read-through cache over the authority server.
 //!
 //! Reads ([replication authority-server-link L3](../replication/authority-server-link/L3.md))
-//! go through a [`ReadCache`] over a [`AuthorityServerLink`]: the query engine lives at
+//! go through a [`ReadCache`] over an [`AuthorityServerApi`]: the query engine lives at
 //! the authority (the far node), and a near node retains the data that flowed
 //! back under a **policy** chosen from link cost. The primitive is read-through;
 //! caching is the optimization.
 //!
-//! There is no separate read-source abstraction — the cache wraps the one
-//! `AuthorityServerLink` (the in-process `LocalAuthorityServer` co-located, the `RemoteAuthorityServer`
-//! over the link), the same trait the write/subscribe channels use. Co-located
+//! There is no separate read-source abstraction — the cache holds the **Api
+//! half** of the D33 seam over the one config-selected transport (the
+//! in-process `LocalAuthorityServer` co-located, the `RemoteAuthorityServer`
+//! over the link); the replication channels are the same transport's
+//! `AuthorityServerLink` half. Co-located
 //! the policy is **passthrough** (retain nothing, read straight through), so the
 //! deployment behaves exactly as before (`colocated-unchanged`); a split runtime
 //! gets the **retaining** policy kept coherent by the down-channel.
@@ -28,7 +30,8 @@ use posthaste_domain_service::{
     SmartMailbox, SmartMailboxId, SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_authority_server_link::{
-    AuthorityServerLink, AuthorityServerLinkHandle, BaseAssertion, BaseUpdate, AuthorityServerFrame, LinkCoverage,
+    AuthorityServerApi, AuthorityServerFrame, AuthorityServerLinkHandle, BaseAssertion,
+    BaseUpdate, LinkCoverage,
 };
 use posthaste_contract_core::{
     AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
@@ -36,7 +39,7 @@ use posthaste_contract_core::{
 };
 use tokio::sync::broadcast;
 
-/// A read-through cache over the [`AuthorityServerLink`], parameterized by policy.
+/// A read-through cache over the [`AuthorityServerApi`], parameterized by policy.
 ///
 /// - **Passthrough** (co-located): every read delegates straight to the authority server,
 ///   retaining nothing — no redundant storage, behavior-preserving.
@@ -54,13 +57,13 @@ use tokio::sync::broadcast;
 /// over-evict across accounts — which is safe (a cache miss), only less
 /// efficient. Carrying the account id on the assertion is a later refinement.
 pub struct ReadCache {
-    authority_server: Arc<dyn AuthorityServerLink>,
+    authority_server: Arc<dyn AuthorityServerApi>,
     summaries: Option<Mutex<HashMap<String, MessageSummary>>>,
 }
 
 impl ReadCache {
     /// The passthrough cache: read straight through, retain nothing.
-    pub fn passthrough(authority_server: Arc<dyn AuthorityServerLink>) -> Self {
+    pub fn passthrough(authority_server: Arc<dyn AuthorityServerApi>) -> Self {
         Self {
             authority_server,
             summaries: None,
@@ -69,7 +72,7 @@ impl ReadCache {
 
     /// The retaining cache: hold the summaries that flow back, kept coherent by
     /// the down-channel.
-    pub fn retaining(authority_server: Arc<dyn AuthorityServerLink>) -> Self {
+    pub fn retaining(authority_server: Arc<dyn AuthorityServerApi>) -> Self {
         Self {
             authority_server,
             summaries: Some(Mutex::new(HashMap::new())),
@@ -364,7 +367,9 @@ mod tests {
 
     use async_trait::async_trait;
     use posthaste_domain_service::MessagePage;
-    use posthaste_authority_server_link::{BaseAssertion, BaseUpdate, DownStream};
+    use posthaste_authority_server_link::{
+        AuthorityServerLink, BaseAssertion, BaseUpdate, DownStream,
+    };
     use posthaste_link_core::MessageFoldState;
     use posthaste_contract_core::{MutationReceipt, MutationRequest};
     use serde_json::json;
@@ -380,8 +385,8 @@ mod tests {
         .unwrap()
     }
 
-    /// An authority server that counts how often each read reaches it. The write/subscribe
-    /// channels are inert (these tests exercise reads only).
+    /// An authority server that counts how often each read reaches it. Reads
+    /// only, so it implements just the Api half (the cache holds no Link half).
     struct CountingAuthorityServerLink {
         summary_calls: AtomicU64,
         query_calls: AtomicU64,
@@ -402,21 +407,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl AuthorityServerLink for CountingAuthorityServerLink {
-        async fn forward_mutation(
-            &self,
-            _mutation: MutationRequest,
-        ) -> Result<MutationReceipt, RuntimeError> {
-            Err(RuntimeError::internal(
-                "counting authority-server link is read-only",
-                None,
-            ))
-        }
-
-        async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-            Ok(Box::pin(futures_util::stream::empty()))
-        }
-
+    impl AuthorityServerApi for CountingAuthorityServerLink {
         async fn query_mail_page(
             &self,
             _request: MailQueryRequest,
@@ -503,7 +494,9 @@ mod tests {
     }
 
     // An authority server whose down-channel emits one Base assertion then closes, with a
-    // counting point read so eviction is observable.
+    // counting point read so eviction is observable. It is consumed both as a
+    // ReadCache source (Api half) and via the handle's down-channel (Link
+    // half), so it implements the pair — the shape every real transport has.
     struct BridgeAuthorityServerLink {
         summary_calls: AtomicU64,
     }
@@ -530,7 +523,10 @@ mod tests {
                 }],
             }])))
         }
+    }
 
+    #[async_trait]
+    impl AuthorityServerApi for BridgeAuthorityServerLink {
         async fn current_summary(
             &self,
             _account_id: AccountId,

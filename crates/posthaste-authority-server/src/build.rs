@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_service::{ConfigRepository, DomainEvent, MailService, MailStore, SecretStore};
-use posthaste_authority_server_link::{AuthorityServerLink, AuthorityServerLinkHandle};
+use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
@@ -107,7 +107,7 @@ pub async fn build_authority_server(
 /// `posthaste-authority-server` role binary serves [`transport`](AuthorityServerNode::transport)
 /// over `link_router` so a remote runtime drives it across the link.
 pub struct AuthorityServerNode {
-    transport: Arc<dyn AuthorityServerLink>,
+    transport: AuthorityServerLinkHandle,
     /// Held so the supervisor's account tasks keep running for the node's life
     /// (also reachable through the transport's far node).
     _account_supervisor: Arc<AccountSupervisor>,
@@ -115,8 +115,9 @@ pub struct AuthorityServerNode {
 }
 
 impl AuthorityServerNode {
-    /// The in-process link transport over this authority server — hand to `link_router`.
-    pub fn transport(&self) -> Arc<dyn AuthorityServerLink> {
+    /// The in-process link transport (both trait halves of the D33 seam) over
+    /// this authority server — hand to `link_router`.
+    pub fn transport(&self) -> AuthorityServerLinkHandle {
         self.transport.clone()
     }
 
@@ -133,7 +134,9 @@ pub async fn build_authority_server_node(
     config: RuntimeBuildConfig,
 ) -> Result<AuthorityServerNode, RuntimeBuildError> {
     let authority_server = build_authority_server_parts(&config).await?;
-    let transport: Arc<dyn AuthorityServerLink> = Arc::new(LocalAuthorityServer::new(authority_server.authority_server.clone()));
+    let transport = AuthorityServerLinkHandle::new(Arc::new(LocalAuthorityServer::new(
+        authority_server.authority_server.clone(),
+    )));
     Ok(AuthorityServerNode {
         transport,
         _account_supervisor: authority_server.account_supervisor.clone(),
@@ -333,7 +336,7 @@ fn build_read_cache(
         // client), retaining what flows back. In-process: read straight through
         // a LocalAuthorityServer over the co-located far node, retaining nothing.
         AuthorityServerTransportConfig::Remote { .. } => {
-            ReadCache::retaining(authority_server_link.transport().clone())
+            ReadCache::retaining(authority_server_link.api().clone())
         }
         AuthorityServerTransportConfig::InProcess => {
             ReadCache::passthrough(Arc::new(LocalAuthorityServer::new(authority_server.clone())))
@@ -352,15 +355,20 @@ fn select_authority_server_link(
     override_decorator: Option<AuthorityServerTransportDecorator>,
     authority_server: Arc<AuthorityServer>,
 ) -> AuthorityServerLinkHandle {
-    let base: Arc<dyn AuthorityServerLink> = match transport {
-        AuthorityServerTransportConfig::InProcess => Arc::new(LocalAuthorityServer::new(authority_server)),
+    let base = match transport {
+        AuthorityServerTransportConfig::InProcess => {
+            AuthorityServerLinkHandle::new(Arc::new(LocalAuthorityServer::new(authority_server)))
+        }
         AuthorityServerTransportConfig::Remote { base_url, token } => {
-            Arc::new(RemoteAuthorityServer::with_token(base_url.clone(), token.clone()))
+            AuthorityServerLinkHandle::new(Arc::new(RemoteAuthorityServer::with_token(
+                base_url.clone(),
+                token.clone(),
+            )))
         }
     };
     match override_decorator {
-        Some(decorate) => AuthorityServerLinkHandle::new(decorate(base)),
-        None => AuthorityServerLinkHandle::new(base),
+        Some(decorate) => decorate(base),
+        None => base,
     }
 }
 
