@@ -21,10 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use posthaste_authority_runtime::{
-    build_authority_runtime, build_backend_node, build_remote_runtime, BackendTransportConfig,
-    RemoteBackend, RuntimeBuildConfig,
-};
+use posthaste_authority_runtime::{build_authority_runtime, build_backend_node};
 use posthaste_domain_service::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
     SecretStore, SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
@@ -37,8 +34,9 @@ use posthaste_contract_core::{
     MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,
     SecretWriteMutation, ViewDescriptor,
 };
+use posthaste_runtime::{build_remote_runtime, BackendTransportConfig, RemoteBackend, RuntimeBuildConfig};
 use posthaste_runtime_api::{RuntimeAccountApi, RuntimeMailReadApi};
-use posthaste_server::{link_router, LinkAuth};
+use posthaste_authority_runtime::{link_router, LinkAuth};
 
 use futures_util::StreamExt;
 

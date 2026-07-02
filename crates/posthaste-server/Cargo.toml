@@ -42,6 +42,7 @@ posthaste-imap = { path = "../posthaste-imap" }
 posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-contract-core = { path = "../posthaste-contract-core", features = ["openapi"] }
 posthaste-observability = { path = "../posthaste-observability" }
+posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api", features = ["openapi"] }
 posthaste-store = { path = "../posthaste-store" }
 serde = { workspace = true }

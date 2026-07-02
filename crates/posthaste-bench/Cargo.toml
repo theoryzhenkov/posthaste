@@ -27,6 +27,7 @@ posthaste-store = { path = "../posthaste-store" }
 posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-contract-core = { path = "../posthaste-contract-core" }
+posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 anyhow = "1"
 pprof = { version = "0.15", features = ["flamegraph", "protobuf-codec"] }

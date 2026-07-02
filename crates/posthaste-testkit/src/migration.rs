@@ -13,10 +13,9 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use posthaste_authority_runtime::{
-    AccountSupervisor, AuthorityRuntimeApiMigrationBridge, RuntimeHandle,
-};
+use posthaste_authority_runtime::{AccountSupervisor, AuthorityRuntimeApiMigrationBridge};
 use posthaste_domain_service::{DomainEvent, MailService, MailStore, SecretStore};
+use posthaste_runtime::RuntimeHandle;
 
 /// Build a runtime handle around an existing service/store/secret-store/event
 /// graph, with the given account supervisor as the live-account provider.
