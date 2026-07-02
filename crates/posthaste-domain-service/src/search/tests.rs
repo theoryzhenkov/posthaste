@@ -231,3 +231,77 @@ fn test_parse_empty_query() {
     let rule = parse_query("").unwrap();
     assert!(rule.root.nodes.is_empty());
 }
+
+// -- parse_query_with_scopes: in: scope peeling ---------------------------
+// Ported from the deleted `posthaste-authority-runtime/mail_queries/rules/
+// tokenize.rs` so the `in:` extraction behavior is pinned at the one tokenizer
+// that now owns it. These exercise the public boundary mail_queries/rules.rs
+// consumes; the grammar (quoting, negation, spaced `in:` values) must match
+// the deleted duplicate exactly.
+
+#[test]
+fn test_with_scopes_extracts_quoted_in_selector() {
+    let (rule, scopes) = parse_query_with_scopes("in:\"acct-a/inbox\" from:Alex", &["in"]).unwrap();
+    assert_eq!(scopes.len(), 1);
+    assert_eq!(scopes[0].value, "acct-a/inbox");
+    assert!(!scopes[0].negated);
+    let rule = rule.expect("remainder rule for quoted in: + from:");
+    assert_eq!(rule.root.nodes.len(), 1);
+    let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] else {
+        panic!("expected from: ANY group");
+    };
+    assert_eq!(group.operator, SmartMailboxGroupOperator::Any);
+    assert_eq!(group.nodes.len(), 2);
+}
+
+#[test]
+fn test_with_scopes_extracts_spaced_in_selector_until_next_prefix() {
+    let (rule, scopes) = parse_query_with_scopes("in:All Mail from:Alex", &["in"]).unwrap();
+    assert_eq!(scopes.len(), 1);
+    assert_eq!(scopes[0].value, "All Mail");
+    assert!(!scopes[0].negated);
+    let rule = rule.expect("remainder rule for spaced in: + from:");
+    assert_eq!(rule.root.nodes.len(), 1);
+    let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] else {
+        panic!("expected from: ANY group");
+    };
+    assert_eq!(group.nodes.len(), 2);
+}
+
+#[test]
+fn test_with_scopes_marks_negated_in_selector() {
+    let (rule, scopes) = parse_query_with_scopes("-in:Inbox subject:hello", &["in"]).unwrap();
+    assert_eq!(scopes.len(), 1);
+    assert_eq!(scopes[0].value, "Inbox");
+    assert!(scopes[0].negated);
+    let rule = rule.expect("remainder rule for -in: + subject:");
+    assert_eq!(rule.root.nodes.len(), 1);
+    let SmartMailboxRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+        panic!("expected subject Condition");
+    };
+    assert_eq!(condition.field, SmartMailboxField::Subject);
+}
+
+#[test]
+fn test_with_scopes_leaves_in_prefix_as_rule_when_not_listed() {
+    // parse_query delegates with &[], so `in:` must still become a mailbox
+    // node (the behavior the api/bench/store callers rely on).
+    let (rule, scopes) = parse_query_with_scopes("in:archive", &[]).unwrap();
+    assert!(scopes.is_empty());
+    let rule = rule.expect("in:archive yields a rule when not peeled");
+    assert_eq!(rule.root.nodes.len(), 1);
+    let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] else {
+        panic!("expected in: mailbox group");
+    };
+    assert_eq!(group.nodes.len(), 3);
+}
+
+#[test]
+fn test_with_scopes_returns_none_remainder_for_scope_only_query() {
+    // mail_queries/rules.rs relies on `None` here so it does not push an empty
+    // remainder rule alongside a scope rule.
+    let (rule, scopes) = parse_query_with_scopes("in:inbox", &["in"]).unwrap();
+    assert_eq!(scopes.len(), 1);
+    assert_eq!(scopes[0].value, "inbox");
+    assert!(rule.is_none());
+}

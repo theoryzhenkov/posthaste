@@ -1,41 +1,33 @@
-mod tokenize;
-
 use posthaste_domain_service::{
-    AccountId, MailService, MailboxId, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue,
+    search::parse_query_with_scopes, AccountId, MailService, MailboxId, SmartMailboxCondition,
+    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
 };
 use posthaste_contract_core::RuntimeError;
 
-use tokenize::tokenize;
+/// Prefixes that name a mailbox *scope* rather than a searchable field —
+/// resolved service-side by [`resolve_in`] instead of becoming a rule node.
+/// Kept here (not in the domain parser) because scope resolution needs the
+/// [`MailService`], which the service-free parser must not depend on.
+const SCOPE_PREFIXES: &[&str] = &["in"];
 
 pub(crate) fn compile(
     service: &MailService,
     query: &str,
 ) -> Result<SmartMailboxRule, RuntimeError> {
+    let (remainder, scopes) = parse_query_with_scopes(query, SCOPE_PREFIXES)
+        .map_err(RuntimeError::invalid_descriptor)?;
+
     let mut rules = Vec::new();
-    let mut passthrough = Vec::new();
-    for token in tokenize(query) {
-        if token
-            .prefix
-            .as_deref()
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("in"))
-        {
-            let mut rule = resolve_in(service, &token.value)?;
-            if token.negated {
-                rule.root.negated = !rule.root.negated;
-            }
-            rules.push(rule);
-        } else {
-            passthrough.push(token.raw);
+    for scope in scopes {
+        let mut rule = resolve_in(service, &scope.value)?;
+        if scope.negated {
+            rule.root.negated = !rule.root.negated;
         }
+        rules.push(rule);
     }
-    let remaining = passthrough.join(" ");
-    if !remaining.trim().is_empty() {
-        rules.push(
-            posthaste_domain_service::search::parse_query(&remaining)
-                .map_err(RuntimeError::invalid_descriptor)?,
-        );
+    if let Some(remainder) = remainder {
+        rules.push(remainder);
     }
     Ok(combine(rules).unwrap_or_else(empty_rule))
 }
