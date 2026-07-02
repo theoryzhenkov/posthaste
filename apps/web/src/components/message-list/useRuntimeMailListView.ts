@@ -260,7 +260,9 @@ export function useRuntimeMailListView({
               }
             },
           },
-          { afterSeq: 0, sourceId },
+          // No afterSeq: the near-end engine owns the resume cursor (M9b2)
+          // and callers stop threading sequence numbers.
+          { sourceId },
         )
       })
       .catch((cause: unknown) => {

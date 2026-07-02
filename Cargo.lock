@@ -4286,6 +4286,7 @@ dependencies = [
  "posthaste-domain-service",
  "posthaste-link-core",
  "posthaste-link-far-end",
+ "posthaste-link-near-end",
  "posthaste-link-replica",
  "posthaste-runtime-api",
  "reqwest 0.12.28",

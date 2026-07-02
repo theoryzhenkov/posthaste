@@ -14,6 +14,17 @@ export interface ParsedMailOperation {
   assertion: ReplicaAssertion
 }
 
+/** The wasm `NearEndHandle` surface the near-end binding drives (see
+ * `src/runtime/nearEnd.ts`); values cross as JSON strings. */
+export interface NearEndWasmHandle {
+  connect(): Promise<unknown>
+  disconnect(): Promise<unknown>
+  forward(requestJson: string): Promise<string>
+  sessionId(): string | undefined
+  cursor(): number | undefined
+  free(): void
+}
+
 interface WasmModule {
   default(): Promise<void>
   /**
@@ -27,9 +38,17 @@ interface WasmModule {
     roleMapJson: string,
   ): string | undefined
   invertMessageChangeDiff(diffJson: string): string
+  NearEndHandle: new (io: unknown, configJson: string) => NearEndWasmHandle
 }
 
 let wasmModulePromise: Promise<WasmModule> | undefined
+
+/** Load + initialize the shared link wasm module once (browser URL fetch, or
+ * synchronous binary init under Bun). Shared by the replica helpers here and
+ * the near-end engine binding (`src/runtime/nearEnd.ts`). */
+export function loadLinkWasmModule(): Promise<WasmModule> {
+  return loadWasmModule()
+}
 
 async function loadWasmModule(): Promise<WasmModule> {
   wasmModulePromise ??= (async () => {

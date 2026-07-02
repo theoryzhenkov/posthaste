@@ -20,7 +20,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use futures_util::StreamExt;
 use std::collections::BTreeMap;
 
 use posthaste_domain_model::{
@@ -30,8 +29,7 @@ use posthaste_domain_model::{
     SmartMailbox, SmartMailboxId, SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_authority_server_link::{
-    AuthorityServerApi, AuthorityServerFrame, AuthorityServerLinkHandle, BaseAssertion,
-    BaseUpdate, LinkCoverage,
+    AuthorityServerApi, AuthorityServerFrame, BaseAssertion, BaseUpdate,
 };
 use posthaste_contract_core::{
     AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
@@ -303,28 +301,27 @@ impl ReadCache {
 /// down-channel; the runtime→client half is the shipped view-frame protocol it
 /// feeds ([replication authority-server-link L3](../replication/authority-server-link/L3.md)). In-process the runtime
 /// shares the authority server's event bus directly, so this is spawned only for a split
-/// (remote) runtime; it returns when the stream closes.
+/// (remote) runtime.
+///
+/// The connection lifecycle lives in the shared `LinkNearEnd` engine (M9b2,
+/// D40): `frames` is the engine's down-channel — the engine subscribes,
+/// reconnects with jittered backoff, and resumes from its own `last_down_seq`
+/// cursor (`afterSeq`, D46). This consumer holds ONLY the near node's frame
+/// semantics (eviction/absorption/republish — unchanged); it returns when the
+/// engine side is dropped.
 pub(crate) async fn run_authority_server_down_channel(
-    link: AuthorityServerLinkHandle,
+    mut frames: tokio::sync::mpsc::UnboundedReceiver<
+        posthaste_authority_server_link::SequencedFrame,
+    >,
     reads: Arc<ReadCache>,
     events: broadcast::Sender<DomainEvent>,
     outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
 ) {
-    // Initial subscribe is fresh (`after_seq = None`); the reconnect engine
-    // (M9b) will resume from `last_down_seq` below. Coverage says WHAT to stream,
-    // the seq says WHERE to resume (D46).
-    let Ok(mut stream) = link.subscribe(LinkCoverage::Complete, None).await else {
-        return;
-    };
     // A monotonic local sequence for the synthesized events. These do NOT match
     // the authority server's authoritative seqs (those come via `replay_events` over the
     // link); they only order the live stream for fresh subscribers.
     let mut seq: i64 = 0;
-    // The last down-channel seq observed — the resume cursor a reconnect would
-    // pass as `after_seq` (D46). Tracked here; the reconnect loop lands at M9b.
-    let mut last_down_seq: u64 = 0;
-    while let Some(sequenced) = stream.next().await {
-        last_down_seq = sequenced.seq;
+    while let Some(sequenced) = frames.recv().await {
         let frame = &sequenced.frame;
         reads.apply_coherence_frame(frame);
         if let AuthorityServerFrame::Base { assertions } = frame {
@@ -341,12 +338,7 @@ pub(crate) async fn run_authority_server_down_channel(
             }
         }
     }
-    // The stream closed. `last_down_seq` is the resume cursor a reconnect passes
-    // as `after_seq`; the reconnect loop that consumes it lands at M9b.
-    tracing::debug!(
-        last_down_seq,
-        "authority-server down-channel closed; resume cursor recorded"
-    );
+    tracing::debug!("authority-server down-channel consumer stopped (engine side dropped)");
 }
 
 /// Map a down-channel base assertion to the domain event the near node's view
@@ -382,10 +374,9 @@ mod tests {
     use async_trait::async_trait;
     use posthaste_domain_model::MessagePage;
     use posthaste_authority_server_link::{
-        AuthorityServerLink, BaseAssertion, BaseUpdate, DownStream, SequencedFrame,
+        BaseAssertion, BaseUpdate, SequencedFrame,
     };
     use posthaste_link_core::MessageFoldState;
-    use posthaste_contract_core::{MutationReceipt, MutationRequest};
     use serde_json::json;
 
     fn summary(id: &str) -> MessageSummary {
@@ -507,43 +498,12 @@ mod tests {
         assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 2);
     }
 
-    // An authority server whose down-channel emits one Base assertion then closes, with a
-    // counting point read so eviction is observable. It is consumed both as a
-    // ReadCache source (Api half) and via the handle's down-channel (Link
-    // half), so it implements the pair — the shape every real transport has.
+    // A counting point read so eviction is observable through the ReadCache's
+    // Api half; the down-channel frames now arrive over the engine's channel
+    // (the engine owns subscribe/reconnect — see `link_near_end`), so the test
+    // feeds the consumer directly.
     struct BridgeAuthorityServerLink {
         summary_calls: AtomicU64,
-    }
-
-    #[async_trait]
-    impl AuthorityServerLink for BridgeAuthorityServerLink {
-        async fn forward_mutation(
-            &self,
-            _mutation: MutationRequest,
-        ) -> Result<MutationReceipt, RuntimeError> {
-            Err(RuntimeError::internal("bridge authority-server link is read-only", None))
-        }
-
-        async fn subscribe(
-            &self,
-            _coverage: LinkCoverage,
-            _after_seq: Option<u64>,
-        ) -> Result<DownStream, RuntimeError> {
-            Ok(Box::pin(futures_util::stream::iter([SequencedFrame::new(
-                1,
-                AuthorityServerFrame::Base {
-                    assertions: vec![BaseAssertion {
-                        account_id: "acct".into(),
-                        message_id: "m1".into(),
-                        // Carries the flag so a pending flag op on m1 is absorbed.
-                        update: BaseUpdate::Present(MessageFoldState {
-                            keywords: vec!["$flagged".into()],
-                            mailbox_ids: vec![],
-                        }),
-                    }],
-                },
-            )])))
-        }
     }
 
     #[async_trait]
@@ -572,7 +532,7 @@ mod tests {
         assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 1);
 
         // A confirmed flag op on m1, held pending because its receipt outran the
-        // base assertion (the remote seam). The bridge's assertion below carries
+        // base assertion (the remote seam). The assertion fed below carries
         // the flag, so the absorption-gated retire drops it.
         let outbox = Arc::new(crate::near_node::RuntimeAuthorityServerOutbox::new(true));
         outbox.accept(posthaste_link_core::PendingMessageMutation {
@@ -591,9 +551,27 @@ mod tests {
         );
 
         let (events, mut rx) = broadcast::channel(16);
-        let link = AuthorityServerLinkHandle::new(authority_server.clone());
-        // The stub stream closes after one frame, so the bridge returns.
-        run_authority_server_down_channel(link, cache.clone(), events, outbox.clone()).await;
+        // One engine-delivered frame, then the engine side drops — the consumer
+        // applies the frame's semantics and returns.
+        let (frames_tx, frames_rx) = tokio::sync::mpsc::unbounded_channel();
+        frames_tx
+            .send(SequencedFrame::new(
+                1,
+                AuthorityServerFrame::Base {
+                    assertions: vec![BaseAssertion {
+                        account_id: "acct".into(),
+                        message_id: "m1".into(),
+                        // Carries the flag so the pending flag op on m1 is absorbed.
+                        update: BaseUpdate::Present(MessageFoldState {
+                            keywords: vec!["$flagged".into()],
+                            mailbox_ids: vec![],
+                        }),
+                    }],
+                },
+            ))
+            .expect("frame enqueues");
+        drop(frames_tx);
+        run_authority_server_down_channel(frames_rx, cache.clone(), events, outbox.clone()).await;
 
         // The base now carries the flag: the held op is retired by absorption.
         assert!(

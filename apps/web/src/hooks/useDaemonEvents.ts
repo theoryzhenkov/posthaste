@@ -3,8 +3,9 @@
  * the session-scoped `RuntimeFrame` stream and dispatches them as cache
  * invalidations and browser `CustomEvent`s.
  *
- * Resumes from the last seen runtime frame sequence number stored in
- * `sessionStorage`.
+ * Stream resume is the near-end engine's job (M9b2): the engine owns the
+ * `afterSeq` cursor and persists it across reloads — callers no longer thread
+ * a sequence number.
  *
  * Subscribes through the runtime adapter so transport details (SSE, loopback
  * URLs, and bearer headers) stay outside UI code. The token no longer appears
@@ -20,9 +21,6 @@ import { LOG_EVENTS } from '../logEvents'
 import type { DomainEvent } from '../api/types'
 import { applyDomainEvent } from '../domainCache'
 import { runtimeSessionClient } from '../runtime/sessionClient'
-
-/** `sessionStorage` key for the last processed runtime frame sequence number. */
-const EVENT_CURSOR_STORAGE_KEY = 'mail:last-runtime-frame-seq'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -53,60 +51,51 @@ export function useDaemonEvents() {
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    const storedSeq = window.sessionStorage.getItem(EVENT_CURSOR_STORAGE_KEY)
-    const afterSeq = storedSeq ? Number.parseInt(storedSeq, 10) : null
-    const unsubscribe = runtimeSessionClient.subscribe(
-      {
-        onFrame(frame) {
-          window.sessionStorage.setItem(
-            EVENT_CURSOR_STORAGE_KEY,
-            String(frame.sessionSeq),
-          )
-          if (frame.type !== 'notification') {
-            return
-          }
-          if (!isDomainEventPayload(frame.payload)) {
-            syncLogger.warn(
-              {
-                event: LOG_EVENTS.daemonEventMalformed,
-                raw: JSON.stringify(frame.payload),
-              },
-              'ignoring malformed runtime notification',
-            )
-            return
-          }
-          const payload = frame.payload
-          // The renderer holds no optimistic overlay, so every runtime event is
-          // authoritative and always applies — there is no local echo to drop.
-          applyDomainEvent(queryClient, payload)
-        },
-        onMalformedFrame({ raw, error }) {
+    const unsubscribe = runtimeSessionClient.subscribe({
+      onFrame(frame) {
+        if (frame.type !== 'notification') {
+          return
+        }
+        if (!isDomainEventPayload(frame.payload)) {
           syncLogger.warn(
-            { event: LOG_EVENTS.daemonEventMalformed, error, raw },
-            'ignoring malformed daemon event',
+            {
+              event: LOG_EVENTS.daemonEventMalformed,
+              raw: JSON.stringify(frame.payload),
+            },
+            'ignoring malformed runtime notification',
           )
-        },
-        onPermanentError(error) {
-          syncLogger.warn(
-            { event: LOG_EVENTS.daemonEventStreamError, error },
-            'daemon event stream failed permanently',
-          )
-        },
-        onTransientError(error) {
-          syncLogger.warn(
-            { event: LOG_EVENTS.daemonEventStreamError, error },
-            'daemon event stream disconnected; reconnecting',
-          )
-        },
-        onClosed(error) {
-          syncLogger.warn(
-            { event: LOG_EVENTS.daemonEventStreamError, error },
-            'daemon event stream closed',
-          )
-        },
+          return
+        }
+        const payload = frame.payload
+        // The renderer holds no optimistic overlay, so every runtime event is
+        // authoritative and always applies — there is no local echo to drop.
+        applyDomainEvent(queryClient, payload)
       },
-      { afterSeq: Number.isFinite(afterSeq) ? afterSeq : null },
-    )
+      onMalformedFrame({ raw, error }) {
+        syncLogger.warn(
+          { event: LOG_EVENTS.daemonEventMalformed, error, raw },
+          'ignoring malformed daemon event',
+        )
+      },
+      onPermanentError(error) {
+        syncLogger.warn(
+          { event: LOG_EVENTS.daemonEventStreamError, error },
+          'daemon event stream failed permanently',
+        )
+      },
+      onTransientError(error) {
+        syncLogger.warn(
+          { event: LOG_EVENTS.daemonEventStreamError, error },
+          'daemon event stream disconnected; reconnecting',
+        )
+      },
+      onClosed(error) {
+        syncLogger.warn(
+          { event: LOG_EVENTS.daemonEventStreamError, error },
+          'daemon event stream closed',
+        )
+      },
+    })
 
     return unsubscribe
   }, [queryClient])

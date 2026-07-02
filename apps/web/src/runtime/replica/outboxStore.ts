@@ -23,12 +23,20 @@ export interface OutboxRecord {
   acceptedAt: number
   /**
    * The original runtime send, stored so a never-dispatched record
-   * (`runtimeMutationId === null`) can be re-sent verbatim on rehydration.
-   * Optional: records written before this field existed lack it and are
-   * skipped on replay (can't reconstruct the send). IndexedDB is schemaless,
-   * so adding this needs NO `replicaDatabase` version bump.
+   * (`runtimeMutationId === null`) can be replayed verbatim by the near-end
+   * engine's reconciler on connect. Optional: records written before this
+   * field existed lack it and are skipped on replay (can't reconstruct the
+   * send). IndexedDB is schemaless, so adding this needs NO `replicaDatabase`
+   * version bump.
    */
   request?: RuntimeRunMutationRequest
+  /**
+   * The runtime session the record was dispatched under (stored at link
+   * time). The reconciler's sent-but-unsettled settlement query (D44b) is
+   * keyed to it; a legacy record without one cannot be queried and is dropped
+   * on rehydration (the pre-reconciler behavior). Schemaless: no version bump.
+   */
+  sessionId?: string
 }
 
 /**
@@ -40,6 +48,7 @@ export interface OutboxStore {
   linkRuntimeMutationId(
     clientMutationId: string,
     runtimeMutationId: string,
+    sessionId?: string,
   ): Promise<void>
   remove(clientMutationId: string): Promise<void>
   all(): Promise<OutboxRecord[]>
@@ -85,6 +94,7 @@ export class IndexedDbOutboxStore implements OutboxStore {
   async linkRuntimeMutationId(
     clientMutationId: string,
     runtimeMutationId: string,
+    sessionId?: string,
   ): Promise<void> {
     const connection = await this.db()
     await new Promise<void>((resolve, reject) => {
@@ -99,7 +109,11 @@ export class IndexedDbOutboxStore implements OutboxStore {
           resolve()
           return
         }
-        store.put({ ...existing, runtimeMutationId })
+        store.put({
+          ...existing,
+          runtimeMutationId,
+          ...(sessionId ? { sessionId } : {}),
+        })
         transaction.oncomplete = () => resolve()
       }
       get.onerror = () => reject(get.error)
@@ -136,10 +150,14 @@ export class MemoryOutboxStore implements OutboxStore {
   async linkRuntimeMutationId(
     clientMutationId: string,
     runtimeMutationId: string,
+    sessionId?: string,
   ): Promise<void> {
     const existing = this.records.get(clientMutationId)
     if (existing) {
       existing.runtimeMutationId = runtimeMutationId
+      if (sessionId) {
+        existing.sessionId = sessionId
+      }
     }
   }
 

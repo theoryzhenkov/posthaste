@@ -28,8 +28,9 @@ use wasm_bindgen_futures::{future_to_promise, spawn_local, JsFuture};
 
 use posthaste_contract_core::{MutationReceipt, MutationRequest, RuntimeFrame};
 use posthaste_link_near_end::{
-    ConnectionStatus, FrameSink, NearEnd, NearEndConfig, OutboxHooks, PostRequest, PostResponse,
-    Scheduler, StreamEvent, StreamRequest, Transport, TransportError,
+    ConnectionStatus, FrameSink, GetRequest, NearEnd, NearEndConfig, OutboxHooks, PostRequest,
+    PostResponse, RuntimeSessionWire, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
+    Transport, TransportError,
 };
 
 fn js_error_string(value: &JsValue) -> String {
@@ -52,10 +53,33 @@ fn get_function(io: &JsValue, name: &str) -> Result<Function, JsError> {
 
 // ---- Transport -------------------------------------------------------------
 
-/// Binds the JS `postJson` / `openStream` callbacks as the engine's transport.
+/// Binds the JS `postJson` / `getJson` / `openStream` callbacks as the
+/// engine's transport.
 struct JsTransport {
     post_json: Function,
+    get_json: Function,
     open_stream: Function,
+}
+
+/// Await a JS-returned Promise resolving `{status, body}` into a
+/// [`PostResponse`] — shared by the POST and GET bindings.
+async fn js_response(returned: Result<JsValue, JsValue>) -> Result<PostResponse, TransportError> {
+    let returned = returned.map_err(|e| TransportError::new(js_error_string(&e)))?;
+    let promise: Promise = returned
+        .dyn_into()
+        .map_err(|_| TransportError::new("io callback must return a promise"))?;
+    let value = JsFuture::from(promise)
+        .await
+        .map_err(|e| TransportError::new(js_error_string(&e)))?;
+    let status = Reflect::get(&value, &JsValue::from_str("status"))
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as u16;
+    let body = Reflect::get(&value, &JsValue::from_str("body"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_default();
+    Ok(PostResponse { status, body })
 }
 
 /// A [`Stream`] fed by the JS `openStream` event callback. Holds the closure
@@ -92,29 +116,30 @@ impl Transport for JsTransport {
         let func = self.post_json.clone();
         let headers_json = serde_json::to_string(&request.headers).unwrap_or_else(|_| "[]".into());
         async move {
-            let returned = func
-                .call3(
-                    &JsValue::NULL,
-                    &JsValue::from_str(&request.url),
-                    &JsValue::from_str(&headers_json),
-                    &JsValue::from_str(&request.body),
-                )
-                .map_err(|e| TransportError::new(js_error_string(&e)))?;
-            let promise: Promise = returned
-                .dyn_into()
-                .map_err(|_| TransportError::new("postJson must return a promise"))?;
-            let value = JsFuture::from(promise)
-                .await
-                .map_err(|e| TransportError::new(js_error_string(&e)))?;
-            let status = Reflect::get(&value, &JsValue::from_str("status"))
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0) as u16;
-            let body = Reflect::get(&value, &JsValue::from_str("body"))
-                .ok()
-                .and_then(|v| v.as_string())
-                .unwrap_or_default();
-            Ok(PostResponse { status, body })
+            js_response(func.call3(
+                &JsValue::NULL,
+                &JsValue::from_str(&request.url),
+                &JsValue::from_str(&headers_json),
+                &JsValue::from_str(&request.body),
+            ))
+            .await
+        }
+        .boxed_local()
+    }
+
+    fn get_json(
+        &self,
+        request: GetRequest,
+    ) -> LocalBoxFuture<'static, Result<PostResponse, TransportError>> {
+        let func = self.get_json.clone();
+        let headers_json = serde_json::to_string(&request.headers).unwrap_or_else(|_| "[]".into());
+        async move {
+            js_response(func.call2(
+                &JsValue::NULL,
+                &JsValue::from_str(&request.url),
+                &JsValue::from_str(&headers_json),
+            ))
+            .await
         }
         .boxed_local()
     }
@@ -181,7 +206,7 @@ struct JsFrameSink {
     on_status: Function,
 }
 
-impl FrameSink for JsFrameSink {
+impl FrameSink<RuntimeFrame> for JsFrameSink {
     fn on_frame(&self, frame: RuntimeFrame) {
         if let Ok(json) = serde_json::to_string(&frame) {
             let _ = self.on_frame.call1(&JsValue::NULL, &JsValue::from_str(&json));
@@ -217,31 +242,74 @@ impl FrameSink for JsFrameSink {
 struct JsOutbox {
     never_dispatched: Function,
     on_reconciled: Function,
+    sent_unsettled: Function,
+    on_settlement: Function,
+}
+
+/// The JSON shape `sentUnsettled()` resolves with: the sent-but-unsettled
+/// records the reconciler queries (D44b).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsSentUnsettled {
+    session_id: String,
+    client_mutation_id: String,
+    #[serde(default)]
+    request: Option<MutationRequest>,
+}
+
+/// Call a zero-arg JS hook and resolve its returned Promise<string> (or a
+/// synchronous string) into the JSON payload; empty on any failure.
+async fn js_hook_json(func: Function) -> String {
+    let returned = match func.call0(&JsValue::NULL) {
+        Ok(value) => value,
+        Err(_) => return String::new(),
+    };
+    match returned.dyn_into::<Promise>() {
+        Ok(promise) => match JsFuture::from(promise).await {
+            Ok(value) => value.as_string().unwrap_or_default(),
+            Err(_) => String::new(),
+        },
+        Err(value) => value.as_string().unwrap_or_default(),
+    }
 }
 
 impl OutboxHooks for JsOutbox {
     fn never_dispatched(&self) -> LocalBoxFuture<'static, Vec<MutationRequest>> {
         let func = self.never_dispatched.clone();
         async move {
-            let returned = match func.call0(&JsValue::NULL) {
-                Ok(value) => value,
-                Err(_) => return Vec::new(),
-            };
-            // Accept either a Promise<string> or a synchronous string.
-            let json = match returned.dyn_into::<Promise>() {
-                Ok(promise) => match JsFuture::from(promise).await {
-                    Ok(value) => value.as_string().unwrap_or_default(),
-                    Err(_) => return Vec::new(),
-                },
-                Err(value) => value.as_string().unwrap_or_default(),
-            };
-            serde_json::from_str::<Vec<MutationRequest>>(&json).unwrap_or_default()
+            serde_json::from_str::<Vec<MutationRequest>>(&js_hook_json(func).await)
+                .unwrap_or_default()
         }
         .boxed_local()
     }
 
     fn on_reconciled(&self, receipt: MutationReceipt) -> LocalBoxFuture<'static, ()> {
         let func = self.on_reconciled.clone();
+        let json = serde_json::to_string(&receipt).unwrap_or_default();
+        async move {
+            let _ = func.call1(&JsValue::NULL, &JsValue::from_str(&json));
+        }
+        .boxed_local()
+    }
+
+    fn sent_unsettled(&self) -> LocalBoxFuture<'static, Vec<SentUnsettled>> {
+        let func = self.sent_unsettled.clone();
+        async move {
+            serde_json::from_str::<Vec<JsSentUnsettled>>(&js_hook_json(func).await)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|record| SentUnsettled {
+                    session_id: record.session_id,
+                    client_mutation_id: record.client_mutation_id,
+                    request: record.request,
+                })
+                .collect()
+        }
+        .boxed_local()
+    }
+
+    fn on_settlement(&self, receipt: MutationReceipt) -> LocalBoxFuture<'static, ()> {
+        let func = self.on_settlement.clone();
         let json = serde_json::to_string(&receipt).unwrap_or_default();
         async move {
             let _ = func.call1(&JsValue::NULL, &JsValue::from_str(&json));
@@ -264,23 +332,25 @@ struct JsConfig {
 }
 
 impl JsConfig {
-    fn into_config(self) -> NearEndConfig {
-        let mut config = NearEndConfig::default();
-        if let Some(base) = self.base_url {
-            config.base_url = base;
-        }
-        if let Some(view_delta) = self.view_delta {
-            config.view_delta = view_delta;
-        }
-        config.source_id = self.source_id;
-        config.initial_cursor = self.initial_cursor;
+    /// Split the flat JS config into the wire profile (path/session shape) and
+    /// the engine's policy config.
+    fn into_parts(self) -> (RuntimeSessionWire, NearEndConfig) {
+        let wire = RuntimeSessionWire {
+            base_url: self.base_url.unwrap_or_default(),
+            view_delta: self.view_delta.unwrap_or(true),
+            source_id: self.source_id,
+        };
+        let mut config = NearEndConfig {
+            initial_cursor: self.initial_cursor,
+            ..NearEndConfig::default()
+        };
         if let Some(ms) = self.request_deadline_ms {
             config.request_deadline = Duration::from_millis(ms);
         }
         if let Some(attempts) = self.forward_max_attempts {
             config.forward_max_attempts = attempts.max(1);
         }
-        config
+        (wire, config)
     }
 }
 
@@ -290,7 +360,7 @@ impl JsConfig {
 /// config JSON string; `connect`/`disconnect`/`forward` return Promises.
 #[wasm_bindgen]
 pub struct NearEndHandle {
-    engine: Rc<NearEnd>,
+    engine: Rc<NearEnd<RuntimeSessionWire>>,
     running: RefCell<bool>,
 }
 
@@ -299,14 +369,18 @@ impl NearEndHandle {
     /// Build the engine from the JS IO object and a config JSON string.
     ///
     /// `io` must expose: `postJson(url, headersJson, body) => Promise<{status,
-    /// body}>`, `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
+    /// body}>`, `getJson(url, headersJson) => Promise<{status, body}>`,
+    /// `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
     /// status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onStatus(label,
     /// message)`, `neverDispatched() => Promise<string>` (a JSON array of
-    /// forward requests), and `onReconciled(receiptJson)`.
+    /// forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
+    /// Promise<string>` (a JSON array of `{sessionId, clientMutationId,
+    /// request?}`), and `onSettlement(receiptJson)`.
     #[wasm_bindgen(constructor)]
     pub fn new(io: &JsValue, config_json: &str) -> Result<NearEndHandle, JsError> {
         let transport = JsTransport {
             post_json: get_function(io, "postJson")?,
+            get_json: get_function(io, "getJson")?,
             open_stream: get_function(io, "openStream")?,
         };
         let sink = JsFrameSink {
@@ -317,6 +391,8 @@ impl NearEndHandle {
         let outbox = JsOutbox {
             never_dispatched: get_function(io, "neverDispatched")?,
             on_reconciled: get_function(io, "onReconciled")?,
+            sent_unsettled: get_function(io, "sentUnsettled")?,
+            on_settlement: get_function(io, "onSettlement")?,
         };
         let config: JsConfig = if config_json.trim().is_empty() {
             JsConfig::default()
@@ -325,12 +401,14 @@ impl NearEndHandle {
                 .map_err(|e| JsError::new(&format!("invalid config: {e}")))?
         };
 
+        let (wire, config) = config.into_parts();
         let engine = NearEnd::new(
+            wire,
             Rc::new(transport),
             Rc::new(BrowserScheduler),
             Rc::new(sink),
             Rc::new(outbox),
-            config.into_config(),
+            config,
         );
         Ok(NearEndHandle {
             engine,
@@ -386,7 +464,7 @@ impl NearEndHandle {
     /// The current session id, once connected.
     #[wasm_bindgen(js_name = sessionId)]
     pub fn session_id(&self) -> Option<String> {
-        self.engine.session_id().map(|id| id.as_str().to_string())
+        self.engine.token()
     }
 
     /// The engine-owned resume cursor (last seen `sessionSeq`). The host mirrors
