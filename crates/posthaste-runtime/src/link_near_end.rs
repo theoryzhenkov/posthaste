@@ -40,8 +40,8 @@ use posthaste_contract_core::{
 };
 use posthaste_link_near_end::{
     ConnectionStatus, EngineError, FrameSink, GetRequest, NearEnd, NearEndConfig, OutboxHooks,
-    PostRequest, PostResponse, Scheduler, SentUnsettled, StreamEvent, StreamRequest, Transport,
-    TransportError, Wire,
+    ParsedFrame, PostRequest, PostResponse, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
+    Transport, TransportError, Wire,
 };
 
 // ---- SSE framing -------------------------------------------------------------
@@ -294,9 +294,18 @@ impl Wire for AuthorityLinkWire {
         }
     }
 
-    fn parse_frame(&self, data: &str) -> Result<(u64, SequencedFrame), String> {
+    fn parse_frame(&self, data: &str) -> Result<ParsedFrame<SequencedFrame>, String> {
         let frame: SequencedFrame = serde_json::from_str(data).map_err(|e| e.to_string())?;
-        Ok((frame.seq, frame))
+        Ok(if frame.is_reset() {
+            ParsedFrame::Reset {
+                highest_seq: frame.seq(),
+            }
+        } else {
+            // The whole `Sequenced::Frame` is the seam frame this near-end carries
+            // (its consumer reads the inner assertion/settlement + seq).
+            let seq = frame.seq();
+            ParsedFrame::Frame { seq, frame }
+        })
     }
 
     fn settlement_request(
@@ -342,6 +351,14 @@ impl FrameSink<SequencedFrame> for ChannelFrameSink {
         tracing::warn!(%error, raw, "dropping a malformed authority-server link frame");
     }
 
+    fn on_reset(&self) {
+        // D49: the near node's incremental base view is broken (a seq gap the
+        // far-end could not replay). Signal the read-path consumer to evict its
+        // whole read cache and re-read through, as a `Reset` element on the same
+        // channel (order-preserving with the frames it interleaves).
+        let _ = self.frames.send(SequencedFrame::reset(0));
+    }
+
     fn on_status(&self, status: ConnectionStatus) {
         match status {
             ConnectionStatus::Connecting => {
@@ -355,6 +372,9 @@ impl FrameSink<SequencedFrame> for ChannelFrameSink {
             }
             ConnectionStatus::TransientError(message) => {
                 tracing::warn!(%message, "authority-server down-channel transient error; will reconnect")
+            }
+            ConnectionStatus::Degraded(message) => {
+                tracing::error!(%message, "authority-server down-channel degraded (malformed frames); stream stopped")
             }
             ConnectionStatus::PermanentError(message) => {
                 tracing::error!(%message, "authority-server down-channel permanent error; stream stopped")

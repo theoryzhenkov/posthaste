@@ -40,7 +40,7 @@ use crate::sink::{ConnectionStatus, FrameSink};
 use crate::transport::{
     GetRequest, PostRequest, PostResponse, StreamEvent, Transport, TransportError,
 };
-use crate::wire::Wire;
+use crate::wire::{ParsedFrame, Wire};
 
 /// A failure surfaced by an engine call, tagged with its [`Disposition`] so the
 /// caller (and the wasm boundary) can react. Mirrors the runtime error envelope
@@ -109,7 +109,23 @@ struct State {
     token: Option<String>,
     cursor: Option<u64>,
     reconnect_attempt: u32,
+    /// Consecutive malformed-frame count within the live stream ([3]); reset by
+    /// any successfully parsed frame.
+    malformed_streak: u32,
     shutdown: bool,
+}
+
+/// What the frame loop does after handling one stream message.
+enum MessageOutcome {
+    /// Keep reading the current stream.
+    Continue,
+    /// A seq gap the near node cannot bridge from this stream: reseed and
+    /// **immediately** resubscribe from the resume cursor (no backoff) — the
+    /// far-end replays the gap (or sends a `Reset` if it cannot).
+    Resubscribe,
+    /// The wire is permanently broken (N consecutive malformed frames, [3]) —
+    /// stop the loop.
+    Fatal,
 }
 
 /// The near-end engine, generic over the seam's [`Wire`] profile. Held behind
@@ -302,6 +318,8 @@ impl<W: Wire> NearEnd<W> {
             let mut stream = self.transport.open_stream(request);
 
             let mut permanent = false;
+            // An immediate (no-backoff) resubscribe to bridge a detected seq gap.
+            let mut resubscribe = false;
             while let Some(event) = stream.next().await {
                 match event {
                     StreamEvent::Open => {
@@ -310,9 +328,17 @@ impl<W: Wire> NearEnd<W> {
                         // Level-triggered reconciler: every connect, first included.
                         self.clone().reconcile().await;
                     }
-                    StreamEvent::Message(data) => {
-                        self.handle_message(data);
-                    }
+                    StreamEvent::Message(data) => match self.handle_message(data) {
+                        MessageOutcome::Continue => {}
+                        MessageOutcome::Resubscribe => {
+                            resubscribe = true;
+                            break;
+                        }
+                        MessageOutcome::Fatal => {
+                            permanent = true;
+                            break;
+                        }
+                    },
                     StreamEvent::Closed => break,
                     StreamEvent::Error { status, message } => {
                         if status.map(classify_status) == Some(Disposition::Permanent) {
@@ -334,27 +360,76 @@ impl<W: Wire> NearEnd<W> {
             if permanent || self.is_shutdown() {
                 return;
             }
+            if resubscribe {
+                // Gap recovery (D49): resubscribe at once from the resume cursor,
+                // without the reconnect backoff — this is a targeted catch-up, not
+                // a failure.
+                continue;
+            }
             self.sink.on_status(ConnectionStatus::Reconnecting);
             self.backoff_before_reconnect().await;
         }
     }
 
-    fn handle_message(&self, data: String) {
+    fn handle_message(&self, data: String) -> MessageOutcome {
         // Skip SSE keep-alive / empty payloads (parity with the TS `!event.data`).
+        // An empty payload is not a malformed frame — it does not touch the streak.
         if data.trim().is_empty() {
-            return;
+            return MessageOutcome::Continue;
         }
         match self.wire.parse_frame(&data) {
-            Ok((seq, frame)) => {
-                {
+            Ok(ParsedFrame::Reset { highest_seq }) => {
+                // The far-end could not serve our resume point (backlog overflow):
+                // adopt its current cursor so we stop gap-detecting against the
+                // lost seqs, and re-seed from current state (D49).
+                let mut state = self.state.borrow_mut();
+                state.malformed_streak = 0;
+                state.cursor = Some(highest_seq);
+                drop(state);
+                self.sink.on_reset();
+                MessageOutcome::Continue
+            }
+            Ok(ParsedFrame::Frame { seq, frame }) => {
+                let gap = {
                     let mut state = self.state.borrow_mut();
-                    if state.cursor.is_none_or(|c| seq > c) {
+                    state.malformed_streak = 0;
+                    // A gap is a seq strictly beyond the next expected one.
+                    let gap = state.cursor.is_some_and(|c| seq > c + 1);
+                    if !gap && state.cursor.is_none_or(|c| seq > c) {
                         state.cursor = Some(seq);
                     }
+                    gap
+                };
+                if gap {
+                    // Reseed the near node's incremental view, then resubscribe
+                    // from the (unchanged) cursor to replay the missing frames
+                    // (D49). The frame that revealed the gap is not delivered — it
+                    // will arrive again in order after the resubscribe.
+                    self.sink.on_reset();
+                    MessageOutcome::Resubscribe
+                } else {
+                    self.sink.on_frame(frame);
+                    MessageOutcome::Continue
                 }
-                self.sink.on_frame(frame);
             }
-            Err(e) => self.sink.on_malformed(data, e),
+            Err(e) => {
+                let streak = {
+                    let mut state = self.state.borrow_mut();
+                    state.malformed_streak += 1;
+                    state.malformed_streak
+                };
+                self.sink.on_malformed(data, e);
+                if streak >= self.config.max_consecutive_malformed {
+                    // [3]: a run of unparseable frames is a version skew / corrupt
+                    // peer, not an ignorable keep-alive — surface Degraded and stop.
+                    self.sink.on_status(ConnectionStatus::Degraded(format!(
+                        "{streak} consecutive malformed frames; the link peer is incompatible or corrupt"
+                    )));
+                    MessageOutcome::Fatal
+                } else {
+                    MessageOutcome::Continue
+                }
+            }
         }
     }
 

@@ -280,6 +280,16 @@ impl ReadCache {
         }
     }
 
+    /// Evict the entire summary cache — the D49 reset reaction: a down-channel
+    /// gap the far-end could not replay means the near node's coverage is no
+    /// longer trustworthy, so drop it all and re-read through on the next read.
+    /// No-op for a passthrough cache.
+    pub(crate) fn evict_all(&self) {
+        if let Some(summaries) = &self.summaries {
+            summaries.lock().expect("summary cache poisoned").clear();
+        }
+    }
+
     /// Apply one down-channel frame for coherence: evict the messages a base
     /// assertion changed (present or removed), so the next read re-fetches.
     pub(crate) fn apply_coherence_frame(&self, frame: &AuthorityServerFrame) {
@@ -322,7 +332,13 @@ pub(crate) async fn run_authority_server_down_channel(
     // link); they only order the live stream for fresh subscribers.
     let mut seq: i64 = 0;
     while let Some(sequenced) = frames.recv().await {
-        let frame = &sequenced.frame;
+        let Some(frame) = sequenced.frame() else {
+            // A `Reset` control element (D49): the near node's incremental base
+            // view is broken — evict the whole read cache and re-read through on
+            // the next read.
+            reads.evict_all();
+            continue;
+        };
         reads.apply_coherence_frame(frame);
         if let AuthorityServerFrame::Base { assertions } = frame {
             for assertion in assertions {

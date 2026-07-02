@@ -370,16 +370,16 @@ mod tests {
             .await
             .expect("subscribe");
         let sequenced = down.next().await.expect("a down frame");
-        assert_eq!(sequenced.seq, 1);
+        assert_eq!(sequenced.seq(), 1);
         assert_eq!(
-            sequenced.frame,
-            AuthorityServerFrame::Base {
+            sequenced.frame().cloned(),
+            Some(AuthorityServerFrame::Base {
                 assertions: vec![BaseAssertion {
                     account_id: "acct".into(),
                     message_id: "m1".into(),
                     update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
                 }],
-            }
+            })
         );
     }
 
@@ -451,9 +451,9 @@ mod tests {
 
         // Two frames can only arrive over two subscriptions (one frame each).
         let first = frames.recv().await.expect("first frame");
-        assert_eq!(first.seq, 1);
+        assert_eq!(first.seq(), 1);
         let second = frames.recv().await.expect("second frame after reconnect");
-        assert_eq!(second.seq, 2);
+        assert_eq!(second.seq(), 2);
 
         let after_seqs = log.after_seqs.lock().unwrap().clone();
         assert_eq!(after_seqs[0], None, "fresh subscribe has no cursor");

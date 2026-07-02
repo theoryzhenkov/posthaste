@@ -19,8 +19,14 @@ pub enum ConnectionStatus {
     /// A transient error; the engine will reconnect after backoff. Carries a
     /// human-readable reason for logging/UI.
     TransientError(String),
-    /// A permanent error (4xx): the engine has stopped. The host must decide
-    /// whether to re-establish (e.g. re-auth then a fresh connect).
+    /// The wire is repeatedly delivering unparseable frames — a version skew or
+    /// a corrupt peer ([3]). The stream keeps trying (this is not fatal), but the
+    /// host should surface degraded-mode UI: the near node is no longer applying
+    /// updates it cannot understand. Carries the offending count/reason.
+    Degraded(String),
+    /// A permanent error (4xx, or N consecutive malformed frames — [3]): the
+    /// engine has stopped. The host must decide whether to re-establish (e.g.
+    /// re-auth then a fresh connect).
     PermanentError(String),
 }
 
@@ -34,6 +40,15 @@ pub trait FrameSink<Frame> {
     /// not cast (lifecycle-debt row 9). `raw` is the offending payload; `error`
     /// the parse message.
     fn on_malformed(&self, raw: String, error: String);
+
+    /// The near node's incremental view of the stream is broken and must be
+    /// rebuilt from scratch (D49): a detected seq gap the far-end could not
+    /// replay (it sent a `Reset`), or an out-of-band resync. The host discards
+    /// its stale incremental state and re-seeds — the native AS near-end evicts
+    /// its whole read cache and re-reads through; the wasm client re-seeds the
+    /// adapter (its existing view-refresh path). Default: no-op (seams that carry
+    /// no reset are unaffected).
+    fn on_reset(&self) {}
 
     /// A connection-lifecycle transition.
     fn on_status(&self, status: ConnectionStatus);

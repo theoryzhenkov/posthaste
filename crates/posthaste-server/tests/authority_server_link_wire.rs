@@ -125,8 +125,8 @@ async fn remote_transport_reads_the_link_router_down_channel() {
     let sequenced = down.next().await.expect("a base-assertion frame");
 
     assert_eq!(
-        sequenced.frame,
-        AuthorityServerFrame::Base {
+        sequenced.frame().cloned(),
+        Some(AuthorityServerFrame::Base {
             assertions: vec![BaseAssertion {
                 account_id: "acct".into(),
                 message_id: "m1".into(),
@@ -135,7 +135,7 @@ async fn remote_transport_reads_the_link_router_down_channel() {
                     mailbox_ids: vec!["inbox".into()],
                 }),
             }],
-        }
+        })
     );
 }
 

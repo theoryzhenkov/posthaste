@@ -298,6 +298,12 @@ export interface RuntimeViewFrameHandlers {
   onMalformedFrame?(input: { raw: string; error: unknown }): void
   onPermanentError?(error: unknown): void
   onTransientError?(error: unknown): void
+  /**
+   * The near node's incremental view is broken and must be rebuilt from scratch
+   * (D49): a detected seq gap the far-end could not replay. Drop stale
+   * incremental state; the runtime re-serves whole snapshots that re-seed it.
+   */
+  onReset?(): void
   onClosed?(error: unknown): void
 }
 
@@ -306,6 +312,8 @@ export interface RuntimeFrameHandlers {
   onMalformedFrame?(input: { raw: string; error: unknown }): void
   onPermanentError?(error: unknown): void
   onTransientError?(error: unknown): void
+  /** See {@link RuntimeViewFrameHandlers.onReset} (D49). */
+  onReset?(): void
   onClosed?(error: unknown): void
 }
 

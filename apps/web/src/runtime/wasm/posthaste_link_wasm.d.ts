@@ -156,8 +156,9 @@ export class NearEndHandle {
      * `io` must expose: `postJson(url, headersJson, body) => Promise<{status,
      * body}>`, `getJson(url, headersJson) => Promise<{status, body}>`,
      * `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
-     * status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onStatus(label,
-     * message)`, `neverDispatched() => Promise<string>` (a JSON array of
+     * status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onReset()` (D49 —
+     * re-seed the adapter), `onStatus(label, message)` (labels include
+     * `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
      * forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
      * Promise<string>` (a JSON array of `{sessionId, clientMutationId,
      * request?}`), and `onSettlement(receiptJson)`.

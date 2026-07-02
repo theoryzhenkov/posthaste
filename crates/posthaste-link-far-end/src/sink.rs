@@ -37,25 +37,36 @@ struct Sink<Frame> {
     /// receiver with a closed `tx` means the subscriber connected then vanished.
     rx: Option<mpsc::UnboundedReceiver<Frame>>,
     /// The first `now` tick at which this sink was observed with no live
-    /// receiver; cleared whenever a subscriber is present. Drives TTL expiry.
+    /// receiver; cleared whenever a subscriber is present. Drives TTL expiry for
+    /// the subscriber-gone case.
     dead_since: Option<u64>,
+    /// The last `now` tick at which this sink saw activity (created or emitted
+    /// onto). Drives the age reap of a **never-subscribed** sink ([9]): buffered
+    /// settlements no longer pin a sink forever — a churn of transient
+    /// never-connecting subscribers cannot leak sinks.
+    last_emit: u64,
 }
 
 impl<Frame> Sink<Frame> {
-    fn new() -> Self {
+    fn new(now: u64) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
             tx,
             rx: Some(rx),
             dead_since: None,
+            last_emit: now,
         }
     }
 
-    /// No live subscriber: the receiver was handed out (`rx` is `None`) and then
-    /// dropped (`tx` observes all receivers gone). A never-subscribed sink keeps
-    /// its buffered receiver, so it is not "dead" (its settlements are waiting).
+    /// The subscriber connected then vanished: the receiver was handed out
+    /// (`rx` is `None`) and then dropped (`tx` observes all receivers gone).
     fn subscriber_gone(&self) -> bool {
         self.rx.is_none() && self.tx.is_closed()
+    }
+
+    /// A never-subscribed sink: its buffered receiver was never taken.
+    fn never_subscribed(&self) -> bool {
+        self.rx.is_some()
     }
 }
 
@@ -89,11 +100,12 @@ where
     /// Route `frame` onto `link`'s sink, creating it lazily. The send only fails
     /// when the subscriber's receiver has been dropped without a reconnect, in
     /// which case the frame is discarded (safe — the near node reconciles via
-    /// the base stream). Liveness/expiry is driven by [`subscribe`](Self::subscribe)
-    /// and [`reap`](Self::reap), not by emission.
-    pub fn emit(&self, link: &LinkId, frame: Frame) {
+    /// the base stream). `now` stamps activity so a never-subscribed sink reaps
+    /// on age ([9]) rather than accumulating buffered settlements forever.
+    pub fn emit(&self, link: &LinkId, frame: Frame, now: u64) {
         let mut sinks = self.lock();
-        let sink = sinks.entry(link.clone()).or_insert_with(Sink::new);
+        let sink = sinks.entry(link.clone()).or_insert_with(|| Sink::new(now));
+        sink.last_emit = now;
         let _ = sink.tx.send(frame);
     }
 
@@ -104,9 +116,9 @@ where
     /// clears any pending expiry.
     pub fn subscribe(&self, link: &LinkId, now: u64) -> mpsc::UnboundedReceiver<Frame> {
         let mut sinks = self.lock();
-        let sink = sinks.entry(link.clone()).or_insert_with(Sink::new);
+        let sink = sinks.entry(link.clone()).or_insert_with(|| Sink::new(now));
         sink.dead_since = None;
-        let _ = now;
+        sink.last_emit = now;
         match sink.rx.take() {
             Some(rx) => rx,
             None => {
@@ -119,28 +131,43 @@ where
         }
     }
 
-    /// Drop sinks whose subscriber has been gone for longer than the TTL, driven
-    /// by the explicit `now` tick. Returns the number reaped (for observability
-    /// and tests). A sink first observed dead at `now` starts its countdown then;
-    /// a reconnect before `now - dead_since > ttl` clears it.
-    pub fn reap(&self, now: u64) -> usize {
+    /// Drop sinks whose subscriber has been gone for longer than the TTL (or that
+    /// were never subscribed and have aged out, [9]), driven by the explicit `now`
+    /// tick. Returns the reaped `LinkId`s so the assembling far-end can purge
+    /// their other per-link state (D49 [6], departure purge). A sink first
+    /// observed dead at `now` starts its countdown then; a reconnect before
+    /// `now - dead_since > ttl` clears it.
+    pub fn reap(&self, now: u64) -> Vec<LinkId> {
         let mut sinks = self.lock();
         let ttl = self.ttl;
-        let mut reaped = 0;
-        sinks.retain(|_, sink| {
+        let mut reaped = Vec::new();
+        sinks.retain(|link, sink| {
             if sink.subscriber_gone() {
+                // Subscriber connected then vanished — the original TTL countdown.
                 match sink.dead_since {
                     None => {
                         sink.dead_since = Some(now);
                         true
                     }
                     Some(since) if now.saturating_sub(since) > ttl => {
-                        reaped += 1;
+                        reaped.push(link.clone());
                         false
                     }
                     Some(_) => true,
                 }
+            } else if sink.never_subscribed() {
+                // [9]: a never-subscribed sink is no longer spared forever — it
+                // reaps on age since its last activity (created / emitted onto),
+                // regardless of subscription state, so buffered settlements for a
+                // subscriber that never connects cannot leak.
+                if now.saturating_sub(sink.last_emit) > ttl {
+                    reaped.push(link.clone());
+                    false
+                } else {
+                    true
+                }
             } else {
+                // A live subscriber holds the receiver — never reaped.
                 sink.dead_since = None;
                 true
             }
@@ -175,7 +202,7 @@ mod tests {
     #[test]
     fn settlement_routes_only_to_the_originating_link() {
         let store: SettlementSinkStore<&str, u32> = SettlementSinkStore::new();
-        store.emit(&"a", 1);
+        store.emit(&"a", 1, 0);
         let mut rx_a = store.subscribe(&"a", 0);
         let mut rx_b = store.subscribe(&"b", 0);
         assert_eq!(rx_a.try_recv().ok(), Some(1), "a receives its settlement");
@@ -188,14 +215,14 @@ mod tests {
         let first = store.subscribe(&"a", 0);
         drop(first);
         let mut second = store.subscribe(&"a", 1);
-        store.emit(&"a", 42);
+        store.emit(&"a", 42, 1);
         assert_eq!(second.try_recv().ok(), Some(42));
     }
 
     #[test]
     fn a_settlement_emitted_before_subscribe_is_buffered() {
         let store: SettlementSinkStore<&str, u32> = SettlementSinkStore::new();
-        store.emit(&"a", 7);
+        store.emit(&"a", 7, 0);
         let mut rx = store.subscribe(&"a", 0);
         assert_eq!(rx.try_recv().ok(), Some(7));
     }
@@ -205,9 +232,9 @@ mod tests {
         let store: SettlementSinkStore<&str, u32> = SettlementSinkStore::with_ttl(10);
         let rx = store.subscribe(&"a", 0);
         drop(rx); // subscriber vanished
-        assert_eq!(store.reap(5), 0, "first observation starts the countdown");
-        assert_eq!(store.reap(12), 0, "still within ttl (12 - 5 = 7 <= 10)");
-        assert_eq!(store.reap(20), 1, "20 - 5 = 15 > 10 → reaped");
+        assert_eq!(store.reap(5).len(), 0, "first observation starts the countdown");
+        assert_eq!(store.reap(12).len(), 0, "still within ttl (12 - 5 = 7 <= 10)");
+        assert_eq!(store.reap(20), vec!["a"], "20 - 5 = 15 > 10 → reaped, id reported");
         assert!(store.is_empty());
     }
 
@@ -218,15 +245,21 @@ mod tests {
         drop(rx);
         store.reap(5); // countdown starts
         let _rx2 = store.subscribe(&"a", 8); // reconnect clears dead_since
-        assert_eq!(store.reap(100), 0, "a live subscriber is never reaped");
+        assert_eq!(store.reap(100).len(), 0, "a live subscriber is never reaped");
         assert_eq!(store.len(), 1);
     }
 
+    // [9]: a never-subscribed sink no longer lives forever — it reaps on age
+    // since its last activity, so a subscriber that never connects cannot leak
+    // buffered settlements. A recent emit refreshes the age.
     #[test]
-    fn reaper_spares_a_never_subscribed_sink_with_buffered_settlements() {
-        let store: SettlementSinkStore<&str, u32> = SettlementSinkStore::with_ttl(1);
-        store.emit(&"a", 1); // buffered, no subscriber yet
-        assert_eq!(store.reap(1000), 0, "buffered settlements are not reaped");
-        assert_eq!(store.len(), 1);
+    fn reaper_reaps_a_never_subscribed_sink_on_age() {
+        let store: SettlementSinkStore<&str, u32> = SettlementSinkStore::with_ttl(10);
+        store.emit(&"a", 1, 0); // buffered, no subscriber; last_emit = 0
+        assert_eq!(store.reap(5).len(), 0, "within ttl (5 - 0 <= 10)");
+        store.emit(&"a", 2, 8); // fresh activity refreshes the age
+        assert_eq!(store.reap(15).len(), 0, "15 - 8 = 7 <= 10 → spared");
+        assert_eq!(store.reap(20), vec!["a"], "20 - 8 = 12 > 10 → reaped on age");
+        assert!(store.is_empty());
     }
 }

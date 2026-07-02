@@ -499,6 +499,18 @@ class EntityStoreController {
     const wrapped: RuntimeFrameHandlers = {
       ...handlers,
       onFrame: (frame) => this.routeFrame(frame, handlers),
+      onReset: () => {
+        // D49: the incremental view is broken. Drop buffered incremental frames
+        // and any scheduled flush; the runtime re-serves whole snapshots over the
+        // fresh subscription (handled by `onBaseFrame` → re-seed), so no stale
+        // delta lingers. Then surface upward.
+        this.pendingFrames = []
+        if (this.cancelScheduledFlush) {
+          this.cancelScheduledFlush()
+          this.cancelScheduledFlush = null
+        }
+        handlers.onReset?.()
+      },
     }
     const unsubscribe = this.deps.base.subscribeRuntimeFrames(request, wrapped)
     return () => {
