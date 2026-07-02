@@ -39,9 +39,9 @@ use posthaste_domain_model::{
 };
 use posthaste_domain_model::CommandAck;
 use posthaste_authority_server_link::{
-    AddToMailboxRequest, AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink,
+    AddToMailboxRequest, AuthorityServerApi, AuthorityServerLink,
     AuthorityServerLinkHandle, AuthorityServerLinkId, DestroyMessageRequest, LinkCoverage,
-    RemoveFromMailboxRequest, ReplaceMailboxesRequest, SetKeywordsRequest,
+    RemoveFromMailboxRequest, ReplaceMailboxesRequest, SequencedFrame, SetKeywordsRequest,
     LINK_ADD_TO_MAILBOX_PATH, LINK_CONVERSATION_PATH, LINK_DESTROY_MESSAGE_PATH, LINK_DETAIL_PATH,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_REMOVE_FROM_MAILBOX_PATH,
     LINK_REPLACE_MAILBOXES_PATH, LINK_SET_KEYWORDS_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
@@ -282,9 +282,14 @@ async fn inject_runtime_id(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SubscribeQuery {
     /// JSON-encoded [`LinkCoverage`]; absent means complete coverage.
     coverage: Option<String>,
+    /// The resume cursor (D46): resume the down-stream from just after this seq.
+    /// Absent opens a fresh stream. Coverage says WHAT to stream, `after_seq`
+    /// says WHERE to resume.
+    after_seq: Option<u64>,
 }
 
 /// Up-channel: apply a forwarded named mutation and return the authority server's receipt.
@@ -314,7 +319,7 @@ async fn subscribe(
         .unwrap_or(LinkCoverage::Complete);
     let stream = state
         .link
-        .subscribe_for(&runtime_id, coverage)
+        .subscribe_for(&runtime_id, coverage, query.after_seq)
         .await
         .map_err(LinkError::from_runtime_error)?;
     Ok(Sse::new(stream.map(down_frame_to_sse)).keep_alive(KeepAlive::default()))
@@ -466,7 +471,7 @@ emit_link_command_routes! {
     (destroy_message_command, DestroyMessageRequest, LINK_DESTROY_MESSAGE_PATH);
 }
 
-fn down_frame_to_sse(frame: AuthorityServerFrame) -> Result<Event, Infallible> {
+fn down_frame_to_sse(frame: SequencedFrame) -> Result<Event, Infallible> {
     Ok(Event::default()
         .json_data(frame)
         .unwrap_or_else(|_| Event::default().data("{}")))

@@ -1,44 +1,51 @@
 //! The authority server far node's per-runtime registry
 //! ([replication authority-server-link L1 §3.1](../replication/authority-server-link/L1.md)):
-//! the `(AuthorityServerLinkId, ClientMutationId)` → settled-mutation table that scopes
-//! mutation-id idempotency and (in a later slice) settlement routing per runtime.
+//! the runtime↔authority-server seam's assembly of the shared far-end
+//! sub-stores ([`posthaste_link_far_end`], RFC D40/D45).
 //!
-//! Mirrors the runtime near node's own `mutations_by_client_id`
-//! (`posthaste-runtime/src/sessions.rs`) one level up: a near node dedups its
-//! clients' mutations; the authority server dedups the runtimes' forwarded mutations.
-//! `accept` atomically reserves a slot so a concurrent retry cannot double-apply;
-//! the lock is never held across the mutation's `await`.
+//! This side dedups the runtimes' forwarded mutations — mirroring the runtime
+//! near node's own dedup one level up (a near node dedups its clients'
+//! mutations; the authority server dedups the runtimes'). It composes three
+//! sub-stores, all keyed per [`AuthorityServerLinkId`]:
+//!
+//! - [`DedupStore`] — `(AuthorityServerLinkId, ClientMutationId)` idempotency
+//!   with the D47 terminal-class rule (Rejected kept, Failed cleared). `accept`
+//!   atomically reserves a slot so a concurrent retry cannot double-apply.
+//! - [`SettlementSinkStore`] — per-runtime settlement-to-originator routing
+//!   (`settlement-routed-to-origin-runtime`) with a TTL reaper (the sink-leak
+//!   fix this seam lacked).
+//! - [`ReplayStore`] — the seq-backlog: a monotonic per-runtime seq stamped onto
+//!   every down-frame, a bounded backlog, and resume-from-`after_seq` with the
+//!   collapse fallback (D46 — replay this seam previously had none of).
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_server_link::{AuthorityServerFrame, AuthorityServerLinkId};
 use posthaste_contract_core::{
-    ClientMutationId, MutationReceipt, MutationSettlementState, RuntimeMutationId,
+    ClientMutationId, MutationReceipt, MutationSettlementState, RuntimeAdapterError,
+    RuntimeMutationId,
+};
+use posthaste_link_far_end::{
+    Accept, DedupStore, ReplayStore, Resume, Sequenced, SettlementSinkStore, TerminalClass,
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-/// Upper bound on retained terminal mutations per registry, mirroring the near
-/// node's `MAX_LATEST_MUTATIONS`. Bounds reconnect/dedup memory rather than
-/// letting it grow with runtime age.
-const MAX_RETAINED_MUTATIONS: usize = 100;
-
-/// A forwarded mutation the authority server has accepted, stored for `(AuthorityServerLinkId,
-/// ClientMutationId)` idempotency and (later) settlement routing.
+/// A forwarded mutation the authority server has accepted, stored for
+/// `(AuthorityServerLinkId, ClientMutationId)` idempotency in the shared
+/// [`DedupStore`].
 #[derive(Clone)]
 pub(crate) struct StoredForwardMutation {
     runtime_mutation_id: RuntimeMutationId,
     client_mutation_id: ClientMutationId,
     name: String,
     /// Serialized `CommandAck` — the receipt's `output`. `Null` while a just
-    /// reserved entry is still applying (the co-located single-runtime path
-    /// never observes this; multi-runtime reads it as a pending `Accepted`).
+    /// reserved entry is still applying.
     output: Value,
-    /// Whether the mutation has reached a terminal outcome (applied). Used only
-    /// for bounded retention — the receipt's `state` is `Accepted` (the up-channel
-    /// ack); `Confirmed`/`Failed` arrive on the down-channel in a later slice.
-    settled: bool,
+    /// D47: the permanent-rejection verdict for a kept `Rejected` settlement, so
+    /// a duplicate `ClientMutationId` re-observes the same rejection instead of
+    /// re-executing. `None` for pending / `Confirmed`.
+    error: Option<RuntimeAdapterError>,
 }
 
 impl StoredForwardMutation {
@@ -56,172 +63,152 @@ impl StoredForwardMutation {
 
 /// The outcome of reserving a mutation at the authority server up-channel.
 pub(crate) enum ForwardAcceptance {
-    /// First time this `(AuthorityServerLinkId, ClientMutationId)` was seen: the authority server
-    /// assigned `RuntimeMutationId` and reserved a pending entry the caller
-    /// must fill with `RuntimeRegistry::settle_output`.
+    /// First time this `(AuthorityServerLinkId, ClientMutationId)` was seen: the
+    /// authority server assigned `RuntimeMutationId` and reserved a pending entry
+    /// the caller must settle.
     New { runtime_mutation_id: RuntimeMutationId },
-    /// Already accepted: return the stored receipt (idempotent — never apply
-    /// the user intent twice).
+    /// Already accepted (pending or `Confirmed`): return the stored receipt
+    /// (idempotent — never apply the user intent twice).
     Existing(MutationReceipt),
+    /// D47: a kept permanent rejection. The caller returns this same error and
+    /// does NOT re-execute.
+    Rejected(RuntimeAdapterError),
 }
 
-/// The per-runtime settlement-routing sink (`settlement-routed-to-origin-runtime`).
-/// `tx` is held by the registry — `forward_mutation_for` emits a `AuthorityServerFrame::Settlement`
-/// on it once a mutation reaches its terminal outcome; `rx` is taken by
-/// `subscribe_for` and merged with the broadcast `Base` stream onto that runtime's
-/// down-stream. Unbounded so a Settlement emitted before the runtime subscribes
-/// (or while its stream is briefly behind) is never dropped — a missed Settlement
-/// would strand the near node's outbox entry. Reconnect/resume across a dropped
-/// receiver is S4.
-struct SettlementSink {
-    tx: mpsc::UnboundedSender<AuthorityServerFrame>,
-    rx: Mutex<Option<mpsc::UnboundedReceiver<AuthorityServerFrame>>>,
+/// Wall-clock seconds — the `now` tick the sink reaper is driven on.
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
-impl SettlementSink {
-    fn new() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
-        Self {
-            tx,
-            rx: Mutex::new(Some(rx)),
-        }
-    }
-}
-
+/// The per-runtime registry: the runtime↔authority-server seam's assembly of the
+/// shared far-end sub-stores.
 pub(crate) struct RuntimeRegistry {
-    mutations: Mutex<HashMap<(AuthorityServerLinkId, ClientMutationId), StoredForwardMutation>>,
-    /// Terminal mutations in settlement order, for bounded eviction.
-    settled_order: Mutex<VecDeque<(AuthorityServerLinkId, ClientMutationId)>>,
-    /// Per-runtime settlement sinks. A sink is created lazily on first
-    /// `emit_settlement` or `take_settlement_receiver` for a runtime.
-    sinks: Mutex<HashMap<AuthorityServerLinkId, SettlementSink>>,
+    dedup: DedupStore<AuthorityServerLinkId, StoredForwardMutation>,
+    sinks: SettlementSinkStore<AuthorityServerLinkId, AuthorityServerFrame>,
+    replay: ReplayStore<AuthorityServerLinkId, AuthorityServerFrame>,
 }
 
 impl RuntimeRegistry {
     pub(crate) fn new() -> Self {
         Self {
-            mutations: Mutex::new(HashMap::new()),
-            settled_order: Mutex::new(VecDeque::new()),
-            sinks: Mutex::new(HashMap::new()),
+            dedup: DedupStore::new(),
+            sinks: SettlementSinkStore::new(),
+            replay: ReplayStore::new(),
         }
     }
 
-    /// Atomically reserve a slot for `(runtime_id, client_mutation_id)` if
-    /// absent. Returns `Existing(receipt)` if already known (the dedup case) or
-    /// `New { runtime_mutation_id }` with a reserved pending entry. The lock is
-    /// released before returning so the caller's `await` never holds it.
+    /// Atomically reserve a slot for `(runtime_id, client_mutation_id)`. Returns
+    /// the D47 verdict: `New` (reserved a pending entry), `Existing` (dedup to a
+    /// pending/Confirmed receipt), or `Rejected` (re-observe a kept permanent
+    /// verdict). The lock is released before returning so the caller's `await`
+    /// never holds it.
     pub(crate) fn accept(
         &self,
         runtime_id: &AuthorityServerLinkId,
         client_mutation_id: &ClientMutationId,
         name: &str,
     ) -> ForwardAcceptance {
-        let mut map = self.mutations.lock().expect("runtime registry lock");
-        let key = (runtime_id.clone(), client_mutation_id.clone());
-        if let Some(stored) = map.get(&key) {
-            return ForwardAcceptance::Existing(stored.receipt());
-        }
-        let runtime_mutation_id =
-            RuntimeMutationId::new(uuid::Uuid::new_v4().to_string());
-        map.insert(
-            key,
-            StoredForwardMutation {
-                runtime_mutation_id: runtime_mutation_id.clone(),
-                client_mutation_id: client_mutation_id.clone(),
-                name: name.to_string(),
-                output: Value::Null,
-                settled: false,
+        let runtime_mutation_id = RuntimeMutationId::new(uuid::Uuid::new_v4().to_string());
+        let record = StoredForwardMutation {
+            runtime_mutation_id: runtime_mutation_id.clone(),
+            client_mutation_id: client_mutation_id.clone(),
+            name: name.to_string(),
+            output: Value::Null,
+            error: None,
+        };
+        match self.dedup.accept(runtime_id, client_mutation_id, || record) {
+            Accept::New => ForwardAcceptance::New { runtime_mutation_id },
+            Accept::Duplicate(stored) => match stored.error {
+                Some(error) => ForwardAcceptance::Rejected(error),
+                None => ForwardAcceptance::Existing(stored.receipt()),
             },
-        );
-        ForwardAcceptance::New { runtime_mutation_id }
+        }
     }
 
-    /// Fill a reserved entry's `output` once the mutation has applied.
-    /// Idempotent: a missing entry (already evicted) is a no-op.
-    pub(crate) fn settle_output(
+    /// Fill a reserved entry's `output` once the mutation has applied (D47
+    /// `Confirmed`: kept, bounded-evicted).
+    pub(crate) fn settle_confirmed(
         &self,
         runtime_id: &AuthorityServerLinkId,
         client_mutation_id: &ClientMutationId,
         output: Value,
     ) {
-        let mut map = self.mutations.lock().expect("runtime registry lock");
-        if let Some(stored) = map.get_mut(&(runtime_id.clone(), client_mutation_id.clone())) {
-            stored.output = output;
-            stored.settled = true;
-        }
-        // A settled mutation is terminal → eligible for bounded eviction.
-        let mut order = self.settled_order.lock().expect("settled-order lock");
-        order.push_back((runtime_id.clone(), client_mutation_id.clone()));
-        Self::prune_locked(&mut map, &mut order);
+        self.dedup
+            .settle(runtime_id, client_mutation_id, TerminalClass::Confirmed, |record| {
+                record.output = output;
+            });
     }
 
-    /// Drop the oldest terminal mutations once the retention window is full.
-    /// Pending (never-settled) entries are never evicted.
-    fn prune_locked(
-        map: &mut HashMap<(AuthorityServerLinkId, ClientMutationId), StoredForwardMutation>,
-        order: &mut VecDeque<(AuthorityServerLinkId, ClientMutationId)>,
+    /// Record a permanent rejection verdict (D47 `Rejected`: kept; a duplicate
+    /// re-observes the same error, never re-executes).
+    pub(crate) fn settle_rejected(
+        &self,
+        runtime_id: &AuthorityServerLinkId,
+        client_mutation_id: &ClientMutationId,
+        error: RuntimeAdapterError,
     ) {
-        while order.len() > MAX_RETAINED_MUTATIONS {
-            let Some(key) = order.pop_front() else {
-                break;
-            };
-            // Only evict terminal (settled) entries; a re-pushed key for a
-            // still-pending mutation is left in place.
-            if map.get(&key).map(|s| s.settled).unwrap_or(false) {
-                map.remove(&key);
-            }
-        }
+        self.dedup
+            .settle(runtime_id, client_mutation_id, TerminalClass::Rejected, |record| {
+                record.error = Some(error);
+            });
     }
 
-    /// Route a `AuthorityServerFrame::Settlement` onto the originating runtime's down-stream
-    /// only (`settlement-routed-to-origin-runtime`) — never broadcast. The sink is
-    /// created lazily so a Settlement emitted before the runtime subscribes is
-    /// buffered for `take_settlement_receiver` to drain. `Base` frames are not sent
-    /// here; they ride the authority server's global event broadcast.
-    pub(crate) fn emit_settlement(&self, runtime_id: &AuthorityServerLinkId, frame: AuthorityServerFrame) {
-        let mut sinks = self.sinks.lock().expect("settlement-sink lock");
-        let sink = sinks.entry(runtime_id.clone()).or_insert_with(SettlementSink::new);
-        // Unbounded: the send cannot fail unless every receiver was dropped
-        // (the runtime disconnected without resuming — S4); the frame is then
-        // simply discarded, which is safe (the near node reconciles via `Base`).
-        let _ = sink.tx.send(frame);
+    /// Clear a reserved entry whose apply failed transiently (D47 `Failed`:
+    /// cleared; a deliberate retry re-accepts as `New` and re-executes).
+    pub(crate) fn settle_failed(
+        &self,
+        runtime_id: &AuthorityServerLinkId,
+        client_mutation_id: &ClientMutationId,
+    ) {
+        self.dedup
+            .settle(runtime_id, client_mutation_id, TerminalClass::Failed, |_| {});
     }
 
-    /// Get the originating runtime's settlement receiver for `subscribe_for` to
-    /// merge with the `Base` broadcast. On a first subscription this is the
-    /// receiver created with the channel; on a reconnect (the prior receiver was
-    /// taken and dropped on disconnect) the channel is recreated so future
-    /// Settlements drain to the fresh receiver (S4). Settlements buffered during
-    /// the disconnect window are lost — best-effort, which is safe: the near node
-    /// reconciles via `Base` absorption (Confirmed) + the up-channel error
-    /// (Failed), so a missed Settlement never strands an outbox entry.
+    /// Route a `AuthorityServerFrame::Settlement` onto the originating runtime's
+    /// sink only (`settlement-routed-to-origin-runtime`) — never broadcast. The
+    /// down-stream stamps the seq when it drains the sink.
+    pub(crate) fn emit_settlement(
+        &self,
+        runtime_id: &AuthorityServerLinkId,
+        frame: AuthorityServerFrame,
+    ) {
+        self.sinks.emit(runtime_id, frame);
+    }
+
+    /// Take the originating runtime's settlement receiver for the down-stream to
+    /// merge with the `Base` broadcast. Reconnect-safe (a fresh channel on
+    /// resubscribe). Opportunistically reaps sinks whose subscriber has been gone
+    /// past the TTL — the sink-leak fix — driven by the current wall-clock tick.
     pub(crate) fn subscribe_settlement(
         &self,
         runtime_id: &AuthorityServerLinkId,
     ) -> mpsc::UnboundedReceiver<AuthorityServerFrame> {
-        let mut sinks = self.sinks.lock().expect("settlement-sink lock");
-        let sink = sinks.entry(runtime_id.clone()).or_insert_with(SettlementSink::new);
-        let rx = sink.rx.lock().expect("settlement-rx lock").take();
-        match rx {
-            Some(rx) => rx,
-            None => {
-                // Reconnect: recreate the channel. The prior sender (with any
-                // buffered disconnect-window Settlements) is dropped.
-                let (tx, rx) = mpsc::unbounded_channel();
-                sink.tx = tx;
-                rx
-            }
-        }
+        let now = now_secs();
+        self.sinks.reap(now);
+        self.sinks.subscribe(runtime_id, now)
     }
 
-    /// Drop a just-reserved entry whose mutation failed to apply (atomic apply),
-    /// so a retry with the same `(AuthorityServerLinkId, ClientMutationId)` re-accepts as `New`
-    /// rather than resolving to a stale pending record. No `Settlement` is emitted
-    /// — the near node learns of the failure from the up-channel error, and cannot
-    /// match a `Settlement` it never received a receipt for.
-    pub(crate) fn reject(&self, runtime_id: &AuthorityServerLinkId, client_mutation_id: &ClientMutationId) {
-        let mut map = self.mutations.lock().expect("runtime registry lock");
-        map.remove(&(runtime_id.clone(), client_mutation_id.clone()));
+    /// Resolve a (re)subscribe's resume point against the runtime's seq backlog
+    /// (D46): fresh, replay-from-`after_seq`, or collapse-to-current-state.
+    pub(crate) fn replay_resume(
+        &self,
+        runtime_id: &AuthorityServerLinkId,
+        after_seq: Option<u64>,
+    ) -> Resume<AuthorityServerFrame> {
+        self.replay.resume(runtime_id, after_seq)
+    }
+
+    /// Stamp the next monotonic per-runtime seq onto a down-frame and retain it
+    /// in the bounded backlog (D46).
+    pub(crate) fn replay_record(
+        &self,
+        runtime_id: &AuthorityServerLinkId,
+        frame: AuthorityServerFrame,
+    ) -> Sequenced<AuthorityServerFrame> {
+        self.replay.record(runtime_id, frame)
     }
 }
 
@@ -234,6 +221,9 @@ impl Default for RuntimeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use posthaste_authority_server_link::WireSettlementOutcome;
+    use posthaste_contract_core::RuntimeErrorCode;
+    use posthaste_link_core::MutationId;
 
     fn rid(s: &str) -> AuthorityServerLinkId {
         AuthorityServerLinkId(s.to_string())
@@ -245,17 +235,12 @@ mod tests {
     #[test]
     fn a_retried_mutation_dedups_to_the_same_receipt() {
         let registry = RuntimeRegistry::new();
-        let r = rid("rt-A");
-        let c = cid("op-1");
-        let acceptance = registry.accept(&r, &c, "message.setKeywords");
-        let runtime_mutation_id = match acceptance {
+        let (r, c) = (rid("rt-A"), cid("op-1"));
+        let runtime_mutation_id = match registry.accept(&r, &c, "message.setKeywords") {
             ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
             _ => panic!("first accept must be New"),
         };
-        // The runtime applied the mutation and recorded its output.
-        registry.settle_output(&r, &c, serde_json::json!({ "events": [] }));
-
-        // A retry of the same (runtime, client) id resolves to the stored record.
+        registry.settle_confirmed(&r, &c, serde_json::json!({ "events": [] }));
         match registry.accept(&r, &c, "message.setKeywords") {
             ForwardAcceptance::Existing(receipt) => {
                 assert_eq!(receipt.runtime_mutation_id, Some(runtime_mutation_id));
@@ -267,8 +252,6 @@ mod tests {
 
     #[test]
     fn two_runtimes_may_independently_mint_the_same_client_mutation_id() {
-        // `link-permits-fan-in`: idempotency is scoped per AuthorityServerLinkId, so the same
-        // ClientMutationId from two runtimes is two distinct mutations.
         let registry = RuntimeRegistry::new();
         let c = cid("op-1");
         let a = match registry.accept(&rid("rt-A"), &c, "message.destroy") {
@@ -283,27 +266,65 @@ mod tests {
     }
 
     #[test]
-    fn terminal_mutations_are_evicted_once_the_window_is_full() {
-        // Fill past the retention cap; the oldest confirmed entries are dropped,
-        // never a pending one.
+    fn confirmed_mutations_are_evicted_once_the_window_is_full() {
         let registry = RuntimeRegistry::new();
         let r = rid("rt-A");
-        for i in 0..(MAX_RETAINED_MUTATIONS + 5) {
+        for i in 0..(posthaste_link_far_end::DEFAULT_TERMINAL_CAPACITY + 5) {
             let c = cid(&format!("op-{i}"));
             registry.accept(&r, &c, "message.setKeywords");
-            registry.settle_output(&r, &c, serde_json::json!({}));
+            registry.settle_confirmed(&r, &c, serde_json::json!({}));
         }
-        let map = registry.mutations.lock().unwrap();
-        assert!(map.len() <= MAX_RETAINED_MUTATIONS);
+        // The oldest Confirmed terminals fell out of the per-runtime window.
+        assert!(matches!(
+            registry.accept(&r, &cid("op-0"), "message.setKeywords"),
+            ForwardAcceptance::New { .. }
+        ));
+    }
+
+    // D47 at the seam: a permanent (non-retryable) rejection is KEPT — a retry
+    // re-observes the same rejection and never re-executes.
+    #[test]
+    fn a_rejected_mutation_is_kept_and_re_observed_on_retry() {
+        let registry = RuntimeRegistry::new();
+        let (r, c) = (rid("rt-A"), cid("op-1"));
+        registry.accept(&r, &c, "message.setKeywords");
+        registry.settle_rejected(
+            &r,
+            &c,
+            RuntimeAdapterError {
+                code: RuntimeErrorCode::InvalidMutation,
+                message: "nope".into(),
+                retryable: false,
+                correlation_id: None,
+                details: Value::Null,
+            },
+        );
+        match registry.accept(&r, &c, "message.setKeywords") {
+            ForwardAcceptance::Rejected(error) => {
+                assert_eq!(error.code, RuntimeErrorCode::InvalidMutation);
+            }
+            _ => panic!("a Rejected retry must re-observe the rejection"),
+        }
+    }
+
+    // D47 at the seam: a transient (retryable) failure is CLEARED — a deliberate
+    // retry re-accepts as New and re-executes.
+    #[test]
+    fn a_failed_mutation_is_cleared_and_re_executes_on_retry() {
+        let registry = RuntimeRegistry::new();
+        let (r, c) = (rid("rt-A"), cid("op-1"));
+        registry.accept(&r, &c, "message.setKeywords");
+        registry.settle_failed(&r, &c);
+        assert!(matches!(
+            registry.accept(&r, &c, "message.setKeywords"),
+            ForwardAcceptance::New { .. }
+        ));
     }
 
     #[test]
     fn settlement_routes_only_to_the_originating_runtime() {
-        use posthaste_authority_server_link::WireSettlementOutcome;
-        use posthaste_link_core::MutationId;
         let registry = RuntimeRegistry::new();
-        let a = rid("rt-A");
-        let b = rid("rt-B");
+        let (a, b) = (rid("rt-A"), rid("rt-B"));
         registry.emit_settlement(
             &a,
             AuthorityServerFrame::Settlement {
@@ -313,25 +334,19 @@ mod tests {
         );
         let mut rx_a = registry.subscribe_settlement(&a);
         let mut rx_b = registry.subscribe_settlement(&b);
-        let frame = rx_a.try_recv().expect("rt-A receives its settlement");
-        assert!(matches!(frame, AuthorityServerFrame::Settlement { .. }));
-        assert!(
-            rx_b.try_recv().is_err(),
-            "rt-B must not receive rt-A's settlement"
-        );
+        assert!(matches!(
+            rx_a.try_recv(),
+            Ok(AuthorityServerFrame::Settlement { .. })
+        ));
+        assert!(rx_b.try_recv().is_err(), "rt-B must not receive rt-A's settlement");
     }
 
     #[test]
     fn a_reconnecting_runtime_resumes_its_settlement_stream() {
-        use posthaste_authority_server_link::WireSettlementOutcome;
-        use posthaste_link_core::MutationId;
         let registry = RuntimeRegistry::new();
         let rt = rid("rt-A");
-        // First subscription, then disconnect (drop the receiver).
         let first = registry.subscribe_settlement(&rt);
         drop(first);
-        // Reconnect: a fresh subscription. A subsequent Settlement reaches it
-        // (the channel was recreated) — S4.
         let mut second = registry.subscribe_settlement(&rt);
         registry.emit_settlement(
             &rt,
@@ -340,9 +355,25 @@ mod tests {
                 outcome: WireSettlementOutcome::Confirmed,
             },
         );
-        let frame = second
-            .try_recv()
-            .expect("a reconnected runtime receives its settlement");
-        assert!(matches!(frame, AuthorityServerFrame::Settlement { .. }));
+        assert!(matches!(
+            second.try_recv(),
+            Ok(AuthorityServerFrame::Settlement { .. })
+        ));
+    }
+
+    // D46: the seq backlog stamps a monotonic per-runtime seq and resumes from
+    // after_seq (or collapses when the resume point has been dropped).
+    #[test]
+    fn the_seq_backlog_stamps_and_resumes() {
+        let registry = RuntimeRegistry::new();
+        let rt = rid("rt-A");
+        let s1 = registry.replay_record(&rt, AuthorityServerFrame::Heartbeat);
+        let s2 = registry.replay_record(&rt, AuthorityServerFrame::Heartbeat);
+        assert_eq!((s1.seq, s2.seq), (1, 2));
+        assert!(matches!(registry.replay_resume(&rt, None), Resume::Fresh));
+        match registry.replay_resume(&rt, Some(1)) {
+            Resume::Replay(frames) => assert_eq!(frames.len(), 1),
+            _ => panic!("resume within the backlog must replay"),
+        }
     }
 }

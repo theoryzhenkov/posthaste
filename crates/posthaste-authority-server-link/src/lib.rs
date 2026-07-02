@@ -222,9 +222,19 @@ pub enum LinkCoverage {
     },
 }
 
-/// The ordered down-channel: authoritative base assertions + confirmation,
-/// tagged with the watermark per [`AuthorityServerFrame`].
-pub type DownStream = BoxStream<'static, AuthorityServerFrame>;
+/// This seam's down-channel envelope: an [`AuthorityServerFrame`] carried in the
+/// **generic** [`Sequenced`](posthaste_link_far_end::Sequenced) wire envelope
+/// owned by the engine crate. [`AuthorityServerFrame`] stays the canonical,
+/// emitter-named frame vocabulary (D1/D39/XIV); the seq rides *alongside* it
+/// (`{ "seq": N, "frame": { .. } }`), never inside it. A resubscribing near node
+/// passes the last seq it saw as `after_seq` and the far node replays from there
+/// (coverage says WHAT to stream, seq says WHERE to resume). The envelope is
+/// generic over the frame precisely so the client↔runtime seam can reuse it.
+pub type SequencedFrame = posthaste_link_far_end::Sequenced<AuthorityServerFrame>;
+
+/// The ordered down-channel: authoritative base assertions + confirmation, each
+/// stamped with its per-subscriber seq per [`SequencedFrame`].
+pub type DownStream = BoxStream<'static, SequencedFrame>;
 
 /// One link's two channels + the outbox op-lifecycle, transport-neutral (the
 /// Link half of the D33 seam). The transport is the only thing that varies
@@ -276,7 +286,16 @@ pub trait AuthorityServerLink: Send + Sync {
     /// Down-channel. Subscribe to the far node's ordered stream of base
     /// assertions + per-mutation confirmation for a coverage. The near node
     /// rebases its base cache on each frame and recomputes its derived views.
-    async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError>;
+    ///
+    /// `after_seq` is the resume cursor (D46): `None` opens a fresh stream;
+    /// `Some(seq)` asks the far node to replay from just after `seq` (or collapse
+    /// to current state when that point has fallen out of the backlog). Coverage
+    /// says WHAT to stream, `after_seq` says WHERE to resume.
+    async fn subscribe(
+        &self,
+        coverage: LinkCoverage,
+        after_seq: Option<u64>,
+    ) -> Result<DownStream, RuntimeError>;
 
     /// Down-channel, runtime-aware variant of [`subscribe`](Self::subscribe): as
     /// `subscribe` but the far node routes `AuthorityServerFrame::Settlement` onto the
@@ -289,9 +308,10 @@ pub trait AuthorityServerLink: Send + Sync {
         &self,
         runtime_id: &AuthorityServerLinkId,
         coverage: LinkCoverage,
+        after_seq: Option<u64>,
     ) -> Result<DownStream, RuntimeError> {
         let _ = runtime_id;
-        self.subscribe(coverage).await
+        self.subscribe(coverage, after_seq).await
     }
 
     /// Op-lifecycle: discard a pending outbox operation (a user escape hatch
@@ -773,9 +793,14 @@ impl AuthorityServerLinkHandle {
     }
 
     /// Subscribe to the authority server's authoritative base-assertion stream
-    /// (down-channel).
-    pub async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-        self.link.subscribe(coverage).await
+    /// (down-channel). `after_seq` is the resume cursor (D46): `None` for a fresh
+    /// stream, `Some(seq)` to resume from just after the last seq seen.
+    pub async fn subscribe(
+        &self,
+        coverage: LinkCoverage,
+        after_seq: Option<u64>,
+    ) -> Result<DownStream, RuntimeError> {
+        self.link.subscribe(coverage, after_seq).await
     }
 
     /// Op-lifecycle: discard a pending outbox operation at the authority server.
@@ -1409,8 +1434,15 @@ mod tests {
             })
         }
 
-        async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-            Ok(Box::pin(futures_util::stream::iter([AuthorityServerFrame::Heartbeat])))
+        async fn subscribe(
+            &self,
+            _coverage: LinkCoverage,
+            _after_seq: Option<u64>,
+        ) -> Result<DownStream, RuntimeError> {
+            Ok(Box::pin(futures_util::stream::iter([SequencedFrame::new(
+                1,
+                AuthorityServerFrame::Heartbeat,
+            )])))
         }
     }
 
@@ -1438,9 +1470,12 @@ mod tests {
         assert_eq!(receipt.client_mutation_id, ClientMutationId::new("c1"));
 
         let mut down = link
-            .subscribe(LinkCoverage::Complete)
+            .subscribe(LinkCoverage::Complete, None)
             .await
             .expect("subscribe");
-        assert_eq!(down.next().await, Some(AuthorityServerFrame::Heartbeat));
+        assert_eq!(
+            down.next().await.map(|s| s.frame),
+            Some(AuthorityServerFrame::Heartbeat)
+        );
     }
 }
