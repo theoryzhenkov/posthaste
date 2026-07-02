@@ -13,3 +13,11 @@
 
 pub mod entity_store;
 pub mod mutation;
+
+// The near-end engine boundary (RFC-L2-architecture-cleanup D41): a NEW async
+// boundary shape beside the sync `EntityStoreHandle` — JS hands an IO object at
+// construction and the handle exposes Promise-returning lifecycle methods. It
+// binds `wasm-bindgen-futures`/`js-sys`/`gloo-timers`, so it compiles only for
+// the browser target; the native `cargo check --workspace` build skips it.
+#[cfg(target_arch = "wasm32")]
+pub mod near_end;
