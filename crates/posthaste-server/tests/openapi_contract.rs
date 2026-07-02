@@ -1,7 +1,7 @@
 //! Contract test: the committed `openapi.json` must match the document the
 //! server generates from its annotated handlers. The committed spec is the
 //! source the TS client is generated from, so drift here means drift between
-//! the backend and every generated client.
+//! the authority server and every generated client.
 //!
 //! Regenerate after intentional API changes with:
 //!   `UPDATE_OPENAPI=1 cargo test -p posthaste-server --test openapi_contract`

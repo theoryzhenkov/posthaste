@@ -8,8 +8,8 @@ name = "posthaste_runtime"
 path = "src/lib.rs"
 
 # The runtime near node: the renderer-facing authority runtime that serves views
-# and forwards mutations over the backend link. It is transport- and store-free —
-# it reaches its backend through `posthaste-link-contract` and never links the
+# and forwards mutations over the authority server link. It is transport- and store-free —
+# it reaches its authority server through `posthaste-authority-server-link` and never links the
 # far-node roles (store/engine/imap), so it is shared by the bundled daemon, a
 # standalone runtime near node, and (in spirit) the client replica.
 [dependencies]
@@ -20,7 +20,7 @@ keyring = { workspace = true }
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
-posthaste-link-contract = { path = "../posthaste-link-contract" }
+posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }

@@ -1,6 +1,6 @@
 use super::*;
 
-/// Account-level automation rule evaluated by backend triggers.
+/// Account-level automation rule evaluated by authority server triggers.
 ///
 /// @spec docs/L1-accounts#toml-schema
 /// @spec docs/L1-sync#automation-actions
@@ -17,7 +17,7 @@ pub struct AutomationRule {
     pub backfill: bool,
 }
 
-/// Durable state for backend-owned automation backfill work.
+/// Durable state for authority-server-owned automation backfill work.
 ///
 /// @spec docs/L1-sync#automation-actions
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

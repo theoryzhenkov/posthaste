@@ -8,16 +8,16 @@ name = "posthaste_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "posthaste_daemon"
+name = "posthaste-authority-runtime-server"
 path = "src/main.rs"
 # The CLI has no unit tests. Library and integration tests cover server
 # behavior, so skip the otherwise empty libtest harness for this binary.
 test = false
 
 [[bin]]
-# The standalone backend role (L5 §4): serves only the authenticated link.
-name = "posthaste_backend"
-path = "src/bin/backend.rs"
+# The standalone authority server role (L5 §4): serves only the authenticated link.
+name = "posthaste-authority-server"
+path = "src/bin/authority_server.rs"
 test = false
 
 [dependencies]
@@ -33,13 +33,13 @@ jsonwebtoken = { workspace = true }
 keyring = { workspace = true }
 macaroon = { workspace = true }
 oauth2 = { workspace = true }
-posthaste-api = { path = "../posthaste-api" }
-posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
+posthaste-http-api-adapter = { path = "../posthaste-http-api-adapter" }
+posthaste-authority-server = { path = "../posthaste-authority-server" }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-domain-service = { path = "../posthaste-domain-service", features = ["openapi"] }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
-posthaste-link-contract = { path = "../posthaste-link-contract" }
+posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-contract-core = { path = "../posthaste-contract-core", features = ["openapi"] }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime = { path = "../posthaste-runtime" }
@@ -65,7 +65,7 @@ uuid = { workspace = true }
 async-trait = { workspace = true }
 http-body-util = "0.1"
 posthaste-client-link = { path = "../posthaste-client-link" }
-posthaste-link-contract = { path = "../posthaste-link-contract" }
+posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-testkit = { path = "../posthaste-testkit" }
 tokio = { workspace = true, features = ["net"] }

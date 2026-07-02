@@ -1,14 +1,14 @@
-//! The runtime as a near node of the runtime↔backend link.
+//! The runtime as a near node of the runtime↔authority-server link.
 //!
-//! Two pieces ([replication backend-link L2 §5](../replication/backend-link/L2.md)):
+//! Two pieces ([replication authority-server-link L2 §5](../replication/authority-server-link/L2.md)):
 //!
-//! - [`RuntimeBackendOutbox`] — the runtime's outbox **toward the backend**: the
-//!   mutations it has forwarded but the backend has not yet confirmed. A
+//! - [`RuntimeAuthorityServerOutbox`] — the runtime's outbox **toward the authority server**: the
+//!   mutations it has forwarded but the authority server has not yet confirmed. A
 //!   mutation is accepted here when it is forwarded and retired when its receipt
 //!   returns; while it is held, the runtime's served views fold it optimistically.
 //!   In the co-located in-process deployment confirmation is synchronous, so the
 //!   outbox is empty between mutations and the fold is a pass-through; it holds
-//!   work only when the backend is remote or unreachable (optimistic offline).
+//!   work only when the authority server is remote or unreachable (optimistic offline).
 //!
 //! - [`apply_outbox_overlay`] — folds the outbox over a recomputed mail-list view
 //!   using the **shared** `posthaste-link-replica::MailListReplica`, the same
@@ -16,12 +16,12 @@
 //!   served rows are the base; the outbox is the pending set; the projection is
 //!   the optimistic result.
 //!
-//! @spec docs/replication/backend-link/L2#5-the-runtime-near-node-read-replica-outbox
+//! @spec docs/replication/authority-server-link/L2#5-the-runtime-near-node-read-replica-outbox
 
 use std::sync::{Mutex, MutexGuard};
 
-use posthaste_link_contract::message_mutation::MessageMutation;
-use posthaste_link_contract::BaseUpdate;
+use posthaste_authority_server_link::message_mutation::MessageMutation;
+use posthaste_authority_server_link::BaseUpdate;
 use posthaste_link_core::{
     MessageAssertion, MessageReplica, MutationId, Outcome, PendingMessageMutation,
 };
@@ -29,10 +29,10 @@ use posthaste_link_replica::{apply_fold_to_projection, fold_state_from_projectio
 use posthaste_contract_core::{MailListViewState, MutationRequest};
 use serde_json::Value;
 
-/// The runtime's outbox toward the backend: forwarded-but-unconfirmed message
+/// The runtime's outbox toward the authority server: forwarded-but-unconfirmed message
 /// mutations, ordered, idempotent on mutation id. Backed by the shared
 /// [`MessageReplica`] so retirement is **absorption-gated** for the remote seam,
-/// consistent with the client tier ([replication backend-link L2 §5](../replication/backend-link/L2.md)).
+/// consistent with the client tier ([replication authority-server-link L2 §5](../replication/authority-server-link/L2.md)).
 ///
 /// Retirement policy (`retire_on_down_channel`):
 ///
@@ -46,13 +46,13 @@ use serde_json::Value;
 ///   Retiring on the receipt instead would recompute against a stale base — the
 ///   revert-then-reapply flicker the client tier's absorption-gated retire
 ///   already eliminated.
-pub(crate) struct RuntimeBackendOutbox {
+pub(crate) struct RuntimeAuthorityServerOutbox {
     engine: Mutex<MessageReplica>,
     retire_on_down_channel: bool,
 }
 
-impl RuntimeBackendOutbox {
-    /// `retire_on_down_channel` mirrors `drive_down_channel`: a remote backend
+impl RuntimeAuthorityServerOutbox {
+    /// `retire_on_down_channel` mirrors `drive_down_channel`: a remote authority server
     /// (down-channel bridge spawned) gates retirement on the base assertion; a
     /// co-located one retires on receipt.
     pub(crate) fn new(retire_on_down_channel: bool) -> Self {
@@ -115,7 +115,7 @@ impl RuntimeBackendOutbox {
 /// account's role→mailbox resolution, so they are not folded optimistically yet
 /// and simply forward.
 ///
-/// Delegates to [`posthaste_link_contract::message_mutation::MessageMutation`] so
+/// Delegates to [`posthaste_authority_server_link::message_mutation::MessageMutation`] so
 /// the name→assertion mapping stays in one place.
 pub(crate) fn named_message_assertion(
     request: &MutationRequest,
@@ -127,7 +127,7 @@ pub(crate) fn named_message_assertion(
         .map(|assertion| (message_id, assertion))
 }
 
-/// Fold the runtime→backend outbox over a recomputed mail-list view, in place,
+/// Fold the runtime→authority server outbox over a recomputed mail-list view, in place,
 /// using the shared convergence engine (the same fold the browser client's
 /// entity store runs — assertion `one-replica`). Behavior-preserving when the
 /// outbox is empty (the in-process default): a short-circuit that leaves the
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn outbox_accept_is_idempotent() {
-        let outbox = RuntimeBackendOutbox::new(false);
+        let outbox = RuntimeAuthorityServerOutbox::new(false);
         let mutation = pending("op1", "m1", MessageAssertion::Destroy);
         outbox.accept(mutation.clone());
         outbox.accept(mutation);
@@ -322,7 +322,7 @@ mod tests {
     fn colocated_confirm_retires_on_receipt() {
         // Co-located: the base already carries the effect when the receipt
         // returns, so a confirmed op is dropped outright (`colocated-unchanged`).
-        let outbox = RuntimeBackendOutbox::new(false);
+        let outbox = RuntimeAuthorityServerOutbox::new(false);
         outbox.accept(pending("op1", "m1", flag()));
         outbox.settle_receipt(&MutationId("op1".into()), true);
         assert!(outbox.snapshot().is_empty());
@@ -333,7 +333,7 @@ mod tests {
         // A `Failed` verdict (confirmed == false) is dropped on receipt even on
         // the remote seam: the base never absorbs a rejection.
         for remote in [false, true] {
-            let outbox = RuntimeBackendOutbox::new(remote);
+            let outbox = RuntimeAuthorityServerOutbox::new(remote);
             outbox.accept(pending("op1", "m1", flag()));
             outbox.settle_receipt(&MutationId("op1".into()), false);
             assert!(outbox.snapshot().is_empty(), "remote={remote}");
@@ -347,7 +347,7 @@ mod tests {
         // must NOT retire the op — it stays folded so a recompute in that window
         // reads the optimistic (flagged) state, not a stale revert. It retires
         // only once the down-channel base assertion carries the effect.
-        let outbox = RuntimeBackendOutbox::new(true);
+        let outbox = RuntimeAuthorityServerOutbox::new(true);
         outbox.accept(pending("op1", "m1", flag()));
 
         // Receipt confirms, but the base assertion has not arrived yet.
@@ -386,7 +386,7 @@ mod tests {
         // A base assertion that arrives BEFORE the mutation applied (an unrelated
         // re-serve) must not retire the confirmed op: it is not absorbed, so it
         // holds for a later assertion that carries the effect.
-        let outbox = RuntimeBackendOutbox::new(true);
+        let outbox = RuntimeAuthorityServerOutbox::new(true);
         outbox.accept(pending("op1", "m1", flag()));
         outbox.settle_receipt(&MutationId("op1".into()), true);
         let retired = outbox.apply_base(

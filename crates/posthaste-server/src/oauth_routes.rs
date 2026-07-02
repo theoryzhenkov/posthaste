@@ -1,8 +1,8 @@
 //! The OAuth provider-flow routes — the far half of `/v1`.
 //!
 //! Account creation/linking via a provider's PKCE authorization flow needs the
-//! backend's provider machinery (token exchange, JWKS, the account-mutation
-//! service), so it lives here rather than in the near `posthaste-api` platform.
+//! authority server's provider machinery (token exchange, JWKS, the account-mutation
+//! service), so it lives here rather than in the near `posthaste-http-api-adapter` platform.
 //! The lean remote runtime daemon does not serve these routes; the bundled
 //! server merges [`build_oauth_router`] into its `/v1` router.
 
@@ -18,16 +18,16 @@ use posthaste_contract_core::{RuntimeCaller, RuntimeError};
 use posthaste_runtime_api::RuntimeAccountApi;
 
 use axum::http::StatusCode;
-use posthaste_api::api::{
+use posthaste_http_api_adapter::api::{
     ApiError, ApiErrorBody, ApiErrorCode, OAuthCallbackQuery, StartOAuthRequest,
     StartOAuthResponse, StartProviderOAuthRequest,
 };
-use posthaste_api::AppState;
-use posthaste_authority_runtime::oauth::{
+use posthaste_http_api_adapter::AppState;
+use posthaste_authority_server::oauth::{
     OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthFlowCompletion, OAuthFlowStore,
     OAuthProviderProfile, OAuthTokenService, OAuthTokenSet, PendingOAuthFlow,
 };
-use posthaste_authority_runtime::AccountMutationService;
+use posthaste_authority_server::AccountMutationService;
 
 pub(crate) mod handlers;
 mod support;
@@ -35,13 +35,13 @@ mod support;
 mod tests;
 
 /// State for the OAuth routes: the near `/v1` app state (runtime handle + auth)
-/// plus the backend-only OAuth machinery (the pending-flow store and the
+/// plus the authority-server-only OAuth machinery (the pending-flow store and the
 /// account-mutation service for the holdout).
 #[derive(Clone)]
 pub struct OAuthState {
     pub app: Arc<AppState>,
     pub oauth_flows: Arc<OAuthFlowStore>,
-    /// `None` on a remote near node (no local backend) — the holdout then
+    /// `None` on a remote near node (no local authority server) — the holdout then
     /// returns the "account mutation runtime is not available" error.
     pub oauth_mutations: Option<Arc<AccountMutationService>>,
 }
@@ -59,7 +59,7 @@ pub fn build_oauth_router(state: Arc<OAuthState>) -> Router {
         .route("/oauth/callback", get(handlers::complete_account_oauth))
         .layer(middleware::from_fn_with_state(
             state.app.clone(),
-            posthaste_api::auth::require_auth_layer,
+            posthaste_http_api_adapter::auth::require_auth_layer,
         ))
         .with_state(state)
 }

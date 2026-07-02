@@ -7,7 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_client_link::RuntimeLinkOps;
+use posthaste_client_link::RuntimeLink;
 use posthaste_contract_core::{AccountScopeRequest, MailListViewState, RuntimeCaller};
 use posthaste_runtime_api::RuntimeMailReadApi;
 use posthaste_testkit::Harness;

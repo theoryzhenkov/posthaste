@@ -1,0 +1,58 @@
+[package]
+name = "posthaste-http-api-adapter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "posthaste_http_api_adapter"
+path = "src/lib.rs"
+
+# The client-facing `/v1` HTTP platform: the REST resource API + the
+# client↔runtime link (runtime sessions/views/streams), auth/authz (macaroon
+# capability tokens), HTML sanitization, OpenAPI, and the serving glue. It drives
+# the runtime over `posthaste-runtime` (the near node) and never links the
+# far-node roles (store/engine/imap) — so a lean remote runtime daemon can serve
+# it. The OAuth-flow routes (which need the authority server's provider machinery) live in
+# `posthaste-server`, layered on top.
+[dependencies]
+ammonia = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+dirs = { workspace = true }
+keyring = { workspace = true }
+macaroon = { workspace = true }
+posthaste-config = { path = "../posthaste-config" }
+posthaste-client-link = { path = "../posthaste-client-link" }
+posthaste-contract-core = { path = "../posthaste-contract-core", features = ["openapi"] }
+posthaste-domain-service = { path = "../posthaste-domain-service", features = ["openapi"] }
+posthaste-observability = { path = "../posthaste-observability" }
+posthaste-runtime = { path = "../posthaste-runtime" }
+posthaste-runtime-api = { path = "../posthaste-runtime-api", features = ["openapi"] }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio-rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+toml = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = "2.5.8"
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+# Test-only: `account_support` unit tests drive their logic against a real store
+# fixture. Dev-deps don't affect the lean binary (it links only `[dependencies]`).
+posthaste-store = { path = "../posthaste-store" }
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+reqwest = { workspace = true }
+
+[lints]
+workspace = true

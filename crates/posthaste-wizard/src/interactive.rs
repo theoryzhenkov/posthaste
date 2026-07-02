@@ -70,10 +70,10 @@ pub fn guided_install<R: BufRead, W: Write>(
     // Role-specific link wiring.
     let mut link_serve_token = None;
     let mut link_token = None;
-    let mut link_backend_url = None;
+    let mut link_authority_server_url = None;
     let mut join = None;
     match role {
-        Role::Backend => {
+        Role::AuthorityServer => {
             let token = ask_secret_or_generate(input, out, "Link token (blank to generate)")?;
             link_serve_token = Some(token.clone());
             link_token = Some(token);
@@ -82,15 +82,15 @@ pub fn guided_install<R: BufRead, W: Write>(
             if ask_yes_no(
                 input,
                 out,
-                "Do you have a join string from the backend?",
+                "Do you have a join string from the authority server?",
                 true,
             )? {
                 join = Some(ask(input, out, "Join string", None)?);
             } else {
-                link_backend_url = Some(ask(
+                link_authority_server_url = Some(ask(
                     input,
                     out,
-                    "Backend URL (e.g. https://backend:3002)",
+                    "Authority server URL (e.g. https://authority-server:3002)",
                     None,
                 )?);
                 let token = ask(input, out, "Link token", None)?;
@@ -122,7 +122,7 @@ pub fn guided_install<R: BufRead, W: Write>(
         tls,
         hosts,
         link_serve_token,
-        link_backend_url,
+        link_authority_server_url,
         link_token,
         exec_path: None,
         systemd_unit_path: None,
@@ -146,8 +146,8 @@ pub fn guided_install<R: BufRead, W: Write>(
 fn ask_role<R: BufRead, W: Write>(input: &mut R, out: &mut W) -> Result<Role, String> {
     let roles = [
         (Role::Daemon, "daemon — all-in-one on one machine"),
-        (Role::Backend, "backend — far node, serves the link only"),
-        (Role::Runtime, "runtime — near node over a remote backend"),
+        (Role::AuthorityServer, "authority-server — far node, serves the link only"),
+        (Role::Runtime, "runtime — near node over a remote authority server"),
     ];
     writeln!(out, "Which role is this node?").map_err(io_err)?;
     for (i, (_, desc)) in roles.iter().enumerate() {
@@ -210,8 +210,8 @@ fn write_summary<W: Write>(
     .map_err(io_err)?;
     if has_join {
         writeln!(out, "  link:    from join string").map_err(io_err)?;
-    } else if let Some(url) = &plan.link_backend_url {
-        writeln!(out, "  backend: {url}").map_err(io_err)?;
+    } else if let Some(url) = &plan.link_authority_server_url {
+        writeln!(out, "  authority-server: {url}").map_err(io_err)?;
     }
     let svc = match service {
         ServiceScope::UserSystemd => "systemctl --user",
@@ -305,7 +305,7 @@ fn random_token() -> Result<String, String> {
 fn default_bind(role: Role) -> &'static str {
     match role {
         // A far node listens broadly; the all-in-one/near node default to loopback.
-        Role::Backend => "0.0.0.0:3002",
+        Role::AuthorityServer => "0.0.0.0:3002",
         Role::Daemon | Role::Runtime => "127.0.0.1:3001",
     }
 }
@@ -335,21 +335,21 @@ mod tests {
     }
 
     #[test]
-    fn guides_a_backend_install_with_generated_token() {
+    fn guides_a_authority_server_install_with_generated_token() {
         std::env::set_var("HOME", "/home/tester");
-        // role=2 (backend), config(default), state(default), bind(default),
+        // role=2 (authority server), config(default), state(default), bind(default),
         // tls=y, hosts, token(blank→generate), version(blank), bin(default),
         // service=y, system=n, proceed=y
-        let script = "2\n\n\n\ny\nbackend.lan\n\n\n\ny\nn\ny\n";
-        let g = run(script).expect("guided backend install");
-        assert_eq!(g.plan.role, Role::Backend);
+        let script = "2\n\n\n\ny\nauthority-server.lan\n\n\n\ny\nn\ny\n";
+        let g = run(script).expect("guided authority server install");
+        assert_eq!(g.plan.role, Role::AuthorityServer);
         assert_eq!(
             g.plan.config_root,
             PathBuf::from("/home/tester/.config/posthaste")
         );
         assert_eq!(g.plan.bind, "0.0.0.0:3002");
         assert!(g.plan.tls);
-        assert_eq!(g.plan.hosts, vec!["backend.lan".to_string()]);
+        assert_eq!(g.plan.hosts, vec!["authority-server.lan".to_string()]);
         // Blank token → generated 24-byte hex (48 chars).
         let token = g.plan.link_serve_token.unwrap();
         assert_eq!(token.len(), 48);

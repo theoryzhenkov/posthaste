@@ -4,7 +4,7 @@ set working-directory := '..'
 
 # Run the local server
 run *args:
-    cargo run --bin posthaste_daemon -- serve {{args}}
+    cargo run --bin posthaste-authority-runtime-server -- serve {{args}}
 
 # Build all crates
 build:

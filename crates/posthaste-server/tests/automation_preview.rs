@@ -15,11 +15,11 @@ use posthaste_domain_service::{
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
-use posthaste_api::api::{
+use posthaste_http_api_adapter::api::{
     preview_automation_rule, AutomationRulePreviewResponse, PreviewAutomationRuleRequest,
 };
-use posthaste_authority_runtime::AccountSupervisor;
-use posthaste_api::AppState;
+use posthaste_authority_server::AccountSupervisor;
+use posthaste_http_api_adapter::AppState;
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 
@@ -98,7 +98,7 @@ impl PreviewHarness {
                     ),
                 account_logo_root: state_root.join("account-assets/logos"),
                 auth_token: "test-token".to_string(),
-                macaroon_root_key: posthaste_api::token::RootKey::from_test_bytes([0u8; 32]),
+                macaroon_root_key: posthaste_http_api_adapter::token::RootKey::from_test_bytes([0u8; 32]),
                 require_auth: false,
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),
@@ -221,7 +221,7 @@ fn rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
 }
 
 fn expect_preview_ok(
-    result: Result<Json<AutomationRulePreviewResponse>, posthaste_api::api::ApiError>,
+    result: Result<Json<AutomationRulePreviewResponse>, posthaste_http_api_adapter::api::ApiError>,
 ) -> Json<AutomationRulePreviewResponse> {
     match result {
         Ok(response) => response,

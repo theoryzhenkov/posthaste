@@ -12,7 +12,7 @@ tags = ["api", "settings", "fast"]
 paths = ["crates/posthaste-server/tests/settings_patch.rs"]
 command = "printf 'settings stdout\\n'; printf 'settings stderr\\n' >&2"
 timeout_seconds = 5
-artifacts = ["log.backend.jsonl.dev"]
+artifacts = ["log.authority-server.jsonl.dev"]
 
 [suite.dev.smoke.local]
 level = "smoke"

@@ -3,7 +3,7 @@ use super::*;
 
 /// POST /v1/oauth/start
 ///
-/// Creates a backend-held PKCE authorization session for provider-first setup.
+/// Creates an authority-server-held PKCE authorization session for provider-first setup.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
 #[utoipa::path(
@@ -11,7 +11,7 @@ use super::*;
     path = "/v1/oauth/start",
     tag = "oauth",
     summary = "Start provider OAuth flow",
-    description = "Creates a backend-held PKCE authorization session for provider-first setup.",
+    description = "Creates an authority-server-held PKCE authorization session for provider-first setup.",
     request_body = StartProviderOAuthRequest,
     responses(
         (status = 200, description = "Authorization session details", body = StartOAuthResponse),
@@ -64,7 +64,7 @@ pub async fn start_provider_oauth(
 
 /// POST /v1/accounts/{account_id}/oauth/start
 ///
-/// Creates a backend-held PKCE authorization session for an existing account.
+/// Creates an authority-server-held PKCE authorization session for an existing account.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
 #[utoipa::path(
@@ -72,7 +72,7 @@ pub async fn start_provider_oauth(
     path = "/v1/accounts/{account_id}/oauth/start",
     tag = "oauth",
     summary = "Start account OAuth flow",
-    description = "Creates a backend-held PKCE authorization session for an existing account.",
+    description = "Creates an authority-server-held PKCE authorization session for an existing account.",
     params(("account_id" = String, Path, description = "Account identifier")),
     request_body = StartOAuthRequest,
     responses(

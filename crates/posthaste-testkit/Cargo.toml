@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 futures-util = { workspace = true }
-posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
+posthaste-authority-server = { path = "../posthaste-authority-server" }
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-contract-core = { path = "../posthaste-contract-core" }

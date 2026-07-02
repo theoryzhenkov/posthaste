@@ -4,7 +4,7 @@ members = ["crates/*", "apps/desktop"]
 # default build: it pulls profiling-only deps and a Valgrind-backed bench harness,
 # exercised by `profile.yml` rather than the main `ci.yml`.
 default-members = [
-  "crates/posthaste-authority-runtime",
+  "crates/posthaste-authority-server",
   "crates/posthaste-config",
   "crates/posthaste-contract-core",
   "crates/posthaste-domain-model",
@@ -12,11 +12,11 @@ default-members = [
   "crates/posthaste-engine",
   "crates/posthaste-imap",
   "crates/posthaste-lab",
-  "crates/posthaste-link-contract",
+  "crates/posthaste-authority-server-link",
   "crates/posthaste-link-core",
   "crates/posthaste-link-replica",
   "crates/posthaste-observability",
-  "crates/posthaste-api",
+  "crates/posthaste-http-api-adapter",
   "crates/posthaste-runtime",
   "crates/posthaste-client-link",
   "crates/posthaste-runtime-api",

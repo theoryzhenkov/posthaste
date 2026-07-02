@@ -110,7 +110,7 @@ impl Version {
     }
 
     /// The channel this version belongs to, used to build the channel-aware
-    /// artifact name (`PosthasteBackendNightly` vs `PosthasteBackend`).
+    /// artifact name (`PosthasteAuthorityServerNightly` vs `PosthasteAuthorityServer`).
     fn channel(&self) -> Channel {
         match self {
             Version::Channel(c) => *c,
@@ -146,9 +146,9 @@ pub fn fetch_and_install(
 /// which is the source of truth for these names on the publishing side.
 fn artifact_base_name(role: Role, channel: Channel) -> String {
     let base = match role {
-        Role::Daemon => "PosthasteDaemon",
-        Role::Backend => "PosthasteBackend",
-        Role::Runtime => "PosthasteRuntimeDaemon",
+        Role::Daemon => "PosthasteAuthorityRuntimeServer",
+        Role::AuthorityServer => "PosthasteAuthorityServer",
+        Role::Runtime => "PosthasteRuntime",
     };
     match channel {
         Channel::Nightly => format!("{base}Nightly"),
@@ -317,12 +317,12 @@ mod tests {
     #[test]
     fn installs_a_verified_binary() {
         let dir = tempfile::tempdir().unwrap();
-        let dest = dir.path().join("posthaste_backend");
-        let source = source_with(Role::Backend, Channel::Nightly, "nightly", b"BACKEND-BYTES");
+        let dest = dir.path().join("posthaste-authority-server");
+        let source = source_with(Role::AuthorityServer, Channel::Nightly, "nightly", b"AUTHORITY_SERVER-BYTES");
 
         let out = fetch_and_install(
             &source,
-            Role::Backend,
+            Role::AuthorityServer,
             &Version::Channel(Channel::Nightly),
             "linux-x86_64",
             &dest,
@@ -330,7 +330,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(out, dest);
-        assert_eq!(fs::read(&dest).unwrap(), b"BACKEND-BYTES");
+        assert_eq!(fs::read(&dest).unwrap(), b"AUTHORITY_SERVER-BYTES");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -342,14 +342,14 @@ mod tests {
     #[test]
     fn rejects_a_tampered_tarball() {
         let dir = tempfile::tempdir().unwrap();
-        let dest = dir.path().join("posthaste_backend");
+        let dest = dir.path().join("posthaste-authority-server");
         // Build a source whose SHA256SUMS is correct, then corrupt the tarball
         // bytes so the recorded hash no longer matches.
-        let artifact = artifact_base_name(Role::Backend, Channel::Nightly);
+        let artifact = artifact_base_name(Role::AuthorityServer, Channel::Nightly);
         let tarball_name = format!("{artifact}-linux-x86_64.tar.gz");
         let good = make_tarball(
             &format!("{artifact}-linux-x86_64"),
-            "posthaste_backend",
+            "posthaste-authority-server",
             b"GOOD",
         );
         let sums = format!("{}  {}\n", sha256_hex(&good), tarball_name);
@@ -361,7 +361,7 @@ mod tests {
 
         let err = fetch_and_install(
             &MapSource(map),
-            Role::Backend,
+            Role::AuthorityServer,
             &Version::Channel(Channel::Nightly),
             "linux-x86_64",
             &dest,
@@ -380,7 +380,7 @@ mod tests {
         // A pinned nightly tag must resolve the *Nightly* artifact name, not the
         // stable one, or the asset won't be found.
         let dir = tempfile::tempdir().unwrap();
-        let dest = dir.path().join("posthaste_runtime_daemon");
+        let dest = dir.path().join("posthaste-runtime");
         let source = source_with(Role::Runtime, Channel::Nightly, "v0.2.0-nightly.44", b"RT");
 
         let out = fetch_and_install(

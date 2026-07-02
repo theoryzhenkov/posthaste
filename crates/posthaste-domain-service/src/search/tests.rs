@@ -233,7 +233,7 @@ fn test_parse_empty_query() {
 }
 
 // -- parse_query_with_scopes: in: scope peeling ---------------------------
-// Ported from the deleted `posthaste-authority-runtime/mail_queries/rules/
+// Ported from the deleted `posthaste-authority-server/mail_queries/rules/
 // tokenize.rs` so the `in:` extraction behavior is pinned at the one tokenizer
 // that now owns it. These exercise the public boundary mail_queries/rules.rs
 // consumes; the grammar (quoting, negation, spaced `in:` values) must match

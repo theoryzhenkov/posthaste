@@ -7,6 +7,12 @@ edition = "2021"
 name = "posthaste_desktop_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
+[[bin]]
+# The desktop app binary is named after the component it runs (RFC D18): the
+# client. Mirrored by `mainBinaryName` in tauri.conf.json.
+name = "posthaste-client"
+path = "src/main.rs"
+
 [features]
 default = ["embedded-server"]
 # Embed the Posthaste server in-process (bundled `.dmg`). When OFF, the desktop
@@ -27,7 +33,7 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-playwright = { version = "0.2.2", optional = true }
 url = "2.5.8"
-posthaste-api = { path = "../../crates/posthaste-api" }
+posthaste-http-api-adapter = { path = "../../crates/posthaste-http-api-adapter" }
 posthaste-observability = { path = "../../crates/posthaste-observability" }
 posthaste-server = { path = "../../crates/posthaste-server" }
 serde = { workspace = true }
