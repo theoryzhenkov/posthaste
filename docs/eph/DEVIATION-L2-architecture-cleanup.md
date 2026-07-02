@@ -49,3 +49,12 @@ bumped).
   exist.
 - A row may not close while any `[::state partial …]` marker it owns remains
   in a durable spec.
+
+## M9 rows (next wave — opened at D40–D47 drain, 2026-07-02)
+
+| Row | RFC ref | Spec section | Current state (reality) | End state (intent) | Status |
+|-----|---------|--------------|--------------------------|--------------------|--------|
+| V14 | D40, D45, D46, D47 | architecture/L2-crate-topology §2.1b; replication L1 §10 | Two hand-rolled far-ends: runtime sessions (seq replay, per-subscriber struct) + AS registry (NO replay, silent lag swallow, sink leak, no expiry); dedup ledgers duplicated with divergent failed-retry semantics | `posthaste-link-far-end` crate: composable sub-stores (dedup w/ D47 terminal-class semantics, settlement sinks, seq-backlog replay w/ collapse fallback + expiry); both far-ends assemble it; AS frames carry seq (wire change) | open |
+| V15 | D40, D41, D44, D45 | architecture/L2-crate-topology §2.1b; replication client-link L1–L2 | Three near-end forks: reqwest transport (no deadline/reconnect), TS sessionClient (flat 1s retry, cursor dropped on reconnect, unchecked parse), in-process; outbox replay triggered by view-open; sent-but-unsettled TODO | `posthaste-link-near-end` crate (wasm-pure, frontier CI): Transport trait + engine (deadlines, jittered backoff, seq cursor, typed parse) + level-triggered reconciler on every connect (owns never-dispatched + sent-but-unsettled; view-open trigger deleted); browser IO shim zero-policy; closes lifecycle-debt rows 1/2/8/9 | open |
+| V16 | D42, D43 | architecture/L2-crate-topology §1.1, §1.3; runtime specs (session vocabulary) | `RuntimeSessionId` (49 uses/10 files) + session protocol vocabulary; crates named `posthaste-link-core`/`posthaste-link-replica` | `RuntimeLinkId` + link-connection vocabulary; `posthaste-replica-core`/`posthaste-replica-projector`; link-wasm name decided; CI frontier list updated | open |
+
