@@ -1,6 +1,6 @@
 use std::fs;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, AccountSettings, AppSettings, ConfigDiff, ConfigError, ConfigRepository,
     ConfigSnapshot, SmartMailbox, SmartMailboxId,
 };
@@ -96,7 +96,7 @@ impl ConfigRepository for TomlConfigRepository {
             .iter()
             .map(|id| id.as_str())
             .collect();
-        Ok(posthaste_domain::apply_explicit_order(
+        Ok(posthaste_domain_service::apply_explicit_order(
             sources,
             &order,
             |source| source.id.as_str(),
@@ -184,8 +184,8 @@ impl ConfigRepository for TomlConfigRepository {
         let snapshot = self.snapshot.read().map_err(lock_error)?;
         let mut mailboxes = snapshot.smart_mailboxes.clone();
         mailboxes.sort_by(|a, b| {
-            posthaste_domain::smart_mailbox_fallback_rank(a.default_key.as_deref())
-                .cmp(&posthaste_domain::smart_mailbox_fallback_rank(
+            posthaste_domain_service::smart_mailbox_fallback_rank(a.default_key.as_deref())
+                .cmp(&posthaste_domain_service::smart_mailbox_fallback_rank(
                     b.default_key.as_deref(),
                 ))
                 .then_with(|| a.created_at.cmp(&b.created_at))
@@ -197,7 +197,7 @@ impl ConfigRepository for TomlConfigRepository {
             .iter()
             .map(|id| id.as_str())
             .collect();
-        Ok(posthaste_domain::apply_explicit_order(
+        Ok(posthaste_domain_service::apply_explicit_order(
             mailboxes,
             &order,
             |mailbox| mailbox.id.as_str(),
@@ -285,8 +285,8 @@ impl ConfigRepository for TomlConfigRepository {
         // Canonical fallback order (built-ins first); the user's explicit
         // arrangement is applied at read time in `list_smart_mailboxes`.
         snapshot.smart_mailboxes.sort_by(|a, b| {
-            posthaste_domain::smart_mailbox_fallback_rank(a.default_key.as_deref())
-                .cmp(&posthaste_domain::smart_mailbox_fallback_rank(
+            posthaste_domain_service::smart_mailbox_fallback_rank(a.default_key.as_deref())
+                .cmp(&posthaste_domain_service::smart_mailbox_fallback_rank(
                     b.default_key.as_deref(),
                 ))
                 .then_with(|| a.created_at.cmp(&b.created_at))

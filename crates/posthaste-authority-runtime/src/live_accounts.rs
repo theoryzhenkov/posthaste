@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, GatewayError, ServiceError, SharedGateway, SyncMode, SyncTrigger,
 };
 

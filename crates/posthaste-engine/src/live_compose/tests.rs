@@ -1,4 +1,4 @@
-use posthaste_domain::Identity;
+use posthaste_domain_service::Identity;
 
 use super::*;
 
@@ -17,7 +17,7 @@ fn send_identity_uses_requested_from_with_matching_identity_id() {
                 email: "alias@example.com".to_string(),
             },
         ],
-        Some(&posthaste_domain::Recipient {
+        Some(&posthaste_domain_service::Recipient {
             name: Some("Alias Sender".to_string()),
             email: "ALIAS@example.com".to_string(),
         }),
@@ -37,7 +37,7 @@ fn send_identity_uses_default_identity_id_for_freeform_sender() {
             name: "Primary".to_string(),
             email: "primary@example.com".to_string(),
         }],
-        Some(&posthaste_domain::Recipient {
+        Some(&posthaste_domain_service::Recipient {
             name: None,
             email: "catchall@example.com".to_string(),
         }),
@@ -55,7 +55,7 @@ fn draft_sender_uses_requested_from_when_identity_get_is_empty() {
     // because a draft create carries no identityId — only the `from` address.
     let identity = resolve_draft_sender(
         Vec::new(),
-        Some(&posthaste_domain::Recipient {
+        Some(&posthaste_domain_service::Recipient {
             name: Some("Casey".to_string()),
             email: "casey@example.com".to_string(),
         }),
@@ -77,7 +77,7 @@ fn draft_sender_borrows_display_name_from_a_matching_identity() {
             name: "Primary Name".to_string(),
             email: "primary@example.com".to_string(),
         }],
-        Some(&posthaste_domain::Recipient {
+        Some(&posthaste_domain_service::Recipient {
             name: None,
             email: "PRIMARY@example.com".to_string(),
         }),

@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601, AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress,
     CommandAck, ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity,
     MailService, MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,

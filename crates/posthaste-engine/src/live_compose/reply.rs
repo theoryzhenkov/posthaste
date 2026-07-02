@@ -1,5 +1,5 @@
 use jmap_client::email;
-use posthaste_domain::{
+use posthaste_domain_service::{
     format_forwarded_body, recipients_to_header, GatewayError, MessageId, ReplyContext,
 };
 use time::format_description::well_known::Rfc3339;

@@ -1,5 +1,5 @@
 use mail_parser::{Address, MessageParser};
-use posthaste_domain::{
+use posthaste_domain_service::{
     format_forwarded_body, recipients_to_header, ImapMessageLocation, Recipient, ReplyContext,
 };
 

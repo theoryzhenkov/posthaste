@@ -23,7 +23,7 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
     ConfigRepository, MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord,
     Recipient, SecretRef, SecretStore, SecretStoreError, SourceProjectionStore, SyncBatch,

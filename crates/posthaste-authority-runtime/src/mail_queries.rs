@@ -3,7 +3,7 @@ mod visibility;
 
 use std::sync::Arc;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationView, MailService, MessageCursor, MessageDetail, MessageId, MessagePage,
     MessageSortField, SortDirection,

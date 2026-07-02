@@ -1,4 +1,4 @@
-use posthaste_domain::{AutomationAction, AutomationBackfillJobStatus};
+use posthaste_domain_service::{AutomationAction, AutomationBackfillJobStatus};
 
 use crate::builders::{from_contains, mailbox, message, rule, source_is};
 use crate::gateway::ScriptedGateway;

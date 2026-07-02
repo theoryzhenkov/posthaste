@@ -3,7 +3,7 @@
 //! exchange became a backend operation.
 
 use axum::response::IntoResponse;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, ProviderAuthKind, ProviderHint, SecretKind, SecretRef,
     TransportSecurity,
 };

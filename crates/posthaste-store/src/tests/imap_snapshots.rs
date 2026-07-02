@@ -14,14 +14,14 @@ fn full_imap_snapshot_prunes_stale_location_without_deleting_canonical_message(
     let message_id = MessageId::from("imap:gmail:rfc822msgid:canonical");
     let sent_id = MailboxId::from("imap:sent");
     let starred_id = MailboxId::from("imap:starred");
-    let sent_mailbox = posthaste_domain::MailboxRecord {
+    let sent_mailbox = posthaste_domain_service::MailboxRecord {
         id: sent_id.clone(),
         name: "Sent".to_string(),
         role: Some("sent".to_string()),
         unread_emails: 0,
         total_emails: 0,
     };
-    let starred_mailbox = posthaste_domain::MailboxRecord {
+    let starred_mailbox = posthaste_domain_service::MailboxRecord {
         id: starred_id.clone(),
         name: "Starred".to_string(),
         role: None,
@@ -136,14 +136,14 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
         &account,
         &SyncBatch {
             mailboxes: vec![
-                posthaste_domain::MailboxRecord {
+                posthaste_domain_service::MailboxRecord {
                     id: archive_id.clone(),
                     name: "Archive".to_string(),
                     role: Some("archive".to_string()),
                     unread_emails: 0,
                     total_emails: 0,
                 },
-                posthaste_domain::MailboxRecord {
+                posthaste_domain_service::MailboxRecord {
                     id: inbox_id.clone(),
                     name: "Inbox".to_string(),
                     role: Some("inbox".to_string()),

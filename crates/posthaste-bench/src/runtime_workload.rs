@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
 use posthaste_authority_runtime::{build_authority_runtime, RuntimeBuildConfig};
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, MessageId, MessageSortField, SecretRef, SecretStore,
     SecretStoreError, SetKeywordsCommand, SortDirection,
 };

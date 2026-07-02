@@ -6,7 +6,8 @@ members = ["crates/*", "apps/desktop"]
 default-members = [
   "crates/posthaste-authority-runtime",
   "crates/posthaste-config",
-  "crates/posthaste-domain",
+  "crates/posthaste-domain-model",
+  "crates/posthaste-domain-service",
   "crates/posthaste-engine",
   "crates/posthaste-imap",
   "crates/posthaste-lab",

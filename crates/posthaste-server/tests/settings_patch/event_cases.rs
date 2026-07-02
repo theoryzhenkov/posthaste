@@ -1,6 +1,6 @@
 use axum::extract::{Path, State};
 use axum::Json;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountAppearance, EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED,
     EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
     EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,

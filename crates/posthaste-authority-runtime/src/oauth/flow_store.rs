@@ -14,7 +14,7 @@ pub struct OAuthAuthorizationSession {
 
 #[derive(Clone, Debug)]
 pub struct PendingOAuthFlow {
-    pub account_id: Option<posthaste_domain::AccountId>,
+    pub account_id: Option<posthaste_domain_service::AccountId>,
     pub profile: OAuthProviderProfile,
     pub client_id: String,
     pub client_secret: Option<String>,

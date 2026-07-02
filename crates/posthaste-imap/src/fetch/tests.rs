@@ -4,7 +4,7 @@ use imap_client::imap_types::body::{BasicFields, Body, BodyStructure, SpecificFi
 use imap_client::imap_types::core::IString;
 use imap_client::imap_types::core::{NString, Text};
 use imap_client::imap_types::flag::{Flag, FlagFetch};
-use posthaste_domain::{ImapUidValidity, MailboxId};
+use posthaste_domain_service::{ImapUidValidity, MailboxId};
 
 use super::*;
 

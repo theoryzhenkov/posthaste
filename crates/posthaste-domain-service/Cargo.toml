@@ -1,0 +1,30 @@
+[package]
+name = "posthaste-domain-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+mail-parser = { workspace = true }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
+posthaste-link-core = { path = "../posthaste-link-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+posthaste-observability = { path = "../posthaste-observability" }
+thiserror = { workspace = true }
+time = { workspace = true }
+utoipa = { workspace = true, optional = true }
+uuid = { workspace = true }
+
+[features]
+# Derive `utoipa::ToSchema` on wire-facing domain types so the server can emit
+# OpenAPI without coupling the domain crate to the web stack by default.
+# Forwarded to `posthaste-domain-model`, which owns the pure type derives.
+openapi = ["dep:utoipa", "posthaste-domain-model/openapi"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

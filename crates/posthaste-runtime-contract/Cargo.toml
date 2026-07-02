@@ -14,7 +14,7 @@ openapi = ["dep:utoipa"]
 [dependencies]
 async-trait = { workspace = true }
 futures-util = { workspace = true }
-posthaste-domain = { path = "../posthaste-domain" }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }

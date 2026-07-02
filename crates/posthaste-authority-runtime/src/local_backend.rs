@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
     MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
@@ -520,7 +520,7 @@ impl LocalBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_domain::{AccountId, MessageId};
+    use posthaste_domain_service::{AccountId, MessageId};
     use serde_json::json;
 
     fn message_event(payload: serde_json::Value) -> DomainEvent {

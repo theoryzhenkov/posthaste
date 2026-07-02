@@ -9,7 +9,7 @@ use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
     build_authority_runtime, from_api_bridge_for_migration, RuntimeBuildConfig, RuntimeBuildError,
 };
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
     SecretStore, SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection,
@@ -514,7 +514,7 @@ async fn authority_builder_handle_supports_account_mutations() {
             CreateAccountMutation {
                 id: Some("acct-builder".to_string()),
                 name: "Builder Account".to_string(),
-                driver: Some(posthaste_domain::AccountDriver::Mock),
+                driver: Some(posthaste_domain_service::AccountDriver::Mock),
                 enabled: Some(false),
                 full_name: None,
                 signature: None,
@@ -2244,7 +2244,7 @@ impl posthaste_link_contract::BackendApi for DeferredTransport {
     async fn create_account(
         &self,
         mutation: CreateAccountMutation,
-    ) -> Result<posthaste_domain::AccountOverview, posthaste_runtime_contract::RuntimeError> {
+    ) -> Result<posthaste_domain_service::AccountOverview, posthaste_runtime_contract::RuntimeError> {
         self.inner.create_account(mutation).await
     }
 }

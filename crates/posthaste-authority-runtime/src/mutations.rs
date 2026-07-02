@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601 as domain_now_iso8601, validate_account_settings, validate_automation_drafts,
     validate_automation_rules, validate_default_account_exists, AccountAppearance, AccountDriver,
     AccountId, AccountOverview, AccountSettings, AccountTransportSettings, AppSettings,

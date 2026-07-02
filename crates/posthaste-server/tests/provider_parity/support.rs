@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, BlobId, FetchedBody,
     GatewayError, Identity, ImapMessageLocationStore, MailGateway, MailService, MailboxId,
     MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
@@ -97,7 +97,7 @@ impl MailGateway for StaticGateway {
         &self,
         _account_id: &AccountId,
         _cursors: &[SyncCursor],
-        _progress: Option<posthaste_domain::SyncProgressReporter>,
+        _progress: Option<posthaste_domain_service::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         Ok(self
             .batches
@@ -235,7 +235,7 @@ pub(super) fn message_by_subject(
     harness: &Harness,
     account_id: &str,
     subject: &str,
-) -> posthaste_domain::MessageSummary {
+) -> posthaste_domain_service::MessageSummary {
     harness
         .service
         .list_messages(&AccountId::from(account_id), None)

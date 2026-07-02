@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use jmap_client::client::Client;
-use posthaste_domain::{AccountId, GatewayError, PushStream, PushTransport};
+use posthaste_domain_service::{AccountId, GatewayError, PushStream, PushTransport};
 use posthaste_observability::{events, ph_debug, ph_warn};
 
 use crate::live::map_gateway_error;

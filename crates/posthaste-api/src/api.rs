@@ -11,9 +11,9 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 #[cfg(test)]
-use posthaste_domain::AccountTransportSettings;
+use posthaste_domain_service::AccountTransportSettings;
 #[allow(unused_imports)]
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountConnectionOverview, AccountDriver,
     AccountId, AccountOverview, AccountSettings, AddToMailboxCommand, AppSettings, Appearance,
     AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult,

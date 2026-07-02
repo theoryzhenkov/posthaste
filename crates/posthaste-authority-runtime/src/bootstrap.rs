@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use posthaste_config::{default_smart_mailboxes, validate_safe_config_id, TomlConfigRepository};
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601 as domain_now_iso8601, validate_snapshot, AccountDriver, AccountSettings,
     AccountTransportSettings, AppSettings, ConfigRepository, ConfigSnapshot, SecretRef,
 };
@@ -55,7 +55,7 @@ fn import_bootstrap(
         smart_mailboxes: default_smart_mailboxes(),
         app_settings: app_settings.clone().unwrap_or_default(),
     };
-    validate_snapshot(&candidate).map_err(posthaste_domain::ConfigError::from)?;
+    validate_snapshot(&candidate).map_err(posthaste_domain_service::ConfigError::from)?;
 
     config_repo.initialize_defaults()?;
     for source in &sources {
@@ -140,14 +140,14 @@ struct BootstrapAccountConfig {
 #[serde(rename_all = "camelCase")]
 struct BootstrapAccountTransportConfig {
     #[serde(default)]
-    provider: posthaste_domain::ProviderHint,
+    provider: posthaste_domain_service::ProviderHint,
     #[serde(default)]
-    auth: posthaste_domain::ProviderAuthKind,
+    auth: posthaste_domain_service::ProviderAuthKind,
     base_url: Option<String>,
     username: Option<String>,
     secret_ref: Option<SecretRef>,
-    imap: Option<posthaste_domain::ImapTransportSettings>,
-    smtp: Option<posthaste_domain::SmtpTransportSettings>,
+    imap: Option<posthaste_domain_service::ImapTransportSettings>,
+    smtp: Option<posthaste_domain_service::SmtpTransportSettings>,
 }
 
 #[cfg(test)]

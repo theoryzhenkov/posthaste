@@ -1,5 +1,5 @@
 use jmap_client::mailbox;
-use posthaste_domain::{
+use posthaste_domain_service::{
     BlobId, MailboxId, MailboxRecord, MessageId, MessageRecord, Recipient, RFC3339_EPOCH,
 };
 use time::format_description::well_known::Rfc3339;
@@ -64,7 +64,7 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
         .unwrap_or_default();
     MessageRecord {
         id: MessageId(email.id().unwrap_or_default().to_string()),
-        source_thread_id: posthaste_domain::ThreadId(
+        source_thread_id: posthaste_domain_service::ThreadId(
             email.thread_id().unwrap_or_default().to_string(),
         ),
         remote_blob_id: email.blob_id().map(|blob_id| BlobId(blob_id.to_string())),
@@ -95,7 +95,7 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
             .unwrap_or_default(),
         draft_id: email
             .header(&jmap_client::email::Header::as_text(
-                posthaste_domain::DRAFT_ID_HEADER,
+                posthaste_domain_service::DRAFT_ID_HEADER,
                 false,
             ))
             .and_then(header_text_value),

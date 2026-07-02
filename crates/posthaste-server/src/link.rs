@@ -25,7 +25,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
 use posthaste_link_contract::{

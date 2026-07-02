@@ -3,7 +3,7 @@ use crate::sql_cache::CachedSql;
 
 pub(crate) fn track_applied_message_projection_inputs(
     affected: &mut ProjectionInputs,
-    message: &posthaste_domain::MessageRecord,
+    message: &posthaste_domain_service::MessageRecord,
     conversation_id: &ConversationId,
     before: &MessageBeforeApply,
 ) {
@@ -17,10 +17,10 @@ pub(crate) fn track_applied_message_projection_inputs(
 }
 
 pub(crate) fn append_message_diff_events_tx(
-    message: &posthaste_domain::MessageRecord,
+    message: &posthaste_domain_service::MessageRecord,
     conversation_id: &ConversationId,
     before: &MessageBeforeApply,
-    projection: Option<&posthaste_domain::MessageSummary>,
+    projection: Option<&posthaste_domain_service::MessageSummary>,
     count_deltas: Value,
     events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
@@ -37,10 +37,10 @@ pub(crate) fn append_message_diff_events_tx(
 }
 
 struct MessageEventDiff<'a> {
-    message: &'a posthaste_domain::MessageRecord,
+    message: &'a posthaste_domain_service::MessageRecord,
     conversation_id: &'a ConversationId,
     before: &'a MessageBeforeApply,
-    projection: Option<&'a posthaste_domain::MessageSummary>,
+    projection: Option<&'a posthaste_domain_service::MessageSummary>,
     count_deltas: Value,
     current_mailboxes: BTreeSet<MailboxId>,
     previous_mailboxes: BTreeSet<MailboxId>,
@@ -48,10 +48,10 @@ struct MessageEventDiff<'a> {
 
 impl<'a> MessageEventDiff<'a> {
     fn new(
-        message: &'a posthaste_domain::MessageRecord,
+        message: &'a posthaste_domain_service::MessageRecord,
         conversation_id: &'a ConversationId,
         before: &'a MessageBeforeApply,
-        projection: Option<&'a posthaste_domain::MessageSummary>,
+        projection: Option<&'a posthaste_domain_service::MessageSummary>,
         count_deltas: Value,
     ) -> Self {
         Self {

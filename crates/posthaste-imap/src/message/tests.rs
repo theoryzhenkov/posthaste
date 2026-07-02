@@ -1,4 +1,4 @@
-use posthaste_domain::{GmailMessageId, GmailThreadId, ImapUidValidity, MailboxId};
+use posthaste_domain_service::{GmailMessageId, GmailThreadId, ImapUidValidity, MailboxId};
 
 use super::*;
 

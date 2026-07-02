@@ -36,7 +36,7 @@ oauth2 = { workspace = true }
 posthaste-api = { path = "../posthaste-api" }
 posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
 posthaste-config = { path = "../posthaste-config" }
-posthaste-domain = { path = "../posthaste-domain", features = ["openapi"] }
+posthaste-domain-service = { path = "../posthaste-domain-service", features = ["openapi"] }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-link-contract = { path = "../posthaste-link-contract" }

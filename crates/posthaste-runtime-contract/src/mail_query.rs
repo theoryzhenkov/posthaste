@@ -1,4 +1,4 @@
-use posthaste_domain::{
+use posthaste_domain_model::{
     ConversationCursor, ConversationPage, ConversationSortField, MessageCursor, MessagePage,
     MessageSortField, SortDirection,
 };

@@ -2,7 +2,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ProviderAuthKind,
     ProviderHint, Recipient, SecretKind, SecretRef, SmtpTransportSettings, TransportSecurity,
     RFC3339_EPOCH,

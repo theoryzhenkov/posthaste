@@ -16,7 +16,7 @@ use imap_client::imap_types::search::SearchKey;
 use imap_client::imap_types::sequence::SequenceSet;
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
-use posthaste_domain::{
+use posthaste_domain_service::{
     GmailLabel, GmailMessageId, GmailThreadId, ImapGmailMetadata, ImapModSeq, ImapSelectedMailbox,
     ImapUid,
 };

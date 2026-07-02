@@ -2,7 +2,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use posthaste_domain::*;
+use posthaste_domain_service::*;
 use posthaste_server::api::{patch_settings, PatchSettingsRequest};
 
 use crate::support::{expect_settings_ok, source_rule, SettingsHarness};

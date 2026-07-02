@@ -1,5 +1,5 @@
 use jmap_client::mailbox;
-use posthaste_domain::{AccountId, GatewayError, MessageId, SendMessageRequest};
+use posthaste_domain_service::{AccountId, GatewayError, MessageId, SendMessageRequest};
 
 use crate::compose::{recipient_to_address, render_markdown};
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
@@ -50,7 +50,7 @@ pub(crate) async fn save_draft(
             .filter(|id| !id.is_empty())
         {
             email_obj.header(
-                jmap_client::email::Header::as_text(posthaste_domain::DRAFT_ID_HEADER, false),
+                jmap_client::email::Header::as_text(posthaste_domain_service::DRAFT_ID_HEADER, false),
                 jmap_client::email::HeaderValue::AsText(draft_id.to_string()),
             );
         }

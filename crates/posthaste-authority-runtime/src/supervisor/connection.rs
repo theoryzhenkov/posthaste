@@ -265,7 +265,7 @@ pub(crate) async fn build_connection(
 pub(crate) async fn resolve_account_secret(
     account: &AccountSettings,
     shared: &Arc<SupervisorShared>,
-    secret_ref: &posthaste_domain::SecretRef,
+    secret_ref: &posthaste_domain_service::SecretRef,
 ) -> Result<String, ServiceError> {
     let secret = shared.secret_store.resolve(secret_ref)?;
     if account.transport.auth != ProviderAuthKind::OAuth2 {
@@ -278,7 +278,7 @@ pub(crate) async fn resolve_account_secret(
 
 pub(crate) async fn refresh_oauth_access_token(
     shared: &Arc<SupervisorShared>,
-    secret_ref: &posthaste_domain::SecretRef,
+    secret_ref: &posthaste_domain_service::SecretRef,
     token_set: &OAuthTokenSet,
 ) -> Result<String, ServiceError> {
     let token_service = OAuthTokenService::new()?;

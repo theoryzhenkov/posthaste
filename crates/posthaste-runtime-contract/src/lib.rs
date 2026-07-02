@@ -13,7 +13,7 @@ pub use mail_query::*;
 
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
-use posthaste_domain::{
+use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
     Appearance, AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult,
     DomainEvent, DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxColor,
@@ -1356,7 +1356,7 @@ pub trait RuntimeCore: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_domain::StoreError;
+    use posthaste_domain_model::StoreError;
 
     #[test]
     fn service_error_conversion_preserves_runtime_error_code() {

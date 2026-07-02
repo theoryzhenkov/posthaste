@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::response::IntoResponse;
 use axum::Json;
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
     AutomationAction, AutomationRule, AutomationTrigger, ConfigRepository, DomainEvent,
     MailService, MailStore, SecretRef, SecretStore, SecretStoreError, SmartMailboxCondition,

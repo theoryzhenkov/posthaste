@@ -213,7 +213,7 @@ pub(crate) fn query_conversations(
                     message_count: row.get(7)?,
                     source_ids: split_group_concat_ids(row.get::<_, Option<String>>(8)?),
                     source_names: split_group_concat_strings(row.get::<_, Option<String>>(9)?),
-                    latest_message: posthaste_domain::SourceMessageRef {
+                    latest_message: posthaste_domain_service::SourceMessageRef {
                         source_id: AccountId(row.get(10)?),
                         message_id: MessageId(row.get(12)?),
                     },

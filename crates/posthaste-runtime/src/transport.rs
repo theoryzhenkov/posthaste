@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
 use posthaste_link_contract::{

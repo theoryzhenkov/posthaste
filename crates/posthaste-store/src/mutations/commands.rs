@@ -90,7 +90,7 @@ pub(crate) fn set_keywords_tx(
     let mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     let detail = query_message_detail_tx(tx, account_id, message_id)?
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
-    let assertion = posthaste_domain::MessageChangeAssertion::after(detail.summary.clone());
+    let assertion = posthaste_domain_service::MessageChangeAssertion::after(detail.summary.clone());
     let count_deltas = crate::query::mailbox_counts_json_tx(tx, account_id, mailboxes.iter())?;
     let mut payload = json!({
         "messageId": message_id.as_str(),

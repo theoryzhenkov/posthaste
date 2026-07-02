@@ -18,8 +18,8 @@ fn apply_upsert_chunk(
     Ok(())
 }
 
-fn inbox() -> posthaste_domain::MailboxRecord {
-    posthaste_domain::MailboxRecord {
+fn inbox() -> posthaste_domain_service::MailboxRecord {
+    posthaste_domain_service::MailboxRecord {
         id: MailboxId::from("inbox"),
         name: "Inbox".to_string(),
         role: Some("inbox".to_string()),
@@ -120,7 +120,7 @@ fn reconcile_prunes_mailboxes_absent_from_remote_set() -> Result<(), StoreError>
     let account = AccountId::from("primary");
     setup_source(&store, &account, "Primary")?;
 
-    let archive = posthaste_domain::MailboxRecord {
+    let archive = posthaste_domain_service::MailboxRecord {
         id: MailboxId::from("archive"),
         name: "Archive".to_string(),
         role: None,

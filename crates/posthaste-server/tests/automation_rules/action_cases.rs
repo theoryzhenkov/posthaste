@@ -1,4 +1,4 @@
-use posthaste_domain::{AutomationAction, MailboxId};
+use posthaste_domain_service::{AutomationAction, MailboxId};
 
 use crate::builders::{from_contains, mailbox, mailbox_role_is, message, rule, source_is};
 use crate::gateway::{RecordedMutation, ScriptedGateway};

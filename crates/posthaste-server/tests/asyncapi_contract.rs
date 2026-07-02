@@ -1,7 +1,7 @@
 //! Contract test: the committed `asyncapi.json` event contract must stay in
 //! sync with the topics the backend actually emits. The documented
 //! `components.schemas.EventTopic` enum is compared, both directions, against
-//! `posthaste_domain::ALL_EVENT_TOPICS` (the single source of truth). Drift here
+//! `posthaste_domain_service::ALL_EVENT_TOPICS` (the single source of truth). Drift here
 //! means the published event contract has fallen out of step with the server.
 //!
 //! @spec docs/L1-api#sse-event-stream
@@ -42,7 +42,7 @@ fn documented_topics() -> BTreeSet<String> {
 #[test]
 fn asyncapi_topics_match_backend_constants() {
     let documented = documented_topics();
-    let constants: BTreeSet<String> = posthaste_domain::ALL_EVENT_TOPICS
+    let constants: BTreeSet<String> = posthaste_domain_service::ALL_EVENT_TOPICS
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -56,11 +56,11 @@ fn asyncapi_topics_match_backend_constants() {
     );
     assert!(
         missing_from_constants.is_empty(),
-        "topics documented in asyncapi.json are not in posthaste_domain::ALL_EVENT_TOPICS: {missing_from_constants:?}"
+        "topics documented in asyncapi.json are not in posthaste_domain_service::ALL_EVENT_TOPICS: {missing_from_constants:?}"
     );
 
     assert_eq!(
         documented, constants,
-        "asyncapi.json EventTopic enum has drifted from posthaste_domain::ALL_EVENT_TOPICS"
+        "asyncapi.json EventTopic enum has drifted from posthaste_domain_service::ALL_EVENT_TOPICS"
     );
 }

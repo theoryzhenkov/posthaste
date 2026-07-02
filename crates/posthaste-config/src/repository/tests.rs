@@ -1,7 +1,7 @@
 use super::*;
 use std::{fs, path::PathBuf};
 
-use posthaste_domain::{AccountId, AccountSettings, AppSettings, ConfigRepository};
+use posthaste_domain_service::{AccountId, AccountSettings, AppSettings, ConfigRepository};
 
 fn temp_root() -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -26,7 +26,7 @@ fn mock_source(id: &str, name: &str) -> AccountSettings {
         full_name: None,
         signature: None,
         email_patterns: Vec::new(),
-        driver: posthaste_domain::AccountDriver::Mock,
+        driver: posthaste_domain_service::AccountDriver::Mock,
         enabled: true,
         appearance: None,
         transport: Default::default(),
@@ -71,7 +71,7 @@ fn source_crud_round_trips() {
         full_name: None,
         signature: None,
         email_patterns: Vec::new(),
-        driver: posthaste_domain::AccountDriver::Mock,
+        driver: posthaste_domain_service::AccountDriver::Mock,
         enabled: true,
         appearance: None,
         transport: Default::default(),
@@ -101,7 +101,7 @@ fn insert_source_rejects_duplicate_without_overwriting() {
         full_name: None,
         signature: None,
         email_patterns: Vec::new(),
-        driver: posthaste_domain::AccountDriver::Mock,
+        driver: posthaste_domain_service::AccountDriver::Mock,
         enabled: true,
         appearance: None,
         transport: Default::default(),

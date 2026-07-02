@@ -9,7 +9,7 @@
 //! Only `driver = "mock"` is supported today; JMAP / provider-state fixtures
 //! land with the live read-path (see `docs/eph/PLAN-L2-testkit-roadmap`).
 
-use posthaste_domain::{MailboxId, MessageId, MessageRecord, SystemKeyword, ThreadId};
+use posthaste_domain_service::{MailboxId, MessageId, MessageRecord, SystemKeyword, ThreadId};
 
 /// A parsed fixture: a set of accounts with their messages.
 #[derive(Debug, serde::Deserialize)]
