@@ -13,7 +13,7 @@ paths = [
 ]
 command = "cargo test -p posthaste-server health"
 timeout_seconds = 300
-artifacts = ["log.backend.health.dev"]
+artifacts = ["log.authority-server.health.dev"]
 
 [suite.api.settings.dev]
 level = "integration"
@@ -27,7 +27,7 @@ paths = [
 ]
 command = "cargo test -p posthaste-server --test settings_patch"
 timeout_seconds = 300
-artifacts = ["log.backend.jsonl.dev"]
+artifacts = ["log.authority-server.jsonl.dev"]
 
 [suite.ui.readiness.web.test]
 level = "unit"

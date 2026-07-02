@@ -3,7 +3,7 @@ use axum::http::{header, Request, StatusCode};
 use axum::routing::get;
 use axum::{middleware, Router};
 use http_body_util::BodyExt;
-use posthaste_api::auth::require_auth_layer;
+use posthaste_http_api_adapter::auth::require_auth_layer;
 use tower::ServiceExt;
 
 use crate::support::{build_app, build_state, get_request, protected, status_of};

@@ -1,6 +1,6 @@
 //! Runtime assembly + build config (D29 split from `build.rs`): the
 //! transport-free build inputs, the remote/colocated build entry points, and the
-//! shared [`assemble_runtime`] that composes a near node over a backend link.
+//! shared [`assemble_runtime`] that composes a near node over an authority server link.
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -9,16 +9,16 @@ use std::time::Duration;
 
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_domain_service::{DomainEvent, SecretStore};
-use posthaste_link_contract::{BackendApi, BackendLink};
+use posthaste_authority_server_link::{AuthorityServerLink, AuthorityServerLinkHandle};
 use tokio::sync::broadcast;
 
 use crate::handle::{RuntimeCoreState, RuntimeHandle};
-use crate::near_node::RuntimeBackendOutbox;
+use crate::near_node::RuntimeAuthorityServerOutbox;
 use crate::read::ReadCache;
 use crate::secret::SystemSecretStore;
 use crate::sessions::SessionRegistry;
 use crate::shutdown::RuntimeShutdownHandle;
-use crate::transport::RemoteBackend;
+use crate::transport::RemoteAuthorityServer;
 use crate::views::ViewRegistry;
 
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
@@ -38,39 +38,39 @@ pub struct RuntimeBuildConfig {
     pub secret_store: Option<Arc<dyn SecretStore>>,
     pub event_channel_capacity: usize,
     pub poll_interval: Duration,
-    /// Which transport carries the runtime↔backend link ([replication backend-link L2 §6](../replication/backend-link/L2.md)).
+    /// Which transport carries the runtime↔authority-server link ([replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)).
     /// Chosen from configuration, not at build time; the default is in-process
     /// co-located (assertion `transport-selected-by-config`).
-    pub backend_transport: BackendTransportConfig,
+    pub authority_server_transport: AuthorityServerTransportConfig,
     /// A decorator over the config-selected link transport. When set, the
-    /// builder hands it the real (in-process or remote) [`BackendApi`] and uses
+    /// builder hands it the real (in-process or remote) [`AuthorityServerLink`] and uses
     /// what it returns. A host/test seam for *composing over* the transport
     /// (e.g. gating the up-channel to exercise the near-node outbox) without
-    /// replacing the full backend surface — the decorator delegates everything
+    /// replacing the full authority server surface — the decorator delegates everything
     /// it does not intercept to the inner transport. `None` in normal builds.
-    pub backend_transport_override: Option<BackendTransportDecorator>,
+    pub authority_server_transport_override: Option<AuthorityServerTransportDecorator>,
 }
 
 /// A decorator over the config-selected link transport (see
-/// [`RuntimeBuildConfig::backend_transport_override`]): receives the
-/// real [`BackendApi`] and returns a wrapping one. Composes, so it need not
+/// [`RuntimeBuildConfig::authority_server_transport_override`]): receives the
+/// real [`AuthorityServerLink`] and returns a wrapping one. Composes, so it need not
 /// re-implement the whole surface — only the methods it intercepts.
-pub type BackendTransportDecorator =
-    Box<dyn FnOnce(Arc<dyn BackendApi>) -> Arc<dyn BackendApi> + Send>;
+pub type AuthorityServerTransportDecorator =
+    Box<dyn FnOnce(Arc<dyn AuthorityServerLink>) -> Arc<dyn AuthorityServerLink> + Send>;
 
-/// The runtime↔backend link transport, selected by configuration.
+/// The runtime↔authority-server link transport, selected by configuration.
 ///
 /// `InProcess` (default) is the co-located far node — zero serialization, byte
-/// for byte the pre-link behavior. `Remote` points the link at a backend that
+/// for byte the pre-link behavior. `Remote` points the link at an authority server that
 /// serves the link wire (POST up + SSE down) elsewhere; switching is a config
-/// change, not a rebuild ([replication backend-link L2 §6](../replication/backend-link/L2.md)).
+/// change, not a rebuild ([replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum BackendTransportConfig {
+pub enum AuthorityServerTransportConfig {
     #[default]
     InProcess,
     Remote {
         base_url: String,
-        /// Bearer token presented to the backend's authenticated `link_router`
+        /// Bearer token presented to the authority server's authenticated `link_router`
         /// (`LinkAuth::PerRuntime`). `None` for an unauthenticated link.
         token: Option<String>,
     },
@@ -90,25 +90,25 @@ impl RuntimeBuildConfig {
             secret_store: None,
             event_channel_capacity: DEFAULT_EVENT_CHANNEL_CAPACITY,
             poll_interval: Duration::from_secs(60),
-            backend_transport: BackendTransportConfig::InProcess,
-            backend_transport_override: None,
+            authority_server_transport: AuthorityServerTransportConfig::InProcess,
+            authority_server_transport_override: None,
         }
     }
 
-    /// Select the runtime↔backend link transport (default in-process).
-    pub fn with_backend_transport(mut self, backend_transport: BackendTransportConfig) -> Self {
-        self.backend_transport = backend_transport;
+    /// Select the runtime↔authority-server link transport (default in-process).
+    pub fn with_authority_server_transport(mut self, authority_server_transport: AuthorityServerTransportConfig) -> Self {
+        self.authority_server_transport = authority_server_transport;
         self
     }
 
     /// Decorate the config-selected link transport (see
-    /// [`backend_transport_override`](Self::backend_transport_override)). The
+    /// [`authority_server_transport_override`](Self::authority_server_transport_override)). The
     /// closure receives the real transport and returns the one the link uses.
-    pub fn with_backend_transport_override(
+    pub fn with_authority_server_transport_override(
         mut self,
-        decorator: impl FnOnce(Arc<dyn BackendApi>) -> Arc<dyn BackendApi> + Send + 'static,
+        decorator: impl FnOnce(Arc<dyn AuthorityServerLink>) -> Arc<dyn AuthorityServerLink> + Send + 'static,
     ) -> Self {
-        self.backend_transport_override = Some(Box::new(decorator));
+        self.authority_server_transport_override = Some(Box::new(decorator));
         self
     }
 
@@ -149,10 +149,10 @@ pub struct RemoteRuntimeBuild {
     pub secret_store: Arc<dyn SecretStore>,
 }
 
-/// Build a backend-less runtime near node over a remote backend link. Requires
-/// [`BackendTransportConfig::Remote`] (a near node has no in-process backend to
+/// Build an authority-server-less runtime near node over a remote authority server link. Requires
+/// [`AuthorityServerTransportConfig::Remote`] (a near node has no in-process authority server to
 /// fall back to). Must run within a Tokio runtime: it spawns the down-channel
-/// bridge that keeps the read cache + views live from the backend's assertions.
+/// bridge that keeps the read cache + views live from the authority server's assertions.
 pub fn build_remote_runtime(
     config: RuntimeBuildConfig,
 ) -> Result<RemoteRuntimeBuild, crate::shutdown::RuntimeBuildError> {
@@ -164,16 +164,16 @@ pub fn build_remote_runtime(
     let RuntimeBuildConfig {
         secret_store,
         event_channel_capacity,
-        backend_transport,
-        backend_transport_override,
+        authority_server_transport,
+        authority_server_transport_override,
         ..
     } = config;
 
-    let (base_url, token) = match backend_transport {
-        BackendTransportConfig::Remote { base_url, token } => (base_url, token),
-        BackendTransportConfig::InProcess => {
+    let (base_url, token) = match authority_server_transport {
+        AuthorityServerTransportConfig::Remote { base_url, token } => (base_url, token),
+        AuthorityServerTransportConfig::InProcess => {
             return Err(crate::shutdown::RuntimeBuildError::InvalidConfig(
-                "a remote runtime requires a remote backend transport".to_string(),
+                "a remote runtime requires a remote authority_server transport".to_string(),
             ));
         }
     };
@@ -181,15 +181,15 @@ pub fn build_remote_runtime(
     let secret_store = secret_store.unwrap_or_else(|| Arc::new(SystemSecretStore));
     let (event_sender, _) = broadcast::channel(event_channel_capacity);
 
-    // The link transport is the remote backend (optionally decorated by a test
+    // The link transport is the remote authority server (optionally decorated by a test
     // seam); there is no in-process far node to fall back to.
-    let base: Arc<dyn BackendApi> = Arc::new(RemoteBackend::with_token(base_url, token));
-    let transport = match backend_transport_override {
+    let base: Arc<dyn AuthorityServerLink> = Arc::new(RemoteAuthorityServer::with_token(base_url, token));
+    let transport = match authority_server_transport_override {
         Some(decorate) => decorate(base),
         None => base,
     };
-    let backend_link = BackendLink::new(transport);
-    let reads = Arc::new(ReadCache::retaining(backend_link.transport().clone()));
+    let authority_server_link = AuthorityServerLinkHandle::new(transport);
+    let reads = Arc::new(ReadCache::retaining(authority_server_link.transport().clone()));
 
     // No local store; the live account count comes through the link on the
     // `runtime_status` read.
@@ -203,10 +203,10 @@ pub fn build_remote_runtime(
         account_count: 0,
     };
 
-    // A near node drives its cache + views from the backend down-channel (it has
+    // A near node drives its cache + views from the authority server down-channel (it has
     // no local event bus of its own).
     let composed = assemble_runtime(RuntimeAssembly {
-        backend_link,
+        authority_server_link,
         reads,
         event_sender,
         startup_status: runtime_status.clone(),
@@ -221,22 +221,22 @@ pub fn build_remote_runtime(
     })
 }
 
-/// Inputs for [`assemble_runtime`]: a link to the backend plus the read cache
-/// over it. The far-node crate builds these around an in-process `LocalBackend`;
-/// [`build_remote_runtime`] builds them around a [`RemoteBackend`].
+/// Inputs for [`assemble_runtime`]: a link to the authority server plus the read cache
+/// over it. The far-node crate builds these around an in-process `LocalAuthorityServer`;
+/// [`build_remote_runtime`] builds them around a [`RemoteAuthorityServer`].
 pub struct RuntimeAssembly {
-    /// The runtime↔backend link over its (config-selected) transport.
-    pub backend_link: BackendLink,
+    /// The runtime↔authority-server link over its (config-selected) transport.
+    pub authority_server_link: AuthorityServerLinkHandle,
     /// The read-through cache over the same transport the link uses.
     pub reads: Arc<ReadCache>,
-    /// The runtime's domain-event bus. In-process this is the backend's bus; a
+    /// The runtime's domain-event bus. In-process this is the authority server's bus; a
     /// remote near node owns its own and the down-channel republishes onto it.
     pub event_sender: broadcast::Sender<DomainEvent>,
     /// The startup status snapshot the handle reports until live reads layer on.
     pub startup_status: RuntimeStatus,
-    /// Spawn the backend down-channel bridge (a remote near node: evict on
+    /// Spawn the authority server down-channel bridge (a remote near node: evict on
     /// assertions and republish so views recompute). In-process the runtime
-    /// shares the backend's bus, so no bridge is needed.
+    /// shares the authority server's bus, so no bridge is needed.
     pub drive_down_channel: bool,
 }
 
@@ -246,14 +246,14 @@ pub struct ComposedRuntime {
     pub shutdown: RuntimeShutdownHandle,
 }
 
-/// Assemble a runtime near node over a backend link: the outbox, view/session
+/// Assemble a runtime near node over an authority server link: the outbox, view/session
 /// registries, and the handle. The far-node crate calls this to compose an
-/// in-process runtime over a `LocalBackend`; [`build_remote_runtime`] calls it
-/// over a [`RemoteBackend`]. Must run within a Tokio runtime when
+/// in-process runtime over a `LocalAuthorityServer`; [`build_remote_runtime`] calls it
+/// over a [`RemoteAuthorityServer`]. Must run within a Tokio runtime when
 /// `drive_down_channel` is set (it spawns the down-channel bridge).
 pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     let RuntimeAssembly {
-        backend_link,
+        authority_server_link,
         reads,
         event_sender,
         startup_status,
@@ -261,13 +261,13 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     } = assembly;
 
     let stopped = Arc::new(AtomicBool::new(false));
-    // Remote backend (`drive_down_channel`): retirement is absorption-gated on
+    // Remote authority server (`drive_down_channel`): retirement is absorption-gated on
     // the down-channel base assertion, not the receipt. Co-located: retire on
-    // receipt (`colocated-unchanged`). See [`RuntimeBackendOutbox`].
-    let outbox = Arc::new(RuntimeBackendOutbox::new(drive_down_channel));
+    // receipt (`colocated-unchanged`). See [`RuntimeAuthorityServerOutbox`].
+    let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(drive_down_channel));
     if drive_down_channel {
-        tokio::spawn(crate::read::run_backend_down_channel(
-            backend_link.clone(),
+        tokio::spawn(crate::read::run_authority_server_down_channel(
+            authority_server_link.clone(),
             reads.clone(),
             event_sender.clone(),
             outbox.clone(),
@@ -280,7 +280,7 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
     let core = Arc::new(RuntimeCoreState {
-        backend_link,
+        authority_server_link,
         outbox,
         reads,
         event_sender,

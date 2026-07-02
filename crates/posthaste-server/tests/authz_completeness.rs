@@ -16,7 +16,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use posthaste_api::authz;
+use posthaste_http_api_adapter::authz;
 use serde_json::Value;
 
 /// Templates that are intentionally not in the authz map (perimeter-exempt).

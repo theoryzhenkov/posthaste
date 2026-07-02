@@ -3,7 +3,7 @@
 //! (mutation dispatch, event-stream wiring), and the five trait impls that
 //! realize the two surfaces extracted from `RuntimeCore` — four
 //! `posthaste-runtime-api` facets ([`RuntimeAccountApi`], [`RuntimeSettingsApi`],
-//! [`RuntimeMailReadApi`], [`RuntimeMailWriteApi`]) + the [`RuntimeLinkOps`]
+//! [`RuntimeMailReadApi`], [`RuntimeMailWriteApi`]) + the [`RuntimeLink`]
 //! link-protocol trait from `posthaste-client-link`. `replay_events` is dropped
 //! from the public surface (zero production consumers); the runtime builds its
 //! subscription backlog internally via `ReadCache::replay_events`.
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_client_link::{
-    RuntimeEventSubscription, RuntimeEventStream, RuntimeFrameSubscription, RuntimeLinkOps,
+    RuntimeEventSubscription, RuntimeEventStream, RuntimeFrameSubscription, RuntimeLink,
     RuntimeViewSubscription,
 };
 use posthaste_contract_core::{
@@ -30,39 +30,39 @@ use posthaste_domain_service::{
     MessageId, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     SendMessageRequest, SetKeywordsCommand, SmartMailboxId, SyncMode,
 };
-use posthaste_link_contract::{message_mutation::MessageMutation, BackendLink};
+use posthaste_authority_server_link::{message_mutation::MessageMutation, AuthorityServerLinkHandle};
 use posthaste_link_core::{MutationId, PendingMessageMutation};
 use posthaste_runtime_api::{
     RuntimeAccountApi, RuntimeMailReadApi, RuntimeMailWriteApi, RuntimeSettingsApi,
 };
 use tokio::sync::broadcast;
 
-use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
+use crate::near_node::{named_message_assertion, RuntimeAuthorityServerOutbox};
 use crate::read::ReadCache;
 use crate::sessions::{MutationAcceptance, SessionRegistry};
 use crate::views::ViewRegistry;
 
-/// The shared runtime core behind the cloneable handle: the backend link, the
+/// The shared runtime core behind the cloneable handle: the authority server link, the
 /// outbox, the read cache, the event bus, and the view/session registries.
 pub(crate) struct RuntimeCoreState {
-    // Neither the service/store nor the backend far node is held here: every
-    // backend operation now routes through the link — `backend_link` for the
+    // Neither the service/store nor the authority server far node is held here: every
+    // authority server operation now routes through the link — `authority_server_link` for the
     // mutation up-channel and the typed write commands, `reads` for the read
     // channel. account_reads/account_supervisor are likewise not held — every
     // view (incl. AccountStatus) reads through `reads`.
-    /// The runtime↔backend link over its (config-selected, in-process by
+    /// The runtime↔authority-server link over its (config-selected, in-process by
     /// default) transport. The mutation up-channel + typed writes go through here.
-    pub(crate) backend_link: BackendLink,
-    /// The runtime's outbox toward the backend: forwarded-but-unconfirmed
+    pub(crate) authority_server_link: AuthorityServerLinkHandle,
+    /// The runtime's outbox toward the authority server: forwarded-but-unconfirmed
     /// mutations, folded optimistically into served views (L4 §4.3).
-    pub(crate) outbox: Arc<RuntimeBackendOutbox>,
+    pub(crate) outbox: Arc<RuntimeAuthorityServerOutbox>,
     /// The read-through cache over the far node (W4a: passthrough). Point reads
     /// and the mail-list base draw from here.
     pub(crate) reads: Arc<ReadCache>,
     pub(crate) event_sender: broadcast::Sender<DomainEvent>,
     // The OAuth holdout: account CRUD the lean near node can't do over the link
-    // yet, so it routes to the local backend's mutation service. Present only in
-    // a `backend`-linked build; a lean near node has no such service.
+    // yet, so it routes to the local authority server's mutation service. Present only in
+    // a `authority_server`-linked build; a lean near node has no such service.
     pub(crate) views: Arc<ViewRegistry>,
     pub(crate) sessions: Arc<SessionRegistry>,
     pub(crate) startup_status: RuntimeStatus,
@@ -72,7 +72,7 @@ pub(crate) struct RuntimeCoreState {
 /// Cloneable authority runtime handle used by transport adapters.
 ///
 /// spec: docs/runtime/internals/L1#runtime-handle-transport-neutral
-/// spec: docs/backend/L2#handle-methods-transport-free
+/// spec: docs/authority-server/L2#handle-methods-transport-free
 #[derive(Clone)]
 pub struct RuntimeHandle {
     pub(crate) core: Arc<RuntimeCoreState>,
@@ -158,10 +158,10 @@ impl RuntimeHandle {
     }
 
     /// Accept a named message mutation onto the session (idempotency), forward it
-    /// up the backend link, and settle the session stream from the backend's
+    /// up the authority server link, and settle the session stream from the authority server's
     /// receipt. The `forward` future is the link's up-channel
-    /// (`BackendLink::forward_mutation`); its receipt carries the command's
-    /// events as `output` and the backend's confirmation id. Scope is the
+    /// (`AuthorityServerLinkHandle::forward_mutation`); its receipt carries the command's
+    /// events as `output` and the authority server's confirmation id. Scope is the
     /// runtime's (near-node) concern, resolved before this call; the undo-history
     /// diff is captured in `dispatch_named_mutation` after settlement.
     ///
@@ -182,7 +182,7 @@ impl RuntimeHandle {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
-        // Arm the cancel-guard before awaiting the backend: if `forward.await`
+        // Arm the cancel-guard before awaiting the authority server: if `forward.await`
         // is dropped (client disconnect mid-dispatch), neither branch below
         // runs, and the guard's Drop settles `Failed` so the mutation doesn't
         // leak `Accepted` forever. Disarmed on each normal settle path.
@@ -193,9 +193,9 @@ impl RuntimeHandle {
             armed: true,
         };
         match forward.await {
-            Ok(backend_receipt) => {
+            Ok(authority_server_receipt) => {
                 guard.armed = false;
-                // The backend already serialized the command's events as the
+                // The authority server already serialized the command's events as the
                 // receipt output (state-before-event: the effect is applied
                 // before the receipt returns); settle the session with it.
                 self.core.sessions.settle_mutation(
@@ -203,7 +203,7 @@ impl RuntimeHandle {
                     &mutation_id,
                     MutationSettlementState::Confirmed,
                     None,
-                    backend_receipt.output,
+                    authority_server_receipt.output,
                 )
             }
             Err(error) => {
@@ -270,7 +270,7 @@ impl RuntimeHandle {
     /// Route a single named message mutation through the shared accept → forward
     /// → settle flow, folding its optimistic assertion into the outbox, and — for
     /// a diff-eligible user mutation — record the invertible change-diff onto the
-    /// session's undo history once the backend confirms it. `message.applyDiff`
+    /// session's undo history once the authority server confirms it. `message.applyDiff`
     /// (undo/redo) goes through [`run_apply_diff`] instead, which wraps this flow
     /// with history navigation.
     ///
@@ -287,7 +287,7 @@ impl RuntimeHandle {
             .session_scope(&session_id, caller.account_scope.as_deref())?;
         // Phase 2: `revCursor` is a control mutation (not a message mutation) —
         // it carries no message target + has no outbox optimism. Route it
-        // directly to the backend (which validates + applies the cursor).
+        // directly to the authority server (which validates + applies the cursor).
         // @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
         if request.name == "revCursor" {
             return self
@@ -295,7 +295,7 @@ impl RuntimeHandle {
                 .await;
         }
         // Runtime (near-node) concern: scope enforcement per mutation. The
-        // command application is the backend's; it is forwarded up the link
+        // command application is the authority server's; it is forwarded up the link
         // below, uniform across names. Undo/redo history is client-owned
         // (@spec docs/eph/DESIGN-L2-undo-redo-synced-history): the runtime no
         // longer records change-diffs or navigates a history stack — an undo
@@ -304,7 +304,7 @@ impl RuntimeHandle {
         let mutation = MessageMutation::from_request(&request)?;
         let source_id = mutation.account_id().to_string();
         Self::ensure_account_in_scope(&source_id, session_scope.as_deref())?;
-        // Accept the mutation into the runtime's outbox toward the backend so
+        // Accept the mutation into the runtime's outbox toward the authority server so
         // recomputed views fold it optimistically while it is in flight. It is
         // settled from the receipt below: co-located it retires on receipt (the
         // forward confirms synchronously, so the outbox is empty between
@@ -321,11 +321,11 @@ impl RuntimeHandle {
             });
             id
         });
-        // Up-channel: forward the named mutation to the backend far node.
-        let forward = self.core.backend_link.forward_mutation(request.clone());
+        // Up-channel: forward the named mutation to the authority server far node.
+        let forward = self.core.authority_server_link.forward_mutation(request.clone());
         let result = self.run_message_mutation(caller, &request, forward).await;
         if let Some(id) = optimistic {
-            // A backend rejection settles as `Ok(receipt)` carrying a `Failed`
+            // An authority server rejection settles as `Ok(receipt)` carrying a `Failed`
             // state (the verdict is on `error.code`), so the confirm signal is
             // the receipt state, not `is_ok()`.
             let confirmed = matches!(
@@ -337,10 +337,10 @@ impl RuntimeHandle {
         result
     }
 
-    /// Phase 2: route a `revCursor` control mutation to the backend. Parses the
+    /// Phase 2: route a `revCursor` control mutation to the authority server. Parses the
     /// args for the account (scope check), then forwards through the normal
     /// accept → forward → settle flow (no outbox optimism — a cursor move has
-    /// no message assertion to fold). The backend validates the referenced
+    /// no message assertion to fold). The authority server validates the referenced
     /// steps exist + applies the cursor + emits the recompute trigger.
     ///
     /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
@@ -355,7 +355,7 @@ impl RuntimeHandle {
                 RuntimeError::invalid_mutation(format!("invalid revCursor args: {error}"))
             })?;
         Self::ensure_account_in_scope(&args.account_id, session_scope)?;
-        let forward = self.core.backend_link.forward_mutation(request.clone());
+        let forward = self.core.authority_server_link.forward_mutation(request.clone());
         self.run_message_mutation(caller, &request, forward).await
     }
 }
@@ -374,7 +374,7 @@ fn runtime_lifecycle_label(lifecycle: &RuntimeLifecycle) -> &'static str {
 impl RuntimeAccountApi for RuntimeHandle {
     async fn runtime_status(&self, _caller: RuntimeCaller) -> Result<RuntimeStatus, RuntimeError> {
         let mut status = self.current_status();
-        // The live account count is backend state; read it through the link
+        // The live account count is authority server state; read it through the link
         // (best-effort — a status read never fails on a count miss).
         if let Ok(Some(account_count)) = self.core.reads.account_count().await {
             status.account_count = account_count;
@@ -418,7 +418,7 @@ impl RuntimeAccountApi for RuntimeHandle {
         mutation: CreateAccountMutation,
     ) -> Result<posthaste_domain_service::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.create_account(mutation).await
+        self.core.authority_server_link.create_account(mutation).await
     }
 
     async fn patch_account(
@@ -429,7 +429,7 @@ impl RuntimeAccountApi for RuntimeHandle {
     ) -> Result<posthaste_domain_service::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .patch_account(account_id, mutation)
             .await
     }
@@ -440,7 +440,7 @@ impl RuntimeAccountApi for RuntimeHandle {
         account_id: AccountId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.delete_account(account_id).await
+        self.core.authority_server_link.delete_account(account_id).await
     }
 
     async fn verify_account(
@@ -449,7 +449,7 @@ impl RuntimeAccountApi for RuntimeHandle {
         account_id: AccountId,
     ) -> Result<AccountVerificationResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.verify_account(account_id).await
+        self.core.authority_server_link.verify_account(account_id).await
     }
 
     async fn set_account_enabled(
@@ -460,14 +460,14 @@ impl RuntimeAccountApi for RuntimeHandle {
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .set_account_enabled(account_id, enabled)
             .await
     }
 
     async fn reload_config(&self, _caller: RuntimeCaller) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.reload_config().await
+        self.core.authority_server_link.reload_config().await
     }
 
     async fn sync_account(
@@ -477,7 +477,7 @@ impl RuntimeAccountApi for RuntimeHandle {
         mode: SyncMode,
     ) -> Result<usize, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.sync_account(account_id, mode).await
+        self.core.authority_server_link.sync_account(account_id, mode).await
     }
 }
 
@@ -494,7 +494,7 @@ impl RuntimeSettingsApi for RuntimeHandle {
         mutation: posthaste_contract_core::PatchAppSettingsMutation,
     ) -> Result<AppSettings, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.patch_app_settings(mutation).await
+        self.core.authority_server_link.patch_app_settings(mutation).await
     }
 
     async fn preview_automation_rule(
@@ -504,7 +504,7 @@ impl RuntimeSettingsApi for RuntimeHandle {
     ) -> Result<posthaste_contract_core::AutomationRulePreviewResult, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .preview_automation_rule(mutation)
             .await
     }
@@ -533,7 +533,7 @@ impl RuntimeMailReadApi for RuntimeHandle {
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .set_mailbox_role(account_id, mailbox_id, role)
             .await
     }
@@ -561,7 +561,7 @@ impl RuntimeMailReadApi for RuntimeHandle {
         mutation: posthaste_contract_core::CreateSmartMailboxMutation,
     ) -> Result<posthaste_domain_service::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.create_smart_mailbox(mutation).await
+        self.core.authority_server_link.create_smart_mailbox(mutation).await
     }
 
     async fn patch_smart_mailbox(
@@ -572,7 +572,7 @@ impl RuntimeMailReadApi for RuntimeHandle {
     ) -> Result<posthaste_domain_service::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .patch_smart_mailbox(smart_mailbox_id, mutation)
             .await
     }
@@ -584,7 +584,7 @@ impl RuntimeMailReadApi for RuntimeHandle {
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .delete_smart_mailbox(smart_mailbox_id)
             .await
     }
@@ -594,7 +594,7 @@ impl RuntimeMailReadApi for RuntimeHandle {
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain_service::SmartMailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.reset_default_smart_mailboxes().await
+        self.core.authority_server_link.reset_default_smart_mailboxes().await
     }
 
     async fn list_tags(
@@ -706,7 +706,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .send_message(account_id, request)
             .await
     }
@@ -724,7 +724,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .save_draft(account_id, draft_id, request)
             .await
     }
@@ -740,7 +740,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .delete_draft(account_id, draft_id)
             .await
     }
@@ -767,7 +767,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         operation_id: OperationId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.discard_operation(operation_id).await
+        self.core.authority_server_link.discard_operation(operation_id).await
     }
 
     /// Re-arm a failed outbox operation so the next flush re-attempts it.
@@ -779,7 +779,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .retry_operation(account_id, operation_id)
             .await
     }
@@ -793,7 +793,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .set_keywords(account_id, message_id, command)
             .await
     }
@@ -807,7 +807,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .add_to_mailbox(account_id, message_id, command)
             .await
     }
@@ -821,7 +821,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .remove_from_mailbox(account_id, message_id, command)
             .await
     }
@@ -835,7 +835,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .replace_mailboxes(account_id, message_id, command)
             .await
     }
@@ -848,14 +848,14 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend_link
+            .authority_server_link
             .destroy_message(account_id, message_id)
             .await
     }
 }
 
 #[async_trait]
-impl RuntimeLinkOps for RuntimeHandle {
+impl RuntimeLink for RuntimeHandle {
     async fn open_session(&self, caller: RuntimeCaller) -> Result<RuntimeSession, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.sessions.open_session(caller)
@@ -922,7 +922,7 @@ impl RuntimeLinkOps for RuntimeHandle {
             .await
     }
 
-    async fn run_mutation(
+    async fn forward_mutation(
         &self,
         caller: RuntimeCaller,
         request: MutationRequest,
@@ -997,15 +997,15 @@ mod outbox_lifecycle_tests {
     use super::*;
     use posthaste_contract_core::ClientMutationId;
     use posthaste_domain_service::MessageSummary;
-    use posthaste_link_contract::{BackendApi, DownStream, LinkCoverage};
+    use posthaste_authority_server_link::{AuthorityServerLink, DownStream, LinkCoverage};
 
-    // A never-invoked `BackendApi`: the outbox-lifecycle paths under test touch
-    // only the session registry, never the backend, so the stub's methods are
+    // A never-invoked `AuthorityServerLink`: the outbox-lifecycle paths under test touch
+    // only the session registry, never the authority server, so the stub's methods are
     // inert. (Only the 4 non-defaulted trait methods need bodies; the rest
     // inherit defaults.)
-    struct NoopBackend;
+    struct NoopAuthorityServerLink;
     #[async_trait]
-    impl BackendApi for NoopBackend {
+    impl AuthorityServerLink for NoopAuthorityServerLink {
         async fn forward_mutation(
             &self,
             _: MutationRequest,
@@ -1032,8 +1032,8 @@ mod outbox_lifecycle_tests {
 
     fn test_session_registry() -> Arc<SessionRegistry> {
         let event_sender = broadcast::channel(16).0;
-        let outbox = Arc::new(RuntimeBackendOutbox::new(false));
-        let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopBackend)));
+        let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(false));
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopAuthorityServerLink)));
         let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
         Arc::new(SessionRegistry::new(views, event_sender))
     }

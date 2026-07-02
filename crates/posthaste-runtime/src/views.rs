@@ -77,12 +77,12 @@ struct RevLogDescriptor {
 
 pub(crate) struct ViewRegistry {
     event_sender: broadcast::Sender<DomainEvent>,
-    /// The runtime's outbox toward the backend, folded over mail-list recomputes
+    /// The runtime's outbox toward the authority server, folded over mail-list recomputes
     /// so served views are optimistic over forwarded-but-unconfirmed mutations
-    /// ([replication backend-link L2 §5](../replication/backend-link/L2.md)).
-    outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
+    /// ([replication authority-server-link L2 §5](../replication/authority-server-link/L2.md)).
+    outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
     /// The mail-list base read through the far node (W4a: passthrough cache over
-    /// the in-process backend, behavior-preserving).
+    /// the in-process authority server, behavior-preserving).
     reads: Arc<crate::read::ReadCache>,
     views: Mutex<HashMap<ViewId, StoredView>>,
     next_view_id: AtomicU64,
@@ -110,7 +110,7 @@ impl ViewRegistry {
 
     pub(crate) fn new(
         event_sender: broadcast::Sender<DomainEvent>,
-        outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
+        outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
         reads: Arc<crate::read::ReadCache>,
     ) -> Self {
         Self {
@@ -410,7 +410,7 @@ impl ViewRegistry {
             ViewKind::MailList(request) => {
                 let page = self.reads.query_mail_page(request.clone()).await?;
                 let mut state = mail_list_state(request, page)?;
-                // Fold the runtime→backend outbox: served rows are optimistic
+                // Fold the runtime→authority server outbox: served rows are optimistic
                 // over forwarded-but-unconfirmed mutations. A no-op when the
                 // outbox is empty (the in-process default), so co-located
                 // behavior is unchanged (`colocated-unchanged`).
@@ -454,7 +454,7 @@ impl ViewRegistry {
             }
             ViewKind::AccountStatus { account_id } => {
                 // Account status reads through the link (the same `reads` path
-                // as every other view), so a backend-less runtime serves it too.
+                // as every other view), so an authority-server-less runtime serves it too.
                 let data = match account_id {
                     Some(account_id) => {
                         let overview = self
@@ -868,22 +868,22 @@ mod recompute_trigger_tests {
 #[cfg(test)]
 mod rev_log_view_tests {
     use super::*;
-    use crate::near_node::RuntimeBackendOutbox;
+    use crate::near_node::RuntimeAuthorityServerOutbox;
     use crate::read::ReadCache;
     use async_trait::async_trait;
     use posthaste_domain_service::{RevCursor, RevLogSnapshot, RevLogStep};
-    use posthaste_link_contract::{BackendApi, DownStream, LinkCoverage};
+    use posthaste_authority_server_link::{AuthorityServerLink, DownStream, LinkCoverage};
     use posthaste_contract_core::{MutationReceipt, MutationRequest};
 
-    /// A read-only `BackendApi` stub that serves a canned `RevLogSnapshot` for
+    /// A read-only `AuthorityServerLink` stub that serves a canned `RevLogSnapshot` for
     /// every account — enough to drive the `RevLog` view's build/read path
-    /// without the store plumbing (Slice 2b wires the real `LocalBackend`).
-    struct RevLogStubBackend {
+    /// without the store plumbing (Slice 2b wires the real `LocalAuthorityServer`).
+    struct RevLogStubAuthorityServerLink {
         snapshot: RevLogSnapshot,
     }
 
     #[async_trait]
-    impl BackendApi for RevLogStubBackend {
+    impl AuthorityServerLink for RevLogStubAuthorityServerLink {
         async fn forward_mutation(
             &self,
             _mutation: MutationRequest,
@@ -908,8 +908,8 @@ mod rev_log_view_tests {
 
     fn registry(snapshot: RevLogSnapshot) -> Arc<ViewRegistry> {
         let (event_sender, _) = broadcast::channel(16);
-        let outbox = Arc::new(RuntimeBackendOutbox::new(false));
-        let reads = Arc::new(ReadCache::passthrough(Arc::new(RevLogStubBackend {
+        let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(false));
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(RevLogStubAuthorityServerLink {
             snapshot,
         })));
         Arc::new(ViewRegistry::new(event_sender, outbox, reads))

@@ -4,7 +4,7 @@
 //! drives the **full co-located application path** — the authority runtime's
 //! session/view machinery, the named-mutation pipeline, and the view recompute
 //! that produces a frame — so the flamegraph harness can see the
-//! mutation -> view-recompute -> frame hot path the runtime<->backend "link bus"
+//! mutation -> view-recompute -> frame hot path the runtime<->authority server "link bus"
 //! introduced, not just the store floor.
 //!
 //! It uses the **co-located in-process default** (an `AccountDriver::Mock`
@@ -18,12 +18,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
-use posthaste_authority_runtime::build_authority_runtime;
+use posthaste_authority_server::build_authority_server;
 use posthaste_domain_service::{
     AccountDriver, AccountId, MessageId, MessageSortField, SecretRef, SecretStore,
     SecretStoreError, SetKeywordsCommand, SortDirection,
 };
-use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLinkOps};
+use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLink};
 use posthaste_contract_core::{
     AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
     MailQueryRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionId, RuntimeSessionSeq,
@@ -46,7 +46,7 @@ const PAGE_LIMIT: usize = 50;
 pub struct RuntimeInbox {
     // Field order matters for drop: the runtime build shuts down its tasks when
     // dropped; the temp dir is removed last.
-    build: posthaste_authority_runtime::AuthorityRuntimeBuild,
+    build: posthaste_authority_server::AuthorityServerBuild,
     account_id: AccountId,
     session_id: RuntimeSessionId,
     view_id: ViewId,
@@ -74,7 +74,7 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
     // Suppress background re-sync (a mock sync would otherwise replace the seed).
     .with_poll_interval(Duration::from_secs(86_400));
 
-    let build = build_authority_runtime(config)
+    let build = build_authority_server(config)
         .await
         .map_err(|error| anyhow!("build authority runtime: {error}"))?;
 
@@ -84,7 +84,7 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
         .await
         .map_err(|error| anyhow!("create account: {error}"))?;
 
-    // Bring the mock account runtime up so run_mutation routes through it.
+    // Bring the mock account runtime up so forward_mutation routes through it.
     build
         .account_supervisor
         .sync_account(&account.id)
@@ -161,8 +161,8 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
 /// "drain until view frame" would hang.
 ///
 /// It triggers via `store.set_keywords` + manual event broadcast (the pattern
-/// the runtime's own `authority_runtime_handle` tests use) rather than
-/// `run_mutation`: the full named-mutation pipeline's existence check
+/// the runtime's own `authority_server_handle` tests use) rather than
+/// `forward_mutation`: the full named-mutation pipeline's existence check
 /// (`get_message_mailboxes`) rejects bulk-seeded messages, and that pipeline is
 /// upstream of — not part of — the path we are profiling.
 pub async fn mutate_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -> Result<()> {
@@ -273,7 +273,7 @@ fn mock_account_mutation(account_id: &str) -> CreateAccountMutation {
         id: Some(account_id.to_string()),
         name: account_id.to_string(),
         driver: Some(AccountDriver::Mock),
-        // Enabled so run_mutation routes through the account runtime.
+        // Enabled so forward_mutation routes through the account runtime.
         enabled: Some(true),
         full_name: None,
         signature: None,

@@ -108,28 +108,28 @@ impl TagAppearanceToml {
     }
 }
 
-/// Runtime↔backend link settings (`[link]`). Default: in-process, link not
+/// Runtime↔authority server link settings (`[link]`). Default: in-process, link not
 /// served — the bundled single-process deployment is unaffected.
 ///
 /// @spec docs/replication/L1#10-deployment-topology
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct LinkToml {
-    /// Backend role: serve the runtime↔backend link over HTTP for a remote
+    /// Authority server role: serve the runtime↔authority-server link over HTTP for a remote
     /// runtime. Default `false`.
     pub serve: Option<bool>,
     /// Connect role: this near node's bearer token, presented to the remote
-    /// backend (single token — the near node is one runtime). The backend
-    /// resolves it to a `RuntimeId` via [`runtimes`](Self::runtimes) on the
+    /// authority server (single token — the near node is one runtime). The authority server
+    /// resolves it to a `AuthorityServerLinkId` via [`runtimes`](Self::runtimes) on the
     /// serve side.
     pub token: Option<String>,
     /// Serve role: the runtimes permitted to connect, as `token → runtime_id`
     /// (X runtimes, X ≥ 1; no single-runtime special case). Required under
     /// `serve` + `require_auth`. A connecting runtime presents its [`token`];
-    /// the backend looks it up here to derive its identity.
+    /// the authority server looks it up here to derive its identity.
     pub runtimes: Option<HashMap<String, String>>,
-    /// Runtime role: connect to a remote backend at this base URL instead of the
+    /// Runtime role: connect to a remote authority server at this base URL instead of the
     /// in-process one. When set, this process is a near node over the link.
-    pub backend_url: Option<String>,
+    pub authority_server_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

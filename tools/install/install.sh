@@ -9,7 +9,7 @@
 #   curl -fsSL https://posthaste.theor.net/install.sh | sh
 #
 # Then, on each machine:
-#   posthaste-wizard install --role <daemon|backend|runtime> ...
+#   posthaste-wizard install --role <daemon|authority server|runtime> ...
 #
 # Environment overrides:
 #   POSTHASTE_CHANNEL        nightly (default) | stable
@@ -145,7 +145,7 @@ cat <<EOF
 
 The wizard is one-shot. Provision a node:
 
-  posthaste-wizard install --role backend --tls --host <hostname> \\
+  posthaste-wizard install --role authority server --tls --host <hostname> \\
     --bind 0.0.0.0:3002 --link-token <secret> \\
     --config-root ~/.config/posthaste --state-root ~/.local/share/posthaste
 

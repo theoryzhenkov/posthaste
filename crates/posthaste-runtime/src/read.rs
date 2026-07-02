@@ -1,19 +1,19 @@
-//! The runtime's read path as a read-through cache over the backend.
+//! The runtime's read path as a read-through cache over the authority server.
 //!
-//! Reads ([replication backend-link L3](../replication/backend-link/L3.md))
-//! go through a [`ReadCache`] over a [`BackendApi`]: the query engine lives at
+//! Reads ([replication authority-server-link L3](../replication/authority-server-link/L3.md))
+//! go through a [`ReadCache`] over a [`AuthorityServerLink`]: the query engine lives at
 //! the authority (the far node), and a near node retains the data that flowed
 //! back under a **policy** chosen from link cost. The primitive is read-through;
 //! caching is the optimization.
 //!
 //! There is no separate read-source abstraction — the cache wraps the one
-//! `BackendApi` (the in-process `LocalBackend` co-located, the `RemoteBackend`
+//! `AuthorityServerLink` (the in-process `LocalAuthorityServer` co-located, the `RemoteAuthorityServer`
 //! over the link), the same trait the write/subscribe channels use. Co-located
 //! the policy is **passthrough** (retain nothing, read straight through), so the
 //! deployment behaves exactly as before (`colocated-unchanged`); a split runtime
 //! gets the **retaining** policy kept coherent by the down-channel.
 //!
-//! @spec docs/replication/backend-link/L3#2-retaining-policy-and-coherence-by-eviction
+//! @spec docs/replication/authority-server-link/L3#2-retaining-policy-and-coherence-by-eviction
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -27,8 +27,8 @@ use posthaste_domain_service::{
     MessageDetail, MessageId, MessageSummary, Operation, ReplyContext, RevLogSnapshot,
     SmartMailbox, SmartMailboxId, SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
-use posthaste_link_contract::{
-    BackendApi, BackendLink, BaseAssertion, BaseUpdate, DownFrame, LinkCoverage,
+use posthaste_authority_server_link::{
+    AuthorityServerLink, AuthorityServerLinkHandle, BaseAssertion, BaseUpdate, AuthorityServerFrame, LinkCoverage,
 };
 use posthaste_contract_core::{
     AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
@@ -36,15 +36,15 @@ use posthaste_contract_core::{
 };
 use tokio::sync::broadcast;
 
-/// A read-through cache over the [`BackendApi`], parameterized by policy.
+/// A read-through cache over the [`AuthorityServerLink`], parameterized by policy.
 ///
-/// - **Passthrough** (co-located): every read delegates straight to the backend,
+/// - **Passthrough** (co-located): every read delegates straight to the authority server,
 ///   retaining nothing — no redundant storage, behavior-preserving.
 /// - **Retaining** (remote): point reads are served from a coherent summary
 ///   cache of the messages that flowed back (from point reads *and* query
 ///   pages), and read through on a miss. The cache is kept correct by the
-///   down-channel ([`run_backend_down_channel`]): a message's entry is evicted when
-///   the backend says it changed, so it is never stale — the next read
+///   down-channel ([`run_authority_server_down_channel`]): a message's entry is evicted when
+///   the authority server says it changed, so it is never stale — the next read
 ///   re-fetches. (Mail-list pages are not cached; the authority computes
 ///   membership/order, so a list is always a fresh read-through that warms the
 ///   message cache.)
@@ -54,24 +54,24 @@ use tokio::sync::broadcast;
 /// over-evict across accounts — which is safe (a cache miss), only less
 /// efficient. Carrying the account id on the assertion is a later refinement.
 pub struct ReadCache {
-    backend: Arc<dyn BackendApi>,
+    authority_server: Arc<dyn AuthorityServerLink>,
     summaries: Option<Mutex<HashMap<String, MessageSummary>>>,
 }
 
 impl ReadCache {
     /// The passthrough cache: read straight through, retain nothing.
-    pub fn passthrough(backend: Arc<dyn BackendApi>) -> Self {
+    pub fn passthrough(authority_server: Arc<dyn AuthorityServerLink>) -> Self {
         Self {
-            backend,
+            authority_server,
             summaries: None,
         }
     }
 
     /// The retaining cache: hold the summaries that flow back, kept coherent by
     /// the down-channel.
-    pub fn retaining(backend: Arc<dyn BackendApi>) -> Self {
+    pub fn retaining(authority_server: Arc<dyn AuthorityServerLink>) -> Self {
         Self {
-            backend,
+            authority_server,
             summaries: Some(Mutex::new(HashMap::new())),
         }
     }
@@ -80,7 +80,7 @@ impl ReadCache {
         &self,
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
-        let page = self.backend.query_mail_page(request).await?;
+        let page = self.authority_server.query_mail_page(request).await?;
         // A list read-through warms the message cache with what it returned.
         if let (Some(summaries), MailQueryPage::Messages(messages)) = (&self.summaries, &page) {
             let mut cache = summaries.lock().expect("summary cache poisoned");
@@ -91,29 +91,29 @@ impl ReadCache {
         Ok(page)
     }
 
-    /// Read a message's detail through the backend (passthrough; the detail view
+    /// Read a message's detail through the authority server (passthrough; the detail view
     /// is recomputed per open, so it is not cached here).
     pub(crate) async fn message_detail(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        self.backend
+        self.authority_server
             .message_detail(account_id.clone(), message_id.clone())
             .await
     }
 
-    /// Read a conversation through the backend (passthrough).
+    /// Read a conversation through the authority server (passthrough).
     pub(crate) async fn conversation(
         &self,
         conversation_id: &ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
-        self.backend.conversation(conversation_id.clone()).await
+        self.authority_server.conversation(conversation_id.clone()).await
     }
 
-    /// Read the backend's live account count (passthrough; status metadata).
+    /// Read the authority server's live account count (passthrough; status metadata).
     pub(crate) async fn account_count(&self) -> Result<Option<usize>, RuntimeError> {
-        self.backend.account_count().await
+        self.authority_server.account_count().await
     }
 
     /// Read channel: the per-account undo/redo `rev_log` + cursor (passthrough).
@@ -122,67 +122,67 @@ impl ReadCache {
         &self,
         account_id: &AccountId,
     ) -> Result<RevLogSnapshot, RuntimeError> {
-        self.backend.rev_log_snapshot(account_id.clone()).await
+        self.authority_server.rev_log_snapshot(account_id.clone()).await
     }
 
-    /// Account/config reads through the backend (passthrough; not cached — these
+    /// Account/config reads through the authority server (passthrough; not cached — these
     /// are config metadata, re-read on demand).
     pub(crate) async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
-        self.backend.list_accounts().await
+        self.authority_server.list_accounts().await
     }
 
     pub(crate) async fn get_account(
         &self,
         account_id: AccountId,
     ) -> Result<Option<AccountOverview>, RuntimeError> {
-        self.backend.get_account(account_id).await
+        self.authority_server.get_account(account_id).await
     }
 
     pub(crate) async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
-        self.backend.app_settings().await
+        self.authority_server.app_settings().await
     }
 
     pub(crate) async fn resolve_account_scope(
         &self,
         scope: AccountScopeRequest,
     ) -> Result<Vec<AccountId>, RuntimeError> {
-        self.backend.resolve_account_scope(scope).await
+        self.authority_server.resolve_account_scope(scope).await
     }
 
     pub(crate) async fn list_mailboxes(
         &self,
         scope: AccountScopeRequest,
     ) -> Result<BTreeMap<AccountId, Vec<MailboxSummary>>, RuntimeError> {
-        self.backend.list_mailboxes(scope).await
+        self.authority_server.list_mailboxes(scope).await
     }
 
     pub(crate) async fn list_smart_mailboxes(
         &self,
     ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
-        self.backend.list_smart_mailboxes().await
+        self.authority_server.list_smart_mailboxes().await
     }
 
     pub(crate) async fn get_smart_mailbox(
         &self,
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<SmartMailbox, RuntimeError> {
-        self.backend.get_smart_mailbox(smart_mailbox_id).await
+        self.authority_server.get_smart_mailbox(smart_mailbox_id).await
     }
 
     pub(crate) async fn list_tags(
         &self,
         scope: AccountScopeRequest,
     ) -> Result<Vec<TagSummary>, RuntimeError> {
-        self.backend.list_tags(scope).await
+        self.authority_server.list_tags(scope).await
     }
 
-    /// Provider/account reads through the backend (passthrough; not cached —
+    /// Provider/account reads through the authority server (passthrough; not cached —
     /// these resolve a live gateway or read config/outbox state on demand).
     pub(crate) async fn get_identity(
         &self,
         account_id: AccountId,
     ) -> Result<Identity, RuntimeError> {
-        self.backend.get_identity(account_id).await
+        self.authority_server.get_identity(account_id).await
     }
 
     pub(crate) async fn get_reply_context(
@@ -190,27 +190,27 @@ impl ReadCache {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<ReplyContext, RuntimeError> {
-        self.backend.get_reply_context(account_id, message_id).await
+        self.authority_server.get_reply_context(account_id, message_id).await
     }
 
     pub(crate) async fn list_sender_addresses(
         &self,
     ) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
-        self.backend.list_sender_addresses().await
+        self.authority_server.list_sender_addresses().await
     }
 
     pub(crate) async fn list_pending_operations(
         &self,
         account_id: AccountId,
     ) -> Result<Vec<Operation>, RuntimeError> {
-        self.backend.list_pending_operations(account_id).await
+        self.authority_server.list_pending_operations(account_id).await
     }
 
     pub(crate) async fn replay_events(
         &self,
         filter: EventFilter,
     ) -> Result<Vec<DomainEvent>, RuntimeError> {
-        self.backend.replay_events(filter).await
+        self.authority_server.replay_events(filter).await
     }
 
     pub(crate) async fn get_draft_content(
@@ -218,7 +218,7 @@ impl ReadCache {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<DraftContent, RuntimeError> {
-        self.backend.get_draft_content(account_id, message_id).await
+        self.authority_server.get_draft_content(account_id, message_id).await
     }
 
     pub(crate) async fn get_message_resource(
@@ -227,7 +227,7 @@ impl ReadCache {
         message_id: MessageId,
         kind: MessageResourceKind,
     ) -> Result<RuntimeResourceBytes, RuntimeError> {
-        self.backend
+        self.authority_server
             .get_message_resource(account_id, message_id, kind)
             .await
     }
@@ -256,7 +256,7 @@ impl ReadCache {
             }
         }
         let result = self
-            .backend
+            .authority_server
             .current_summary(account_id.clone(), message_id.clone())
             .await?;
         if let (Some(summaries), Some(summary)) = (&self.summaries, &result) {
@@ -281,8 +281,8 @@ impl ReadCache {
 
     /// Apply one down-channel frame for coherence: evict the messages a base
     /// assertion changed (present or removed), so the next read re-fetches.
-    pub(crate) fn apply_coherence_frame(&self, frame: &DownFrame) {
-        if let DownFrame::Base { assertions } = frame {
+    pub(crate) fn apply_coherence_frame(&self, frame: &AuthorityServerFrame) {
+        if let AuthorityServerFrame::Base { assertions } = frame {
             for assertion in assertions {
                 self.evict(&assertion.message_id);
             }
@@ -290,38 +290,38 @@ impl ReadCache {
     }
 }
 
-/// Consume the backend's down-channel and drive the near node from it: evict the
+/// Consume the authority server's down-channel and drive the near node from it: evict the
 /// read cache (so the next read re-fetches), retire any outbox op the asserted
 /// base now absorbs (the absorption-gated retire — a confirmed op held since its
 /// receipt outran this assertion), AND republish each base assertion as a domain
 /// event on the runtime's event bus, so the existing view machinery
 /// (`ViewRegistry`'s event pump + `subscribe_events`) recomputes and pushes
-/// frames to clients. This is the runtime↔backend half of the recursive
+/// frames to clients. This is the runtime↔authority-server half of the recursive
 /// down-channel; the runtime→client half is the shipped view-frame protocol it
-/// feeds ([replication backend-link L3](../replication/backend-link/L3.md)). In-process the runtime
-/// shares the backend's event bus directly, so this is spawned only for a split
+/// feeds ([replication authority-server-link L3](../replication/authority-server-link/L3.md)). In-process the runtime
+/// shares the authority server's event bus directly, so this is spawned only for a split
 /// (remote) runtime; it returns when the stream closes.
-pub(crate) async fn run_backend_down_channel(
-    link: BackendLink,
+pub(crate) async fn run_authority_server_down_channel(
+    link: AuthorityServerLinkHandle,
     reads: Arc<ReadCache>,
     events: broadcast::Sender<DomainEvent>,
-    outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
+    outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
 ) {
     let Ok(mut stream) = link.subscribe(LinkCoverage::Complete).await else {
         return;
     };
     // A monotonic local sequence for the synthesized events. These do NOT match
-    // the backend's authoritative seqs (those come via `replay_events` over the
+    // the authority server's authoritative seqs (those come via `replay_events` over the
     // link); they only order the live stream for fresh subscribers.
     let mut seq: i64 = 0;
     while let Some(frame) = stream.next().await {
         reads.apply_coherence_frame(&frame);
-        if let DownFrame::Base { assertions } = &frame {
+        if let AuthorityServerFrame::Base { assertions } = &frame {
             for assertion in assertions {
                 // The authoritative base now carries the asserted state, so a
                 // confirmed outbox op it absorbs is retired here — NOT on the
                 // mutation's receipt, which can outrun this assertion when the
-                // backend is remote.
+                // authority server is remote.
                 outbox.apply_base(&assertion.message_id, &assertion.update);
                 seq += 1;
                 // A send error means there are no live subscribers yet; the next
@@ -364,7 +364,7 @@ mod tests {
 
     use async_trait::async_trait;
     use posthaste_domain_service::MessagePage;
-    use posthaste_link_contract::{BaseAssertion, BaseUpdate, DownStream};
+    use posthaste_authority_server_link::{BaseAssertion, BaseUpdate, DownStream};
     use posthaste_link_core::MessageFoldState;
     use posthaste_contract_core::{MutationReceipt, MutationRequest};
     use serde_json::json;
@@ -380,15 +380,15 @@ mod tests {
         .unwrap()
     }
 
-    /// A backend that counts how often each read reaches it. The write/subscribe
+    /// An authority server that counts how often each read reaches it. The write/subscribe
     /// channels are inert (these tests exercise reads only).
-    struct CountingBackend {
+    struct CountingAuthorityServerLink {
         summary_calls: AtomicU64,
         query_calls: AtomicU64,
         page: MailQueryPage,
     }
 
-    impl CountingBackend {
+    impl CountingAuthorityServerLink {
         fn new(items: Vec<MessageSummary>) -> Self {
             Self {
                 summary_calls: AtomicU64::new(0),
@@ -402,13 +402,13 @@ mod tests {
     }
 
     #[async_trait]
-    impl BackendApi for CountingBackend {
+    impl AuthorityServerLink for CountingAuthorityServerLink {
         async fn forward_mutation(
             &self,
             _mutation: MutationRequest,
         ) -> Result<MutationReceipt, RuntimeError> {
             Err(RuntimeError::internal(
-                "counting backend is read-only",
+                "counting authority_server is read-only",
                 None,
             ))
         }
@@ -435,8 +435,8 @@ mod tests {
         }
     }
 
-    fn base_frame(message_id: &str) -> DownFrame {
-        DownFrame::Base {
+    fn base_frame(message_id: &str) -> AuthorityServerFrame {
+        AuthorityServerFrame::Base {
             assertions: vec![BaseAssertion {
                 account_id: "acct".to_string(),
                 message_id: message_id.to_string(),
@@ -447,31 +447,31 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_never_retains() {
-        let backend = Arc::new(CountingBackend::new(vec![]));
-        let cache = ReadCache::passthrough(backend.clone());
+        let authority_server = Arc::new(CountingAuthorityServerLink::new(vec![]));
+        let cache = ReadCache::passthrough(authority_server.clone());
         let account = AccountId("acct".into());
         let message = MessageId("m1".into());
         cache.current_summary(&account, &message).await.unwrap();
         cache.current_summary(&account, &message).await.unwrap();
-        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
     async fn retaining_serves_a_point_read_from_cache_after_the_first() {
-        let backend = Arc::new(CountingBackend::new(vec![]));
-        let cache = ReadCache::retaining(backend.clone());
+        let authority_server = Arc::new(CountingAuthorityServerLink::new(vec![]));
+        let cache = ReadCache::retaining(authority_server.clone());
         let account = AccountId("acct".into());
         let message = MessageId("m1".into());
         cache.current_summary(&account, &message).await.unwrap();
         cache.current_summary(&account, &message).await.unwrap();
         // Second read is a cache hit.
-        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn a_query_warms_the_message_cache() {
-        let backend = Arc::new(CountingBackend::new(vec![summary("m1")]));
-        let cache = ReadCache::retaining(backend.clone());
+        let authority_server = Arc::new(CountingAuthorityServerLink::new(vec![summary("m1")]));
+        let cache = ReadCache::retaining(authority_server.clone());
         let request: MailQueryRequest = serde_json::from_value(json!({
             "query": "in:acct/inbox",
             "presentation": {
@@ -481,44 +481,44 @@ mod tests {
         }))
         .unwrap();
         cache.query_mail_page(request).await.unwrap();
-        // The point read is now served from the warmed cache, never reaching the backend.
+        // The point read is now served from the warmed cache, never reaching the authority server.
         cache
             .current_summary(&AccountId("acct".into()), &MessageId("m1".into()))
             .await
             .unwrap();
-        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
     async fn a_coherence_frame_evicts_so_the_next_read_refetches() {
-        let backend = Arc::new(CountingBackend::new(vec![]));
-        let cache = ReadCache::retaining(backend.clone());
+        let authority_server = Arc::new(CountingAuthorityServerLink::new(vec![]));
+        let cache = ReadCache::retaining(authority_server.clone());
         let account = AccountId("acct".into());
         let message = MessageId("m1".into());
         cache.current_summary(&account, &message).await.unwrap();
-        // The backend asserts m1 changed; the cached summary is evicted.
+        // The authority server asserts m1 changed; the cached summary is evicted.
         cache.apply_coherence_frame(&base_frame("m1"));
         cache.current_summary(&account, &message).await.unwrap();
-        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 2);
     }
 
-    // A backend whose down-channel emits one Base assertion then closes, with a
+    // An authority server whose down-channel emits one Base assertion then closes, with a
     // counting point read so eviction is observable.
-    struct BridgeBackend {
+    struct BridgeAuthorityServerLink {
         summary_calls: AtomicU64,
     }
 
     #[async_trait]
-    impl BackendApi for BridgeBackend {
+    impl AuthorityServerLink for BridgeAuthorityServerLink {
         async fn forward_mutation(
             &self,
             _mutation: MutationRequest,
         ) -> Result<MutationReceipt, RuntimeError> {
-            Err(RuntimeError::internal("bridge backend is read-only", None))
+            Err(RuntimeError::internal("bridge authority_server is read-only", None))
         }
 
         async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-            Ok(Box::pin(futures_util::stream::iter([DownFrame::Base {
+            Ok(Box::pin(futures_util::stream::iter([AuthorityServerFrame::Base {
                 assertions: vec![BaseAssertion {
                     account_id: "acct".into(),
                     message_id: "m1".into(),
@@ -543,21 +543,21 @@ mod tests {
 
     #[tokio::test]
     async fn the_down_channel_bridge_evicts_the_cache_and_republishes_an_event() {
-        let backend = Arc::new(BridgeBackend {
+        let authority_server = Arc::new(BridgeAuthorityServerLink {
             summary_calls: AtomicU64::new(0),
         });
-        let cache = Arc::new(ReadCache::retaining(backend.clone()));
+        let cache = Arc::new(ReadCache::retaining(authority_server.clone()));
         let account = AccountId("acct".into());
         let message = MessageId("m1".into());
 
         // Warm the cache (one fetch), then run the bridge over a one-frame link.
         cache.current_summary(&account, &message).await.unwrap();
-        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 1);
 
         // A confirmed flag op on m1, held pending because its receipt outran the
         // base assertion (the remote seam). The bridge's assertion below carries
         // the flag, so the absorption-gated retire drops it.
-        let outbox = Arc::new(crate::near_node::RuntimeBackendOutbox::new(true));
+        let outbox = Arc::new(crate::near_node::RuntimeAuthorityServerOutbox::new(true));
         outbox.accept(posthaste_link_core::PendingMessageMutation {
             id: posthaste_link_core::MutationId("op1".into()),
             key: "m1".into(),
@@ -574,9 +574,9 @@ mod tests {
         );
 
         let (events, mut rx) = broadcast::channel(16);
-        let link = BackendLink::new(backend.clone());
+        let link = AuthorityServerLinkHandle::new(authority_server.clone());
         // The stub stream closes after one frame, so the bridge returns.
-        run_backend_down_channel(link, cache.clone(), events, outbox.clone()).await;
+        run_authority_server_down_channel(link, cache.clone(), events, outbox.clone()).await;
 
         // The base now carries the flag: the held op is retired by absorption.
         assert!(
@@ -594,6 +594,6 @@ mod tests {
 
         // And it evicted the cache: the next read re-fetches.
         cache.current_summary(&account, &message).await.unwrap();
-        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 2);
     }
 }
