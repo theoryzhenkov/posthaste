@@ -1,6 +1,13 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_nearendhandle_free: (a: number, b: number) => void;
+export const nearendhandle_connect: (a: number) => any;
+export const nearendhandle_cursor: (a: number) => [number, number];
+export const nearendhandle_disconnect: (a: number) => any;
+export const nearendhandle_forward: (a: number, b: number, c: number) => any;
+export const nearendhandle_new: (a: any, b: number, c: number) => [number, number, number];
+export const nearendhandle_sessionId: (a: number) => [number, number];
 export const __wbg_entitystorehandle_free: (a: number, b: number) => void;
 export const entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
 export const entitystorehandle_captureMutationDiffJson: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
@@ -19,17 +26,10 @@ export const entitystorehandle_settle: (a: number, b: number, c: number, d: numb
 export const entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
 export const invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
 export const parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-export const __wbg_nearendhandle_free: (a: number, b: number) => void;
-export const nearendhandle_connect: (a: number) => any;
-export const nearendhandle_cursor: (a: number) => [number, number];
-export const nearendhandle_disconnect: (a: number) => any;
-export const nearendhandle_forward: (a: number, b: number, c: number) => any;
-export const nearendhandle_new: (a: any, b: number, c: number) => [number, number, number];
-export const nearendhandle_sessionId: (a: number) => [number, number];
-export const wasm_bindgen__convert__closures_____invoke__hb442c339423f200d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
-export const wasm_bindgen__convert__closures_____invoke__hbd70f3a990e4cad7: (a: number, b: number, c: any) => [number, number];
-export const wasm_bindgen__convert__closures_____invoke__h385b7305685c474c: (a: number, b: number, c: any, d: any) => void;
-export const wasm_bindgen__convert__closures_____invoke__h2423c9da95588df5: (a: number, b: number) => void;
+export const wasm_bindgen__convert__closures_____invoke__ha433c4c869742dc2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const wasm_bindgen__convert__closures_____invoke__ha35c10aed9720f95: (a: number, b: number, c: any) => [number, number];
+export const wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d: (a: number, b: number, c: any, d: any) => void;
+export const wasm_bindgen__convert__closures_____invoke__h690adb9d64021208: (a: number, b: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_exn_store: (a: number) => void;

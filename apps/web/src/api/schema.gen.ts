@@ -416,6 +416,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runtime/sessions/{session_id}/mutations/{client_mutation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a runtime mutation's settlement
+         * @description Returns the settlement receipt the runtime holds for a client mutation id, or a null receipt when it has no record (unknown session, never accepted, or already cleared). The client near-end's reconciler queries this for sent-but-unsettled records after a session-continuity loss: a terminal receipt settles locally; a null receipt re-forwards.
+         */
+        get: operations["runtime_session_mutation_settlement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runtime/sessions/{session_id}/stream": {
         parameters: {
             query?: never;
@@ -2362,6 +2382,17 @@ export interface components {
             type: "heartbeat";
         };
         RuntimeMutationId: string;
+        /**
+         * @description The settlement-query response for one `(session, clientMutationId)` key
+         *     (`GET /runtime/sessions/{id}/mutations/{clientMutationId}`): the receipt the
+         *     runtime holds, or `null` when it has no record (unknown session, never
+         *     accepted, or already evicted/cleared under the D47 ledger rule). Consumed by
+         *     the near-end reconciler's sent-but-unsettled step (D44b): a terminal receipt
+         *     settles locally, `null` re-forwards.
+         */
+        RuntimeMutationSettlement: {
+            receipt?: null | components["schemas"]["MutationReceipt"];
+        };
         RuntimeSession: {
             sessionId: components["schemas"]["RuntimeSessionId"];
         };
@@ -3722,6 +3753,66 @@ export interface operations {
             };
             /** @description Unknown runtime session */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    runtime_session_mutation_settlement: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime session id the mutation was dispatched under */
+                session_id: string;
+                /** @description Client mutation id */
+                client_mutation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runtime's settlement record (receipt is null when unknown) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeMutationSettlement"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

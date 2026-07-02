@@ -11,6 +11,7 @@
 
 mod assembly;
 mod handle;
+mod link_near_end;
 mod near_node;
 mod read;
 mod secret;

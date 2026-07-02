@@ -203,7 +203,7 @@ describe('useRuntimeMailListView', () => {
       'primary',
     )
     expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-      { request: { sessionId: 'session-1', afterSeq: 0, sourceId: 'primary' } },
+      { request: { sessionId: 'session-1', sourceId: 'primary' } },
     ])
 
     runtimeAdapter.emitRuntimeFrame({
@@ -435,7 +435,7 @@ describe('useRuntimeMailListView', () => {
     )
     expect(runtimeAdapter.runtimeSessionCalls).toEqual([{ viewDelta: true }])
     expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-      { request: { sessionId: 'session-1', afterSeq: null } },
+      { request: { sessionId: 'session-1' } },
     ])
     expect(runtimeAdapter.runtimeSessionViewOpenCalls).toHaveLength(1)
     expect(runtimeAdapter.runtimeSessionViewOpenCalls[0].sourceId).toBe(

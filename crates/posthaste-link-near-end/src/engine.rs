@@ -1,19 +1,22 @@
 //! The near-end engine: one place for the link's consuming half + its
 //! resilience policy (D40/D44).
 //!
-//! Instantiated per seam (browser via wasm, native in-process later), the engine
+//! Instantiated per seam over a [`Wire`] profile (the browser's client↔runtime
+//! wire via wasm, the runtime's authority-server wire natively), the engine
 //! owns:
 //!
-//! * **session lifecycle** — opens a session (POST) and holds its id;
+//! * **connection lifecycle** — runs the wire's prepare step (a session open,
+//!   when the wire has one) and holds its token;
 //! * **the frame subscription** — a reconnect loop that re-subscribes with the
 //!   engine-owned resume **cursor** (`after_seq`) on *every* reconnect (fixing
-//!   the TS closure that dropped it), parses each payload into a typed
-//!   [`RuntimeFrame`] at the boundary (no unchecked cast), and classifies stream
-//!   errors permanent-vs-transient;
+//!   the TS closure that dropped it), parses each payload into the wire's typed
+//!   frame at the boundary (no unchecked cast), and classifies stream errors
+//!   permanent-vs-transient;
 //! * **`forward`** — a mutation POST with a request **deadline** and jittered
 //!   backoff retry of transient failures;
 //! * **the level-triggered reconciler** — runs on *every* connect (first
-//!   included) and replays never-dispatched forwards via the outbox hooks.
+//!   included) and drives both halves of D44: never-dispatched replay and the
+//!   sent-but-unsettled settlement query (when the wire has one).
 //!
 //! No timers, no HTTP client, no persistence live here — those are the injected
 //! [`Transport`]/[`Scheduler`]/[`FrameSink`]/[`OutboxHooks`]. That is what keeps
@@ -22,12 +25,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use futures_util::future::{select, Either};
+use futures_util::future::{select, Either, LocalBoxFuture};
 use futures_util::StreamExt;
 
 use posthaste_contract_core::{
-    MutationReceipt, MutationRequest, RuntimeAdapterError, RuntimeFrame, RuntimeSession,
-    RuntimeSessionId, RuntimeSessionSeq,
+    MutationReceipt, MutationRequest, RuntimeAdapterError, RuntimeMutationSettlement,
 };
 
 use crate::config::NearEndConfig;
@@ -35,7 +37,10 @@ use crate::error::{classify_status, Disposition};
 use crate::outbox::OutboxHooks;
 use crate::scheduler::Scheduler;
 use crate::sink::{ConnectionStatus, FrameSink};
-use crate::transport::{PostRequest, PostResponse, StreamRequest, Transport, TransportError};
+use crate::transport::{
+    GetRequest, PostRequest, PostResponse, StreamEvent, Transport, TransportError,
+};
+use crate::wire::Wire;
 
 /// A failure surfaced by an engine call, tagged with its [`Disposition`] so the
 /// caller (and the wasm boundary) can react. Mirrors the runtime error envelope
@@ -98,34 +103,40 @@ impl std::error::Error for EngineError {}
 
 #[derive(Default)]
 struct State {
-    session_id: Option<RuntimeSessionId>,
-    cursor: Option<RuntimeSessionSeq>,
+    /// The wire's prepare step ran (a no-prepare wire is prepared immediately).
+    prepared: bool,
+    /// The prepare result the wire's requests carry (e.g. the session id).
+    token: Option<String>,
+    cursor: Option<u64>,
     reconnect_attempt: u32,
     shutdown: bool,
 }
 
-/// The near-end engine. Held behind `Rc` so its long-lived frame loop
-/// ([`Self::run`]) and its short one-shot calls ([`Self::forward`]) share one
-/// state without a lifetime.
-pub struct NearEnd {
+/// The near-end engine, generic over the seam's [`Wire`] profile. Held behind
+/// `Rc` so its long-lived frame loop ([`Self::run`]) and its short one-shot
+/// calls ([`Self::forward`]) share one state without a lifetime.
+pub struct NearEnd<W: Wire> {
+    wire: W,
     transport: Rc<dyn Transport>,
     scheduler: Rc<dyn Scheduler>,
-    sink: Rc<dyn FrameSink>,
+    sink: Rc<dyn FrameSink<W::Frame>>,
     outbox: Rc<dyn OutboxHooks>,
     config: NearEndConfig,
     state: RefCell<State>,
 }
 
-impl NearEnd {
+impl<W: Wire> NearEnd<W> {
     pub fn new(
+        wire: W,
         transport: Rc<dyn Transport>,
         scheduler: Rc<dyn Scheduler>,
-        sink: Rc<dyn FrameSink>,
+        sink: Rc<dyn FrameSink<W::Frame>>,
         outbox: Rc<dyn OutboxHooks>,
         config: NearEndConfig,
     ) -> Rc<Self> {
-        let cursor = config.initial_cursor.map(RuntimeSessionSeq::new);
+        let cursor = config.initial_cursor;
         Rc::new(Self {
+            wire,
             transport,
             scheduler,
             sink,
@@ -138,16 +149,17 @@ impl NearEnd {
         })
     }
 
-    /// The current session id, once [`Self::open`] has run.
-    pub fn session_id(&self) -> Option<RuntimeSessionId> {
-        self.state.borrow().session_id.clone()
+    /// The wire's connection token (the session id at the client seam), once
+    /// [`Self::open`] has run. `None` for a no-prepare wire.
+    pub fn token(&self) -> Option<String> {
+        self.state.borrow().token.clone()
     }
 
-    /// The engine-owned resume cursor (last seen `sessionSeq`). The host persists
+    /// The engine-owned resume cursor (last seen frame seq). The host persists
     /// this so a reload resumes where it left off — callers no longer thread
     /// `afterSeq` themselves.
     pub fn cursor(&self) -> Option<u64> {
-        self.state.borrow().cursor.map(|c| c.get())
+        self.state.borrow().cursor
     }
 
     /// Ask the frame loop to stop (no further reconnects). Idempotent. Aborting
@@ -160,47 +172,51 @@ impl NearEnd {
         self.state.borrow().shutdown
     }
 
-    // ---- session -----------------------------------------------------------
+    fn is_prepared(&self) -> bool {
+        self.state.borrow().prepared
+    }
 
-    /// Open a session (idempotent). POSTs `/runtime/sessions` and stores the id.
-    pub async fn open(&self) -> Result<RuntimeSessionId, EngineError> {
-        if let Some(id) = self.session_id() {
-            return Ok(id);
+    // ---- connection prepare --------------------------------------------------
+
+    /// Run the wire's prepare step (idempotent) — the client seam POSTs
+    /// `/runtime/sessions` and stores the session id; a no-prepare wire is
+    /// prepared immediately. Returns the connection token, if the wire has one.
+    pub async fn open(&self) -> Result<Option<String>, EngineError> {
+        if self.is_prepared() {
+            return Ok(self.token());
         }
-        let url = self.session_open_url();
+        let Some(request) = self.wire.prepare_request() else {
+            self.state.borrow_mut().prepared = true;
+            return Ok(None);
+        };
         let resp = self
-            .post_with_deadline(&url, "")
+            .post_with_deadline(request)
             .await
             .map_err(|e| EngineError::transient(e.message))?;
         if !(200..300).contains(&resp.status) {
             return Err(EngineError::from_response(resp.status, &resp.body));
         }
-        let session: RuntimeSession = serde_json::from_str(&resp.body)
-            .map_err(|e| EngineError::permanent(format!("parse session: {e}")))?;
-        self.state.borrow_mut().session_id = Some(session.session_id.clone());
-        Ok(session.session_id)
+        let token = self
+            .wire
+            .parse_prepared(&resp.body)
+            .map_err(EngineError::permanent)?;
+        let mut state = self.state.borrow_mut();
+        state.token = Some(token.clone());
+        state.prepared = true;
+        Ok(Some(token))
     }
 
     // ---- forward -----------------------------------------------------------
 
     /// Forward a mutation with the request deadline + transient-retry policy.
-    /// Stamps the current session id onto the request (typed round-trip: parse
-    /// in, serialize out — the mutation crosses the wire as a validated
-    /// `MailOperation`, never a raw cast). Returns the receipt on 2xx (including
-    /// an authority `Failed` verdict), a permanent error on 4xx, or a transient
-    /// error once retries are exhausted.
-    pub async fn forward(&self, mut request: MutationRequest) -> Result<MutationReceipt, EngineError> {
-        let session_id = self
-            .session_id()
-            .ok_or_else(|| EngineError::transient("forward before session open"))?;
-        request.session_id = Some(session_id.clone());
-        let url = self.mutation_url(&session_id);
-        let body = serde_json::to_string(&request)
-            .map_err(|e| EngineError::permanent(format!("serialize mutation: {e}")))?;
-
+    /// Returns the receipt on 2xx (including an authority `Failed` verdict), a
+    /// permanent error on 4xx, or a transient error once retries are exhausted.
+    pub async fn forward(&self, request: MutationRequest) -> Result<MutationReceipt, EngineError> {
         let mut attempt = 0u32;
         loop {
-            match self.post_with_deadline(&url, &body).await {
+            let token = self.token();
+            let post = self.wire.forward_request(token.as_deref(), &request)?;
+            match self.post_with_deadline(post).await {
                 Ok(resp) if (200..300).contains(&resp.status) => {
                     return serde_json::from_str::<MutationReceipt>(&resp.body)
                         .map_err(|e| EngineError::permanent(format!("parse receipt: {e}")));
@@ -231,18 +247,23 @@ impl NearEnd {
 
     async fn post_with_deadline(
         &self,
-        url: &str,
-        body: &str,
+        request: PostRequest,
     ) -> Result<PostResponse, TransportError> {
-        let post = self.transport.post_json(PostRequest {
-            url: url.to_string(),
-            headers: json_headers(),
-            body: body.to_string(),
-        });
+        self.with_deadline(self.transport.post_json(request)).await
+    }
+
+    async fn get_with_deadline(&self, request: GetRequest) -> Result<PostResponse, TransportError> {
+        self.with_deadline(self.transport.get_json(request)).await
+    }
+
+    async fn with_deadline(
+        &self,
+        request: LocalBoxFuture<'static, Result<PostResponse, TransportError>>,
+    ) -> Result<PostResponse, TransportError> {
         let deadline = self.scheduler.sleep(self.config.request_deadline);
-        match select(post, deadline).await {
+        match select(request, deadline).await {
             Either::Left((result, _)) => result,
-            // Deadline won: dropping `post` cancels the in-flight request.
+            // Deadline won: dropping the request future cancels it in flight.
             Either::Right(((), _)) => Err(TransportError::new("request deadline exceeded")),
         }
     }
@@ -259,8 +280,8 @@ impl NearEnd {
                 return;
             }
 
-            // Ensure a session before subscribing.
-            if self.session_id().is_none() {
+            // Run the wire's prepare step (session open) before subscribing.
+            if !self.is_prepared() {
                 self.sink.on_status(ConnectionStatus::Connecting);
                 if let Err(e) = self.open().await {
                     if e.is_permanent() {
@@ -274,26 +295,26 @@ impl NearEnd {
             }
 
             self.sink.on_status(ConnectionStatus::Connecting);
-            let request = StreamRequest {
-                url: self.stream_url(),
-                headers: Vec::new(),
+            let request = {
+                let state = self.state.borrow();
+                self.wire.stream_request(state.token.as_deref(), state.cursor)
             };
             let mut stream = self.transport.open_stream(request);
 
             let mut permanent = false;
             while let Some(event) = stream.next().await {
                 match event {
-                    crate::transport::StreamEvent::Open => {
+                    StreamEvent::Open => {
                         self.state.borrow_mut().reconnect_attempt = 0;
                         self.sink.on_status(ConnectionStatus::Connected);
                         // Level-triggered reconciler: every connect, first included.
                         self.clone().reconcile().await;
                     }
-                    crate::transport::StreamEvent::Message(data) => {
+                    StreamEvent::Message(data) => {
                         self.handle_message(data);
                     }
-                    crate::transport::StreamEvent::Closed => break,
-                    crate::transport::StreamEvent::Error { status, message } => {
+                    StreamEvent::Closed => break,
+                    StreamEvent::Error { status, message } => {
                         if status.map(classify_status) == Some(Disposition::Permanent) {
                             self.sink.on_status(ConnectionStatus::PermanentError(message));
                             permanent = true;
@@ -323,18 +344,17 @@ impl NearEnd {
         if data.trim().is_empty() {
             return;
         }
-        match serde_json::from_str::<RuntimeFrame>(&data) {
-            Ok(frame) => {
-                let seq = frame.session_seq();
+        match self.wire.parse_frame(&data) {
+            Ok((seq, frame)) => {
                 {
                     let mut state = self.state.borrow_mut();
-                    if state.cursor.is_none_or(|c| seq.get() > c.get()) {
+                    if state.cursor.is_none_or(|c| seq > c) {
                         state.cursor = Some(seq);
                     }
                 }
                 self.sink.on_frame(frame);
             }
-            Err(e) => self.sink.on_malformed(data, e.to_string()),
+            Err(e) => self.sink.on_malformed(data, e),
         }
     }
 
@@ -351,12 +371,18 @@ impl NearEnd {
 
     // ---- reconciler --------------------------------------------------------
 
-    /// Replay never-dispatched forwards (D44a). Safe on every connect: a
-    /// never-dispatched request never reached the server, so re-forwarding it
-    /// cannot double-apply; a same-session duplicate `clientMutationId` is
-    /// deduped by the runtime. Sent-but-unsettled reconciliation is handled by
-    /// the cursor-owned resubscribe (session-collapse re-delivers the terminal
-    /// notification frames) — those records are *not* in `never_dispatched`.
+    /// The level-triggered reconciler (D44), run on every connect:
+    ///
+    /// * **(a) never-dispatched replay** — a request the host optimistically
+    ///   accepted with no evidence it reached the runtime is re-forwarded. Safe:
+    ///   never-dispatched means no server-side application, and a same-session
+    ///   duplicate `clientMutationId` is deduped by the runtime.
+    /// * **(b) sent-but-unsettled reconciliation** — a record with a receipt but
+    ///   no terminal settlement (session-continuity loss) queries the runtime's
+    ///   settlement state by stored ids ([`Wire::settlement_request`]): a
+    ///   terminal verdict settles locally, a still-pending record is left to the
+    ///   frame stream, and a record the runtime does not know is re-forwarded
+    ///   (the far-end dedup ledger guards a raced duplicate).
     async fn reconcile(self: Rc<Self>) {
         let pending = self.outbox.never_dispatched().await;
         for request in pending {
@@ -366,65 +392,45 @@ impl NearEnd {
                 self.outbox.on_reconciled(receipt).await;
             }
         }
-    }
 
-    // ---- url building ------------------------------------------------------
-
-    fn session_open_url(&self) -> String {
-        let mut query = Vec::new();
-        if self.config.view_delta {
-            query.push("viewDelta=true".to_string());
+        let unsettled = self.outbox.sent_unsettled().await;
+        for record in unsettled {
+            let Some(get) = self
+                .wire
+                .settlement_request(&record.session_id, &record.client_mutation_id)
+            else {
+                // This seam has no settlement query — nothing to reconcile here.
+                return;
+            };
+            let Ok(resp) = self.get_with_deadline(get).await else {
+                // Transport failure: leave the record for the next connect.
+                continue;
+            };
+            if !(200..300).contains(&resp.status) {
+                continue;
+            }
+            let Ok(settlement) = serde_json::from_str::<RuntimeMutationSettlement>(&resp.body)
+            else {
+                continue;
+            };
+            match settlement.receipt {
+                Some(receipt) if receipt.state.is_terminal() => {
+                    // The runtime already settled it — settle locally.
+                    self.outbox.on_settlement(receipt).await;
+                }
+                Some(_) => {
+                    // Still pending server-side; the frame stream will settle it.
+                }
+                None => {
+                    // The runtime has no record (session-continuity loss):
+                    // re-forward, if the host still holds the original request.
+                    let Some(request) = record.request else { continue };
+                    if let Ok(receipt) = self.forward(request).await {
+                        self.outbox.on_reconciled(receipt).await;
+                    }
+                }
+            }
         }
-        if let Some(source) = &self.config.source_id {
-            query.push(format!("sourceId={source}"));
-        }
-        format!(
-            "{}/runtime/sessions{}",
-            self.config.base_url,
-            query_string(&query)
-        )
-    }
-
-    fn mutation_url(&self, session_id: &RuntimeSessionId) -> String {
-        let mut query = Vec::new();
-        if let Some(source) = &self.config.source_id {
-            query.push(format!("sourceId={source}"));
-        }
-        format!(
-            "{}/runtime/sessions/{}/mutations{}",
-            self.config.base_url,
-            session_id.as_str(),
-            query_string(&query)
-        )
-    }
-
-    fn stream_url(&self) -> String {
-        let session = self.session_id().map(|s| s.as_str().to_string()).unwrap_or_default();
-        let mut query = Vec::new();
-        if let Some(cursor) = self.cursor() {
-            query.push(format!("afterSeq={cursor}"));
-        }
-        if let Some(source) = &self.config.source_id {
-            query.push(format!("sourceId={source}"));
-        }
-        format!(
-            "{}/runtime/sessions/{}/stream{}",
-            self.config.base_url,
-            session,
-            query_string(&query)
-        )
-    }
-}
-
-fn json_headers() -> Vec<(String, String)> {
-    vec![("content-type".to_string(), "application/json".to_string())]
-}
-
-fn query_string(parts: &[String]) -> String {
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!("?{}", parts.join("&"))
     }
 }
 

@@ -188,10 +188,12 @@ pub fn build_remote_runtime(
 
     // The link transport is the remote authority server (optionally decorated by a test
     // seam); there is no in-process far node to fall back to. One transport
-    // object carries both trait halves of the seam (D33).
-    let base = AuthorityServerLinkHandle::new(Arc::new(RemoteAuthorityServer::with_token(
-        base_url, token,
-    )));
+    // object carries both trait halves of the seam (D33). The down-channel is
+    // taken from the raw transport — it is the near-end ENGINE's reconnect
+    // loop (M9b2), not a trait subscribe, so a decorator cannot intercept it.
+    let remote = Arc::new(RemoteAuthorityServer::with_token(base_url, token));
+    let down_channel = remote.take_down_channel();
+    let base = AuthorityServerLinkHandle::new(remote);
     let authority_server_link = match authority_server_transport_override {
         Some(decorate) => decorate(base),
         None => base,
@@ -217,7 +219,7 @@ pub fn build_remote_runtime(
         reads,
         event_sender,
         startup_status: runtime_status.clone(),
-        drive_down_channel: true,
+        down_channel,
     });
 
     Ok(RemoteRuntimeBuild {
@@ -241,10 +243,14 @@ pub struct RuntimeAssembly {
     pub event_sender: broadcast::Sender<DomainEvent>,
     /// The startup status snapshot the handle reports until live reads layer on.
     pub startup_status: RuntimeStatus,
-    /// Spawn the authority server down-channel bridge (a remote near node: evict on
-    /// assertions and republish so views recompute). In-process the runtime
-    /// shares the authority server's bus, so no bridge is needed.
-    pub drive_down_channel: bool,
+    /// The engine-driven down-channel of a remote near node
+    /// ([`RemoteAuthorityServer::take_down_channel`]): when `Some`, the
+    /// consumer that evicts on assertions and republishes so views recompute is
+    /// spawned over it (and outbox retirement becomes absorption-gated).
+    /// In-process the runtime shares the authority server's bus, so no bridge
+    /// is needed — pass `None`.
+    pub down_channel:
+        Option<tokio::sync::mpsc::UnboundedReceiver<posthaste_authority_server_link::SequencedFrame>>,
 }
 
 /// The handle + shutdown produced by [`assemble_runtime`].
@@ -264,17 +270,21 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         reads,
         event_sender,
         startup_status,
-        drive_down_channel,
+        down_channel,
     } = assembly;
 
     let stopped = Arc::new(AtomicBool::new(false));
-    // Remote authority server (`drive_down_channel`): retirement is absorption-gated on
-    // the down-channel base assertion, not the receipt. Co-located: retire on
-    // receipt (`colocated-unchanged`). See [`RuntimeAuthorityServerOutbox`].
-    let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(drive_down_channel));
-    if drive_down_channel {
+    // Remote authority server (a down-channel is mounted): retirement is
+    // absorption-gated on the down-channel base assertion, not the receipt.
+    // Co-located: retire on receipt (`colocated-unchanged`). See
+    // [`RuntimeAuthorityServerOutbox`].
+    let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(down_channel.is_some()));
+    if let Some(frames) = down_channel {
+        // The connection lifecycle (subscribe, reconnect, `afterSeq` resume)
+        // lives in the near-end engine that feeds `frames`; this task holds the
+        // frame SEMANTICS only (evict/absorb/republish).
         tokio::spawn(crate::read::run_authority_server_down_channel(
-            authority_server_link.clone(),
+            frames,
             reads.clone(),
             event_sender.clone(),
             outbox.clone(),

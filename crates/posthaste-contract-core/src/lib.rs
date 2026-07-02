@@ -737,6 +737,19 @@ pub struct MutationReceipt {
     pub output: Value,
 }
 
+/// The settlement-query response for one `(session, clientMutationId)` key
+/// (`GET /runtime/sessions/{id}/mutations/{clientMutationId}`): the receipt the
+/// runtime holds, or `null` when it has no record (unknown session, never
+/// accepted, or already evicted/cleared under the D47 ledger rule). Consumed by
+/// the near-end reconciler's sent-but-unsettled step (D44b): a terminal receipt
+/// settles locally, `null` re-forwards.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeMutationSettlement {
+    pub receipt: Option<MutationReceipt>,
+}
+
 /// A terminal verdict about a named client mutation, carried by
 /// [`RuntimeFrame::MutationNotification`] and keyed to the client mutation id.
 /// The two outcomes are deliberately the only ones on the wire: `Confirmed` is

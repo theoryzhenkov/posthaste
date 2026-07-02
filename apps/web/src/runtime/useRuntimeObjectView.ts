@@ -91,7 +91,8 @@ export function useRuntimeObjectView<TData>({
               }
             },
           },
-          { afterSeq: 0, sourceId },
+          // No afterSeq: the near-end engine owns the resume cursor (M9b2).
+          { sourceId },
         )
       })
       .catch(() => {

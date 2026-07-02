@@ -154,10 +154,13 @@ export class NearEndHandle {
      * Build the engine from the JS IO object and a config JSON string.
      *
      * `io` must expose: `postJson(url, headersJson, body) => Promise<{status,
-     * body}>`, `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
+     * body}>`, `getJson(url, headersJson) => Promise<{status, body}>`,
+     * `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
      * status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onStatus(label,
      * message)`, `neverDispatched() => Promise<string>` (a JSON array of
-     * forward requests), and `onReconciled(receiptJson)`.
+     * forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
+     * Promise<string>` (a JSON array of `{sessionId, clientMutationId,
+     * request?}`), and `onSettlement(receiptJson)`.
      */
     constructor(io: any, config_json: string);
     /**
@@ -190,6 +193,13 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_nearendhandle_free: (a: number, b: number) => void;
+    readonly nearendhandle_connect: (a: number) => any;
+    readonly nearendhandle_cursor: (a: number) => [number, number];
+    readonly nearendhandle_disconnect: (a: number) => any;
+    readonly nearendhandle_forward: (a: number, b: number, c: number) => any;
+    readonly nearendhandle_new: (a: any, b: number, c: number) => [number, number, number];
+    readonly nearendhandle_sessionId: (a: number) => [number, number];
     readonly __wbg_entitystorehandle_free: (a: number, b: number) => void;
     readonly entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
     readonly entitystorehandle_captureMutationDiffJson: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
@@ -208,17 +218,10 @@ export interface InitOutput {
     readonly entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
     readonly invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
     readonly parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly __wbg_nearendhandle_free: (a: number, b: number) => void;
-    readonly nearendhandle_connect: (a: number) => any;
-    readonly nearendhandle_cursor: (a: number) => [number, number];
-    readonly nearendhandle_disconnect: (a: number) => any;
-    readonly nearendhandle_forward: (a: number, b: number, c: number) => any;
-    readonly nearendhandle_new: (a: any, b: number, c: number) => [number, number, number];
-    readonly nearendhandle_sessionId: (a: number) => [number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__hb442c339423f200d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__hbd70f3a990e4cad7: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__h385b7305685c474c: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h2423c9da95588df5: (a: number, b: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__ha433c4c869742dc2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__ha35c10aed9720f95: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h690adb9d64021208: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

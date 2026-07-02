@@ -34,6 +34,14 @@ use posthaste_contract_core::ClientMutationId;
 /// reconnect/dedup memory rather than letting it grow with a link's age.
 pub const DEFAULT_TERMINAL_CAPACITY: usize = 100;
 
+/// Default per-link bound on retained [`TerminalClass::Rejected`] records for
+/// an assembly that opts into one ([`DedupStore::with_rejected_capacity`]).
+/// The V14 follow-up knob: the AS seam's links live for a runtime's whole
+/// uptime, so its Rejected ledger is bounded here; the runtime seam leaves it
+/// unbounded (a client session's lifetime bounds it naturally, and a stranded
+/// client must always be able to re-observe its rejection verdicts).
+pub const DEFAULT_REJECTED_CAPACITY: usize = 100;
+
 /// The terminal class of a settled mutation (D47) — the keep-vs-clear verdict
 /// the assembling far-end derives from its own settlement state + error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +83,10 @@ struct LinkLedger<R> {
     /// `Confirmed` terminals in settlement order, for bounded eviction. Pending,
     /// `Rejected`, and (already-removed) `Failed` records never appear here.
     confirmed_order: VecDeque<ClientMutationId>,
+    /// `Rejected` terminals in settlement order — populated (and pruned) only
+    /// when the assembly bounds its Rejected window
+    /// ([`DedupStore::with_rejected_capacity`]).
+    rejected_order: VecDeque<ClientMutationId>,
 }
 
 impl<R> LinkLedger<R> {
@@ -82,6 +94,7 @@ impl<R> LinkLedger<R> {
         Self {
             entries: HashMap::new(),
             confirmed_order: VecDeque::new(),
+            rejected_order: VecDeque::new(),
         }
     }
 
@@ -96,6 +109,11 @@ impl<R> LinkLedger<R> {
 pub struct DedupStore<LinkId, R> {
     links: Mutex<HashMap<LinkId, LinkLedger<R>>>,
     capacity: usize,
+    /// Per-link bound on retained `Rejected` terminals. `None` = unbounded
+    /// (the runtime seam: the link is a client session, whose lifetime bounds
+    /// the ledger); `Some` = a settlement-order eviction window (the AS seam:
+    /// links live for a runtime's uptime — V14 follow-up).
+    rejected_capacity: Option<usize>,
 }
 
 impl<LinkId, R> DedupStore<LinkId, R>
@@ -103,18 +121,29 @@ where
     LinkId: Clone + Eq + Hash,
     R: Clone,
 {
-    /// A store with the default per-link retention cap
-    /// ([`DEFAULT_TERMINAL_CAPACITY`]).
+    /// A store with the default per-link `Confirmed` retention cap
+    /// ([`DEFAULT_TERMINAL_CAPACITY`]) and an unbounded `Rejected` window.
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_TERMINAL_CAPACITY)
     }
 
-    /// A store with an explicit per-link `Confirmed` retention cap.
+    /// A store with an explicit per-link `Confirmed` retention cap and an
+    /// unbounded `Rejected` window.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             links: Mutex::new(HashMap::new()),
             capacity,
+            rejected_capacity: None,
         }
+    }
+
+    /// Bound the per-link `Rejected` retention window (settlement-order
+    /// eviction, like the `Confirmed` window). For assemblies whose links
+    /// outlive any client session (the AS seam); leaving it unbounded is
+    /// correct where the link's own lifetime bounds the ledger.
+    pub fn with_rejected_capacity(mut self, capacity: usize) -> Self {
+        self.rejected_capacity = Some(capacity);
+        self
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<LinkId, LinkLedger<R>>> {
@@ -170,8 +199,14 @@ where
                 if let Some(entry) = ledger.entries.get_mut(client_mutation_id) {
                     update(&mut entry.record);
                     entry.status = Status::Terminal(TerminalClass::Rejected);
+                    // Kept and exempt from the `Confirmed` window (recovery
+                    // path); an assembly may bound Rejected retention with its
+                    // own window (V14 follow-up knob).
+                    if let Some(capacity) = self.rejected_capacity {
+                        ledger.rejected_order.push_back(client_mutation_id.clone());
+                        prune_rejected(ledger, capacity);
+                    }
                 }
-                // Kept and exempt from the eviction window (recovery path).
             }
             TerminalClass::Confirmed => {
                 let Some(entry) = ledger.entries.get_mut(client_mutation_id) else {
@@ -266,6 +301,25 @@ fn prune_confirmed<R>(ledger: &mut LinkLedger<R>, capacity: usize) {
         if matches!(
             ledger.entries.get(&oldest).map(|e| e.status),
             Some(Status::Terminal(TerminalClass::Confirmed))
+        ) {
+            ledger.entries.remove(&oldest);
+        }
+    }
+}
+
+/// Evict the oldest `Rejected` terminals once a link's bounded Rejected window
+/// exceeds its cap (only assemblies that opted in via
+/// [`DedupStore::with_rejected_capacity`] ever populate `rejected_order`).
+fn prune_rejected<R>(ledger: &mut LinkLedger<R>, capacity: usize) {
+    while ledger.rejected_order.len() > capacity {
+        let Some(oldest) = ledger.rejected_order.pop_front() else {
+            break;
+        };
+        // Only evict if still a Rejected terminal (a Failed retry may have
+        // cleared + re-accepted the key since).
+        if matches!(
+            ledger.entries.get(&oldest).map(|e| e.status),
+            Some(Status::Terminal(TerminalClass::Rejected))
         ) {
             ledger.entries.remove(&oldest);
         }
@@ -368,6 +422,26 @@ mod tests {
         }
         assert!(store.verdict(&"b", &cid("b-0")).is_some());
         assert!(store.verdict(&"b", &cid("b-1")).is_some());
+    }
+
+    // The V14 follow-up knob: a bounded Rejected window evicts oldest-first,
+    // independently of the Confirmed window; unbounded (default) keeps all.
+    #[test]
+    fn bounded_rejected_window_evicts_oldest_first() {
+        let store: DedupStore<&str, u64> = DedupStore::with_capacity(100).with_rejected_capacity(2);
+        for i in 0..5u64 {
+            let c = cid(&format!("rej-{i}"));
+            store.accept(&"link", &c, || i);
+            store.settle(&"link", &c, TerminalClass::Rejected, |_| {});
+        }
+        assert!(store.verdict(&"link", &cid("rej-0")).is_none(), "oldest evicted");
+        assert!(store.verdict(&"link", &cid("rej-2")).is_none(), "next-oldest evicted");
+        assert_eq!(store.verdict(&"link", &cid("rej-3")), Some(3));
+        assert_eq!(store.verdict(&"link", &cid("rej-4")), Some(4));
+        // The Confirmed window is untouched by Rejected pruning.
+        store.accept(&"link", &cid("cf"), || 99);
+        store.settle(&"link", &cid("cf"), TerminalClass::Confirmed, |_| {});
+        assert_eq!(store.verdict(&"link", &cid("cf")), Some(99));
     }
 
     #[test]
