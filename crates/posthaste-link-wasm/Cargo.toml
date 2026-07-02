@@ -27,3 +27,18 @@ wasm-bindgen = "=0.2.117"
 # `generated_id`); for wasm32-unknown-unknown we need its "js" RNG backend. This is
 # a transitive override for the browser target.
 uuid = { version = "1", features = ["v4", "js"] }
+
+# The near-end engine + its browser IO binding compile only for wasm32 (the
+# binding uses wasm-bindgen-futures / js-sys / gloo-timers). Gating them here —
+# and the `near_end` module with `cfg(target_arch = "wasm32")` — keeps the native
+# `cargo check --workspace` build of this crate (which excludes wasm-only code)
+# green while the wasm-frontier check compiles the full boundary.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+posthaste-link-near-end = { path = "../posthaste-link-near-end" }
+# Pinned to the versions already in Cargo.lock so adding them is churn-free and
+# stays compatible with the `wasm-bindgen = 0.2.117` pin above.
+wasm-bindgen-futures = "=0.4.67"
+js-sys = "=0.3.94"
+gloo-timers = { version = "0.3", features = ["futures"] }
+futures-channel = "0.3"
+futures-util = { workspace = true }
