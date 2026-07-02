@@ -1,6 +1,6 @@
 //! Tests for the OAuth provider-flow account construction (the far half), moved
 //! here from the api crate's account tests when account creation from a provider
-//! exchange became a backend operation.
+//! exchange became an authority server operation.
 
 use axum::response::IntoResponse;
 use posthaste_domain_service::{

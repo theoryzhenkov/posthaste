@@ -1,14 +1,14 @@
-//! [`RemoteBackend`]: the remote [`BackendApi`] implementation the near node uses
-//! when the backend lives in another process or host.
+//! [`RemoteAuthorityServer`]: the remote [`AuthorityServerLink`] implementation the near node uses
+//! when the authority server lives in another process or host.
 //!
-//! The split case ([replication backend-link L2 §2](../replication/backend-link/L2.md)):
+//! The split case ([replication authority-server-link L2 §2](../replication/authority-server-link/L2.md)):
 //! the up-channel `POST`s named mutations, the reads `POST` request/response, and
 //! the down-channel is an SSE stream of base-assertion frames. The in-process
-//! counterpart (`LocalBackend`, direct calls to a co-located far node) lives in
+//! counterpart (`LocalAuthorityServer`, direct calls to a co-located far node) lives in
 //! the far-node crate; both are config-selected
-//! ([replication backend-link L2 §6](../replication/backend-link/L2.md)).
+//! ([replication authority-server-link L2 §6](../replication/authority-server-link/L2.md)).
 //!
-//! @spec docs/replication/backend-link/L2#2-backendapi-implementations-localbackend-remotebackend
+//! @spec docs/replication/authority-server-link/L2#2-backendapi-implementations-localbackend-remotebackend
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -16,8 +16,8 @@ use futures_util::StreamExt;
 use posthaste_domain_service::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
-use posthaste_link_contract::{
-    BackendApi, DownFrame, DownStream, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
+use posthaste_authority_server_link::{
+    AuthorityServerLink, AuthorityServerFrame, DownStream, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_contract_core::{
@@ -25,24 +25,24 @@ use posthaste_contract_core::{
     RuntimeErrorCode,
 };
 
-// The default transport: the runtime calls the co-located backend directly.
+// The default transport: the runtime calls the co-located authority server directly.
 
-/// The remote link transport ([replication backend-link L2 §2](../replication/backend-link/L2.md)): a near
+/// The remote link transport ([replication authority-server-link L2 §2](../replication/authority-server-link/L2.md)): a near
 /// node talking to a far node that serves the link wire over HTTP. The
 /// up-channel `POST`s named mutations; the down-channel is an SSE stream of
-/// base-assertion frames. This is what lets the backend live on another
+/// base-assertion frames. This is what lets the authority server live on another
 /// process or host; it is selected by config, the symmetric twin of the
 /// in-process transport.
-pub struct RemoteBackend {
+pub struct RemoteAuthorityServer {
     base_url: String,
     client: reqwest::Client,
-    /// The link bearer token presented on every request, when the backend's
+    /// The link bearer token presented on every request, when the authority server's
     /// `link_router` requires one ([`LinkAuth::PerRuntime`](posthaste_server)). `None`
     /// for an unauthenticated link (in-process tests / dormant mounts).
     token: Option<String>,
 }
 
-impl RemoteBackend {
+impl RemoteAuthorityServer {
     pub fn new(base_url: String) -> Self {
         Self::with_token(base_url, None)
     }
@@ -67,9 +67,9 @@ impl RemoteBackend {
     }
 
     /// POST a JSON request to a link path and parse the JSON response — the one
-    /// HTTP round-trip the generated [`BackendApi`] methods (and the bespoke
+    /// HTTP round-trip the generated [`AuthorityServerLink`] methods (and the bespoke
     /// request/response ones) share
-    /// ([`for_each_link_op`](posthaste_link_contract::for_each_link_op)). Carries
+    /// ([`for_each_link_op`](posthaste_authority_server_link::for_each_link_op)). Carries
     /// the link bearer token.
     async fn post_link<Req, Ret>(&self, path: &str, req: &Req) -> Result<Ret, RuntimeError>
     where
@@ -88,7 +88,7 @@ impl RemoteBackend {
             let body = response.text().await.unwrap_or_default();
             return Err(RuntimeError::new(
                 RuntimeErrorCode::GatewayRejected,
-                format!("remote backend rejected link request ({status}): {body}"),
+                format!("remote authority_server rejected link request ({status}): {body}"),
             ));
         }
         response.json::<Ret>().await.map_err(transport_error)
@@ -100,16 +100,16 @@ impl RemoteBackend {
 fn transport_error(error: reqwest::Error) -> RuntimeError {
     RuntimeError::retryable(
         RuntimeErrorCode::TransportDisconnected,
-        format!("runtime↔backend link transport error: {error}"),
+        format!("runtime↔authority-server link transport error: {error}"),
     )
 }
 
 /// Parse one SSE event block (the text between `\n\n` boundaries) into a
-/// [`DownFrame`]. SSE carries the JSON frame on one or more `data:` lines;
+/// [`AuthorityServerFrame`]. SSE carries the JSON frame on one or more `data:` lines;
 /// non-data lines (comments, `event:`/`id:`) are ignored. Returns `None` for a
 /// keep-alive comment or an unparseable block. Pure, so it is unit-testable
 /// without a live stream.
-pub(crate) fn parse_sse_frame(block: &str) -> Option<DownFrame> {
+pub(crate) fn parse_sse_frame(block: &str) -> Option<AuthorityServerFrame> {
     let mut data = String::new();
     for line in block.lines() {
         if let Some(value) = line.strip_prefix("data:") {
@@ -122,17 +122,17 @@ pub(crate) fn parse_sse_frame(block: &str) -> Option<DownFrame> {
     serde_json::from_str(&data).ok()
 }
 
-/// Emit the full [`RemoteBackend`] [`BackendApi`] impl: the bespoke up-channel
+/// Emit the full [`RemoteAuthorityServer`] [`AuthorityServerLink`] impl: the bespoke up-channel
 /// (`forward_mutation`) + SSE down-channel (`subscribe`) + the pre-existing read
 /// methods, plus one generated method per link-op row. Emitting the whole
 /// `#[async_trait] impl` from the macro is deliberate: `async_trait` then runs
 /// on the already-expanded impl, so it desugars the generated methods too (a
 /// `macro_rules!` invocation *inside* an `#[async_trait]` impl would expand too
 /// late and the generated methods would miss the desugaring).
-macro_rules! remote_backend_impl {
+macro_rules! remote_authority_server_impl {
     ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
 #[async_trait]
-impl BackendApi for RemoteBackend {
+impl AuthorityServerLink for RemoteAuthorityServer {
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,
@@ -197,7 +197,7 @@ impl BackendApi for RemoteBackend {
             let status = response.status();
             return Err(RuntimeError::retryable(
                 RuntimeErrorCode::TransportDisconnected,
-                format!("remote backend refused link subscription ({status})"),
+                format!("remote authority_server refused link subscription ({status})"),
             ));
         }
         let mut bytes = response.bytes_stream();
@@ -223,18 +223,18 @@ impl BackendApi for RemoteBackend {
     // the shared link-op table so it cannot drift from the server handlers.
     $(
         async fn $method(&self, $($field: $fty),*) -> Result<$ret, RuntimeError> {
-            self.post_link($path, &posthaste_link_contract::$req { $($field),* }).await
+            self.post_link($path, &posthaste_authority_server_link::$req { $($field),* }).await
         }
     )*
 }
     };
 }
-posthaste_link_contract::for_each_link_op!(remote_backend_impl);
+posthaste_authority_server_link::for_each_link_op!(remote_authority_server_impl);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_link_contract::{BaseAssertion, BaseUpdate};
+    use posthaste_authority_server_link::{BaseAssertion, BaseUpdate};
     use posthaste_link_core::MessageFoldState;
     use posthaste_contract_core::{MutationSettlementState, RuntimeMutationId};
     use serde_json::json;
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn parse_sse_frame_reads_a_data_line_as_a_down_frame() {
-        let frame = DownFrame::Base {
+        let frame = AuthorityServerFrame::Base {
             assertions: vec![BaseAssertion {
                 account_id: "acct".into(),
                 message_id: "m1".into(),
@@ -266,8 +266,8 @@ mod tests {
         assert!(parse_sse_frame("").is_none());
     }
 
-    // A mock far-node HTTP surface stands in for the backend's (W3b) link
-    // endpoints, proving the RemoteBackend client speaks the wire end to end:
+    // A mock far-node HTTP surface stands in for the authority server's (W3b) link
+    // endpoints, proving the RemoteAuthorityServer client speaks the wire end to end:
     // POST up returns a receipt, SSE down yields a base-assertion frame.
     #[tokio::test]
     async fn remote_transport_round_trips_against_a_mock_far_node() {
@@ -279,7 +279,7 @@ mod tests {
 
         async fn forward(Json(request): Json<MutationRequest>) -> Json<MutationReceipt> {
             Json(MutationReceipt {
-                runtime_mutation_id: Some(RuntimeMutationId::new("backend-1")),
+                runtime_mutation_id: Some(RuntimeMutationId::new("authority-server-1")),
                 client_mutation_id: request.client_mutation_id,
                 name: request.name,
                 state: MutationSettlementState::Confirmed,
@@ -291,7 +291,7 @@ mod tests {
         async fn subscribe(
         ) -> Sse<futures_util::stream::Iter<std::vec::IntoIter<Result<Event, Infallible>>>>
         {
-            let frame = DownFrame::Base {
+            let frame = AuthorityServerFrame::Base {
                 assertions: vec![BaseAssertion {
                     account_id: "acct".into(),
                     message_id: "m1".into(),
@@ -311,7 +311,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let transport = RemoteBackend::new(format!("http://{addr}"));
+        let transport = RemoteAuthorityServer::new(format!("http://{addr}"));
 
         let receipt = transport
             .forward_mutation(MutationRequest {
@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(receipt.client_mutation_id, ClientMutationId::new("c1"));
         assert_eq!(
             receipt.runtime_mutation_id,
-            Some(RuntimeMutationId::new("backend-1"))
+            Some(RuntimeMutationId::new("authority-server-1"))
         );
 
         let mut down = transport
@@ -336,7 +336,7 @@ mod tests {
         let frame = down.next().await.expect("a down frame");
         assert_eq!(
             frame,
-            DownFrame::Base {
+            AuthorityServerFrame::Base {
                 assertions: vec![BaseAssertion {
                     account_id: "acct".into(),
                     message_id: "m1".into(),

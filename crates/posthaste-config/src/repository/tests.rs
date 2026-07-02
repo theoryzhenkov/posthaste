@@ -121,7 +121,7 @@ fn insert_source_rejects_duplicate_without_overwriting() {
     assert_eq!(loaded.name, "Test");
 }
 
-// spec: docs/backend/L1#config-snapshot-validation
+// spec: docs/authority-server/L1#config-snapshot-validation
 #[test]
 fn reload_rejects_semantic_validation_errors_and_preserves_snapshot() {
     let root = temp_root();

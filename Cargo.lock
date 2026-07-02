@@ -4044,47 +4044,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-api"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "axum",
- "base64 0.22.1",
- "dirs",
- "http-body-util",
- "keyring",
- "macaroon",
- "posthaste-client-link",
- "posthaste-config",
- "posthaste-contract-core",
- "posthaste-domain-service",
- "posthaste-observability",
- "posthaste-runtime",
- "posthaste-runtime-api",
- "posthaste-store",
- "reqwest 0.12.28",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "time",
- "tokio",
- "tokio-rustls",
- "tokio-stream",
- "toml 0.8.2",
- "tower",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "url",
- "utoipa",
- "utoipa-swagger-ui",
- "uuid",
-]
-
-[[package]]
-name = "posthaste-authority-runtime"
+name = "posthaste-authority-server"
 version = "0.1.0"
 dependencies = [
  "async-stream",
@@ -4094,13 +4054,13 @@ dependencies = [
  "futures-util",
  "jsonwebtoken",
  "oauth2",
+ "posthaste-authority-server-link",
  "posthaste-client-link",
  "posthaste-config",
  "posthaste-contract-core",
  "posthaste-domain-service",
  "posthaste-engine",
  "posthaste-imap",
- "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-observability",
  "posthaste-runtime",
@@ -4118,6 +4078,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-authority-server-link"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "posthaste-contract-core",
+ "posthaste-domain-model",
+ "posthaste-link-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "posthaste-bench"
 version = "0.1.0"
 dependencies = [
@@ -4126,7 +4100,7 @@ dependencies = [
  "dhat",
  "futures-util",
  "iai-callgrind",
- "posthaste-authority-runtime",
+ "posthaste-authority-server",
  "posthaste-client-link",
  "posthaste-contract-core",
  "posthaste-domain-service",
@@ -4177,7 +4151,7 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "keyring",
- "posthaste-api",
+ "posthaste-http-api-adapter",
  "posthaste-observability",
  "posthaste-server",
  "serde",
@@ -4246,6 +4220,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-http-api-adapter"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "axum",
+ "base64 0.22.1",
+ "dirs",
+ "http-body-util",
+ "keyring",
+ "macaroon",
+ "posthaste-client-link",
+ "posthaste-config",
+ "posthaste-contract-core",
+ "posthaste-domain-service",
+ "posthaste-observability",
+ "posthaste-runtime",
+ "posthaste-runtime-api",
+ "posthaste-store",
+ "reqwest 0.12.28",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "toml 0.8.2",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "url",
+ "utoipa",
+ "utoipa-swagger-ui",
+ "uuid",
+]
+
+[[package]]
 name = "posthaste-imap"
 version = "0.1.0"
 dependencies = [
@@ -4278,20 +4292,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-link-contract"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "posthaste-link-core",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "posthaste-link-core"
 version = "0.1.0"
 dependencies = [
@@ -4312,8 +4312,8 @@ dependencies = [
 name = "posthaste-link-wasm"
 version = "0.1.0"
 dependencies = [
+ "posthaste-authority-server-link",
  "posthaste-contract-core",
- "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-link-replica",
  "serde",
@@ -4338,10 +4338,10 @@ dependencies = [
  "axum",
  "futures-util",
  "keyring",
+ "posthaste-authority-server-link",
  "posthaste-client-link",
  "posthaste-contract-core",
  "posthaste-domain-service",
- "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-link-replica",
  "posthaste-runtime-api",
@@ -4367,8 +4367,8 @@ dependencies = [
 name = "posthaste-runtimed"
 version = "0.1.0"
 dependencies = [
- "posthaste-api",
  "posthaste-config",
+ "posthaste-http-api-adapter",
  "posthaste-runtime",
  "tokio",
 ]
@@ -4390,15 +4390,15 @@ dependencies = [
  "keyring",
  "macaroon",
  "oauth2",
- "posthaste-api",
- "posthaste-authority-runtime",
+ "posthaste-authority-server",
+ "posthaste-authority-server-link",
  "posthaste-client-link",
  "posthaste-config",
  "posthaste-contract-core",
  "posthaste-domain-service",
  "posthaste-engine",
+ "posthaste-http-api-adapter",
  "posthaste-imap",
- "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-observability",
  "posthaste-runtime",
@@ -4442,7 +4442,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "imap-codec",
- "posthaste-authority-runtime",
+ "posthaste-authority-server",
  "posthaste-client-link",
  "posthaste-config",
  "posthaste-contract-core",

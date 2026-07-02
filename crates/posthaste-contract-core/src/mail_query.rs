@@ -4,7 +4,7 @@ use posthaste_domain_model::{
 };
 use serde::{Deserialize, Serialize};
 
-/// How a backend-evaluated message query should be presented in a page.
+/// How an authority-server-evaluated message query should be presented in a page.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     rename_all = "camelCase",

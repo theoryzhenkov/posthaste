@@ -1,11 +1,11 @@
 use super::*;
 
-use posthaste_authority_runtime::oauth::OAuthFlowStore;
+use posthaste_authority_server::oauth::OAuthFlowStore;
 
 /// Initialize the bundled daemon (config, store, supervisor, logging), build the
-/// runtime (in-process backend, or a remote near node when `[link] backend_url`
+/// runtime (in-process authority server, or a remote near node when `[link] authority_server_url`
 /// is set), compose the `/v1` API + OAuth routers, optionally serve the
-/// runtime↔backend link, and spawn the Axum server. Returns immediately.
+/// runtime↔authority-server link, and spawn the Axum server. Returns immediately.
 ///
 /// @spec docs/L0-api#axum
 /// @spec docs/L1-accounts#initialization
@@ -21,36 +21,36 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         config_was_empty,
     } = assemble_daemon_preamble();
 
-    // Runtime↔backend transport: a remote backend when `[link] backend_url` is
+    // Runtime↔authority server transport: a remote authority server when `[link] authority_server_url` is
     // configured (this process is then a near node over the link), else the
     // in-process default ([replication L1 §10](../replication/L1.md)).
-    let backend_transport = match &daemon.link_backend_url {
-        Some(base_url) => BackendTransportConfig::Remote {
+    let authority_server_transport = match &daemon.link_authority_server_url {
+        Some(base_url) => AuthorityServerTransportConfig::Remote {
             base_url: base_url.clone(),
             token: daemon.link_token.clone(),
         },
-        None => BackendTransportConfig::InProcess,
+        None => AuthorityServerTransportConfig::InProcess,
     };
 
     let build_config = build_config
         .with_bootstrap_path_option(roots.bootstrap_path.clone())
-        .with_backend_transport(backend_transport.clone());
+        .with_authority_server_transport(authority_server_transport.clone());
 
-    // A remote backend makes this process a LEAN near node (reads/writes cross
+    // A remote authority server makes this process a LEAN near node (reads/writes cross
     // the link, the down-channel drives views); otherwise the full bundled graph
-    // is built in-process. Only an in-process backend can serve the link or run
+    // is built in-process. Only an in-process authority server can serve the link or run
     // the OAuth holdout.
     let (runtime_handle, runtime_shutdown, secret_store, link_serve_transport, oauth_mutations) =
-        if matches!(backend_transport, BackendTransportConfig::Remote { .. }) {
+        if matches!(authority_server_transport, AuthorityServerTransportConfig::Remote { .. }) {
             let build = build_remote_runtime(build_config).expect("failed to build remote runtime");
             (build.handle, build.shutdown, build.secret_store, None, None)
         } else {
-            let build = build_authority_runtime(build_config)
+            let build = build_authority_server(build_config)
                 .await
                 .expect("failed to build authority runtime");
             let link_transport = daemon
                 .link_serve
-                .then(|| build.backend_link.transport().clone());
+                .then(|| build.authority_server_link.transport().clone());
             (
                 build.handle,
                 build.shutdown,
@@ -96,7 +96,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .merge(build_oauth_router(oauth_state))
         .merge(crate::openapi::openapi_router(crate::openapi::document()));
 
-    // Backend role: serve the runtime↔backend link for a remote runtime, with
+    // Authority server role: serve the runtime↔authority-server link for a remote runtime, with
     // its OWN per-runtime token auth. Fail closed under require_auth without
     // [link].runtimes.
     let mut root_merges = Vec::new();
@@ -105,7 +105,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         ph_info!(
             events::LINK_SURFACE_SERVED,
             authenticated = daemon.require_auth,
-            "serving the runtime↔backend link surface for a remote runtime"
+            "serving the runtime↔authority-server link surface for a remote runtime"
         );
         root_merges.push(link_router(link_transport, link_auth));
     }

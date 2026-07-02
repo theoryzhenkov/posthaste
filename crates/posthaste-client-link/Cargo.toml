@@ -6,14 +6,14 @@ edition = "2021"
 # The client↔runtime link ops extracted from `RuntimeCore`
 # (RFC-L2-architecture-cleanup D7/D23): the 10 of 52 `RuntimeCore` methods that
 # are the link protocol — session open/close, the three stream families (frames,
-# views, events), session-view snapshots, and `run_mutation` forward — plus the
-# subscription/stream types those methods return. ONE trait (`RuntimeLinkOps`):
+# views, events), session-view snapshots, and `forward_mutation` forward — plus the
+# subscription/stream types those methods return. ONE trait (`RuntimeLink`):
 # its four families are one protocol every consumer drives together, so splitting
 # them across traits is ceremony with no subset consumer (XXI).
 #
 # `replay_events` is dropped (zero production consumers — the runtime builds its
 # subscription backlog internally; that stays a private fn in `posthaste-runtime`).
-# The sessionless `open_view`/`subscribe_view` pair is kept: `posthaste-api`'s
+# The sessionless `open_view`/`subscribe_view` pair is kept: `posthaste-http-api-adapter`'s
 # `/v1/views` + `/v1/views/{id}/stream` routes are live production consumers.
 #
 # Depends on `contract-core` (RuntimeCaller + wire view/id types), `domain-model`

@@ -6,14 +6,14 @@
 //! is complete (RFC D20); the live server integration test suites that stand up
 //! a runtime around a pre-configured service graph still need this entry point,
 //! so it lives here in the testkit (its only consumers). It delegates to
-//! `posthaste_authority_runtime`'s public
+//! `posthaste_authority_server`'s public
 //! `from_api_bridge_with_account_supervisor_for_migration` constructor.
 
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use posthaste_authority_runtime::{AccountSupervisor, AuthorityRuntimeApiMigrationBridge};
+use posthaste_authority_server::{AccountSupervisor, AuthorityServerApiMigrationBridge};
 use posthaste_domain_service::{DomainEvent, MailService, MailStore, SecretStore};
 use posthaste_runtime::RuntimeHandle;
 
@@ -33,8 +33,8 @@ pub fn runtime_handle_with_account_runtime_provider_for_migration(
         .list_sources()
         .expect("migration runtime handle should read configured sources")
         .len();
-    posthaste_authority_runtime::from_api_bridge_with_account_supervisor_for_migration(
-        AuthorityRuntimeApiMigrationBridge::new(service, store, secret_store, event_sender),
+    posthaste_authority_server::from_api_bridge_with_account_supervisor_for_migration(
+        AuthorityServerApiMigrationBridge::new(service, store, secret_store, event_sender),
         account_count,
         account_runtime_provider,
     )

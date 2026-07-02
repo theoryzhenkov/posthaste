@@ -2,9 +2,9 @@
 //!
 //! These deserialize the `args` of a [`MutationRequest`] for each message-state
 //! mutation and live on the **lean** side of the build seam: the runtime handle
-//! parses them before forwarding the typed command over the backend link, so a
-//! lean near node (no `backend` feature, no in-process `Backend`) still needs
-//! them. They were factored out of `backend.rs` for exactly this reason.
+//! parses them before forwarding the typed command over the authority server link, so a
+//! lean near node (no `authority_server` feature, no in-process `AuthorityServer`) still needs
+//! them. They were factored out of `authority server.rs` for exactly this reason.
 
 use crate::{MutationRequest, RuntimeError, RuntimeErrorCode};
 use posthaste_domain_model::SetKeywordsCommand;
@@ -12,7 +12,7 @@ use posthaste_link_core::MessageChangeDiff;
 use serde::Deserialize;
 
 /// Build a single-keyword add/remove command from a desired presence. Shared by
-/// the backend's read-state/flagged-state application and the runtime's history
+/// the authority server's read-state/flagged-state application and the runtime's history
 /// capture for the same mutations.
 pub fn keyword_toggle(keyword: &str, present: bool) -> SetKeywordsCommand {
     if present {

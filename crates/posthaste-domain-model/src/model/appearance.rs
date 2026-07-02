@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 /// stored in `[appearance]` of `app.toml` as the single source of truth (moved
 /// out of the opaque `localStorage` "client-preferences" snapshot).
 ///
-/// The backend treats appearance as **pass-through storage**: it does not
+/// The authority server treats appearance as **pass-through storage**: it does not
 /// interpret theme values (the renderer applies them). The enums give the
 /// OpenAPI schema self-documentation and reject typos at the parse boundary.
 ///

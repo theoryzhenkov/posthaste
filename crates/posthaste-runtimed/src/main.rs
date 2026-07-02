@@ -1,19 +1,19 @@
 //! `posthaste-runtimed`: the lean remote runtime daemon.
 //!
-//! A runtime near node over a remote backend (`[link] backend_url`) that serves
+//! A runtime near node over a remote authority server (`[link] authority_server_url`) that serves
 //! the `/v1` client platform to local clients — drafts, smart mailboxes, and
 //! view state shared via the session model. It links only the near crates
-//! (`posthaste-api` + `posthaste-runtime`), never store/engine/imap. OAuth
-//! provider-account setup is a backend operation and is not served here.
+//! (`posthaste-http-api-adapter` + `posthaste-runtime`), never store/engine/imap. OAuth
+//! provider-account setup is an authority server operation and is not served here.
 //!
-//! Config is the usual `app.toml` + `POSTHASTE_*` env; the backend link is
-//! `[link] backend_url` (+ `[link] token`). Bind with `POSTHASTE_BIND`.
+//! Config is the usual `app.toml` + `POSTHASTE_*` env; the authority server link is
+//! `[link] authority_server_url` (+ `[link] token`). Bind with `POSTHASTE_BIND`.
 
-use posthaste_api::{
+use posthaste_http_api_adapter::{
     assemble_daemon_preamble, build_api_router, build_app_state, serve, DaemonPreamble,
     ServeOptions, ServerConfig,
 };
-use posthaste_runtime::{build_remote_runtime, BackendTransportConfig};
+use posthaste_runtime::{build_remote_runtime, AuthorityServerTransportConfig};
 
 #[tokio::main]
 async fn main() {
@@ -25,14 +25,14 @@ async fn main() {
         ..
     } = assemble_daemon_preamble();
 
-    let base_url = daemon.link_backend_url.clone().unwrap_or_else(|| {
+    let base_url = daemon.link_authority_server_url.clone().unwrap_or_else(|| {
         panic!(
-            "posthaste-runtimed is a remote near node: set [link] backend_url \
-             (or POSTHASTE_LINK_BACKEND_URL) to the backend it should connect to"
+            "posthaste-runtimed is a remote near node: set [link] authority_server_url \
+             (or POSTHASTE_LINK_AUTHORITY_SERVER_URL) to the authority server it should connect to"
         )
     });
 
-    let build_config = build_config.with_backend_transport(BackendTransportConfig::Remote {
+    let build_config = build_config.with_authority_server_transport(AuthorityServerTransportConfig::Remote {
         base_url,
         token: daemon.link_token.clone(),
     });
@@ -58,8 +58,8 @@ async fn main() {
     let handle = serve(ServeOptions {
         // The lean near node serves the OAuth-free near OpenAPI document (it has
         // no provider machinery to run the OAuth flow).
-        v1_router: build_api_router(state.clone()).merge(posthaste_api::openapi::openapi_router(
-            posthaste_api::openapi::document(),
+        v1_router: build_api_router(state.clone()).merge(posthaste_http_api_adapter::openapi::openapi_router(
+            posthaste_http_api_adapter::openapi::document(),
         )),
         root_merges: Vec::new(),
         bind_address,

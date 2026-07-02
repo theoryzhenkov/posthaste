@@ -82,7 +82,7 @@ jobs:
       # will restore. Keep this bin list in sync with release.yml's build-daemon
       # job.
       - name: Warm release binary compilation
-        run: cargo build --release --bin posthaste_daemon --bin posthaste_backend --bin posthaste_runtime_daemon --bin posthaste-wizard
+        run: cargo build --release --bin posthaste-authority-runtime-server --bin posthaste-authority-server --bin posthaste-runtime --bin posthaste-wizard
 
       - name: Print sccache stats
         if: always()

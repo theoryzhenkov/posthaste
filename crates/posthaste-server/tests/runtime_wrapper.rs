@@ -27,7 +27,7 @@ async fn api_harness_state_exposes_runtime_handle_status() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#first-api-read-runtime-backed
+// spec: docs/authority-server/L3#first-api-read-runtime-backed
 #[tokio::test]
 async fn get_settings_matches_runtime_read_projection() {
     let harness = Harness::new();
@@ -45,7 +45,7 @@ async fn get_settings_matches_runtime_read_projection() {
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#account-list-runtime-backed
+// spec: docs/authority-server/L3#account-list-runtime-backed
 #[tokio::test]
 async fn list_accounts_and_read_account_list_match_runtime_projection() {
     let harness = Harness::new();
@@ -79,7 +79,7 @@ async fn list_accounts_and_read_account_list_match_runtime_projection() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#account-get-runtime-backed
+// spec: docs/authority-server/L3#account-get-runtime-backed
 #[tokio::test]
 async fn get_account_matches_runtime_account_projection() {
     let harness = Harness::new();
@@ -357,7 +357,7 @@ async fn read_account_list_enabled_ids_reference_still_drives_followup_reads() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#typed-read-catalog-runtime-backed
+// spec: docs/authority-server/L3#typed-read-catalog-runtime-backed
 #[tokio::test]
 async fn typed_read_catalog_reads_work_after_runtime_migration() {
     let harness = Harness::new();
@@ -387,7 +387,7 @@ async fn typed_read_catalog_reads_work_after_runtime_migration() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#collection-list-routes-runtime-backed
+// spec: docs/authority-server/L3#collection-list-routes-runtime-backed
 #[tokio::test]
 async fn list_mailboxes_and_smart_mailboxes_routes_use_runtime_reads() {
     let harness = Harness::new();
@@ -406,7 +406,7 @@ async fn list_mailboxes_and_smart_mailboxes_routes_use_runtime_reads() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#collection-list-routes-runtime-backed
+// spec: docs/authority-server/L3#collection-list-routes-runtime-backed
 #[tokio::test]
 async fn get_smart_mailbox_route_uses_runtime_read() {
     let harness = Harness::new();
@@ -422,7 +422,7 @@ async fn get_smart_mailbox_route_uses_runtime_read() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#provider-backed-compose-reads-runtime-backed
+// spec: docs/authority-server/L3#provider-backed-compose-reads-runtime-backed
 #[tokio::test]
 async fn identity_route_uses_runtime_provider_backed_read() {
     let harness = Harness::new();
@@ -440,7 +440,7 @@ async fn identity_route_uses_runtime_provider_backed_read() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#sync-command-runtime-backed
+// spec: docs/authority-server/L3#sync-command-runtime-backed
 #[tokio::test]
 async fn sync_command_route_uses_runtime_provider() {
     let harness = Harness::new();
@@ -462,7 +462,7 @@ async fn sync_command_route_uses_runtime_provider() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#provider-backed-compose-reads-runtime-backed
+// spec: docs/authority-server/L3#provider-backed-compose-reads-runtime-backed
 #[tokio::test]
 async fn sender_address_route_uses_runtime_read() {
     let harness = Harness::new();
@@ -478,7 +478,7 @@ async fn sender_address_route_uses_runtime_read() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#account-mutations-runtime-backed
+// spec: docs/authority-server/L3#account-mutations-runtime-backed
 #[tokio::test]
 async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
     let harness = Harness::new();
@@ -556,10 +556,10 @@ async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#account-logo-metadata-runtime-backed
+// spec: docs/authority-server/L3#account-logo-metadata-runtime-backed
 #[test]
 fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
-    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src/api");
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-http-api-adapter/src/api");
     let source = ["accounts/logos.rs", "accounts/crud.rs"]
         .into_iter()
         .map(|relative| {
@@ -585,7 +585,7 @@ fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
 #[test]
 fn app_state_does_not_expose_legacy_runtime_parts_to_routes() {
-    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src");
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-http-api-adapter/src");
     let source = fs::read_to_string(server_dir.join("app_state.rs"))
         .expect("app state source should be readable");
     for forbidden in [
@@ -604,10 +604,10 @@ fn app_state_does_not_expose_legacy_runtime_parts_to_routes() {
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
-// spec: docs/backend/L3#message-mutations-runtime-backed
+// spec: docs/authority-server/L3#message-mutations-runtime-backed
 #[test]
 fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
-    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src/api");
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-http-api-adapter/src/api");
     for relative in [
         "message_commands.rs",
         "messages/compose.rs",
@@ -689,7 +689,7 @@ fn runtime_contract_exposes_single_mail_query_entry_point() {
 
 #[test]
 fn api_route_modules_do_not_construct_new_mail_runtime_graphs() {
-    let api_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src/api");
+    let api_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-http-api-adapter/src/api");
     let mut violations = Vec::new();
     collect_forbidden_runtime_graph_constructors(&api_dir, &mut violations);
 

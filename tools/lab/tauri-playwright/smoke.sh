@@ -76,7 +76,7 @@ from pathlib import Path
 
 run_dir = sys.argv[1].encode()
 managed_terms = (
-    b"posthaste-desktop",
+    b"posthaste-client",
     b"tauri dev",
     b"bun run tauri dev",
     b"bun run web:dev",

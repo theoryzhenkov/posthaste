@@ -14,7 +14,7 @@ use super::*;
 pub const MAX_REV_LOG_HISTORY: u32 = 50;
 
 // `RevLogStep` + `RevCursor` live in `posthaste-domain-model` (shared with the
-// `BackendApi` read channel + the `RevLog` synced view); `use super::*`
+// `AuthorityServerLink` read channel + the `RevLog` synced view); `use super::*`
 // brings them into scope via the crate-level import.
 
 const REV_LOG_COLUMNS: &str = "step_id, seq, message_id, source_id, diff, created_at";
