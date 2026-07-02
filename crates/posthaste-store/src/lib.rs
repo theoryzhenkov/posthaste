@@ -32,28 +32,30 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
 use hex::encode as hex_encode;
-use posthaste_domain_service::{
-    cache_signal_rescore_priority, now_iso8601 as domain_now_iso8601,
-    synthesize_plain_text_raw_mime, AccountId, AutomationBackfillJob, AutomationBackfillJobStatus,
-    AutomationBackfillStore, CacheCandidate, CacheFetchCandidate, CacheFetchUnit, CacheLayer,
-    CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate, CacheSearchSignals,
-    CacheSignalUpdate, CacheStore, CachedSenderAddress, CommandResult, ConversationCursor,
-    ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
-    ConversationSummary, ConversationView, DomainEvent, EventFilter, EventStore, FetchedBody,
-    ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationKey, ImapMessageLocationStore,
-    ImapMessageLocationWriteStore, ImapModSeq, ImapSyncStateStore, ImapSyncStateWriteStore,
-    ImapUid, ImapUidValidity, MailboxId, MailboxReadStore, MailboxRole, MailboxRoleOverrideStore,
-    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetail, MessageDetailStore,
-    MessageId, MessageListStore, MessageMailboxStore, MessagePage, MessageSortField,
+use posthaste_domain_model::{
+    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId,
+    AutomationBackfillJob, AutomationBackfillJobStatus, CacheCandidate, CacheFetchCandidate,
+    CacheFetchUnit, CacheLayer, CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate,
+    CacheSearchSignals, CacheSignalUpdate, CachedSenderAddress, CommandResult, ConversationCursor,
+    ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
+    DomainEvent, EventFilter, FetchedBody, ImapMailboxSyncState, ImapMessageLocation,
+    ImapMessageLocationKey, ImapModSeq, ImapUid, ImapUidValidity, MailboxId, MailboxRole,
+    MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
     MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
-    OperationOutboxStore, OperationState, RawMessageRef, Recipient, ReplaceMailboxesCommand,
-    RevCursor, RevLogSnapshot, RevLogStep, RevLogStore,
-    SenderAddressCacheStore, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
-    SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncReconciliation,
-    SyncStateStore, SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView,
-    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
+    OperationState, RawMessageRef, Recipient, ReplaceMailboxesCommand, RevCursor, RevLogSnapshot,
+    RevLogStep, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxValue, SortDirection, StoreError, SyncBatch, SyncCursor, SyncObject,
+    SyncReconciliation, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
+    EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
+};
+use posthaste_domain_service::{
+    cache_signal_rescore_priority, AutomationBackfillStore, CacheStore, ConversationReadStore,
+    EventStore, ImapMessageLocationStore, ImapMessageLocationWriteStore, ImapSyncStateStore,
+    ImapSyncStateWriteStore, MailboxReadStore, MailboxRoleOverrideStore, MessageCommandStore,
+    MessageDetailStore, MessageListStore, MessageMailboxStore, OperationOutboxStore, RevLogStore,
+    SenderAddressCacheStore, SmartMailboxStore, SourceDataStore, SourceProjectionStore,
+    SyncStateStore, SyncWriteStore, TagReadStore,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 use rusqlite::types::Value as SqlValue;

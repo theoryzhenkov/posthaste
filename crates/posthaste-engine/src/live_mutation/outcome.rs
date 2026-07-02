@@ -1,4 +1,4 @@
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     now_iso8601 as domain_now_iso8601, GatewayError, MailboxId, MutationOutcome, SyncCursor,
     SyncObject,
 };
@@ -7,7 +7,7 @@ use crate::live::map_gateway_error;
 
 pub(crate) fn set_keywords_mutation_outcome(
     mut response: jmap_client::core::response::EmailSetResponse,
-    message_id: &posthaste_domain_service::MessageId,
+    message_id: &posthaste_domain_model::MessageId,
 ) -> Result<MutationOutcome, GatewayError> {
     response
         .updated(message_id.as_str())

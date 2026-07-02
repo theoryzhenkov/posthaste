@@ -30,7 +30,7 @@ impl SyncWriteStore for TestStore {
     fn reconcile_sync(
         &self,
         _account_id: &AccountId,
-        reconciliation: &crate::SyncReconciliation,
+        reconciliation: &posthaste_domain_model::SyncReconciliation,
     ) -> Result<Vec<DomainEvent>, StoreError> {
         // Commit the cursors withheld until the stream succeeded; the real store
         // also prunes locals absent from the remote set (covered by store tests).
@@ -76,7 +76,7 @@ impl SyncWriteStore for TestStore {
 impl crate::CacheStore for TestStore {
     fn upsert_cache_candidates(
         &self,
-        candidates: &[crate::CacheCandidate],
+        candidates: &[posthaste_domain_model::CacheCandidate],
     ) -> Result<(), StoreError> {
         self.cache_candidates
             .lock()
@@ -87,7 +87,7 @@ impl crate::CacheStore for TestStore {
 
     fn record_cache_signal_updates(
         &self,
-        updates: &[crate::CacheSignalUpdate],
+        updates: &[posthaste_domain_model::CacheSignalUpdate],
     ) -> Result<(), StoreError> {
         self.cache_signal_updates
             .lock()
@@ -100,7 +100,7 @@ impl crate::CacheStore for TestStore {
         &self,
         account_id: &AccountId,
         limit: usize,
-    ) -> Result<Vec<crate::CacheRescoreCandidate>, StoreError> {
+    ) -> Result<Vec<posthaste_domain_model::CacheRescoreCandidate>, StoreError> {
         Ok(self
             .cache_rescore_candidates
             .lock()
@@ -127,7 +127,7 @@ impl crate::CacheStore for TestStore {
 
     fn update_cache_priorities(
         &self,
-        updates: &[crate::CachePriorityUpdate],
+        updates: &[posthaste_domain_model::CachePriorityUpdate],
     ) -> Result<(), StoreError> {
         self.cache_priority_updates
             .lock()
@@ -139,9 +139,9 @@ impl crate::CacheStore for TestStore {
     fn list_cache_fetch_candidates(
         &self,
         account_id: &AccountId,
-        layer: crate::CacheLayer,
+        layer: posthaste_domain_model::CacheLayer,
         limit: usize,
-    ) -> Result<Vec<crate::CacheFetchCandidate>, StoreError> {
+    ) -> Result<Vec<posthaste_domain_model::CacheFetchCandidate>, StoreError> {
         Ok(self
             .cache_fetch_candidates
             .lock()
@@ -159,9 +159,9 @@ impl crate::CacheStore for TestStore {
         &self,
         _account_id: &AccountId,
         message_id: &MessageId,
-        _layer: crate::CacheLayer,
+        _layer: posthaste_domain_model::CacheLayer,
         _object_id: Option<&str>,
-        state: crate::CacheObjectState,
+        state: posthaste_domain_model::CacheObjectState,
         error_code: Option<&str>,
     ) -> Result<(), StoreError> {
         self.cache_state_changes

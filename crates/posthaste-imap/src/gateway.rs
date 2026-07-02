@@ -3,14 +3,9 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use imap_client::client::tokio::Client as ImapClient;
-use posthaste_domain_service::{
-    now_iso8601, plan_imap_mailbox_sync, plan_imap_move, AccountId, BlobId, FetchedBody,
-    GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState,
-    ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MailGateway, MailStore,
-    MailboxId, MessageId, MutationOutcome, ProviderProfile, PushTransport, ReplyContext,
-    SecretResolver, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
-    SyncProgress, SyncProgressReporter, SyncProgressStage, SyncTrigger,
-};
+use posthaste_domain_model::{FetchedBody, GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState, ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MutationOutcome, ProviderProfile, ReplyContext, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress, SyncProgressStage, SyncTrigger, now_iso8601};
+use posthaste_domain_model::{AccountId, BlobId, MailboxId, MessageId};
+use posthaste_domain_service::{MailGateway, MailStore, PushTransport, SecretResolver, SyncProgressReporter, plan_imap_mailbox_sync, plan_imap_move};
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
 use crate::discovery::connect_authenticated_client;

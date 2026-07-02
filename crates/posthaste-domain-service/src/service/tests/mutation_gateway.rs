@@ -5,7 +5,7 @@ pub(super) struct MutationGateway {
     pub(super) batch: Option<SyncBatch>,
     /// When set, `sync_streamed` emits these chunks in order and returns the
     /// reconciliation set, exercising the progressive-delivery service path.
-    pub(super) stream: Option<(Vec<SyncBatch>, crate::SyncReconciliation)>,
+    pub(super) stream: Option<(Vec<SyncBatch>, posthaste_domain_model::SyncReconciliation)>,
     pub(super) fetch_body_result: Mutex<Option<Result<FetchedBody, GatewayError>>>,
     /// Result returned by `fetch_identity`; `None` falls back to an error (the
     /// default unused stub), preserving the pre-change test behavior.
@@ -24,16 +24,16 @@ pub(super) struct MutationGateway {
     pub(super) set_keywords_results: Mutex<Vec<Result<MutationOutcome, GatewayError>>>,
     /// Readbacks attached to each accepted message mutation's `MutationOutcome`,
     /// popped front-first (the `get` of set+get). Empty => `message: None`.
-    pub(super) readbacks: Mutex<Vec<crate::MessageReadback>>,
+    pub(super) readbacks: Mutex<Vec<posthaste_domain_model::MessageReadback>>,
     /// When set, the next message mutation is rejected: returns
     /// `Err(MutationRejected { readback, reason })` so the flush reverts + surfaces.
-    pub(super) reject_next: Mutex<Option<(crate::MessageReadback, String)>>,
+    pub(super) reject_next: Mutex<Option<(posthaste_domain_model::MessageReadback, String)>>,
 }
 
 impl MutationGateway {
     pub(super) fn with_stream(
         chunks: Vec<SyncBatch>,
-        reconciliation: crate::SyncReconciliation,
+        reconciliation: posthaste_domain_model::SyncReconciliation,
     ) -> Self {
         Self {
             stream: Some((chunks, reconciliation)),
@@ -106,7 +106,7 @@ impl MutationGateway {
             cursor: Some(SyncCursor {
                 object_type: SyncObject::Message,
                 state: format!("message-{}", *revision),
-                updated_at: crate::RFC3339_EPOCH.to_string(),
+                updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
             }),
             message,
         })
@@ -132,18 +132,18 @@ impl MailGateway for MutationGateway {
         cursors: &[SyncCursor],
         progress: Option<crate::SyncProgressReporter>,
         sink: &mut dyn crate::SyncChunkSink,
-    ) -> Result<crate::SyncOutcome, GatewayError> {
+    ) -> Result<posthaste_domain_model::SyncOutcome, GatewayError> {
         if let Some((chunks, reconciliation)) = &self.stream {
             for chunk in chunks {
                 sink.emit(chunk.clone())?;
             }
-            return Ok(crate::SyncOutcome {
+            return Ok(posthaste_domain_model::SyncOutcome {
                 reconciliation: Some(reconciliation.clone()),
             });
         }
         let batch = self.sync(account_id, cursors, progress).await?;
         sink.emit(batch)?;
-        Ok(crate::SyncOutcome::single_batch())
+        Ok(posthaste_domain_model::SyncOutcome::single_batch())
     }
 
     async fn fetch_message_body(
@@ -165,7 +165,7 @@ impl MailGateway for MutationGateway {
     async fn download_blob(
         &self,
         _account_id: &AccountId,
-        _blob_id: &crate::BlobId,
+        _blob_id: &posthaste_domain_model::BlobId,
     ) -> Result<Vec<u8>, GatewayError> {
         Err(GatewayError::Rejected("unused".to_string()))
     }
@@ -230,7 +230,7 @@ impl MailGateway for MutationGateway {
         &self,
         _account_id: &AccountId,
         _message_id: &MessageId,
-    ) -> Result<crate::ReplyContext, GatewayError> {
+    ) -> Result<posthaste_domain_model::ReplyContext, GatewayError> {
         Err(GatewayError::Rejected("unused".to_string()))
     }
 

@@ -1,4 +1,4 @@
-use posthaste_domain_service::{MailboxId, MailboxRecord, MessageId, MessageRecord, SyncCursor};
+use posthaste_domain_model::{MailboxId, MailboxRecord, MessageId, MessageRecord, SyncCursor};
 
 #[cfg(test)]
 use jmap_client::email;

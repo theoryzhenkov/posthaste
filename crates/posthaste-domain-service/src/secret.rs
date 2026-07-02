@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 
-use crate::GatewayError;
+use posthaste_domain_model::GatewayError;
 
 /// Resolve the current account secret immediately before a provider operation.
 ///

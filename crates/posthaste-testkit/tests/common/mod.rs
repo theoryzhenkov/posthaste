@@ -3,7 +3,7 @@
 //! Each file in `tests/` is its own test binary, so shared helpers live here
 //! and are pulled in via `#[path = "common/mod.rs"] mod common;`.
 
-use posthaste_domain_service::{MessageSortField, SortDirection};
+use posthaste_domain_model::{MessageSortField, SortDirection};
 use posthaste_contract_core::{MailPresentationRequest, MailQueryRequest, ViewDescriptor};
 
 /// A `mailList` view descriptor for `query`: messages projection, newest-first,

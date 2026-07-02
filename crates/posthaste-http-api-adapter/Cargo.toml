@@ -24,6 +24,7 @@ macaroon = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-contract-core = { path = "../posthaste-contract-core", features = ["openapi"] }
+posthaste-domain-model = { path = "../posthaste-domain-model", features = ["openapi"] }
 posthaste-domain-service = { path = "../posthaste-domain-service", features = ["openapi"] }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime = { path = "../posthaste-runtime" }

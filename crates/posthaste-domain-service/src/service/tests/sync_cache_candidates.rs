@@ -17,7 +17,7 @@ async fn streamed_sync_applies_chunks_progressively_then_reconciles() {
     };
     let gateway = MutationGateway::with_stream(
         vec![chunk("message-1"), chunk("message-2")],
-        crate::SyncReconciliation {
+        posthaste_domain_model::SyncReconciliation {
             remote_message_ids: vec![MessageId::from("message-1"), MessageId::from("message-2")],
             remote_mailbox_ids: Vec::new(),
             prune_messages: true,
@@ -25,7 +25,7 @@ async fn streamed_sync_applies_chunks_progressively_then_reconciles() {
             cursors: vec![SyncCursor {
                 object_type: SyncObject::Message,
                 state: "final-state".to_string(),
-                updated_at: crate::RFC3339_EPOCH.to_string(),
+                updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
             }],
         },
     );

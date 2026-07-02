@@ -10,7 +10,7 @@
 
 use super::message_queries::project_record;
 use super::*;
-use crate::{MessageReadback, MessageRecord, MutationOutcome, SyncBatch};
+use posthaste_domain_model::{MessageReadback, MessageRecord, MutationOutcome, SyncBatch};
 
 /// Outcome of attempting to push one operation to the provider.
 enum FlushError {

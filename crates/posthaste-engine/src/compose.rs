@@ -1,4 +1,4 @@
-use posthaste_domain_service::Recipient;
+use posthaste_domain_model::Recipient;
 use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
 /// Render a Markdown string to a self-contained HTML document for email.

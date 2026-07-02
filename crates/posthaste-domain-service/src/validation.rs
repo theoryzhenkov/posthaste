@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
-use crate::{
+use crate::ConfigSnapshot;
+use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AutomationAction, AutomationRule,
-    ConfigSnapshot, ImapTransportSettings, SmartMailboxId, SmtpTransportSettings, ValidationError,
+    ImapTransportSettings, SmartMailboxId, SmtpTransportSettings, ValidationError,
 };
 
 pub fn validate_snapshot(snapshot: &ConfigSnapshot) -> Result<(), Vec<ValidationError>> {
@@ -90,7 +91,7 @@ fn collect_source_ids(
 }
 
 fn collect_smart_mailbox_ids(
-    smart_mailboxes: &[crate::SmartMailbox],
+    smart_mailboxes: &[posthaste_domain_model::SmartMailbox],
     errors: &mut Vec<ValidationError>,
 ) -> BTreeSet<SmartMailboxId> {
     let mut ids = BTreeSet::new();
@@ -318,7 +319,7 @@ fn automation_draft_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use posthaste_domain_model::{
         AccountTransportSettings, AppSettings, SecretKind, SmartMailbox, SmartMailboxGroup,
         SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxRule, TransportSecurity,
     };
@@ -455,7 +456,7 @@ mod tests {
         account.driver = AccountDriver::ImapSmtp;
         account.email_patterns = vec!["primary@example.com".to_string()];
         account.transport.username = Some("primary@example.com".to_string());
-        account.transport.secret_ref = Some(crate::SecretRef {
+        account.transport.secret_ref = Some(posthaste_domain_model::SecretRef {
             kind: SecretKind::Env,
             key: "POSTHASTE_PASSWORD".to_string(),
         });

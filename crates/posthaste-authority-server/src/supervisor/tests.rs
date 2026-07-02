@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountTransportSettings, EventFilter, ProviderAuthKind, ProviderHint, PushNotification,
     SecretRef, SecretStoreError, RFC3339_EPOCH,
 };

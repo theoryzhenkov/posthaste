@@ -13,7 +13,7 @@ use posthaste_client_link::RuntimeViewSubscription;
 use posthaste_contract_core::{
     RuntimeError, ViewDescriptor, ViewFrame, ViewId, ViewRevision, ViewSnapshot,
 };
-use posthaste_domain_service::DomainEvent;
+use posthaste_domain_model::DomainEvent;
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 use tracing::warn;
@@ -359,7 +359,7 @@ mod rev_log_view_tests {
     use crate::read::ReadCache;
     use async_trait::async_trait;
     use posthaste_authority_server_link::AuthorityServerApi;
-    use posthaste_domain_service::{AccountId, RevCursor, RevLogSnapshot, RevLogStep};
+    use posthaste_domain_model::{AccountId, RevCursor, RevLogSnapshot, RevLogStep};
     use serde_json::{json, Value};
 
     /// A read-only `AuthorityServerLink` stub that serves a canned `RevLogSnapshot` for

@@ -28,7 +28,7 @@ async fn sync_applies_matching_automation_tag() {
                 subject: Some("Welcome".to_string()),
                 from_name: Some("PostHaste Updates".to_string()),
                 from_email: Some("hello@example.com".to_string()),
-                received_at: crate::RFC3339_EPOCH.to_string(),
+                received_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
                 mailbox_ids: vec![MailboxId::from("inbox")],
                 ..Default::default()
             }],

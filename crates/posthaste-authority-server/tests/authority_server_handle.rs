@@ -7,13 +7,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
 use posthaste_authority_server::oauth::OAuthTokenSet;
 use posthaste_authority_server::{build_authority_server, from_api_bridge_for_migration};
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
-    SecretStore, SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection,
-    SyncBatch, SyncCursor, SyncObject, SyncTrigger, ThreadId, TransportSecurity,
+    SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection, SyncBatch,
+    SyncCursor, SyncObject, SyncTrigger, ThreadId, TransportSecurity,
     EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
+use posthaste_domain_service::SecretStore;
 use posthaste_engine::MockJmapGateway;
 use posthaste_client_link::RuntimeLink;
 use posthaste_runtime::{RuntimeBuildConfig, RuntimeBuildError};
@@ -515,7 +516,7 @@ async fn authority_builder_handle_supports_account_mutations() {
             CreateAccountMutation {
                 id: Some("acct-builder".to_string()),
                 name: "Builder Account".to_string(),
-                driver: Some(posthaste_domain_service::AccountDriver::Mock),
+                driver: Some(posthaste_domain_model::AccountDriver::Mock),
                 enabled: Some(false),
                 full_name: None,
                 signature: None,
@@ -2261,7 +2262,7 @@ impl posthaste_authority_server_link::AuthorityServerApi for DeferredTransport {
     async fn create_account(
         &self,
         mutation: CreateAccountMutation,
-    ) -> Result<posthaste_domain_service::AccountOverview, posthaste_contract_core::RuntimeError> {
+    ) -> Result<posthaste_domain_model::AccountOverview, posthaste_contract_core::RuntimeError> {
         self.inner.create_account(mutation).await
     }
 }

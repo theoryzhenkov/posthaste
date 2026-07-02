@@ -83,7 +83,7 @@ impl EventStore for TestStore {
             seq: 1,
             account_id: account_id.clone(),
             topic: topic.to_string(),
-            occurred_at: crate::RFC3339_EPOCH.to_string(),
+            occurred_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
             mailbox_id: mailbox_id.cloned(),
             message_id: message_id.cloned(),
             payload,

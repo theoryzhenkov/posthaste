@@ -6,7 +6,8 @@
 //!
 //! Gated behind `POSTHASTE_STALWART_INTEGRATION=1` like the parity suite.
 
-use posthaste_domain_service::{AccountId, MailGateway, Recipient, SendMessageRequest};
+use posthaste_domain_model::{AccountId, Recipient, SendMessageRequest};
+use posthaste_domain_service::MailGateway;
 use posthaste_engine::LiveJmapGateway;
 use posthaste_testkit::StalwartFixture;
 

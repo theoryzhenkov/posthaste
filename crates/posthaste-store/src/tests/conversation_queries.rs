@@ -10,7 +10,7 @@ fn list_conversations_preserves_source_names_with_commas() -> Result<(), StoreEr
     store.apply_sync_batch(
         &account,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain_service::MailboxRecord {
+            mailboxes: vec![posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),

@@ -13,7 +13,7 @@ fn smart_mailbox_queries_messages_across_enabled_sources() -> Result<(), StoreEr
         store.apply_sync_batch(
             account,
             &SyncBatch {
-                mailboxes: vec![posthaste_domain_service::MailboxRecord {
+                mailboxes: vec![posthaste_domain_model::MailboxRecord {
                     id: MailboxId::from("inbox"),
                     name: "Inbox".to_string(),
                     role: Some("inbox".to_string()),
@@ -79,14 +79,14 @@ fn bulk_message_hydration_preserves_order_and_account_scoped_metadata() -> Resul
         &account_a,
         &SyncBatch {
             mailboxes: vec![
-                posthaste_domain_service::MailboxRecord {
+                posthaste_domain_model::MailboxRecord {
                     id: MailboxId::from("archive"),
                     name: "Archive".to_string(),
                     role: Some("archive".to_string()),
                     unread_emails: 0,
                     total_emails: 0,
                 },
-                posthaste_domain_service::MailboxRecord {
+                posthaste_domain_model::MailboxRecord {
                     id: MailboxId::from("inbox"),
                     name: "Inbox".to_string(),
                     role: Some("inbox".to_string()),
@@ -126,7 +126,7 @@ fn bulk_message_hydration_preserves_order_and_account_scoped_metadata() -> Resul
     store.apply_sync_batch(
         &account_b,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain_service::MailboxRecord {
+            mailboxes: vec![posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("trash"),
                 name: "Trash".to_string(),
                 role: Some("trash".to_string()),

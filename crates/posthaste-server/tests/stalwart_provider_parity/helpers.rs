@@ -1,8 +1,7 @@
 use std::collections::BTreeSet;
 
-use posthaste_domain_service::{
-    AccountId, ImapMessageLocationStore, MailboxId, MailboxSummary, MessageSummary, SyncTrigger,
-};
+use posthaste_domain_model::{AccountId, MailboxId, MailboxSummary, MessageSummary, SyncTrigger};
+use posthaste_domain_service::ImapMessageLocationStore;
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::LiveImapSmtpGateway;
 

@@ -24,8 +24,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use posthaste_domain_service::{AccountDriver, AccountId, ImapTransportSettings, SmtpTransportSettings};
-use posthaste_domain_service::{ProviderAuthKind, ProviderHint, TransportSecurity};
+use posthaste_domain_model::{AccountDriver, AccountId, ImapTransportSettings, SmtpTransportSettings};
+use posthaste_domain_model::{ProviderAuthKind, ProviderHint, TransportSecurity};
 use posthaste_contract_core::{
     AccountTransportMutation, CreateAccountMutation, RuntimeCaller, SecretWriteMode,
     SecretWriteMutation,

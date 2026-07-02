@@ -1,4 +1,4 @@
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     now_iso8601 as domain_now_iso8601, AccountId, GatewayError, PushNotification,
 };
 

@@ -3,24 +3,25 @@ use std::sync::Arc;
 use posthaste_observability::{events, ph_warn};
 use serde_json::json;
 
-use crate::{now_iso8601, GatewayError, Id};
 use crate::{
-    AccountId, AccountSettings, AppSettings, AutomationBackfillStore, CacheStore, CommandResult,
-    ConfigDiff, ConfigRepository, ConversationCursor, ConversationId, ConversationPage,
-    ConversationReadStore, ConversationSortField, ConversationView, DraftContent,
-    DraftContentResult, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
-    MailboxRoleOverrideStore, MailboxSummary, MessageCommandStore, MessageCursor, MessageDetail,
-    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
-    MessageSortField, MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId,
-    OperationKind, OperationOutboxStore, OperationOutcome, OperationSettlement, OperationState,
-    Recipient, ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedConfigRepository, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxStore,
-    SmartMailboxSummary, SnoozeStore, SortDirection, SourceDataStore, SourceProjectionStore,
-    StoreError, SyncMode, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore,
-    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_UPDATED,
+    AutomationBackfillStore, CacheStore, ConfigDiff, ConfigRepository, ConversationReadStore,
+    EventStore, MailGateway, MailStore, MailboxReadStore, MailboxRoleOverrideStore,
+    MessageCommandStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
+    OperationOutboxStore, ServiceResultExt, SharedConfigRepository, SmartMailboxStore, SnoozeStore,
+    SourceDataStore, SourceProjectionStore, SyncStateStore, SyncWriteStore, TagReadStore,
+};
+use posthaste_domain_model::{
+    now_iso8601, AccountId, AccountSettings, AppSettings, CommandResult, ConversationCursor,
+    ConversationId, ConversationPage, ConversationSortField, ConversationView, DomainEvent,
+    DraftContent, DraftContentResult, GatewayError, Id, Identity, MailboxId, MailboxSummary,
+    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
+    Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind, OperationOutcome,
+    OperationSettlement, OperationState, Recipient, ReplaceMailboxesCommand, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxRule,
+    SmartMailboxSummary, SortDirection, StoreError, SyncMode, SyncObject, SyncTrigger, TagSummary,
+    ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_UPDATED,
     EVENT_TOPIC_OPERATION_SETTLED, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
-use crate::{DomainEvent, ServiceResultExt};
 
 mod automation;
 mod cache;

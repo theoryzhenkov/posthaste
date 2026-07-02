@@ -6,7 +6,7 @@ async fn fetch_identity_uses_configured_sender_identity() {
         config: test_config(),
         smtp_config: test_smtp_config(),
         discovery: DiscoveredImapAccount {
-            capabilities: posthaste_domain_service::ImapCapabilities::default(),
+            capabilities: posthaste_domain_model::ImapCapabilities::default(),
             mailboxes: Vec::new(),
         },
         store: None,
@@ -26,7 +26,7 @@ async fn fetch_identity_uses_configured_sender_identity() {
 fn names_imap_sync_plans_for_logs() {
     assert_eq!(
         imap_sync_plan_name(&ImapMailboxSyncPlan::FullSnapshot {
-            reason: posthaste_domain_service::ImapFullSyncReason::InitialSync,
+            reason: posthaste_domain_model::ImapFullSyncReason::InitialSync,
         }),
         "full_snapshot"
     );
@@ -38,7 +38,7 @@ fn names_imap_sync_plans_for_logs() {
     );
     assert_eq!(
         imap_sync_plan_name(&ImapMailboxSyncPlan::CondstoreDelta {
-            since_modseq: posthaste_domain_service::ImapModSeq(9),
+            since_modseq: posthaste_domain_model::ImapModSeq(9),
             after_uid: None,
         }),
         "condstore_delta"
@@ -46,7 +46,7 @@ fn names_imap_sync_plans_for_logs() {
     assert_eq!(
         imap_sync_plan_name(&ImapMailboxSyncPlan::QresyncDelta {
             uid_validity: ImapUidValidity(1),
-            since_modseq: posthaste_domain_service::ImapModSeq(9),
+            since_modseq: posthaste_domain_model::ImapModSeq(9),
             after_uid: None,
         }),
         "qresync_delta"
@@ -95,15 +95,15 @@ fn mailbox_status_does_not_skip_empty_mailbox_without_modseq() {
 #[test]
 fn mailbox_status_requires_matching_modseq_when_available() {
     let mut state = imap_mailbox_state(Some(ImapUid(42)));
-    state.highest_modseq = Some(posthaste_domain_service::ImapModSeq(100));
+    state.highest_modseq = Some(posthaste_domain_model::ImapModSeq(100));
     let unchanged = ImapMailboxStatus {
         messages: Some(5),
         uid_next: Some(ImapUid(43)),
         uid_validity: Some(ImapUidValidity(7)),
-        highest_modseq: Some(posthaste_domain_service::ImapModSeq(100)),
+        highest_modseq: Some(posthaste_domain_model::ImapModSeq(100)),
     };
     let changed = ImapMailboxStatus {
-        highest_modseq: Some(posthaste_domain_service::ImapModSeq(101)),
+        highest_modseq: Some(posthaste_domain_model::ImapModSeq(101)),
         ..unchanged
     };
 
@@ -178,7 +178,7 @@ async fn fetch_body_reports_clear_unsupported_error() {
         config: test_config(),
         smtp_config: test_smtp_config(),
         discovery: DiscoveredImapAccount {
-            capabilities: posthaste_domain_service::ImapCapabilities::default(),
+            capabilities: posthaste_domain_model::ImapCapabilities::default(),
             mailboxes: Vec::new(),
         },
         store: None,
@@ -241,10 +241,10 @@ fn test_config() -> ImapConnectionConfig {
     ImapConnectionConfig {
         host: "imap.example.test".to_string(),
         port: 993,
-        security: posthaste_domain_service::TransportSecurity::Tls,
+        security: posthaste_domain_model::TransportSecurity::Tls,
         username: "alice@example.test".to_string(),
         secret: "secret".to_string(),
-        auth: posthaste_domain_service::ProviderAuthKind::Password,
+        auth: posthaste_domain_model::ProviderAuthKind::Password,
     }
 }
 
@@ -252,13 +252,13 @@ fn test_smtp_config() -> SmtpConnectionConfig {
     SmtpConnectionConfig {
         host: "smtp.example.test".to_string(),
         port: 587,
-        security: posthaste_domain_service::TransportSecurity::StartTls,
+        security: posthaste_domain_model::TransportSecurity::StartTls,
         sender_name: Some("Alice Example".to_string()),
         sender_email: "alice@example.test".to_string(),
         username: "alice-login".to_string(),
         secret: "secret".to_string(),
-        auth: posthaste_domain_service::ProviderAuthKind::Password,
-        provider: posthaste_domain_service::ProviderHint::Generic,
+        auth: posthaste_domain_model::ProviderAuthKind::Password,
+        provider: posthaste_domain_model::ProviderHint::Generic,
     }
 }
 
@@ -294,7 +294,7 @@ impl CountingResolver {
 
 #[async_trait::async_trait]
 impl posthaste_domain_service::SecretResolver for CountingResolver {
-    async fn resolve_secret(&self) -> Result<String, posthaste_domain_service::GatewayError> {
+    async fn resolve_secret(&self) -> Result<String, posthaste_domain_model::GatewayError> {
         self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(self.secret.clone())
     }

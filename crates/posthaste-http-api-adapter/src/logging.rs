@@ -72,7 +72,7 @@ fn default_filter_directives(config_level: &str) -> String {
         format!("posthaste_engine={level}"),
         format!("posthaste_imap={level}"),
         format!("posthaste_store={level}"),
-        format!("posthaste_domain_service={level}"),
+        format!("posthaste_domain_model={level}"),
         "tower_http=info".to_string(),
     ]
     .join(",")

@@ -112,12 +112,12 @@ struct BootstrapAccountConfig {
 #[serde(rename_all = "camelCase")]
 struct BootstrapAccountTransportConfig {
     #[serde(default)]
-    provider: posthaste_domain_service::ProviderHint,
+    provider: posthaste_domain_model::ProviderHint,
     #[serde(default)]
-    auth: posthaste_domain_service::ProviderAuthKind,
+    auth: posthaste_domain_model::ProviderAuthKind,
     base_url: Option<String>,
     username: Option<String>,
     secret_ref: Option<SecretRef>,
-    imap: Option<posthaste_domain_service::ImapTransportSettings>,
-    smtp: Option<posthaste_domain_service::SmtpTransportSettings>,
+    imap: Option<posthaste_domain_model::ImapTransportSettings>,
+    smtp: Option<posthaste_domain_model::SmtpTransportSettings>,
 }

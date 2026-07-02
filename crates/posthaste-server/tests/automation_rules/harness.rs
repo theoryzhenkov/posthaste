@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{
-    AccountId, AppSettings, AutomationBackfillJobStatus, AutomationRule, ConfigRepository,
-    MailService, SyncTrigger,
+use posthaste_domain_model::{
+    AccountId, AppSettings, AutomationBackfillJobStatus, AutomationRule, SyncTrigger,
 };
+use posthaste_domain_service::{ConfigRepository, MailService};
 use posthaste_store::DatabaseStore;
 
 use crate::builders::account;

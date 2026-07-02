@@ -2,7 +2,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 
 use imap_client::imap_types::core::Text;
 use imap_client::imap_types::flag::{Flag, FlagPerm};
-use posthaste_domain_service::MailboxId;
+use posthaste_domain_model::MailboxId;
 
 use super::*;
 

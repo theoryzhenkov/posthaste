@@ -1,7 +1,6 @@
 use futures_util::StreamExt;
-use posthaste_domain_service::{
-    AccountId, PushEventStream, PushStreamEvent, PushTransport, ResilientPushConfig,
-};
+use posthaste_domain_model::{AccountId};
+use posthaste_domain_service::{PushEventStream, PushStreamEvent, PushTransport, ResilientPushConfig};
 use posthaste_observability::{events, ph_debug, ph_warn};
 
 /// Which transport is currently being used by the resilient stream.

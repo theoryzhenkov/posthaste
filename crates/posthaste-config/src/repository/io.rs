@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use posthaste_domain_service::{
-    now_iso8601 as domain_now_iso8601, validate_snapshot, AccountSettings, ConfigError,
-    ConfigSnapshot, SmartMailbox, RFC3339_EPOCH,
+use posthaste_domain_model::{
+    now_iso8601 as domain_now_iso8601, AccountSettings, ConfigError, SmartMailbox, RFC3339_EPOCH,
 };
+use posthaste_domain_service::{validate_snapshot, ConfigSnapshot};
 
 use crate::atomic::atomic_write;
 use crate::schema::{AppToml, SmartMailboxToml, SourceToml};
