@@ -310,16 +310,24 @@ pub(crate) async fn run_authority_server_down_channel(
     events: broadcast::Sender<DomainEvent>,
     outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
 ) {
-    let Ok(mut stream) = link.subscribe(LinkCoverage::Complete).await else {
+    // Initial subscribe is fresh (`after_seq = None`); the reconnect engine
+    // (M9b) will resume from `last_down_seq` below. Coverage says WHAT to stream,
+    // the seq says WHERE to resume (D46).
+    let Ok(mut stream) = link.subscribe(LinkCoverage::Complete, None).await else {
         return;
     };
     // A monotonic local sequence for the synthesized events. These do NOT match
     // the authority server's authoritative seqs (those come via `replay_events` over the
     // link); they only order the live stream for fresh subscribers.
     let mut seq: i64 = 0;
-    while let Some(frame) = stream.next().await {
-        reads.apply_coherence_frame(&frame);
-        if let AuthorityServerFrame::Base { assertions } = &frame {
+    // The last down-channel seq observed — the resume cursor a reconnect would
+    // pass as `after_seq` (D46). Tracked here; the reconnect loop lands at M9b.
+    let mut last_down_seq: u64 = 0;
+    while let Some(sequenced) = stream.next().await {
+        last_down_seq = sequenced.seq;
+        let frame = &sequenced.frame;
+        reads.apply_coherence_frame(frame);
+        if let AuthorityServerFrame::Base { assertions } = frame {
             for assertion in assertions {
                 // The authoritative base now carries the asserted state, so a
                 // confirmed outbox op it absorbs is retired here — NOT on the
@@ -333,6 +341,12 @@ pub(crate) async fn run_authority_server_down_channel(
             }
         }
     }
+    // The stream closed. `last_down_seq` is the resume cursor a reconnect passes
+    // as `after_seq`; the reconnect loop that consumes it lands at M9b.
+    tracing::debug!(
+        last_down_seq,
+        "authority-server down-channel closed; resume cursor recorded"
+    );
 }
 
 /// Map a down-channel base assertion to the domain event the near node's view
@@ -368,7 +382,7 @@ mod tests {
     use async_trait::async_trait;
     use posthaste_domain_model::MessagePage;
     use posthaste_authority_server_link::{
-        AuthorityServerLink, BaseAssertion, BaseUpdate, DownStream,
+        AuthorityServerLink, BaseAssertion, BaseUpdate, DownStream, SequencedFrame,
     };
     use posthaste_link_core::MessageFoldState;
     use posthaste_contract_core::{MutationReceipt, MutationRequest};
@@ -510,18 +524,25 @@ mod tests {
             Err(RuntimeError::internal("bridge authority-server link is read-only", None))
         }
 
-        async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-            Ok(Box::pin(futures_util::stream::iter([AuthorityServerFrame::Base {
-                assertions: vec![BaseAssertion {
-                    account_id: "acct".into(),
-                    message_id: "m1".into(),
-                    // Carries the flag so a pending flag op on m1 is absorbed.
-                    update: BaseUpdate::Present(MessageFoldState {
-                        keywords: vec!["$flagged".into()],
-                        mailbox_ids: vec![],
-                    }),
-                }],
-            }])))
+        async fn subscribe(
+            &self,
+            _coverage: LinkCoverage,
+            _after_seq: Option<u64>,
+        ) -> Result<DownStream, RuntimeError> {
+            Ok(Box::pin(futures_util::stream::iter([SequencedFrame::new(
+                1,
+                AuthorityServerFrame::Base {
+                    assertions: vec![BaseAssertion {
+                        account_id: "acct".into(),
+                        message_id: "m1".into(),
+                        // Carries the flag so a pending flag op on m1 is absorbed.
+                        update: BaseUpdate::Present(MessageFoldState {
+                            keywords: vec!["$flagged".into()],
+                            mailbox_ids: vec![],
+                        }),
+                    }],
+                },
+            )])))
         }
     }
 

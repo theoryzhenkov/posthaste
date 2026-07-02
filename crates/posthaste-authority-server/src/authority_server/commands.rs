@@ -464,16 +464,31 @@ impl AuthorityServer {
             mutation.operation.name(),
         ) {
             ForwardAcceptance::Existing(receipt) => Ok(receipt),
+            // D47: a retried permanent rejection re-observes the same verdict and
+            // never re-executes (the old path always re-executed — the AS-seam
+            // half of D47's fix).
+            ForwardAcceptance::Rejected(error) => Err(RuntimeError(error)),
             ForwardAcceptance::New { runtime_mutation_id } => {
                 let ack = match self.apply_operation(&mutation).await {
                     Ok(ack) => ack,
                     Err(error) => {
-                        // The mutation did not apply (atomic): drop the reserved
-                        // entry so a retry re-accepts as New, and surface the error
-                        // on the up-channel. No Settlement — the near node learns of
-                        // the failure from the up-channel error and cannot match a
-                        // Settlement it never received a receipt for.
-                        self.runtimes.reject(runtime_id, &mutation.client_mutation_id);
+                        // The mutation did not apply (atomic). Split by D47
+                        // terminal class from the error's `retryable` flag: a
+                        // transient failure CLEARS the entry so a retry
+                        // re-executes; a permanent rejection is KEPT so a retry
+                        // re-observes it. No Settlement either way — the near node
+                        // learns of the failure from the up-channel error and
+                        // cannot match a Settlement it never received a receipt for.
+                        if error.envelope().retryable {
+                            self.runtimes
+                                .settle_failed(runtime_id, &mutation.client_mutation_id);
+                        } else {
+                            self.runtimes.settle_rejected(
+                                runtime_id,
+                                &mutation.client_mutation_id,
+                                error.envelope().clone(),
+                            );
+                        }
                         return Err(error);
                     }
                 };
@@ -484,7 +499,7 @@ impl AuthorityServer {
                     )
                 })?;
                 self.runtimes
-                    .settle_output(runtime_id, &mutation.client_mutation_id, output.clone());
+                    .settle_confirmed(runtime_id, &mutation.client_mutation_id, output.clone());
                 // Route the per-mutation confirmation onto the originating
                 // runtime's down-stream only (`settlement-routed-to-origin-runtime`):
                 // never broadcast — a Settlement names one runtime's mutation.

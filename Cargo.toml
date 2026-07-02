@@ -13,6 +13,7 @@ default-members = [
   "crates/posthaste-imap",
   "crates/posthaste-lab",
   "crates/posthaste-authority-server-link",
+  "crates/posthaste-link-far-end",
   "crates/posthaste-link-core",
   "crates/posthaste-link-replica",
   "crates/posthaste-observability",
