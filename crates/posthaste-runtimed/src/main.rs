@@ -9,18 +9,21 @@
 //! Config is the usual `app.toml` + `POSTHASTE_*` env; the backend link is
 //! `[link] backend_url` (+ `[link] token`). Bind with `POSTHASTE_BIND`.
 
-use std::time::Duration;
-
 use posthaste_api::{
-    build_api_router, build_app_state, logging, resolve_roots, serve, ServeOptions, ServerConfig,
+    assemble_daemon_preamble, build_api_router, build_app_state, serve, DaemonPreamble,
+    ServeOptions, ServerConfig,
 };
-use posthaste_runtime::{build_remote_runtime, BackendTransportConfig, RuntimeBuildConfig};
+use posthaste_runtime::{build_remote_runtime, BackendTransportConfig};
 
 #[tokio::main]
 async fn main() {
-    let roots = resolve_roots();
-    let daemon = posthaste_config::load_daemon_settings(&roots.config_root);
-    let log_guard = logging::init(&roots.state_root, &daemon.log_level);
+    let DaemonPreamble {
+        roots,
+        daemon,
+        log_guard,
+        build_config,
+        ..
+    } = assemble_daemon_preamble();
 
     let base_url = daemon.link_backend_url.clone().unwrap_or_else(|| {
         panic!(
@@ -29,13 +32,7 @@ async fn main() {
         )
     });
 
-    let build_config = RuntimeBuildConfig::new(
-        roots.config_root.clone(),
-        roots.state_root.clone(),
-        roots.state_root.join("cache"),
-    )
-    .with_poll_interval(Duration::from_secs(daemon.poll_interval_seconds))
-    .with_backend_transport(BackendTransportConfig::Remote {
+    let build_config = build_config.with_backend_transport(BackendTransportConfig::Remote {
         base_url,
         token: daemon.link_token.clone(),
     });

@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use super::*;
-use posthaste_link_contract::RuntimeId;
 
 /// Handle returned by [`start_backend`]: the bound address, the server task, and
 /// the log guard (must outlive the process).
@@ -22,47 +21,24 @@ pub async fn start_backend(server_config: ServerConfig) -> BackendServerHandle {
     #[cfg(debug_assertions)]
     dotenv().ok();
 
-    let roots = resolve_roots();
-
-    let settings_repo =
-        TomlConfigRepository::open(&roots.config_root).expect("failed to open config directory");
-    let runtime =
-        read_daemon_settings(&settings_repo).expect("failed to read runtime settings");
-    drop(settings_repo);
-
-    let log_guard = logging::init(&roots.state_root, &runtime.log_level);
+    let DaemonPreamble {
+        roots,
+        daemon: runtime,
+        log_guard,
+        build_config,
+        ..
+    } = assemble_daemon_preamble();
 
     let node = build_backend_node(
-        RuntimeBuildConfig::new(
-            roots.config_root.clone(),
-            roots.state_root.clone(),
-            roots.state_root.join("cache"),
-        )
-        .with_bootstrap_path_option(roots.bootstrap_path.clone())
-        .with_poll_interval(Duration::from_secs(runtime.poll_interval_seconds)),
+        build_config.with_bootstrap_path_option(roots.bootstrap_path.clone()),
     )
     .await
     .expect("failed to build backend node");
 
-    // The link is the ONLY surface here; require [link].runtimes under
-    // require_auth and fail closed if absent (the backend is entirely
-    // network-exposed). With require_auth off (explicit dev opt-out) it serves
-    // unauthenticated.
-    let link_auth = if runtime.require_auth {
-        match &runtime.link_runtimes {
-            Some(map) if !map.is_empty() => LinkAuth::PerRuntime(
-                map.iter()
-                    .map(|(token, rid)| (token.clone(), RuntimeId::new(rid.clone())))
-                    .collect(),
-            ),
-            _ => panic!(
-                "posthaste-backend requires [link].runtimes (token → runtime_id) under \
-                 require_auth — one entry per connecting runtime (X ≥ 1)"
-            ),
-        }
-    } else {
-        LinkAuth::Disabled
-    };
+    // The link is the ONLY surface here; fail closed under require_auth without
+    // [link].runtimes (the backend is entirely network-exposed). With
+    // require_auth off (explicit dev opt-out) it serves unauthenticated.
+    let link_auth = LinkAuth::from_daemon_settings(&runtime, "posthaste-backend");
 
     let trace_layer = TraceLayer::new_for_http()
         .make_span_with(|request: &axum::http::Request<_>| {

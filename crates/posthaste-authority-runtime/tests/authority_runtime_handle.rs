@@ -19,7 +19,7 @@ use posthaste_domain_service::{
 use posthaste_engine::MockJmapGateway;
 use posthaste_client_link::RuntimeLinkOps;
 use posthaste_contract_core::RuntimeCaller;
-use posthaste_runtime_api::{RuntimeAccountApi, RuntimeMailWriteApi};
+use posthaste_runtime_api::RuntimeAccountApi;
 use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,

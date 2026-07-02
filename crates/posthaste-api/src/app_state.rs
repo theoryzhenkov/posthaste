@@ -3,7 +3,7 @@ use super::*;
 pub struct AppState {
     /// Target runtime boundary for `/v1` mail behavior.
     ///
-    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
+    /// @spec docs/eph/RFC-L2-architecture-cleanup#d20
     pub runtime: RuntimeHandle,
     pub account_logo_root: PathBuf,
     /// Per-process bearer token enforced by the auth middleware when

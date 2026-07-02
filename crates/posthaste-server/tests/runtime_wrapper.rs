@@ -1,6 +1,6 @@
 //! API runtime-wrapper migration tests.
 //!
-//! spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+//! spec: docs/eph/RFC-L2-architecture-cleanup#d20
 
 mod support;
 
@@ -26,7 +26,7 @@ async fn api_harness_state_exposes_runtime_handle_status() {
     );
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#first-api-read-runtime-backed
 #[tokio::test]
 async fn get_settings_matches_runtime_read_projection() {
@@ -43,8 +43,8 @@ async fn get_settings_matches_runtime_read_projection() {
     );
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#no-new-route-service-graphs
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#account-list-runtime-backed
 #[tokio::test]
 async fn list_accounts_and_read_account_list_match_runtime_projection() {
@@ -78,7 +78,7 @@ async fn list_accounts_and_read_account_list_match_runtime_projection() {
     );
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#account-get-runtime-backed
 #[tokio::test]
 async fn get_account_matches_runtime_account_projection() {
@@ -231,7 +231,7 @@ async fn runtime_session_stream_returns_collapsed_view_snapshot() {
     assert_eq!(closed_stream_status, StatusCode::NOT_FOUND);
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 #[tokio::test]
 async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
     let harness = Harness::new();
@@ -320,7 +320,7 @@ async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
     assert_eq!(tag_only_status, StatusCode::FORBIDDEN, "{tag_only_body}");
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 #[tokio::test]
 async fn read_account_list_enabled_ids_reference_still_drives_followup_reads() {
     let harness = Harness::new();
@@ -356,7 +356,7 @@ async fn read_account_list_enabled_ids_reference_still_drives_followup_reads() {
         .is_none());
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#typed-read-catalog-runtime-backed
 #[tokio::test]
 async fn typed_read_catalog_reads_work_after_runtime_migration() {
@@ -386,7 +386,7 @@ async fn typed_read_catalog_reads_work_after_runtime_migration() {
     assert_eq!(body["results"]["tags"]["op"], "Tag/list");
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#collection-list-routes-runtime-backed
 #[tokio::test]
 async fn list_mailboxes_and_smart_mailboxes_routes_use_runtime_reads() {
@@ -405,7 +405,7 @@ async fn list_mailboxes_and_smart_mailboxes_routes_use_runtime_reads() {
     assert!(smart_body.is_array());
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#collection-list-routes-runtime-backed
 #[tokio::test]
 async fn get_smart_mailbox_route_uses_runtime_read() {
@@ -421,7 +421,7 @@ async fn get_smart_mailbox_route_uses_runtime_read() {
     assert_eq!(body["name"], "Inbox");
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#provider-backed-compose-reads-runtime-backed
 #[tokio::test]
 async fn identity_route_uses_runtime_provider_backed_read() {
@@ -439,7 +439,7 @@ async fn identity_route_uses_runtime_provider_backed_read() {
     assert_eq!(body["email"], "mock@example.com");
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#sync-command-runtime-backed
 #[tokio::test]
 async fn sync_command_route_uses_runtime_provider() {
@@ -461,7 +461,7 @@ async fn sync_command_route_uses_runtime_provider() {
     assert_eq!(body["mode"], "incremental");
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#provider-backed-compose-reads-runtime-backed
 #[tokio::test]
 async fn sender_address_route_uses_runtime_read() {
@@ -477,7 +477,7 @@ async fn sender_address_route_uses_runtime_read() {
     assert_eq!(body[0]["email"], "alice@example.com");
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#account-mutations-runtime-backed
 #[tokio::test]
 async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
@@ -555,7 +555,7 @@ async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
     assert_eq!(reload_body["ok"], true);
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#account-logo-metadata-runtime-backed
 #[test]
 fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
@@ -582,7 +582,7 @@ fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
     }
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 #[test]
 fn app_state_does_not_expose_legacy_runtime_parts_to_routes() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src");
@@ -603,7 +603,7 @@ fn app_state_does_not_expose_legacy_runtime_parts_to_routes() {
     }
 }
 
-// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/eph/RFC-L2-architecture-cleanup#d20
 // spec: docs/backend/L3#message-mutations-runtime-backed
 #[test]
 fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
