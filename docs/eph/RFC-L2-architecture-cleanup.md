@@ -640,6 +640,35 @@ domain-model) and exactly `ConfigRepository`/`ConfigSnapshot`/`ConfigDiff` +
 `read_app_toml()` leaks a voldemort type to api (D25); `DaemonRuntimeTuning`
 + 5 sub-structs are dead (D26).
 
+### 6.9 `AuthorityServerLink` method assignment (D33 — the M5b worklist; 2026-07-02 pre-pass)
+
+49 methods (post-M4 names, pre-M5 apply-collapse). Ruling applied over the
+draft table: **all reads are Api** — D33's "op-lifecycle" rule covers the
+lifecycle *mutations* only (`list_pending_operations` re-bucketed Api; it is a
+side-effect-free, ReadCache-mirrored query).
+
+**LINK (6):** `forward_mutation`, `forward_mutation_for`, `subscribe`,
+`subscribe_for`, `retry_operation`, `discard_operation`.
+
+**API (43):** everything else —
+- reads (21, all ReadCache-mirrored 1:1, the Api-half evidence): mail queries/
+  detail/conversation/resources, account/settings/catalog/compose reads,
+  `replay_events` (has a real prod consumer here, unlike RuntimeCore's — keep),
+  `get_draft_content` (Api-shaped; its lazy-fetch side effect rides the
+  existing down-channel, not a new entry), `list_pending_operations`,
+  `rev_log_snapshot`, `account_count`;
+- message commands (5) — fold into `apply(op: MailOperation) -> CommandAck`
+  (D34) during the split;
+- compose-outbox creation (`send_message`, `save_draft`, `delete_draft`),
+  catalog/settings/smart-mailbox/account ops, `sync_account`, `reload_config`.
+
+**D35b verdict (recorded per D35):** the two seams' `forward_mutation`
+signatures DIFFER-BECAUSE-CALLER-ARITY — `RuntimeLink` threads per-call
+`RuntimeCaller` (one runtime multiplexes many client sessions);
+`AuthorityServerLink` scopes identity per-connection (`*_for` variants for
+fan-in). A shared supertrait would force one shape onto both — contortion.
+**Same-name convention stands; no supertrait.**
+
 ## 7. Drain map (Phase 3 worklist)
 
 Revised specs land at the same relative paths the stale tree mirrors
