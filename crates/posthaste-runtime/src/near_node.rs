@@ -12,7 +12,7 @@
 //!
 //! - [`apply_outbox_overlay`] — folds the outbox over a recomputed mail-list view
 //!   using the **shared** convergence kernel and per-entity optimism read
-//!   (`posthaste-link-replica`'s `project_optimistic`), the same fold the
+//!   (`posthaste-replica-projector`'s `project_optimistic`), the same fold the
 //!   browser client's entity store runs as WASM (assertion `one-replica`). The
 //!   served rows are the base; the outbox is the pending set; the projection is
 //!   the optimistic result.
@@ -22,14 +22,14 @@
 use std::sync::{Mutex, MutexGuard};
 
 use posthaste_authority_server_link::BaseUpdate;
-use posthaste_link_core::{MessageAssertion, MessageReplica, MutationId, PendingMessageMutation};
-use posthaste_link_replica::{fold_state_from_projection, project_optimistic};
+use posthaste_replica_core::{MessageAssertion, MessageReplica, MutationId, PendingMessageMutation};
+use posthaste_replica_projector::{fold_state_from_projection, project_optimistic};
 use posthaste_contract_core::{MailListViewState, MutationRequest};
 use serde_json::Value;
 
 /// The runtime's outbox toward the authority server: forwarded-but-unconfirmed message
 /// mutations, ordered, idempotent on mutation id. Composes the shared
-/// [`MessageReplica`] — link-core's `OptimisticReplica` kernel, the same
+/// [`MessageReplica`] — replica-core's `OptimisticReplica` kernel, the same
 /// accept-pending / fold-on-read / retire-on-absorption mechanism the client's
 /// `EntityStore` mounts (`one-replica-both-seams`, RFC D34/D35a) — so retirement
 /// is **absorption-gated** for the remote seam, consistent with the client tier
@@ -314,9 +314,9 @@ mod tests {
     #[test]
     fn the_composed_engine_is_the_shared_optimistic_replica_seam() {
         // Compile-time proof of composition (RFC D35a/D36): the outbox's engine
-        // is link-core's `OptimisticReplica` kernel — the same seam the client
+        // is replica-core's `OptimisticReplica` kernel — the same seam the client
         // `EntityStore` mounts — not a runtime-grown sibling.
-        use posthaste_link_core::{MessageConvergence, OptimisticReplica};
+        use posthaste_replica_core::{MessageConvergence, OptimisticReplica};
         fn assert_kernel<R: OptimisticReplica<MessageConvergence>>() {}
         assert_kernel::<MessageReplica>();
     }
@@ -378,7 +378,7 @@ mod tests {
         // retired by absorption.
         let retired = outbox.apply_base(
             "m1",
-            &BaseUpdate::Present(posthaste_link_core::MessageFoldState {
+            &BaseUpdate::Present(posthaste_replica_core::MessageFoldState {
                 keywords: vec!["$flagged".into()],
                 mailbox_ids: vec!["inbox".into()],
             }),
@@ -403,7 +403,7 @@ mod tests {
         outbox.settle_receipt(&MutationId("op1".into()), true);
         let retired = outbox.apply_base(
             "m1",
-            &BaseUpdate::Present(posthaste_link_core::MessageFoldState {
+            &BaseUpdate::Present(posthaste_replica_core::MessageFoldState {
                 keywords: vec![],
                 mailbox_ids: vec!["inbox".into()],
             }),

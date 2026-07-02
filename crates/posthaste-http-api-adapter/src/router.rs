@@ -83,35 +83,35 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/messages/search", get(api::search_messages))
         .route(
             "/runtime/sessions",
-            post(api::runtime_stream::open_runtime_session),
+            post(api::runtime_stream::open_runtime_link),
         )
         .route(
             "/runtime/sessions/{session_id}",
-            axum::routing::delete(api::runtime_stream::close_runtime_session),
+            axum::routing::delete(api::runtime_stream::close_runtime_link),
         )
         .route(
             "/runtime/sessions/{session_id}/stream",
-            get(api::runtime_stream::stream_runtime_session),
+            get(api::runtime_stream::stream_runtime_link),
         )
         .route(
             "/runtime/sessions/{session_id}/views",
-            post(api::runtime_stream::open_runtime_session_view),
+            post(api::runtime_stream::open_runtime_link_view),
         )
         .route(
             "/runtime/sessions/{session_id}/views/{view_id}",
-            axum::routing::delete(api::runtime_stream::close_runtime_session_view),
+            axum::routing::delete(api::runtime_stream::close_runtime_link_view),
         )
         .route(
             "/runtime/sessions/{session_id}/views/{view_id}/extend",
-            post(api::runtime_stream::extend_runtime_session_view),
+            post(api::runtime_stream::extend_runtime_link_view),
         )
         .route(
             "/runtime/sessions/{session_id}/mutations",
-            post(api::runtime_stream::run_runtime_session_mutation),
+            post(api::runtime_stream::run_runtime_link_mutation),
         )
         .route(
             "/runtime/sessions/{session_id}/mutations/{client_mutation_id}",
-            get(api::runtime_stream::runtime_session_mutation_settlement),
+            get(api::runtime_stream::runtime_link_mutation_settlement),
         )
         .route("/views", post(api::open_view))
         .route("/views/{view_id}/stream", get(api::stream_view))

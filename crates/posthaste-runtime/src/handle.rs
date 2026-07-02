@@ -23,7 +23,7 @@ use posthaste_contract_core::{
     MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
     MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller,
     RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes,
-    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, RuntimeStatus, ViewDescriptor, ViewId,
+    RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, RuntimeStatus, ViewDescriptor, ViewId,
     ViewRevision,
 };
 use posthaste_domain_model::{
@@ -33,7 +33,7 @@ use posthaste_domain_model::{
     SmartMailboxSummary, SyncMode, TagSummary,
 };
 use posthaste_authority_server_link::AuthorityServerLinkHandle;
-use posthaste_link_core::{MutationId, PendingMessageMutation};
+use posthaste_replica_core::{MutationId, PendingMessageMutation};
 use posthaste_runtime_api::{
     RuntimeAccountApi, RuntimeMailReadApi, RuntimeMailWriteApi, RuntimeSettingsApi,
 };
@@ -41,11 +41,11 @@ use tokio::sync::broadcast;
 
 use crate::near_node::{named_message_assertion, RuntimeAuthorityServerOutbox};
 use crate::read::ReadCache;
-use crate::far_end::sessions::{MutationAcceptance, SessionRegistry};
+use crate::far_end::links::{MutationAcceptance, LinkRegistry};
 use crate::far_end::view_registry::ViewRegistry;
 
 /// The shared runtime core behind the cloneable handle: the authority server link, the
-/// outbox, the read cache, the event bus, and the view/session registries.
+/// outbox, the read cache, the event bus, and the view/link registries.
 pub(crate) struct RuntimeCoreState {
     // Neither the service/store nor the authority server far node is held here: every
     // authority server operation now routes through the link — `authority_server_link` for the
@@ -66,7 +66,7 @@ pub(crate) struct RuntimeCoreState {
     // yet, so it routes to the local authority server's mutation service. Present only in
     // a `authority_server`-linked build; a lean near node has no such service.
     pub(crate) views: Arc<ViewRegistry>,
-    pub(crate) sessions: Arc<SessionRegistry>,
+    pub(crate) links: Arc<LinkRegistry>,
     pub(crate) startup_status: RuntimeStatus,
     pub(crate) stopped: Arc<AtomicBool>,
 }
@@ -88,8 +88,8 @@ pub struct RuntimeHandle {
 /// unbounded outbox leak. Disarmed on the normal settle paths so it no-ops when
 /// the dispatch completes.
 struct MutationCancelGuard {
-    sessions: Arc<SessionRegistry>,
-    session_id: RuntimeSessionId,
+    links: Arc<LinkRegistry>,
+    link_id: RuntimeLinkId,
     mutation_id: RuntimeMutationId,
     armed: bool,
 }
@@ -97,9 +97,9 @@ struct MutationCancelGuard {
 impl Drop for MutationCancelGuard {
     fn drop(&mut self) {
         if self.armed {
-            self.sessions
+            self.links
                 .settle_mutation(
-                    &self.session_id,
+                    &self.link_id,
                     &self.mutation_id,
                     MutationSettlementState::Failed,
                     Some(
@@ -153,14 +153,14 @@ impl RuntimeHandle {
     ) -> Result<(), RuntimeError> {
         if account_scope.is_some_and(|scope| !scope.iter().any(|id| id == account_id)) {
             return Err(RuntimeError::unauthorized(
-                "mutation source is outside the runtime session account scope",
+                "mutation source is outside the runtime link account scope",
             ));
         }
         Ok(())
     }
 
-    /// Accept a named message mutation onto the session (idempotency), forward it
-    /// up the authority server link, and settle the session stream from the authority server's
+    /// Accept a named message mutation onto the link (idempotency), forward it
+    /// up the authority server link, and settle the link stream from the authority server's
     /// receipt. The `forward` future is the link's up-channel
     /// (`AuthorityServerLinkHandle::forward_mutation`); its receipt carries the command's
     /// events as `output` and the authority server's confirmation id. Scope is the
@@ -177,10 +177,10 @@ impl RuntimeHandle {
     where
         Fut: std::future::Future<Output = Result<MutationReceipt, RuntimeError>>,
     {
-        let session_id = request.session_id.clone().ok_or_else(|| {
-            RuntimeError::invalid_mutation("runtime mutation requires a session id")
+        let link_id = request.link_id.clone().ok_or_else(|| {
+            RuntimeError::invalid_mutation("runtime mutation requires a link id")
         })?;
-        let mutation_id = match self.core.sessions.accept_mutation(caller, request)? {
+        let mutation_id = match self.core.links.accept_mutation(caller, request)? {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
@@ -189,8 +189,8 @@ impl RuntimeHandle {
         // runs, and the guard's Drop settles `Failed` so the mutation doesn't
         // leak `Accepted` forever. Disarmed on each normal settle path.
         let mut guard = MutationCancelGuard {
-            sessions: self.core.sessions.clone(),
-            session_id: session_id.clone(),
+            links: self.core.links.clone(),
+            link_id: link_id.clone(),
             mutation_id: mutation_id.clone(),
             armed: true,
         };
@@ -199,9 +199,9 @@ impl RuntimeHandle {
                 guard.armed = false;
                 // The authority server already serialized the command's events as the
                 // receipt output (state-before-event: the effect is applied
-                // before the receipt returns); settle the session with it.
-                self.core.sessions.settle_mutation(
-                    &session_id,
+                // before the receipt returns); settle the link with it.
+                self.core.links.settle_mutation(
+                    &link_id,
                     &mutation_id,
                     MutationSettlementState::Confirmed,
                     None,
@@ -211,8 +211,8 @@ impl RuntimeHandle {
             Err(error) => {
                 guard.armed = false;
                 let envelope = error.envelope().clone();
-                self.core.sessions.settle_mutation(
-                    &session_id,
+                self.core.links.settle_mutation(
+                    &link_id,
                     &mutation_id,
                     MutationSettlementState::Failed,
                     Some(envelope),
@@ -272,7 +272,7 @@ impl RuntimeHandle {
     /// Route a single named message mutation through the shared accept → forward
     /// → settle flow, folding its optimistic assertion into the outbox, and — for
     /// a diff-eligible user mutation — record the invertible change-diff onto the
-    /// session's undo history once the authority server confirms it. `message.applyDiff`
+    /// link's undo history once the authority server confirms it. `message.applyDiff`
     /// (undo/redo) goes through [`run_apply_diff`] instead, which wraps this flow
     /// with history navigation.
     ///
@@ -280,13 +280,13 @@ impl RuntimeHandle {
     async fn dispatch_named_mutation(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        let session_scope = self
+        let link_scope = self
             .core
-            .sessions
-            .session_scope(&session_id, caller.account_scope.as_deref())?;
+            .links
+            .link_scope(&link_id, caller.account_scope.as_deref())?;
         // Phase 2: `revCursor` is a control operation (not a message mutation) —
         // it carries no message target + has no outbox optimism. Route it
         // directly to the authority server (which validates + applies the cursor).
@@ -296,7 +296,7 @@ impl RuntimeHandle {
         if let MailOperation::RevCursor(args) = &request.operation {
             let account_id = args.account_id.clone();
             return self
-                .dispatch_rev_cursor(caller, session_scope.as_deref(), account_id, request)
+                .dispatch_rev_cursor(caller, link_scope.as_deref(), account_id, request)
                 .await;
         }
         // Runtime (near-node) concern: scope enforcement per mutation. The
@@ -307,7 +307,7 @@ impl RuntimeHandle {
         // or redo is an ordinary `message.applyDiff` operation that flows
         // through this same path.
         let source_id = request.operation.account_id().to_string();
-        Self::ensure_account_in_scope(&source_id, session_scope.as_deref())?;
+        Self::ensure_account_in_scope(&source_id, link_scope.as_deref())?;
         // Accept the mutation into the runtime's outbox toward the authority server so
         // recomputed views fold it optimistically while it is in flight. It is
         // settled from the receipt below: co-located it retires on receipt (the
@@ -353,11 +353,11 @@ impl RuntimeHandle {
     async fn dispatch_rev_cursor(
         &self,
         caller: RuntimeCaller,
-        session_scope: Option<&[String]>,
+        link_scope: Option<&[String]>,
         account_id: String,
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        Self::ensure_account_in_scope(&account_id, session_scope)?;
+        Self::ensure_account_in_scope(&account_id, link_scope)?;
         let forward = self.core.authority_server_link.forward_mutation(request.clone());
         self.run_message_mutation(caller, &request, forward).await
     }
@@ -813,69 +813,69 @@ impl RuntimeMailWriteApi for RuntimeHandle {
 
 #[async_trait]
 impl RuntimeLink for RuntimeHandle {
-    async fn open_session(&self, caller: RuntimeCaller) -> Result<RuntimeSession, RuntimeError> {
+    async fn open_link(&self, caller: RuntimeCaller) -> Result<RuntimeLinkConnection, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.sessions.open_session(caller)
+        self.core.links.open_link(caller)
     }
 
-    async fn close_session(
+    async fn close_link(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.sessions.close_session(caller, session_id)
+        self.core.links.close_link(caller, link_id)
     }
 
     async fn subscribe_runtime_frames(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
-        after_seq: Option<RuntimeSessionSeq>,
+        link_id: RuntimeLinkId,
+        after_seq: Option<RuntimeLinkSeq>,
     ) -> Result<RuntimeFrameSubscription, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .sessions
-            .subscribe_frames(caller, session_id, after_seq)
+            .links
+            .subscribe_frames(caller, link_id, after_seq)
             .await
     }
 
-    async fn open_session_view(
+    async fn open_link_view(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         descriptor: ViewDescriptor,
     ) -> Result<posthaste_contract_core::ViewSnapshot, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .sessions
-            .open_view(caller, session_id, descriptor)
+            .links
+            .open_view(caller, link_id, descriptor)
             .await
     }
 
-    async fn close_session_view(
+    async fn close_link_view(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         view_id: ViewId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.sessions.close_view(caller, session_id, view_id)
+        self.core.links.close_view(caller, link_id, view_id)
     }
 
-    /// Grow an open windowed session view by `count` rows, returning the
+    /// Grow an open windowed link view by `count` rows, returning the
     /// extended snapshot (also broadcast as a `ViewReplace` frame).
-    async fn extend_session_view(
+    async fn extend_link_view(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         view_id: ViewId,
         count: usize,
     ) -> Result<posthaste_contract_core::ViewSnapshot, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .sessions
-            .extend_view(caller, session_id, view_id, count)
+            .links
+            .extend_view(caller, link_id, view_id, count)
             .await
     }
 
@@ -885,8 +885,8 @@ impl RuntimeLink for RuntimeHandle {
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
         self.ensure_runtime_active()?;
-        let session_id = request.session_id.clone().ok_or_else(|| {
-            RuntimeError::invalid_mutation("runtime mutation requires a session id")
+        let link_id = request.link_id.clone().ok_or_else(|| {
+            RuntimeError::invalid_mutation("runtime mutation requires a link id")
         })?;
         // Undo/redo history is client-owned: an undo or redo arrives as an
         // ordinary `message.applyDiff` mutation and flows through the same
@@ -894,20 +894,20 @@ impl RuntimeLink for RuntimeHandle {
         // navigate.
         //
         // @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-        self.dispatch_named_mutation(caller, session_id, request)
+        self.dispatch_named_mutation(caller, link_id, request)
             .await
     }
 
     async fn mutation_settlement(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         client_mutation_id: ClientMutationId,
     ) -> Result<Option<MutationReceipt>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .sessions
-            .mutation_settlement(caller, &session_id, &client_mutation_id)
+            .links
+            .mutation_settlement(caller, &link_id, &client_mutation_id)
     }
 
     async fn open_view(
@@ -969,7 +969,7 @@ mod outbox_lifecycle_tests {
     use posthaste_authority_server_link::AuthorityServerApi;
 
     // A never-invoked authority-server Api half: the outbox-lifecycle paths
-    // under test touch only the session registry, never the authority server,
+    // under test touch only the link registry, never the authority server,
     // so the stub's methods are inert. (Only the reads the view registry may
     // touch get bodies; the rest inherit the erroring defaults.)
     struct NoopAuthorityServerLink;
@@ -990,35 +990,35 @@ mod outbox_lifecycle_tests {
         }
     }
 
-    fn test_session_registry() -> Arc<SessionRegistry> {
+    fn test_link_registry() -> Arc<LinkRegistry> {
         let event_sender = broadcast::channel(16).0;
         let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(false));
         let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopAuthorityServerLink)));
         let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
-        Arc::new(SessionRegistry::new(views, event_sender))
+        Arc::new(LinkRegistry::new(views, event_sender))
     }
 
     /// The tests' state probe over the production settlement query
     /// (`mutation_settlement`, D44b): receipt → bare settlement state.
     fn mutation_state(
-        sessions: &Arc<SessionRegistry>,
-        session_id: &RuntimeSessionId,
+        links: &Arc<LinkRegistry>,
+        link_id: &RuntimeLinkId,
         client_mutation_id: &ClientMutationId,
     ) -> Option<MutationSettlementState> {
-        sessions
-            .mutation_settlement(RuntimeCaller::test(), session_id, client_mutation_id)
+        links
+            .mutation_settlement(RuntimeCaller::test(), link_id, client_mutation_id)
             .expect("settlement query succeeds")
             .map(|receipt| receipt.state)
     }
 
     fn accept(
-        sessions: &Arc<SessionRegistry>,
+        links: &Arc<LinkRegistry>,
         caller: &RuntimeCaller,
-        session_id: &RuntimeSessionId,
+        link_id: &RuntimeLinkId,
         client_mutation_id: &ClientMutationId,
     ) -> RuntimeMutationId {
         let request: MutationRequest = serde_json::from_value(serde_json::json!({
-            "sessionId": session_id.as_str(),
+            "linkId": link_id.as_str(),
             "name": "message.setKeywords",
             "args": {
                 "sourceId": "outbox-acct",
@@ -1028,7 +1028,7 @@ mod outbox_lifecycle_tests {
             "clientMutationId": client_mutation_id.as_str(),
         }))
         .expect("request builds from the flat wire shape");
-        match sessions.accept_mutation(caller.clone(), &request).unwrap() {
+        match links.accept_mutation(caller.clone(), &request).unwrap() {
             MutationAcceptance::New { mutation_id } => mutation_id,
             MutationAcceptance::Existing(_) => panic!("expected a new mutation"),
         }
@@ -1042,17 +1042,17 @@ mod outbox_lifecycle_tests {
     // alongside (4 lines, documented at the call site).
     #[tokio::test]
     async fn cancelled_dispatch_guard_settles_failed_not_accepted() {
-        let sessions = test_session_registry();
+        let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let session = sessions
-            .open_session(caller.clone())
-            .expect("session opens");
-        let session_id = session.session_id;
+        let link = links
+            .open_link(caller.clone())
+            .expect("link opens");
+        let link_id = link.link_id;
         let client_mutation_id = ClientMutationId::new("cancel-cmid");
-        let mutation_id = accept(&sessions, &caller, &session_id, &client_mutation_id);
+        let mutation_id = accept(&links, &caller, &link_id, &client_mutation_id);
 
         assert_eq!(
-            mutation_state(&sessions, &session_id, &client_mutation_id),
+            mutation_state(&links, &link_id, &client_mutation_id),
             Some(MutationSettlementState::Accepted),
             "mutation is Accepted once dispatched, before any verdict"
         );
@@ -1061,14 +1061,14 @@ mod outbox_lifecycle_tests {
         // mid-forward): the armed guard's Drop settles `Failed`.
         {
             let _guard = MutationCancelGuard {
-                sessions: sessions.clone(),
-                session_id: session_id.clone(),
+                links: links.clone(),
+                link_id: link_id.clone(),
                 mutation_id,
                 armed: true,
             };
         }
         assert_eq!(
-            mutation_state(&sessions, &session_id, &client_mutation_id),
+            mutation_state(&links, &link_id, &client_mutation_id),
             Some(MutationSettlementState::Failed),
             "cancelled dispatch must settle Failed, not leak Accepted"
         );
@@ -1081,17 +1081,17 @@ mod outbox_lifecycle_tests {
     // D47's fix, landing in the shared dedup sub-store.
     #[tokio::test]
     async fn retryable_failure_clears_the_ledger_so_a_retry_re_executes() {
-        let sessions = test_session_registry();
+        let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let session = sessions
-            .open_session(caller.clone())
-            .expect("session opens");
-        let session_id = session.session_id;
+        let link = links
+            .open_link(caller.clone())
+            .expect("link opens");
+        let link_id = link.link_id;
         let cmid = ClientMutationId::new("retry-cmid");
-        let mid = accept(&sessions, &caller, &session_id, &cmid);
-        sessions
+        let mid = accept(&links, &caller, &link_id, &cmid);
+        links
             .settle_mutation(
-                &session_id,
+                &link_id,
                 &mid,
                 MutationSettlementState::Failed,
                 Some(
@@ -1106,12 +1106,12 @@ mod outbox_lifecycle_tests {
             )
             .unwrap();
         assert!(
-            mutation_state(&sessions, &session_id, &cmid).is_none(),
+            mutation_state(&links, &link_id, &cmid).is_none(),
             "a transient failure clears the ledger entry"
         );
         // `accept` asserts the retry re-accepts as New (re-executes); it would
         // panic if the retry deduped into the cleared failure.
-        let _ = accept(&sessions, &caller, &session_id, &cmid);
+        let _ = accept(&links, &caller, &link_id, &cmid);
     }
 
     // Outbox C / D47 (permanent rejection): a non-retryable `Failed` verdict is
@@ -1120,18 +1120,18 @@ mod outbox_lifecycle_tests {
     // disconnect-stranded client can always revert its optimistic row.
     #[tokio::test]
     async fn rejected_verdict_survives_the_confirmed_eviction_window() {
-        let sessions = test_session_registry();
+        let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let session = sessions
-            .open_session(caller.clone())
-            .expect("session opens");
-        let session_id = session.session_id;
+        let link = links
+            .open_link(caller.clone())
+            .expect("link opens");
+        let link_id = link.link_id;
 
         let rejected_cmid = ClientMutationId::new("rej-1");
-        let rejected_mid = accept(&sessions, &caller, &session_id, &rejected_cmid);
-        sessions
+        let rejected_mid = accept(&links, &caller, &link_id, &rejected_cmid);
+        links
             .settle_mutation(
-                &session_id,
+                &link_id,
                 &rejected_mid,
                 MutationSettlementState::Failed,
                 None,
@@ -1143,10 +1143,10 @@ mod outbox_lifecycle_tests {
         // (MAX_LATEST_MUTATIONS = 100).
         for i in 0..105 {
             let cmid = ClientMutationId::new(format!("cf-{i}"));
-            let mid = accept(&sessions, &caller, &session_id, &cmid);
-            sessions
+            let mid = accept(&links, &caller, &link_id, &cmid);
+            links
                 .settle_mutation(
-                    &session_id,
+                    &link_id,
                     &mid,
                     MutationSettlementState::Confirmed,
                     None,
@@ -1156,34 +1156,34 @@ mod outbox_lifecycle_tests {
         }
 
         assert_eq!(
-            mutation_state(&sessions, &session_id, &rejected_cmid),
+            mutation_state(&links, &link_id, &rejected_cmid),
             Some(MutationSettlementState::Failed),
             "Rejected verdict must be retained across the Confirmed eviction window"
         );
     }
 
     // V14 follow-up knob (runtime assembly): this seam's Rejected ledger is
-    // UNBOUNDED — a client session's lifetime bounds it naturally, and a
+    // UNBOUNDED — a client link's lifetime bounds it naturally, and a
     // stranded client must always be able to re-observe every rejection verdict
     // it never saw. (The AS assembly bounds its window; see
     // `runtime_registry::tests::the_rejected_window_is_bounded_at_this_seam`.)
     #[tokio::test]
     async fn the_rejected_ledger_is_unbounded_at_the_client_seam() {
-        let sessions = test_session_registry();
+        let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let session = sessions
-            .open_session(caller.clone())
-            .expect("session opens");
-        let session_id = session.session_id;
+        let link = links
+            .open_link(caller.clone())
+            .expect("link opens");
+        let link_id = link.link_id;
 
         // Bury the first rejection under well over any bounded window's cap
         // (the AS seam evicts at 100).
         for i in 0..120 {
             let cmid = ClientMutationId::new(format!("rej-{i}"));
-            let mid = accept(&sessions, &caller, &session_id, &cmid);
-            sessions
+            let mid = accept(&links, &caller, &link_id, &cmid);
+            links
                 .settle_mutation(
-                    &session_id,
+                    &link_id,
                     &mid,
                     MutationSettlementState::Failed,
                     None,
@@ -1193,9 +1193,9 @@ mod outbox_lifecycle_tests {
         }
 
         assert_eq!(
-            mutation_state(&sessions, &session_id, &ClientMutationId::new("rej-0")),
+            mutation_state(&links, &link_id, &ClientMutationId::new("rej-0")),
             Some(MutationSettlementState::Failed),
-            "the client seam keeps every Rejected verdict for the session's life"
+            "the client seam keeps every Rejected verdict for the link's life"
         );
     }
 }

@@ -11,8 +11,8 @@ import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 // the served rows against that base instead of clobbering with the served list.
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 const present =
-  existsSync(join(wasmDir, 'posthaste_link_wasm.js')) &&
-  existsSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm'))
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm.js')) &&
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm'))
 
 function projection(mailboxIds: string[], version: number) {
   return {
@@ -39,13 +39,13 @@ const row = [
 describe.skipIf(!present)('mailbox-move flicker (real WASM)', () => {
   it('a stale re-serve does not re-add a moved-out row', async () => {
     const mod = (await import(
-      join(wasmDir, 'posthaste_link_wasm.js')
+      join(wasmDir, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
     }
     mod.initSync({
-      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
     })
     const h = new mod.EntityStoreHandle()
     h.registerViewJson(

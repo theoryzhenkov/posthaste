@@ -1,12 +1,12 @@
 /**
- * The renderer's session-scoped facade over the runtime adapter.
+ * The renderer's link-scoped facade over the runtime adapter.
  *
  * A THIN binding since M9b2 (D41): the transport policy that used to live here
  * — the reconnect timer, the `afterSeq` cursor threading, the retry loop — is
  * gone. The shared `LinkNearEnd` engine (wasm, behind the adapter's
- * session/stream/mutation methods) owns session open, reconnects, resume, and
+ * link/stream/mutation methods) owns link open, reconnects, resume, and
  * retries; this module only multiplexes renderer consumers over one frame
- * subscription and reference-counts the session (open views + subscribers)
+ * subscription and reference-counts the link (open views + subscribers)
  * so it closes when nothing uses it.
  */
 import { LOG_EVENTS, syncLogger } from '../logger'
@@ -19,15 +19,15 @@ import type {
   RuntimeOpenMessageListViewResult,
   RuntimeOpenViewResult,
   RuntimeRunMutationRequest,
-  RuntimeSession,
+  RuntimeLinkConnection,
   RuntimeUnsubscribe,
 } from './types'
 
 type FrameHandlers = RuntimeFrameHandlers
 
-type RuntimeSessionMutationRequest = Omit<
+type RuntimeLinkMutationRequest = Omit<
   RuntimeRunMutationRequest,
-  'sessionId' | 'clientMutationId'
+  'linkId' | 'clientMutationId'
 > & {
   clientMutationId?: string | null
 }
@@ -43,9 +43,9 @@ function randomRuntimeId(prefix: string): string {
 const frameHandlers = new Set<FrameHandlers>()
 const openViewIds = new Set<string>()
 
-let sessionPromise: Promise<RuntimeSession> | undefined
-let activeSession: RuntimeSession | undefined
-let activeSessionSourceId: string | null | undefined
+let linkPromise: Promise<RuntimeLinkConnection> | undefined
+let activeLink: RuntimeLinkConnection | undefined
+let activeLinkSourceId: string | null | undefined
 let unsubscribeStream: RuntimeUnsubscribe | undefined
 
 function notifyPermanentError(error: unknown): void {
@@ -54,31 +54,31 @@ function notifyPermanentError(error: unknown): void {
   }
 }
 
-function ensureSession(sourceId?: string | null): Promise<RuntimeSession> {
-  if (sessionPromise) {
-    return sessionPromise
+function ensureLink(sourceId?: string | null): Promise<RuntimeLinkConnection> {
+  if (linkPromise) {
+    return linkPromise
   }
-  activeSessionSourceId = sourceId
-  sessionPromise = runtimeStream
+  activeLinkSourceId = sourceId
+  linkPromise = runtimeStream
     // Opt into incremental mail-list deltas (replication client-link). Both client read
     // paths apply them: the default renderer reconciles directly, and the
     // replica adapter folds the delta into its served base.
-    .openSession({
+    .openLink({
       ...(sourceId === undefined ? {} : { sourceId }),
       viewDelta: true,
     })
-    .then((session) => {
-      activeSession = session
-      return session
+    .then((link) => {
+      activeLink = link
+      return link
     })
     .catch((error) => {
-      sessionPromise = undefined
-      activeSession = undefined
-      activeSessionSourceId = undefined
+      linkPromise = undefined
+      activeLink = undefined
+      activeLinkSourceId = undefined
       notifyPermanentError(error)
       throw error
     })
-  return sessionPromise
+  return linkPromise
 }
 
 /**
@@ -90,9 +90,9 @@ function ensureStream(): void {
   if (unsubscribeStream) {
     return
   }
-  void ensureSession(activeSessionSourceId).then((session) => {
+  void ensureLink(activeLinkSourceId).then((link) => {
     if (frameHandlers.size === 0) {
-      maybeCloseSession()
+      maybeCloseLink()
       return
     }
     if (unsubscribeStream) {
@@ -100,19 +100,19 @@ function ensureStream(): void {
     }
     unsubscribeStream = runtimeStream.subscribe(
       {
-        sessionId: session.sessionId,
-        ...(activeSessionSourceId === undefined
+        linkId: link.linkId,
+        ...(activeLinkSourceId === undefined
           ? {}
-          : { sourceId: activeSessionSourceId }),
+          : { sourceId: activeLinkSourceId }),
       },
       {
         onFrame(frame) {
           syncLogger.debug(
             {
               event: LOG_EVENTS.runtimeFrameDispatched,
-              sessionId: session.sessionId,
+              linkId: link.linkId,
               type: frame.type,
-              sessionSeq: frame.sessionSeq,
+              linkSeq: frame.linkSeq,
               ...(frame.type === 'viewReplace' || frame.type === 'viewSnapshot'
                 ? { viewId: frame.viewId, revision: frame.revision }
                 : {}),
@@ -151,18 +151,18 @@ function ensureStream(): void {
   })
 }
 
-function maybeCloseSession(): void {
-  if (frameHandlers.size > 0 || openViewIds.size > 0 || !activeSession) {
+function maybeCloseLink(): void {
+  if (frameHandlers.size > 0 || openViewIds.size > 0 || !activeLink) {
     return
   }
-  const session = activeSession
-  const sourceId = activeSessionSourceId
+  const link = activeLink
+  const sourceId = activeLinkSourceId
   unsubscribeStream?.()
   unsubscribeStream = undefined
-  sessionPromise = undefined
-  activeSession = undefined
-  activeSessionSourceId = undefined
-  void runtimeStream.closeSession(session.sessionId, sourceId).catch(() => {})
+  linkPromise = undefined
+  activeLink = undefined
+  activeLinkSourceId = undefined
+  void runtimeStream.closeLink(link.linkId, sourceId).catch(() => {})
 }
 
 function sourceIdForView(request: RuntimeMessagePageRequest): string | null {
@@ -170,28 +170,28 @@ function sourceIdForView(request: RuntimeMessagePageRequest): string | null {
 }
 
 function activeTransportSourceId(): string | null | undefined {
-  return activeSessionSourceId === undefined ? undefined : activeSessionSourceId
+  return activeLinkSourceId === undefined ? undefined : activeLinkSourceId
 }
 
-export const runtimeSessionClient = {
+export const runtimeLinkClient = {
   subscribe(
     handlers: FrameHandlers,
     options?: { sourceId?: string | null },
   ): RuntimeUnsubscribe {
     frameHandlers.add(handlers)
-    void ensureSession(options?.sourceId).then(() => ensureStream())
+    void ensureLink(options?.sourceId).then(() => ensureStream())
     return () => {
       frameHandlers.delete(handlers)
-      maybeCloseSession()
+      maybeCloseLink()
     }
   },
 
   async openMessageListView(
     request: RuntimeMessagePageRequest,
   ): Promise<RuntimeOpenMessageListViewResult> {
-    const session = await ensureSession(sourceIdForView(request))
+    const link = await ensureLink(sourceIdForView(request))
     const result = await runtimeStream.openMessageListView({
-      sessionId: session.sessionId,
+      linkId: link.linkId,
       view: request,
       sourceId: activeTransportSourceId(),
     })
@@ -204,9 +204,9 @@ export const runtimeSessionClient = {
     payload: unknown
     sourceId?: string | null
   }): Promise<RuntimeOpenViewResult<TData>> {
-    const session = await ensureSession(request.sourceId)
+    const link = await ensureLink(request.sourceId)
     const result = await runtimeStream.openView<TData>({
-      sessionId: session.sessionId,
+      linkId: link.linkId,
       descriptor: { family: request.family, payload: request.payload },
       sourceId: activeTransportSourceId(),
     })
@@ -218,9 +218,9 @@ export const runtimeSessionClient = {
     viewId: string,
     count: number,
   ): Promise<RuntimeOpenMessageListViewResult> {
-    const session = await ensureSession(activeSessionSourceId)
+    const link = await ensureLink(activeLinkSourceId)
     return runtimeStream.extendView({
-      sessionId: session.sessionId,
+      linkId: link.linkId,
       viewId,
       count,
       sourceId: activeTransportSourceId(),
@@ -228,15 +228,15 @@ export const runtimeSessionClient = {
   },
 
   async runMutation(
-    request: RuntimeSessionMutationRequest,
+    request: RuntimeLinkMutationRequest,
   ): Promise<RuntimeMutationReceipt> {
-    const session = await ensureSession(request.sourceId)
+    const link = await ensureLink(request.sourceId)
     const clientMutationId =
       request.clientMutationId ?? randomRuntimeId('client_mutation')
     syncLogger.debug(
       {
         event: LOG_EVENTS.runtimeMutationSent,
-        sessionId: session.sessionId,
+        linkId: link.linkId,
         name: request.name,
         clientMutationId,
         sourceId: activeTransportSourceId(),
@@ -244,7 +244,7 @@ export const runtimeSessionClient = {
       'runtime mutation sent',
     )
     return runtimeStream.runMutation({
-      sessionId: session.sessionId,
+      linkId: link.linkId,
       name: request.name,
       args: request.args,
       clientMutationId,
@@ -254,26 +254,24 @@ export const runtimeSessionClient = {
   },
 
   closeView(viewId: string): void {
-    if (!activeSession || !openViewIds.has(viewId)) {
+    if (!activeLink || !openViewIds.has(viewId)) {
       return
     }
-    const session = activeSession
-    const sourceId = activeSessionSourceId
+    const link = activeLink
+    const sourceId = activeLinkSourceId
     openViewIds.delete(viewId)
-    void runtimeStream
-      .closeView(session.sessionId, viewId, sourceId)
-      .finally(() => {
-        maybeCloseSession()
-      })
+    void runtimeStream.closeView(link.linkId, viewId, sourceId).finally(() => {
+      maybeCloseLink()
+    })
   },
 }
 
-export function resetRuntimeSessionClientForTesting(): void {
+export function resetRuntimeLinkClientForTesting(): void {
   unsubscribeStream?.()
   unsubscribeStream = undefined
-  sessionPromise = undefined
-  activeSession = undefined
-  activeSessionSourceId = undefined
+  linkPromise = undefined
+  activeLink = undefined
+  activeLinkSourceId = undefined
   frameHandlers.clear()
   openViewIds.clear()
 }

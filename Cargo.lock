@@ -3970,9 +3970,9 @@ dependencies = [
  "posthaste-domain-service",
  "posthaste-engine",
  "posthaste-imap",
- "posthaste-link-core",
  "posthaste-link-far-end",
  "posthaste-observability",
+ "posthaste-replica-core",
  "posthaste-runtime",
  "posthaste-runtime-api",
  "posthaste-store",
@@ -3995,8 +3995,8 @@ dependencies = [
  "futures-util",
  "posthaste-contract-core",
  "posthaste-domain-model",
- "posthaste-link-core",
  "posthaste-link-far-end",
+ "posthaste-replica-core",
  "serde",
  "serde_json",
  "tokio",
@@ -4033,7 +4033,26 @@ dependencies = [
  "futures-util",
  "posthaste-contract-core",
  "posthaste-domain-model",
- "posthaste-link-core",
+ "posthaste-replica-core",
+]
+
+[[package]]
+name = "posthaste-client-node-wasm"
+version = "0.1.0"
+dependencies = [
+ "futures-channel",
+ "futures-util",
+ "gloo-timers",
+ "js-sys",
+ "posthaste-contract-core",
+ "posthaste-link-near-end",
+ "posthaste-replica-core",
+ "posthaste-replica-projector",
+ "serde",
+ "serde_json",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -4052,7 +4071,7 @@ name = "posthaste-contract-core"
 version = "0.1.0"
 dependencies = [
  "posthaste-domain-model",
- "posthaste-link-core",
+ "posthaste-replica-core",
  "serde",
  "serde_json",
  "utoipa",
@@ -4101,8 +4120,8 @@ dependencies = [
  "futures-util",
  "mail-parser",
  "posthaste-domain-model",
- "posthaste-link-core",
  "posthaste-observability",
+ "posthaste-replica-core",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -4208,14 +4227,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-link-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "posthaste-link-far-end"
 version = "0.1.0"
 dependencies = [
@@ -4236,38 +4247,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-link-replica"
-version = "0.1.0"
-dependencies = [
- "posthaste-link-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "posthaste-link-wasm"
-version = "0.1.0"
-dependencies = [
- "futures-channel",
- "futures-util",
- "gloo-timers",
- "js-sys",
- "posthaste-contract-core",
- "posthaste-link-core",
- "posthaste-link-near-end",
- "posthaste-link-replica",
- "serde",
- "serde_json",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
-]
-
-[[package]]
 name = "posthaste-observability"
 version = "0.1.0"
 dependencies = [
  "tracing",
+]
+
+[[package]]
+name = "posthaste-replica-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "posthaste-replica-projector"
+version = "0.1.0"
+dependencies = [
+ "posthaste-replica-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4284,10 +4284,10 @@ dependencies = [
  "posthaste-contract-core",
  "posthaste-domain-model",
  "posthaste-domain-service",
- "posthaste-link-core",
  "posthaste-link-far-end",
  "posthaste-link-near-end",
- "posthaste-link-replica",
+ "posthaste-replica-core",
+ "posthaste-replica-projector",
  "posthaste-runtime-api",
  "reqwest 0.12.28",
  "serde",
@@ -4344,8 +4344,8 @@ dependencies = [
  "posthaste-engine",
  "posthaste-http-api-adapter",
  "posthaste-imap",
- "posthaste-link-core",
  "posthaste-observability",
+ "posthaste-replica-core",
  "posthaste-runtime",
  "posthaste-runtime-api",
  "posthaste-store",
@@ -4395,8 +4395,8 @@ dependencies = [
  "posthaste-domain-model",
  "posthaste-domain-service",
  "posthaste-imap",
- "posthaste-link-core",
- "posthaste-link-replica",
+ "posthaste-replica-core",
+ "posthaste-replica-projector",
  "posthaste-runtime",
  "posthaste-runtime-api",
  "posthaste-store",

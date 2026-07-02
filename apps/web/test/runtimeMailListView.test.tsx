@@ -15,7 +15,7 @@ import {
   createFakeRuntimeAdapter,
   type FakeRuntimeAdapter,
 } from '../src/runtime/fakeAdapter'
-import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
+import { resetRuntimeLinkClientForTesting } from '../src/runtime/linkClient'
 import type {
   RuntimeMailListViewState,
   RuntimeViewSnapshot,
@@ -136,7 +136,7 @@ function mailListHookInput(queryKey: readonly unknown[]) {
       operationId: 'op_1',
       operationKind: 'mail.list',
       operationSource: 'test',
-      sessionId: 'session_1',
+      linkId: 'session_1',
     },
     preparedSearchQuery: {
       query: undefined,
@@ -162,7 +162,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  resetRuntimeSessionClientForTesting()
+  resetRuntimeLinkClientForTesting()
   resetRuntimeAdapterForTesting()
   queryClient.clear()
 })
@@ -174,8 +174,8 @@ describe('useRuntimeMailListView', () => {
       undefined,
       { columnId: 'date', direction: 'desc' },
     )
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
-    runtimeAdapter.queueRuntimeSessionMessageListView({
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
+    runtimeAdapter.queueRuntimeLinkMessageListView({
       viewId: 'view-1',
       snapshot: mailListSnapshot(1, message),
     })
@@ -195,20 +195,18 @@ describe('useRuntimeMailListView', () => {
     // The hook also returns the rows as its view-model (the component reads this).
     expect(result.current.items).toEqual([message])
     expect(runtimeAdapter.messagePageCalls).toEqual([])
-    expect(runtimeAdapter.runtimeSessionCalls).toEqual([
+    expect(runtimeAdapter.runtimeLinkCalls).toEqual([
       { sourceId: 'primary', viewDelta: true },
     ])
-    expect(runtimeAdapter.runtimeSessionViewOpenCalls).toHaveLength(1)
-    expect(runtimeAdapter.runtimeSessionViewOpenCalls[0].sourceId).toBe(
-      'primary',
-    )
+    expect(runtimeAdapter.runtimeLinkViewOpenCalls).toHaveLength(1)
+    expect(runtimeAdapter.runtimeLinkViewOpenCalls[0].sourceId).toBe('primary')
     expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-      { request: { sessionId: 'session-1', sourceId: 'primary' } },
+      { request: { linkId: 'link-1', sourceId: 'primary' } },
     ])
 
     runtimeAdapter.emitRuntimeFrame({
       type: 'viewReplace',
-      sessionSeq: 2,
+      linkSeq: 2,
       viewId: 'view-1',
       revision: 2,
       snapshot: mailListSnapshot(2, updatedMessage),
@@ -224,13 +222,13 @@ describe('useRuntimeMailListView', () => {
 
     unmount()
     await waitFor(() =>
-      expect(runtimeAdapter.runtimeSessionViewCloseCalls).toEqual([
-        { sessionId: 'session-1', viewId: 'view-1', sourceId: 'primary' },
+      expect(runtimeAdapter.runtimeLinkViewCloseCalls).toEqual([
+        { linkId: 'link-1', viewId: 'view-1', sourceId: 'primary' },
       ]),
     )
     await waitFor(() =>
-      expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
-        { sessionId: 'session-1', sourceId: 'primary' },
+      expect(runtimeAdapter.runtimeLinkCloseCalls).toEqual([
+        { linkId: 'link-1', sourceId: 'primary' },
       ]),
     )
   })
@@ -242,8 +240,8 @@ describe('useRuntimeMailListView', () => {
       { columnId: 'date', direction: 'desc' },
     )
     const secondMessage: MessageSummary = { ...message, id: 'm2' }
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
-    runtimeAdapter.queueRuntimeSessionMessageListView({
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
+    runtimeAdapter.queueRuntimeLinkMessageListView({
       viewId: 'view-1',
       snapshot: mailListSnapshotRows(1, [message, secondMessage], false),
     })
@@ -261,7 +259,7 @@ describe('useRuntimeMailListView', () => {
     // Upsert in place: flag m1, no reorder — only the changed row is sent.
     runtimeAdapter.emitRuntimeFrame({
       type: 'viewDelta',
-      sessionSeq: 2,
+      linkSeq: 2,
       viewId: 'view-1',
       revision: 2,
       delta: {
@@ -286,7 +284,7 @@ describe('useRuntimeMailListView', () => {
     // Removal: m1 leaves the view — the new order drops it, no upserts.
     runtimeAdapter.emitRuntimeFrame({
       type: 'viewDelta',
-      sessionSeq: 3,
+      linkSeq: 3,
       viewId: 'view-1',
       revision: 3,
       delta: { order: ['primary:m2'], upserts: [] },
@@ -306,12 +304,12 @@ describe('useRuntimeMailListView', () => {
       { columnId: 'date', direction: 'desc' },
     )
     const secondMessage: MessageSummary = { ...message, id: 'm2' }
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
-    runtimeAdapter.queueRuntimeSessionMessageListView({
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
+    runtimeAdapter.queueRuntimeLinkMessageListView({
       viewId: 'view-1',
       snapshot: mailListSnapshotRows(1, [message], true),
     })
-    runtimeAdapter.queueRuntimeSessionViewExtend({
+    runtimeAdapter.queueRuntimeLinkViewExtend({
       viewId: 'view-1',
       snapshot: mailListSnapshotRows(2, [message, secondMessage], false),
     })
@@ -324,7 +322,7 @@ describe('useRuntimeMailListView', () => {
         operationId: 'op_1',
         operationKind: 'mail.list',
         operationSource: 'test',
-        sessionId: 'session_1',
+        linkId: 'session_1',
       },
       preparedSearchQuery: {
         query: undefined,
@@ -354,9 +352,9 @@ describe('useRuntimeMailListView', () => {
       }),
     )
     expect(result.current.hasMore).toBe(false)
-    expect(runtimeAdapter.runtimeSessionViewExtendCalls).toEqual([
+    expect(runtimeAdapter.runtimeLinkViewExtendCalls).toEqual([
       {
-        sessionId: 'session-1',
+        linkId: 'link-1',
         viewId: 'view-1',
         count: 100,
         sourceId: 'primary',
@@ -370,10 +368,10 @@ describe('useRuntimeMailListView', () => {
       undefined,
       { columnId: 'date', direction: 'desc' },
     )
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
     // The IndexedDB VersionError class of failure: view open rejects, so the
     // view never opens and no snapshot ever lands.
-    runtimeAdapter.queueRuntimeSessionMessageListViewError(
+    runtimeAdapter.queueRuntimeLinkMessageListViewError(
       new Error('IndexedDB VersionError'),
     )
 
@@ -389,8 +387,8 @@ describe('useRuntimeMailListView', () => {
     expect(result.current.items).toEqual([])
 
     // Retry clears the error and re-opens; a good snapshot now lands.
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-2' })
-    runtimeAdapter.queueRuntimeSessionMessageListView({
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-2' })
+    runtimeAdapter.queueRuntimeLinkMessageListView({
       viewId: 'view-1',
       snapshot: mailListSnapshot(1, message),
     })
@@ -412,8 +410,8 @@ describe('useRuntimeMailListView', () => {
       undefined,
       { columnId: 'date', direction: 'desc' },
     )
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
-    runtimeAdapter.queueRuntimeSessionMessageListView({
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
+    runtimeAdapter.queueRuntimeLinkMessageListView({
       viewId: 'view-1',
       snapshot: mailListSnapshot(1, message),
     })
@@ -433,13 +431,11 @@ describe('useRuntimeMailListView', () => {
         pageParams: [null],
       }),
     )
-    expect(runtimeAdapter.runtimeSessionCalls).toEqual([{ viewDelta: true }])
+    expect(runtimeAdapter.runtimeLinkCalls).toEqual([{ viewDelta: true }])
     expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-      { request: { sessionId: 'session-1' } },
+      { request: { linkId: 'link-1' } },
     ])
-    expect(runtimeAdapter.runtimeSessionViewOpenCalls).toHaveLength(1)
-    expect(runtimeAdapter.runtimeSessionViewOpenCalls[0].sourceId).toBe(
-      undefined,
-    )
+    expect(runtimeAdapter.runtimeLinkViewOpenCalls).toHaveLength(1)
+    expect(runtimeAdapter.runtimeLinkViewOpenCalls[0].sourceId).toBe(undefined)
   })
 })

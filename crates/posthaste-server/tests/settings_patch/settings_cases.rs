@@ -2,7 +2,11 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use posthaste_domain_model::*;
+use posthaste_domain_model::{
+    AccountId, Appearance, AppSettings, AutomationAction, AutomationBackfillJobStatus,
+    CachePolicy, GlassBloom, GlassTheme, MailboxColor, MailboxId, TagAppearance, ThemeColors,
+    ThemeMode, UiDensity,
+};
 use posthaste_http_api_adapter::api::{patch_settings, PatchSettingsRequest};
 
 use crate::support::{expect_settings_ok, source_rule, SettingsHarness};

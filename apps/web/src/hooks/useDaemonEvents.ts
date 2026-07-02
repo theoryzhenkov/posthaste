@@ -1,6 +1,6 @@
 /**
  * Runtime notification listener that receives domain-event notifications from
- * the session-scoped `RuntimeFrame` stream and dispatches them as cache
+ * the link-scoped `RuntimeFrame` stream and dispatches them as cache
  * invalidations and browser `CustomEvent`s.
  *
  * Stream resume is the near-end engine's job (M9b2): the engine owns the
@@ -20,7 +20,7 @@ import { syncLogger } from '../logger'
 import { LOG_EVENTS } from '../logEvents'
 import type { DomainEvent } from '../api/types'
 import { applyDomainEvent } from '../domainCache'
-import { runtimeSessionClient } from '../runtime/sessionClient'
+import { runtimeLinkClient } from '../runtime/linkClient'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -51,7 +51,7 @@ export function useDaemonEvents() {
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    const unsubscribe = runtimeSessionClient.subscribe({
+    const unsubscribe = runtimeLinkClient.subscribe({
       onFrame(frame) {
         if (frame.type !== 'notification') {
           return

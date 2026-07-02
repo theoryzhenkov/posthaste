@@ -17,8 +17,8 @@ posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-imap = { path = "../posthaste-imap" }
-posthaste-link-core = { path = "../posthaste-link-core" }
-posthaste-link-replica = { path = "../posthaste-link-replica" }
+posthaste-replica-core = { path = "../posthaste-replica-core" }
+posthaste-replica-projector = { path = "../posthaste-replica-projector" }
 posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 posthaste-store = { path = "../posthaste-store" }

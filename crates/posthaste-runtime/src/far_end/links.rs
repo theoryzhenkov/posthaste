@@ -11,7 +11,7 @@ use posthaste_contract_core::{
     ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MailOperation,
     MutationNotification, MutationReceipt, MutationRequest, MutationSettlementState,
     RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeMutationId,
-    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, ViewDescriptor, ViewFrame, ViewId,
+    RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, ViewDescriptor, ViewFrame, ViewId,
     ViewSnapshot,
 };
 use serde_json::Value;
@@ -21,29 +21,29 @@ use tracing::{debug, warn};
 
 use crate::far_end::view_registry::ViewRegistry;
 
-/// Capacity of the per-session frame broadcast channel. A burst (e.g. a sync
+/// Capacity of the per-link frame broadcast channel. A burst (e.g. a sync
 /// delivering many messages at once) emits one view frame per recompute; if the
 /// SSE consumer can't drain them before the channel fills, `recv` returns
 /// `Lagged` and we recover by collapsing to current state. Sized generously so
 /// ordinary bursts never lag; the collapse path remains the safety net.
-const SESSION_FRAME_CHANNEL_CAPACITY: usize = 512;
+const LINK_FRAME_CHANNEL_CAPACITY: usize = 512;
 
-pub(crate) struct SessionRegistry {
+pub(crate) struct LinkRegistry {
     views: Arc<ViewRegistry>,
     event_sender: broadcast::Sender<DomainEvent>,
-    sessions: Mutex<HashMap<RuntimeSessionId, StoredSession>>,
+    links: Mutex<HashMap<RuntimeLinkId, StoredLink>>,
     /// The shared idempotency-dedup sub-store (RFC D45/D47), keyed
-    /// `(RuntimeSessionId, ClientMutationId)` — the client↔runtime seam's
-    /// assembly of the far-end engine. Replaces the former per-session
+    /// `(RuntimeLinkId, ClientMutationId)` — the client↔runtime seam's
+    /// assembly of the far-end engine. Replaces the former per-link
     /// `latest_mutations` / `mutations_by_client_id` / `settled_mutation_ids`
-    /// hand-roll; a client "session" IS this seam's `LinkId` (D42).
-    dedup: DedupStore<RuntimeSessionId, StoredMutation>,
-    /// The shared seq mechanism (D50): the per-session monotonic frame seq counter
+    /// hand-roll; a client "link" IS this seam's `LinkId` (D42).
+    dedup: DedupStore<RuntimeLinkId, StoredMutation>,
+    /// The shared seq mechanism (D50): the per-link monotonic frame seq counter
     /// + reconnect (collapse) detection, in **collapse-always** mode — the runtime
     /// far-end's collapse re-serves whole snapshots, so a per-frame replay backlog
     /// buys nothing; the store owns the counter and the resume→collapse decision.
-    /// Replaces the former hand-rolled `StoredSession.last_seq` / `next_seq`.
-    seq: ReplayStore<RuntimeSessionId, ()>,
+    /// Replaces the former hand-rolled `StoredLink.last_seq` / `next_seq`.
+    seq: ReplayStore<RuntimeLinkId, ()>,
     next_mutation_id: AtomicU64,
     /// Test-only barrier fired inside `subscribe_frames`, exactly between the live
     /// `frames.subscribe()` and the catch-up snapshot — lets a test deterministically
@@ -51,15 +51,15 @@ pub(crate) struct SessionRegistry {
     #[cfg(test)]
     subscribe_barrier: Mutex<Option<Box<dyn FnMut() + Send>>>,
     /// Test-only barrier fired inside `accept_mutation`, exactly between the dedup
-    /// insert and the session revalidation — lets a test deterministically
-    /// interpose a `close_session` there to pin the [4] self-sweep invariant.
+    /// insert and the link revalidation — lets a test deterministically
+    /// interpose a `close_link` there to pin the [4] self-sweep invariant.
     #[cfg(test)]
     accept_barrier: Mutex<Option<Box<dyn FnMut() + Send>>>,
 }
 
-struct StoredSession {
+struct StoredLink {
     account_scope: Option<Vec<String>>,
-    /// The session opted into incremental mail-list deltas ([`RuntimeFrame::ViewDelta`])
+    /// The link opted into incremental mail-list deltas ([`RuntimeFrame::ViewDelta`])
     /// instead of whole-view replaces (L6).
     delta_capable: bool,
     frames: broadcast::Sender<RuntimeFrame>,
@@ -118,22 +118,22 @@ impl StoredMutation {
         }
     }
 
-    fn notification_frame(&self, session_seq: RuntimeSessionSeq) -> Option<RuntimeFrame> {
+    fn notification_frame(&self, link_seq: RuntimeLinkSeq) -> Option<RuntimeFrame> {
         self.notification()
             .map(|notification| RuntimeFrame::MutationNotification {
-                session_seq,
+                link_seq,
                 client_mutation_id: self.client_mutation_id.clone(),
                 notification,
             })
     }
 }
 
-impl SessionRegistry {
-    fn lock_sessions(&self) -> MutexGuard<'_, HashMap<RuntimeSessionId, StoredSession>> {
-        match self.sessions.lock() {
+impl LinkRegistry {
+    fn lock_links(&self) -> MutexGuard<'_, HashMap<RuntimeLinkId, StoredLink>> {
+        match self.links.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
-                warn!("session registry mutex was poisoned; recovering");
+                warn!("link registry mutex was poisoned; recovering");
                 poisoned.into_inner()
             }
         }
@@ -146,7 +146,7 @@ impl SessionRegistry {
         Self {
             views,
             event_sender,
-            sessions: Mutex::new(HashMap::new()),
+            links: Mutex::new(HashMap::new()),
             dedup: DedupStore::new(),
             seq: ReplayStore::collapse_always(),
             next_mutation_id: AtomicU64::new(1),
@@ -166,24 +166,24 @@ impl SessionRegistry {
         }
     }
 
-    /// Stamp the next monotonic per-session frame seq from the shared store (D50)
-    /// and wrap it as the wire's [`RuntimeSessionSeq`] (this seam keeps the seq
+    /// Stamp the next monotonic per-link frame seq from the shared store (D50)
+    /// and wrap it as the wire's [`RuntimeLinkSeq`] (this seam keeps the seq
     /// inside `RuntimeFrame` for client-visible wire compatibility — the store owns
     /// the counter, the frame carries it).
-    fn stamp(&self, session_id: &RuntimeSessionId) -> RuntimeSessionSeq {
-        RuntimeSessionSeq::new(self.seq.stamp(session_id))
+    fn stamp(&self, link_id: &RuntimeLinkId) -> RuntimeLinkSeq {
+        RuntimeLinkSeq::new(self.seq.stamp(link_id))
     }
 
-    pub(crate) fn open_session(
+    pub(crate) fn open_link(
         self: &Arc<Self>,
         caller: RuntimeCaller,
-    ) -> Result<RuntimeSession, RuntimeError> {
-        let session_id = RuntimeSessionId::new(format!("session-{}", Id::generate()));
-        let (frames, _) = broadcast::channel(SESSION_FRAME_CHANNEL_CAPACITY);
-        debug!(session_id = %session_id.as_str(), "runtime session opened");
-        self.lock_sessions().insert(
-            session_id.clone(),
-            StoredSession {
+    ) -> Result<RuntimeLinkConnection, RuntimeError> {
+        let link_id = RuntimeLinkId::new(format!("link-{}", Id::generate()));
+        let (frames, _) = broadcast::channel(LINK_FRAME_CHANNEL_CAPACITY);
+        debug!(link_id = %link_id.as_str(), "runtime link opened");
+        self.lock_links().insert(
+            link_id.clone(),
+            StoredLink {
                 account_scope: caller.account_scope,
                 delta_capable: caller.capabilities.view_delta,
                 frames,
@@ -192,25 +192,25 @@ impl SessionRegistry {
                 event_task: None,
             },
         );
-        let event_task = self.spawn_notification_forwarder(session_id.clone());
-        if let Some(session) = self.lock_sessions().get_mut(&session_id) {
-            session.event_task = Some(event_task);
+        let event_task = self.spawn_notification_forwarder(link_id.clone());
+        if let Some(link) = self.lock_links().get_mut(&link_id) {
+            link.event_task = Some(event_task);
         }
-        Ok(RuntimeSession { session_id })
+        Ok(RuntimeLinkConnection { link_id })
     }
 
     pub(crate) async fn subscribe_frames(
         self: &Arc<Self>,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
-        after_seq: Option<RuntimeSessionSeq>,
+        link_id: RuntimeLinkId,
+        after_seq: Option<RuntimeLinkSeq>,
     ) -> Result<RuntimeFrameSubscription, RuntimeError> {
         {
-            let sessions = self.lock_sessions();
-            let session = sessions
-                .get(&session_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-            ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
+            let links = self.lock_links();
+            let link = links
+                .get(&link_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+            ensure_caller_matches_link(link, caller.account_scope.as_deref())?;
         }
 
         // The resume cursor IS the ack signal (D48): a resume from `after_seq`
@@ -219,7 +219,7 @@ impl SessionRegistry {
         // the TTL fallback opportunistically (D48 (b)).
         let now = now_secs();
         if let Some(seq) = after_seq {
-            self.dedup.ack(&session_id, seq.get());
+            self.dedup.ack(&link_id, seq.get());
         }
         self.dedup.reap(now);
 
@@ -229,15 +229,15 @@ impl SessionRegistry {
         // cursor (`Collapse`, in collapse-always mode) is a reconnect: re-derive
         // open views before collapsing so we serve current rows, not stale ones
         // (the per-event mail-list re-serve was retired, option iii).
-        let resume = self.seq.resume(&session_id, after_seq.map(|s| s.get()));
+        let resume = self.seq.resume(&link_id, after_seq.map(|s| s.get()));
         let is_reconnect = matches!(resume, Resume::Collapse);
         if is_reconnect {
-            self.refresh_open_views(&session_id).await;
+            self.refresh_open_views(&link_id).await;
         }
 
-        // The dedup ledger's mutation records for this session — the live
-        // mutation window replayed on collapse (fetched outside the session lock).
-        let mutations = self.dedup.records_for(&session_id);
+        // The dedup ledger's mutation records for this link — the live
+        // mutation window replayed on collapse (fetched outside the link lock).
+        let mutations = self.dedup.records_for(&link_id);
 
         // Ordering invariant [2] — subscribe THEN snapshot: subscribe to the live
         // broadcast *before* taking the catch-up snapshot, so a settle landing in
@@ -246,31 +246,31 @@ impl SessionRegistry {
         // the live stream) is a harmless duplicate — terminal notifications are
         // idempotent for the client.
         let mut receiver = {
-            let sessions = self.lock_sessions();
-            let session = sessions
-                .get(&session_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-            session.frames.subscribe()
+            let links = self.lock_links();
+            let link = links
+                .get(&link_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+            link.frames.subscribe()
         };
         // [2] race window: a settle landing here must reach the live stream (we
         // already subscribed) rather than being lost.
         #[cfg(test)]
         self.fire_barrier(&self.subscribe_barrier);
         let catch_up = {
-            let mut sessions = self.lock_sessions();
-            let session = sessions
-                .get_mut(&session_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+            let mut links = self.lock_links();
+            let link = links
+                .get_mut(&link_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
             let needs_initial_frames =
-                !session.latest_snapshots.is_empty() || !mutations.is_empty();
+                !link.latest_snapshots.is_empty() || !mutations.is_empty();
             match resume {
                 // Current (fresh or at-head): re-serve initial state on a first
                 // subscribe, else nothing to catch up.
                 Resume::Fresh | Resume::Replay(_) if !needs_initial_frames => Vec::new(),
                 _ => {
-                    let sid = session_id.clone();
-                    let mut next = || RuntimeSessionSeq::new(self.seq.stamp(&sid));
-                    collapse_session_frames(session, &mutations, &mut next)
+                    let sid = link_id.clone();
+                    let mut next = || RuntimeLinkSeq::new(self.seq.stamp(&sid));
+                    collapse_link_frames(link, &mutations, &mut next)
                 }
             }
         };
@@ -284,16 +284,16 @@ impl SessionRegistry {
                     Err(broadcast::error::RecvError::Lagged(missed)) => {
                         // A burst outran the consumer: `missed` frames were
                         // dropped from the channel. Recover by collapsing to the
-                        // session's current state (idempotent for the client).
+                        // link's current state (idempotent for the client).
                         // A transient collapse failure must NOT kill the stream —
                         // keep looping so the next live frame still flows.
                         warn!(
-                            session_id = %session_id.as_str(),
+                            link_id = %link_id.as_str(),
                             missed_frames = missed,
-                            "session frame stream lagged; recovering with a collapsed snapshot",
+                            "link frame stream lagged; recovering with a collapsed snapshot",
                         );
-                        registry.refresh_open_views(&session_id).await;
-                        match registry.collapse_session(&session_id, caller_scope.as_deref()) {
+                        registry.refresh_open_views(&link_id).await;
+                        match registry.collapse_link(&link_id, caller_scope.as_deref()) {
                             Ok(frames) => {
                                 for frame in frames {
                                     yield frame;
@@ -301,15 +301,15 @@ impl SessionRegistry {
                             }
                             Err(error) => {
                                 warn!(
-                                    session_id = %session_id.as_str(),
+                                    link_id = %link_id.as_str(),
                                     %error,
-                                    "failed to collapse session after lag; continuing the stream",
+                                    "failed to collapse link after lag; continuing the stream",
                                 );
                             }
                         }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
-                        debug!(session_id = %session_id.as_str(), "session frame stream closed");
+                        debug!(link_id = %link_id.as_str(), "link frame stream closed");
                         break;
                     }
                 }
@@ -322,21 +322,21 @@ impl SessionRegistry {
         })
     }
 
-    pub(crate) fn close_session(
+    pub(crate) fn close_link(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
     ) -> Result<(), RuntimeError> {
         let (open_views, event_task) = {
-            let mut sessions = self.lock_sessions();
-            let session = sessions
-                .get(&session_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-            ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
-            let session = sessions
-                .remove(&session_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-            (session.open_views, session.event_task)
+            let mut links = self.lock_links();
+            let link = links
+                .get(&link_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+            ensure_caller_matches_link(link, caller.account_scope.as_deref())?;
+            let link = links
+                .remove(&link_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+            (link.open_views, link.event_task)
         };
         if let Some(event_task) = event_task {
             event_task.abort();
@@ -344,29 +344,29 @@ impl SessionRegistry {
         for view_id in open_views {
             let _ = self.views.close_view(&view_id);
         }
-        // Drop the session's dedup ledger entries (its link closed).
-        self.dedup.purge(&session_id);
+        // Drop the link's dedup ledger entries (its link closed).
+        self.dedup.purge(&link_id);
         Ok(())
     }
 
     pub(crate) async fn open_view(
         self: &Arc<Self>,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         descriptor: ViewDescriptor,
     ) -> Result<ViewSnapshot, RuntimeError> {
-        let session_scope = self.session_scope(&session_id, caller.account_scope.as_deref())?;
+        let link_scope = self.link_scope(&link_id, caller.account_scope.as_deref())?;
         let snapshot = self
             .views
-            .open_view(descriptor, session_scope.as_deref())
+            .open_view(descriptor, link_scope.as_deref())
             .await?;
         let subscription = self.views.subscribe_view(
             snapshot.view_id.clone(),
             Some(snapshot.revision),
-            session_scope.as_deref(),
+            link_scope.as_deref(),
         )?;
-        self.record_open_view(&session_id, snapshot.clone())?;
-        self.spawn_view_forwarder(session_id, subscription);
+        self.record_open_view(&link_id, snapshot.clone())?;
+        self.spawn_view_forwarder(link_id, subscription);
         Ok(snapshot)
     }
 
@@ -378,44 +378,44 @@ impl SessionRegistry {
     pub(crate) async fn extend_view(
         self: &Arc<Self>,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         view_id: ViewId,
         count: usize,
     ) -> Result<ViewSnapshot, RuntimeError> {
-        let session_scope = self.session_scope(&session_id, caller.account_scope.as_deref())?;
+        let link_scope = self.link_scope(&link_id, caller.account_scope.as_deref())?;
         {
-            let sessions = self.lock_sessions();
-            let session = sessions
-                .get(&session_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-            if !session.open_views.contains(&view_id) {
-                return Err(RuntimeError::not_found("view is not open in this session"));
+            let links = self.lock_links();
+            let link = links
+                .get(&link_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+            if !link.open_views.contains(&view_id) {
+                return Err(RuntimeError::not_found("view is not open in this link"));
             }
         }
         self.views
-            .extend_view(&view_id, count, session_scope.as_deref())
+            .extend_view(&view_id, count, link_scope.as_deref())
             .await
     }
 
     pub(crate) fn close_view(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         view_id: ViewId,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
-        session.open_views.remove(&view_id);
-        session.latest_snapshots.remove(&view_id);
-        let sender = session.frames.clone();
-        drop(sessions);
-        let seq = self.stamp(&session_id);
+        let mut links = self.lock_links();
+        let link = links
+            .get_mut(&link_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+        ensure_caller_matches_link(link, caller.account_scope.as_deref())?;
+        link.open_views.remove(&view_id);
+        link.latest_snapshots.remove(&view_id);
+        let sender = link.frames.clone();
+        drop(links);
+        let seq = self.stamp(&link_id);
         let _ = self.views.close_view(&view_id);
         let _ = sender.send(RuntimeFrame::ViewClosed {
-            session_seq: seq,
+            link_seq: seq,
             view_id,
         });
         Ok(())
@@ -426,17 +426,17 @@ impl SessionRegistry {
         caller: RuntimeCaller,
         request: &MutationRequest,
     ) -> Result<MutationAcceptance, RuntimeError> {
-        let session_id = request.session_id.as_ref().ok_or_else(|| {
-            RuntimeError::invalid_mutation("runtime mutation requires a session id")
+        let link_id = request.link_id.as_ref().ok_or_else(|| {
+            RuntimeError::invalid_mutation("runtime mutation requires a link id")
         })?;
         {
             // Caller-scope (auth) check up front; the dedup ledger is the shared
             // sub-store below (released before it is touched).
-            let sessions = self.lock_sessions();
-            let session = sessions
-                .get(session_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-            ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
+            let links = self.lock_links();
+            let link = links
+                .get(link_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+            ensure_caller_matches_link(link, caller.account_scope.as_deref())?;
         }
         // Mint the id up front so the New record carries it; on a Duplicate the
         // minted id is simply discarded (harmless).
@@ -452,21 +452,21 @@ impl SessionRegistry {
             error: None,
             output: Value::Null,
         };
-        // Insert THEN revalidate ([4]): a `close_session` racing between the
-        // scope check above and this insert purges the session's ledger; if we
+        // Insert THEN revalidate ([4]): a `close_link` racing between the
+        // scope check above and this insert purges the link's ledger; if we
         // inserted after that purge, the Pending record would orphan (never
-        // evicted → unbounded leak). Revalidate the session still exists; if it
+        // evicted → unbounded leak). Revalidate the link still exists; if it
         // vanished, self-sweep our just-inserted record and report not_found.
         let acceptance = self
             .dedup
-            .accept(session_id, &request.client_mutation_id, || record);
-        // [4] race window: a close_session landing here purges the session; the
+            .accept(link_id, &request.client_mutation_id, || record);
+        // [4] race window: a close_link landing here purges the link; the
         // revalidation below must self-sweep our just-inserted record.
         #[cfg(test)]
         self.fire_barrier(&self.accept_barrier);
-        if !self.lock_sessions().contains_key(session_id) {
-            self.dedup.clear(session_id, &request.client_mutation_id);
-            return Err(RuntimeError::not_found("runtime session not found"));
+        if !self.lock_links().contains_key(link_id) {
+            self.dedup.clear(link_id, &request.client_mutation_id);
+            return Err(RuntimeError::not_found("runtime link not found"));
         }
         match acceptance {
             Accept::Duplicate(existing) => {
@@ -486,7 +486,7 @@ impl SessionRegistry {
 
     pub(crate) fn settle_mutation(
         &self,
-        session_id: &RuntimeSessionId,
+        link_id: &RuntimeLinkId,
         mutation_id: &RuntimeMutationId,
         state: MutationSettlementState,
         error: Option<RuntimeAdapterError>,
@@ -494,10 +494,10 @@ impl SessionRegistry {
     ) -> Result<MutationReceipt, RuntimeError> {
         // The dedup ledger is keyed by `ClientMutationId`; settlement addresses
         // the runtime's own `RuntimeMutationId`, so resolve the client id from
-        // the pending record (≤100 per session).
+        // the pending record (≤100 per link).
         let base = self
             .dedup
-            .records_for(session_id)
+            .records_for(link_id)
             .into_iter()
             .find(|record| &record.mutation_id == mutation_id)
             .ok_or_else(|| RuntimeError::not_found("runtime mutation not found"))?;
@@ -513,14 +513,14 @@ impl SessionRegistry {
         let class = terminal_class_for(&state, error.as_ref());
 
         // Stamp the terminal-notification seq (the D48 ack target) from the shared
-        // store — no session lock needed; the store owns the counter.
+        // store — no link lock needed; the store owns the counter.
         let (settlement_seq, frame) = match settled.notification() {
             Some(notification) => {
-                let session_seq = self.stamp(session_id);
+                let link_seq = self.stamp(link_id);
                 (
-                    Some(session_seq.get()),
+                    Some(link_seq.get()),
                     Some(RuntimeFrame::MutationNotification {
-                        session_seq,
+                        link_seq,
                         client_mutation_id: client_mutation_id.clone(),
                         notification,
                     }),
@@ -536,7 +536,7 @@ impl SessionRegistry {
         // cleared so a deliberate retry re-accepts and re-executes. `settlement_seq`
         // is the seq of the emitted notification, the ack target D48 evicts on.
         self.dedup.settle(
-            session_id,
+            link_id,
             &client_mutation_id,
             class,
             settlement_seq,
@@ -548,12 +548,12 @@ impl SessionRegistry {
             },
         );
 
-        // THEN broadcast onto the live stream, if the session is still open.
+        // THEN broadcast onto the live stream, if the link is still open.
         if let Some(frame) = frame {
             let sender = self
-                .lock_sessions()
-                .get(session_id)
-                .map(|session| session.frames.clone());
+                .lock_links()
+                .get(link_id)
+                .map(|link| link.frames.clone());
             if let Some(sender) = sender {
                 let _ = sender.send(frame);
             }
@@ -562,55 +562,55 @@ impl SessionRegistry {
     }
 
     /// Read the current settlement of a mutation by its **client** mutation id —
-    /// the near-end reconciler's cross-session query (D44b, `RuntimeLink::
+    /// the near-end reconciler's cross-link query (D44b, `RuntimeLink::
     /// mutation_settlement`). `Ok(None)` when the runtime has no record: an
-    /// unknown session (closed/restarted — its ledger was purged) or an unknown
-    /// / already-cleared mutation id. A known session still enforces the caller
+    /// unknown link (closed/restarted — its ledger was purged) or an unknown
+    /// / already-cleared mutation id. A known link still enforces the caller
     /// scope; an unknown one cannot leak anything (there is nothing to read).
     pub(crate) fn mutation_settlement(
         &self,
         caller: RuntimeCaller,
-        session_id: &RuntimeSessionId,
+        link_id: &RuntimeLinkId,
         client_mutation_id: &ClientMutationId,
     ) -> Result<Option<MutationReceipt>, RuntimeError> {
         {
-            let sessions = self.lock_sessions();
-            if let Some(session) = sessions.get(session_id) {
-                ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
+            let links = self.lock_links();
+            if let Some(link) = links.get(link_id) {
+                ensure_caller_matches_link(link, caller.account_scope.as_deref())?;
             } else {
                 return Ok(None);
             }
         }
         Ok(self
             .dedup
-            .verdict(session_id, client_mutation_id)
+            .verdict(link_id, client_mutation_id)
             .map(|record| record.receipt()))
     }
 
-    pub(crate) fn session_scope(
+    pub(crate) fn link_scope(
         &self,
-        session_id: &RuntimeSessionId,
+        link_id: &RuntimeLinkId,
         caller_scope: Option<&[String]>,
     ) -> Result<Option<Vec<String>>, RuntimeError> {
-        let sessions = self.lock_sessions();
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        ensure_caller_matches_session(session, caller_scope)?;
-        Ok(session.account_scope.clone())
+        let links = self.lock_links();
+        let link = links
+            .get(link_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+        ensure_caller_matches_link(link, caller_scope)?;
+        Ok(link.account_scope.clone())
     }
 
     fn record_open_view(
         &self,
-        session_id: &RuntimeSessionId,
+        link_id: &RuntimeLinkId,
         snapshot: ViewSnapshot,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        session.open_views.insert(snapshot.view_id.clone());
-        session
+        let mut links = self.lock_links();
+        let link = links
+            .get_mut(link_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+        link.open_views.insert(snapshot.view_id.clone());
+        link
             .latest_snapshots
             .insert(snapshot.view_id.clone(), snapshot);
         Ok(())
@@ -618,7 +618,7 @@ impl SessionRegistry {
 
     fn spawn_view_forwarder(
         self: &Arc<Self>,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         mut subscription: RuntimeViewSubscription,
     ) {
         let registry = Arc::downgrade(self);
@@ -627,7 +627,7 @@ impl SessionRegistry {
                 let Some(registry) = registry.upgrade() else {
                     return;
                 };
-                if !registry.forward_view_frame(&session_id, frame) {
+                if !registry.forward_view_frame(&link_id, frame) {
                     return;
                 }
             }
@@ -635,14 +635,14 @@ impl SessionRegistry {
                 let Some(registry) = registry.upgrade() else {
                     return;
                 };
-                if !registry.forward_view_frame(&session_id, frame) {
+                if !registry.forward_view_frame(&link_id, frame) {
                     return;
                 }
             }
         });
     }
 
-    fn spawn_notification_forwarder(self: &Arc<Self>, session_id: RuntimeSessionId) -> AbortHandle {
+    fn spawn_notification_forwarder(self: &Arc<Self>, link_id: RuntimeLinkId) -> AbortHandle {
         let registry = Arc::downgrade(self);
         let mut receiver = self.event_sender.subscribe();
         let task = tokio::spawn(async move {
@@ -652,14 +652,14 @@ impl SessionRegistry {
                         let Some(registry) = registry.upgrade() else {
                             return;
                         };
-                        if !registry.forward_notification(&session_id, event) {
+                        if !registry.forward_notification(&link_id, event) {
                             return;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(missed)) => {
                         // The event bus dropped `missed` events for this
-                        // forwarder — they never reached the session's frame
-                        // stream. Recover by collapsing to the session's current
+                        // forwarder — they never reached the link's frame
+                        // stream. Recover by collapsing to the link's current
                         // state so the client resyncs (re-snapshots open views
                         // + replays the live mutation window) rather than
                         // silently missing them (I3, `gap-detection`).
@@ -667,12 +667,12 @@ impl SessionRegistry {
                             return;
                         };
                         warn!(
-                            session_id = %session_id.as_str(),
+                            link_id = %link_id.as_str(),
                             missed_events = missed,
-                            "notification forwarder lagged; collapsing the session to resync",
+                            "notification forwarder lagged; collapsing the link to resync",
                         );
-                        registry.refresh_open_views(&session_id).await;
-                        let _ = registry.collapse_session_into_stream(&session_id);
+                        registry.refresh_open_views(&link_id).await;
+                        let _ = registry.collapse_link_into_stream(&link_id);
                     }
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
@@ -681,27 +681,27 @@ impl SessionRegistry {
         task.abort_handle()
     }
 
-    fn forward_view_frame(&self, session_id: &RuntimeSessionId, frame: ViewFrame) -> bool {
-        let mut next = || RuntimeSessionSeq::new(self.seq.stamp(session_id));
-        let mut sessions = self.lock_sessions();
-        let Some(session) = sessions.get_mut(session_id) else {
+    fn forward_view_frame(&self, link_id: &RuntimeLinkId, frame: ViewFrame) -> bool {
+        let mut next = || RuntimeLinkSeq::new(self.seq.stamp(link_id));
+        let mut links = self.lock_links();
+        let Some(link) = links.get_mut(link_id) else {
             return false;
         };
-        let Some(runtime_frame) = view_frame_to_runtime(session, frame, &mut next) else {
+        let Some(runtime_frame) = view_frame_to_runtime(link, frame, &mut next) else {
             return false;
         };
-        let sender = session.frames.clone();
-        drop(sessions);
+        let sender = link.frames.clone();
+        drop(links);
         let _ = sender.send(runtime_frame);
         true
     }
 
-    fn forward_notification(&self, session_id: &RuntimeSessionId, event: DomainEvent) -> bool {
-        let mut sessions = self.lock_sessions();
-        let Some(session) = sessions.get_mut(session_id) else {
+    fn forward_notification(&self, link_id: &RuntimeLinkId, event: DomainEvent) -> bool {
+        let mut links = self.lock_links();
+        let Some(link) = links.get_mut(link_id) else {
             return false;
         };
-        if !event_matches_session_scope(&event, session.account_scope.as_deref()) {
+        if !event_matches_link_scope(&event, link.account_scope.as_deref()) {
             return true;
         }
         let payload = match serde_json::to_value(&event) {
@@ -709,73 +709,73 @@ impl SessionRegistry {
             Err(_) => return false,
         };
         let frame = RuntimeFrame::Notification {
-            session_seq: self.stamp(session_id),
+            link_seq: self.stamp(link_id),
             kind: event.topic,
             payload,
         };
-        let sender = session.frames.clone();
-        drop(sessions);
+        let sender = link.frames.clone();
+        drop(links);
         let _ = sender.send(frame);
         true
     }
 
-    /// Re-derive each open view fresh and refresh the session's stored snapshot,
+    /// Re-derive each open view fresh and refresh the link's stored snapshot,
     /// so a subsequent collapse/catch-up serves current state rather than a stale
     /// cached one. Required because the per-event mail-list re-serve was retired
-    /// (option iii): the session's stored mail-list snapshot is otherwise only
+    /// (option iii): the link's stored mail-list snapshot is otherwise only
     /// refreshed on open/extend, so resync would replay stale rows. Holds no lock
     /// across the async recompute; `recompute_view_if_changed` no-ops views that
     /// haven't moved (so unchanged + still-#3-served views cost nothing).
-    async fn refresh_open_views(&self, session_id: &RuntimeSessionId) {
+    async fn refresh_open_views(&self, link_id: &RuntimeLinkId) {
         let open_views: Vec<ViewId> = {
-            let sessions = self.lock_sessions();
-            match sessions.get(session_id) {
-                Some(session) => session.open_views.iter().cloned().collect(),
+            let links = self.lock_links();
+            match links.get(link_id) {
+                Some(link) => link.open_views.iter().cloned().collect(),
                 None => return,
             }
         };
         for view_id in &open_views {
             if let Ok(Some(snapshot)) = self.views.recompute_view_if_changed(view_id).await {
-                let mut sessions = self.lock_sessions();
-                if let Some(session) = sessions.get_mut(session_id) {
-                    if session.open_views.contains(view_id) {
-                        session.latest_snapshots.insert(view_id.clone(), snapshot);
+                let mut links = self.lock_links();
+                if let Some(link) = links.get_mut(link_id) {
+                    if link.open_views.contains(view_id) {
+                        link.latest_snapshots.insert(view_id.clone(), snapshot);
                     }
                 }
             }
         }
     }
 
-    fn collapse_session(
+    fn collapse_link(
         &self,
-        session_id: &RuntimeSessionId,
+        link_id: &RuntimeLinkId,
         caller_scope: Option<&[String]>,
     ) -> Result<Vec<RuntimeFrame>, RuntimeError> {
-        let mutations = self.dedup.records_for(session_id);
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        ensure_caller_matches_session(session, caller_scope)?;
-        let mut next = || RuntimeSessionSeq::new(self.seq.stamp(session_id));
-        Ok(collapse_session_frames(session, &mutations, &mut next))
+        let mutations = self.dedup.records_for(link_id);
+        let mut links = self.lock_links();
+        let link = links
+            .get_mut(link_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+        ensure_caller_matches_link(link, caller_scope)?;
+        let mut next = || RuntimeLinkSeq::new(self.seq.stamp(link_id));
+        Ok(collapse_link_frames(link, &mutations, &mut next))
     }
 
-    /// Collapse the session and push the frames into its stream — the
+    /// Collapse the link and push the frames into its stream — the
     /// notification forwarder's recovery from an event-bus lag (it silently
     /// dropped events; the client resyncs from the collapsed snapshot). No
-    /// caller-scope check: the forwarder is the session's own component.
-    fn collapse_session_into_stream(
+    /// caller-scope check: the forwarder is the link's own component.
+    fn collapse_link_into_stream(
         &self,
-        session_id: &RuntimeSessionId,
+        link_id: &RuntimeLinkId,
     ) -> Result<(), RuntimeError> {
-        let mutations = self.dedup.records_for(session_id);
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        let mut next = || RuntimeSessionSeq::new(self.seq.stamp(session_id));
-        collapse_session_frames_into(session, &mutations, &mut next);
+        let mutations = self.dedup.records_for(link_id);
+        let mut links = self.lock_links();
+        let link = links
+            .get_mut(link_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
+        let mut next = || RuntimeLinkSeq::new(self.seq.stamp(link_id));
+        collapse_link_frames_into(link, &mutations, &mut next);
         Ok(())
     }
 }
@@ -784,18 +784,18 @@ impl SessionRegistry {
 /// mutation notifications). `next` stamps each frame's seq from the shared store
 /// (D50). This is also the runtime seam's **Reset-path payload** (D49): a stale
 /// resume collapses to exactly these frames rather than a per-frame replay.
-fn collapse_session_frames(
-    session: &mut StoredSession,
+fn collapse_link_frames(
+    link: &mut StoredLink,
     mutations: &[StoredMutation],
-    next: &mut impl FnMut() -> RuntimeSessionSeq,
+    next: &mut impl FnMut() -> RuntimeLinkSeq,
 ) -> Vec<RuntimeFrame> {
     let mut frames = Vec::new();
-    let mut snapshots: Vec<_> = session.latest_snapshots.values().cloned().collect();
+    let mut snapshots: Vec<_> = link.latest_snapshots.values().cloned().collect();
     snapshots.sort_by(|left, right| left.view_id.as_str().cmp(right.view_id.as_str()));
     for snapshot in snapshots {
-        let session_seq = next();
+        let link_seq = next();
         frames.push(RuntimeFrame::ViewSnapshot {
-            session_seq,
+            link_seq,
             view_id: snapshot.view_id.clone(),
             revision: snapshot.revision,
             snapshot,
@@ -813,18 +813,18 @@ fn collapse_session_frames(
     frames
 }
 
-/// Push the session's collapsed state into its frame stream — the recovery
+/// Push the link's collapsed state into its frame stream — the recovery
 /// path for a notification forwarder that lagged on the event bus: it silently
 /// dropped events, so collapse to a consistent snapshot the client re-applies
 /// (re-snapshot open views + replay the live mutation window) rather than
-/// missing them (I3, `gap-detection`). Reuses [`collapse_session_frames`].
-fn collapse_session_frames_into(
-    session: &mut StoredSession,
+/// missing them (I3, `gap-detection`). Reuses [`collapse_link_frames`].
+fn collapse_link_frames_into(
+    link: &mut StoredLink,
     mutations: &[StoredMutation],
-    next: &mut impl FnMut() -> RuntimeSessionSeq,
+    next: &mut impl FnMut() -> RuntimeLinkSeq,
 ) {
-    let sender = session.frames.clone();
-    for frame in collapse_session_frames(session, mutations, next) {
+    let sender = link.frames.clone();
+    for frame in collapse_link_frames(link, mutations, next) {
         let _ = sender.send(frame);
     }
 }
@@ -876,48 +876,48 @@ fn mail_list_delta(old: &ViewSnapshot, new: &ViewSnapshot) -> Option<MailListDel
 }
 
 fn view_frame_to_runtime(
-    session: &mut StoredSession,
+    link: &mut StoredLink,
     frame: ViewFrame,
-    next: &mut impl FnMut() -> RuntimeSessionSeq,
+    next: &mut impl FnMut() -> RuntimeLinkSeq,
 ) -> Option<RuntimeFrame> {
     match frame {
         ViewFrame::Snapshot { snapshot } => {
-            if !session.open_views.contains(&snapshot.view_id) {
+            if !link.open_views.contains(&snapshot.view_id) {
                 return None;
             }
-            let session_seq = next();
+            let link_seq = next();
             let view_id = snapshot.view_id.clone();
             let revision = snapshot.revision;
-            session
+            link
                 .latest_snapshots
                 .insert(view_id.clone(), snapshot.clone());
             Some(RuntimeFrame::ViewSnapshot {
-                session_seq,
+                link_seq,
                 view_id,
                 revision,
                 snapshot,
             })
         }
         ViewFrame::Replace { snapshot } => {
-            if !session.open_views.contains(&snapshot.view_id) {
+            if !link.open_views.contains(&snapshot.view_id) {
                 return None;
             }
-            let session_seq = next();
+            let link_seq = next();
             let view_id = snapshot.view_id.clone();
             let revision = snapshot.revision;
-            let previous = session
+            let previous = link
                 .latest_snapshots
                 .insert(view_id.clone(), snapshot.clone());
-            // A delta-capable session receives only the rows that changed, when
+            // A delta-capable link receives only the rows that changed, when
             // the change is row-local; structural changes (and non-mail-list
             // views) fall back to a whole replace (L6).
-            if session.delta_capable {
+            if link.delta_capable {
                 if let Some(delta) = previous
                     .as_ref()
                     .and_then(|old| mail_list_delta(old, &snapshot))
                 {
                     return Some(RuntimeFrame::ViewDelta {
-                        session_seq,
+                        link_seq,
                         view_id,
                         revision,
                         delta,
@@ -925,31 +925,31 @@ fn view_frame_to_runtime(
                 }
             }
             Some(RuntimeFrame::ViewReplace {
-                session_seq,
+                link_seq,
                 view_id,
                 revision,
                 snapshot,
             })
         }
         ViewFrame::Error { view_id, error, .. } => {
-            if !session.open_views.contains(&view_id) {
+            if !link.open_views.contains(&view_id) {
                 return None;
             }
-            let session_seq = next();
+            let link_seq = next();
             Some(RuntimeFrame::ViewError {
-                session_seq,
+                link_seq,
                 view_id,
                 error,
             })
         }
         ViewFrame::Closed { view_id } => {
-            if !session.open_views.remove(&view_id) {
+            if !link.open_views.remove(&view_id) {
                 return None;
             }
-            session.latest_snapshots.remove(&view_id);
-            let session_seq = next();
+            link.latest_snapshots.remove(&view_id);
+            let link_seq = next();
             Some(RuntimeFrame::ViewClosed {
-                session_seq,
+                link_seq,
                 view_id,
             })
         }
@@ -988,7 +988,7 @@ fn terminal_class_for(
     }
 }
 
-fn event_matches_session_scope(event: &DomainEvent, account_scope: Option<&[String]>) -> bool {
+fn event_matches_link_scope(event: &DomainEvent, account_scope: Option<&[String]>) -> bool {
     account_scope
         .map(|scope| {
             scope
@@ -998,19 +998,19 @@ fn event_matches_session_scope(event: &DomainEvent, account_scope: Option<&[Stri
         .unwrap_or(true)
 }
 
-fn ensure_caller_matches_session(
-    session: &StoredSession,
+fn ensure_caller_matches_link(
+    link: &StoredLink,
     caller_scope: Option<&[String]>,
 ) -> Result<(), RuntimeError> {
-    match (session.account_scope.as_deref(), caller_scope) {
+    match (link.account_scope.as_deref(), caller_scope) {
         (None, None) => Ok(()),
         (Some(_), None) => Ok(()),
         (None, Some(_)) => Err(RuntimeError::unauthorized(
-            "account-scoped caller cannot access a full-scope runtime session",
+            "account-scoped caller cannot access a full-scope runtime link",
         )),
-        (Some(session_scope), Some(caller_scope)) if session_scope == caller_scope => Ok(()),
+        (Some(link_scope), Some(caller_scope)) if link_scope == caller_scope => Ok(()),
         (Some(_), Some(_)) => Err(RuntimeError::unauthorized(
-            "caller account scope does not match runtime session",
+            "caller account scope does not match runtime link",
         )),
     }
 }
@@ -1102,7 +1102,7 @@ mod delta_tests {
 
 #[cfg(test)]
 mod race_tests {
-    //! Deterministic interleaving tests for the two sessions.rs ordering races
+    //! Deterministic interleaving tests for the two links.rs ordering races
     //! (D49 (b), [2]/[4]). The barrier hooks (`subscribe_barrier`/`accept_barrier`)
     //! fire at the exact race window so the interleaving is pinned, not chanced.
     use super::*;
@@ -1111,49 +1111,49 @@ mod race_tests {
     use serde_json::json;
     use std::time::Duration;
 
-    /// An all-default `AuthorityServerApi` — the session races never touch it.
+    /// An all-default `AuthorityServerApi` — the link races never touch it.
     struct StubApi;
     #[async_trait]
     impl AuthorityServerApi for StubApi {}
 
-    fn registry() -> Arc<SessionRegistry> {
+    fn registry() -> Arc<LinkRegistry> {
         let (event_sender, _) = broadcast::channel(64);
         let outbox = Arc::new(crate::near_node::RuntimeAuthorityServerOutbox::new(false));
         let reads = Arc::new(crate::read::ReadCache::passthrough(Arc::new(StubApi)));
         let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
-        Arc::new(SessionRegistry::new(views, event_sender))
+        Arc::new(LinkRegistry::new(views, event_sender))
     }
 
-    fn request(session_id: &RuntimeSessionId, client_mutation_id: &str) -> MutationRequest {
+    fn request(link_id: &RuntimeLinkId, client_mutation_id: &str) -> MutationRequest {
         let operation: MailOperation = serde_json::from_value(json!({
             "name": "message.setFlaggedState",
             "args": { "sourceId": "acct", "messageId": "m1", "flagged": true },
         }))
         .unwrap();
         MutationRequest {
-            session_id: Some(session_id.clone()),
+            link_id: Some(link_id.clone()),
             operation,
             client_mutation_id: ClientMutationId::new(client_mutation_id),
             context: None,
         }
     }
 
-    // [4]: an accept that races a close_session must self-sweep its just-inserted
+    // [4]: an accept that races a close_link must self-sweep its just-inserted
     // Pending record (no orphaned, eviction-exempt leak) and report not_found.
     #[tokio::test]
     async fn accept_racing_close_self_sweeps_and_reports_not_found() {
         let reg = registry();
-        let sid = reg.open_session(RuntimeCaller::test()).unwrap().session_id;
+        let sid = reg.open_link(RuntimeCaller::test()).unwrap().link_id;
 
         // Fire the race exactly between the dedup insert and the revalidation.
         let reg2 = reg.clone();
         let sid2 = sid.clone();
         *reg.accept_barrier.lock().unwrap() = Some(Box::new(move || {
-            reg2.close_session(RuntimeCaller::test(), sid2.clone()).unwrap();
+            reg2.close_link(RuntimeCaller::test(), sid2.clone()).unwrap();
         }));
 
         let result = reg.accept_mutation(RuntimeCaller::test(), &request(&sid, "op-race"));
-        assert!(result.is_err(), "a raced-closed session must not accept");
+        assert!(result.is_err(), "a raced-closed link must not accept");
         // The Pending record was self-swept — no orphan leaks under the closed id.
         assert!(
             reg.dedup.records_for(&sid).is_empty(),
@@ -1166,7 +1166,7 @@ mod race_tests {
     #[tokio::test]
     async fn settle_racing_subscribe_reaches_the_live_stream() {
         let reg = registry();
-        let sid = reg.open_session(RuntimeCaller::test()).unwrap().session_id;
+        let sid = reg.open_link(RuntimeCaller::test()).unwrap().link_id;
         let mutation_id = match reg
             .accept_mutation(RuntimeCaller::test(), &request(&sid, "op-1"))
             .unwrap()
@@ -1241,9 +1241,9 @@ mod collapse_tests {
         }
     }
 
-    fn empty_session() -> StoredSession {
+    fn empty_link() -> StoredLink {
         let (frames, _) = broadcast::channel(8);
-        StoredSession {
+        StoredLink {
             account_scope: None,
             delta_capable: false,
             frames,
@@ -1255,22 +1255,22 @@ mod collapse_tests {
 
     /// A monotonic stamping closure for the collapse helpers under test (the
     /// production path draws the same seqs from the shared `ReplayStore`, D50).
-    fn test_stamp() -> impl FnMut() -> RuntimeSessionSeq {
+    fn test_stamp() -> impl FnMut() -> RuntimeLinkSeq {
         let mut n = 0u64;
         move || {
             n += 1;
-            RuntimeSessionSeq::new(n)
+            RuntimeLinkSeq::new(n)
         }
     }
 
     #[test]
     fn collapse_replays_a_terminal_notification_per_mutation() {
-        let mut session = empty_session();
+        let mut link = empty_link();
         let mutations: Vec<_> = (1..=3)
             .map(|id| stored_mutation(id, MutationSettlementState::Confirmed))
             .collect();
         let mut next = test_stamp();
-        let frames = collapse_session_frames(&mut session, &mutations, &mut next);
+        let frames = collapse_link_frames(&mut link, &mutations, &mut next);
         let mutation_frames = frames
             .iter()
             .filter(|f| matches!(f, RuntimeFrame::MutationNotification { .. }))
@@ -1281,17 +1281,17 @@ mod collapse_tests {
     #[test]
     fn collapse_into_stream_pushes_the_window_for_resync() {
         // The notification forwarder lagged on the event bus and silently dropped
-        // events; `collapse_session_frames_into` pushes the session's collapsed
+        // events; `collapse_link_frames_into` pushes the link's collapsed
         // state into the frame stream so the client resyncs (I3, gap-detection).
         let (frames, mut rx) = broadcast::channel(8);
-        let mut session = empty_session();
-        session.frames = frames;
+        let mut link = empty_link();
+        link.frames = frames;
         let mutations: Vec<_> = (1..=3)
             .map(|id| stored_mutation(id, MutationSettlementState::Confirmed))
             .collect();
 
         let mut next = test_stamp();
-        collapse_session_frames_into(&mut session, &mutations, &mut next);
+        collapse_link_frames_into(&mut link, &mutations, &mut next);
 
         let mut streamed = 0;
         while let Ok(frame) = rx.try_recv() {

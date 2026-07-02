@@ -3,7 +3,7 @@
 //!
 //! The log is append-only on forward actions; the cursor is mutable (undo/redo
 //! move it). `diff` is a `MessageChangeDiff` JSON, opaque to the store — the
-//! semantics live in `posthaste-link-core` / the client. The client proposes
+//! semantics live in `posthaste-replica-core` / the client. The client proposes
 //! idempotent cursor moves; the server arbitrates.
 //!
 //! @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract

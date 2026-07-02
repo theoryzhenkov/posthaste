@@ -48,7 +48,7 @@ use posthaste_domain_model::{
     SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
     SyncMode, TagSummary,
 };
-use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
+use posthaste_replica_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
@@ -89,7 +89,7 @@ pub const LINK_CONVERSATION_PATH: &str = "/v1/link/conversation";
 /// down-channel ([replication L1 §5.1](../replication/L1.md)). The near node
 /// rebases its base cache on each: a new asserted confirmed state, or a removal.
 ///
-/// This is the wire-shaped, serializable twin of `link_core::MessageBaseUpdate`
+/// This is the wire-shaped, serializable twin of `replica_core::MessageBaseUpdate`
 /// (which is internal to the convergence engine and not `Serialize`). The near
 /// node maps between the two when applying a frame to its `MessageReplica`
 /// (W2); keeping the wire type here lets the remote transport (W3) serialize it
@@ -142,7 +142,7 @@ pub enum AuthorityServerFrame {
     Settlement {
         /// The engine's mutation id, carried directly on the wire (D12 — no
         /// serde mirror type; `MutationId` is already serde and this crate
-        /// depends on `link-core`).
+        /// depends on `replica-core`).
         mutation_id: MutationId,
         outcome: WireSettlementOutcome,
     },
@@ -246,7 +246,7 @@ pub type DownStream = BoxStream<'static, SequencedFrame>;
 /// `forward_mutation` shares its name (not a supertrait) with the client-link
 /// seam's up-channel: the signatures differ for real reasons — `RuntimeLink`
 /// threads a per-call `RuntimeCaller` (one runtime multiplexes many client
-/// sessions) while this seam scopes identity per connection (the `*_for`
+/// links) while this seam scopes identity per connection (the `*_for`
 /// variants for fan-in). D35b verdict: same-name convention, no shared
 /// supertrait.
 ///
@@ -534,7 +534,7 @@ pub trait AuthorityServerApi: Send + Sync {
     // ===== Write channel: typed authority server commands =====
     //
     // The named up-channel (`AuthorityServerLink::forward_mutation`) carries
-    // session-originated message mutations through the replica; these typed
+    // link-originated message mutations through the replica; these typed
     // commands are the direct (REST) command surface, applied at the far node
     // and returning the typed ack. Default-erroring so a transport that does not
     // carry the write channel is simply not a command sink (the remote wire is

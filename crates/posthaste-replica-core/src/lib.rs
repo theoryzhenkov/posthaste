@@ -13,7 +13,7 @@
 //! its pending mutations, and maps the result back. Keeping the *effect* (not
 //! the record types) shared is what the invariant requires.
 //!
-//! @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-link-core
+//! @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-replica-core
 
 mod convergence;
 mod message;

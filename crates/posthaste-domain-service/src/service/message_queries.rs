@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use mail_parser::{Address, MessageParser};
-use posthaste_link_core::{replay_message, MessageAssertion, MessageFoldState, MessageOutcome};
+use posthaste_replica_core::{replay_message, MessageAssertion, MessageFoldState, MessageOutcome};
 
 use super::*;
 
@@ -294,12 +294,12 @@ impl MailService {
 }
 
 /// Fold an account's pending message assertions over one summary using the
-/// shared predictor ([posthaste_link_core]). The renderer-facing read shape
+/// shared predictor ([posthaste_replica_core]). The renderer-facing read shape
 /// (`MessageSummary`) is mapped onto the predictor's minimal canonical state,
 /// folded, and mapped back, so the *effect* is defined once and is identical to
 /// the one the WASM replica runs (`single-local-effect`).
 ///
-/// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-link-core
+/// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-replica-core
 /// Derive the ordered message assertions a message id's operations assert — the
 /// single op→assertion mapping shared by the read overlay
 /// ([`apply_operations_to_summary`]) and the settle write-back

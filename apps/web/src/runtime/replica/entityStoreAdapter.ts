@@ -40,9 +40,9 @@ import type {
   RuntimeMutationReceipt,
   RuntimeOpenMessageListViewResult,
   RuntimeRunMutationRequest,
-  RuntimeSessionViewCloseRequest,
-  RuntimeSessionViewExtendRequest,
-  RuntimeSessionViewRequest,
+  RuntimeLinkViewCloseRequest,
+  RuntimeLinkViewExtendRequest,
+  RuntimeLinkViewRequest,
   RuntimeUnsubscribe,
   RuntimeViewSnapshot,
 } from '../types'
@@ -64,7 +64,7 @@ import type { OutboxStore } from './outboxStore'
 import { getUndoHistoryStore, makeRevStep } from './undoHistoryStore'
 import { parseMailOperation } from './wasmUtil'
 import {
-  nearEndSessionId,
+  nearEndLinkId,
   setNearEndOutboxHooks,
   type NearEndOutboxHooks,
 } from '../nearEnd'
@@ -165,7 +165,7 @@ export interface EntityStoreAdapterDeps {
    * D44). Defaults to the live wasm engine binding; injected in tests. */
   nearEnd?: {
     setOutboxHooks(hooks: NearEndOutboxHooks): void
-    sessionId(): string | null
+    linkId(): string | null
   }
 }
 
@@ -254,7 +254,7 @@ class EntityStoreController {
     this.scheduleFlush = deps.scheduleFlush ?? defaultFlushScheduler
     this.nearEnd = deps.nearEnd ?? {
       setOutboxHooks: setNearEndOutboxHooks,
-      sessionId: nearEndSessionId,
+      linkId: nearEndLinkId,
     }
     // Wire the durable outbox into the engine's level-triggered reconciler
     // (D44): the engine decides WHEN (every connect); these hooks are HOW.
@@ -266,7 +266,7 @@ class EntityStoreController {
    *
    * - never-dispatched replay (D44a — subsumes and replaces the deleted
    *   view-open `resendNeverDispatched` trigger);
-   * - sent-but-unsettled settlement (D44b — the cross-session query the old
+   * - sent-but-unsettled settlement (D44b — the cross-link query the old
    *   adapter left as a TODO): a terminal verdict settles the optimism +
    *   clears the record; a runtime with no record re-forwards.
    */
@@ -290,7 +290,7 @@ class EntityStoreController {
             return []
           })
       },
-      onReconciled: async (receipt, sessionId) => {
+      onReconciled: async (receipt, linkId) => {
         if (!receipt.runtimeMutationId) {
           return
         }
@@ -304,23 +304,23 @@ class EntityStoreController {
         await this.deps.outbox.linkRuntimeMutationId(
           receipt.clientMutationId,
           receipt.runtimeMutationId,
-          sessionId ?? undefined,
+          linkId ?? undefined,
         )
       },
       sentUnsettled: async () => {
         const records = await this.deps.outbox.all()
         return records
           .filter(
-            (record) => record.runtimeMutationId !== null && record.sessionId,
+            (record) => record.runtimeMutationId !== null && record.linkId,
           )
           .map((record) => ({
-            sessionId: record.sessionId as string,
+            linkId: record.linkId as string,
             clientMutationId: record.clientMutationId,
             ...(record.request ? { request: record.request } : {}),
           }))
       },
       onSettlement: async (receipt) => {
-        // The runtime already settled it terminally in a prior session: settle
+        // The runtime already settled it terminally in a prior link: settle
         // the optimism (a no-op when nothing is folded) and clear the record.
         await this.settleAll(
           receipt.clientMutationId,
@@ -346,18 +346,17 @@ class EntityStoreController {
   }
 
   async openMailListView(
-    request: RuntimeSessionViewRequest,
+    request: RuntimeLinkViewRequest,
   ): Promise<RuntimeOpenMessageListViewResult> {
     // Option (i): the view opens non-delta-capable, so the runtime serves full
     // `viewSnapshot`/`viewReplace` and the store re-derives from `message.updated`.
-    const result =
-      await this.deps.base.openRuntimeSessionMessageListView(request)
+    const result = await this.deps.base.openRuntimeLinkMessageListView(request)
     return this.enqueue(() => this.seedOpenedView(request, result))
   }
 
   /** Seed a freshly-opened view + rehydrate durable intent, as one store op. */
   private async seedOpenedView(
-    request: RuntimeSessionViewRequest,
+    request: RuntimeLinkViewRequest,
     result: RuntimeOpenMessageListViewResult,
   ): Promise<RuntimeOpenMessageListViewResult> {
     const { viewId, snapshot } = result
@@ -392,9 +391,9 @@ class EntityStoreController {
     // runtime-owned: the base served just above already reflects its outcome
     // when settled, and the near-end engine's reconciler resolves the
     // sent-but-unsettled remainder on every connect (D44b: query the runtime's
-    // settlement by the stored session + client mutation id; settle locally or
+    // settlement by the stored link + client mutation id; settle locally or
     // re-forward). So it is NOT re-applied as pending intent here — and, when
-    // it carries the session id the settlement query needs, it is KEPT for the
+    // it carries the link id the settlement query needs, it is KEPT for the
     // reconciler. A legacy sent record without one cannot be queried; drop it
     // (the pre-reconciler behavior, which also caps the old settled-record
     // leak). Never-sent records are re-folded below; the reconciler replays
@@ -407,7 +406,7 @@ class EntityStoreController {
     const droppedLegacy: string[] = []
     for (const record of rehydrated) {
       if (record.runtimeMutationId !== null) {
-        if (!record.sessionId) {
+        if (!record.linkId) {
           droppedLegacy.push(record.clientMutationId)
         }
         continue
@@ -439,7 +438,7 @@ class EntityStoreController {
           event: LOG_EVENTS.outboxRehydrateDropped,
           count: droppedLegacy.length,
         },
-        'dropped sent outbox records with no session id (not reconcilable)',
+        'dropped sent outbox records with no link id (not reconcilable)',
       )
     }
     const projected = await this.projectView(viewId)
@@ -460,9 +459,9 @@ class EntityStoreController {
    *  still applies the returned snapshot directly for scroll responsiveness.
    */
   async extendMailListView(
-    request: RuntimeSessionViewExtendRequest,
+    request: RuntimeLinkViewExtendRequest,
   ): Promise<RuntimeOpenMessageListViewResult> {
-    const result = await this.deps.base.extendRuntimeSessionView(request)
+    const result = await this.deps.base.extendRuntimeLinkView(request)
     const entry = this.views.get(result.viewId)
     if (!entry) {
       // Untracked view (not opened through the store): pass through unchanged.
@@ -485,10 +484,10 @@ class EntityStoreController {
     return result
   }
 
-  closeView(request: RuntimeSessionViewCloseRequest): Promise<OkResponse> {
+  closeView(request: RuntimeLinkViewCloseRequest): Promise<OkResponse> {
     this.views.delete(request.viewId)
     void this.enqueue(() => this.store.closeView(request.viewId))
-    return this.deps.base.closeRuntimeSessionView(request)
+    return this.deps.base.closeRuntimeLinkView(request)
   }
 
   subscribe(
@@ -676,8 +675,8 @@ class EntityStoreController {
 
   /**
    * Send a translated mutation to the runtime and link/settle its receipt
-   * against the durable outbox (stamping the dispatching session so the
-   * engine's reconciler can query its settlement cross-session, D44b). On a
+   * against the durable outbox (stamping the dispatching link so the
+   * engine's reconciler can query its settlement cross-link, D44b). On a
    * synchronous rejection it retires the optimism (revert) and rethrows.
    * Replay of never-dispatched records is NOT here anymore — the engine's
    * level-triggered reconciler owns it (D44a).
@@ -693,7 +692,7 @@ class EntityStoreController {
         await this.deps.outbox.linkRuntimeMutationId(
           clientMutationId,
           receipt.runtimeMutationId,
-          this.nearEnd.sessionId() ?? request.sessionId ?? undefined,
+          this.nearEnd.linkId() ?? request.linkId ?? undefined,
         )
       }
     } catch (error) {
@@ -902,7 +901,7 @@ class EntityStoreController {
       const snapshot = this.snapshotFrom(entry, projected.rows)
       this.sink.onFrame({
         type: 'viewReplace',
-        sessionSeq: this.seq++,
+        linkSeq: this.seq++,
         viewId,
         revision: entry.lastSnapshot.revision,
         snapshot,
@@ -981,11 +980,10 @@ export function createEntityStoreAdapter(
   const controller = new EntityStoreController(deps)
   return {
     ...deps.base,
-    openRuntimeSessionMessageListView: (request) =>
+    openRuntimeLinkMessageListView: (request) =>
       controller.openMailListView(request),
-    extendRuntimeSessionView: (request) =>
-      controller.extendMailListView(request),
-    closeRuntimeSessionView: (request) => controller.closeView(request),
+    extendRuntimeLinkView: (request) => controller.extendMailListView(request),
+    closeRuntimeLinkView: (request) => controller.closeView(request),
     subscribeRuntimeFrames: (request, handlers) =>
       controller.subscribe(request, handlers),
     runRuntimeMutation: (request) => controller.runMutation(request),

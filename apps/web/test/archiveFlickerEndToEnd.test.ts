@@ -11,8 +11,8 @@ import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 const present =
-  existsSync(join(wasmDir, 'posthaste_link_wasm.js')) &&
-  existsSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm'))
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm.js')) &&
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm'))
 
 function projection(mailboxIds: string[], version: number) {
   return {
@@ -36,7 +36,7 @@ const m1Row = {
 describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
   it('archive resolves to replaceMailboxes via the role map; empty map = no optimism', async () => {
     const mod = (await import(
-      join(wasmDir, 'posthaste_link_wasm.js')
+      join(wasmDir, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
@@ -46,7 +46,7 @@ describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
       ): string | undefined
     }
     mod.initSync({
-      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
     })
     const request = JSON.stringify({
       name: 'message.moveToRole',
@@ -73,13 +73,13 @@ describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
 
   it('an archived row leaves immediately and survives an equal-version stale re-serve', async () => {
     const mod = (await import(
-      join(wasmDir, 'posthaste_link_wasm.js')
+      join(wasmDir, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
     }
     mod.initSync({
-      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
     })
     const h = new mod.EntityStoreHandle()
     h.registerViewJson(

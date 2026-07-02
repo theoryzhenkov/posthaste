@@ -4,7 +4,7 @@
 //! `message.updated` firehose, so the runtime no longer re-serves it per event —
 //! the assertion is that the firehose notification fired AND the runtime emitted
 //! no redundant per-event view recompute (the retired #3 re-serve). No unrelated
-//! view recomputes, and session seq is monotonic. (The client-side convergence
+//! view recomputes, and link seq is monotonic. (The client-side convergence
 //! of the view itself is covered by the live-convergence + replica tests.)
 //!
 // spec: docs/testing/L1#view-settlement-correctness
@@ -17,7 +17,7 @@ use posthaste_testkit::Harness;
 
 fn set_keywords_mutation(account_id: &str, message_id: &str, cmid: &str) -> MutationRequest {
     // Built from the flat wire shape: the typed operation flattens its
-    // `name`/`args` into the envelope (session_id is assigned by settle()).
+    // `name`/`args` into the envelope (link_id is assigned by settle()).
     serde_json::from_value(serde_json::json!({
         "name": "message.setKeywords",
         "args": {

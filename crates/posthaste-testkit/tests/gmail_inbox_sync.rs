@@ -54,15 +54,15 @@ async fn open_inbox_view(harness: &RuntimeHarness, account: &AccountId) -> MailL
         })
         .expect("inbox mailbox should be present after the initial sync");
     let view = common::mail_list_view(&format!("in:{account}/{}", inbox.id.as_str()));
-    let session = harness
+    let link = harness
         .core()
-        .open_session(caller.clone())
+        .open_link(caller.clone())
         .await
-        .expect("session should open")
-        .session_id;
+        .expect("link should open")
+        .link_id;
     let snapshot = harness
         .core()
-        .open_session_view(caller, session, view)
+        .open_link_view(caller, link, view)
         .await
         .expect("inbox view should open");
     mail_list_rows(&snapshot)

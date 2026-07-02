@@ -9,7 +9,7 @@ import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
 import { runtimeMutations } from '../src/runtime/mutations'
 import { runtimeResources } from '../src/runtime/resources'
 import { runtimeStream } from '../src/runtime/runtimeStream'
-import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
+import { resetRuntimeLinkClientForTesting } from '../src/runtime/linkClient'
 import { runtimeViews } from '../src/runtime/views'
 
 const account: AccountOverview = {
@@ -45,7 +45,7 @@ const account: AccountOverview = {
 }
 
 afterEach(() => {
-  resetRuntimeSessionClientForTesting()
+  resetRuntimeLinkClientForTesting()
   resetRuntimeAdapterForTesting()
 })
 
@@ -53,12 +53,11 @@ describe('runtime intent facades', () => {
   it('route views, mutations, resources, and subscriptions through the active adapter', async () => {
     const fake = createFakeRuntimeAdapter()
     const resourceBlob = new Blob(['resource'])
-    const receivedRuntimeFrames: Array<{ type: string; sessionSeq: number }> =
-      []
+    const receivedRuntimeFrames: Array<{ type: string; linkSeq: number }> = []
     fake.queueAccounts([account])
     fake.queueMessageCommandResult({ detail: null, events: [] })
     fake.queueResourceBlob(resourceBlob)
-    fake.queueRuntimeSession({ sessionId: 'session-1' })
+    fake.queueRuntimeLinkConnection({ linkId: 'link-1' })
     setRuntimeAdapterForTesting(fake)
 
     expect(await runtimeViews.accounts.list()).toEqual([account])
@@ -75,18 +74,18 @@ describe('runtime intent facades', () => {
     expect(
       await runtimeResources.blob({ kind: 'account-logo', imageId: 'logo-1' }),
     ).toBe(resourceBlob)
-    const session = await runtimeStream.openSession({ sourceId: 'primary' })
+    const link = await runtimeStream.openLink({ sourceId: 'primary' })
     const unsubscribeRuntime = runtimeStream.subscribe(
-      { sessionId: session.sessionId, afterSeq: 1, sourceId: 'primary' },
+      { linkId: link.linkId, afterSeq: 1, sourceId: 'primary' },
       { onFrame: (payload) => receivedRuntimeFrames.push(payload) },
     )
-    fake.emitRuntimeFrame({ type: 'heartbeat', sessionSeq: 2 })
+    fake.emitRuntimeFrame({ type: 'heartbeat', linkSeq: 2 })
     unsubscribeRuntime()
 
     expect(fake.accountCalls).toBe(1)
     expect(fake.runtimeMutationCalls).toHaveLength(2)
     expect(fake.runtimeMutationCalls[0].request).toMatchObject({
-      sessionId: 'session-1',
+      linkId: 'link-1',
       sourceId: 'primary',
       name: 'message.setKeywords',
       args: {
@@ -102,7 +101,7 @@ describe('runtime intent facades', () => {
     ).toBe(true)
     // Role moves now route through the named-mutation pipeline too.
     expect(fake.runtimeMutationCalls[1].request).toMatchObject({
-      sessionId: 'session-1',
+      linkId: 'link-1',
       sourceId: 'primary',
       name: 'message.moveToRole',
       args: { sourceId: 'primary', messageId: 'm1', role: 'archive' },
@@ -112,17 +111,15 @@ describe('runtime intent facades', () => {
     expect(fake.resourceCalls).toEqual([
       { descriptor: { kind: 'account-logo', imageId: 'logo-1' } },
     ])
-    expect(fake.runtimeSessionCalls).toEqual([
-      // The mail-list facade opens its session through the session client, which
-      // opts into deltas; the raw openSession below does not.
+    expect(fake.runtimeLinkCalls).toEqual([
+      // The mail-list facade opens its link through the link client, which
+      // opts into deltas; the raw openLink below does not.
       { sourceId: 'primary', viewDelta: true },
       { sourceId: 'primary' },
     ])
     expect(fake.runtimeFrameSubscriptionCalls).toEqual([
-      { request: { sessionId: 'session-1', afterSeq: 1, sourceId: 'primary' } },
+      { request: { linkId: 'link-1', afterSeq: 1, sourceId: 'primary' } },
     ])
-    expect(receivedRuntimeFrames).toEqual([
-      { type: 'heartbeat', sessionSeq: 2 },
-    ])
+    expect(receivedRuntimeFrames).toEqual([{ type: 'heartbeat', linkSeq: 2 }])
   })
 })

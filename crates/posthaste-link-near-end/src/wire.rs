@@ -5,14 +5,14 @@
 //! cursor, deadlines, jittered backoff, permanent-vs-transient classification,
 //! the reconciler. What *differs* between the client↔runtime link and the
 //! runtime↔authority-server link is only the wire shape: whether a connection is
-//! prepared first (a session open), how the forward/stream/settlement requests
+//! prepared first (a link open), how the forward/stream/settlement requests
 //! are built, and what a frame parses into. [`Wire`] captures exactly that
-//! seam-shaped remainder; [`RuntimeSessionWire`] is the client↔runtime profile
+//! seam-shaped remainder; [`RuntimeLinkWire`] is the client↔runtime profile
 //! (used by the browser via wasm), and the runtime crate implements the
 //! authority-server profile natively (its frame type is native-only, so the
 //! impl lives runtime-side — this crate stays wasm-pure).
 
-use posthaste_contract_core::{MutationRequest, RuntimeFrame, RuntimeSession};
+use posthaste_contract_core::{MutationRequest, RuntimeFrame, RuntimeLinkConnection};
 
 use crate::engine::EngineError;
 use crate::transport::{GetRequest, PostRequest, StreamRequest};
@@ -36,11 +36,11 @@ pub trait Wire {
     type Frame: 'static;
 
     /// The prepare POST the wire needs before subscribing (e.g. the client
-    /// seam's session open), or `None` when the wire subscribes directly.
+    /// seam's link open), or `None` when the wire subscribes directly.
     fn prepare_request(&self) -> Option<PostRequest>;
 
     /// Digest a successful prepare response into the connection token
-    /// (e.g. the session id) later requests carry. `Err` is permanent — the
+    /// (e.g. the link id) later requests carry. `Err` is permanent — the
     /// contract itself is broken.
     fn parse_prepared(&self, body: &str) -> Result<String, String>;
 
@@ -62,30 +62,30 @@ pub trait Wire {
     fn parse_frame(&self, data: &str) -> Result<ParsedFrame<Self::Frame>, String>;
 
     /// The settlement-query GET for a sent-but-unsettled record (D44b), or
-    /// `None` when this seam has no cross-session settlement query (the
+    /// `None` when this seam has no cross-link settlement query (the
     /// reconciler then skips that step).
     fn settlement_request(
         &self,
-        session_id: &str,
+        link_id: &str,
         client_mutation_id: &str,
     ) -> Option<GetRequest>;
 }
 
-/// The client↔runtime wire profile: session-prepared, `RuntimeFrame` down,
-/// forwards stamped with the session id. `base_url` is a path prefix the host's
+/// The client↔runtime wire profile: link-prepared, `RuntimeFrame` down,
+/// forwards stamped with the link id. `base_url` is a path prefix the host's
 /// IO shim resolves against the API origin.
 #[derive(Clone, Debug, Default)]
-pub struct RuntimeSessionWire {
+pub struct RuntimeLinkWire {
     /// Path prefix for every runtime route (e.g. `/v1`). The host resolves the
     /// origin + auth; the wire only builds the protocol path.
     pub base_url: String,
-    /// Whether the session opts into incremental mail-list deltas.
+    /// Whether the link opts into incremental mail-list deltas.
     pub view_delta: bool,
-    /// Optional account scope for a source-scoped session (`?sourceId=`).
+    /// Optional account scope for a source-scoped link (`?sourceId=`).
     pub source_id: Option<String>,
 }
 
-impl Wire for RuntimeSessionWire {
+impl Wire for RuntimeLinkWire {
     type Frame = RuntimeFrame;
 
     fn prepare_request(&self) -> Option<PostRequest> {
@@ -104,9 +104,9 @@ impl Wire for RuntimeSessionWire {
     }
 
     fn parse_prepared(&self, body: &str) -> Result<String, String> {
-        let session: RuntimeSession =
-            serde_json::from_str(body).map_err(|e| format!("parse session: {e}"))?;
-        Ok(session.session_id.as_str().to_string())
+        let link: RuntimeLinkConnection =
+            serde_json::from_str(body).map_err(|e| format!("parse link: {e}"))?;
+        Ok(link.link_id.as_str().to_string())
     }
 
     fn forward_request(
@@ -114,13 +114,13 @@ impl Wire for RuntimeSessionWire {
         token: Option<&str>,
         request: &MutationRequest,
     ) -> Result<PostRequest, EngineError> {
-        let session_id =
-            token.ok_or_else(|| EngineError::transient("forward before session open"))?;
-        // Stamp the engine-held session onto the typed request (parse in,
+        let link_id =
+            token.ok_or_else(|| EngineError::transient("forward before link open"))?;
+        // Stamp the engine-held link onto the typed request (parse in,
         // serialize out — the mutation crosses the wire as a validated
         // `MailOperation`, never a raw cast).
         let mut request = request.clone();
-        request.session_id = Some(posthaste_contract_core::RuntimeSessionId::new(session_id));
+        request.link_id = Some(posthaste_contract_core::RuntimeLinkId::new(link_id));
         let body = serde_json::to_string(&request)
             .map_err(|e| EngineError::permanent(format!("serialize mutation: {e}")))?;
         let mut query = Vec::new();
@@ -131,7 +131,7 @@ impl Wire for RuntimeSessionWire {
             url: format!(
                 "{}/runtime/sessions/{}/mutations{}",
                 self.base_url,
-                session_id,
+                link_id,
                 query_string(&query)
             ),
             headers: json_headers(),
@@ -140,7 +140,7 @@ impl Wire for RuntimeSessionWire {
     }
 
     fn stream_request(&self, token: Option<&str>, cursor: Option<u64>) -> StreamRequest {
-        let session = token.unwrap_or_default();
+        let link = token.unwrap_or_default();
         let mut query = Vec::new();
         if let Some(cursor) = cursor {
             query.push(format!("afterSeq={cursor}"));
@@ -152,7 +152,7 @@ impl Wire for RuntimeSessionWire {
             url: format!(
                 "{}/runtime/sessions/{}/stream{}",
                 self.base_url,
-                session,
+                link,
                 query_string(&query)
             ),
             headers: Vec::new(),
@@ -160,21 +160,21 @@ impl Wire for RuntimeSessionWire {
     }
 
     fn parse_frame(&self, data: &str) -> Result<ParsedFrame<RuntimeFrame>, String> {
-        // The client↔runtime session stream carries `RuntimeFrame` (its seq rides
-        // inside as `sessionSeq`); it has no `Reset` control element — the runtime
+        // The client↔runtime link stream carries `RuntimeFrame` (its seq rides
+        // inside as `linkSeq`); it has no `Reset` control element — the runtime
         // far-end's collapse re-serves whole `ViewSnapshot`s, and a detected gap
         // resubscribes into that re-serve, so the reset is surfaced by the engine's
         // gap detection rather than a wire element.
         let frame: RuntimeFrame = serde_json::from_str(data).map_err(|e| e.to_string())?;
         Ok(ParsedFrame::Frame {
-            seq: frame.session_seq().get(),
+            seq: frame.link_seq().get(),
             frame,
         })
     }
 
     fn settlement_request(
         &self,
-        session_id: &str,
+        link_id: &str,
         client_mutation_id: &str,
     ) -> Option<GetRequest> {
         let mut query = Vec::new();
@@ -185,7 +185,7 @@ impl Wire for RuntimeSessionWire {
             url: format!(
                 "{}/runtime/sessions/{}/mutations/{}{}",
                 self.base_url,
-                session_id,
+                link_id,
                 client_mutation_id,
                 query_string(&query)
             ),

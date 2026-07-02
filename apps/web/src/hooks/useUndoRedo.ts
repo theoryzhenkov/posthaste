@@ -15,7 +15,7 @@ import {
   getUndoHistoryStore,
   type UndoHistorySnapshot,
 } from '@/runtime/replica/undoHistoryStore'
-import { runtimeSessionClient } from '@/runtime/sessionClient'
+import { runtimeLinkClient } from '@/runtime/linkClient'
 import { invertMessageChangeDiff } from '@/runtime/replica/wasmUtil'
 
 export interface UndoRedo {
@@ -38,7 +38,7 @@ function sendRevCursor(snapshot: UndoHistorySnapshot, accountId: string): void {
   const cursorStepId =
     snapshot.cursor >= 0 ? (snapshot.steps[snapshot.cursor]?.id ?? null) : null
   const redoTail = snapshot.steps.slice(snapshot.cursor + 1).map((s) => s.id)
-  void runtimeSessionClient
+  void runtimeLinkClient
     .runMutation({
       name: 'revCursor',
       args: { accountId, cursorStepId, redoTail },
@@ -75,7 +75,7 @@ export function useUndoRedo(): UndoRedo {
       if (!result) return
       const { step, accountId } = result
       const inverse = await invertMessageChangeDiff(step.diff)
-      void runtimeSessionClient
+      void runtimeLinkClient
         .runMutation({
           name: 'message.applyDiff',
           args: {
@@ -98,7 +98,7 @@ export function useUndoRedo(): UndoRedo {
     void store.redo().then((result) => {
       if (!result) return
       const { step, accountId } = result
-      void runtimeSessionClient
+      void runtimeLinkClient
         .runMutation({
           name: 'message.applyDiff',
           args: {

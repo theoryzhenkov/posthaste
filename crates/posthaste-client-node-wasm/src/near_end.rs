@@ -29,7 +29,7 @@ use wasm_bindgen_futures::{future_to_promise, spawn_local, JsFuture};
 use posthaste_contract_core::{MutationReceipt, MutationRequest, RuntimeFrame};
 use posthaste_link_near_end::{
     ConnectionStatus, FrameSink, GetRequest, NearEnd, NearEndConfig, OutboxHooks, PostRequest,
-    PostResponse, RuntimeSessionWire, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
+    PostResponse, RuntimeLinkWire, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
     Transport, TransportError,
 };
 
@@ -260,7 +260,7 @@ struct JsOutbox {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JsSentUnsettled {
-    session_id: String,
+    link_id: String,
     client_mutation_id: String,
     #[serde(default)]
     request: Option<MutationRequest>,
@@ -308,7 +308,7 @@ impl OutboxHooks for JsOutbox {
                 .unwrap_or_default()
                 .into_iter()
                 .map(|record| SentUnsettled {
-                    session_id: record.session_id,
+                    link_id: record.link_id,
                     client_mutation_id: record.client_mutation_id,
                     request: record.request,
                 })
@@ -341,10 +341,10 @@ struct JsConfig {
 }
 
 impl JsConfig {
-    /// Split the flat JS config into the wire profile (path/session shape) and
+    /// Split the flat JS config into the wire profile (path/link shape) and
     /// the engine's policy config.
-    fn into_parts(self) -> (RuntimeSessionWire, NearEndConfig) {
-        let wire = RuntimeSessionWire {
+    fn into_parts(self) -> (RuntimeLinkWire, NearEndConfig) {
+        let wire = RuntimeLinkWire {
             base_url: self.base_url.unwrap_or_default(),
             view_delta: self.view_delta.unwrap_or(true),
             source_id: self.source_id,
@@ -369,7 +369,7 @@ impl JsConfig {
 /// config JSON string; `connect`/`disconnect`/`forward` return Promises.
 #[wasm_bindgen]
 pub struct NearEndHandle {
-    engine: Rc<NearEnd<RuntimeSessionWire>>,
+    engine: Rc<NearEnd<RuntimeLinkWire>>,
     running: RefCell<bool>,
 }
 
@@ -384,7 +384,7 @@ impl NearEndHandle {
     /// re-seed the adapter), `onStatus(label, message)` (labels include
     /// `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
     /// forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
-    /// Promise<string>` (a JSON array of `{sessionId, clientMutationId,
+    /// Promise<string>` (a JSON array of `{linkId, clientMutationId,
     /// request?}`), and `onSettlement(receiptJson)`.
     #[wasm_bindgen(constructor)]
     pub fn new(io: &JsValue, config_json: &str) -> Result<NearEndHandle, JsError> {
@@ -427,8 +427,8 @@ impl NearEndHandle {
         })
     }
 
-    /// Open the session and start the frame loop (idempotent). The Promise
-    /// resolves once the session is open; the reconnect loop then runs in the
+    /// Open the link and start the frame loop (idempotent). The Promise
+    /// resolves once the link is open; the reconnect loop then runs in the
     /// background (`spawn_local`) until [`Self::disconnect`].
     pub fn connect(&self) -> Promise {
         let engine = self.engine.clone();
@@ -445,7 +445,7 @@ impl NearEndHandle {
         })
     }
 
-    /// Stop the frame loop (no further reconnects). Session close is a host
+    /// Stop the frame loop (no further reconnects). Link close is a host
     /// concern (a policy-free `DELETE` via the api client) since the transport is
     /// post-only.
     pub fn disconnect(&self) -> Promise {
@@ -472,13 +472,13 @@ impl NearEndHandle {
         })
     }
 
-    /// The current session id, once connected.
-    #[wasm_bindgen(js_name = sessionId)]
-    pub fn session_id(&self) -> Option<String> {
+    /// The current link id, once connected.
+    #[wasm_bindgen(js_name = linkId)]
+    pub fn link_id(&self) -> Option<String> {
         self.engine.token()
     }
 
-    /// The engine-owned resume cursor (last seen `sessionSeq`). The host mirrors
+    /// The engine-owned resume cursor (last seen `linkSeq`). The host mirrors
     /// this to durable storage so a reload resumes where it left off — callers no
     /// longer thread `afterSeq`.
     pub fn cursor(&self) -> Option<f64> {

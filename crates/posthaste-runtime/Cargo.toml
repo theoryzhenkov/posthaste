@@ -24,8 +24,8 @@ posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-far-end = { path = "../posthaste-link-far-end" }
 posthaste-link-near-end = { path = "../posthaste-link-near-end" }
-posthaste-link-core = { path = "../posthaste-link-core" }
-posthaste-link-replica = { path = "../posthaste-link-replica" }
+posthaste-replica-core = { path = "../posthaste-replica-core" }
+posthaste-replica-projector = { path = "../posthaste-replica-projector" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { workspace = true }

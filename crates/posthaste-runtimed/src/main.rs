@@ -2,7 +2,7 @@
 //!
 //! A runtime near node over a remote authority server (`[link] authority_server_url`) that serves
 //! the `/v1` client platform to local clients — drafts, smart mailboxes, and
-//! view state shared via the session model. It links only the near crates
+//! view state shared via the link model. It links only the near crates
 //! (`posthaste-http-api-adapter` + `posthaste-runtime`), never store/engine/imap. OAuth
 //! provider-account setup is an authority server operation and is not served here.
 //!

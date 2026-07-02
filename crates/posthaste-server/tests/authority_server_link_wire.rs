@@ -19,7 +19,7 @@ use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkHandle,
     AuthorityServerLinkId, BaseAssertion, BaseUpdate, DownStream, LinkCoverage, SequencedFrame,
 };
-use posthaste_link_core::MessageFoldState;
+use posthaste_replica_core::MessageFoldState;
 use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationRequest, MutationSettlementState, RuntimeError,
     RuntimeMutationId,
@@ -93,7 +93,7 @@ async fn remote_transport_drives_the_link_router_up_channel() {
 
     let receipt = transport
         .forward_mutation(MutationRequest {
-            session_id: None,
+            link_id: None,
             operation: serde_json::from_value(serde_json::json!({
                 "name": "message.setFlaggedState",
                 "args": serde_json::json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),
@@ -226,7 +226,7 @@ async fn link_router_threads_the_authed_runtime_id_into_forward_mutation_for() {
     let transport = RemoteAuthorityServer::with_token(base_url, Some("t1".to_string()));
     transport
         .forward_mutation(MutationRequest {
-            session_id: None,
+            link_id: None,
             operation: serde_json::from_value(serde_json::json!({
                 "name": "message.setFlaggedState",
                 "args": serde_json::json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),

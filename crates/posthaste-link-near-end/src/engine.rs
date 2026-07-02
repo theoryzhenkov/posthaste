@@ -5,7 +5,7 @@
 //! wire via wasm, the runtime's authority-server wire natively), the engine
 //! owns:
 //!
-//! * **connection lifecycle** — runs the wire's prepare step (a session open,
+//! * **connection lifecycle** — runs the wire's prepare step (a link open,
 //!   when the wire has one) and holds its token;
 //! * **the frame subscription** — a reconnect loop that re-subscribes with the
 //!   engine-owned resume **cursor** (`after_seq`) on *every* reconnect (fixing
@@ -105,7 +105,7 @@ impl std::error::Error for EngineError {}
 struct State {
     /// The wire's prepare step ran (a no-prepare wire is prepared immediately).
     prepared: bool,
-    /// The prepare result the wire's requests carry (e.g. the session id).
+    /// The prepare result the wire's requests carry (e.g. the link id).
     token: Option<String>,
     cursor: Option<u64>,
     reconnect_attempt: u32,
@@ -165,7 +165,7 @@ impl<W: Wire> NearEnd<W> {
         })
     }
 
-    /// The wire's connection token (the session id at the client seam), once
+    /// The wire's connection token (the link id at the client seam), once
     /// [`Self::open`] has run. `None` for a no-prepare wire.
     pub fn token(&self) -> Option<String> {
         self.state.borrow().token.clone()
@@ -195,7 +195,7 @@ impl<W: Wire> NearEnd<W> {
     // ---- connection prepare --------------------------------------------------
 
     /// Run the wire's prepare step (idempotent) — the client seam POSTs
-    /// `/runtime/sessions` and stores the session id; a no-prepare wire is
+    /// `/runtime/sessions` and stores the link id; a no-prepare wire is
     /// prepared immediately. Returns the connection token, if the wire has one.
     pub async fn open(&self) -> Result<Option<String>, EngineError> {
         if self.is_prepared() {
@@ -296,7 +296,7 @@ impl<W: Wire> NearEnd<W> {
                 return;
             }
 
-            // Run the wire's prepare step (session open) before subscribing.
+            // Run the wire's prepare step (link open) before subscribing.
             if !self.is_prepared() {
                 self.sink.on_status(ConnectionStatus::Connecting);
                 if let Err(e) = self.open().await {
@@ -450,10 +450,10 @@ impl<W: Wire> NearEnd<W> {
     ///
     /// * **(a) never-dispatched replay** — a request the host optimistically
     ///   accepted with no evidence it reached the runtime is re-forwarded. Safe:
-    ///   never-dispatched means no server-side application, and a same-session
+    ///   never-dispatched means no server-side application, and a same-link
     ///   duplicate `clientMutationId` is deduped by the runtime.
     /// * **(b) sent-but-unsettled reconciliation** — a record with a receipt but
-    ///   no terminal settlement (session-continuity loss) queries the runtime's
+    ///   no terminal settlement (link-continuity loss) queries the runtime's
     ///   settlement state by stored ids ([`Wire::settlement_request`]): a
     ///   terminal verdict settles locally, a still-pending record is left to the
     ///   frame stream, and a record the runtime does not know is re-forwarded
@@ -472,7 +472,7 @@ impl<W: Wire> NearEnd<W> {
         for record in unsettled {
             let Some(get) = self
                 .wire
-                .settlement_request(&record.session_id, &record.client_mutation_id)
+                .settlement_request(&record.link_id, &record.client_mutation_id)
             else {
                 // This seam has no settlement query — nothing to reconcile here.
                 return;
@@ -497,7 +497,7 @@ impl<W: Wire> NearEnd<W> {
                     // Still pending server-side; the frame stream will settle it.
                 }
                 None => {
-                    // The runtime has no record (session-continuity loss):
+                    // The runtime has no record (link-continuity loss):
                     // re-forward, if the host still holds the original request.
                     let Some(request) = record.request else { continue };
                     if let Ok(receipt) = self.forward(request).await {

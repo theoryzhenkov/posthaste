@@ -4,7 +4,7 @@
 //! (decorrelate reconnect storms), but a wasm-pure crate cannot depend on a
 //! timer (`tokio::time`) or an entropy source (`getrandom`) — those are host
 //! IO, exactly like [`crate::transport::Transport`]. So they are a trait the
-//! host supplies. The browser binding (in `posthaste-link-wasm`) backs `sleep`
+//! host supplies. The browser binding (in `posthaste-client-node-wasm`) backs `sleep`
 //! with `setTimeout` and seeds `jitter` from a construction-time seed; tests
 //! back both deterministically. Keeping these off the engine's own dependency
 //! list is what lets `posthaste-link-near-end` stay on the wasm frontier.

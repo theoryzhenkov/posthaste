@@ -15,7 +15,7 @@
 //! * [`TokioScheduler`] — `Scheduler` over `tokio::time::sleep` + a xorshift
 //!   jitter source (decorrelation only, per the trait's contract);
 //! * [`AuthorityLinkWire`] — the seam's [`Wire`] profile: no prepare step (the
-//!   AS link has no session open), forwards on [`LINK_FORWARD_MUTATION_PATH`],
+//!   AS link has no link open), forwards on [`LINK_FORWARD_MUTATION_PATH`],
 //!   subscribes on [`LINK_SUBSCRIBE_PATH`] with the engine-owned `afterSeq`
 //!   resume cursor (D46), frames parse as [`SequencedFrame`];
 //! * [`NativeNearEnd`] — the actor that runs the (deliberately `!Send`,
@@ -310,11 +310,11 @@ impl Wire for AuthorityLinkWire {
 
     fn settlement_request(
         &self,
-        _session_id: &str,
+        _link_id: &str,
         _client_mutation_id: &str,
     ) -> Option<GetRequest> {
         // The runtime's own forwards settle on the receipt + down-channel
-        // absorption; this seam has no cross-session settlement query.
+        // absorption; this seam has no cross-link settlement query.
         None
     }
 }

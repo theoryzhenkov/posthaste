@@ -104,7 +104,7 @@ pub struct DraftContentResult {
 /// The message's authoritative state read back after a mutation (the `get` of
 /// set+get): present with its provider record, or removed (destroyed).
 ///
-/// Mirrors link-core's `MessageOutcome` (`Present`/`Removed`) at the
+/// Mirrors replica-core's `MessageOutcome` (`Present`/`Removed`) at the
 /// provider-record layer, so `Removed` is self-describing rather than an
 /// overloaded absence. `MutationOutcome.message` is `None` only when the gateway
 /// did not read the message back at all (non-message mutation, or a gateway that

@@ -22,7 +22,7 @@ import type {
   VerificationResponse,
 } from '../api/types'
 import { getRuntimeAdapter } from './adapter'
-import { runtimeSessionClient } from './sessionClient'
+import { runtimeLinkClient } from './linkClient'
 import type {
   RuntimeMessageCommandRequest,
   RuntimeMoveMessageToMailboxRoleRequest,
@@ -136,7 +136,7 @@ export const runtimeMutations = {
       // (Phase 5a). Post-M5 the typed vocabulary covers every command kind
       // (incl. addToMailbox/removeFromMailbox), so all commands take this path.
       const named = namedMailOperation(request)
-      const receipt = await runtimeSessionClient.runMutation({
+      const receipt = await runtimeLinkClient.runMutation({
         name: named.name,
         args: {
           sourceId: request.sourceId,
@@ -156,7 +156,7 @@ export const runtimeMutations = {
       request: RuntimeMoveMessageToMailboxRoleRequest,
       options?: { userInitiated?: boolean },
     ): Promise<MessageCommandResult> {
-      const receipt = await runtimeSessionClient.runMutation({
+      const receipt = await runtimeLinkClient.runMutation({
         name: 'message.moveToRole',
         args: {
           sourceId: request.sourceId,
@@ -172,7 +172,7 @@ export const runtimeMutations = {
       request: { sourceId: string; messageId: string; until: number },
       options?: { userInitiated?: boolean },
     ): Promise<MessageCommandResult> {
-      const receipt = await runtimeSessionClient.runMutation({
+      const receipt = await runtimeLinkClient.runMutation({
         name: 'message.snooze',
         args: {
           sourceId: request.sourceId,
@@ -188,7 +188,7 @@ export const runtimeMutations = {
       request: { sourceId: string; messageId: string },
       options?: { userInitiated?: boolean },
     ): Promise<MessageCommandResult> {
-      const receipt = await runtimeSessionClient.runMutation({
+      const receipt = await runtimeLinkClient.runMutation({
         name: 'message.unsnooze',
         args: {
           sourceId: request.sourceId,

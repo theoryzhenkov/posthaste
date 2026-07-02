@@ -13,8 +13,8 @@ import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 const present =
-  existsSync(join(wasmDir, 'posthaste_link_wasm.js')) &&
-  existsSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm'))
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm.js')) &&
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm'))
 
 function projection(mailboxIds: string[], version: number) {
   return {
@@ -38,7 +38,7 @@ const m1Row = {
 describe.skipIf(!present)('archive optimism (real WASM)', () => {
   it('archive resolves to replaceMailboxes via the role map', async () => {
     const mod = (await import(
-      join(wasmDir, 'posthaste_link_wasm.js')
+      join(wasmDir, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
@@ -48,7 +48,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
       ): string | undefined
     }
     mod.initSync({
-      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
     })
     const request = JSON.stringify({
       name: 'message.moveToRole',
@@ -68,7 +68,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
 
   it('an archive op holds through the equal-version stale window, retiring at the bump', async () => {
     const mod = (await import(
-      join(wasmDir, 'posthaste_link_wasm.js')
+      join(wasmDir, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
@@ -78,7 +78,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
       ): string | undefined
     }
     mod.initSync({
-      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
     })
     const h = new mod.EntityStoreHandle()
     h.registerViewJson(

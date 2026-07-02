@@ -25,14 +25,14 @@ type QueueControls = Pick<
   | 'queueMessagePageError'
   | 'queueOpenMessageListView'
   | 'queueOpenMessageListViewError'
-  | 'queueRuntimeSession'
-  | 'queueRuntimeSessionError'
-  | 'queueRuntimeSessionMessageListView'
-  | 'queueRuntimeSessionMessageListViewError'
-  | 'queueRuntimeSessionView'
-  | 'queueRuntimeSessionViewError'
-  | 'queueRuntimeSessionViewExtend'
-  | 'queueRuntimeSessionViewExtendError'
+  | 'queueRuntimeLinkConnection'
+  | 'queueRuntimeLinkError'
+  | 'queueRuntimeLinkMessageListView'
+  | 'queueRuntimeLinkMessageListViewError'
+  | 'queueRuntimeLinkView'
+  | 'queueRuntimeLinkViewError'
+  | 'queueRuntimeLinkViewExtend'
+  | 'queueRuntimeLinkViewExtendError'
   | 'queueRuntimeMutationReceipt'
   | 'queueRuntimeMutationError'
   | 'queueOAuthStartResponse'
@@ -74,22 +74,21 @@ export function createFakeQueueControls(queues: FakeQueues): QueueControls {
       queueResolve(queues.openMessageListViews, result),
     queueOpenMessageListViewError: (error) =>
       queueReject(queues.openMessageListViews, error),
-    queueRuntimeSession: (session) =>
-      queueResolve(queues.runtimeSessions, session),
-    queueRuntimeSessionError: (error) =>
-      queueReject(queues.runtimeSessions, error),
-    queueRuntimeSessionMessageListView: (result) =>
-      queueResolve(queues.runtimeSessionMessageListViews, result),
-    queueRuntimeSessionMessageListViewError: (error) =>
-      queueReject(queues.runtimeSessionMessageListViews, error),
-    queueRuntimeSessionView: (result) =>
-      queueResolve(queues.runtimeSessionViews, result),
-    queueRuntimeSessionViewError: (error) =>
-      queueReject(queues.runtimeSessionViews, error),
-    queueRuntimeSessionViewExtend: (result) =>
-      queueResolve(queues.runtimeSessionViewExtends, result),
-    queueRuntimeSessionViewExtendError: (error) =>
-      queueReject(queues.runtimeSessionViewExtends, error),
+    queueRuntimeLinkConnection: (link) =>
+      queueResolve(queues.runtimeLinks, link),
+    queueRuntimeLinkError: (error) => queueReject(queues.runtimeLinks, error),
+    queueRuntimeLinkMessageListView: (result) =>
+      queueResolve(queues.runtimeLinkMessageListViews, result),
+    queueRuntimeLinkMessageListViewError: (error) =>
+      queueReject(queues.runtimeLinkMessageListViews, error),
+    queueRuntimeLinkView: (result) =>
+      queueResolve(queues.runtimeLinkViews, result),
+    queueRuntimeLinkViewError: (error) =>
+      queueReject(queues.runtimeLinkViews, error),
+    queueRuntimeLinkViewExtend: (result) =>
+      queueResolve(queues.runtimeLinkViewExtends, result),
+    queueRuntimeLinkViewExtendError: (error) =>
+      queueReject(queues.runtimeLinkViewExtends, error),
     queueRuntimeMutationReceipt: (receipt) =>
       queueResolve(queues.runtimeMutations, receipt),
     queueRuntimeMutationError: (error) =>
