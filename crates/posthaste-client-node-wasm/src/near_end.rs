@@ -4,7 +4,7 @@
 //! JS hands an **IO object** at construction (its `postJson` + `openStream`
 //! callbacks are the engine's [`Transport`]; the `onFrame`/`onMalformed`/
 //! `onStatus` callbacks are its [`FrameSink`]; the `neverDispatched`/
-//! `onReconciled` callbacks are its [`OutboxHooks`]), and the handle exposes
+//! `onReconciled` callbacks are its [`PendingSetHooks`]), and the handle exposes
 //! **Promise-returning** lifecycle methods (`connect`/`disconnect`/`forward`).
 //! Every scrap of policy — deadlines, backoff, the resume cursor, the reconciler,
 //! the typed frame parse, the 4xx classification — lives in the engine. The JS
@@ -28,7 +28,7 @@ use wasm_bindgen_futures::{future_to_promise, spawn_local, JsFuture};
 
 use posthaste_contract_core::{MutationReceipt, MutationRequest, RuntimeFrame};
 use posthaste_link_near_end::{
-    ConnectionStatus, FrameSink, GetRequest, NearEnd, NearEndConfig, OutboxHooks, PostRequest,
+    ConnectionStatus, FrameSink, GetRequest, NearEnd, NearEndConfig, PendingSetHooks, PostRequest,
     PostResponse, RuntimeLinkWire, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
     Transport, TransportError,
 };
@@ -246,9 +246,9 @@ impl FrameSink<RuntimeFrame> for JsFrameSink {
     }
 }
 
-// ---- OutboxHooks -----------------------------------------------------------
+// ---- PendingSetHooks --------------------------------------------------------
 
-struct JsOutbox {
+struct JsPendingSet {
     never_dispatched: Function,
     on_reconciled: Function,
     sent_unsettled: Function,
@@ -282,7 +282,7 @@ async fn js_hook_json(func: Function) -> String {
     }
 }
 
-impl OutboxHooks for JsOutbox {
+impl PendingSetHooks for JsPendingSet {
     fn never_dispatched(&self) -> LocalBoxFuture<'static, Vec<MutationRequest>> {
         let func = self.never_dispatched.clone();
         async move {
@@ -399,7 +399,7 @@ impl NearEndHandle {
             on_reset: get_function(io, "onReset")?,
             on_status: get_function(io, "onStatus")?,
         };
-        let outbox = JsOutbox {
+        let pending_set = JsPendingSet {
             never_dispatched: get_function(io, "neverDispatched")?,
             on_reconciled: get_function(io, "onReconciled")?,
             sent_unsettled: get_function(io, "sentUnsettled")?,
@@ -418,7 +418,7 @@ impl NearEndHandle {
             Rc::new(transport),
             Rc::new(BrowserScheduler),
             Rc::new(sink),
-            Rc::new(outbox),
+            Rc::new(pending_set),
             config,
         );
         Ok(NearEndHandle {

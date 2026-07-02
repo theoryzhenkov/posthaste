@@ -15,7 +15,6 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_client_link::{
     RuntimeEventSubscription, RuntimeEventStream, RuntimeFrameSubscription, RuntimeLink,
-    RuntimeViewSubscription,
 };
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, ClientMutationId, CreateAccountMutation,
@@ -24,7 +23,6 @@ use posthaste_contract_core::{
     MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller,
     RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes,
     RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, RuntimeStatus, ViewDescriptor, ViewId,
-    ViewRevision,
 };
 use posthaste_domain_model::{
     AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, CommandResult,
@@ -39,13 +37,12 @@ use posthaste_runtime_api::{
 };
 use tokio::sync::broadcast;
 
-use crate::near_node::{named_message_assertion, RuntimeAuthorityServerOutbox};
+use crate::near_node::{named_message_assertion, AuthorityServerPendingSet};
 use crate::read::ReadCache;
 use crate::far_end::links::{MutationAcceptance, LinkRegistry};
-use crate::far_end::view_registry::ViewRegistry;
 
 /// The shared runtime core behind the cloneable handle: the authority server link, the
-/// outbox, the read cache, the event bus, and the view/link registries.
+/// pending set, the read cache, the event bus, and the view/link registries.
 pub(crate) struct RuntimeCoreState {
     // Neither the service/store nor the authority server far node is held here: every
     // authority server operation now routes through the link — `authority_server_link` for the
@@ -55,9 +52,9 @@ pub(crate) struct RuntimeCoreState {
     /// The runtime↔authority-server link over its (config-selected, in-process by
     /// default) transport. The mutation up-channel + typed writes go through here.
     pub(crate) authority_server_link: AuthorityServerLinkHandle,
-    /// The runtime's outbox toward the authority server: forwarded-but-unconfirmed
+    /// The runtime's pending set toward the authority server: forwarded-but-unconfirmed
     /// mutations, folded optimistically into served views (L4 §4.3).
-    pub(crate) outbox: Arc<RuntimeAuthorityServerOutbox>,
+    pub(crate) pending_set: Arc<AuthorityServerPendingSet>,
     /// The read-through cache over the far node (W4a: passthrough). Point reads
     /// and the mail-list base draw from here.
     pub(crate) reads: Arc<ReadCache>,
@@ -65,7 +62,12 @@ pub(crate) struct RuntimeCoreState {
     // The OAuth holdout: account CRUD the lean near node can't do over the link
     // yet, so it routes to the local authority server's mutation service. Present only in
     // a `authority_server`-linked build; a lean near node has no such service.
-    pub(crate) views: Arc<ViewRegistry>,
+    //
+    // No direct `views: Arc<ViewRegistry>` field here (D51/M10 removed the last
+    // reader, the sessionless `open_view`/`subscribe_view` trait methods): every
+    // remaining view operation is link-scoped and reaches the registry through
+    // `links` (`LinkRegistry` holds its own `Arc<ViewRegistry>`, the same
+    // instance — see `assemble_runtime`).
     pub(crate) links: Arc<LinkRegistry>,
     pub(crate) startup_status: RuntimeStatus,
     pub(crate) stopped: Arc<AtomicBool>,
@@ -85,7 +87,7 @@ pub struct RuntimeHandle {
 /// `run_message_mutation`). Without it, a dropped `forward.await` skips both the
 /// `Confirmed` and `Failed` branches, leaving the mutation stuck `Accepted`
 /// forever — never pruned, no terminal `mutation.notification` frame, an
-/// unbounded outbox leak. Disarmed on the normal settle paths so it no-ops when
+/// unbounded pending-set leak. Disarmed on the normal settle paths so it no-ops when
 /// the dispatch completes.
 struct MutationCancelGuard {
     links: Arc<LinkRegistry>,
@@ -270,7 +272,7 @@ impl RuntimeHandle {
     }
 
     /// Route a single named message mutation through the shared accept → forward
-    /// → settle flow, folding its optimistic assertion into the outbox, and — for
+    /// → settle flow, folding its optimistic assertion into the pending set, and — for
     /// a diff-eligible user mutation — record the invertible change-diff onto the
     /// link's undo history once the authority server confirms it. `message.applyDiff`
     /// (undo/redo) goes through [`run_apply_diff`] instead, which wraps this flow
@@ -288,7 +290,7 @@ impl RuntimeHandle {
             .links
             .link_scope(&link_id, caller.account_scope.as_deref())?;
         // Phase 2: `revCursor` is a control operation (not a message mutation) —
-        // it carries no message target + has no outbox optimism. Route it
+        // it carries no message target + has no pending-set optimism. Route it
         // directly to the authority server (which validates + applies the cursor).
         // The typed variant carries `RevCursorArgs`, so there is no per-site arg
         // re-parse (D22).
@@ -308,17 +310,17 @@ impl RuntimeHandle {
         // through this same path.
         let source_id = request.operation.account_id().to_string();
         Self::ensure_account_in_scope(&source_id, link_scope.as_deref())?;
-        // Accept the mutation into the runtime's outbox toward the authority server so
+        // Accept the mutation into the runtime's pending set toward the authority server so
         // recomputed views fold it optimistically while it is in flight. It is
         // settled from the receipt below: co-located it retires on receipt (the
-        // forward confirms synchronously, so the outbox is empty between
+        // forward confirms synchronously, so the pending set is empty between
         // mutations and the overlay is a pass-through, `colocated-unchanged`);
         // remote it retires by absorption when the down-channel base assertion
         // arrives, so a receipt that outruns the `message.updated` propagation
         // does not recompute against a stale base (the near-node flicker).
         let optimistic = named_message_assertion(&request).map(|(message_id, assertion)| {
             let id = MutationId(request.client_mutation_id.as_str().to_string());
-            self.core.outbox.accept(PendingMessageMutation {
+            self.core.pending_set.accept(PendingMessageMutation {
                 id: id.clone(),
                 key: message_id,
                 effect: assertion,
@@ -336,7 +338,7 @@ impl RuntimeHandle {
                 &result,
                 Ok(receipt) if receipt.state == MutationSettlementState::Confirmed
             );
-            self.core.outbox.settle_receipt(&id, confirmed);
+            self.core.pending_set.settle_receipt(&id, confirmed);
         }
         result
     }
@@ -344,7 +346,7 @@ impl RuntimeHandle {
     /// Phase 2: route a `revCursor` control operation to the authority server.
     /// The account (for the scope check) is read from the already-typed
     /// `RevCursorArgs` — no per-site arg re-parse (D22) — then the request is
-    /// forwarded through the normal accept → forward → settle flow (no outbox
+    /// forwarded through the normal accept → forward → settle flow (no pending-set
     /// optimism — a cursor move has no message assertion to fold). The authority
     /// server validates the referenced steps exist + applies the cursor + emits
     /// the recompute trigger.
@@ -788,7 +790,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     }
 
     /// Direct-apply a mail operation at the authority (D21/D34). REST callers are
-    /// not replicas: there is no outbox, no optimistic fold, and no
+    /// not replicas: there is no pending set, no optimistic fold, and no
     /// `ClientMutationId` dedup on this path — the op is applied and its ack
     /// returned. Idempotency on retry is a property of the *operations* (keyword
     /// set, mailbox add/remove/replace, destroy are all state-idempotent), not of
@@ -910,30 +912,6 @@ impl RuntimeLink for RuntimeHandle {
             .mutation_settlement(caller, &link_id, &client_mutation_id)
     }
 
-    async fn open_view(
-        &self,
-        caller: RuntimeCaller,
-        descriptor: ViewDescriptor,
-    ) -> Result<posthaste_contract_core::ViewSnapshot, RuntimeError> {
-        self.ensure_runtime_active()?;
-        self.core
-            .views
-            .open_view(descriptor, caller.account_scope.as_deref())
-            .await
-    }
-
-    async fn subscribe_view(
-        &self,
-        caller: RuntimeCaller,
-        view_id: ViewId,
-        after_revision: Option<ViewRevision>,
-    ) -> Result<RuntimeViewSubscription, RuntimeError> {
-        self.ensure_runtime_active()?;
-        self.core
-            .views
-            .subscribe_view(view_id, after_revision, caller.account_scope.as_deref())
-    }
-
     async fn subscribe_events(
         &self,
         _caller: RuntimeCaller,
@@ -962,13 +940,14 @@ impl RuntimeLink for RuntimeHandle {
 }
 
 #[cfg(test)]
-mod outbox_lifecycle_tests {
+mod pending_set_lifecycle_tests {
     use super::*;
     use posthaste_contract_core::ClientMutationId;
     use posthaste_domain_model::MessageSummary;
     use posthaste_authority_server_link::AuthorityServerApi;
+    use crate::far_end::view_registry::ViewRegistry;
 
-    // A never-invoked authority-server Api half: the outbox-lifecycle paths
+    // A never-invoked authority-server Api half: the pending-set-lifecycle paths
     // under test touch only the link registry, never the authority server,
     // so the stub's methods are inert. (Only the reads the view registry may
     // touch get bodies; the rest inherit the erroring defaults.)
@@ -979,7 +958,7 @@ mod outbox_lifecycle_tests {
             &self,
             _: MailQueryRequest,
         ) -> Result<MailQueryPage, RuntimeError> {
-            unimplemented!("outbox-lifecycle tests do not query")
+            unimplemented!("pending-set-lifecycle tests do not query")
         }
         async fn current_summary(
             &self,
@@ -992,9 +971,9 @@ mod outbox_lifecycle_tests {
 
     fn test_link_registry() -> Arc<LinkRegistry> {
         let event_sender = broadcast::channel(16).0;
-        let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(false));
+        let pending_set = Arc::new(AuthorityServerPendingSet::new(false));
         let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopAuthorityServerLink)));
-        let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
+        let views = Arc::new(ViewRegistry::new(event_sender.clone(), pending_set, reads));
         Arc::new(LinkRegistry::new(views, event_sender))
     }
 

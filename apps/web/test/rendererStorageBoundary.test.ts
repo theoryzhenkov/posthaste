@@ -22,13 +22,13 @@ const allowedStorageFiles = new Set([
   'src/repairFeedback.ts',
   // The client-layer replica's durable state lives in one IndexedDB DB
   // (`posthaste-replica`); `replicaDatabase.ts` is the single shared opener
-  // that owns the schema version + creates every object store, so the outbox
-  // + undo history can't diverge on version again. It persists only mutation
+  // that owns the schema version + creates every object store, so the pending
+  // set + undo history can't diverge on version again. It persists only mutation
   // metadata + invertible diffs (keyword/mailbox deltas, step ids) — never
   // bodies, attachments, or auth material, which the forbidden-value check
   // below still enforces.
   'src/runtime/replica/replicaDatabase.ts',
-  'src/runtime/replica/outboxStore.ts',
+  'src/runtime/replica/pendingSetStore.ts',
   // The client-owned undo/redo history: persists only invertible change-diffs
   // (keyword/mailbox deltas) + step ids — no bodies, attachments, or auth
   // material. Shares the `posthaste-replica` DB via the shared opener.
@@ -52,7 +52,7 @@ const forbiddenStorageValueTerms = [
   /idempotency/i,
   /event[_-]?history/i,
   // `sqlite|indexeddb|database` was a proxy for "don't mirror the server DB to
-  // storage"; the replica outbox is now a sanctioned IndexedDB store, so the
+  // storage"; the replica pending set is now a sanctioned IndexedDB store, so the
   // API identifier is no longer treated as a forbidden value. The mail-content
   // and auth-material terms above remain the real guard.
 ]

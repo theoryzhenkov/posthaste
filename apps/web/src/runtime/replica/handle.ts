@@ -77,7 +77,7 @@ export interface EntityStoreHandle {
   /** Drain the dirty keys (`[{message|mailbox|view: id}]`) since the last drain. */
   drainDirtyJson(): string
   /** Drain the ids of ops retired since the last drain (JSON string array). The
-   *  host clears durable-outbox records only for these. (outbox D) */
+   *  host clears durable-pending-set records only for these. (outbox D) */
   drainRetiredJson(): string
 }
 

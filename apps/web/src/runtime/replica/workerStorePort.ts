@@ -4,7 +4,7 @@
  * This is the payoff of the async `StorePort` boundary: the CPU-bound store
  * (ingest + projection) runs on a worker thread, so a sync burst (e.g. a
  * post-repair full re-sync) can't freeze the UI thread. The renderer keeps
- * React, React Query, mutation translation, and the durable outbox/undo.
+ * React, React Query, mutation translation, and the durable pending set/undo.
  *
  * The protocol is a request/response over `postMessage`: each call carries an
  * id, the method name, and its JSON-string args (the same payload that crosses

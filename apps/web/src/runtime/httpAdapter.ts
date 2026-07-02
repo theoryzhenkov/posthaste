@@ -1,14 +1,8 @@
 import {
-  EventStreamContentType,
-  fetchEventSource,
-} from '@microsoft/fetch-event-source'
-
-import {
   authHeaders,
   buildAccountLogoUrl,
   buildMessageAttachmentUrl,
   buildMessageBodyUrl,
-  buildViewStreamUrl,
   buildOAuthRedirectUri,
   closeRuntimeLink,
   closeRuntimeLinkView,
@@ -36,7 +30,6 @@ import {
   fetchSourceMessages,
   extendRuntimeLinkView,
   openRuntimeLinkView,
-  openView,
   patchMailbox,
   patchSettings,
   performMessageCommand,
@@ -61,13 +54,10 @@ import type { KnownMailboxRole, Mailbox } from '../api/types'
 
 import type {
   RuntimeAdapter,
-  RuntimeFrameHandlers,
   RuntimeMailListViewState,
   RuntimeMailQueryRequest,
   RuntimeMessagePageRequest,
   RuntimeResourceDescriptor,
-  RuntimeViewFrame,
-  RuntimeViewFrameHandlers,
   RuntimeViewDescriptor,
   RuntimeViewSnapshot,
 } from './types'
@@ -118,10 +108,6 @@ function scopeQuery(request: RuntimeMessagePageRequest): string {
   return parts.join(' ')
 }
 
-function sourceScope(request: RuntimeMessagePageRequest): string | null {
-  return request.scope.kind === 'source-mailbox' ? request.scope.sourceId : null
-}
-
 function mailQueryRequest(
   request: RuntimeMessagePageRequest,
 ): RuntimeMailQueryRequest {
@@ -157,8 +143,6 @@ function mailListViewDescriptor(
   }
 }
 
-class FatalStreamError extends Error {}
-
 function requiredMailboxByRole(
   mailboxes: Mailbox[],
   sourceId: string,
@@ -188,14 +172,6 @@ function resourceUrl(resource: RuntimeResourceDescriptor): string {
         resource.format,
       )
   }
-}
-
-function handleMalformedFrame(
-  handlers: RuntimeFrameHandlers | RuntimeViewFrameHandlers,
-  raw: string,
-  error: unknown,
-): void {
-  handlers.onMalformedFrame?.({ raw, error })
 }
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
@@ -255,68 +231,6 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     // loop and the `afterSeq` resume cursor are engine-owned (callers no
     // longer thread `afterSeq`).
     return subscribeNearEndFrames(handlers)
-  },
-  async openMessageListView(request) {
-    const descriptor = mailListViewDescriptor(request)
-    return openView<RuntimeViewSnapshot<RuntimeMailListViewState>>(
-      { descriptor },
-      { sourceId: sourceScope(request) },
-    )
-  },
-  subscribeView(request, handlers) {
-    const controller = new AbortController()
-    void fetchEventSource(
-      buildViewStreamUrl({
-        viewId: request.viewId,
-        afterRevision: request.afterRevision,
-        sourceId: request.sourceId,
-      }),
-      {
-        headers: authHeaders(),
-        signal: controller.signal,
-        openWhenHidden: true,
-        async onopen(response) {
-          const contentType = response.headers.get('content-type') ?? ''
-          if (response.ok && contentType.startsWith(EventStreamContentType)) {
-            return
-          }
-          if (response.status >= 400 && response.status < 500) {
-            throw new FatalStreamError(
-              `view stream rejected with ${response.status}`,
-            )
-          }
-          throw new Error(`view stream returned ${response.status}`)
-        },
-        onmessage(event) {
-          if (!event.data) {
-            return
-          }
-          let payload: RuntimeViewFrame<RuntimeMailListViewState>
-          try {
-            payload = JSON.parse(
-              event.data,
-            ) as RuntimeViewFrame<RuntimeMailListViewState>
-          } catch (error) {
-            handleMalformedFrame(handlers, event.data, error)
-            return
-          }
-          handlers.onFrame(payload)
-        },
-        onerror(error) {
-          if (error instanceof FatalStreamError) {
-            handlers.onPermanentError?.(error)
-            throw error
-          }
-          handlers.onTransientError?.(error)
-        },
-      },
-    ).catch((error) => {
-      if (controller.signal.aborted || error instanceof FatalStreamError) {
-        return
-      }
-      handlers.onClosed?.(error)
-    })
-    return () => controller.abort()
   },
   createAccount(input) {
     return createAccount(input)

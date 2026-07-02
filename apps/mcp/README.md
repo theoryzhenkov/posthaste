@@ -12,7 +12,8 @@ interfaces. Each operation is defined once in `src/operations/` (name,
 description, `zod` arg schema, handler); the MCP server renders it as a tool and
 the CLI renders it as a subcommand. "No new API surface" and "CLI ≡ MCP" are
 therefore _structural_ — neither front-end can drift from the other or from the
-API. See [`docs/eph/DESIGN-L2-posthastectl.md`](../../docs/eph/DESIGN-L2-posthastectl.md).
+API. See [`docs/eph/RFC-L2-scripting.md`](../../docs/eph/RFC-L2-scripting.md) §7
+(the ladder) for posthastectl's place in the minimal-code-per-level design.
 
 ```
 src/
@@ -101,7 +102,7 @@ stream is intentionally **not** exposed (view-internal).
 > `events` consumes the daemon's `GET /v1/events` SSE — the flat, view-less
 > projection of the same `DomainEvent` broadcast the UI consumes in view-coupled
 > form (the runtime session stream's `Notification` frames). See
-> DESIGN-L2-posthastectl §0/§3.
+> `docs/eph/RFC-L2-scripting.md` §4 (the tap).
 
 ### Run a script on new mail (`watch`)
 

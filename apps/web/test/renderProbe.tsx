@@ -10,8 +10,8 @@
  * Fixtures supply external inputs at the adapter's injection seams
  * (`EntityStoreAdapterDeps`): `base` = a `FakeRuntimeAdapter` whose
  * `emitRuntimeFrame` is the replay point (the adapter cannot tell a live frame
- * from a replayed one), `makeHandle` = the real WASM factory, `outbox` = a real
- * `MemoryOutboxStore`, `queryClient` = a test client. Observables are the
+ * from a replayed one), `makeHandle` = the real WASM factory, `pendingSet` = a real
+ * `MemoryPendingSetStore`, `queryClient` = a test client. Observables are the
  * rendered row-set per commit (the observer's `query.data`, which reflects
  * `placeholderData` too) + the raw cache.
  *
@@ -37,7 +37,7 @@ import type {
   EntityStoreHandle,
   EntityStoreHandleFactory,
 } from '../src/runtime/replica/handle'
-import { MemoryOutboxStore } from '../src/runtime/replica/outboxStore'
+import { MemoryPendingSetStore } from '../src/runtime/replica/pendingSetStore'
 import {
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
@@ -323,7 +323,7 @@ export class RenderProbe {
     this.spy = args.spy
   }
 
-  /** Wire the real adapter over a fake base + real WASM handle + real outbox,
+  /** Wire the real adapter over a fake base + real WASM handle + real pending set,
    *  install it, render the host, and wait for the initial rows to commit. */
   static async open(opts: RenderProbeOptions): Promise<RenderProbe> {
     const queryClient = new QueryClient({
@@ -340,7 +340,7 @@ export class RenderProbe {
     const adapter = createEntityStoreAdapter({
       base: fakeBase,
       makeHandle,
-      outbox: new MemoryOutboxStore(),
+      pendingSet: new MemoryPendingSetStore(),
       queryClient,
       now: () => 1,
     })
@@ -393,7 +393,7 @@ export class RenderProbe {
     })
   }
 
-  /** Run a mutation through the real adapter (acceptMutation + outbox + forward
+  /** Run a mutation through the real adapter (acceptMutation + pending set + forward
    *  to the fake base). Settlement arrives later via a `mutationNotification`
    *  frame (see {@link mutationNotificationFrame}). */
   async runMutation(

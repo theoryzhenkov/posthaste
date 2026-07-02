@@ -5,7 +5,7 @@
  * `linkClientReconnect` suite (the TS reconnect timer it pinned is deleted;
  * the engine owns reconnects) and the transport halves of the adapter suites.
  *
- * Behavior pinned here: reconnect-with-cursor, replay-on-connect (the outbox
+ * Behavior pinned here: reconnect-with-cursor, replay-on-connect (the pending-set
  * reconciler), malformed-frame reporting, permanent-vs-transient stream
  * classification, forward retry + typed receipts, and the sent-but-unsettled
  * settlement query (D44b).
@@ -18,7 +18,7 @@ import {
   connectNearEnd,
   forwardNearEndMutation,
   resetNearEndForTesting,
-  setNearEndOutboxHooks,
+  setNearEndPendingSetHooks,
   setNearEndTransportIoForTesting,
   subscribeNearEndFrames,
   type NearEndSentUnsettled,
@@ -265,13 +265,13 @@ describe('the near-end engine over fake IO', () => {
     expect(io.posts.filter((p) => p.url.includes('/mutations')).length).toBe(1)
   })
 
-  it('replays never-dispatched outbox records on every connect (D44a)', async () => {
+  it('replays never-dispatched pending-set records on every connect (D44a)', async () => {
     const reconciled: {
       receipt: RuntimeMutationReceipt
       linkId: string | null
     }[] = []
     let pending: RuntimeRunMutationRequest[] = [sampleRequest('c-replay')]
-    setNearEndOutboxHooks({
+    setNearEndPendingSetHooks({
       neverDispatched: async () => {
         const drained = pending
         pending = []
@@ -304,7 +304,7 @@ describe('the near-end engine over fake IO', () => {
       request: sampleRequest('c-sent'),
     }
     let unsettled: NearEndSentUnsettled[] = [record]
-    setNearEndOutboxHooks({
+    setNearEndPendingSetHooks({
       neverDispatched: async () => [],
       onReconciled: async () => {},
       sentUnsettled: async () => {
@@ -341,7 +341,7 @@ describe('the near-end engine over fake IO', () => {
         request: sampleRequest('c-lost'),
       },
     ]
-    setNearEndOutboxHooks({
+    setNearEndPendingSetHooks({
       neverDispatched: async () => [],
       onReconciled: async (receipt) => {
         reconciled.push(receipt)

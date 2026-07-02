@@ -1092,26 +1092,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/views": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Open a runtime view
-         * @description Opens a runtime-owned view and returns its initial snapshot.
-         */
-        post: operations["open_view"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/views/conversations": {
         parameters: {
             query?: never;
@@ -1144,26 +1124,6 @@ export interface paths {
          * @description Returns a full conversation with all messages expanded.
          */
         get: operations["get_conversation"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/views/{view_id}/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Subscribe to a runtime view stream
-         * @description Streams runtime view frames as server-sent events. Event ids are view revisions.
-         */
-        get: operations["stream_view"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1944,7 +1904,7 @@ export interface components {
          *     [`RuntimeFrame::MutationNotification`] and keyed to the client mutation id.
          *     The two outcomes are deliberately the only ones on the wire: `Confirmed` is
          *     otherwise implicit in the base update (it serves the no-op-confirmation and
-         *     durable-outbox-clear cases), and `Rejected` is the *only* signal a failed
+         *     durable-pending-set-clear cases), and `Rejected` is the *only* signal a failed
          *     mutation produces — a rejection changes no state, so no `message.updated`
          *     accompanies it. The non-terminal acks (Accepted/Queued) are not emitted: the
          *     client already tracks the op the moment it enqueues it.
@@ -2011,13 +1971,6 @@ export interface components {
         };
         OpenRuntimeLinkViewResponse: {
             snapshot: components["schemas"]["ViewSnapshot"];
-            viewId: string;
-        };
-        OpenViewRequest: {
-            descriptor: Record<string, never>;
-        };
-        OpenViewResponse: {
-            snapshot: Record<string, never>;
             viewId: string;
         };
         /**
@@ -5393,50 +5346,6 @@ export interface operations {
             };
         };
     };
-    open_view: {
-        parameters: {
-            query?: {
-                sourceId?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OpenViewRequest"];
-            };
-        };
-        responses: {
-            /** @description The opened view snapshot */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpenViewResponse"];
-                };
-            };
-            /** @description Invalid view descriptor */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorBody"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorBody"];
-                };
-            };
-        };
-    };
     list_conversations: {
         parameters: {
             query?: {
@@ -5497,48 +5406,6 @@ export interface operations {
             };
             /** @description Conversation not found */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorBody"];
-                };
-            };
-        };
-    };
-    stream_view: {
-        parameters: {
-            query?: {
-                afterRevision?: number | null;
-                sourceId?: string | null;
-            };
-            header?: never;
-            path: {
-                /** @description Runtime view id */
-                view_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description SSE stream of runtime ViewFrame values */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown view */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorBody"];
-                };
-            };
-            /** @description Internal error */
-            500: {
                 headers: {
                     [name: string]: unknown;
                 };

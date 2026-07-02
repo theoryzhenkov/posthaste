@@ -88,7 +88,9 @@ pub struct EventsQuery {
 /// is `posthastectl events` — the scriptable CLI / MCP bridge in `apps/mcp` — plus
 /// other view-less integrations, none of which are visible from this crate. The
 /// endpoint was deleted once (commit cce95402c) precisely because that consumer
-/// did not yet exist. See docs/eph/DESIGN-L2-posthastectl §0/§3.
+/// did not yet exist. See docs/eph/RFC-L2-scripting §4 (the tap) — this
+/// endpoint's D52 remount target; posthastectl's design rationale now lives
+/// there.
 ///
 /// @spec docs/L1-api#sse-event-stream
 /// @spec docs/L0-api#server-sent-events-for-push
