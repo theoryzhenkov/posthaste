@@ -7,7 +7,7 @@
 //! them. They were factored out of `backend.rs` for exactly this reason.
 
 use crate::{MutationRequest, RuntimeError, RuntimeErrorCode};
-use posthaste_domain::SetKeywordsCommand;
+use posthaste_domain_model::SetKeywordsCommand;
 use posthaste_link_core::MessageChangeDiff;
 use serde::Deserialize;
 

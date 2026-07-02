@@ -12,7 +12,7 @@ fn account_scoped_reads_do_not_leak() -> Result<(), StoreError> {
     store.apply_sync_batch(
         &account_a,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain::MailboxRecord {
+            mailboxes: vec![posthaste_domain_service::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),
@@ -37,7 +37,7 @@ fn account_scoped_reads_do_not_leak() -> Result<(), StoreError> {
     store.apply_sync_batch(
         &account_b,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain::MailboxRecord {
+            mailboxes: vec![posthaste_domain_service::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),
@@ -105,7 +105,7 @@ fn sync_batch_is_atomic_when_junction_insert_fails() -> Result<(), StoreError> {
     let result = store.apply_sync_batch(
         &account,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain::MailboxRecord {
+            mailboxes: vec![posthaste_domain_service::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),

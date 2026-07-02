@@ -25,7 +25,7 @@ use posthaste_authority_runtime::{
     build_authority_runtime, build_backend_node, build_remote_runtime, BackendTransportConfig,
     RemoteBackend, RuntimeBuildConfig,
 };
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
     SecretStore, SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
     SyncObject, ThreadId,
@@ -109,7 +109,7 @@ fn build_config(root: PathBuf) -> RuntimeBuildConfig {
 
 fn seed_inbox_message(
     build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
-    account: &posthaste_domain::AccountId,
+    account: &posthaste_domain_service::AccountId,
     message_id: &str,
 ) {
     build

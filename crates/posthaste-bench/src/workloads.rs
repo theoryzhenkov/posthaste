@@ -6,7 +6,7 @@
 //! iai-callgrind regression gate all share one source of truth. Fixtures are
 //! fully synthetic and require no network or external services.
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     search, AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid,
     ImapUidValidity, MailboxId, MailboxRecord, MessageCommandStore, MessageDetailStore, MessageId,
     MessageListStore, MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient,

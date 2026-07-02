@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ConfigRepository,
     MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord, SecretRef,
     SecretStore, SecretStoreError, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,

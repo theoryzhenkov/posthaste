@@ -1,4 +1,4 @@
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AutomationAction,
     AutomationRule, AutomationTrigger, MailboxId, MailboxRecord, MessageId, MessageRecord,
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,

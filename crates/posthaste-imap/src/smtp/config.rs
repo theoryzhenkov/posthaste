@@ -1,5 +1,5 @@
 use lettre::Address;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountSettings, AccountTransportSettings, ProviderAuthKind, ProviderHint, ProviderProfile,
     SmtpSentCopyPolicy, TransportSecurity,
 };

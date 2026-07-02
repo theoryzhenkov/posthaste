@@ -13,7 +13,7 @@ use super::*;
 /// The conventional per-account history cap (carried from Phase 1).
 pub const MAX_REV_LOG_HISTORY: u32 = 50;
 
-// `RevLogStep` + `RevCursor` live in `posthaste-domain` (shared with the
+// `RevLogStep` + `RevCursor` live in `posthaste-domain-model` (shared with the
 // `BackendApi` read channel + the `RevLog` synced view); `use super::*`
 // brings them into scope via the crate re-export.
 

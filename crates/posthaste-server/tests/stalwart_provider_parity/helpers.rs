@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, ImapMessageLocationStore, MailboxId, MailboxSummary, MessageSummary, SyncTrigger,
 };
 use posthaste_engine::LiveJmapGateway;

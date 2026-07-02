@@ -1,5 +1,5 @@
 use base64::Engine;
-use posthaste_domain::{GatewayError, SendMessageAttachment};
+use posthaste_domain_service::{GatewayError, SendMessageAttachment};
 
 use crate::live::{map_gateway_error, LiveJmapGateway};
 

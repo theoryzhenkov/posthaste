@@ -31,7 +31,7 @@ impl LiveImapSmtpGateway {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-    ) -> Result<(posthaste_domain::ImapMessageLocation, String), GatewayError> {
+    ) -> Result<(posthaste_domain_service::ImapMessageLocation, String), GatewayError> {
         let locations = self
             .store("message location lookup")?
             .list_imap_message_locations(account_id, message_id)
@@ -163,7 +163,7 @@ pub(crate) async fn plan_mailbox(
             stored_state: None,
             local_locations: Vec::new(),
             plan: PlannedImapMailboxSync::Sync(ImapMailboxSyncPlan::FullSnapshot {
-                reason: posthaste_domain::ImapFullSyncReason::InitialSync,
+                reason: posthaste_domain_service::ImapFullSyncReason::InitialSync,
             }),
         });
     };

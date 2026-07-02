@@ -13,7 +13,7 @@ use iai_callgrind::{
     library_benchmark, library_benchmark_group, main, Callgrind, EventKind, LibraryBenchmarkConfig,
 };
 use posthaste_bench::workloads;
-use posthaste_domain::{MessagePage, SyncBatch};
+use posthaste_domain_service::{MessagePage, SyncBatch};
 
 /// Smaller than the Criterion population: Callgrind instruments execution and is
 /// ~50x slower, and instruction counts are scale-stable for regression signal.

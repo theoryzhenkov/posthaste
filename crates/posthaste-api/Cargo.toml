@@ -22,7 +22,7 @@ dirs = { workspace = true }
 keyring = { workspace = true }
 macaroon = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }
-posthaste-domain = { path = "../posthaste-domain", features = ["openapi"] }
+posthaste-domain-service = { path = "../posthaste-domain-service", features = ["openapi"] }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-runtime-contract = { path = "../posthaste-runtime-contract", features = ["openapi"] }

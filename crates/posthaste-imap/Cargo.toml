@@ -12,7 +12,7 @@ imap-client = { workspace = true }
 imap-codec = "2.0.0-alpha.7"
 lettre = { workspace = true }
 mail-parser = { workspace = true }
-posthaste-domain = { path = "../posthaste-domain" }
+posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-observability = { path = "../posthaste-observability" }
 pulldown-cmark = { workspace = true }
 thiserror = { workspace = true }

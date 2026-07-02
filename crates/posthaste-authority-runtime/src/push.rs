@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, PushEventStream, PushStreamEvent, PushTransport, ResilientPushConfig,
 };
 use posthaste_observability::{events, ph_debug, ph_warn};

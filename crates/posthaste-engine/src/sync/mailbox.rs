@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use jmap_client::client::Client;
 use jmap_client::mailbox;
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601 as domain_now_iso8601, GatewayError, MailboxId, SyncCursor, SyncObject,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};

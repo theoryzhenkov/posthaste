@@ -12,7 +12,7 @@ use std::time::Duration;
 use posthaste_authority_runtime::{
     AccountSupervisor, AuthorityRuntimeApiMigrationBridge, RuntimeHandle,
 };
-use posthaste_domain::{DomainEvent, MailService, MailStore, SecretStore};
+use posthaste_domain_service::{DomainEvent, MailService, MailStore, SecretStore};
 use tokio::sync::broadcast;
 
 pub fn runtime_handle_for_migration(

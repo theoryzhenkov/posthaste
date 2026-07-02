@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use posthaste_domain::{ImapMessageLocation, MailboxId, MessageRecord};
+use posthaste_domain_service::{ImapMessageLocation, MailboxId, MessageRecord};
 
 use crate::{message::ImapMailboxMembershipSource, ImapMappedHeader};
 

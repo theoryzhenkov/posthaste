@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, ConversationId, DomainEvent, MessageId, EVENT_TOPIC_ACCOUNT_CREATED,
     EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_ACCOUNT_UPDATED,
     EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_REV_LOG_APPENDED,
@@ -811,7 +811,7 @@ fn presentation_window(presentation: &MailPresentationRequest) -> Value {
 #[cfg(test)]
 mod recompute_trigger_tests {
     use super::*;
-    use posthaste_domain::EVENT_TOPIC_MESSAGE_UPDATED;
+    use posthaste_domain_service::EVENT_TOPIC_MESSAGE_UPDATED;
     use serde_json::json;
 
     fn message_event(payload: serde_json::Value) -> DomainEvent {
@@ -870,7 +870,7 @@ mod rev_log_view_tests {
     use crate::near_node::RuntimeBackendOutbox;
     use crate::read::ReadCache;
     use async_trait::async_trait;
-    use posthaste_domain::{RevCursor, RevLogSnapshot, RevLogStep};
+    use posthaste_domain_service::{RevCursor, RevLogSnapshot, RevLogStep};
     use posthaste_link_contract::{BackendApi, DownStream, LinkCoverage};
     use posthaste_runtime_contract::{MutationReceipt, MutationRequest};
 

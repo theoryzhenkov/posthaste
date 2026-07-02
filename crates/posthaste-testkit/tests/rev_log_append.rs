@@ -4,7 +4,7 @@
 //!
 // spec: docs/eph/DESIGN-L2-undo-redo-revlog-contract
 
-use posthaste_domain::RevCursor;
+use posthaste_domain_service::RevCursor;
 use posthaste_runtime_contract::{
     ClientMutationId, MutationNotification, MutationRequest, ViewDescriptor,
 };

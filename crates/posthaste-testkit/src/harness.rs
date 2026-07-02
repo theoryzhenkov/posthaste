@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use posthaste_authority_runtime::{build_authority_runtime, RuntimeBuildConfig};
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, RFC3339_EPOCH,
 };
 use posthaste_store::DatabaseStore;
@@ -24,7 +24,7 @@ use crate::paths::temp_root;
 /// assertions can observe the recompute path. The `store`/`service` fields are
 /// the seam for direct driving without the runtime.
 pub struct Harness {
-    pub service: posthaste_domain::MailService,
+    pub service: posthaste_domain_service::MailService,
     pub store: Arc<DatabaseStore>,
     root: PathBuf,
 }
@@ -46,7 +46,7 @@ impl Harness {
         );
         let config = Arc::new(config_repo);
         Self {
-            service: posthaste_domain::MailService::new(store.clone(), config),
+            service: posthaste_domain_service::MailService::new(store.clone(), config),
             store,
             root,
         }

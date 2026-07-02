@@ -23,7 +23,7 @@ mod store;
 mod sync_state;
 
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
-pub use posthaste_domain::{RevCursor, RevLogSnapshot, RevLogStep, RevLogStore};
+pub use posthaste_domain_service::{RevCursor, RevLogSnapshot, RevLogStep, RevLogStore};
 pub use rev_log::MAX_REV_LOG_HISTORY;
 
 use std::collections::BTreeSet;
@@ -33,7 +33,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
 use hex::encode as hex_encode;
-use posthaste_domain::{
+use posthaste_domain_service::{
     cache_signal_rescore_priority, now_iso8601 as domain_now_iso8601,
     synthesize_plain_text_raw_mime, AccountId, AutomationBackfillJob, AutomationBackfillJobStatus,
     AutomationBackfillStore, CacheCandidate, CacheFetchCandidate, CacheFetchUnit, CacheLayer,

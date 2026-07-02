@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use imap_client::client::tokio::Client as ImapClient;
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601, plan_imap_mailbox_sync, plan_imap_move, AccountId, BlobId, FetchedBody,
     GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState,
     ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MailGateway, MailStore,

@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
 use posthaste_authority_runtime::{AuthorityRuntimeBuild, RuntimeHandle};
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, DomainEvent, MailStore, MailboxId, MailboxRecord, MessageRecord,
     ProviderAuthKind, ProviderHint, SecretRef, SecretStore, SecretStoreError, SyncBatch,
     SyncCursor, SyncObject,

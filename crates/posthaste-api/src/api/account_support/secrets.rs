@@ -6,7 +6,7 @@ use super::*;
 /// @spec docs/L1-api#secret-management
 #[cfg(test)]
 pub(crate) fn apply_secret_instruction(
-    secret_store: &dyn posthaste_domain::SecretStore,
+    secret_store: &dyn posthaste_domain_service::SecretStore,
     account: &mut AccountSettings,
     previous_secret_ref: Option<&SecretRef>,
     secret: &SecretWriteRequest,

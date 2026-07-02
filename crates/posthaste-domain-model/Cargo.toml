@@ -1,28 +1,27 @@
 [package]
-name = "posthaste-domain"
+name = "posthaste-domain-model"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-trait = { workspace = true }
 futures-util = { workspace = true }
-mail-parser = { workspace = true }
-posthaste-link-core = { path = "../posthaste-link-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-posthaste-observability = { path = "../posthaste-observability" }
 thiserror = { workspace = true }
 time = { workspace = true }
 utoipa = { workspace = true, optional = true }
 uuid = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# uuid's v4 RNG needs the js backend on wasm32-unknown-unknown (RFC Q4). The
+# workspace `uuid` already enables v4; this adds the browser RNG backend for
+# the wasm-pure frontier check. Native builds keep the default backend.
+uuid = { workspace = true, features = ["js"] }
+
 [features]
 # Derive `utoipa::ToSchema` on wire-facing domain types so the server can emit
-# OpenAPI without coupling the domain crate to the web stack by default.
+# OpenAPI without coupling the domain model to the web stack by default.
 openapi = ["dep:utoipa"]
-
-[dev-dependencies]
-tokio = { workspace = true }
 
 [lints]
 workspace = true

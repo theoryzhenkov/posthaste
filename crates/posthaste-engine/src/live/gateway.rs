@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageId,
     MutationOutcome, PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand,
     SyncBatch, SyncChunkSink, SyncCursor, SyncOutcome,
@@ -22,7 +22,7 @@ impl MailGateway for LiveJmapGateway {
         &self,
         _account_id: &AccountId,
         cursors: &[SyncCursor],
-        progress: Option<posthaste_domain::SyncProgressReporter>,
+        progress: Option<posthaste_domain_service::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         crate::live_sync::sync_account(&self.client, cursors, progress).await
     }
@@ -35,7 +35,7 @@ impl MailGateway for LiveJmapGateway {
         &self,
         account_id: &AccountId,
         cursors: &[SyncCursor],
-        progress: Option<posthaste_domain::SyncProgressReporter>,
+        progress: Option<posthaste_domain_service::SyncProgressReporter>,
         sink: &mut dyn SyncChunkSink,
     ) -> Result<SyncOutcome, GatewayError> {
         crate::live_sync::sync_account_streamed(&self.client, account_id, cursors, progress, sink)

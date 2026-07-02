@@ -1,6 +1,6 @@
 mod tokenize;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, MailService, MailboxId, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue,
@@ -33,7 +33,7 @@ pub(crate) fn compile(
     let remaining = passthrough.join(" ");
     if !remaining.trim().is_empty() {
         rules.push(
-            posthaste_domain::search::parse_query(&remaining)
+            posthaste_domain_service::search::parse_query(&remaining)
                 .map_err(RuntimeError::invalid_descriptor)?,
         );
     }

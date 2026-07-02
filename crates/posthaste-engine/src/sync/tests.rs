@@ -96,14 +96,14 @@ struct MockJmapState {
 /// delivery (mailboxes first, then message pages) and per-chunk contents.
 #[derive(Default)]
 struct RecordingSink {
-    chunks: Vec<posthaste_domain::SyncBatch>,
+    chunks: Vec<posthaste_domain_service::SyncBatch>,
 }
 
-impl posthaste_domain::SyncChunkSink for RecordingSink {
+impl posthaste_domain_service::SyncChunkSink for RecordingSink {
     fn emit(
         &mut self,
-        batch: posthaste_domain::SyncBatch,
-    ) -> Result<(), posthaste_domain::GatewayError> {
+        batch: posthaste_domain_service::SyncBatch,
+    ) -> Result<(), posthaste_domain_service::GatewayError> {
         self.chunks.push(batch);
         Ok(())
     }
@@ -135,7 +135,7 @@ async fn full_streamed_sync_emits_mailbox_then_message_chunks_and_a_reconciliati
     let mut sink = RecordingSink::default();
     let outcome = crate::live_sync::sync_account_streamed(
         &client,
-        &posthaste_domain::AccountId::from("acc1"),
+        &posthaste_domain_service::AccountId::from("acc1"),
         &[],
         None,
         &mut sink,

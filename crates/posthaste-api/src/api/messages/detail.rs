@@ -126,7 +126,7 @@ fn escape_content_disposition_filename(filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_domain::BlobId;
+    use posthaste_domain_service::BlobId;
 
     fn inline_attachment(id: &str, cid: &str) -> MessageAttachment {
         MessageAttachment {

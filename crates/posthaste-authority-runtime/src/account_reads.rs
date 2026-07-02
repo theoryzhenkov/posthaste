@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountAppearance, AccountConnectionOverview, AccountId, AccountOverview,
     AccountRuntimeOverview, AccountSettings, AppSettings, MailService, MailboxSummary,
     ProviderAuthKind, SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError,

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use posthaste_domain::SecretStore;
+use posthaste_domain_service::SecretStore;
 use posthaste_observability::{events, ph_info};
 use posthaste_runtime::{RuntimeHandle, RuntimeShutdownHandle};
 use tower_http::cors::{AllowOrigin, CorsLayer};

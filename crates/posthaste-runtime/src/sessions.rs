@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
-use posthaste_domain::{DomainEvent, Id};
+use posthaste_domain_service::{DomainEvent, Id};
 use posthaste_runtime_contract::{
     ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MutationNotification,
     MutationReceipt, MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller,

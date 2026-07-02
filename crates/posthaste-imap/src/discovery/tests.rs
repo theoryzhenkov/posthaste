@@ -41,7 +41,7 @@ fn maps_noselect_mailboxes_without_role_loss() {
 fn maps_gmail_role_aliases_only_with_gmail_provider_policy() {
     let generic = map_imap_mailbox("[Gmail]/All Mail", ["\\All", "\\HasNoChildren"]);
     let gmail = map_imap_mailbox_with_provider(
-        ProviderProfile::from_kind(posthaste_domain::ProviderKind::Gmail),
+        ProviderProfile::from_kind(posthaste_domain_service::ProviderKind::Gmail),
         "[Gmail]/All Mail",
         ["\\All", "\\HasNoChildren"],
     );
@@ -91,7 +91,7 @@ async fn mock_gmail_imap_negotiates_condstore_qresync_and_gmail_extensions() {
     );
     assert_eq!(
         discovered.provider_profile().kind(),
-        posthaste_domain::ProviderKind::Gmail,
+        posthaste_domain_service::ProviderKind::Gmail,
         "X-GM-EXT-1 should select the Gmail provider profile"
     );
 
@@ -353,7 +353,7 @@ async fn mock_gmail_imap_uid_fetch_decodes_x_gm_labels_through_real_client() {
         .map(|labels| {
             labels
                 .iter()
-                .map(posthaste_domain::GmailLabel::as_str)
+                .map(posthaste_domain_service::GmailLabel::as_str)
                 .collect()
         })
         .unwrap_or_default();

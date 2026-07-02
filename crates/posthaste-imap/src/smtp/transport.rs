@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use imap_client::imap_types::flag::Flag;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
-use posthaste_domain::{ProviderAuthKind, SendMessageRequest, TransportSecurity};
+use posthaste_domain_service::{ProviderAuthKind, SendMessageRequest, TransportSecurity};
 
 use crate::discovery::connect_authenticated_client;
 use crate::smtp::{build_smtp_message, SmtpConnectionConfig, SubmittedSmtpMessage};

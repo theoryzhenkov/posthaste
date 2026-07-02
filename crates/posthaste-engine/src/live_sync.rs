@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use jmap_client::client::Client;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, GatewayError, MessageRecord, SyncBatch, SyncChunkSink, SyncCursor, SyncObject,
     SyncOutcome, SyncProgress, SyncProgressReporter, SyncProgressStage, SyncReconciliation,
     SyncTrigger,

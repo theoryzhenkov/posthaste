@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use imap_client::imap_types::{command::CommandBody, fetch::MessageDataItem, flag::Flag};
 use imap_client::tasks::Task;
-use posthaste_domain::{
+use posthaste_domain_service::{
     ImapMessageLocation, ImapUid, ImapUidValidity, MailboxId, MessageId, SystemKeyword,
 };
 

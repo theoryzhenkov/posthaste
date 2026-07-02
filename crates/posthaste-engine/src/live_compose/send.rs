@@ -1,5 +1,5 @@
 use jmap_client::mailbox;
-use posthaste_domain::{GatewayError, SendMessageRequest};
+use posthaste_domain_service::{GatewayError, SendMessageRequest};
 
 use crate::compose::{recipient_to_address, render_markdown};
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};

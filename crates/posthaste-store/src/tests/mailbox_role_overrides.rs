@@ -9,14 +9,14 @@ fn mailbox_role_override_survives_full_mailbox_snapshot() -> Result<(), StoreErr
 
     let batch = SyncBatch {
         mailboxes: vec![
-            posthaste_domain::MailboxRecord {
+            posthaste_domain_service::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),
                 unread_emails: 0,
                 total_emails: 0,
             },
-            posthaste_domain::MailboxRecord {
+            posthaste_domain_service::MailboxRecord {
                 id: MailboxId::from("all-mail"),
                 name: "All Mail".to_string(),
                 role: None,
@@ -64,14 +64,14 @@ fn mailbox_role_override_can_clear_discovered_previous_owner() -> Result<(), Sto
 
     let batch = SyncBatch {
         mailboxes: vec![
-            posthaste_domain::MailboxRecord {
+            posthaste_domain_service::MailboxRecord {
                 id: MailboxId::from("server-archive"),
                 name: "Archive".to_string(),
                 role: Some("archive".to_string()),
                 unread_emails: 0,
                 total_emails: 0,
             },
-            posthaste_domain::MailboxRecord {
+            posthaste_domain_service::MailboxRecord {
                 id: MailboxId::from("all-mail"),
                 name: "All Mail".to_string(),
                 role: None,
@@ -128,14 +128,14 @@ fn mailbox_role_override_rejects_duplicate_role_without_clear() -> Result<(), St
         &account,
         &SyncBatch {
             mailboxes: vec![
-                posthaste_domain::MailboxRecord {
+                posthaste_domain_service::MailboxRecord {
                     id: MailboxId::from("server-archive"),
                     name: "Archive".to_string(),
                     role: Some("archive".to_string()),
                     unread_emails: 0,
                     total_emails: 0,
                 },
-                posthaste_domain::MailboxRecord {
+                posthaste_domain_service::MailboxRecord {
                     id: MailboxId::from("all-mail"),
                     name: "All Mail".to_string(),
                     role: None,

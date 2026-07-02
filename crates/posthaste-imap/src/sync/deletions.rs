@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     ImapMessageLocation, ImapMessageLocationKey, ImapUid, ImapUidValidity, MailboxId, MessageId,
     MessageRecord,
 };

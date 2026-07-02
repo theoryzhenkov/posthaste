@@ -11,7 +11,7 @@ use crate::sql_cache::CachedSql;
 pub(crate) fn assign_conversation_id_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
-    message: &posthaste_domain::MessageRecord,
+    message: &posthaste_domain_service::MessageRecord,
 ) -> Result<ConversationId, StoreError> {
     if let Some(conversation_id) = tx
         .query_row_cached(
@@ -151,7 +151,7 @@ pub(crate) fn normalized_subject(value: Option<&str>) -> Option<String> {
 /// `threadId` via SHA-256.
 fn generate_conversation_id(
     account_id: &AccountId,
-    message: &posthaste_domain::MessageRecord,
+    message: &posthaste_domain_service::MessageRecord,
 ) -> ConversationId {
     let mut hasher = Sha256::new();
     hasher.update(account_id.as_str().as_bytes());

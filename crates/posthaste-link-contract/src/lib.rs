@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 
 pub mod message_mutation;
 
-use posthaste_domain::{
+use posthaste_domain_model::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
     MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
@@ -859,46 +859,46 @@ macro_rules! for_each_link_op {
             list_accounts => "/v1/link/accounts" => ListAccountsRequest {}
                 => $crate::reexport::RuntimeAccountList;
             get_account => "/v1/link/account" => GetAccountRequest {
-                account_id: posthaste_domain::AccountId
-            } => Option<posthaste_domain::AccountOverview>;
+                account_id: $crate::reexport::AccountId
+            } => Option<$crate::reexport::AccountOverview>;
             app_settings => "/v1/link/app-settings" => AppSettingsRequest {}
-                => posthaste_domain::AppSettings;
+                => $crate::reexport::AppSettings;
             resolve_account_scope => "/v1/link/resolve-scope" => ResolveAccountScopeRequest {
                 scope: $crate::reexport::AccountScopeRequest
-            } => Vec<posthaste_domain::AccountId>;
+            } => Vec<$crate::reexport::AccountId>;
             list_mailboxes => "/v1/link/mailboxes" => ListMailboxesRequest {
                 scope: $crate::reexport::AccountScopeRequest
-            } => std::collections::BTreeMap<posthaste_domain::AccountId, Vec<posthaste_domain::MailboxSummary>>;
+            } => std::collections::BTreeMap<$crate::reexport::AccountId, Vec<$crate::reexport::MailboxSummary>>;
             list_smart_mailboxes => "/v1/link/smart-mailboxes" => ListSmartMailboxesRequest {}
-                => Vec<posthaste_domain::SmartMailboxSummary>;
+                => Vec<$crate::reexport::SmartMailboxSummary>;
             get_smart_mailbox => "/v1/link/smart-mailbox" => GetSmartMailboxRequest {
-                smart_mailbox_id: posthaste_domain::SmartMailboxId
-            } => posthaste_domain::SmartMailbox;
+                smart_mailbox_id: $crate::reexport::SmartMailboxId
+            } => $crate::reexport::SmartMailbox;
             list_tags => "/v1/link/tags" => ListTagsRequest {
                 scope: $crate::reexport::AccountScopeRequest
-            } => Vec<posthaste_domain::TagSummary>;
+            } => Vec<$crate::reexport::TagSummary>;
             get_identity => "/v1/link/identity" => GetIdentityRequest {
-                account_id: posthaste_domain::AccountId
-            } => posthaste_domain::Identity;
+                account_id: $crate::reexport::AccountId
+            } => $crate::reexport::Identity;
             get_reply_context => "/v1/link/reply-context" => GetReplyContextRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId
-            } => posthaste_domain::ReplyContext;
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId
+            } => $crate::reexport::ReplyContext;
             list_sender_addresses => "/v1/link/sender-addresses" => ListSenderAddressesRequest {}
-                => Vec<posthaste_domain::CachedSenderAddress>;
+                => Vec<$crate::reexport::CachedSenderAddress>;
             list_pending_operations => "/v1/link/pending-operations" => ListPendingOperationsRequest {
-                account_id: posthaste_domain::AccountId
-            } => Vec<posthaste_domain::Operation>;
+                account_id: $crate::reexport::AccountId
+            } => Vec<$crate::reexport::Operation>;
             replay_events => "/v1/link/events" => ReplayEventsRequest {
-                filter: posthaste_domain::EventFilter
-            } => Vec<posthaste_domain::DomainEvent>;
+                filter: $crate::reexport::EventFilter
+            } => Vec<$crate::reexport::DomainEvent>;
             get_draft_content => "/v1/link/draft-content" => GetDraftContentRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId
-            } => posthaste_domain::DraftContent;
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId
+            } => $crate::reexport::DraftContent;
             get_message_resource => "/v1/link/message-resource" => GetMessageResourceRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId,
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId,
                 kind: $crate::reexport::MessageResourceKind
             } => $crate::reexport::RuntimeResourceBytes;
             account_count => "/v1/link/account-count" => AccountCountRequest {}
@@ -906,91 +906,91 @@ macro_rules! for_each_link_op {
 
             // ===== writes =====
             set_keywords => "/v1/link/set-keywords" => SetKeywordsRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId,
-                command: posthaste_domain::SetKeywordsCommand
-            } => posthaste_domain::CommandAck;
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId,
+                command: $crate::reexport::SetKeywordsCommand
+            } => $crate::reexport::CommandAck;
             add_to_mailbox => "/v1/link/add-to-mailbox" => AddToMailboxRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId,
-                command: posthaste_domain::AddToMailboxCommand
-            } => posthaste_domain::CommandAck;
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId,
+                command: $crate::reexport::AddToMailboxCommand
+            } => $crate::reexport::CommandAck;
             remove_from_mailbox => "/v1/link/remove-from-mailbox" => RemoveFromMailboxRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId,
-                command: posthaste_domain::RemoveFromMailboxCommand
-            } => posthaste_domain::CommandAck;
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId,
+                command: $crate::reexport::RemoveFromMailboxCommand
+            } => $crate::reexport::CommandAck;
             replace_mailboxes => "/v1/link/replace-mailboxes" => ReplaceMailboxesRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId,
-                command: posthaste_domain::ReplaceMailboxesCommand
-            } => posthaste_domain::CommandAck;
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId,
+                command: $crate::reexport::ReplaceMailboxesCommand
+            } => $crate::reexport::CommandAck;
             destroy_message => "/v1/link/destroy-message" => DestroyMessageRequest {
-                account_id: posthaste_domain::AccountId,
-                message_id: posthaste_domain::MessageId
-            } => posthaste_domain::CommandAck;
+                account_id: $crate::reexport::AccountId,
+                message_id: $crate::reexport::MessageId
+            } => $crate::reexport::CommandAck;
             set_mailbox_role => "/v1/link/set-mailbox-role" => SetMailboxRoleRequest {
-                account_id: posthaste_domain::AccountId,
-                mailbox_id: posthaste_domain::MailboxId,
+                account_id: $crate::reexport::AccountId,
+                mailbox_id: $crate::reexport::MailboxId,
                 role: Option<String>
-            } => Vec<posthaste_domain::MailboxSummary>;
+            } => Vec<$crate::reexport::MailboxSummary>;
             send_message => "/v1/link/send-message" => SendMessageLinkRequest {
-                account_id: posthaste_domain::AccountId,
-                request: posthaste_domain::SendMessageRequest
+                account_id: $crate::reexport::AccountId,
+                request: $crate::reexport::SendMessageRequest
             } => ();
             save_draft => "/v1/link/save-draft" => SaveDraftRequest {
-                account_id: posthaste_domain::AccountId,
-                draft_id: Option<posthaste_domain::MessageId>,
-                request: posthaste_domain::SendMessageRequest
-            } => posthaste_domain::Operation;
+                account_id: $crate::reexport::AccountId,
+                draft_id: Option<$crate::reexport::MessageId>,
+                request: $crate::reexport::SendMessageRequest
+            } => $crate::reexport::Operation;
             delete_draft => "/v1/link/delete-draft" => DeleteDraftRequest {
-                account_id: posthaste_domain::AccountId,
-                draft_id: posthaste_domain::MessageId
-            } => posthaste_domain::Operation;
+                account_id: $crate::reexport::AccountId,
+                draft_id: $crate::reexport::MessageId
+            } => $crate::reexport::Operation;
             discard_operation => "/v1/link/discard-operation" => DiscardOperationRequest {
-                operation_id: posthaste_domain::OperationId
+                operation_id: $crate::reexport::OperationId
             } => ();
             retry_operation => "/v1/link/retry-operation" => RetryOperationRequest {
-                account_id: posthaste_domain::AccountId,
-                operation_id: posthaste_domain::OperationId
+                account_id: $crate::reexport::AccountId,
+                operation_id: $crate::reexport::OperationId
             } => ();
             sync_account => "/v1/link/sync-account" => SyncAccountRequest {
-                account_id: posthaste_domain::AccountId,
-                mode: posthaste_domain::SyncMode
+                account_id: $crate::reexport::AccountId,
+                mode: $crate::reexport::SyncMode
             } => usize;
             patch_app_settings => "/v1/link/patch-app-settings" => PatchAppSettingsLinkRequest {
                 mutation: $crate::reexport::PatchAppSettingsMutation
-            } => posthaste_domain::AppSettings;
+            } => $crate::reexport::AppSettings;
             preview_automation_rule => "/v1/link/preview-automation-rule" => PreviewAutomationRuleRequest {
                 mutation: $crate::reexport::AutomationRulePreviewMutation
             } => $crate::reexport::AutomationRulePreviewResult;
             create_smart_mailbox => "/v1/link/create-smart-mailbox" => CreateSmartMailboxLinkRequest {
                 mutation: $crate::reexport::CreateSmartMailboxMutation
-            } => posthaste_domain::SmartMailbox;
+            } => $crate::reexport::SmartMailbox;
             patch_smart_mailbox => "/v1/link/patch-smart-mailbox" => PatchSmartMailboxLinkRequest {
-                smart_mailbox_id: posthaste_domain::SmartMailboxId,
+                smart_mailbox_id: $crate::reexport::SmartMailboxId,
                 mutation: $crate::reexport::PatchSmartMailboxMutation
-            } => posthaste_domain::SmartMailbox;
+            } => $crate::reexport::SmartMailbox;
             delete_smart_mailbox => "/v1/link/delete-smart-mailbox" => DeleteSmartMailboxRequest {
-                smart_mailbox_id: posthaste_domain::SmartMailboxId
+                smart_mailbox_id: $crate::reexport::SmartMailboxId
             } => ();
             reset_default_smart_mailboxes => "/v1/link/reset-smart-mailboxes" => ResetDefaultSmartMailboxesRequest {}
-                => Vec<posthaste_domain::SmartMailboxSummary>;
+                => Vec<$crate::reexport::SmartMailboxSummary>;
             create_account => "/v1/link/create-account" => CreateAccountLinkRequest {
                 mutation: $crate::reexport::CreateAccountMutation
-            } => posthaste_domain::AccountOverview;
+            } => $crate::reexport::AccountOverview;
             patch_account => "/v1/link/patch-account" => PatchAccountLinkRequest {
-                account_id: posthaste_domain::AccountId,
+                account_id: $crate::reexport::AccountId,
                 mutation: $crate::reexport::PatchAccountMutation
-            } => posthaste_domain::AccountOverview;
+            } => $crate::reexport::AccountOverview;
             delete_account => "/v1/link/delete-account" => DeleteAccountRequest {
-                account_id: posthaste_domain::AccountId
+                account_id: $crate::reexport::AccountId
             } => ();
             verify_account => "/v1/link/verify-account" => VerifyAccountRequest {
-                account_id: posthaste_domain::AccountId
+                account_id: $crate::reexport::AccountId
             } => $crate::reexport::AccountVerificationResult;
             set_account_enabled => "/v1/link/set-account-enabled" => SetAccountEnabledRequest {
-                account_id: posthaste_domain::AccountId,
+                account_id: $crate::reexport::AccountId,
                 enabled: bool
             } => ();
             reload_config => "/v1/link/reload-config" => ReloadConfigRequest {}
@@ -1004,6 +1004,13 @@ macro_rules! for_each_link_op {
 /// (`posthaste_runtime_contract` may not be a direct dependency name everywhere,
 /// but `posthaste_link_contract` always is).
 pub mod reexport {
+    pub use posthaste_domain_model::{
+        AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress,
+        CommandAck, DomainEvent, DraftContent, EventFilter, Identity, MailboxId, MailboxSummary,
+        MessageId, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+        ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
+        SmartMailboxSummary, SyncMode, TagSummary,
+    };
     pub use posthaste_runtime_contract::{
         AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
         AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,

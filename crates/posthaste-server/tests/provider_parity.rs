@@ -7,7 +7,7 @@ mod jmap_batches;
 #[path = "provider_parity/support.rs"]
 mod support;
 
-use posthaste_domain::{AccountDriver, AccountId, MessageId, SyncTrigger};
+use posthaste_domain_service::{AccountDriver, AccountId, MessageId, SyncTrigger};
 use posthaste_imap::imap_body_from_raw_mime;
 
 use fixtures::{empty_body, parity_attachment_blob, parity_body, parity_raw_mime};

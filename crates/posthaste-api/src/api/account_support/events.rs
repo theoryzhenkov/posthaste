@@ -66,11 +66,11 @@ fn account_operation_from_topic(topic: &str) -> ResourceOperation {
 /// @spec docs/L1-sync#event-propagation
 #[cfg(test)]
 pub(crate) fn append_and_publish_account_event(
-    store: &dyn posthaste_domain::MailStore,
+    store: &dyn posthaste_domain_service::MailStore,
     event_sender: &tokio::sync::broadcast::Sender<DomainEvent>,
     account_id: &AccountId,
     topic: &str,
-) -> Result<(), posthaste_domain::StoreError> {
+) -> Result<(), posthaste_domain_service::StoreError> {
     let operation = account_operation_from_topic(topic);
     let event = store.append_event(
         account_id,

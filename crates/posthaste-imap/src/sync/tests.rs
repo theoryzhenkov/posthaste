@@ -1,4 +1,4 @@
-use posthaste_domain::{
+use posthaste_domain_service::{
     GmailMessageId, GmailThreadId, ImapCapabilities, ImapGmailMetadata, ImapMessageLocation,
     ImapModSeq, ImapSelectedMailbox, ImapUid, ImapUidValidity, MailboxId, MessageId,
 };
