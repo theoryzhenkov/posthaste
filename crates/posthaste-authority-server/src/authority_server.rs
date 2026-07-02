@@ -34,7 +34,7 @@ use posthaste_contract_core::{
     PatchSmartMailboxMutation, RevCursorArgs, RevStepInput, RuntimeAccountList,
     RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
 use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;

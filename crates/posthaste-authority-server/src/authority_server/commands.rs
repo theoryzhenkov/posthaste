@@ -498,17 +498,24 @@ impl AuthorityServer {
                         None,
                     )
                 })?;
-                self.runtimes
-                    .settle_confirmed(runtime_id, &mutation.client_mutation_id, output.clone());
                 // Route the per-mutation confirmation onto the originating
                 // runtime's down-stream only (`settlement-routed-to-origin-runtime`):
-                // never broadcast — a Settlement names one runtime's mutation.
-                self.runtimes.emit_settlement(
+                // never broadcast — a Settlement names one runtime's mutation. The
+                // frame is recorded into the backlog at emission (D49 [0]); its
+                // replay seq is the ack target D48 uses to reclaim the kept dedup
+                // record once the runtime's resume cursor passes it.
+                let settlement_seq = self.runtimes.emit_settlement(
                     runtime_id,
                     AuthorityServerFrame::Settlement {
                         mutation_id: MutationId(runtime_mutation_id.as_str().to_string()),
                         outcome: WireSettlementOutcome::Confirmed,
                     },
+                );
+                self.runtimes.settle_confirmed(
+                    runtime_id,
+                    &mutation.client_mutation_id,
+                    output.clone(),
+                    settlement_seq,
                 );
                 Ok(MutationReceipt {
                     runtime_mutation_id: Some(runtime_mutation_id),

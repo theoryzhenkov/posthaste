@@ -68,6 +68,12 @@ pub struct NearEndConfig {
     /// persisted from a prior run. The engine owns the cursor thereafter
     /// ([`crate::engine::NearEnd::cursor`]); callers no longer thread `afterSeq`.
     pub initial_cursor: Option<u64>,
+    /// How many **consecutive** malformed frames the engine tolerates before it
+    /// stops treating them as ignorable keep-alives and declares the wire
+    /// permanently broken — a version skew / corrupt peer ([3]). At the threshold
+    /// it surfaces [`crate::sink::ConnectionStatus::Degraded`] and stops the loop.
+    /// **Review** (default 3).
+    pub max_consecutive_malformed: u32,
 }
 
 impl Default for NearEndConfig {
@@ -77,6 +83,7 @@ impl Default for NearEndConfig {
             forward_max_attempts: 4,
             backoff: BackoffPolicy::default(),
             initial_cursor: None,
+            max_consecutive_malformed: 3,
         }
     }
 }

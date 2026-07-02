@@ -25,22 +25,63 @@ use serde::{Deserialize, Serialize};
 /// collapse fallback as the safety net.
 pub const DEFAULT_BACKLOG_CAPACITY: usize = 512;
 
-/// A seam frame stamped with its monotonic per-subscriber sequence — the
-/// down-channel's resume cursor (D46). This is the **generic, seam-agnostic**
-/// wire envelope owned by the engine crate: the seq rides *alongside* the frame
-/// (`{ "seq": N, "frame": { .. } }`), never inside it, so a frame stays named by
-/// its emitter (D1/D39) and one frame vocabulary serves each seam (XIV). Both
-/// seams reuse this one envelope over their own `Frame` type.
+/// A down-channel wire element (D46/D49). This is the **generic, seam-agnostic**
+/// wire envelope owned by the engine crate: the seq rides *alongside* the frame,
+/// never inside it, so a frame stays named by its emitter (D1/D39) and one frame
+/// vocabulary serves each seam (XIV). Both seams reuse this one envelope over
+/// their own `Frame` type.
+///
+/// Two shapes ride the wire (serde-internally-tagged on `kind`, camelCase — the
+/// envelope is young enough that this atomic shape change is fine per §9):
+///
+/// - `{ "kind": "frame", "seq": N, "frame": { .. } }` — a stamped down-frame
+///   carrying its monotonic per-subscriber seq.
+/// - `{ "kind": "reset", "highestSeq": N }` — a **control** element (D49): the
+///   subscriber's resume point fell out of the backlog (or claimed a seq never
+///   issued), so it must collapse to current state and re-seed. `highest_seq` is
+///   the far-end's current cursor the subscriber adopts, so it stops gap-detecting
+///   against the lost seqs. Emitted as the first stream element on a Collapse.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Sequenced<Frame> {
-    pub seq: u64,
-    pub frame: Frame,
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum Sequenced<Frame> {
+    /// A stamped down-frame carrying its monotonic per-subscriber seq.
+    Frame { seq: u64, frame: Frame },
+    /// A reset control element — the subscriber must collapse-and-reseed and
+    /// adopt `highest_seq` as its new resume cursor (D49).
+    Reset { highest_seq: u64 },
 }
 
 impl<Frame> Sequenced<Frame> {
+    /// A stamped data element.
     pub fn new(seq: u64, frame: Frame) -> Self {
-        Self { seq, frame }
+        Self::Frame { seq, frame }
+    }
+
+    /// A reset control element (D49).
+    pub fn reset(highest_seq: u64) -> Self {
+        Self::Reset { highest_seq }
+    }
+
+    /// The resume cursor this element advances the subscriber to: a frame's seq,
+    /// or a reset's `highest_seq` — both name "the seq the subscriber is now at".
+    pub fn seq(&self) -> u64 {
+        match self {
+            Self::Frame { seq, .. } => *seq,
+            Self::Reset { highest_seq } => *highest_seq,
+        }
+    }
+
+    /// The carried frame, or `None` for a reset control element.
+    pub fn frame(&self) -> Option<&Frame> {
+        match self {
+            Self::Frame { frame, .. } => Some(frame),
+            Self::Reset { .. } => None,
+        }
+    }
+
+    /// Whether this is a reset control element.
+    pub fn is_reset(&self) -> bool {
+        matches!(self, Self::Reset { .. })
     }
 }
 
@@ -58,12 +99,22 @@ pub enum Resume<Frame> {
     Collapse,
 }
 
+/// A stamped frame retained in the backlog. Only the `Frame` shape is ever
+/// retained (a `Reset` is a transient control signal, never buffered), so the
+/// backlog stores this private struct and lifts it to [`Sequenced::Frame`] on
+/// the way out.
+struct Stamped<Frame> {
+    seq: u64,
+    frame: Frame,
+}
+
 struct Backlog<Frame> {
     next_seq: u64,
-    /// `(seq, frame)` in emission order, bounded at `capacity`; the oldest is
-    /// dropped when full. `oldest_retained_seq` tracks the front so a resume can
-    /// tell "already replayed" from "dropped, must collapse".
-    buffer: VecDeque<Sequenced<Frame>>,
+    /// Stamped frames in emission order, bounded at `capacity`; the oldest is
+    /// dropped when full. The front seq tells "already replayed" from "dropped,
+    /// must collapse". At `capacity == 0` (collapse-always, D50) nothing is
+    /// retained, so every resume from a stale cursor collapses.
+    buffer: VecDeque<Stamped<Frame>>,
 }
 
 impl<Frame> Backlog<Frame> {
@@ -91,12 +142,23 @@ where
         Self::with_capacity(DEFAULT_BACKLOG_CAPACITY)
     }
 
-    /// A store with an explicit per-subscriber backlog depth.
+    /// A store with an explicit per-subscriber backlog depth. `0` is the
+    /// **collapse-always** mode (D50): the seq counter still advances (so a
+    /// resume can compare cursors and a `Reset` carries the current cursor), but
+    /// nothing is retained — every resume from a stale cursor collapses. The
+    /// runtime far-end mounts this: its collapse re-serves whole snapshots, so a
+    /// per-frame replay backlog buys nothing.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             subscribers: Mutex::new(HashMap::new()),
-            capacity: capacity.max(1),
+            capacity,
         }
+    }
+
+    /// The collapse-always store (D50): capacity 0 — every resume from a stale
+    /// cursor collapses to current state rather than replaying a backlog.
+    pub fn collapse_always() -> Self {
+        Self::with_capacity(0)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<LinkId, Backlog<Frame>>> {
@@ -113,8 +175,11 @@ where
         let backlog = subs.entry(link.clone()).or_insert_with(Backlog::new);
         let seq = backlog.next_seq;
         backlog.next_seq += 1;
-        let stamped = Sequenced { seq, frame };
-        backlog.buffer.push_back(stamped.clone());
+        let stamped = Sequenced::Frame {
+            seq,
+            frame: frame.clone(),
+        };
+        backlog.buffer.push_back(Stamped { seq, frame });
         while backlog.buffer.len() > self.capacity {
             backlog.buffer.pop_front();
         }
@@ -139,9 +204,15 @@ where
             };
         };
         let highest = backlog.next_seq.saturating_sub(1);
-        if after >= highest {
-            // Caller is already current (or ahead): nothing to replay.
+        if after == highest {
+            // Caller is exactly current: nothing to replay.
             return Resume::Replay(Vec::new());
+        }
+        if after > highest {
+            // Caller claims a seq we never issued (a stale/forged cursor across a
+            // far-end restart, or a bug) — we cannot serve it. Collapse ([5];
+            // was a silent empty replay).
+            return Resume::Collapse;
         }
         let oldest_retained = backlog.buffer.front().map(|s| s.seq);
         match oldest_retained {
@@ -151,13 +222,30 @@ where
                     .buffer
                     .iter()
                     .filter(|s| s.seq > after)
-                    .cloned()
+                    .map(|s| Sequenced::Frame {
+                        seq: s.seq,
+                        frame: s.frame.clone(),
+                    })
                     .collect(),
             ),
             // The resume point was evicted (or the buffer is empty but frames
-            // were issued) → the subscriber must collapse.
+            // were issued — the collapse-always mode, D50) → the subscriber must
+            // collapse.
             _ => Resume::Collapse,
         }
+    }
+
+    /// Advance a subscriber's monotonic per-link seq counter and return the new
+    /// seq **without buffering a frame**. For a collapse-always seam (D50) whose
+    /// frames carry their own seq field on the wire (the runtime session stream):
+    /// the shared store owns the counter + collapse detection, but retains no
+    /// backlog, so the caller stamps the returned seq into its own frame type.
+    pub fn stamp(&self, link: &LinkId) -> u64 {
+        let mut subs = self.lock();
+        let backlog = subs.entry(link.clone()).or_insert_with(Backlog::new);
+        let seq = backlog.next_seq;
+        backlog.next_seq += 1;
+        seq
     }
 
     /// The highest seq issued for a subscriber, or `0` if none — the resume
@@ -192,10 +280,22 @@ mod tests {
     #[test]
     fn record_assigns_monotonic_per_subscriber_seq() {
         let store: ReplayStore<&str, char> = ReplayStore::new();
-        assert_eq!(store.record(&"a", 'x').seq, 1);
-        assert_eq!(store.record(&"a", 'y').seq, 2);
+        assert_eq!(store.record(&"a", 'x').seq(), 1);
+        assert_eq!(store.record(&"a", 'y').seq(), 2);
         // A distinct subscriber has its own seq domain.
-        assert_eq!(store.record(&"b", 'z').seq, 1);
+        assert_eq!(store.record(&"b", 'z').seq(), 1);
+    }
+
+    #[test]
+    fn reset_element_carries_the_highest_seq() {
+        let reset: Sequenced<char> = Sequenced::reset(7);
+        assert!(reset.is_reset());
+        assert_eq!(reset.seq(), 7);
+        assert!(reset.frame().is_none());
+        // Round-trips through the internally-tagged wire shape.
+        let json = serde_json::to_string(&reset).unwrap();
+        assert_eq!(json, r#"{"kind":"reset","highestSeq":7}"#);
+        assert_eq!(serde_json::from_str::<Sequenced<char>>(&json).unwrap(), reset);
     }
 
     #[test]
@@ -214,10 +314,10 @@ mod tests {
         match store.resume(&"s", Some(1)) {
             Resume::Replay(frames) => {
                 assert_eq!(
-                    frames.iter().map(|s| s.frame).collect::<Vec<_>>(),
+                    frames.iter().map(|s| *s.frame().unwrap()).collect::<Vec<_>>(),
                     vec!['b', 'c']
                 );
-                assert_eq!(frames.iter().map(|s| s.seq).collect::<Vec<_>>(), vec![2, 3]);
+                assert_eq!(frames.iter().map(|s| s.seq()).collect::<Vec<_>>(), vec![2, 3]);
             }
             _ => panic!("resume within the backlog must replay"),
         }
@@ -244,6 +344,30 @@ mod tests {
         assert!(matches!(store.resume(&"s", Some(1)), Resume::Collapse));
         // Resuming from a still-retained seq replays.
         assert!(matches!(store.resume(&"s", Some(4)), Resume::Replay(_)));
+    }
+
+    #[test]
+    fn resume_past_the_highest_seq_collapses() {
+        // [5]: a cursor ahead of everything we ever issued cannot be served —
+        // collapse rather than returning a misleading empty replay.
+        let store: ReplayStore<&str, u32> = ReplayStore::new();
+        store.record(&"s", 1);
+        store.record(&"s", 2); // highest = 2
+        assert!(matches!(store.resume(&"s", Some(2)), Resume::Replay(_)), "at head");
+        assert!(matches!(store.resume(&"s", Some(3)), Resume::Collapse), "past head");
+    }
+
+    #[test]
+    fn collapse_always_mode_never_replays_a_stale_cursor() {
+        // D50: capacity 0 retains nothing; the seq counter still advances, so a
+        // caller exactly at head replays nothing but any stale cursor collapses.
+        let store: ReplayStore<&str, u32> = ReplayStore::collapse_always();
+        store.record(&"s", 1);
+        store.record(&"s", 2);
+        assert_eq!(store.highest_seq(&"s"), 2);
+        assert!(matches!(store.resume(&"s", Some(2)), Resume::Replay(_)), "at head");
+        assert!(matches!(store.resume(&"s", Some(1)), Resume::Collapse), "stale");
+        assert!(matches!(store.resume(&"s", None), Resume::Fresh));
     }
 
     #[test]

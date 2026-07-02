@@ -203,6 +203,7 @@ impl Scheduler for BrowserScheduler {
 struct JsFrameSink {
     on_frame: Function,
     on_malformed: Function,
+    on_reset: Function,
     on_status: Function,
 }
 
@@ -221,12 +222,20 @@ impl FrameSink<RuntimeFrame> for JsFrameSink {
         );
     }
 
+    fn on_reset(&self) {
+        // D49: the near node's incremental view is broken (a seq gap the far-end
+        // could not replay). The adapter re-seeds from current state via its
+        // existing view-refresh path.
+        let _ = self.on_reset.call0(&JsValue::NULL);
+    }
+
     fn on_status(&self, status: ConnectionStatus) {
         let (label, message) = match status {
             ConnectionStatus::Connecting => ("connecting", String::new()),
             ConnectionStatus::Connected => ("connected", String::new()),
             ConnectionStatus::Reconnecting => ("reconnecting", String::new()),
             ConnectionStatus::TransientError(m) => ("transientError", m),
+            ConnectionStatus::Degraded(m) => ("degraded", m),
             ConnectionStatus::PermanentError(m) => ("permanentError", m),
         };
         let _ = self.on_status.call2(
@@ -371,8 +380,9 @@ impl NearEndHandle {
     /// `io` must expose: `postJson(url, headersJson, body) => Promise<{status,
     /// body}>`, `getJson(url, headersJson) => Promise<{status, body}>`,
     /// `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
-    /// status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onStatus(label,
-    /// message)`, `neverDispatched() => Promise<string>` (a JSON array of
+    /// status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onReset()` (D49 —
+    /// re-seed the adapter), `onStatus(label, message)` (labels include
+    /// `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
     /// forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
     /// Promise<string>` (a JSON array of `{sessionId, clientMutationId,
     /// request?}`), and `onSettlement(receiptJson)`.
@@ -386,6 +396,7 @@ impl NearEndHandle {
         let sink = JsFrameSink {
             on_frame: get_function(io, "onFrame")?,
             on_malformed: get_function(io, "onMalformed")?,
+            on_reset: get_function(io, "onReset")?,
             on_status: get_function(io, "onStatus")?,
         };
         let outbox = JsOutbox {

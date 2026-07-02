@@ -680,7 +680,7 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
     for _ in 0..64 {
         match tokio::time::timeout(Duration::from_secs(2), down.next()).await {
             Ok(Some(sequenced))
-                if matches!(sequenced.frame, AuthorityServerFrame::Settlement { .. }) =>
+                if matches!(sequenced.frame(), Some(AuthorityServerFrame::Settlement { .. })) =>
             {
                 saw_settlement = true;
                 break;
