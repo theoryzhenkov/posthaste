@@ -39,8 +39,8 @@ use tokio::sync::broadcast;
 
 use crate::near_node::{named_message_assertion, RuntimeAuthorityServerOutbox};
 use crate::read::ReadCache;
-use crate::sessions::{MutationAcceptance, SessionRegistry};
-use crate::views::ViewRegistry;
+use crate::far_end::sessions::{MutationAcceptance, SessionRegistry};
+use crate::far_end::view_registry::ViewRegistry;
 
 /// The shared runtime core behind the cloneable handle: the authority server link, the
 /// outbox, the read cache, the event bus, and the view/session registries.

@@ -10,6 +10,12 @@
 //! a pure fold over the confirmed base (the shared predictor); the store never
 //! stores it as truth.
 //!
+//! Layered per RFC D36: [`mechanism`] is the accept/settle/retire plumbing
+//! over link-core's `OptimisticReplica` kernel (layer 1 mount); [`projection`]
+//! is the keyed view rows / predicates / windowing over it (layer 2, the
+//! shared projector of D38); [`entity_store::EntityStore`] is the public
+//! composition of both. A headless client consumes exactly these layers.
+//!
 //! Like `posthaste-link-core` this is portable (serde only, no I/O): transport +
 //! persistence belong to the host (the web adapter).
 //!
@@ -17,8 +23,12 @@
 //! @spec docs/eph/DESIGN-L2-client-link-reactive-store
 
 pub mod entity_store;
+pub mod mechanism;
+pub mod projection;
 
-pub use entity_store::{
-    apply_fold_to_projection, fold_state_from_projection, CountDelta, DirtyKey, EntityStore,
-    MailboxEntity, SortDirection, SortKey, StoreUpdate, ViewEntity, ViewPredicate, ViewRow,
+pub use entity_store::{EntityStore, StoreUpdate};
+pub use mechanism::{apply_fold_to_projection, fold_state_from_projection, project_optimistic};
+pub use projection::{
+    CountDelta, DirtyKey, MailboxEntity, SortDirection, SortKey, ViewEntity, ViewPredicate,
+    ViewRow,
 };
