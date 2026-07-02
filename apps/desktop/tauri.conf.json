@@ -2,6 +2,7 @@
   "productName": "Posthaste",
   "version": "0.1.0",
   "identifier": "com.posthaste.mail",
+  "mainBinaryName": "posthaste-client",
   "build": {
     "frontendDist": "../web/dist",
     "devUrl": "http://127.0.0.1:5173",

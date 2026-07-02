@@ -31,7 +31,7 @@ Browser-localhost frontend for split/self-hosted topologies. Serve it with the
 Posthaste daemon:
 
 \`\`\`sh
-POSTHASTE_FRONTEND_DIST="/path/to/web" posthaste_daemon serve
+POSTHASTE_FRONTEND_DIST="/path/to/web" posthaste-authority-runtime-server serve
 \`\`\`
 EOF
 

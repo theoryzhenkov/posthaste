@@ -16,7 +16,7 @@
 mod common;
 
 use posthaste_domain_service::AccountId;
-use posthaste_client_link::RuntimeLinkOps;
+use posthaste_client_link::RuntimeLink;
 use posthaste_contract_core::{
     AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot,
 };

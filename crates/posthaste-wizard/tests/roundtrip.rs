@@ -17,7 +17,7 @@ fn base_plan(role: Role, dir: &std::path::Path) -> Plan {
         tls: false,
         hosts: Vec::new(),
         link_serve_token: None,
-        link_backend_url: None,
+        link_authority_server_url: None,
         link_token: None,
         exec_path: None,
         systemd_unit_path: None,
@@ -30,7 +30,7 @@ fn tls_runtime_node_roundtrips_through_the_daemon_schema() {
     let mut plan = base_plan(Role::Runtime, tmp.path());
     plan.tls = true;
     plan.hosts = vec!["mail.lan".into(), "127.0.0.1".into()];
-    plan.link_backend_url = Some("https://backend.lan:3002/v1".into());
+    plan.link_authority_server_url = Some("https://authority-server.lan:3002/v1".into());
     plan.link_token = Some("shared-secret".into());
 
     let out = provision(&plan).expect("provision");
@@ -51,8 +51,8 @@ fn tls_runtime_node_roundtrips_through_the_daemon_schema() {
     assert!(tls.key_path.exists());
 
     assert_eq!(
-        daemon.link_backend_url.as_deref(),
-        Some("https://backend.lan:3002/v1")
+        daemon.link_authority_server_url.as_deref(),
+        Some("https://authority-server.lan:3002/v1")
     );
     assert_eq!(daemon.link_token.as_deref(), Some("shared-secret"));
     assert!(!daemon.link_serve); // runtime role does not serve the link
@@ -62,9 +62,9 @@ fn tls_runtime_node_roundtrips_through_the_daemon_schema() {
 }
 
 #[test]
-fn backend_node_serves_the_link() {
+fn authority_server_node_serves_the_link() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut plan = base_plan(Role::Backend, tmp.path());
+    let mut plan = base_plan(Role::AuthorityServer, tmp.path());
     plan.bind = "0.0.0.0:3002".into();
     plan.link_serve_token = Some("shared-secret".into());
 
@@ -87,21 +87,21 @@ fn daemon_node_has_no_link_section() {
     let daemon = read_daemon_settings(&repo).expect("read daemon settings");
 
     assert!(!daemon.link_serve);
-    assert!(daemon.link_backend_url.is_none());
+    assert!(daemon.link_authority_server_url.is_none());
 }
 
 #[test]
 fn systemd_unit_references_the_exec_and_roots() {
     let tmp = tempfile::tempdir().unwrap();
     let mut plan = base_plan(Role::Daemon, tmp.path());
-    plan.exec_path = Some(PathBuf::from("/usr/local/bin/posthaste_daemon"));
+    plan.exec_path = Some(PathBuf::from("/usr/local/bin/posthaste-authority-runtime-server"));
     plan.systemd_unit_path = Some(tmp.path().join("posthaste.service"));
 
     let out = provision(&plan).expect("provision");
     let unit_path = out.systemd_unit_path.expect("unit written");
     let unit = std::fs::read_to_string(&unit_path).unwrap();
     // The all-in-one daemon needs the `serve` subcommand in ExecStart.
-    assert!(unit.contains("ExecStart=/usr/local/bin/posthaste_daemon serve"));
+    assert!(unit.contains("ExecStart=/usr/local/bin/posthaste-authority-runtime-server serve"));
     assert!(unit.contains("POSTHASTE_CONFIG_ROOT="));
     assert!(unit.contains("WantedBy=default.target"));
 }

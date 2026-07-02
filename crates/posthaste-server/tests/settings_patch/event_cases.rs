@@ -6,7 +6,7 @@ use posthaste_domain_service::{
     EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
     EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
-use posthaste_api::api::{
+use posthaste_http_api_adapter::api::{
     create_smart_mailbox, delete_smart_mailbox, patch_account, patch_settings, patch_smart_mailbox,
     reload_config, reset_default_smart_mailboxes, CreateSmartMailboxRequest, PatchAccountRequest,
     PatchSettingsRequest, PatchSmartMailboxRequest,

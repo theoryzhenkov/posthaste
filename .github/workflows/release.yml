@@ -101,7 +101,7 @@ jobs:
         # workspace dependency graph, so one build is far cheaper than separate
         # jobs. The wizard's posthaste-config dep is dev-only, so a --bin build
         # never pulls the config graph into the release artifact.
-        run: cargo build --release --bin posthaste_daemon --bin posthaste_backend --bin posthaste_runtime_daemon --bin posthaste-wizard
+        run: cargo build --release --bin posthaste-authority-runtime-server --bin posthaste-authority-server --bin posthaste-runtime --bin posthaste-wizard
 
       - name: Package daemon
         shell: bash
@@ -109,20 +109,20 @@ jobs:
           POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
         run: bash tools/package/daemon.sh
 
-      - name: Package backend node binary
+      - name: Package authority server node binary
         shell: bash
         env:
           POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
-          POSTHASTE_BIN: posthaste_backend
-          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_BACKEND_NAME }}
-          POSTHASTE_BIN_LABEL: Posthaste backend node
+          POSTHASTE_BIN: posthaste-authority-server
+          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_AUTHORITY_SERVER_NAME }}
+          POSTHASTE_BIN_LABEL: Posthaste authority server node
         run: bash tools/package/bin.sh
 
       - name: Package runtime node binary
         shell: bash
         env:
           POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
-          POSTHASTE_BIN: posthaste_runtime_daemon
+          POSTHASTE_BIN: posthaste-runtime
           POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_RUNTIME_NAME }}
           POSTHASTE_BIN_LABEL: Posthaste runtime node
         run: bash tools/package/bin.sh
@@ -143,21 +143,21 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: posthaste-daemon-${{ matrix.platform }}
+          name: posthaste-authority-runtime-server-${{ matrix.platform }}
           if-no-files-found: error
-          path: target/distribute/PosthasteDaemon*.tar.gz
+          path: target/distribute/PosthasteAuthorityRuntimeServer*.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
-          name: posthaste-backend-${{ matrix.platform }}
+          name: posthaste-authority-server-${{ matrix.platform }}
           if-no-files-found: error
-          path: target/distribute/PosthasteBackend*.tar.gz
+          path: target/distribute/PosthasteAuthorityServer*.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
           name: posthaste-runtime-${{ matrix.platform }}
           if-no-files-found: error
-          path: target/distribute/PosthasteRuntimeDaemon*.tar.gz
+          path: target/distribute/PosthasteRuntime*.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:

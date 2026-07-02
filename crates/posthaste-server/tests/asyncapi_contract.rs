@@ -1,5 +1,5 @@
 //! Contract test: the committed `asyncapi.json` event contract must stay in
-//! sync with the topics the backend actually emits. The documented
+//! sync with the topics the authority server actually emits. The documented
 //! `components.schemas.EventTopic` enum is compared, both directions, against
 //! `posthaste_domain_service::ALL_EVENT_TOPICS` (the single source of truth). Drift here
 //! means the published event contract has fallen out of step with the server.
@@ -40,7 +40,7 @@ fn documented_topics() -> BTreeSet<String> {
 }
 
 #[test]
-fn asyncapi_topics_match_backend_constants() {
+fn asyncapi_topics_match_authority_server_constants() {
     let documented = documented_topics();
     let constants: BTreeSet<String> = posthaste_domain_service::ALL_EVENT_TOPICS
         .iter()
@@ -52,7 +52,7 @@ fn asyncapi_topics_match_backend_constants() {
 
     assert!(
         missing_from_doc.is_empty(),
-        "topics emitted by the backend are missing from asyncapi.json EventTopic enum: {missing_from_doc:?}"
+        "topics emitted by the authority server are missing from asyncapi.json EventTopic enum: {missing_from_doc:?}"
     );
     assert!(
         missing_from_constants.is_empty(),

@@ -14,13 +14,13 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
-use posthaste_authority_runtime::AuthorityRuntimeBuild;
+use posthaste_authority_server::AuthorityServerBuild;
 use posthaste_domain_service::{
     AccountDriver, AccountId, DomainEvent, MailStore, MailboxId, MailboxRecord, MessageRecord,
     ProviderAuthKind, ProviderHint, SecretRef, SecretStore, SecretStoreError, SyncBatch,
     SyncCursor, SyncObject,
 };
-use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLinkOps};
+use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLink};
 use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MutationNotification,
     MutationReceipt, MutationRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionSeq,
@@ -43,11 +43,11 @@ const SETTLE_GRACE: Duration = Duration::from_millis(80);
 /// store (for direct seeding), the event bus, and the
 /// [`settle`](Self::settle) recorder.
 pub struct RuntimeHarness {
-    build: AuthorityRuntimeBuild,
+    build: AuthorityServerBuild,
 }
 
 impl RuntimeHarness {
-    pub(crate) fn new(build: AuthorityRuntimeBuild) -> Self {
+    pub(crate) fn new(build: AuthorityServerBuild) -> Self {
         Self { build }
     }
 
@@ -300,7 +300,7 @@ impl RuntimeHarness {
         let receipt = self
             .build
             .handle
-            .run_mutation(caller.clone(), mutation)
+            .forward_mutation(caller.clone(), mutation)
             .await
             .expect("mutation should run");
         let client_mutation_id = receipt.client_mutation_id.clone();
@@ -519,7 +519,7 @@ impl ViewSettlement {
     /// Assert exactly one recompute frame (`ViewReplace`/`ViewDelta`) arrived
     /// for the settled view — zero is a missed recompute, more than one is a
     /// redundant recompute. Use for scenarios with no follow-up sync; a
-    /// `run_mutation` on a live account legitimately produces two (optimistic +
+    /// `forward_mutation` on a live account legitimately produces two (optimistic +
     /// sync-confirmed), so prefer [`assert_view_recomputed_at_least_once`] there.
     /// (The initial `ViewSnapshot` from opening the view is not counted.)
     ///
@@ -652,7 +652,7 @@ async fn drain_grace(
     }
 }
 
-/// In-memory `SecretStore` for tests (lifted from `authority_runtime_handle`).
+/// In-memory `SecretStore` for tests (lifted from `authority_server_handle`).
 #[derive(Default)]
 pub struct TestSecretStore {
     values: Mutex<HashMap<String, String>>,

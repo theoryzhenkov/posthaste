@@ -41,27 +41,27 @@ struct LinkSection<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     token: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    backend_url: Option<&'a str>,
+    authority_server_url: Option<&'a str>,
 }
 
 impl LinkSection<'_> {
     fn is_empty(&self) -> bool {
-        self.serve.is_none() && self.token.is_none() && self.backend_url.is_none()
+        self.serve.is_none() && self.token.is_none() && self.authority_server_url.is_none()
     }
 }
 
 /// Render the node's `app.toml`. `cert`/`key` are the leaf paths when TLS is on.
 pub fn render_app_toml(plan: &Plan, cert: Option<&Path>, key: Option<&Path>) -> String {
     let link = match plan.role {
-        Role::Backend => LinkSection {
+        Role::AuthorityServer => LinkSection {
             serve: Some(true),
             token: plan.link_serve_token.as_deref(),
-            backend_url: None,
+            authority_server_url: None,
         },
         Role::Runtime => LinkSection {
             serve: None,
             token: plan.link_token.as_deref(),
-            backend_url: plan.link_backend_url.as_deref(),
+            authority_server_url: plan.link_authority_server_url.as_deref(),
         },
         Role::Daemon => LinkSection::default(),
     };
@@ -99,31 +99,31 @@ fn exec_bin(plan: &Plan) -> String {
         .unwrap_or_else(|| format!("/usr/local/bin/{}", plan.role.binary()))
 }
 
-/// The full invocation (program + args). Only the all-in-one `posthaste_daemon`
+/// The full invocation (program + args). Only the all-in-one `posthaste-authority-runtime-server`
 /// is a multi-command binary needing the `serve` subcommand; the lean
-/// backend/runtime daemons run directly. Shared by the systemd `ExecStart` and
+/// authority server/runtime daemons run directly. Shared by the systemd `ExecStart` and
 /// the launchd `ProgramArguments`.
 fn exec_invocation(plan: &Plan) -> Vec<String> {
     let bin = exec_bin(plan);
     match plan.role {
         Role::Daemon => vec![bin, "serve".to_string()],
-        Role::Backend | Role::Runtime => vec![bin],
+        Role::AuthorityServer | Role::Runtime => vec![bin],
     }
 }
 
 fn role_description(plan: &Plan) -> &'static str {
     match plan.role {
         Role::Daemon => "Posthaste all-in-one daemon",
-        Role::Backend => "Posthaste backend node",
+        Role::AuthorityServer => "Posthaste authority server node",
         Role::Runtime => "Posthaste runtime node",
     }
 }
 
-/// The launchd job label / reverse-DNS id for a role, e.g. `com.posthaste.backend`.
+/// The launchd job label / reverse-DNS id for a role, e.g. `com.posthaste.authority server`.
 pub fn launchd_label(role: Role) -> String {
     let suffix = match role {
         Role::Daemon => "daemon",
-        Role::Backend => "backend",
+        Role::AuthorityServer => "authority-server",
         Role::Runtime => "runtime",
     };
     format!("com.posthaste.{suffix}")

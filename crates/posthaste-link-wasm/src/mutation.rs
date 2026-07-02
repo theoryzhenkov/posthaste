@@ -2,7 +2,7 @@
 //!
 //! The web client used to maintain a hand-written TypeScript copy of the
 //! name→assertion mapping and the `MessageChangeDiff` inverse. These functions
-//! expose the canonical Rust implementations from `posthaste-link-contract`
+//! expose the canonical Rust implementations from `posthaste-authority-server-link`
 //! and `posthaste-link-core` across the WASM boundary, eliminating that drift.
 
 use serde::Serialize;
@@ -10,7 +10,7 @@ use wasm_bindgen::prelude::*;
 
 use std::collections::HashMap;
 
-use posthaste_link_contract::message_mutation::MessageMutation;
+use posthaste_authority_server_link::message_mutation::MessageMutation;
 use posthaste_link_core::{MessageAssertion, MessageChangeDiff};
 use posthaste_contract_core::MutationRequest;
 

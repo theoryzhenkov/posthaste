@@ -93,9 +93,9 @@ fn base_plan(role: Role, dir: &Path) -> Plan {
         state_root: dir.join("state"),
         bind: "0.0.0.0:3002".into(),
         tls: false,
-        hosts: vec!["backend.lan".into()],
+        hosts: vec!["authority-server.lan".into()],
         link_serve_token: Some("link-secret".into()),
-        link_backend_url: None,
+        link_authority_server_url: None,
         link_token: Some("link-secret".into()),
         exec_path: None,
         systemd_unit_path: None,
@@ -109,11 +109,11 @@ fn install_fetches_verifies_and_provisions_over_http() {
     // not touch the real ~/.config. Set before install computes user_unit_dir().
     std::env::set_var("XDG_CONFIG_HOME", dir.path().join("xdg"));
 
-    // A real gzip tarball carrying a stand-in backend binary.
-    let artifact = "PosthasteBackendNightly-linux-x86_64";
+    // A real gzip tarball carrying a stand-in authority server binary.
+    let artifact = "PosthasteAuthorityServerNightly-linux-x86_64";
     let tarball_name = format!("{artifact}.tar.gz");
-    let fake_binary = b"#!/bin/sh\necho posthaste_backend\n";
-    let tarball = make_tarball(artifact, "posthaste_backend", fake_binary);
+    let fake_binary = b"#!/bin/sh\necho posthaste-authority-server\n";
+    let tarball = make_tarball(artifact, "posthaste-authority-server", fake_binary);
     let sums = format!("{}  {}\n", sha256_hex(&tarball), tarball_name);
 
     let (base_url, server) = serve(vec![
@@ -125,7 +125,7 @@ fn install_fetches_verifies_and_provisions_over_http() {
     let source = GithubSource::new("theoryzhenkov/posthaste").with_base_url(&base_url);
 
     let bin_dir = dir.path().join("bin");
-    let plan = base_plan(Role::Backend, dir.path());
+    let plan = base_plan(Role::AuthorityServer, dir.path());
     let opts = InstallOptions {
         version: Version::Channel(Channel::Nightly),
         platform: Some("linux-x86_64".into()),
@@ -141,7 +141,7 @@ fn install_fetches_verifies_and_provisions_over_http() {
     server.join().unwrap();
 
     // Binary landed, executable, with the served bytes.
-    let placed = bin_dir.join("posthaste_backend");
+    let placed = bin_dir.join("posthaste-authority-server");
     assert_eq!(installed.binary_path, placed);
     assert_eq!(std::fs::read(&placed).unwrap(), fake_binary);
     #[cfg(unix)]
@@ -156,7 +156,7 @@ fn install_fetches_verifies_and_provisions_over_http() {
     let app_toml = std::fs::read_to_string(&installed.provisioned.app_toml_path).unwrap();
     assert!(
         app_toml.contains("[link]"),
-        "backend writes a [link] section"
+        "authority_server writes a [link] section"
     );
     let unit_path = installed
         .service_path
@@ -168,9 +168,9 @@ fn install_fetches_verifies_and_provisions_over_http() {
         "unit ExecStart must reference the installed binary"
     );
 
-    // A backend node emits a join string for the runtime machine.
+    // A authority server node emits a join string for the runtime machine.
     assert!(
         installed.join_string.is_some(),
-        "backend install emits a join string"
+        "authority_server install emits a join string"
     );
 }

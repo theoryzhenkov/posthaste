@@ -12,9 +12,9 @@ use posthaste_domain_service::{
     MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord, SecretRef,
     SecretStore, SecretStoreError, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
-use posthaste_api::api::{ApiError, ListSourceMessagesQuery};
-use posthaste_authority_runtime::AccountSupervisor;
-use posthaste_api::AppState;
+use posthaste_http_api_adapter::api::{ApiError, ListSourceMessagesQuery};
+use posthaste_authority_server::AccountSupervisor;
+use posthaste_http_api_adapter::AppState;
 use posthaste_store::DatabaseStore;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -27,7 +27,7 @@ fn temp_root() -> PathBuf {
         .expect("system time should be after epoch")
         .as_nanos();
     let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-api-boundary-test-{now}-{seq}"))
+    std::env::temp_dir().join(format!("posthaste-http-api-adapter-boundary-test-{now}-{seq}"))
 }
 
 struct TestSecretStore;
@@ -94,7 +94,7 @@ impl ApiHarness {
                     ),
                 account_logo_root: state_root.join("account-assets/logos"),
                 auth_token: "test-token".to_string(),
-                macaroon_root_key: posthaste_api::token::RootKey::from_test_bytes([0u8; 32]),
+                macaroon_root_key: posthaste_http_api_adapter::token::RootKey::from_test_bytes([0u8; 32]),
                 require_auth: false,
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),

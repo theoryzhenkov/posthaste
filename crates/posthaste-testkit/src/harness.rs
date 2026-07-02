@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use posthaste_authority_runtime::build_authority_runtime;
+use posthaste_authority_server::build_authority_server;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_service::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, RFC3339_EPOCH,
@@ -69,7 +69,7 @@ impl Harness {
         .with_secret_store(Arc::new(crate::runtime::TestSecretStore::default()))
         .with_poll_interval(Duration::from_millis(500));
         drop(self);
-        let build = build_authority_runtime(config)
+        let build = build_authority_server(config)
             .await
             .expect("authority runtime should build");
         crate::runtime::RuntimeHarness::new(build)

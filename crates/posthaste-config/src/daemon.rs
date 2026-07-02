@@ -31,22 +31,22 @@ pub struct DaemonSettings {
     ///
     /// @spec docs/eph/DESIGN-L1-trust-model
     pub require_auth: bool,
-    /// Backend role: when `true`, mount the runtime↔backend `link_router` so a
-    /// remote runtime can drive this backend over HTTP. Default `false` (the
+    /// Authority server role: when `true`, mount the runtime↔authority-server `link_router` so a
+    /// remote runtime can drive this authority server over HTTP. Default `false` (the
     /// bundled single-process deployment never exposes the link).
     ///
     /// @spec docs/replication/L1#10-deployment-topology
     pub link_serve: bool,
     /// Connect role: this near node's bearer token, presented to the remote
-    /// backend (single token — the near node is one runtime).
+    /// authority server (single token — the near node is one runtime).
     pub link_token: Option<String>,
     /// Serve role: the runtimes permitted to connect, as `token → runtime_id`
     /// (X ≥ 1). Required under `link_serve` + `require_auth`; serving without
     /// it is refused.
     pub link_runtimes: Option<HashMap<String, String>>,
-    /// Runtime role: when set, this process connects to a remote backend at this
+    /// Runtime role: when set, this process connects to a remote authority server at this
     /// base URL over the link instead of using the in-process one.
-    pub link_backend_url: Option<String>,
+    pub link_authority_server_url: Option<String>,
     /// Optional in-daemon TLS (`[tls]` cert+key paths). Present ⇒ serve HTTPS
     /// over the bound address; absent = plaintext loopback.
     pub tls: Option<TlsConfig>,
@@ -112,7 +112,7 @@ pub fn read_daemon_settings(
         .or(app_toml.daemon.require_auth)
         .unwrap_or(true);
 
-    // Runtime↔backend link roles (default: in-process, not served). Env wins
+    // Runtime↔authority server link roles (default: in-process, not served). Env wins
     // over `[link]` so a split can be dogfooded without editing config.
     let link_serve = std::env::var("POSTHASTE_LINK_SERVE")
         .ok()
@@ -123,10 +123,10 @@ pub fn read_daemon_settings(
         .ok()
         .filter(|token| !token.is_empty())
         .or(app_toml.link.token);
-    let link_backend_url = std::env::var("POSTHASTE_LINK_BACKEND_URL")
+    let link_authority_server_url = std::env::var("POSTHASTE_LINK_AUTHORITY_SERVER_URL")
         .ok()
         .filter(|url| !url.is_empty())
-        .or(app_toml.link.backend_url);
+        .or(app_toml.link.authority_server_url);
     // Serve role: the `token → runtime_id` map (TOML only — a map is awkward in
     // env). X runtimes, X ≥ 1.
     let link_runtimes = app_toml.link.runtimes.clone();
@@ -160,7 +160,7 @@ pub fn read_daemon_settings(
         link_serve,
         link_token,
         link_runtimes,
-        link_backend_url,
+        link_authority_server_url,
         tls,
         allowed_hosts,
     })

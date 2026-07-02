@@ -5,11 +5,11 @@
 //! it, installs it, provisions the node, and registers a `systemd --user`
 //! service that keeps it running.
 //!
-//! Example — install a TLS backend node, then a runtime node that joins it:
+//! Example — install a TLS authority server node, then a runtime node that joins it:
 //!
 //! ```text
-//! # On the backend machine:
-//! posthaste-wizard install --role backend --tls --host backend.lan \
+//! # On the authority server machine:
+//! posthaste-wizard install --role authority server --tls --host authority server.lan \
 //!   --bind 0.0.0.0:3002 --link-token <secret> \
 //!   --config-root ~/.config/mail --state-root ~/.local/share/mail
 //! #   ... prints a one-line join string ...
@@ -17,7 +17,7 @@
 //! # On the runtime machine — one command, no manual URL/token/CA copying:
 //! posthaste-wizard install --role runtime --bind 0.0.0.0:3001 \
 //!   --config-root ~/.config/mail --state-root ~/.local/share/mail \
-//!   --join <join-string-from-backend>
+//!   --join <join-string-from-authority-server>
 //! ```
 //!
 //! @spec docs/eph/PLAN-L2-install-wizard
@@ -158,11 +158,11 @@ fn execute_install(
     bin_dir: PathBuf,
     join: Option<String>,
 ) -> ExitCode {
-    // A runtime node can wire itself from a join string — set backend URL +
+    // A runtime node can wire itself from a join string — set authority server URL +
     // token (+ CA) before provisioning.
     if let Some(join) = &join {
         match apply_join(&mut plan, join) {
-            Ok(Some(ca)) => println!("trusting backend CA: {}", ca.display()),
+            Ok(Some(ca)) => println!("trusting authority server CA: {}", ca.display()),
             Ok(None) => {}
             Err(e) => return arg_error(&e),
         }
@@ -228,7 +228,7 @@ struct RawArgs {
     tls: bool,
     hosts: Vec<String>,
     link_serve_token: Option<String>,
-    link_backend_url: Option<String>,
+    link_authority_server_url: Option<String>,
     link_token: Option<String>,
     exec_path: Option<PathBuf>,
     systemd_unit_path: Option<PathBuf>,
@@ -251,7 +251,7 @@ impl RawArgs {
             tls: false,
             hosts: Vec::new(),
             link_serve_token: None,
-            link_backend_url: None,
+            link_authority_server_url: None,
             link_token: None,
             exec_path: None,
             systemd_unit_path: None,
@@ -280,13 +280,13 @@ impl RawArgs {
                 "--tls" => raw.tls = true,
                 "--host" => raw.hosts.push(value()?),
                 "--link-token" => {
-                    // The link secret serves double duty: the backend role
+                    // The link secret serves double duty: the authority server role
                     // *serves* it, the runtime role *presents* it.
                     let v = value()?;
                     raw.link_serve_token = Some(v.clone());
                     raw.link_token = Some(v);
                 }
-                "--link-backend-url" => raw.link_backend_url = Some(value()?),
+                "--link-authority-server-url" => raw.link_authority_server_url = Some(value()?),
                 "--exec" => raw.exec_path = Some(PathBuf::from(value()?)),
                 "--systemd" => raw.systemd_unit_path = Some(PathBuf::from(value()?)),
                 "--version" => raw.version = Some(value()?),
@@ -322,7 +322,7 @@ impl RawArgs {
             tls: self.tls,
             hosts: self.hosts,
             link_serve_token: self.link_serve_token,
-            link_backend_url: self.link_backend_url,
+            link_authority_server_url: self.link_authority_server_url,
             link_token: self.link_token,
             exec_path: self.exec_path,
             systemd_unit_path: self.systemd_unit_path,
@@ -344,14 +344,14 @@ impl RawArgs {
 
 fn usage() -> &'static str {
     "usage:\n\
-     \x20 posthaste-wizard install --role <daemon|backend|runtime> \\\n\
+     \x20 posthaste-wizard install --role <daemon|authority-server|runtime> \\\n\
      \x20   --config-root <dir> --state-root <dir> [--bind <addr>] [--tls]\n\
-     \x20   [--host <name>]... [--link-token <secret>] [--link-backend-url <url>]\n\
+     \x20   [--host <name>]... [--link-token <secret>] [--link-authority-server-url <url>]\n\
      \x20   [--version <tag>] [--platform <p>] [--join <string>] [--bin-dir <dir>] [--system] [--no-service] [-i]\n\
      \n\
-     \x20 posthaste-wizard provision --role <daemon|backend|runtime> \\\n\
+     \x20 posthaste-wizard provision --role <daemon|authority-server|runtime> \\\n\
      \x20   --config-root <dir> --state-root <dir> [--bind <addr>] [--tls]\n\
-     \x20   [--host <name>]... [--link-backend-url <url>] [--link-token <secret>]\n\
+     \x20   [--host <name>]... [--link-authority-server-url <url>] [--link-token <secret>]\n\
      \x20   [--exec <binary-path>] [--systemd <unit-path>]\n\
      \n\
      install fetches + verifies the role binary from the release, installs it to\n\

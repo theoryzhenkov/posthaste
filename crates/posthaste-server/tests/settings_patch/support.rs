@@ -13,8 +13,8 @@ use posthaste_domain_service::{
     SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
-use posthaste_authority_runtime::AccountSupervisor;
-use posthaste_api::AppState;
+use posthaste_authority_server::AccountSupervisor;
+use posthaste_http_api_adapter::AppState;
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 
@@ -94,7 +94,7 @@ impl SettingsHarness {
                     ),
                 account_logo_root: state_root.join("account-assets/logos"),
                 auth_token: "test-token".to_string(),
-                macaroon_root_key: posthaste_api::token::RootKey::from_test_bytes([0u8; 32]),
+                macaroon_root_key: posthaste_http_api_adapter::token::RootKey::from_test_bytes([0u8; 32]),
                 require_auth: false,
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),
@@ -135,7 +135,7 @@ impl SettingsHarness {
 }
 
 pub(super) fn expect_api_ok<T>(
-    result: Result<Json<T>, posthaste_api::api::ApiError>,
+    result: Result<Json<T>, posthaste_http_api_adapter::api::ApiError>,
     context: &str,
 ) -> Json<T> {
     match result {
@@ -145,7 +145,7 @@ pub(super) fn expect_api_ok<T>(
 }
 
 pub(super) fn expect_settings_ok(
-    result: Result<Json<AppSettings>, posthaste_api::api::ApiError>,
+    result: Result<Json<AppSettings>, posthaste_http_api_adapter::api::ApiError>,
 ) -> Json<AppSettings> {
     expect_api_ok(result, "settings patch should succeed")
 }

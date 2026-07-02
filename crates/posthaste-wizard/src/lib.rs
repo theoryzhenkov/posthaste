@@ -31,25 +31,25 @@ pub use render::{
 /// wizard writes. Mirrors the build matrix in the self-host plan.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
-    /// `posthaste_daemon`: the all-in-one headless daemon (backend + runtime +
+    /// `posthaste-authority-runtime-server`: the all-in-one headless daemon (authority server + runtime +
     /// `/v1`). The GUI `posthaste_fused` desktop bundle is the app-download path,
     /// not a wizard-provisioned node.
     Daemon,
-    /// `posthaste_backend`: the far node; serves the runtime↔backend link only.
-    Backend,
-    /// `posthaste_runtime_daemon`: the near node; serves `/v1` over a remote
-    /// backend.
+    /// `posthaste-authority-server`: the far node; serves the runtime↔authority-server link only.
+    AuthorityServer,
+    /// `posthaste-runtime`: the near node; serves `/v1` over a remote
+    /// authority server.
     Runtime,
 }
 
 impl Role {
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
-            "daemon" | "posthaste_daemon" => Ok(Role::Daemon),
-            "backend" | "posthaste_backend" => Ok(Role::Backend),
-            "runtime" | "posthaste_runtime_daemon" => Ok(Role::Runtime),
+            "daemon" | "posthaste-authority-runtime-server" => Ok(Role::Daemon),
+            "authority-server" | "posthaste-authority-server" => Ok(Role::AuthorityServer),
+            "runtime" | "posthaste-runtime" => Ok(Role::Runtime),
             other => Err(format!(
-                "unknown role '{other}' (expected: daemon | backend | runtime)"
+                "unknown role '{other}' (expected: daemon | authority-server | runtime)"
             )),
         }
     }
@@ -57,9 +57,9 @@ impl Role {
     /// The binary name this role runs.
     pub fn binary(self) -> &'static str {
         match self {
-            Role::Daemon => "posthaste_daemon",
-            Role::Backend => "posthaste_backend",
-            Role::Runtime => "posthaste_runtime_daemon",
+            Role::Daemon => "posthaste-authority-runtime-server",
+            Role::AuthorityServer => "posthaste-authority-server",
+            Role::Runtime => "posthaste-runtime",
         }
     }
 }
@@ -75,10 +75,10 @@ pub struct Plan {
     pub tls: bool,
     /// Hostnames/IPs the node is reached as — leaf SANs + `Host` allowlist.
     pub hosts: Vec<String>,
-    /// Backend role: serve the link with this shared token.
+    /// Authority server role: serve the link with this shared token.
     pub link_serve_token: Option<String>,
-    /// Runtime role: connect to this backend URL with `link_token`.
-    pub link_backend_url: Option<String>,
+    /// Runtime role: connect to this authority server URL with `link_token`.
+    pub link_authority_server_url: Option<String>,
     pub link_token: Option<String>,
     /// Path to the role binary, used in the service unit's `ExecStart`.
     pub exec_path: Option<PathBuf>,
@@ -168,11 +168,11 @@ fn validate(plan: &Plan) -> Result<(), String> {
         return Err("--tls requires at least one --host (the cert's SAN)".into());
     }
     match plan.role {
-        Role::Runtime if plan.link_backend_url.is_none() => {
-            Err("the runtime role requires --link-backend-url (the backend it connects to)".into())
+        Role::Runtime if plan.link_authority_server_url.is_none() => {
+            Err("the runtime role requires --link-authority-server-url (the authority server it connects to)".into())
         }
-        Role::Backend if plan.link_serve_token.is_none() => {
-            Err("the backend role requires --link-token (the shared link secret)".into())
+        Role::AuthorityServer if plan.link_serve_token.is_none() => {
+            Err("the authority server role requires --link-token (the shared link secret)".into())
         }
         _ => Ok(()),
     }

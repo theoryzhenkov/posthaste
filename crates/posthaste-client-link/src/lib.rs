@@ -1,7 +1,7 @@
 //! The client↔runtime link ops extracted from `RuntimeCore`
-//! (RFC-L2-architecture-cleanup D7/D23): one trait ([`RuntimeLinkOps`]) for the
+//! (RFC-L2-architecture-cleanup D7/D23): one trait ([`RuntimeLink`]) for the
 //! link protocol — session open/close, the three stream families (runtime frames,
-//! view snapshots, events), session-view open/extend/close, and `run_mutation`
+//! view snapshots, events), session-view open/extend/close, and `forward_mutation`
 //! forward — plus the subscription/stream types those methods return.
 //!
 //! The four families are one protocol: every consumer (api `runtime_stream` +
@@ -14,7 +14,7 @@
 //! calls itself to build the subscription's replay backlog — that logic stays a
 //! private fn in `posthaste-runtime`; the public replay rides on
 //! [`RuntimeEventSubscription::replay`]). The sessionless `open_view`/
-//! `subscribe_view` pair **is** here: `posthaste-api`'s `POST /v1/views` and
+//! `subscribe_view` pair **is** here: `posthaste-http-api-adapter`'s `POST /v1/views` and
 //! `GET /v1/views/{id}/stream` routes are live production consumers.
 
 use async_trait::async_trait;
@@ -49,11 +49,11 @@ pub struct RuntimeFrameSubscription {
 }
 
 /// The client↔runtime link protocol: sessions, the three stream families
-/// (frames / views / events), session-view snapshots, and `run_mutation`
+/// (frames / views / events), session-view snapshots, and `forward_mutation`
 /// forward. Every method takes `caller: RuntimeCaller` first (shared caller
 /// identity, lives in `posthaste-contract-core`).
 #[async_trait]
-pub trait RuntimeLinkOps: Send + Sync {
+pub trait RuntimeLink: Send + Sync {
     async fn open_session(&self, caller: RuntimeCaller) -> Result<RuntimeSession, RuntimeError>;
 
     async fn close_session(
@@ -93,7 +93,7 @@ pub trait RuntimeLinkOps: Send + Sync {
         count: usize,
     ) -> Result<ViewSnapshot, RuntimeError>;
 
-    async fn run_mutation(
+    async fn forward_mutation(
         &self,
         caller: RuntimeCaller,
         request: MutationRequest,
