@@ -678,9 +678,24 @@ that is about to lose half its contents — every moved type would churn twice.
 
 ## 9. Execution protocol & invariants (Phase 5)
 
-Baseline: parent-repo commit `113479c2d` (2026-07-02). This workspace's
-`docs/` is not git-tracked until merge — treat the spec tree as part of every
-landing commit.
+Baseline: this directory is the **jj workspace `architecture-cleanup`**
+(renamed from `multi-runtime` 2026-07-02; `.workspaces/` is git-excluded
+because jj owns these trees). Everything — code and specs — is jj-tracked;
+the drain history already lives in jj changes (phase-0 scaffold at
+`tknpowlq`). Git-side reference point in the main history: `113479c2d`.
+
+**Landing ritual is jj-native:** one jj change per execution unit —
+`jj commit -m "refactor(M1): … — closes V4"` on completion; review via
+`jj diff`; rollback via `jj abandon`/`jj restore`. No nested git repos.
+
+**Driver setup (2026-07-02):** implementation units are executed by headless
+`pi` sessions (`pi -p --provider umans --model umans-glm-5.2 --session-id
+m<step>-<unit> …`), one session per unit so corrections continue with context.
+The orchestrator (Claude) writes each unit brief from the DEVIATION row + spec
+sections, reviews the jj diff, runs the gates, and does the RFC/DEVIATION/
+marker bookkeeping — the implementing agent never edits the RFC or DEVIATION
+register, and never runs `jj` (the orchestrator owns the change boundary).
+Parallel pi sessions only for disjoint-scope units.
 
 **Per-unit landing ritual.** Read the DEVIATION row (current + end) → implement
 → run the gates → close the row → flip the `[::state]` markers the unit owns →
