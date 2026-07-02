@@ -4,7 +4,7 @@ use posthaste_domain_service::{
     AccountId, AccountSettings, MailService, SecretKind, SecretRef, SecretStore, ServiceError,
 };
 use posthaste_observability::{events, ph_error, ph_warn};
-use posthaste_runtime_contract::{RuntimeError, SecretWriteMode, SecretWriteMutation};
+use posthaste_contract_core::{RuntimeError, SecretWriteMode, SecretWriteMutation};
 
 pub(crate) struct AccountRepository {
     service: Arc<MailService>,
@@ -292,7 +292,7 @@ mod tests {
         ConfigRepository, ConfigSnapshot, SecretStoreError, SmartMailbox, SmartMailboxId,
         RFC3339_EPOCH,
     };
-    use posthaste_runtime_contract::RuntimeErrorCode;
+    use posthaste_contract_core::RuntimeErrorCode;
     use posthaste_store::DatabaseStore;
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);

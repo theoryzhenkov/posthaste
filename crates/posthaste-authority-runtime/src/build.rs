@@ -10,7 +10,7 @@ use std::time::Duration;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_service::{ConfigRepository, DomainEvent, MailService, MailStore, SecretStore};
 use posthaste_link_contract::{BackendApi, BackendLink};
-use posthaste_runtime_contract::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
+use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 

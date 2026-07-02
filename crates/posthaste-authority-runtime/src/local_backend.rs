@@ -25,7 +25,7 @@ use posthaste_link_contract::{
     BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, RuntimeId,
 };
 use posthaste_link_core::MessageFoldState;
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest, PatchAccountMutation,

@@ -15,15 +15,16 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
+posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Pinned to exactly match the `wasm-bindgen-cli` nixpkgs provides (the generated
 # JS glue is version-locked to the crate). Bump both together.
 wasm-bindgen = "=0.2.117"
-# uuid is pulled in by posthaste-runtime-contract; for wasm32-unknown-unknown we
-# need its "js" RNG backend. This is a transitive override for the browser target.
+# uuid is pulled in transitively (posthaste-contract-core -> posthaste-domain-model's
+# `generated_id`); for wasm32-unknown-unknown we need its "js" RNG backend. This is
+# a transitive override for the browser target.
 uuid = { version = "1", features = ["v4", "js"] }

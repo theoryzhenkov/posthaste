@@ -8,7 +8,7 @@ use posthaste_domain_service::{
     ConversationView, MailService, MessageCursor, MessageDetail, MessageId, MessagePage,
     MessageSortField, SortDirection,
 };
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     MailPresentationRequest, MailQueryPage, MailQueryRequest, RuntimeError,
 };
 
