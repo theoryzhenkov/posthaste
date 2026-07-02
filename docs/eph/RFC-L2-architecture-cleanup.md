@@ -753,6 +753,7 @@ becoming an M-step. Seeded 2026-07-02 from evidence already in hand:
 | P3 | Lifecycle debt not absorbed by M-steps: push backoff/jitter/breaker, supervisor inline sync await, IMAP timeouts + allocation bounds, web reconnect backoff, snooze wall-clock | `docs/issues/L2-runtime-lifecycle-debt.md` rows 4-6, 8, 10 | V-VIII, XIX |
 | P4 | `SortKey.received_at: String` — ISO-8601 lexicographic ordering of server wall-clock at the replica boundary | client audit; `entity_store.rs:96` | XXIII |
 | P5 | Timing-flaky test under parallel load: `rapid_mutation_burst_coalesces_provider_sync_triggers` (authority-runtime sync-coalescing window) failed once during M1's full-workspace `cargo test`, passes 3/3 isolated — a real-clock race window in the test | M1 gate run 2026-07-02 | XXIV; II (no clock seam in the test) |
+| P6 | Test suites leak `std::env::temp_dir()` directories with no cleanup guards — repeated `cargo test --workspace` runs accumulated 6,853 dirs (2.7 GB) until `EDQUOT` on the 8 GB dev-VM rootfs; test runs are not idempotent in resource terms | M2 gate runs 2026-07-02 | VII (release what you acquire); XXIV |
 
 **Cross-references that live outside this workspace until merge:** the
 superseded spec tree and `docs/issues/*` are in the main tree; the eph docs the
