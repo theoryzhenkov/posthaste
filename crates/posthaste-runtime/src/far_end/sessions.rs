@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 use tracing::{debug, warn};
 
-use crate::views::ViewRegistry;
+use crate::far_end::view_registry::ViewRegistry;
 
 /// Capacity of the per-session frame broadcast channel. A burst (e.g. a sync
 /// delivering many messages at once) emits one view frame per recompute; if the

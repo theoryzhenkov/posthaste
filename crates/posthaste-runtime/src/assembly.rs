@@ -16,10 +16,10 @@ use crate::handle::{RuntimeCoreState, RuntimeHandle};
 use crate::near_node::RuntimeAuthorityServerOutbox;
 use crate::read::ReadCache;
 use crate::secret::SystemSecretStore;
-use crate::sessions::SessionRegistry;
+use crate::far_end::sessions::SessionRegistry;
 use crate::shutdown::RuntimeShutdownHandle;
 use crate::transport::RemoteAuthorityServer;
-use crate::views::ViewRegistry;
+use crate::far_end::view_registry::ViewRegistry;
 
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
 
