@@ -11,8 +11,9 @@
 //!   work only when the authority server is remote or unreachable (optimistic offline).
 //!
 //! - [`apply_outbox_overlay`] — folds the outbox over a recomputed mail-list view
-//!   using the **shared** `posthaste-link-replica::MailListReplica`, the same
-//!   replica the browser client runs as WASM (assertion `one-replica`). The
+//!   using the **shared** convergence kernel and per-entity optimism read
+//!   (`posthaste-link-replica`'s `project_optimistic`), the same fold the
+//!   browser client's entity store runs as WASM (assertion `one-replica`). The
 //!   served rows are the base; the outbox is the pending set; the projection is
 //!   the optimistic result.
 //!
@@ -21,17 +22,18 @@
 use std::sync::{Mutex, MutexGuard};
 
 use posthaste_authority_server_link::BaseUpdate;
-use posthaste_link_core::{
-    MessageAssertion, MessageReplica, MutationId, Outcome, PendingMessageMutation,
-};
-use posthaste_link_replica::{apply_fold_to_projection, fold_state_from_projection};
+use posthaste_link_core::{MessageAssertion, MessageReplica, MutationId, PendingMessageMutation};
+use posthaste_link_replica::{fold_state_from_projection, project_optimistic};
 use posthaste_contract_core::{MailListViewState, MutationRequest};
 use serde_json::Value;
 
 /// The runtime's outbox toward the authority server: forwarded-but-unconfirmed message
-/// mutations, ordered, idempotent on mutation id. Backed by the shared
-/// [`MessageReplica`] so retirement is **absorption-gated** for the remote seam,
-/// consistent with the client tier ([replication authority-server-link L2 §5](../replication/authority-server-link/L2.md)).
+/// mutations, ordered, idempotent on mutation id. Composes the shared
+/// [`MessageReplica`] — link-core's `OptimisticReplica` kernel, the same
+/// accept-pending / fold-on-read / retire-on-absorption mechanism the client's
+/// `EntityStore` mounts (`one-replica-both-seams`, RFC D34/D35a) — so retirement
+/// is **absorption-gated** for the remote seam, consistent with the client tier
+/// ([replication authority-server-link L2 §5](../replication/authority-server-link/L2.md)).
 ///
 /// Retirement policy (`retire_on_down_channel`):
 ///
@@ -171,15 +173,14 @@ pub(crate) fn apply_outbox_overlay(
         .iter()
         .filter_map(|row| {
             let id = row_message_id(row);
-            match engine.project(&id) {
-                Some(Outcome::Present(fold_state)) => {
-                    let mut row = originals.get(&id)?.clone();
-                    row.projection = apply_fold_to_projection(row.projection.clone(), &fold_state);
-                    Some(row)
-                }
-                // Destroyed (or no base): drop, mirroring `project_all`.
-                _ => None,
-            }
+            let original = originals.get(&id)?;
+            // The shared per-entity optimism read (one projector, RFC D38):
+            // destroyed (or no base) folds to None and the row drops,
+            // mirroring `project_all`.
+            let projection = project_optimistic(&engine, &id, &original.projection)?;
+            let mut row = original.clone();
+            row.projection = projection;
+            Some(row)
         })
         .collect();
 }
@@ -308,6 +309,16 @@ mod tests {
             add: vec!["$flagged".into()],
             remove: vec![],
         }
+    }
+
+    #[test]
+    fn the_composed_engine_is_the_shared_optimistic_replica_seam() {
+        // Compile-time proof of composition (RFC D35a/D36): the outbox's engine
+        // is link-core's `OptimisticReplica` kernel — the same seam the client
+        // `EntityStore` mounts — not a runtime-grown sibling.
+        use posthaste_link_core::{MessageConvergence, OptimisticReplica};
+        fn assert_kernel<R: OptimisticReplica<MessageConvergence>>() {}
+        assert_kernel::<MessageReplica>();
     }
 
     #[test]

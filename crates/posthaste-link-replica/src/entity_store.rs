@@ -10,6 +10,12 @@
 //! [`EntityStore::drain_dirty`]. The host does the reactive fan-out (write the
 //! changed keys into the renderer cache); the store is a dumb dirty-tracker.
 //!
+//! [`EntityStore`] is the public **composition** of the two near-node layers
+//! (RFC D36): the replica *mechanism* ([`crate::mechanism`] — accept/settle/
+//! retire plumbing over link-core's `OptimisticReplica` kernel) and the view
+//! *projection* ([`crate::projection`] — rows, predicates, windowing, sort
+//! keys, dirty tracking). A headless client consumes exactly these two layers.
+//!
 //! For an **evaluable** predicate (`InMailboxes`, `All`) the store self-maintains
 //! each view's membership: on a message mutation it runs one local evaluation —
 //! place the row if the predicate matches *and* the message's sort key is within
@@ -21,7 +27,7 @@
 //!
 //! ## Optimism
 //!
-//! The store holds a [`MessageReplica`] (the shared convergence engine,
+//! The mechanism layer holds a `MessageReplica` (the shared convergence engine,
 //! `posthaste-link-core`'s `Replica<MessageConvergence>`) over message fold
 //! state. [`accept_mutation`](EntityStore::accept_mutation) folds an optimistic
 //! assertion into the outbox; [`message`](EntityStore::message) and view
@@ -47,157 +53,16 @@
 //! @spec docs/eph/DESIGN-L2-client-link-reactive-store
 //! @spec docs/eph/PLAN-L2-client-link-reactive-store
 
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use posthaste_link_core::{
-    MessageAssertion, MessageFoldState, MessageReplica, MutationId, Outcome,
-    PendingMessageMutation, SettlementOutcome, SettlementResult,
+use posthaste_link_core::{MessageAssertion, MutationId, SettlementOutcome, SettlementResult};
+
+use crate::mechanism::{BaseApplied, ReplicaMechanism};
+use crate::projection::{
+    CountDelta, DirtyKey, MailboxEntity, SortDirection, SortKey, ViewPredicate, ViewProjection,
+    ViewRow,
 };
-
-/// A changed entity key, reported by [`EntityStore::drain_dirty`].
-///
-/// Serializes externally-tagged + camelCase so the WASM host can parse a drain
-/// as a JSON array of `{"message":id}` / `{"mailbox":id}` / `{"view":id}`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DirtyKey {
-    Message(String),
-    Mailbox(String),
-    View(String),
-}
-
-/// The outcome of re-evaluating a message's placement in one view, used to
-/// drive dirty-marking + reverse-index maintenance after the row borrow ends.
-enum Placement {
-    /// The row is in the view after rederive (newly placed, reordered, or a
-    /// content-only change): mark the view dirty + record membership.
-    Present,
-    /// The row was held but no longer matches: mark dirty + drop membership.
-    Removed,
-    /// Not a member before or after: nothing to do.
-    Absent,
-}
-
-/// Sort direction of a view's order; selects the in-range comparison.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SortDirection {
-    Asc,
-    Desc,
-}
-
-/// The composite sort key `[receivedAt, id]` the store places rows by. A typed
-/// pair (rather than a raw `serde_json::Value`) so ordering is well-defined and
-/// cheap; it matches the runtime's `mail_list_state` sort key. Lexicographic on
-/// `(received_at, message_id)` — ISO-8601 timestamps compare chronologically
-/// and the id is a stable tiebreak.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SortKey {
-    pub received_at: String,
-    pub message_id: String,
-}
-
-/// A view's membership predicate. `InMailboxes`/`All` are **evaluable** (the
-/// store self-maintains placement); `Deferred` is not (the host drives deltas).
-///
-/// `InMailboxes` is set-intersection: a message matches if its `mailboxIds`
-/// intersect the predicate's set. A concrete-folder view holds a one-element
-/// set; a role smart mailbox (e.g. "All Inboxes") holds the role's mailbox in
-/// every account.
-///
-/// Serializes externally-tagged + camelCase: `{"inMailboxes":[id,..]}` /
-/// `"all"` / `"deferred"`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ViewPredicate {
-    InMailboxes(Vec<String>),
-    All,
-    Deferred,
-}
-
-impl ViewPredicate {
-    /// Whether a message matches this view's filter. `Deferred` returns `true`
-    /// (the store does not decide; the host places via deltas).
-    fn matches(&self, projection: &Value) -> bool {
-        match self {
-            ViewPredicate::InMailboxes(mailbox_ids) => projection
-                .get("mailboxIds")
-                .and_then(Value::as_array)
-                .map(|ids| {
-                    ids.iter().any(|id| {
-                        id.as_str()
-                            .is_some_and(|id| mailbox_ids.iter().any(|m| m == id))
-                    })
-                })
-                .unwrap_or(false),
-            ViewPredicate::All => true,
-            ViewPredicate::Deferred => true,
-        }
-    }
-
-    fn is_evaluable(&self) -> bool {
-        !matches!(self, ViewPredicate::Deferred)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ViewRow {
-    pub row_key: String,
-    pub message_id: String,
-    /// The composite sort key the row was placed at, held so a later mutation
-    /// can insert/move against it without re-reading the projection; refreshed
-    /// from the authority on `set_view_rows`.
-    pub sort_key: SortKey,
-}
-
-/// A view entity: an ordered row list plus the coverage watermark and the
-/// predicate/sort that govern local placement.
-#[derive(Clone, Debug)]
-pub struct ViewEntity {
-    pub predicate: ViewPredicate,
-    pub sort_field: String,
-    pub sort_direction: SortDirection,
-    /// The sort key of the last held row; `None` = the range reaches BOTTOM
-    /// (the view holds every match). The boundary a mutation cannot cross
-    /// downward — only paging moves it toward BOTTOM.
-    pub watermark: Option<SortKey>,
-    pub rows: Vec<ViewRow>,
-}
-
-/// A mailbox entity: server-authoritative count scalars (the store is partial,
-/// so counts are never derived from the held message set).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MailboxEntity {
-    pub unread_count: i64,
-    pub total_count: i64,
-}
-
-/// A message entity: the authoritative `MessageSummary` projection (the base the
-/// outbox folds over). The *optimistic* projection a renderer reads is computed
-/// on [`EntityStore::message`] — never stored. Internal (not exported): the base
-/// projection must not leak past the store's `message()` accessor, which returns
-/// the folded state — exposing it would open a second, non-optimistic
-/// derivation path.
-#[derive(Clone, Debug)]
-struct MessageEntity {
-    projection: Value,
-}
-
-/// A count delta shipped with a message event (atomic per batch — `D3`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CountDelta {
-    pub mailbox_id: String,
-    pub unread_count: i64,
-    pub total_count: i64,
-}
 
 /// One authoritative update in a batch.
 ///
@@ -222,40 +87,17 @@ pub enum StoreUpdate {
 
 /// The reactive entity store. Pure compute: no transport, no persistence.
 ///
-/// Holds a [`MessageReplica`] so message optimism is a pure fold over the
-/// confirmed base (keywords + mailbox membership); views and the message read
-/// derive from the projected state. Bases are seeded per-key on ingest; the
-/// outbox is never cleared by a base update, so unconfirmed optimism survives a
-/// re-served snapshot and retires only on settlement.
+/// Composes the replica mechanism (the shared convergence kernel behind
+/// link-core's `OptimisticReplica` seam) with the view projection layer, so
+/// message optimism is a pure fold over the confirmed base (keywords + mailbox
+/// membership); views and the message read derive from the projected state.
+/// Bases are seeded per-key on ingest; the outbox is never cleared by a base
+/// update, so unconfirmed optimism survives a re-served snapshot and retires
+/// only on settlement.
 #[derive(Default)]
 pub struct EntityStore {
-    messages: HashMap<String, MessageEntity>,
-    mailboxes: HashMap<String, MailboxEntity>,
-    views: HashMap<String, ViewEntity>,
-    /// Reverse index `messageId -> set of viewIds the message currently appears
-    /// in`, kept in sync as rows are inserted/removed/rederived. A content-only
-    /// `rederive_message` (a flag/read toggle that leaves the sort key — and so
-    /// the row tuple — unchanged) marks the OWNING views dirty through this
-    /// index, so the drained `View` set is trustworthy and complete: the host
-    /// re-projects only the views a change actually touched, never all of them
-    /// (`adapter-reproject-all`). Empty sets are pruned so membership is exact.
-    message_views: HashMap<String, HashSet<String>>,
-    /// The message convergence engine: confirmed fold states + the optimistic
-    /// outbox. Keyed by message id (`MessageConvergence::Key = String`).
-    engine: MessageReplica,
-    /// Per-op the authority base version captured at accept time, so retirement
-    /// can be gated on a STRICTLY HIGHER version. A local move does not bump the
-    /// provider modseq, so its same-version echo and a stale re-serve share this
-    /// version — retiring there would let the stale re-serve clobber membership.
-    /// Absent for ops accepted with no version yet (those retire on the old
-    /// confirmed+absorbed rule; opt-in for no-version providers).
-    accepted_at: HashMap<MutationId, u64>,
-    dirty: HashSet<DirtyKey>,
-    /// Ids of ops retired since the last [`drain_retired`] (at settle confirm
-    /// or base catch-up). The host clears durable-outbox records only for these
-    /// — an un-retired op is still pending in-engine and must survive a reload.
-    /// (outbox D)
-    retired_buffer: Vec<MutationId>,
+    mechanism: ReplicaMechanism,
+    projection: ViewProjection,
 }
 
 impl EntityStore {
@@ -274,124 +116,21 @@ impl EntityStore {
         sort_direction: SortDirection,
         watermark: Option<SortKey>,
     ) {
-        self.views.insert(
-            view_id.to_string(),
-            ViewEntity {
-                predicate,
-                sort_field,
-                sort_direction,
-                watermark,
-                rows: Vec::new(),
-            },
-        );
-        self.dirty.insert(DirtyKey::View(view_id.to_string()));
+        self.projection
+            .register_view(view_id, predicate, sort_field, sort_direction, watermark);
     }
 
-    /// Adopt a served snapshot / page / resync for a view — but **reconcile, not
-    /// clobber**. The runtime's full-view re-serve is a *second* membership source
-    /// for an evaluable view the store already self-maintains from `message.updated`;
-    /// a stale re-serve must not re-add a row the client's (version-guarded) base
-    /// says has moved out, nor drop a row the client has optimistically placed. So
-    /// for an evaluable predicate: (1) keep only served rows whose current
-    /// optimistic projection still matches the predicate + coverage — a row the
-    /// folded base has moved out of the view, or destroyed, is dropped; then
-    /// (2) re-apply pending optimistic placements over the result. A `Deferred`
-    /// view is host-driven, so its served rows are trusted as-is.
-    ///
-    /// This establishes the invariant: in an evaluable view a row is present iff
-    /// its folded base matches the predicate — making the store's self-maintained
-    /// membership authoritative, so a stale `viewReplace`/`viewSnapshot` can no
-    /// longer clobber it (the move/delete/archive flicker,
-    /// [reserve-clobbers-optimism](../../issues/L2-reserve-clobbers-optimism)).
-    /// Does not touch the message base or outbox.
+    /// Adopt a served snapshot / page / resync for a view — reconciled against
+    /// the version-guarded optimistic state, not clobbered (see
+    /// [`ViewProjection::set_view_rows`](crate::projection) for the full
+    /// invariant). Does not touch the message base or outbox.
     pub fn set_view_rows(&mut self, view_id: &str, rows: Vec<ViewRow>, watermark: Option<SortKey>) {
-        let reconciled = match self.views.get(view_id) {
-            None => return,
-            Some(view) if !view.predicate.is_evaluable() => rows,
-            Some(view) => {
-                let predicate = view.predicate.clone();
-                rows.into_iter()
-                    .filter(|row| {
-                        // No held base yet (the served snapshot precedes its
-                        // ingest): trust the served row — ingest + rederive will
-                        // re-evaluate it. A held base that no longer matches
-                        // (moved out) or is destroyed (project → None) is dropped.
-                        if !self.messages.contains_key(&row.message_id) {
-                            return true;
-                        }
-                        match self.optimistic_projection(&row.message_id) {
-                            Some(projection) => {
-                                predicate.matches(&projection)
-                                    && in_range(&row.sort_key, &watermark, view.sort_direction)
-                            }
-                            None => false,
-                        }
-                    })
-                    .collect()
-            }
-        };
-        let (old_members, new_members) = match self.views.get_mut(view_id) {
-            None => return,
-            Some(view) => {
-                let old: Vec<String> = view.rows.iter().map(|r| r.message_id.clone()).collect();
-                let new: Vec<String> = reconciled.iter().map(|r| r.message_id.clone()).collect();
-                view.rows = reconciled;
-                view.watermark = watermark;
-                self.dirty.insert(DirtyKey::View(view_id.to_string()));
-                (old, new)
-            }
-        };
-        // Rebuild this view's slice of the reverse index: drop its old members,
-        // then record the served set (rederive below re-derives optimistic
-        // placement, adjusting the index as rows move).
-        for message_id in &old_members {
-            self.index_remove(message_id, view_id);
-        }
-        for message_id in &new_members {
-            self.index_insert(message_id, view_id);
-        }
-        // Re-apply pending optimistic membership over the freshly-served rows, so
-        // a re-serve cannot drop an optimistically-placed row (e.g. an optimistic
-        // move-in). No-op for the common archive/move/delete case (no pending op).
-        let pending: Vec<String> = self
-            .engine
-            .pending()
-            .iter()
-            .map(|op| op.key.clone())
-            .collect();
-        for message_id in pending {
-            if self.messages.contains_key(&message_id) {
-                self.rederive_message(&message_id);
-            }
-        }
+        self.projection
+            .set_view_rows(&self.mechanism, view_id, rows, watermark);
     }
 
     pub fn close_view(&mut self, view_id: &str) {
-        if let Some(view) = self.views.remove(view_id) {
-            for row in &view.rows {
-                let message_id = row.message_id.clone();
-                self.index_remove(&message_id, view_id);
-            }
-        }
-    }
-
-    /// Record that `message_id` now appears in `view_id` (reverse index).
-    fn index_insert(&mut self, message_id: &str, view_id: &str) {
-        self.message_views
-            .entry(message_id.to_string())
-            .or_default()
-            .insert(view_id.to_string());
-    }
-
-    /// Drop `message_id`'s membership in `view_id`, pruning an emptied set so the
-    /// index never reports a message as appearing in a view it has left.
-    fn index_remove(&mut self, message_id: &str, view_id: &str) {
-        if let Some(views) = self.message_views.get_mut(message_id) {
-            views.remove(view_id);
-            if views.is_empty() {
-                self.message_views.remove(message_id);
-            }
-        }
+        self.projection.close_view(view_id);
     }
 
     /// Apply a batch atomically: every update is applied before any dirty key
@@ -407,10 +146,10 @@ impl EntityStore {
                 } => {
                     self.apply_message(&message_id, &projection, deleted);
                     for delta in count_deltas {
-                        self.apply_count_delta(&delta);
+                        self.projection.apply_count_delta(&delta);
                     }
                 }
-                StoreUpdate::MailboxCount(delta) => self.apply_count_delta(&delta),
+                StoreUpdate::MailboxCount(delta) => self.projection.apply_count_delta(&delta),
             }
         }
     }
@@ -426,32 +165,19 @@ impl EntityStore {
         message_id: &str,
         assertion: MessageAssertion,
     ) {
-        // Remember the authority version at accept time so retirement can be
-        // gated on a strictly-higher version (the equal-version hold that
-        // survives the local move's same-modseq echo + a stale re-serve).
-        if let Some(version) = self
-            .messages
-            .get(message_id)
-            .and_then(|entity| authority_version(&entity.projection))
-        {
-            self.accepted_at.insert(mutation_id.clone(), version);
-        }
-        self.engine.accept(PendingMessageMutation {
-            id: mutation_id,
-            key: message_id.to_string(),
-            effect: assertion,
-        });
-        if self.messages.contains_key(message_id) {
-            self.rederive_message(message_id);
+        self.mechanism.accept(mutation_id, message_id, assertion);
+        if self.mechanism.is_held(message_id) {
+            self.projection.rederive_message(&self.mechanism, message_id);
         }
     }
 
     /// Settle a pending mutation by its terminal outcome.
     ///
     /// `Confirmed` does **not** revert: it retires the op only if the confirmed
-    /// base already carries its effect (`retire_absorbed`), otherwise it leaves
-    /// the op folded for the authoritative `message.updated` to retire. This is
-    /// the race fix ([mutation.notification design](../eph/DESIGN-L2-mutation-notification.md)):
+    /// base already carries its effect at a strictly-higher authority version
+    /// (the kernel's version-gated retire), otherwise it leaves the op folded
+    /// for the authoritative `message.updated` to retire. This is the race fix
+    /// ([mutation.notification design](../eph/DESIGN-L2-mutation-notification.md)):
     /// a confirmation that outruns the base update can no longer flip the
     /// projection back to a stale base. `Failed` retires the op unconditionally
     /// and the projection reverts to authoritative state (the rejection path).
@@ -461,299 +187,49 @@ impl EntityStore {
         mutation_id: &MutationId,
         outcome: SettlementOutcome,
     ) -> SettlementResult {
-        // Look up the affected message before settling so we can re-fold just it.
-        let key = self
-            .engine
-            .pending()
-            .iter()
-            .find(|held| &held.id == mutation_id)
-            .map(|held| held.key.clone());
-        let result = match outcome {
-            SettlementOutcome::Confirmed => {
-                // Mark confirmed, but retire only ops whose current base version
-                // is STRICTLY HIGHER than at accept. A local move does not bump
-                // the provider modseq, so its same-version echo would absorb +
-                // retire the op prematurely — letting a later equal-version stale
-                // re-serve clobber membership. The op stays folded through that
-                // window, retiring only on the real modseq bump.
-                self.engine.mark_confirmed(mutation_id);
-                let mut retired = false;
-                if let Some(message_id) = key.as_ref() {
-                    let current = self
-                        .messages
-                        .get(message_id.as_str())
-                        .and_then(|e| authority_version(&e.projection));
-                    let can_retire = self.retireable_ops(message_id.as_str(), current);
-                    let retired_ids = self
-                        .engine
-                        .retire_absorbed_if(message_id, |id| can_retire.contains(id));
-                    retired = !retired_ids.is_empty();
-                    self.retired_buffer.extend(retired_ids);
-                    if retired {
-                        self.prune_accepted_at(message_id.as_str());
-                    }
-                }
-                SettlementResult {
-                    retired,
-                    reverted: false,
-                }
-            }
-            SettlementOutcome::Failed => {
-                self.accepted_at.remove(mutation_id);
-                let result = self.engine.settle(mutation_id, outcome);
-                if result.retired {
-                    self.retired_buffer.push(mutation_id.clone());
-                }
-                result
-            }
-        };
+        let (result, key) = self.mechanism.settle(mutation_id, outcome);
         if let Some(message_id) = key {
-            if self.messages.contains_key(&message_id) {
-                self.rederive_message(&message_id);
+            if self.mechanism.is_held(&message_id) {
+                self.projection
+                    .rederive_message(&self.mechanism, &message_id);
             }
         }
         result
     }
 
-    /// The pending ops on `message_id` that may retire at `current_version`: an
-    /// op retires only if it was accepted with no version tracked (opt-in for
-    /// no-version providers — the old confirmed+absorbed rule) OR the current
-    /// base version is STRICTLY HIGHER than the version captured at accept (a
-    /// real provider modseq bump, not the local move's same-modsec echo / a
-    /// stale re-serve). This is the equal-version hold.
-    fn retireable_ops(
-        &self,
-        message_id: &str,
-        current_version: Option<u64>,
-    ) -> HashSet<MutationId> {
-        self.engine
-            .pending()
-            .iter()
-            .filter(|held| held.key.as_str() == message_id)
-            .filter(|held| match self.accepted_at.get(&held.id) {
-                None => true,
-                Some(at) => current_version.is_some_and(|cur| cur > *at),
-            })
-            .map(|held| held.id.clone())
-            .collect()
-    }
-
-    /// Drop `accepted_at` entries for ops no longer pending on `message_id`
-    /// (retired/failed), so the map does not leak across the outbox lifecycle.
-    fn prune_accepted_at(&mut self, message_id: &str) {
-        let live: HashSet<MutationId> = self
-            .engine
-            .pending()
-            .iter()
-            .filter(|held| held.key.as_str() == message_id)
-            .map(|held| held.id.clone())
-            .collect();
-        self.accepted_at.retain(|id, _| live.contains(id));
-    }
-
     /// Whether any optimistic mutation is still pending (drives optimistic-UI
     /// affordances and settle-driven dirty drains).
     pub fn has_pending(&self) -> bool {
-        self.engine.has_pending()
+        self.mechanism.has_pending()
     }
 
     fn apply_message(&mut self, message_id: &str, projection: &Value, deleted: bool) {
-        if deleted {
-            self.messages.remove(message_id);
-            self.engine.remove_base(&message_id.to_string());
-            // Authoritative removal: purge any pending optimism on this entity.
-            // It is gone — the op can neither fold into a base nor revert to
-            // one — so without this it leaks pending forever (has_pending stuck
-            // true; the durable outbox grows unbounded on delete-heavy
-            // workloads). settle(Confirmed)'s version-gated retire can't reach
-            // a deleted entity (no version for the gate), and unconfirmed ops
-            // are never retired there anyway. Scoped to deleted=true — a
-            // *never-ingested* entity is not an authoritative removal; its
-            // deferred pending must survive to fold on a later ingest.
-            self.engine.remove_pending(&message_id.to_string());
-            self.remove_message_from_views(message_id);
-        } else {
-            // Staleness guard: reject a base whose authority-state version is
-            // STRICTLY OLDER than the held one. A late provider re-serve carrying
-            // a snapshot that predates the current state (the post-confirm
-            // flicker tail) must not clobber a newer confirmed base. Equal
-            // versions are idempotent (accepted); absent versions (no provider
-            // version yet) skip the guard, so it is inert until the runtime
-            // stamps `version` on the projection.
-            if let (Some(incoming), Some(held)) = (
-                authority_version(projection),
-                self.messages
-                    .get(message_id)
-                    .and_then(|entity| authority_version(&entity.projection)),
-            ) {
-                if incoming < held {
-                    return;
-                }
-            }
-            self.messages.insert(
-                message_id.to_string(),
-                MessageEntity {
-                    projection: projection.clone(),
-                },
-            );
-            self.engine.set_base(
-                message_id.to_string(),
-                fold_state_from_projection(projection),
-            );
-            // A base update retires any pending op the new base now carries
-            // (the race-free happy-path retire) — but only at a STRICTLY HIGHER
-            // version: an equal-version base (the local move's same-modseq echo,
-            // or a stale re-serve) must NOT retire the op, so it stays folded and
-            // holds membership through the unconfirmed window.
-            let can_retire = self.retireable_ops(message_id, authority_version(projection));
-            let retired_ids = self
-                .engine
-                .retire_absorbed_if(&message_id.to_string(), |id| can_retire.contains(id));
-            let retired = !retired_ids.is_empty();
-            self.retired_buffer.extend(retired_ids);
-            if retired {
-                self.prune_accepted_at(message_id);
-            }
-            self.rederive_message(message_id);
+        match self.mechanism.apply_base(message_id, projection, deleted) {
+            BaseApplied::RejectedStale => return,
+            BaseApplied::Removed => self.projection.remove_message_from_views(message_id),
+            BaseApplied::Updated => self.projection.rederive_message(&self.mechanism, message_id),
         }
-        self.dirty.insert(DirtyKey::Message(message_id.to_string()));
-    }
-
-    fn apply_count_delta(&mut self, delta: &CountDelta) {
-        let mailbox = self.mailboxes.entry(delta.mailbox_id.clone()).or_default();
-        mailbox.unread_count = delta.unread_count;
-        mailbox.total_count = delta.total_count;
-        self.dirty
-            .insert(DirtyKey::Mailbox(delta.mailbox_id.clone()));
-    }
-
-    /// Re-evaluate a held message's placement across every evaluable view from
-    /// its projected (folded) state, and mark it dirty. Assumes the message is
-    /// held (in `messages`); callers gate on that so an un-ingested message's
-    /// authoritative rows are left untouched (its pending folds in on ingest).
-    fn rederive_message(&mut self, message_id: &str) {
-        let optimistic = self.optimistic_projection(message_id);
-        let row_opt: Option<ViewRow> = optimistic.as_ref().map(|proj| ViewRow {
-            row_key: row_key_of(proj, message_id),
-            message_id: message_id.to_string(),
-            sort_key: sort_key_of(proj, message_id),
-        });
-        let views: Vec<(String, SortDirection, ViewPredicate, Option<SortKey>)> = self
-            .views
-            .iter()
-            .map(|(id, v)| {
-                (
-                    id.clone(),
-                    v.sort_direction,
-                    v.predicate.clone(),
-                    v.watermark.clone(),
-                )
-            })
-            .collect();
-        for (view_id, direction, predicate, watermark) in views {
-            if !predicate.is_evaluable() {
-                continue;
-            }
-            let view = self.views.get_mut(&view_id).expect("view present");
-            let was_present = view.rows.iter().position(|r| r.message_id == message_id);
-            let place = match (&row_opt, &optimistic) {
-                (Some(row), Some(proj)) => {
-                    predicate.matches(proj) && in_range(&row.sort_key, &watermark, direction)
-                }
-                _ => false,
-            };
-            // `Present` covers both a reorder (tuple changed) and a content-only
-            // change (same sort key, new flags/read state): the message remains a
-            // member, so the view's projected JSON moved — mark it dirty. This is
-            // the fix the host's dirty-View set was missing; the JSON-diff gate
-            // stays the safety net for a true no-op rederive.
-            let placement = match (place, was_present) {
-                (true, Some(idx)) => {
-                    let row = row_opt.clone().expect("row present when placed");
-                    if view.rows[idx] != row {
-                        view.rows.remove(idx);
-                        insert_sorted(&mut view.rows, row, direction);
-                    }
-                    Placement::Present
-                }
-                (true, None) => {
-                    insert_sorted(
-                        &mut view.rows,
-                        row_opt.clone().expect("row present when placed"),
-                        direction,
-                    );
-                    Placement::Present
-                }
-                (false, Some(idx)) => {
-                    view.rows.remove(idx);
-                    Placement::Removed
-                }
-                (false, None) => Placement::Absent,
-            };
-            match placement {
-                Placement::Present => {
-                    self.index_insert(message_id, &view_id);
-                    self.dirty.insert(DirtyKey::View(view_id));
-                }
-                Placement::Removed => {
-                    self.index_remove(message_id, &view_id);
-                    self.dirty.insert(DirtyKey::View(view_id));
-                }
-                Placement::Absent => {}
-            }
-        }
-        self.dirty.insert(DirtyKey::Message(message_id.to_string()));
-    }
-
-    /// Drop a message's row from every evaluable view (authoritative removal).
-    fn remove_message_from_views(&mut self, message_id: &str) {
-        let view_ids: Vec<String> = self.views.keys().cloned().collect();
-        for view_id in view_ids {
-            let view = match self.views.get_mut(&view_id) {
-                Some(v) => v,
-                None => continue,
-            };
-            if !view.predicate.is_evaluable() {
-                continue;
-            }
-            if let Some(idx) = view.rows.iter().position(|r| r.message_id == message_id) {
-                view.rows.remove(idx);
-                self.dirty.insert(DirtyKey::View(view_id));
-            }
-        }
-        // The message is gone from every view; drop its whole reverse-index entry.
-        self.message_views.remove(message_id);
-    }
-
-    /// The optimistic projection for a message: the authoritative base with the
-    /// pending outbox folded over its keywords/mailboxes, or `None` if the
-    /// message is not held or has been optimistically destroyed.
-    fn optimistic_projection(&self, message_id: &str) -> Option<Value> {
-        let base = self.messages.get(message_id)?.projection.clone();
-        match self.engine.project(&message_id.to_string())? {
-            Outcome::Present(state) => Some(apply_fold_to_projection(base, &state)),
-            Outcome::Removed => None,
-        }
+        self.projection.mark_message_dirty(message_id);
     }
 
     /// Read a message's optimistic projection (None if not held or destroyed).
     pub fn message(&self, message_id: &str) -> Option<Value> {
-        self.optimistic_projection(message_id)
+        self.mechanism.optimistic_projection(message_id)
     }
 
     /// Read a mailbox's counts.
     pub fn mailbox(&self, mailbox_id: &str) -> Option<&MailboxEntity> {
-        self.mailboxes.get(mailbox_id)
+        self.projection.mailbox(mailbox_id)
     }
 
     /// Read a view's rows.
     pub fn view_rows(&self, view_id: &str) -> Option<&[ViewRow]> {
-        self.views.get(view_id).map(|v| v.rows.as_slice())
+        self.projection.view_rows(view_id)
     }
 
     /// Drain the keys changed since the last drain. The host re-reads these.
     pub fn drain_dirty(&mut self) -> Vec<DirtyKey> {
-        self.dirty.drain().collect()
+        self.projection.drain_dirty()
     }
 
     /// Drain the ids of ops retired since the last drain (at settle confirm or
@@ -761,115 +237,9 @@ impl EntityStore {
     /// records only for these — an un-retired op is still pending in-engine and
     /// must survive a reload to be replayed. (outbox D)
     pub fn drain_retired(&mut self) -> Vec<MutationId> {
-        std::mem::take(&mut self.retired_buffer)
+        self.mechanism.drain_retired()
     }
 }
-
-/// The per-message authority-state version of a projection, if present — an
-/// opaque, provider-causality-ordered counter (IMAP MODSEQ / JMAP object state,
-/// stamped by the runtime). Compared opaquely by [`EntityStore::apply_message`]'s
-/// staleness guard; `None` (no version yet) disables the guard for that message.
-fn authority_version(projection: &Value) -> Option<u64> {
-    projection.get("version").and_then(Value::as_u64)
-}
-
-/// The composite sort key `[receivedAt, id]` read out of a projection.
-fn sort_key_of(projection: &Value, message_id: &str) -> SortKey {
-    SortKey {
-        received_at: projection
-            .get("receivedAt")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        message_id: message_id.to_string(),
-    }
-}
-
-fn row_key_of(projection: &Value, message_id: &str) -> String {
-    let source_id = projection
-        .get("sourceId")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    format!("{source_id}:{message_id}")
-}
-
-/// Whether a sort key falls within a view's held range `[TOP, W]`. `None`
-/// watermark means the range reaches BOTTOM (complete) — always in range.
-/// Desc: at or above `W` (`sort_key >= W`); Asc: at or below `W` (`sort_key <= W`).
-fn in_range(sort_key: &SortKey, watermark: &Option<SortKey>, direction: SortDirection) -> bool {
-    match watermark {
-        None => true,
-        Some(w) => match (direction, sort_key.cmp(w)) {
-            (SortDirection::Desc, Ordering::Greater | Ordering::Equal) => true,
-            (SortDirection::Desc, Ordering::Less) => false,
-            (SortDirection::Asc, Ordering::Less | Ordering::Equal) => true,
-            (SortDirection::Asc, Ordering::Greater) => false,
-        },
-    }
-}
-
-/// Insert a row at its sorted position (stable for equal keys).
-fn insert_sorted(rows: &mut Vec<ViewRow>, row: ViewRow, direction: SortDirection) {
-    let pos = match direction {
-        SortDirection::Desc => rows.iter().position(|r| r.sort_key < row.sort_key),
-        SortDirection::Asc => rows.iter().position(|r| r.sort_key > row.sort_key),
-    };
-    rows.insert(pos.unwrap_or(rows.len()), row);
-}
-
-/// Read the foldable canonical state (keywords + mailbox ids) out of a row's
-/// presentation projection. Absent/!array fields read as empty.
-pub fn fold_state_from_projection(projection: &Value) -> MessageFoldState {
-    MessageFoldState {
-        keywords: string_array(projection.get("keywords")),
-        mailbox_ids: string_array(projection.get("mailboxIds")),
-    }
-}
-
-/// Write the folded canonical state back into a presentation projection,
-/// re-deriving the read/flag display flags from the keywords and preserving
-/// every other field.
-pub fn apply_fold_to_projection(mut projection: Value, state: &MessageFoldState) -> Value {
-    if let Value::Object(map) = &mut projection {
-        map.insert(
-            "keywords".to_string(),
-            Value::Array(state.keywords.iter().cloned().map(Value::String).collect()),
-        );
-        map.insert(
-            "mailboxIds".to_string(),
-            Value::Array(
-                state
-                    .mailbox_ids
-                    .iter()
-                    .cloned()
-                    .map(Value::String)
-                    .collect(),
-            ),
-        );
-        map.insert(
-            "isRead".to_string(),
-            Value::Bool(state.keywords.iter().any(|keyword| keyword == "$seen")),
-        );
-        map.insert(
-            "isFlagged".to_string(),
-            Value::Bool(state.keywords.iter().any(|keyword| keyword == "$flagged")),
-        );
-    }
-    projection
-}
-
-fn string_array(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1248,6 +618,7 @@ mod tests {
     /// The reverse index a message is sorted member-list for, for assertions.
     fn views_of<'a>(store: &'a EntityStore, message_id: &str) -> Vec<&'a str> {
         let mut views: Vec<&str> = store
+            .projection
             .message_views
             .get(message_id)
             .map(|set| set.iter().map(String::as_str).collect())
@@ -1399,7 +770,7 @@ mod tests {
             !store.has_pending(),
             "pending op purged on authoritative delete"
         );
-        assert!(store.engine.pending().is_empty());
+        assert!(store.mechanism.engine.pending().is_empty());
 
         // A late `settle(Confirmed)` for the now-purged op is a no-op (the op is
         // absent from pending -> settle finds no key -> no retire), not a leak.

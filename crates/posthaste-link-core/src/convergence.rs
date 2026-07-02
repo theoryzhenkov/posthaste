@@ -96,6 +96,16 @@ pub struct Replica<C: Convergence> {
     /// and a concurrent stale re-serve, retiring on the keyed confirmation
     /// rather than on any base update that happens to carry its effect.
     confirmed: HashSet<MutationId>,
+    /// Per-op the authority base version captured at accept time
+    /// ([`accept_at`](OptimisticReplica::accept_at)), so retirement can be
+    /// gated on a STRICTLY HIGHER version (RFC D9/V7 — the version-gated
+    /// race-free retire lives in the engine seam itself, so every convergence
+    /// consumer inherits it). A local move does not bump the provider modseq,
+    /// so its same-version echo and a stale re-serve share this version —
+    /// retiring there would let the stale re-serve clobber state. Absent for
+    /// ops accepted with no version (those retire on the plain
+    /// confirmed+absorbed rule; opt-in for no-version providers).
+    accepted_at: BTreeMap<MutationId, u64>,
     _convergence: PhantomData<C>,
 }
 
@@ -105,6 +115,7 @@ impl<C: Convergence> Default for Replica<C> {
             base: BTreeMap::new(),
             pending: Vec::new(),
             confirmed: HashSet::new(),
+            accepted_at: BTreeMap::new(),
             _convergence: PhantomData,
         }
     }
@@ -153,6 +164,7 @@ impl<C: Convergence> Replica<C> {
         self.pending.retain(|held| !remove.contains(&held.id));
         for id in &remove {
             self.confirmed.remove(id);
+            self.accepted_at.remove(id);
         }
         true
     }
@@ -169,6 +181,7 @@ impl<C: Convergence> Replica<C> {
         let before = self.pending.len();
         self.pending.retain(|held| &held.id != id);
         self.confirmed.remove(id);
+        self.accepted_at.remove(id);
         self.pending.len() != before
     }
 
@@ -219,6 +232,7 @@ impl<C: Convergence> Replica<C> {
                 let before = self.pending.len();
                 self.pending.retain(|held| &held.id != id);
                 self.confirmed.remove(id);
+                self.accepted_at.remove(id);
                 let retired = self.pending.len() != before;
                 SettlementResult {
                     retired,
@@ -229,11 +243,11 @@ impl<C: Convergence> Replica<C> {
     }
 
     /// Mark a mutation authority-confirmed **without** retiring it. The caller
-    /// then gates retirement itself via [`retire_absorbed_if`](Self::retire_absorbed_if)
-    /// — the message layer does so on the per-message authority version, so an
-    /// op accepted at version `v` retires only once a base at a STRICTLY HIGHER
-    /// version absorbs it (the equal-version hold that survives the local-echo
-    /// + stale re-serve window). Use [`settle`](Self::settle) for the ungated path (it calls this then retires unconditionally).
+    /// then retires via [`retire_absorbed_at`](OptimisticReplica::retire_absorbed_at)
+    /// once it knows the current authority version — an op accepted at version
+    /// `v` retires only once a base at a STRICTLY HIGHER version absorbs it
+    /// (the equal-version hold that survives the local-echo + stale re-serve
+    /// window). Use [`settle`](Self::settle) for the one-call path.
     pub fn mark_confirmed(&mut self, id: &MutationId) {
         self.confirmed.insert(id.clone());
     }
@@ -252,23 +266,58 @@ impl<C: Convergence> Replica<C> {
     /// far node has confirmed it (via [`settle`](Self::settle)) *and* the base
     /// carries the effect. A confirmation that outruns the base update marks the
     /// op confirmed but does not revert it — it retires on the next base update
-    /// that absorbs it. Returns whether any op was retired.
+    /// that absorbs it. Returns the ids it retired.
+    ///
+    /// This is the no-version-known entry — equivalent to
+    /// [`retire_absorbed_at(key, None)`](OptimisticReplica::retire_absorbed_at):
+    /// an op accepted *with* a version ([`accept_at`](OptimisticReplica::accept_at))
+    /// additionally holds until a strictly-higher current version is presented,
+    /// so no retire path can bypass the version gate (RFC D9/V7).
     pub fn retire_absorbed(&mut self, key: &C::Key) -> Vec<MutationId>
     where
         C::State: PartialEq,
     {
-        self.retire_absorbed_if(key, |_| true)
+        self.retire_absorbed_at_impl(key, None)
+    }
+
+    /// The version-gated retire ([`OptimisticReplica::retire_absorbed_at`]):
+    /// an op is retired only if it is confirmed, absorbed, AND its accept-time
+    /// version gate passes — no version recorded at accept (opt-in for
+    /// no-version providers), or `current_version` is STRICTLY HIGHER than the
+    /// version captured at accept (a real provider modseq bump, not the local
+    /// move's same-modseq echo / a stale re-serve). Retired ids leave the
+    /// version map, so it does not leak across the outbox lifecycle.
+    fn retire_absorbed_at_impl(
+        &mut self,
+        key: &C::Key,
+        current_version: Option<u64>,
+    ) -> Vec<MutationId>
+    where
+        C::State: PartialEq,
+    {
+        let can_retire: HashSet<MutationId> = self
+            .pending
+            .iter()
+            .filter(|held| &held.key == key)
+            .filter(|held| match self.accepted_at.get(&held.id) {
+                None => true,
+                Some(at) => current_version.is_some_and(|cur| cur > *at),
+            })
+            .map(|held| held.id.clone())
+            .collect();
+        let retired = self.retire_absorbed_if(key, |id| can_retire.contains(id));
+        for id in &retired {
+            self.accepted_at.remove(id);
+        }
+        retired
     }
 
     /// [`retire_absorbed`](Self::retire_absorbed) with a per-op gate: an op is
     /// retired only if it is confirmed, absorbed, AND `can_retire(&op.id)`.
-    /// The message layer passes the version gate here — an op accepted at base
-    /// version `v` is `can_retire` only once the current base version is
-    /// strictly greater than `v`, so it holds through the equal-version
-    /// unconfirmed window (a local move does not bump the provider modseq, so
-    /// the moved base and a stale re-serve share the op's accepted-at version;
-    /// retiring there would let the stale re-serve clobber membership).
-    pub fn retire_absorbed_if<F>(&mut self, key: &C::Key, can_retire: F) -> Vec<MutationId>
+    /// Internal — the public gates are the confirmed+absorbed rule and the
+    /// accept-time version gate; keeping this private is what makes the retire
+    /// invariant inherited rather than re-implementable (RFC D9).
+    fn retire_absorbed_if<F>(&mut self, key: &C::Key, can_retire: F) -> Vec<MutationId>
     where
         C::State: PartialEq,
         F: Fn(&MutationId) -> bool,
@@ -339,6 +388,141 @@ impl<C: Convergence> Replica<C> {
 
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
+    }
+}
+
+// --- The near-node mechanism seam (RFC D9/D35a/D36) --------------------------
+
+/// The shared near-node mechanism, made explicit (RFC D35a — names D9's seam):
+/// **accept pending** (an optimistic op enters the outbox), **fold on read**
+/// (visible state is always `replay(base, pending)`, never stored as truth),
+/// and **retire on absorption** (an op leaves the outbox only once it is
+/// authority-confirmed AND the confirmed base carries its effect — version-
+/// gated where the consumer tracks authority versions).
+///
+/// Both near nodes compose this one kernel (`one-replica-both-seams`, RFC D34):
+/// the client's `EntityStore` (posthaste-link-replica) and the runtime's
+/// `RuntimeAuthorityServerOutbox` (posthaste-runtime). The trait is a *view*
+/// over the single-owner [`Replica`] — one store (base + pending), never a
+/// second copy (a split store was considered and rejected, RFC R2). The
+/// version-gated race-free retire lives behind this seam ([`accept_at`]
+/// (Self::accept_at) / [`retire_absorbed_at`](Self::retire_absorbed_at)), so
+/// every implementor inherits it instead of re-implementing it (RFC D9/V7).
+///
+/// This layer is UI-free and IO-free (D36 layer 1): persistence, transport,
+/// view projection, and reactivity all live above it.
+pub trait OptimisticReplica<C: Convergence>
+where
+    C::State: PartialEq,
+{
+    // -- accept-pending ------------------------------------------------------
+    /// Accept an optimistic mutation into the outbox (idempotent on id).
+    fn accept(&mut self, mutation: PendingMutation<C>);
+    /// [`accept`](Self::accept), additionally recording the authority base
+    /// version observed at accept time (when the consumer has one), so
+    /// retirement is gated on a STRICTLY HIGHER version — the equal-version
+    /// hold that survives a local move's same-modseq echo and a concurrent
+    /// stale re-serve. `None` opts out (no-version providers): the op retires
+    /// on the plain confirmed+absorbed rule.
+    fn accept_at(&mut self, mutation: PendingMutation<C>, version: Option<u64>);
+
+    // -- fold-on-read --------------------------------------------------------
+    /// The optimistic state of one entity: `replay(base, its pending)`.
+    fn project(&self, key: &C::Key) -> Option<Outcome<C::State>>;
+    /// The ordered pending outbox.
+    fn pending(&self) -> &[PendingMutation<C>];
+    /// Whether any optimistic mutation is still pending.
+    fn has_pending(&self) -> bool;
+
+    // -- confirmed base ------------------------------------------------------
+    /// Replace the confirmed base for one entity (an applied authoritative
+    /// assertion).
+    fn set_base(&mut self, key: C::Key, state: C::State);
+    /// Drop an entity from the confirmed base (authoritative removal).
+    fn remove_base(&mut self, key: &C::Key);
+
+    // -- retire-on-absorption ------------------------------------------------
+    /// Mark a mutation authority-confirmed without retiring it (the caller
+    /// retires via a `retire_absorbed*` call once the base absorbs it).
+    fn mark_confirmed(&mut self, id: &MutationId);
+    /// Settle a pending mutation by its terminal outcome (`Confirmed` retires
+    /// only when absorbed; `Failed` drops and reverts).
+    fn settle(&mut self, id: &MutationId, outcome: SettlementOutcome) -> SettlementResult;
+    /// Retire `key`'s confirmed-and-absorbed ops with no current version known
+    /// (version-tracked ops hold). Returns the retired ids.
+    fn retire_absorbed(&mut self, key: &C::Key) -> Vec<MutationId>;
+    /// The version-gated retire: retire `key`'s ops that are confirmed,
+    /// absorbed, AND accepted with no version or at a version STRICTLY LOWER
+    /// than `current_version`. Returns the retired ids.
+    fn retire_absorbed_at(&mut self, key: &C::Key, current_version: Option<u64>)
+        -> Vec<MutationId>;
+    /// Remove one pending op unconditionally (the co-located retire-on-receipt).
+    fn drop_pending(&mut self, id: &MutationId) -> bool;
+    /// Drop every pending op on `key` (authoritative removal of the entity).
+    fn remove_pending(&mut self, key: &C::Key) -> bool;
+}
+
+impl<C: Convergence> OptimisticReplica<C> for Replica<C>
+where
+    C::State: PartialEq,
+{
+    fn accept(&mut self, mutation: PendingMutation<C>) {
+        Replica::accept(self, mutation);
+    }
+
+    fn accept_at(&mut self, mutation: PendingMutation<C>, version: Option<u64>) {
+        if let Some(version) = version {
+            self.accepted_at.insert(mutation.id.clone(), version);
+        }
+        Replica::accept(self, mutation);
+    }
+
+    fn project(&self, key: &C::Key) -> Option<Outcome<C::State>> {
+        Replica::project(self, key)
+    }
+
+    fn pending(&self) -> &[PendingMutation<C>] {
+        Replica::pending(self)
+    }
+
+    fn has_pending(&self) -> bool {
+        Replica::has_pending(self)
+    }
+
+    fn set_base(&mut self, key: C::Key, state: C::State) {
+        Replica::set_base(self, key, state);
+    }
+
+    fn remove_base(&mut self, key: &C::Key) {
+        Replica::remove_base(self, key);
+    }
+
+    fn mark_confirmed(&mut self, id: &MutationId) {
+        Replica::mark_confirmed(self, id);
+    }
+
+    fn settle(&mut self, id: &MutationId, outcome: SettlementOutcome) -> SettlementResult {
+        Replica::settle(self, id, outcome)
+    }
+
+    fn retire_absorbed(&mut self, key: &C::Key) -> Vec<MutationId> {
+        Replica::retire_absorbed(self, key)
+    }
+
+    fn retire_absorbed_at(
+        &mut self,
+        key: &C::Key,
+        current_version: Option<u64>,
+    ) -> Vec<MutationId> {
+        self.retire_absorbed_at_impl(key, current_version)
+    }
+
+    fn drop_pending(&mut self, id: &MutationId) -> bool {
+        Replica::drop_pending(self, id)
+    }
+
+    fn remove_pending(&mut self, key: &C::Key) -> bool {
+        Replica::remove_pending(self, key)
     }
 }
 
@@ -666,5 +850,117 @@ mod tests {
         replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
         let ids: Vec<&str> = replica.pending().iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, vec!["op2"]);
+    }
+
+    // --- the version-gated retire, lifted into the engine (RFC D9/V7) --------
+
+    #[test]
+    fn version_gated_op_holds_at_equal_version_and_retires_on_a_bump() {
+        // The equal-version hold: an op accepted at base version 5 must NOT
+        // retire while the current version is still 5 (a local move's
+        // same-modseq echo / a stale re-serve share that version), even though
+        // it is confirmed AND the base carries its effect. It retires only at
+        // a STRICTLY HIGHER version.
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
+        replica.accept_at(flag("op1", "m1"), Some(5));
+        replica.mark_confirmed(&MutationId("op1".into()));
+        // Base carries the flag, but the version has not bumped.
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        assert!(
+            replica
+                .retire_absorbed_at(&"m1".to_string(), Some(5))
+                .is_empty(),
+            "op must hold at equal version"
+        );
+        assert!(replica.has_pending());
+        // The real modseq bump: strictly higher, absorbed, confirmed → retire.
+        assert_eq!(
+            replica.retire_absorbed_at(&"m1".to_string(), Some(6)),
+            vec![MutationId("op1".into())]
+        );
+        assert!(!replica.has_pending());
+    }
+
+    #[test]
+    fn version_gated_op_never_retires_through_the_no_version_paths() {
+        // No retire path bypasses the version gate: neither the plain
+        // `retire_absorbed` (no current version known) nor `settle(Confirmed)`
+        // (which retires through it) may retire a version-tracked op.
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        replica.accept_at(flag("op1", "m1"), Some(5));
+        replica.mark_confirmed(&MutationId("op1".into()));
+        assert!(replica.retire_absorbed(&"m1".to_string()).is_empty());
+        assert!(
+            !replica
+                .settle(&MutationId("op1".into()), SettlementOutcome::Confirmed)
+                .retired
+        );
+        assert!(replica.has_pending());
+    }
+
+    #[test]
+    fn unversioned_op_retires_under_the_version_gated_call() {
+        // Opt-in semantics: an op accepted with no version (a no-version
+        // provider) retires on the plain confirmed+absorbed rule even through
+        // the version-gated entry.
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        replica.accept_at(flag("op1", "m1"), None);
+        replica.mark_confirmed(&MutationId("op1".into()));
+        assert_eq!(
+            replica.retire_absorbed_at(&"m1".to_string(), Some(5)),
+            vec![MutationId("op1".into())]
+        );
+    }
+
+    #[test]
+    fn failed_settle_and_drop_clear_the_accept_version() {
+        // The version map follows the outbox lifecycle: a failed settle (or an
+        // unconditional drop) clears the accept-time version, so a re-accepted
+        // id starts fresh rather than inheriting a stale gate.
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
+        replica.accept_at(flag("op1", "m1"), Some(5));
+        replica.settle(&MutationId("op1".into()), SettlementOutcome::Failed);
+        // Re-accept the same id with no version: it must retire ungated.
+        replica.accept_at(flag("op1", "m1"), None);
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        replica.mark_confirmed(&MutationId("op1".into()));
+        assert_eq!(
+            replica.retire_absorbed(&"m1".to_string()),
+            vec![MutationId("op1".into())]
+        );
+    }
+
+    #[test]
+    fn the_engine_is_consumable_through_the_optimistic_replica_seam() {
+        // The D35a seam: a consumer generic over the trait drives the whole
+        // accept-pending / fold-on-read / retire-on-absorption lifecycle.
+        fn drive<R: OptimisticReplica<MessageConvergence>>(replica: &mut R) {
+            replica.set_base("m1".to_string(), state(&[], &["inbox"]));
+            replica.accept_at(flag("op1", "m1"), Some(1));
+            assert!(replica.has_pending());
+            match replica.project(&"m1".to_string()) {
+                Some(MessageOutcome::Present(s)) => {
+                    assert_eq!(s.keywords, vec!["$flagged".to_string()])
+                }
+                other => panic!("expected present, got {other:?}"),
+            }
+            replica.mark_confirmed(&MutationId("op1".into()));
+            replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+            assert_eq!(
+                replica.retire_absorbed_at(&"m1".to_string(), Some(2)),
+                vec![MutationId("op1".into())]
+            );
+            assert!(!replica.has_pending());
+        }
+        drive(&mut MessageReplica::new());
+        // And the seam is object-safe (a dyn view over the one owner).
+        let mut replica = MessageReplica::new();
+        let seam: &mut dyn OptimisticReplica<MessageConvergence> = &mut replica;
+        seam.accept(flag("op1", "m1"));
+        assert!(seam.has_pending());
     }
 }

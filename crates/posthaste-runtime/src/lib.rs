@@ -14,7 +14,7 @@ mod handle;
 mod near_node;
 mod read;
 mod secret;
-mod sessions;
+mod far_end;
 mod shutdown;
 mod transport;
 mod views;
