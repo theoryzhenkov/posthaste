@@ -33,7 +33,7 @@ function msg(id: string, over: Partial<MessageSummary> = {}): MessageSummary {
 }
 
 type MoveRequest = {
-  sessionId: string
+  linkId: string
   name: 'message.replaceMailboxes'
   args: { sourceId: string; messageId: string; mailboxIds: string[] }
   clientMutationId: string
@@ -45,7 +45,7 @@ function move(
   clientMutationId: string,
 ): MoveRequest {
   return {
-    sessionId: 'sess',
+    linkId: 'sess',
     name: 'message.replaceMailboxes',
     args: { sourceId: 's', messageId: id, mailboxIds },
     clientMutationId,

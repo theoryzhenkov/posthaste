@@ -16,12 +16,12 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
   const reject = <T>(): Promise<T> =>
     Promise.reject(new Error(`runtime adapter mode ${mode} is not implemented`))
   return {
-    openRuntimeSession: () => reject(),
-    closeRuntimeSession: () => reject(),
-    openRuntimeSessionMessageListView: () => reject(),
-    openRuntimeSessionView: () => reject(),
-    extendRuntimeSessionView: () => reject(),
-    closeRuntimeSessionView: () => reject(),
+    openRuntimeLink: () => reject(),
+    closeRuntimeLink: () => reject(),
+    openRuntimeLinkMessageListView: () => reject(),
+    openRuntimeLinkView: () => reject(),
+    extendRuntimeLinkView: () => reject(),
+    closeRuntimeLinkView: () => reject(),
     runRuntimeMutation: () => reject(),
     subscribeRuntimeFrames: (_request, handlers) => {
       handlers.onPermanentError?.(

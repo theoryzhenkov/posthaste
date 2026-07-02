@@ -109,7 +109,7 @@ function setFlagged(
   clientMutationId: string,
 ): RuntimeRunMutationRequestLike {
   return {
-    sessionId: 'sess',
+    linkId: 'sess',
     name: 'message.setKeywords',
     args: {
       sourceId: 's',
@@ -122,7 +122,7 @@ function setFlagged(
 
 // Local shape to avoid importing the full runtime union for the test body.
 type RuntimeRunMutationRequestLike = {
-  sessionId: string
+  linkId: string
   name: string
   args: Record<string, unknown>
   clientMutationId: string

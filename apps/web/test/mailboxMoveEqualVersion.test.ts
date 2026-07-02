@@ -14,8 +14,8 @@ import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 const present =
-  existsSync(join(wasmDir, 'posthaste_link_wasm.js')) &&
-  existsSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm'))
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm.js')) &&
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm'))
 
 function projection(mailboxIds: string[], version: number) {
   return {
@@ -43,13 +43,15 @@ describe.skipIf(!present)(
       'a same-version stale re-serve must not re-add a moved-out row',
       async () => {
         const mod = (await import(
-          join(wasmDir, 'posthaste_link_wasm.js')
+          join(wasmDir, 'posthaste_client_node_wasm.js')
         )) as unknown as {
           initSync(input: { module: BufferSource }): unknown
           EntityStoreHandle: new () => EntityStoreHandle
         }
         mod.initSync({
-          module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+          module: readFileSync(
+            join(wasmDir, 'posthaste_client_node_wasm_bg.wasm'),
+          ),
         })
         const h = new mod.EntityStoreHandle()
         h.registerViewJson(
@@ -126,13 +128,15 @@ describe.skipIf(!present)(
       // subsequent equal-version stale re-serve still clobbers. Models the real
       // values: local move leaves modseq unchanged → move-base@v5 == stale@v5.
       const mod = (await import(
-        join(wasmDir, 'posthaste_link_wasm.js')
+        join(wasmDir, 'posthaste_client_node_wasm.js')
       )) as unknown as {
         initSync(input: { module: BufferSource }): unknown
         EntityStoreHandle: new () => EntityStoreHandle
       }
       mod.initSync({
-        module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+        module: readFileSync(
+          join(wasmDir, 'posthaste_client_node_wasm_bg.wasm'),
+        ),
       })
       const h = new mod.EntityStoreHandle()
       h.registerViewJson(
@@ -163,7 +167,7 @@ describe.skipIf(!present)(
       )
       h.setViewRowsJson('inbox', JSON.stringify([m1Row]), 'null')
       // Optimistic move to archive (the adapter accepts it before the mutation runs).
-      // The wire field is `mailboxIds` (link-core rename; `mailbox_ids` was the
+      // The wire field is `mailboxIds` (replica-core rename; `mailbox_ids` was the
       // pre-rename shape — enum rename_all renames tags, not struct fields).
       h.acceptMutationJson(
         JSON.stringify({

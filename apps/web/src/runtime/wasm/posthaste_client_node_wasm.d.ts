@@ -127,19 +127,19 @@ export class NearEndHandle {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Open the session and start the frame loop (idempotent). The Promise
-     * resolves once the session is open; the reconnect loop then runs in the
+     * Open the link and start the frame loop (idempotent). The Promise
+     * resolves once the link is open; the reconnect loop then runs in the
      * background (`spawn_local`) until [`Self::disconnect`].
      */
     connect(): Promise<any>;
     /**
-     * The engine-owned resume cursor (last seen `sessionSeq`). The host mirrors
+     * The engine-owned resume cursor (last seen `linkSeq`). The host mirrors
      * this to durable storage so a reload resumes where it left off — callers no
      * longer thread `afterSeq`.
      */
     cursor(): number | undefined;
     /**
-     * Stop the frame loop (no further reconnects). Session close is a host
+     * Stop the frame loop (no further reconnects). Link close is a host
      * concern (a policy-free `DELETE` via the api client) since the transport is
      * post-only.
      */
@@ -151,6 +151,10 @@ export class NearEndHandle {
      */
     forward(request_json: string): Promise<any>;
     /**
+     * The current link id, once connected.
+     */
+    linkId(): string | undefined;
+    /**
      * Build the engine from the JS IO object and a config JSON string.
      *
      * `io` must expose: `postJson(url, headersJson, body) => Promise<{status,
@@ -160,14 +164,10 @@ export class NearEndHandle {
      * re-seed the adapter), `onStatus(label, message)` (labels include
      * `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
      * forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
-     * Promise<string>` (a JSON array of `{sessionId, clientMutationId,
+     * Promise<string>` (a JSON array of `{linkId, clientMutationId,
      * request?}`), and `onSettlement(receiptJson)`.
      */
     constructor(io: any, config_json: string);
-    /**
-     * The current session id, once connected.
-     */
-    sessionId(): string | undefined;
 }
 
 /**
@@ -199,8 +199,8 @@ export interface InitOutput {
     readonly nearendhandle_cursor: (a: number) => [number, number];
     readonly nearendhandle_disconnect: (a: number) => any;
     readonly nearendhandle_forward: (a: number, b: number, c: number) => any;
+    readonly nearendhandle_linkId: (a: number) => [number, number];
     readonly nearendhandle_new: (a: any, b: number, c: number) => [number, number, number];
-    readonly nearendhandle_sessionId: (a: number) => [number, number];
     readonly __wbg_entitystorehandle_free: (a: number, b: number) => void;
     readonly entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
     readonly entitystorehandle_captureMutationDiffJson: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
@@ -219,7 +219,7 @@ export interface InitOutput {
     readonly entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
     readonly invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
     readonly parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__ha433c4c869742dc2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__ha35c10aed9720f95: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h690adb9d64021208: (a: number, b: number) => void;

@@ -1,6 +1,6 @@
 ---
 scope: L2
-summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. Realized per RFC-L2-architecture-cleanup M0–M8; only next-wave (M9) sections still carry [::state] markers."
+summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. Realized per RFC-L2-architecture-cleanup M0–M9c; no [::state] markers remain (§2.1b records the D38 projector-merge verdict: not a fit, not forced)."
 modified: 2026-07-02
 reviewed: 2026-07-02
 state: active
@@ -35,37 +35,38 @@ pattern); **`*Adapter`** = protocol translation (`HttpApiAdapter`).
 
 ## 1. The crate set (end-state)
 
-[::state partial plan=eph/RFC-L2-architecture-cleanup]
-*The crate set below is REAL as of 2026-07-02 (M0–M8: the domain/contract-core
+*The crate set below is REAL as of 2026-07-02 (M0–M9c: the domain/contract-core
 splits, the `RuntimeCore` and far-node trait splits, the authority-server renames,
-the typed `MailOperation`, `OptimisticReplica`, the frontier CI). Next-wave lag
-(M9, RFC §8) only: the `LinkFarEnd`/`LinkNearEnd` engines + wasm client transport
-(D40/D41), `RuntimeSessionId → RuntimeLinkId` + session→link vocabulary (D42), the
-`replica-core`/`replica-projector` crate renames (D43), and the full projector
-merge into link-replica (D38).*
+the typed `MailOperation`, `OptimisticReplica`, the frontier CI, the
+`LinkFarEnd`/`LinkNearEnd` engines, the opaque-id rename to `RuntimeLinkId` +
+session→link-connection vocabulary (D42), and the `replica-core`/
+`replica-projector` crate renames (D43)). Remaining lag (M9+): the D38 projector
+merge did not land — see §2.1b for the verdict.*
 
 ### 1.1 Shared vocabulary tier (wasm-pure)
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `posthaste-link-core` | The effect-fold leaf: `MessageFoldState` predictor, convergence engine (`Replica`, `MessageReplica`, `MutationId`, settlement fold). *Below* domain; domain-free by construction. | — |
-| `posthaste-link-replica` | The keyed reactive store over link-core: `EntityStore`, view rows/predicates, retirement draining. | link-core |
+| `posthaste-replica-core` | The effect-fold leaf: `MessageFoldState` predictor, convergence engine (`Replica`, `MessageReplica`, `MutationId`, settlement fold). *Below* domain; domain-free by construction. | — |
+| `posthaste-replica-projector` | The keyed reactive store over replica-core: `EntityStore`, view rows/predicates, retirement draining. | replica-core |
 | `posthaste-domain-model` | The pure domain types: ids, messages, records, commands, outbox/sync/rev-log types, smart mailboxes, account settings/overview, appearance, automation, notifications, vocab (`MailboxRole`, `SystemKeyword`), errors (`GatewayError`, `StoreError`, `ServiceError(Kind)`, `SecretStoreError`, `ConfigError`, `ValidationError`), plus the pure cache/imap/provider slices the model types' inherent impls close over: cache primitives/entities/budget, imap types/sync-state/capabilities/mailbox-roles, and the whole provider profile+policy set (RFC D30). | — |
-| `posthaste-contract-core` | The shared wire vocabulary *above* domain-model: the typed `MailOperation` enum (the one operation vocabulary, parsed once per wire), `MutationRequest`/`MutationReceipt`, `MutationSettlementState`, opaque ids (`RuntimeSessionId`, `ViewId`, `ClientMutationId`, `RuntimeMutationId`, `ViewRevision`), view models (`RuntimeFrame`, `ViewFrame`, `ViewSnapshot`, `MailListViewState`, `CoverageRange`), `RuntimeAdapterError` (+ `From<ServiceErrorKind>`), `mutation_args`, `mail_query`. | domain-model, link-core |
+| `posthaste-contract-core` | The shared wire vocabulary *above* domain-model: the typed `MailOperation` enum (the one operation vocabulary, parsed once per wire), `MutationRequest`/`MutationReceipt`, `MutationSettlementState`, opaque ids (`RuntimeLinkId`, `ViewId`, `ClientMutationId`, `RuntimeMutationId`, `ViewRevision`), view models (`RuntimeFrame`, `ViewFrame`, `ViewSnapshot`, `MailListViewState`, `CoverageRange`), `RuntimeAdapterError` (+ `From<ServiceErrorKind>`), `mutation_args`, `mail_query`. | domain-model, replica-core |
 
 ### 1.2 Domain service tier
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `posthaste-domain-service` | The hexagonal core: `MailService`, all port traits (`MailGateway`, `MailStore` composite, secret/config/push ports), imap planning + identities logic, cache scoring/governor, search parsing, `validate_*` functions. (Provider *policies* are model-resident data per RFC D30; the service owns the behavior consuming them.) Forwards the `openapi` feature to domain-model. | domain-model, link-core, observability |
+| `posthaste-domain-service` | The hexagonal core: `MailService`, all port traits (`MailGateway`, `MailStore` composite, secret/config/push ports), imap planning + identities logic, cache scoring/governor, search parsing, `validate_*` functions. (Provider *policies* are model-resident data per RFC D30; the service owns the behavior consuming them.) Forwards the `openapi` feature to domain-model. | domain-model, replica-core, observability |
 
 ### 1.3 Link surface tier
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `posthaste-authority-server-link` | The runtime↔authority-server seam, mirroring the client↔runtime seam's shape (RFC D33): **`AuthorityServerApi`** (the typed request surface — reads, account/settings ops, `apply(op: MailOperation)`) + **`AuthorityServerLink`** (the coherent-link mechanics — `forward_mutation`, `subscribe(coverage)` → frames, settlement/watermark, outbox op-lifecycle) + `AuthorityServerLinkHandle` (wrapper), `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). | contract-core, domain-model, link-core |
+| `posthaste-authority-server-link` | The runtime↔authority-server seam, mirroring the client↔runtime seam's shape (RFC D33): **`AuthorityServerApi`** (the typed request surface — reads, account/settings ops, `apply(op: MailOperation)`) + **`AuthorityServerLink`** (the coherent-link mechanics — `forward_mutation`, `subscribe(coverage)` → frames, settlement/watermark, outbox op-lifecycle) + `AuthorityServerLinkHandle` (wrapper), `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). | contract-core, domain-model, replica-core |
 | `posthaste-runtime-api` | The typed, wire-free client-facing domain RPC extracted from `RuntimeCore` (41 of its 52 methods): returns serde domain types, no frames. **Four traits** — `RuntimeAccountApi`, `RuntimeSettingsApi`, `RuntimeMailReadApi`, `RuntimeMailWriteApi` (whose message commands are one typed `apply(op: MailOperation) -> CommandAck` entry (D34), not per-command RPCs) — plus an umbrella supertrait; narrow consumers take one trait (`&dyn RuntimeAccountApi`). | contract-core, domain-model |
-| `posthaste-client-link` | The client↔runtime link ops extracted from `RuntimeCore` (**one trait, `RuntimeLink`**, 10 methods): `forward_mutation` (the up-channel flush, one verb across both seams per D35), the three stream families (`subscribe_runtime_frames`, `subscribe_events`, session-view snapshots), session open/close, view open/extend/close. | contract-core, domain-model, link-core |
+| `posthaste-client-link` | The client↔runtime link ops extracted from `RuntimeCore` (**one trait, `RuntimeLink`**, 10 methods): `forward_mutation` (the up-channel flush, one verb across both seams per D35), the three stream families (`subscribe_runtime_frames`, `subscribe_events`, link-view snapshots), link open/close, view open/extend/close. | contract-core, domain-model, replica-core |
+| `posthaste-link-near-end` | The shared near-end engine (D40/D41): `Wire`-generic transport+resilience (deadlines, jittered reconnect, seq cursor, the level-triggered reconciler); the client↔runtime profile (`RuntimeLinkWire`) lives here, wasm-pure. | contract-core, domain-model |
+| `posthaste-link-far-end` | The shared far-end engine (D40): composable sub-stores (dedup, settlement sinks, seq-backlog replay with collapse fallback + expiry) both far-ends (runtime, authority server) assemble. | contract-core, domain-model |
 
 ### 1.4 Node/adapter tier (native)
 
@@ -75,9 +76,9 @@ merge into link-replica (D38).*
 | `posthaste-engine` | JMAP gateway/push adapters. | domain-service |
 | `posthaste-imap` | IMAP gateway adapter. | domain-service |
 | `posthaste-config` | TOML config persistence (`TomlConfigRepository`, tuning schemas). | domain-service (types via domain-model) |
-| `posthaste-runtime` | The near node: runtime assembly, outbox (`RuntimeAuthorityServerOutbox` over `MessageReplica`), `ReadCache`, the remote authority-server transport (`RemoteAuthorityServer`), implements runtime-api + client-link. | runtime-api, client-link, authority-server-link, link-replica, link-core, domain-service |
+| `posthaste-runtime` | The near node: runtime assembly, the far-end link registry (`LinkRegistry`, RFC D42), outbox (`RuntimeAuthorityServerOutbox` over `MessageReplica`), `ReadCache`, the remote authority-server transport (`RemoteAuthorityServer`), implements runtime-api + client-link. | runtime-api, client-link, authority-server-link, link-far-end, replica-projector, replica-core, domain-service |
 | `posthaste-authority-server` | The far node: `AuthorityServerNode`, account supervision, sync, push, oauth, `AuthorityServerLink` impls (`LocalAuthorityServer`), registry, **and its own link wire** (`link_router` + link auth — the far node owns the surface it serves; it does not borrow the /v1 platform's error/auth vocabulary). No re-exports of near-node symbols. | authority-server-link, runtime, domain-service, engine, imap, store, config |
-| `posthaste-link-wasm` | The wasm client replica binding (JSON boundary). | link-core, link-replica, domain-model, contract-core |
+| `posthaste-client-node-wasm` | The wasm client node assembly (D41/D43): kernel (replica-core) + projector (replica-projector) + near-end (`posthaste-link-near-end`, wasm32-only cfg), exposed as a wasm-bindgen JSON boundary. | replica-core, replica-projector, link-near-end, domain-model, contract-core |
 | `posthaste-http-api-adapter` | The HTTP API adapter: serves the /v1 contract over the runtime's typed Api surfaces. | runtime-api, client-link, domain-service, config |
 | `posthaste-server` | Composition root: assembles nodes and mounts routers (http-api-adapter's `/v1`, authority-server's link wire), HTTP serving. No facade re-exports; no logic of its own beyond assembly. | http-api-adapter, authority-server, … |
 | `posthaste-runtimed` | Runtime daemon crate. | http-api-adapter, runtime |
@@ -100,8 +101,8 @@ names. Bin names are hyphenated, never underscored.
 ## 2. Dependency direction
 
 ```
-link-core ──────────┐
-link-replica ───────┤            (wasm-pure tier)
+replica-core ────────┐
+replica-projector ───┤            (wasm-pure tier)
 domain-model ───────┼─► contract-core
                     │
 domain-service ─────┘            (service tier)
@@ -110,9 +111,10 @@ domain-service ─────┘            (service tier)
         │
 contract-core ─► authority-server-link              (link surfaces)
 contract-core ─► runtime-api + client-link
+contract-core ─► link-near-end / link-far-end        (shared link-end engines)
         │
         └─► runtime ─► authority-server ─► server   (nodes, roots)
-                 └────► link-wasm / http-api-adapter / runtimed
+                 └────► client-node-wasm / http-api-adapter / runtimed
 ```
 
 Rules:
@@ -121,32 +123,26 @@ Rules:
   vocabulary crate never depends on a wire crate; nothing depends on a
   composition root.
 - **The up-vocabulary lives above domain; the effect fold below it.**
-  `link-core` stays the narrow domain-free leaf (the `domain → link-core →
+  `replica-core` stays the narrow domain-free leaf (the `domain → replica-core →
   domain` cycle is avoided by the minimal `MessageFoldState` predictor);
   `contract-core` carries the wire vocabulary and may reference domain-model.
 - **One operation vocabulary.** `MailOperation` is defined once in
   contract-core, parsed once per wire crossing, carried typed inward; dispatch
   is an exhaustive match. No crate re-mirrors ids (`WireMutationId` is deleted;
-  `link_core::MutationId` is the one wire id).
+  `replica_core::MutationId` is the one wire id).
 
 ### 2.1b Node anatomy (D36–D39)
-
-[::state partial plan=eph/RFC-L2-architecture-cleanup]
-*Next-wave lag (M9, RFC §8): the link ends are per-seam modules today (the
-runtime's `far_end/`, the authority server's `link_wire.rs` + registry), not the
-shared `LinkFarEnd`/`LinkNearEnd` engines (D40/D41); the runtime's remaining
-projector code in `views.rs` has not merged into link-replica (D38).*
 
 Every node is a composition of these parts — shared parts have exactly one
 implementation; bracketed parts are mounts, not forks:
 
 ```
-node = OptimisticReplica (kernel, link-core)              ← shared
-     + Projector (windowed views, link-replica)           ← shared (D38)
-     + link near-end (Link trait + transport)             ← every near node
-     [+ link far-end (sessions/frames/registry/wire)]     ← only fan-in nodes (D37, D39)
-     [+ UI composition (reactivity, persistence)]         ← client only (D36)
-     [+ Evaluator + providers (MailService)]              ← authority server only (D38)
+node = OptimisticReplica (kernel, replica-core)            ← shared
+     + Projector (windowed views, replica-projector)       ← shared (mechanism/projection layers)
+     + link near-end (Link trait + transport)               ← every near node (posthaste-link-near-end)
+     [+ link far-end (links/frames/registry/wire)]          ← only fan-in nodes (posthaste-link-far-end, D37, D39)
+     [+ UI composition (reactivity, persistence)]           ← client only (D36)
+     [+ Evaluator + providers (MailService)]                ← authority server only (D38)
 ```
 
 client = kernel + projector + near-end(`RuntimeLink`) + UI.
@@ -156,13 +152,23 @@ authority server = evaluator + providers + far-end(serves runtimes).
 The *evaluator* (query → membership over unbounded mail) is authority-only by
 the windowed-view-replica product decision; the D15 frontier CI proves the
 client closure cannot contain it. The *projector* (rows + coverage + pending →
-windowed views) is one component both near nodes mount. A headless client is
-kernel + projector + near-end — no UI mount required.
+windowed views) is one component both near nodes mount **for the fold-pending-
+over-served-rows half** (`replica-projector`'s `mechanism`/`projection`
+modules, wasm-pure, JSON-native). D38's verify-and-lift landed the shared
+`LinkFarEnd`/`LinkNearEnd` engines and the D42 rename, but found the runtime's
+`views.rs` (base-row read + family dispatch: `ViewKind`, `build_snapshot`,
+`mail_list_state`) is **not** a second mount of the same component — it is the
+authoritative *read* step, which has no client-side analog (the client only
+ever reconciles already-served rows) and would need `replica-projector` to grow
+new dependencies (contract-core, domain-model, an async read trait mirroring
+most of `AuthorityServerApi`) it does not otherwise carry. `views.rs` stays
+runtime-native; see its file header for the recorded verdict. A headless client
+is kernel + projector + near-end — no UI mount required.
 
 ### 2.1 Replica seams
 
 The Link/Replica/Outbox layering is legible **in types**, not only in
-structure: `link-core` exposes the explicit `OptimisticReplica` trait (D35a;
+structure: `replica-core` exposes the explicit `OptimisticReplica` trait (D35a;
 `Link`/`Outbox` views only if a caller benefits) over the single-owner
 `MessageReplica`. There
 is exactly one store — base + pending, optimism folded on read; the seams are
@@ -174,12 +180,15 @@ re-implementing it.
 
 ## 3. The wasm-pure frontier
 
-`link-core`, `link-replica`, `domain-model`, `contract-core` are serde-only: no
-`tokio`, `reqwest`, `rusqlite`, `mail-parser`, `axum`, `uuid`-free except
-domain-model's `generated_id`. The frontier is CI-enforced (`cargo check
---target wasm32-unknown-unknown` for the four crates); a frontier nobody checks
-is a hope, not a boundary (XXIV). The wasm client's full dependency closure is
-exactly these four crates plus `link-wasm` itself.
+`replica-core`, `replica-projector`, `domain-model`, `contract-core`,
+`posthaste-link-near-end` are serde-only: no `tokio`, `reqwest`, `rusqlite`,
+`mail-parser`, `axum`, `uuid`-free except domain-model's `generated_id`. The
+frontier is CI-enforced (`cargo check --target wasm32-unknown-unknown` for the
+five crates plus `posthaste-client-node-wasm` itself — the six-crate frontier
+list); a frontier nobody checks is a hope, not a boundary (XXIV). The wasm
+client's full dependency closure is exactly these five crates plus
+`client-node-wasm` itself (D41: the near-end engine now compiles into the wasm
+boundary, `cfg(target_arch = "wasm32")`-gated).
 
 ## 4. Assertions
 
@@ -190,5 +199,5 @@ exactly these four crates plus `link-wasm` itself.
 | `binary-named-by-component` | Every role binary is named exactly after the component it runs (§1.5); hyphenated. |
 | `no-upward-deps` | The dependency graph respects §2; adding an upward edge is a spec violation, not a Cargo.toml detail. |
 | `one-operation-vocabulary` | The typed `MailOperation` in contract-core is the only operation vocabulary; no stringly `name`/`args` crosses a crate boundary. |
-| `wasm-frontier-enforced` | The four wasm-pure crates build for `wasm32-unknown-unknown` in CI. |
+| `wasm-frontier-enforced` | The six wasm-pure-or-wasm-target frontier crates build for `wasm32-unknown-unknown` in CI. |
 | `no-parallel-namespaces` | No crate re-exports another crate's public surface (store's historical ~80-symbol domain re-export is the counterexample). Temporary migration shims carry an owner and a sunset. |

@@ -45,7 +45,7 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/runtime/sessions/{session_id}/stream",
         authz: filter(Action::Read, ResourceShape::account("sourceId")),
     },
-    // The settlement query is a READ of the session's mutation ledger (the
+    // The settlement query is a READ of the link's mutation ledger (the
     // reconciler's D44b probe) — it changes nothing, so it gates on Read even
     // though the POST beside it gates on Tag.
     Entry {

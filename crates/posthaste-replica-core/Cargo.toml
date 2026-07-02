@@ -1,5 +1,5 @@
 [package]
-name = "posthaste-link-core"
+name = "posthaste-replica-core"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,7 +10,7 @@ edition = "2021"
 # time/filesystem/database, so it compiles to wasm32-unknown-unknown.
 
 [lib]
-name = "posthaste_link_core"
+name = "posthaste_replica_core"
 path = "src/lib.rs"
 
 [dependencies]

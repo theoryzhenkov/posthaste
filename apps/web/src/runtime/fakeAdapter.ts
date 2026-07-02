@@ -63,7 +63,7 @@ export function createFakeRuntimeAdapter(
     emitRuntimeFrameStreamClosed(error) {
       // Simulate a hard transport close (e.g. an intermittent WKWebView drop):
       // notify the current frame subscribers and detach them, as a real closed
-      // stream would. The session client should then reconnect on its own.
+      // stream would. The link client should then reconnect on its own.
       const closing = [...runtimeFrameHandlers]
       runtimeFrameHandlers.clear()
       for (const handlers of closing) handlers.onClosed?.(error)
@@ -80,54 +80,54 @@ export function createFakeRuntimeAdapter(
       resetFakeCallRecords(calls)
       resetFakeQueues(queues)
     },
-    openRuntimeSession(request) {
-      calls.runtimeSessionCalls.push({ ...request })
+    openRuntimeLink(request) {
+      calls.runtimeLinkCalls.push({ ...request })
       return resolveQueued(
-        queues.runtimeSessions,
-        input?.defaultRuntimeSession ?? { sessionId: 'session-1' },
+        queues.runtimeLinks,
+        input?.defaultRuntimeLinkConnection ?? { linkId: 'link-1' },
       )
     },
-    closeRuntimeSession(request) {
-      calls.runtimeSessionCloseCalls.push({ ...request })
+    closeRuntimeLink(request) {
+      calls.runtimeLinkCloseCalls.push({ ...request })
       return resolveQueued(
         queues.accountOkResults,
         input?.defaultAccountOk ?? { ok: true },
       )
     },
-    openRuntimeSessionMessageListView(request) {
-      calls.runtimeSessionViewOpenCalls.push({
-        sessionId: request.sessionId,
+    openRuntimeLinkMessageListView(request) {
+      calls.runtimeLinkViewOpenCalls.push({
+        linkId: request.linkId,
         view: { ...request.view },
         sourceId: request.sourceId,
       })
       return resolveQueuedOptional(
-        queues.runtimeSessionMessageListViews,
-        input?.defaultRuntimeSessionMessageListView,
-        'runtime session message list view result',
+        queues.runtimeLinkMessageListViews,
+        input?.defaultRuntimeLinkMessageListView,
+        'runtime link message list view result',
       )
     },
-    openRuntimeSessionView(request) {
-      calls.runtimeSessionObjectViewOpenCalls.push({
-        sessionId: request.sessionId,
+    openRuntimeLinkView(request) {
+      calls.runtimeLinkObjectViewOpenCalls.push({
+        linkId: request.linkId,
         descriptor: request.descriptor,
         sourceId: request.sourceId,
       })
       return resolveQueuedOptional(
-        queues.runtimeSessionViews,
-        input?.defaultRuntimeSessionView,
-        'runtime session view result',
+        queues.runtimeLinkViews,
+        input?.defaultRuntimeLinkView,
+        'runtime link view result',
       )
     },
-    extendRuntimeSessionView(request) {
-      calls.runtimeSessionViewExtendCalls.push({ ...request })
+    extendRuntimeLinkView(request) {
+      calls.runtimeLinkViewExtendCalls.push({ ...request })
       return resolveQueuedOptional(
-        queues.runtimeSessionViewExtends,
-        input?.defaultRuntimeSessionViewExtend,
-        'runtime session view extend result',
+        queues.runtimeLinkViewExtends,
+        input?.defaultRuntimeLinkViewExtend,
+        'runtime link view extend result',
       )
     },
-    closeRuntimeSessionView(request) {
-      calls.runtimeSessionViewCloseCalls.push({ ...request })
+    closeRuntimeLinkView(request) {
+      calls.runtimeLinkViewCloseCalls.push({ ...request })
       return resolveQueued(
         queues.accountOkResults,
         input?.defaultAccountOk ?? { ok: true },

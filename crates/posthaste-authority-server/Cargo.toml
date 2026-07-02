@@ -23,7 +23,7 @@ posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-far-end = { path = "../posthaste-link-far-end" }
-posthaste-link-core = { path = "../posthaste-link-core" }
+posthaste-replica-core = { path = "../posthaste-replica-core" }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-store = { path = "../posthaste-store" }

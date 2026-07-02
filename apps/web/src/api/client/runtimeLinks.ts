@@ -1,23 +1,23 @@
 import { jsonRequest } from './core'
 
-export interface OpenRuntimeSessionResponse {
-  sessionId: string
+export interface OpenRuntimeLinkResponse {
+  linkId: string
 }
 
-export interface OpenRuntimeSessionViewRequest {
+export interface OpenRuntimeLinkViewRequest {
   descriptor: {
     family: string
     payload: unknown
   }
 }
 
-export interface OpenRuntimeSessionViewResponse<TSnapshot = unknown> {
+export interface OpenRuntimeLinkViewResponse<TSnapshot = unknown> {
   viewId: string
   snapshot: TSnapshot
 }
 
 export interface RunRuntimeMutationRequest {
-  sessionId?: string | null
+  linkId?: string | null
   name: string
   args?: unknown
   clientMutationId: string
@@ -58,11 +58,11 @@ function sourceSearch(sourceId?: string | null): string {
   return search ? `?${search}` : ''
 }
 
-export function openRuntimeSession(options?: {
+export function openRuntimeLink(options?: {
   sourceId?: string | null
   /** Opt into incremental mail-list view deltas (replication client-link). */
   viewDelta?: boolean
-}): Promise<OpenRuntimeSessionResponse> {
+}): Promise<OpenRuntimeLinkResponse> {
   const params = new URLSearchParams()
   if (options?.sourceId) {
     params.set('sourceId', options.sourceId)
@@ -71,66 +71,66 @@ export function openRuntimeSession(options?: {
     params.set('viewDelta', 'true')
   }
   const search = params.toString()
-  return jsonRequest<OpenRuntimeSessionResponse>(
+  return jsonRequest<OpenRuntimeLinkResponse>(
     `/runtime/sessions${search ? `?${search}` : ''}`,
     'POST',
   )
 }
 
-export function openRuntimeSessionView<TSnapshot = unknown>(
-  sessionId: string,
-  input: OpenRuntimeSessionViewRequest,
+export function openRuntimeLinkView<TSnapshot = unknown>(
+  linkId: string,
+  input: OpenRuntimeLinkViewRequest,
   options?: { sourceId?: string | null },
-): Promise<OpenRuntimeSessionViewResponse<TSnapshot>> {
-  return jsonRequest<OpenRuntimeSessionViewResponse<TSnapshot>>(
-    `/runtime/sessions/${encodeURIComponent(sessionId)}/views${sourceSearch(options?.sourceId)}`,
+): Promise<OpenRuntimeLinkViewResponse<TSnapshot>> {
+  return jsonRequest<OpenRuntimeLinkViewResponse<TSnapshot>>(
+    `/runtime/sessions/${encodeURIComponent(linkId)}/views${sourceSearch(options?.sourceId)}`,
     'POST',
     input,
   )
 }
 
-export function extendRuntimeSessionView<TSnapshot = unknown>(
-  sessionId: string,
+export function extendRuntimeLinkView<TSnapshot = unknown>(
+  linkId: string,
   viewId: string,
   count: number,
   options?: { sourceId?: string | null },
-): Promise<OpenRuntimeSessionViewResponse<TSnapshot>> {
-  return jsonRequest<OpenRuntimeSessionViewResponse<TSnapshot>>(
-    `/runtime/sessions/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(viewId)}/extend${sourceSearch(options?.sourceId)}`,
+): Promise<OpenRuntimeLinkViewResponse<TSnapshot>> {
+  return jsonRequest<OpenRuntimeLinkViewResponse<TSnapshot>>(
+    `/runtime/sessions/${encodeURIComponent(linkId)}/views/${encodeURIComponent(viewId)}/extend${sourceSearch(options?.sourceId)}`,
     'POST',
     { count },
   )
 }
 
-export function closeRuntimeSession(
-  sessionId: string,
+export function closeRuntimeLink(
+  linkId: string,
   options?: { sourceId?: string | null },
 ): Promise<{ ok: true }> {
   return jsonRequest<{ ok: true }>(
-    `/runtime/sessions/${encodeURIComponent(sessionId)}${sourceSearch(options?.sourceId)}`,
+    `/runtime/sessions/${encodeURIComponent(linkId)}${sourceSearch(options?.sourceId)}`,
     'DELETE',
   )
 }
 
-export function closeRuntimeSessionView(
-  sessionId: string,
+export function closeRuntimeLinkView(
+  linkId: string,
   viewId: string,
   options?: { sourceId?: string | null },
 ): Promise<{ ok: true }> {
   return jsonRequest<{ ok: true }>(
-    `/runtime/sessions/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(viewId)}${sourceSearch(options?.sourceId)}`,
+    `/runtime/sessions/${encodeURIComponent(linkId)}/views/${encodeURIComponent(viewId)}${sourceSearch(options?.sourceId)}`,
     'DELETE',
   )
 }
 
 export function runRuntimeMutation(
-  sessionId: string,
+  linkId: string,
   input: RunRuntimeMutationRequest,
   options?: { sourceId?: string | null },
 ): Promise<RunRuntimeMutationResponse> {
   return jsonRequest<RunRuntimeMutationResponse>(
-    `/runtime/sessions/${encodeURIComponent(sessionId)}/mutations${sourceSearch(options?.sourceId)}`,
+    `/runtime/sessions/${encodeURIComponent(linkId)}/mutations${sourceSearch(options?.sourceId)}`,
     'POST',
-    { ...input, sessionId },
+    { ...input, linkId },
   )
 }

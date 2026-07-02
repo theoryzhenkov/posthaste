@@ -1,6 +1,6 @@
 //! The client-facing `/v1` HTTP platform.
 //!
-//! The REST resource API + the client↔runtime link (runtime sessions/views/
+//! The REST resource API + the client↔runtime link (runtime links/views/
 //! streams), the macaroon capability-token perimeter, HTML sanitization,
 //! OpenAPI, and the serving glue. It drives the runtime over `posthaste-runtime`
 //! (the near node) and never links the far-node roles (store/engine/imap), so a

@@ -32,8 +32,8 @@ jobs:
             patchelf
       - run: cargo fmt --all -- --check
       # posthaste-bench (profiling harness) is built/run by profile.yml, not here.
-      - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-link-wasm -- -D warnings
-      - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-link-wasm
+      - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-client-node-wasm -- -D warnings
+      - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-client-node-wasm
 
   # The four-crate frontier set is extended by later refactor steps (RFC-L2-architecture-cleanup D15/M8).
   wasm-frontier:
@@ -47,7 +47,7 @@ jobs:
         with:
           shared-key: ci-wasm-frontier
           cache-on-failure: true
-      - run: cargo check --target wasm32-unknown-unknown -p posthaste-link-core -p posthaste-link-replica -p posthaste-contract-core -p posthaste-domain-model -p posthaste-link-near-end -p posthaste-link-wasm
+      - run: cargo check --target wasm32-unknown-unknown -p posthaste-replica-core -p posthaste-replica-projector -p posthaste-contract-core -p posthaste-domain-model -p posthaste-link-near-end -p posthaste-client-node-wasm
 
   frontend:
     runs-on: ubuntu-latest
@@ -142,7 +142,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  replica-wasm:
+  client-node-wasm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -153,7 +153,7 @@ jobs:
       - uses: extractions/setup-just@v3
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-replica-wasm
+          shared-key: ci-client-node-wasm
           cache-on-failure: true
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
@@ -162,10 +162,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y binaryen
-      - name: Build the replica WASM bundle
+      - name: Build the client node WASM bundle
         env:
           SKIP_WASM_OPT: 1
-        run: just build-replica-wasm
+        run: just build-client-node-wasm
       - name: Verify committed JS binding is fresh
         # The .wasm binary is not byte-diffed (binaryen output can vary across
         # toolchain builds). The wasm-bindgen JS glue is deterministic given
@@ -175,7 +175,7 @@ jobs:
         # changing the API; they are validated by the TypeScript build instead.
         run: |
           git diff --exit-code \
-            apps/web/src/runtime/wasm/posthaste_link_wasm.js
+            apps/web/src/runtime/wasm/posthaste_client_node_wasm.js
       - run: bun install --frozen-lockfile
       - name: Smoke-test the WASM boundary
         run: bun --cwd=apps/web test test/replicaWasmSmoke.test.ts

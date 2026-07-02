@@ -37,8 +37,8 @@ export function buildOAuthRedirectUri(): string {
  * `Authorization` header (see {@link authHeaders}) — no token in the URL.
  * @spec docs/L1-api#sse-event-stream
  */
-export function buildRuntimeSessionStreamUrl(input: {
-  sessionId: string
+export function buildRuntimeLinkStreamUrl(input: {
+  linkId: string
   afterSeq?: number | null
   sourceId?: string | null
 }): string {
@@ -50,7 +50,7 @@ export function buildRuntimeSessionStreamUrl(input: {
     params.set('sourceId', input.sourceId)
   }
   const search = params.toString()
-  return `${baseUrl()}/runtime/sessions/${encodeURIComponent(input.sessionId)}/stream${search ? `?${search}` : ''}`
+  return `${baseUrl()}/runtime/sessions/${encodeURIComponent(input.linkId)}/stream${search ? `?${search}` : ''}`
 }
 
 export function buildViewStreamUrl(input: {

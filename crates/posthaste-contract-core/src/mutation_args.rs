@@ -8,7 +8,7 @@
 
 use crate::{RuntimeError, RuntimeErrorCode};
 use posthaste_domain_model::SetKeywordsCommand;
-use posthaste_link_core::MessageChangeDiff;
+use posthaste_replica_core::MessageChangeDiff;
 use serde::{Deserialize, Serialize};
 
 /// Build a single-keyword add/remove command from a desired presence. Shared by

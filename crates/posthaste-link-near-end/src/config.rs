@@ -50,7 +50,7 @@ impl BackoffPolicy {
 }
 
 /// The near-end engine's policy tunables. Constructed once and held for the
-/// engine's life. Wire-shape settings (base path, session options) live on the
+/// engine's life. Wire-shape settings (base path, link options) live on the
 /// seam's [`crate::wire::Wire`] profile, not here — this is pure policy.
 #[derive(Clone, Debug)]
 pub struct NearEndConfig {

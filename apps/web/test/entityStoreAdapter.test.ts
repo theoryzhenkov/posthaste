@@ -22,7 +22,7 @@ import type {
   RuntimeMailListViewState,
   RuntimeMutationReceipt,
   RuntimeRunMutationRequest,
-  RuntimeSessionViewRequest,
+  RuntimeLinkViewRequest,
   RuntimeViewSnapshot,
 } from '../src/runtime/types'
 import type { NearEndOutboxHooks } from '../src/runtime/nearEnd'
@@ -34,11 +34,12 @@ const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 let makeRealHandle: () => EntityStoreHandle
 
 beforeAll(async () => {
+  const wasmModulePath = join(wasmDir, 'posthaste_client_node_wasm.js')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+  const mod = (await import(wasmModulePath)) as any
   // Bun: initialize synchronously from the binary (avoids the file:// fetch).
   mod.initSync({
-    module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+    module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
   })
   makeRealHandle = () => new mod.EntityStoreHandle() as EntityStoreHandle
 })
@@ -110,11 +111,11 @@ function makeBase(rows: BaseRow[]) {
     error: null,
   }
   const base = {
-    openRuntimeSessionMessageListView: async () => ({
+    openRuntimeLinkMessageListView: async () => ({
       viewId: 'v1',
       snapshot: snapshot(rows),
     }),
-    extendRuntimeSessionView: async () => ({
+    extendRuntimeLinkView: async () => ({
       viewId: 'v1',
       snapshot: snapshot([
         ...rows,
@@ -122,7 +123,7 @@ function makeBase(rows: BaseRow[]) {
         row('m4', '2026-04-26T10:00:00Z'),
       ]),
     }),
-    closeRuntimeSessionView: async (): Promise<OkResponse> => ({ ok: true }),
+    closeRuntimeLinkView: async (): Promise<OkResponse> => ({ ok: true }),
     subscribeRuntimeFrames: (
       _request: unknown,
       handlers: RuntimeFrameHandlers,
@@ -145,8 +146,8 @@ function makeBase(rows: BaseRow[]) {
   }
 }
 
-const viewRequest: RuntimeSessionViewRequest = {
-  sessionId: 'sess',
+const viewRequest: RuntimeLinkViewRequest = {
+  linkId: 'sess',
   view: {
     scope: { kind: 'source-mailbox', sourceId: 's', mailboxId: 'inbox' },
     limit: 50,
@@ -170,7 +171,7 @@ function setFlagged(
   clientMutationId: string,
 ): RuntimeRunMutationRequest {
   return {
-    sessionId: 'sess',
+    linkId: 'sess',
     name: 'message.setKeywords',
     args: {
       sourceId: 's',
@@ -209,7 +210,7 @@ function messageUpdated(
 ): RuntimeFrame<RuntimeMailListViewState> {
   return {
     type: 'notification',
-    sessionSeq: 100,
+    linkSeq: 100,
     kind: 'message.updated',
     payload: {
       seq: 1,
@@ -253,7 +254,7 @@ function build() {
       setOutboxHooks: (hooks) => {
         captured.hooks = hooks
       },
-      sessionId: () => 'sess-live',
+      linkId: () => 'sess-live',
     },
   })
   const hooks = () => {
@@ -262,7 +263,7 @@ function build() {
   }
   const frames: RuntimeFrame<RuntimeMailListViewState>[] = []
   adapter.subscribeRuntimeFrames(
-    { sessionId: 'sess' },
+    { linkId: 'sess' },
     { onFrame: (f) => frames.push(f) },
   )
   return { adapter, outbox, frames, harness, queryClient, hooks }
@@ -274,7 +275,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 describe('entityStoreAdapter', () => {
   it('returns the served base as the initial projected snapshot', async () => {
     const { adapter } = build()
-    const opened = await adapter.openRuntimeSessionMessageListView(viewRequest)
+    const opened = await adapter.openRuntimeLinkMessageListView(viewRequest)
     expect(
       opened.snapshot.data.rows.map((r) => (r.projection as { id: string }).id),
     ).toEqual(['m1', 'm2'])
@@ -282,7 +283,7 @@ describe('entityStoreAdapter', () => {
 
   it('folds a message mutation optimistically + forwards the POST + outbox', async () => {
     const { adapter, outbox, frames, harness } = build()
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     const receipt = await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
 
@@ -297,13 +298,13 @@ describe('entityStoreAdapter', () => {
   it('reverts optimism + clears the outbox on failure', async () => {
     const built = build()
     const { adapter, outbox, frames } = built
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
     await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
 
     built.harness.push({
       type: 'mutationNotification',
-      sessionSeq: 5,
+      linkSeq: 5,
       clientMutationId: 'c1',
       notification: {
         type: 'rejected',
@@ -323,7 +324,7 @@ describe('entityStoreAdapter', () => {
   it('confirmed before the base update does not revert (flicker fix)', async () => {
     const built = build()
     const { adapter, outbox, frames } = built
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
     await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
 
@@ -332,7 +333,7 @@ describe('entityStoreAdapter', () => {
     // op (outbox D: not retired yet — the base hasn't caught up to absorb it).
     built.harness.push({
       type: 'mutationNotification',
-      sessionSeq: 5,
+      linkSeq: 5,
       clientMutationId: 'c1',
       notification: { type: 'confirmed' },
     })
@@ -364,8 +365,8 @@ describe('entityStoreAdapter', () => {
 
   it('rehydration keeps reconcilable sent records and drops legacy ones', async () => {
     const { adapter, outbox, hooks } = build()
-    // A prior session left durable records: a sent one WITH its dispatch
-    // session (the engine's reconciler can query its settlement — D44b, keep),
+    // A prior link left durable records: a sent one WITH its dispatch
+    // link (the engine's reconciler can query its settlement — D44b, keep),
     // a legacy sent one WITHOUT (unqueryable → dropped, the old leak guard),
     // and a never-sent one (still-unconfirmed intent that must survive).
     await outbox.put({
@@ -374,7 +375,7 @@ describe('entityStoreAdapter', () => {
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
       runtimeMutationId: 'r-prev',
       acceptedAt: 1,
-      sessionId: 'sess-old',
+      linkId: 'sess-old',
       request: setFlagged('m1', 'sent-reconcilable'),
     })
     await outbox.put({
@@ -392,7 +393,7 @@ describe('entityStoreAdapter', () => {
       acceptedAt: 1,
     })
 
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     const remaining = await outbox.all()
     expect(remaining.map((r) => r.clientMutationId).sort()).toEqual([
@@ -400,11 +401,11 @@ describe('entityStoreAdapter', () => {
       'sent-reconcilable',
     ])
     // The reconcilable record is exactly what the engine's sent-but-unsettled
-    // query sees, keyed to its ORIGINAL session.
+    // query sees, keyed to its ORIGINAL link.
     const unsettled = await hooks().sentUnsettled()
     expect(unsettled).toEqual([
       {
-        sessionId: 'sess-old',
+        linkId: 'sess-old',
         clientMutationId: 'sent-reconcilable',
         request: setFlagged('m1', 'sent-reconcilable'),
       },
@@ -414,7 +415,7 @@ describe('entityStoreAdapter', () => {
   it('ingests a message.updated notification and re-projects the row', async () => {
     const built = build()
     const { adapter, frames } = built
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     // An authoritative message.updated: m1 gains $flagged + the inbox count
     // moves. The store ingests it (one batch) + the adapter re-projects.
@@ -472,10 +473,10 @@ describe('entityStoreAdapter', () => {
     })
     const frames: RuntimeFrame<RuntimeMailListViewState>[] = []
     adapter.subscribeRuntimeFrames(
-      { sessionId: 'sess' },
+      { linkId: 'sess' },
       { onFrame: (f) => frames.push(f) },
     )
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
     const viewReplacesBefore = frames.filter(
       (f) => f.type === 'viewReplace',
     ).length
@@ -548,8 +549,8 @@ describe('entityStoreAdapter', () => {
         }
       },
     })
-    adapter.subscribeRuntimeFrames({ sessionId: 'sess' }, { onFrame: () => {} })
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    adapter.subscribeRuntimeFrames({ linkId: 'sess' }, { onFrame: () => {} })
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     const ingestsAfterOpen = ingestCount
     const flagged = (id: string, receivedAt: string) =>
@@ -575,12 +576,12 @@ describe('entityStoreAdapter', () => {
   it('extend seeds the store so a later message.updated keeps the extended rows', async () => {
     const built = build()
     const { adapter, frames } = built
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     // Extend the window: the base returns m1..m4. The store must be re-seeded
     // (the fix); without it the store still holds only m1, m2.
-    await adapter.extendRuntimeSessionView({
-      sessionId: 'sess',
+    await adapter.extendRuntimeLinkView({
+      linkId: 'sess',
       viewId: 'v1',
       count: 50,
     })
@@ -618,7 +619,7 @@ describe('entityStoreAdapter', () => {
   it('writes the count delta straight into the React Query cache (no refetch)', async () => {
     const built = build()
     const { adapter, queryClient } = built
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     built.harness.push(
       messageUpdated(
@@ -646,7 +647,7 @@ describe('entityStoreAdapter', () => {
 
   it('exposes never-dispatched records to the engine reconciler + links receipts (D44a)', async () => {
     const { adapter, outbox, hooks, harness } = build()
-    // A record optimistically accepted on a prior session but never dispatched
+    // A record optimistically accepted on a prior link but never dispatched
     // (runtimeMutationId === null), carrying its original send for replay —
     // plus a sent record and a request-less legacy record the replay hook
     // must NOT expose.
@@ -664,7 +665,7 @@ describe('entityStoreAdapter', () => {
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
       runtimeMutationId: 'r-prev',
       acceptedAt: 1,
-      sessionId: 'sess-old',
+      linkId: 'sess-old',
       request: setFlagged('m1', 'c-sent'),
     })
     await outbox.put({
@@ -674,7 +675,7 @@ describe('entityStoreAdapter', () => {
       runtimeMutationId: null,
       acceptedAt: 2,
     })
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     // View open no longer resends anything — the trigger is DELETED (D44a);
     // the engine's connect-time reconciler drives replay through the hooks.
@@ -683,7 +684,7 @@ describe('entityStoreAdapter', () => {
     expect(replayable.map((r) => r.clientMutationId)).toEqual(['c-orphan'])
 
     // A successful replay reports back: the receipt is linked (with the
-    // session it was re-sent under), so the record leaves the replay set.
+    // link it was re-sent under), so the record leaves the replay set.
     await hooks().onReconciled(
       {
         runtimeMutationId: 'r-1',
@@ -698,22 +699,22 @@ describe('entityStoreAdapter', () => {
       (r) => r.clientMutationId === 'c-orphan',
     )
     expect(record?.runtimeMutationId).toBe('r-1')
-    expect(record?.sessionId).toBe('sess-new')
+    expect(record?.linkId).toBe('sess-new')
     expect(await hooks().neverDispatched()).toHaveLength(0)
   })
 
   it('a terminal settlement from the reconciler settles optimism + clears the record (D44b)', async () => {
     const built = build()
     const { adapter, outbox, frames, hooks } = built
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
 
-    // A live mutation: optimism folded, receipt linked under the live session.
+    // A live mutation: optimism folded, receipt linked under the live link.
     await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
-    expect((await outbox.all())[0]?.sessionId).toBe('sess-live')
+    expect((await outbox.all())[0]?.linkId).toBe('sess-live')
 
     // The engine's settlement query found a terminal FAILED verdict for it
-    // (session-continuity loss): the optimism reverts and the record clears.
+    // (link-continuity loss): the optimism reverts and the record clears.
     await hooks().onSettlement({
       runtimeMutationId: 'r-1',
       clientMutationId: 'c1',
@@ -732,9 +733,9 @@ describe('entityStoreAdapter', () => {
     // with no message target and no fold effect — the adapter forwards it
     // without touching the outbox or the optimistic store.
     const { adapter, outbox, harness } = build()
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
     await adapter.runRuntimeMutation({
-      sessionId: 'sess',
+      linkId: 'sess',
       name: 'revCursor',
       args: { accountId: 's', cursorStepId: null, redoTail: [] },
       clientMutationId: 'c9',
@@ -748,10 +749,10 @@ describe('entityStoreAdapter', () => {
     // pass-through — it fails the typed `MutationRequest` parse at the client
     // edge (the same rejection every wire crossing applies, D8/III).
     const { adapter, harness } = build()
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
     await expect(
       adapter.runRuntimeMutation({
-        sessionId: 'sess',
+        linkId: 'sess',
         name: 'account.sync',
         args: { sourceId: 's' },
         clientMutationId: 'c9',
@@ -768,11 +769,11 @@ describe('entityStoreAdapter', () => {
     setUndoHistoryStoreForTesting(store)
     try {
       const { adapter } = build()
-      await adapter.openRuntimeSessionMessageListView(viewRequest) // seed replica
+      await adapter.openRuntimeLinkMessageListView(viewRequest) // seed replica
 
       // A user-initiated flag toggle records a step.
       await adapter.runRuntimeMutation({
-        sessionId: 'sess',
+        linkId: 'sess',
         name: 'message.setKeywords',
         args: {
           sourceId: 's',
@@ -787,7 +788,7 @@ describe('entityStoreAdapter', () => {
 
       // An internal setKeywords (no userInitiated — e.g. auto-mark-read) does NOT.
       await adapter.runRuntimeMutation({
-        sessionId: 'sess',
+        linkId: 'sess',
         name: 'message.setKeywords',
         args: {
           sourceId: 's',
@@ -805,8 +806,8 @@ describe('entityStoreAdapter', () => {
   it('forwards unrelated frames unchanged (parity)', async () => {
     const built = build()
     const { adapter, frames } = built
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
-    built.harness.push({ type: 'heartbeat', sessionSeq: 3 })
-    expect(frames.at(-1)).toEqual({ type: 'heartbeat', sessionSeq: 3 })
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+    built.harness.push({ type: 'heartbeat', linkSeq: 3 })
+    expect(frames.at(-1)).toEqual({ type: 'heartbeat', linkSeq: 3 })
   })
 })

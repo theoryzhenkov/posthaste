@@ -20,7 +20,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-/// Default backlog depth per subscriber, mirroring the runtime session's frame
+/// Default backlog depth per subscriber, mirroring the runtime link's frame
 /// broadcast capacity (`512`): sized so ordinary bursts never overflow, with the
 /// collapse fallback as the safety net.
 pub const DEFAULT_BACKLOG_CAPACITY: usize = 512;
@@ -237,7 +237,7 @@ where
 
     /// Advance a subscriber's monotonic per-link seq counter and return the new
     /// seq **without buffering a frame**. For a collapse-always seam (D50) whose
-    /// frames carry their own seq field on the wire (the runtime session stream):
+    /// frames carry their own seq field on the wire (the runtime link stream):
     /// the shared store owns the counter + collapse detection, but retains no
     /// backlog, so the caller stamps the returned seq into its own frame type.
     pub fn stamp(&self, link: &LinkId) -> u64 {

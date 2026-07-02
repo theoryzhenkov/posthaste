@@ -348,7 +348,7 @@ where
     }
 
     /// Drop every record for a link — the far-end's teardown when the link
-    /// closes (a runtime session ends / a runtime departs — the sink reaper's
+    /// closes (a runtime link ends / a runtime departs — the sink reaper's
     /// departure purge, [6]).
     pub fn purge(&self, link: &LinkId) {
         self.lock().remove(link);

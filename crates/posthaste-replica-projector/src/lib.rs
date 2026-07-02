@@ -1,6 +1,6 @@
 //! Client-layer reactive entity store.
 //!
-//! Wraps the [`posthaste_link_core`] convergence engine with a normalized,
+//! Wraps the [`posthaste_replica_core`] convergence engine with a normalized,
 //! keyed entity store ([client-link L2 §2](../replication/client-link/L2.md)):
 //! `message[id]`, `mailbox[id]` (server-authoritative count scalars), and
 //! `view[viewId]` (an ordered row list + coverage). The host feeds it
@@ -11,15 +11,15 @@
 //! stores it as truth.
 //!
 //! Layered per RFC D36: [`mechanism`] is the accept/settle/retire plumbing
-//! over link-core's `OptimisticReplica` kernel (layer 1 mount); [`projection`]
+//! over replica-core's `OptimisticReplica` kernel (layer 1 mount); [`projection`]
 //! is the keyed view rows / predicates / windowing over it (layer 2, the
 //! shared projector of D38); [`entity_store::EntityStore`] is the public
 //! composition of both. A headless client consumes exactly these layers.
 //!
-//! Like `posthaste-link-core` this is portable (serde only, no I/O): transport +
+//! Like `posthaste-replica-core` this is portable (serde only, no I/O): transport +
 //! persistence belong to the host (the web adapter).
 //!
-//! @spec docs/replication/client-link/L2#2-the-replica-node-posthaste-link-replica
+//! @spec docs/replication/client-link/L2#2-the-replica-node-posthaste-replica-projector
 //! @spec docs/eph/DESIGN-L2-client-link-reactive-store
 
 pub mod entity_store;

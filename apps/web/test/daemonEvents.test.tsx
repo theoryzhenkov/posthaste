@@ -13,7 +13,7 @@ import {
   createFakeRuntimeAdapter,
   type FakeRuntimeAdapter,
 } from '../src/runtime/fakeAdapter'
-import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
+import { resetRuntimeLinkClientForTesting } from '../src/runtime/linkClient'
 import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
@@ -47,26 +47,26 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  resetRuntimeSessionClientForTesting()
+  resetRuntimeLinkClientForTesting()
   resetRuntimeAdapterForTesting()
   queryClient.clear()
   window.sessionStorage.clear()
 })
 
 describe('useDaemonEvents runtime adapter subscription', () => {
-  it('subscribes through the runtime session stream without threading a cursor', async () => {
+  it('subscribes through the runtime link stream without threading a cursor', async () => {
     const { unmount } = renderHook(() => useDaemonEvents(), { wrapper })
 
     // Stream resume is the near-end engine's job (M9b2): the hook passes no
     // afterSeq — the engine owns and persists the cursor.
     await waitFor(() =>
       expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-        { request: { sessionId: 'session-1' } },
+        { request: { linkId: 'link-1' } },
       ]),
     )
     runtimeAdapter.emitRuntimeFrame({
       type: 'notification',
-      sessionSeq: 1,
+      linkSeq: 1,
       kind: event.topic,
       payload: event,
     })
@@ -79,8 +79,8 @@ describe('useDaemonEvents runtime adapter subscription', () => {
 
     unmount()
     await waitFor(() =>
-      expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
-        { sessionId: 'session-1', sourceId: undefined },
+      expect(runtimeAdapter.runtimeLinkCloseCalls).toEqual([
+        { linkId: 'link-1', sourceId: undefined },
       ]),
     )
   })
@@ -94,7 +94,7 @@ describe('useDaemonEvents runtime adapter subscription', () => {
 
     await waitFor(() =>
       expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-        { request: { sessionId: 'session-1' } },
+        { request: { linkId: 'link-1' } },
       ]),
     )
   })

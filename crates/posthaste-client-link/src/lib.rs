@@ -1,11 +1,11 @@
 //! The client↔runtime link ops extracted from `RuntimeCore`
 //! (RFC-L2-architecture-cleanup D7/D23): one trait ([`RuntimeLink`]) for the
-//! link protocol — session open/close, the three stream families (runtime frames,
-//! view snapshots, events), session-view open/extend/close, and `forward_mutation`
+//! link protocol — link open/close, the three stream families (runtime frames,
+//! view snapshots, events), link-view open/extend/close, and `forward_mutation`
 //! forward — plus the subscription/stream types those methods return.
 //!
 //! The four families are one protocol: every consumer (api `runtime_stream` +
-//! `views` + `sync_events`, testkit `settle`, bench workload) opens a session,
+//! `views` + `sync_events`, testkit `settle`, bench workload) opens a link,
 //! opens views, subscribes, and forwards mutations *together*; splitting one
 //! protocol across traits is ceremony with no subset consumer (XXI). So this is
 //! ONE trait, not several.
@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationRequest, RuntimeCaller, RuntimeError, RuntimeFrame,
-    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, ViewDescriptor, ViewFrame, ViewId,
+    RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, ViewDescriptor, ViewFrame, ViewId,
     ViewRevision, ViewSnapshot,
 };
 use posthaste_domain_model::{DomainEvent, EventFilter};
@@ -48,47 +48,47 @@ pub struct RuntimeFrameSubscription {
     pub live: RuntimeFrameStream,
 }
 
-/// The client↔runtime link protocol: sessions, the three stream families
-/// (frames / views / events), session-view snapshots, and `forward_mutation`
+/// The client↔runtime link protocol: links, the three stream families
+/// (frames / views / events), link-view snapshots, and `forward_mutation`
 /// forward. Every method takes `caller: RuntimeCaller` first (shared caller
 /// identity, lives in `posthaste-contract-core`).
 #[async_trait]
 pub trait RuntimeLink: Send + Sync {
-    async fn open_session(&self, caller: RuntimeCaller) -> Result<RuntimeSession, RuntimeError>;
+    async fn open_link(&self, caller: RuntimeCaller) -> Result<RuntimeLinkConnection, RuntimeError>;
 
-    async fn close_session(
+    async fn close_link(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
     ) -> Result<(), RuntimeError>;
 
     async fn subscribe_runtime_frames(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
-        after_seq: Option<RuntimeSessionSeq>,
+        link_id: RuntimeLinkId,
+        after_seq: Option<RuntimeLinkSeq>,
     ) -> Result<RuntimeFrameSubscription, RuntimeError>;
 
-    async fn open_session_view(
+    async fn open_link_view(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         descriptor: ViewDescriptor,
     ) -> Result<ViewSnapshot, RuntimeError>;
 
-    async fn close_session_view(
+    async fn close_link_view(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         view_id: ViewId,
     ) -> Result<(), RuntimeError>;
 
-    /// Grow an open windowed session view by `count` rows, returning the
+    /// Grow an open windowed link view by `count` rows, returning the
     /// extended snapshot (also broadcast as a `ViewReplace` frame).
-    async fn extend_session_view(
+    async fn extend_link_view(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         view_id: ViewId,
         count: usize,
     ) -> Result<ViewSnapshot, RuntimeError>;
@@ -99,15 +99,15 @@ pub trait RuntimeLink: Send + Sync {
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError>;
 
-    /// The settlement the runtime holds for one `(session, clientMutationId)`
-    /// key, or `None` when it has no record (unknown session, never accepted,
+    /// The settlement the runtime holds for one `(link, clientMutationId)`
+    /// key, or `None` when it has no record (unknown link, never accepted,
     /// or already evicted/cleared under the D47 ledger rule). The near-end
-    /// reconciler's cross-session sent-but-unsettled query (D44b): a terminal
+    /// reconciler's cross-link sent-but-unsettled query (D44b): a terminal
     /// receipt settles locally; `None` re-forwards.
     async fn mutation_settlement(
         &self,
         caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
+        link_id: RuntimeLinkId,
         client_mutation_id: ClientMutationId,
     ) -> Result<Option<MutationReceipt>, RuntimeError>;
 
