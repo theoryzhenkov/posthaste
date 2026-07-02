@@ -88,7 +88,7 @@ pub(super) fn build_state() -> Arc<AppState> {
         Duration::from_secs(60),
     ));
     Arc::new(AppState {
-        runtime: posthaste_server::runtime_handle_with_account_runtime_provider_for_migration(
+        runtime: posthaste_testkit::runtime_handle_with_account_runtime_provider_for_migration(
             service,
             store.clone(),
             secret_store.clone(),

@@ -44,10 +44,10 @@ pub struct AuthorityRuntimeBuild {
     pub account_mutations: Arc<AccountMutationService>,
     /// Runtime-owned secret store exposed for host-owned auth-token setup.
     pub secret_store: Arc<dyn SecretStore>,
-    /// MIGRATION(api-runtime-wrapper): exposes the existing mail service/store
-    /// graph for compatibility harnesses and migration handle constructors.
-    ///
-    /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
+    /// The backend's service/store/secret-store/event-bus graph, surfaced for
+    /// hosts (testkit/bench) that need direct access to seed state and observe
+    /// events. The wrapper migration is complete (RFC D20); this is now the
+    /// permanent service-graph handle on the build, not a temporary bridge.
     pub api_bridge: AuthorityRuntimeApiMigrationBridge,
     /// The in-process runtime↔backend link. A split-backend host serves its
     /// transport over the link wire (`link_router`) so a remote runtime can
@@ -57,10 +57,10 @@ pub struct AuthorityRuntimeBuild {
     pub backend_link: BackendLink,
 }
 
-/// Temporary bridge for compatibility harnesses and migration handle
-/// constructors while direct service/store access is retired from API state.
-///
-/// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
+/// The backend's service-graph handle: the `MailService`, `MailStore`, secret
+/// store, and domain-event bus built by `build_backend`. Carried on the build so
+/// hosts (testkit/bench) can seed state and observe events directly. The wrapper
+/// migration is complete (RFC D20) — a permanent handle, not a temporary bridge.
 #[derive(Clone)]
 pub struct AuthorityRuntimeApiMigrationBridge {
     pub service: Arc<MailService>,
@@ -365,16 +365,16 @@ fn select_backend_link(
 }
 
 /// A runtime handle built from pre-existing api parts, plus the backend's
-/// account-mutation service for the OAuth holdout.
-///
-/// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
+/// account-mutation service for the OAuth holdout. Used by test harnesses that
+/// stand up a runtime around a pre-configured service graph (RFC D20).
 pub struct MigrationRuntime {
     pub handle: RuntimeHandle,
     pub account_mutations: Arc<AccountMutationService>,
 }
 
-/// MIGRATION(api-runtime-wrapper): build a runtime handle around existing
-/// test/API parts until all router state is produced by the runtime builder.
+/// Build a runtime handle around a pre-existing service/store graph — the
+/// test-harness entry point for standing up a runtime without a fresh
+/// `build_backend` (RFC D20).
 pub fn from_api_bridge_for_migration(
     api_bridge: AuthorityRuntimeApiMigrationBridge,
     account_count: usize,
@@ -384,37 +384,6 @@ pub fn from_api_bridge_for_migration(
         account_count,
         Arc::new(DefaultAccountRuntimeOverviewProvider),
         Arc::new(UnavailableLiveAccountRuntimeProvider),
-        None,
-    )
-    .0
-}
-
-pub fn from_api_bridge_with_status_provider_for_migration(
-    api_bridge: AuthorityRuntimeApiMigrationBridge,
-    account_count: usize,
-    status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
-) -> RuntimeHandle {
-    migration_runtime(
-        api_bridge,
-        account_count,
-        status_provider,
-        Arc::new(UnavailableLiveAccountRuntimeProvider),
-        None,
-    )
-    .0
-}
-
-pub fn from_api_bridge_with_providers_for_migration(
-    api_bridge: AuthorityRuntimeApiMigrationBridge,
-    account_count: usize,
-    status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
-    live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
-) -> RuntimeHandle {
-    migration_runtime(
-        api_bridge,
-        account_count,
-        status_provider,
-        live_accounts,
         None,
     )
     .0

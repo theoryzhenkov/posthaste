@@ -48,7 +48,7 @@ pub use config::{resolve_roots, ResolvedRoots};
 pub use router::build_api_router;
 pub use secret::SystemSecretStore;
 pub use secure_file::write_secure_file;
-pub use serve::{build_app_state, serve, ServeOptions};
+pub use serve::{assemble_daemon_preamble, build_app_state, serve, DaemonPreamble, ServeOptions};
 
 pub(crate) use spa::spa_fallback_service;
 

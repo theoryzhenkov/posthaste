@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::Router;
 use posthaste_domain_service::SecretStore;
 use posthaste_observability::{events, ph_info};
-use posthaste_runtime::{RuntimeHandle, RuntimeShutdownHandle};
+use posthaste_runtime::{RuntimeBuildConfig, RuntimeHandle, RuntimeShutdownHandle};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
@@ -17,7 +17,53 @@ use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::ResolvedRoots;
 use posthaste_config::DaemonSettings;
-use crate::{auth, observability, token, AppState, ServerConfig, ServerHandle};
+use crate::{auth, logging, observability, token, AppState, ServerConfig, ServerHandle};
+
+/// The shared node-assembly preamble (RFC D27): resolve roots, read daemon
+/// settings (`app.toml` + `POSTHASTE_*` env), init logging, and build the base
+/// [`RuntimeBuildConfig`] (config/state/cache roots + poll interval).
+///
+/// This dedupes the preamble that was triplicated verbatim across
+/// `posthaste-server`'s `startup.rs` + `startup_backend.rs` and
+/// `posthaste-runtimed`'s `main.rs`. Each caller extends `build_config` with its
+/// role-specific transport/bootstrap and uses `daemon`/`roots`/`log_guard` for the
+/// rest of startup. Settings are read via `TomlConfigRepository` so the bundled
+/// server can observe `config_was_empty` for its bootstrap-import logging.
+pub fn assemble_daemon_preamble() -> DaemonPreamble {
+    let roots = crate::resolve_roots();
+    let settings_repo = posthaste_config::TomlConfigRepository::open(&roots.config_root)
+        .expect("failed to open config directory");
+    let daemon = posthaste_config::read_daemon_settings(&settings_repo)
+        .expect("failed to read runtime settings");
+    let config_was_empty = settings_repo.is_empty();
+    drop(settings_repo);
+    let log_guard = logging::init(&roots.state_root, &daemon.log_level);
+    let build_config = RuntimeBuildConfig::new(
+        roots.config_root.clone(),
+        roots.state_root.clone(),
+        roots.state_root.join("cache"),
+    )
+    .with_poll_interval(Duration::from_secs(daemon.poll_interval_seconds));
+    DaemonPreamble {
+        roots,
+        daemon,
+        log_guard,
+        build_config,
+        config_was_empty,
+    }
+}
+
+/// The resolved inputs every role binary shares at the top of `main`/`start_*`:
+/// roots, daemon settings, the logging guard, the base `RuntimeBuildConfig`, and
+/// whether the config directory was empty (for the bundled server's
+/// bootstrap-import logging). See [`assemble_daemon_preamble`].
+pub struct DaemonPreamble {
+    pub roots: ResolvedRoots,
+    pub daemon: DaemonSettings,
+    pub log_guard: WorkerGuard,
+    pub build_config: RuntimeBuildConfig,
+    pub config_was_empty: bool,
+}
 
 /// Build the near `/v1` application state from a runtime handle + resolved
 /// config: mint the full-scope macaroon, resolve the auth root key, and compute

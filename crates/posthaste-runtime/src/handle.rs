@@ -117,11 +117,8 @@ impl Drop for MutationCancelGuard {
 }
 
 impl RuntimeHandle {
-    /// MIGRATION(api-runtime-wrapper): create a runtime handle around existing
-    /// test/API parts until all router state is produced by the authority
-    /// runtime builder.
-    ///
-    /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
+    /// The runtime's local status: lifecycle + the build-time store snapshot.
+    /// The live account count is layered on in `runtime_status` via the link.
     fn current_status(&self) -> RuntimeStatus {
         // Runtime-local status only (lifecycle + the build-time store snapshot);
         // the live account count is layered on in `runtime_status` via the link.

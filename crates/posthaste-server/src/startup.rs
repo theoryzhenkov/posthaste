@@ -1,7 +1,6 @@
 use super::*;
 
 use crate::oauth::OAuthFlowStore;
-use posthaste_link_contract::RuntimeId;
 
 /// Initialize the bundled daemon (config, store, supervisor, logging), build the
 /// runtime (in-process backend, or a remote near node when `[link] backend_url`
@@ -14,15 +13,13 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     #[cfg(debug_assertions)]
     dotenv().ok();
 
-    let roots = resolve_roots();
-
-    let settings_repo =
-        TomlConfigRepository::open(&roots.config_root).expect("failed to open config directory");
-    let daemon = read_daemon_settings(&settings_repo).expect("failed to read runtime settings");
-    let config_was_empty = settings_repo.is_empty();
-    drop(settings_repo);
-
-    let log_guard = logging::init(&roots.state_root, &daemon.log_level);
+    let DaemonPreamble {
+        roots,
+        daemon,
+        log_guard,
+        build_config,
+        config_was_empty,
+    } = assemble_daemon_preamble();
 
     // Runtime↔backend transport: a remote backend when `[link] backend_url` is
     // configured (this process is then a near node over the link), else the
@@ -35,14 +32,9 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         None => BackendTransportConfig::InProcess,
     };
 
-    let build_config = RuntimeBuildConfig::new(
-        roots.config_root.clone(),
-        roots.state_root.clone(),
-        roots.state_root.join("cache"),
-    )
-    .with_bootstrap_path_option(roots.bootstrap_path.clone())
-    .with_poll_interval(Duration::from_secs(daemon.poll_interval_seconds))
-    .with_backend_transport(backend_transport.clone());
+    let build_config = build_config
+        .with_bootstrap_path_option(roots.bootstrap_path.clone())
+        .with_backend_transport(backend_transport.clone());
 
     // A remote backend makes this process a LEAN near node (reads/writes cross
     // the link, the down-channel drives views); otherwise the full bundled graph
@@ -109,21 +101,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // [link].runtimes.
     let mut root_merges = Vec::new();
     if let Some(link_transport) = link_serve_transport {
-        let link_auth = if daemon.require_auth {
-            match &daemon.link_runtimes {
-                Some(map) if !map.is_empty() => LinkAuth::PerRuntime(
-                    map.iter()
-                        .map(|(token, rid)| (token.clone(), RuntimeId::new(rid.clone())))
-                        .collect(),
-                ),
-                _ => panic!(
-                    "[link] serve is enabled under require_auth but no [link].runtimes \
-                     (token → runtime_id) is set — one entry per connecting runtime (X ≥ 1)"
-                ),
-            }
-        } else {
-            LinkAuth::Disabled
-        };
+        let link_auth = LinkAuth::from_daemon_settings(&daemon, "[link] serve");
         ph_info!(
             events::LINK_SURFACE_SERVED,
             authenticated = daemon.require_auth,

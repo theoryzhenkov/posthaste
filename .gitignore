@@ -51,3 +51,4 @@ apps/desktop/gen/schemas/
 .DS_Store
 Thumbs.db
 target-shared-note/
+target-hygiene/

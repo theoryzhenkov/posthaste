@@ -113,7 +113,7 @@ impl Harness {
         ));
         let root = test_root_key();
         let state = Arc::new(AppState {
-            runtime: posthaste_server::runtime_handle_with_account_runtime_provider_for_migration(
+            runtime: posthaste_testkit::runtime_handle_with_account_runtime_provider_for_migration(
                 service.clone(),
                 store.clone(),
                 secret_store.clone(),

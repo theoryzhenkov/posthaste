@@ -13,6 +13,7 @@ mod backend;
 mod bootstrap;
 mod build;
 mod live_accounts;
+mod link_wire;
 mod local_backend;
 mod mail_queries;
 mod mutations;
@@ -25,11 +26,10 @@ pub mod supervisor;
 pub use account_reads::AccountRuntimeOverviewProvider;
 pub use build::{
     build_authority_runtime, build_backend_node, from_api_bridge_for_migration,
-    from_api_bridge_with_account_supervisor_for_migration,
-    from_api_bridge_with_providers_for_migration,
-    from_api_bridge_with_status_provider_for_migration, AuthorityRuntimeApiMigrationBridge,
+    from_api_bridge_with_account_supervisor_for_migration, AuthorityRuntimeApiMigrationBridge,
     AuthorityRuntimeBuild, BackendNode, MigrationRuntime,
 };
+pub use link_wire::{link_router, LinkAuth};
 pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
 pub use mutations::AccountMutationService;
 pub use supervisor::AccountSupervisor;

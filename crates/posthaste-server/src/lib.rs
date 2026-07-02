@@ -9,9 +9,10 @@
 // Facade: re-export the near `/v1` platform so far code + tests keep their
 // `crate::api`/`crate::auth`/… paths and the public `posthaste_server::` surface.
 pub use posthaste_api::{
-    api, auth, authz, build_api_router, build_app_state, config, logging, observability,
-    resolve_roots, sanitize, secret, serve, token, write_secure_file, AppState, ResolvedRoots,
-    ServeOptions, ServerConfig, ServerHandle, SystemSecretStore,
+    api, assemble_daemon_preamble, auth, authz, build_api_router, build_app_state, config,
+    logging, observability, resolve_roots, sanitize, secret, serve, token, write_secure_file,
+    AppState, DaemonPreamble, ResolvedRoots, ServeOptions, ServerConfig, ServerHandle,
+    SystemSecretStore,
 };
 /// Daemon config resolution is owned by `posthaste-config` (D25): the
 /// `DaemonSettings` struct and `read_daemon_settings`/`load_daemon_settings`
@@ -31,17 +32,16 @@ pub mod supervisor {
     pub use posthaste_authority_runtime::supervisor::*;
 }
 
-pub mod link;
 pub mod oauth_routes;
 
-mod migration;
 mod startup;
 mod startup_backend;
 
-pub use link::{link_router, LinkAuth};
-pub use migration::{
-    runtime_handle_for_migration, runtime_handle_with_account_runtime_provider_for_migration,
-};
+/// The far-node link wire (`link_router` + `LinkAuth`) lives in
+/// `posthaste-authority-runtime` with its own error/auth vocabulary (RFC D24):
+/// the standalone far-node binary no longer drags the `/v1` client platform to
+/// serve it. `posthaste-server` remains the composition root that mounts it.
+pub use posthaste_authority_runtime::{link_router, LinkAuth};
 pub use oauth_routes::{build_oauth_router, OAuthState};
 pub use startup::start_server;
 pub use startup_backend::{start_backend, BackendServerHandle};
@@ -49,15 +49,12 @@ pub use startup_backend::{start_backend, BackendServerHandle};
 // Far prelude: items the far modules reach through `use super::*`
 // (`startup`, `startup_backend`).
 use std::sync::Arc;
-use std::time::Duration;
 
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
 use posthaste_authority_runtime::{
     build_authority_runtime, build_backend_node, build_remote_runtime, BackendTransportConfig,
-    RuntimeBuildConfig,
 };
-use posthaste_config::TomlConfigRepository;
 use posthaste_observability::{events, ph_info};
 use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
