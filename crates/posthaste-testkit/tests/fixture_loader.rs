@@ -7,9 +7,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_runtime_contract::{
-    AccountScopeRequest, MailListViewState, RuntimeCaller, RuntimeCore,
-};
+use posthaste_client_link::RuntimeLinkOps;
+use posthaste_contract_core::{AccountScopeRequest, MailListViewState, RuntimeCaller};
+use posthaste_runtime_api::RuntimeMailReadApi;
 use posthaste_testkit::Harness;
 
 const FIXTURE_TOML: &str = r#"

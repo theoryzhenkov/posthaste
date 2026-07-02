@@ -26,7 +26,7 @@ use posthaste_link_core::{
     MessageAssertion, MessageReplica, MutationId, Outcome, PendingMessageMutation,
 };
 use posthaste_link_replica::{apply_fold_to_projection, fold_state_from_projection};
-use posthaste_runtime_contract::{MailListViewState, MutationRequest};
+use posthaste_contract_core::{MailListViewState, MutationRequest};
 use serde_json::Value;
 
 /// The runtime's outbox toward the backend: forwarded-but-unconfirmed message
@@ -159,7 +159,7 @@ pub(crate) fn apply_outbox_overlay(
     }
     // Re-key the original rows by message id so the projected (folded) rows keep
     // every non-foldable field (row_key, sort_key, order_key, resource_ref).
-    let originals: std::collections::HashMap<String, posthaste_runtime_contract::MailListRowState> =
+    let originals: std::collections::HashMap<String, posthaste_contract_core::MailListRowState> =
         state
             .rows
             .iter()
@@ -185,7 +185,7 @@ pub(crate) fn apply_outbox_overlay(
 
 /// A mail-list row's message id — the key both the replica and the outbox use.
 /// Read from the row's projection (`MessageSummary.id`).
-fn row_message_id(row: &posthaste_runtime_contract::MailListRowState) -> String {
+fn row_message_id(row: &posthaste_contract_core::MailListRowState) -> String {
     row.projection
         .get("id")
         .and_then(Value::as_str)
@@ -196,7 +196,7 @@ fn row_message_id(row: &posthaste_runtime_contract::MailListRowState) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_runtime_contract::{
+    use posthaste_contract_core::{
         CoverageRange, MailListAnchorState, MailListContinuation, MailListProjectionKind,
         MailListRowState, RuntimeCoverage,
     };
@@ -406,7 +406,7 @@ mod tests {
             session_id: None,
             name: name.to_string(),
             args,
-            client_mutation_id: posthaste_runtime_contract::ClientMutationId::new("c"),
+            client_mutation_id: posthaste_contract_core::ClientMutationId::new("c"),
             context: None,
         };
         let (id, assertion) = named_message_assertion(&request(

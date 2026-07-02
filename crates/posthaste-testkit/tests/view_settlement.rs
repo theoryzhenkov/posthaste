@@ -12,7 +12,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_runtime_contract::{ClientMutationId, MutationRequest};
+use posthaste_contract_core::{ClientMutationId, MutationRequest};
 use posthaste_testkit::Harness;
 
 fn set_keywords_mutation(account_id: &str, message_id: &str, cmid: &str) -> MutationRequest {

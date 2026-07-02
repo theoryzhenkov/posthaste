@@ -29,7 +29,8 @@ use posthaste_domain_service::{
     Recipient, SecretRef, SecretStore, SecretStoreError, SourceProjectionStore, SyncBatch,
     SyncCursor, SyncObject, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
-use posthaste_runtime_contract::{RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeStatus};
+use posthaste_contract_core::{RuntimeAccountList, RuntimeCaller, RuntimeStatus};
+use posthaste_runtime_api::{RuntimeAccountApi, RuntimeSettingsApi};
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
 use posthaste_server::{build_api_router, AppState};

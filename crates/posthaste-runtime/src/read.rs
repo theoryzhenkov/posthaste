@@ -30,7 +30,7 @@ use posthaste_domain_service::{
 use posthaste_link_contract::{
     BackendApi, BackendLink, BaseAssertion, BaseUpdate, DownFrame, LinkCoverage,
 };
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
     RuntimeError, RuntimeResourceBytes,
 };
@@ -366,7 +366,7 @@ mod tests {
     use posthaste_domain_service::MessagePage;
     use posthaste_link_contract::{BaseAssertion, BaseUpdate, DownStream};
     use posthaste_link_core::MessageFoldState;
-    use posthaste_runtime_contract::{MutationReceipt, MutationRequest};
+    use posthaste_contract_core::{MutationReceipt, MutationRequest};
     use serde_json::json;
 
     fn summary(id: &str) -> MessageSummary {

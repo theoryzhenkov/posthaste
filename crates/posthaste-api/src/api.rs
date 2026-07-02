@@ -30,13 +30,17 @@ use posthaste_domain_service::{
     TagAppearance, TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_ACCOUNT_UPDATED,
 };
-use posthaste_runtime_contract::{
+use posthaste_client_link::RuntimeLinkOps;
+use posthaste_contract_core::{
     AccountScopeRequest, AccountTransportMutation, AutomationRulePreviewMutation,
     CreateAccountMutation, CreateSmartMailboxMutation, MailPresentationRequest, MailQueryPage,
     MailQueryRequest, MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation,
-    PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeError,
-    RuntimeErrorCode, RuntimeResourceBytes, SearchVisibilityRequest,
-    SecretWriteMode as RuntimeSecretWriteMode, SecretWriteMutation,
+    PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller, RuntimeError, RuntimeErrorCode,
+    RuntimeResourceBytes, SearchVisibilityRequest, SecretWriteMode as RuntimeSecretWriteMode,
+    SecretWriteMutation,
+};
+use posthaste_runtime_api::{
+    RuntimeAccountApi, RuntimeMailReadApi, RuntimeMailWriteApi, RuntimeSettingsApi,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

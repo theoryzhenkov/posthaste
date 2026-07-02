@@ -17,7 +17,9 @@ use posthaste_domain_service::{
     EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_engine::MockJmapGateway;
-use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore};
+use posthaste_client_link::RuntimeLinkOps;
+use posthaste_contract_core::RuntimeCaller;
+use posthaste_runtime_api::{RuntimeAccountApi, RuntimeMailWriteApi};
 use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,
@@ -1906,9 +1908,9 @@ async fn delete_account_removes_secret_config_and_publishes_event_through_runtim
         .get_source(&created.id)
         .expect("source lookup should succeed")
         .is_none());
-    let events = build
+    let subscription = build
         .handle
-        .replay_events(
+        .subscribe_events(
             RuntimeCaller::test(),
             EventFilter {
                 account_id: Some(created.id.clone()),
@@ -1919,7 +1921,7 @@ async fn delete_account_removes_secret_config_and_publishes_event_through_runtim
         )
         .await
         .expect("runtime should replay delete events");
-    assert_eq!(events.len(), 1);
+    assert_eq!(subscription.replay.len(), 1);
 }
 
 // spec: docs/backend/L3#account-mutations-runtime-backed

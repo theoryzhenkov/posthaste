@@ -1,26 +1,30 @@
 //! The authority runtime near node.
 //!
 //! Builds a transport-free authority runtime handle that implements the shared
-//! runtime contract ([`posthaste_runtime_contract`]) without binding HTTP or
-//! creating desktop windows. It reaches its backend over the
-//! [`posthaste_link_contract`] link (the in-process `LocalBackend` lives in the
-//! far-node crate; this crate ships the remote [`RemoteBackend`]), so it never
-//! links the far-node roles (store/engine/imap). The far-node crate composes a
-//! runtime over an in-process backend via [`assemble_runtime`].
+//! runtime surface extracted from `RuntimeCore` ([`posthaste_runtime_api`] +
+//! [`posthaste_client_link`]) without binding HTTP or creating desktop windows.
+//! It reaches its backend over the [`posthaste_link_contract`] link (the
+//! in-process `LocalBackend` lives in the far-node crate; this crate ships the
+//! remote [`RemoteBackend`]), so it never links the far-node roles
+//! (store/engine/imap). The far-node crate composes a runtime over an in-process
+//! backend via [`assemble_runtime`].
 
-mod build;
+mod assembly;
+mod handle;
 mod near_node;
 mod read;
 mod secret;
 mod sessions;
+mod shutdown;
 mod transport;
 mod views;
 
-pub use build::{
+pub use assembly::{
     assemble_runtime, build_remote_runtime, BackendTransportConfig, BackendTransportDecorator,
-    ComposedRuntime, RemoteRuntimeBuild, RuntimeAssembly, RuntimeBuildConfig, RuntimeBuildError,
-    RuntimeHandle, RuntimeShutdownError, RuntimeShutdownHandle,
+    ComposedRuntime, RemoteRuntimeBuild, RuntimeAssembly, RuntimeBuildConfig,
 };
+pub use handle::RuntimeHandle;
 pub use read::ReadCache;
 pub use secret::SystemSecretStore;
+pub use shutdown::{RuntimeBuildError, RuntimeShutdownError, RuntimeShutdownHandle};
 pub use transport::RemoteBackend;

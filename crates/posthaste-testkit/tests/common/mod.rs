@@ -4,7 +4,7 @@
 //! and are pulled in via `#[path = "common/mod.rs"] mod common;`.
 
 use posthaste_domain_service::{MessageSortField, SortDirection};
-use posthaste_runtime_contract::{MailPresentationRequest, MailQueryRequest, ViewDescriptor};
+use posthaste_contract_core::{MailPresentationRequest, MailQueryRequest, ViewDescriptor};
 
 /// A `mailList` view descriptor for `query`: messages projection, newest-first,
 /// page of 50. Shared by the view-settlement, live-convergence, and

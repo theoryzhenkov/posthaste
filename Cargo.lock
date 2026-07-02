@@ -4054,11 +4054,13 @@ dependencies = [
  "http-body-util",
  "keyring",
  "macaroon",
+ "posthaste-client-link",
  "posthaste-config",
+ "posthaste-contract-core",
  "posthaste-domain-service",
  "posthaste-observability",
  "posthaste-runtime",
- "posthaste-runtime-contract",
+ "posthaste-runtime-api",
  "posthaste-store",
  "reqwest 0.12.28",
  "rustls",
@@ -4092,6 +4094,7 @@ dependencies = [
  "futures-util",
  "jsonwebtoken",
  "oauth2",
+ "posthaste-client-link",
  "posthaste-config",
  "posthaste-contract-core",
  "posthaste-domain-service",
@@ -4101,7 +4104,7 @@ dependencies = [
  "posthaste-link-core",
  "posthaste-observability",
  "posthaste-runtime",
- "posthaste-runtime-contract",
+ "posthaste-runtime-api",
  "posthaste-store",
  "reqwest 0.12.28",
  "serde",
@@ -4124,13 +4127,26 @@ dependencies = [
  "futures-util",
  "iai-callgrind",
  "posthaste-authority-runtime",
+ "posthaste-client-link",
+ "posthaste-contract-core",
  "posthaste-domain-service",
- "posthaste-runtime-contract",
+ "posthaste-runtime-api",
  "posthaste-store",
  "pprof",
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "posthaste-client-link"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "posthaste-contract-core",
+ "posthaste-domain-model",
+ "posthaste-link-core",
 ]
 
 [[package]]
@@ -4320,11 +4336,13 @@ dependencies = [
  "axum",
  "futures-util",
  "keyring",
+ "posthaste-client-link",
+ "posthaste-contract-core",
  "posthaste-domain-service",
  "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-link-replica",
- "posthaste-runtime-contract",
+ "posthaste-runtime-api",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4334,11 +4352,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-runtime-contract"
+name = "posthaste-runtime-api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "futures-util",
  "posthaste-contract-core",
  "posthaste-domain-model",
  "serde",
@@ -4372,14 +4389,16 @@ dependencies = [
  "oauth2",
  "posthaste-api",
  "posthaste-authority-runtime",
+ "posthaste-client-link",
  "posthaste-config",
+ "posthaste-contract-core",
  "posthaste-domain-service",
  "posthaste-engine",
  "posthaste-imap",
  "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-observability",
- "posthaste-runtime-contract",
+ "posthaste-runtime-api",
  "posthaste-store",
  "posthaste-testkit",
  "serde",
@@ -4420,12 +4439,14 @@ dependencies = [
  "futures-util",
  "imap-codec",
  "posthaste-authority-runtime",
+ "posthaste-client-link",
  "posthaste-config",
+ "posthaste-contract-core",
  "posthaste-domain-service",
  "posthaste-imap",
  "posthaste-link-core",
  "posthaste-link-replica",
- "posthaste-runtime-contract",
+ "posthaste-runtime-api",
  "posthaste-store",
  "serde",
  "serde_json",

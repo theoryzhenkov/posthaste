@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use axum::http::StatusCode;
-use posthaste_runtime_contract::RuntimeLifecycle;
+use posthaste_contract_core::RuntimeLifecycle;
 use support::{message, Harness};
 
 #[tokio::test]
@@ -642,8 +642,8 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
 #[test]
 fn authority_runtime_core_does_not_use_api_bridge_as_dependency_bag() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let runtime_build = fs::read_to_string(server_dir.join("../posthaste-runtime/src/build.rs"))
-        .expect("authority runtime build source should be readable");
+    let runtime_build = fs::read_to_string(server_dir.join("../posthaste-runtime/src/handle.rs"))
+        .expect("authority runtime handle source should be readable");
     let core_start = runtime_build
         .find("struct RuntimeCoreState")
         .expect("authority runtime core struct should exist");
@@ -666,8 +666,8 @@ fn authority_runtime_core_does_not_use_api_bridge_as_dependency_bag() {
 #[test]
 fn runtime_contract_exposes_single_mail_query_entry_point() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let contract = fs::read_to_string(server_dir.join("../posthaste-runtime-contract/src/lib.rs"))
-        .expect("runtime contract source should be readable");
+    let contract = fs::read_to_string(server_dir.join("../posthaste-runtime-api/src/lib.rs"))
+        .expect("runtime api source should be readable");
     assert!(
         contract.contains("async fn query_mail_page"),
         "mail-list/search reads should use the generalized query entry point"
