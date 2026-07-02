@@ -1,4 +1,4 @@
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
     AppSettings, Appearance, AutomationAction, AutomationRule, AutomationTrigger, CachePolicy,
     GlassTheme, ImapTransportSettings, MailboxColor, MailboxId, Notifications, ProviderAuthKind,

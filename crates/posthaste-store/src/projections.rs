@@ -1,5 +1,5 @@
 use super::*;
-use posthaste_domain_service::MessageAttachment;
+use posthaste_domain_model::MessageAttachment;
 
 mod body;
 mod conversation;

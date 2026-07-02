@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use posthaste_domain_service::{ConfigError, ConfigSnapshot};
+use posthaste_domain_model::ConfigError;
+use posthaste_domain_service::ConfigSnapshot;
 
 use crate::defaults::default_smart_mailboxes;
 use crate::schema::AppToml;

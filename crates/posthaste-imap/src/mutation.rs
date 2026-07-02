@@ -2,7 +2,7 @@ mod keywords;
 mod validation;
 
 use imap_client::imap_types::flag::{Flag, StoreType};
-use posthaste_domain_service::{ImapMessageLocation, MutationOutcome, SetKeywordsCommand};
+use posthaste_domain_model::{ImapMessageLocation, MutationOutcome, SetKeywordsCommand};
 
 use crate::discovery::connect_authenticated_client;
 use crate::mutation::validation::{

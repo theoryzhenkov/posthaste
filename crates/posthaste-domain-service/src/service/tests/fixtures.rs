@@ -20,8 +20,8 @@ pub(super) fn sample_smart_mailbox() -> SmartMailbox {
                 })],
             },
         },
-        created_at: crate::RFC3339_EPOCH.to_string(),
-        updated_at: crate::RFC3339_EPOCH.to_string(),
+        created_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
+        updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
     }
 }
 
@@ -32,12 +32,12 @@ pub(super) fn sample_source() -> AccountSettings {
         full_name: None,
         signature: None,
         email_patterns: Vec::new(),
-        driver: crate::AccountDriver::Mock,
+        driver: posthaste_domain_model::AccountDriver::Mock,
         enabled: true,
         appearance: None,
         transport: Default::default(),
-        created_at: crate::RFC3339_EPOCH.to_string(),
-        updated_at: crate::RFC3339_EPOCH.to_string(),
+        created_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
+        updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
     }
 }
 
@@ -53,7 +53,7 @@ pub(super) fn sample_message_summary(id: &str, keywords: Vec<String>) -> Message
         from_email: Some("hello@example.com".to_string()),
         to: Vec::new(),
         preview: None,
-        received_at: crate::RFC3339_EPOCH.to_string(),
+        received_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
         has_attachment: false,
         is_read: false,
         is_flagged: false,
@@ -72,7 +72,7 @@ pub(super) fn sample_message_record(id: &str, size: i64, has_attachment: bool) -
         subject: Some("Hello".to_string()),
         from_name: Some("PostHaste Updates".to_string()),
         from_email: Some("hello@example.com".to_string()),
-        received_at: crate::RFC3339_EPOCH.to_string(),
+        received_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
         has_attachment,
         size,
         mailbox_ids: vec![MailboxId::from("inbox")],
@@ -112,14 +112,14 @@ pub(super) fn sample_cache_rescore_candidate(message_id: &str) -> CacheRescoreCa
         priority: 1.0,
         message_size: 32 * 1024,
         has_attachment: false,
-        received_at: crate::RFC3339_EPOCH.to_string(),
+        received_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
         in_inbox: true,
         unread: true,
         flagged: false,
         thread_activity: 0.0,
         sender_affinity: 0.0,
         local_behavior: 0.0,
-        search: Some(crate::CacheSearchSignals {
+        search: Some(posthaste_domain_model::CacheSearchSignals {
             total_messages: 1_000,
             result_count: 5,
             result_rank: 0,

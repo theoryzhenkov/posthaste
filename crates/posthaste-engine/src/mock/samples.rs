@@ -1,4 +1,4 @@
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     BlobId, MailboxId, MailboxRecord, MessageAttachment, MessageId, MessageRecord,
 };
 
@@ -33,7 +33,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
     vec![
         MessageRecord {
             id: MessageId::from("em-001"),
-            source_thread_id: posthaste_domain_service::ThreadId::from("th-roadmap"),
+            source_thread_id: posthaste_domain_model::ThreadId::from("th-roadmap"),
             remote_blob_id: None,
             subject: Some("Q2 planning priorities".to_string()),
             from_name: Some("Alice Chen".to_string()),
@@ -55,7 +55,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
         },
         MessageRecord {
             id: MessageId::from("em-002"),
-            source_thread_id: posthaste_domain_service::ThreadId::from("th-roadmap"),
+            source_thread_id: posthaste_domain_model::ThreadId::from("th-roadmap"),
             remote_blob_id: None,
             subject: Some("Re: Q2 planning priorities".to_string()),
             from_name: Some("Marcus Johnson".to_string()),
@@ -77,7 +77,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
         },
         MessageRecord {
             id: MessageId::from("em-003"),
-            source_thread_id: posthaste_domain_service::ThreadId::from("th-invoice"),
+            source_thread_id: posthaste_domain_model::ThreadId::from("th-invoice"),
             remote_blob_id: None,
             subject: Some("Invoice #2026-0312".to_string()),
             from_name: Some("Cloudflare Billing".to_string()),

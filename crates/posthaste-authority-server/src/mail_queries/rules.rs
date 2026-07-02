@@ -1,9 +1,10 @@
-use posthaste_domain_service::{
-    search::parse_query_with_scopes, AccountId, MailService, MailboxId, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
-};
 use posthaste_contract_core::RuntimeError;
+use posthaste_domain_model::{
+    AccountId, MailboxId, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxValue,
+};
+use posthaste_domain_service::{search::parse_query_with_scopes, MailService};
 
 /// Prefixes that name a mailbox *scope* rather than a searchable field —
 /// resolved service-side by [`resolve_in`] instead of becoming a rule node.

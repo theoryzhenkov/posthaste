@@ -6,12 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, BlobId, FetchedBody,
-    GatewayError, Identity, ImapMessageLocationStore, MailGateway, MailService, MailboxId,
-    MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor, RFC3339_EPOCH,
+    GatewayError, Identity, MailboxId, MessageId, MutationOutcome, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, RFC3339_EPOCH,
 };
+use posthaste_domain_service::{ImapMessageLocationStore, MailGateway, MailService, PushTransport};
 use posthaste_store::DatabaseStore;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -235,7 +235,7 @@ pub(super) fn message_by_subject(
     harness: &Harness,
     account_id: &str,
     subject: &str,
-) -> posthaste_domain_service::MessageSummary {
+) -> posthaste_domain_model::MessageSummary {
     harness
         .service
         .list_messages(&AccountId::from(account_id), None)

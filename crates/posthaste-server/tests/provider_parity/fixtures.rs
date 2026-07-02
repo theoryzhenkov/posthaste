@@ -1,4 +1,4 @@
-use posthaste_domain_service::{BlobId, FetchedBody};
+use posthaste_domain_model::{BlobId, FetchedBody};
 
 pub(super) fn empty_body() -> FetchedBody {
     FetchedBody {
@@ -14,7 +14,7 @@ pub(super) fn parity_body() -> FetchedBody {
         body_html: Some("<p>HTML body</p>".to_string()),
         body_text: Some("Plain body".to_string()),
         raw_mime: None,
-        attachments: vec![posthaste_domain_service::MessageAttachment {
+        attachments: vec![posthaste_domain_model::MessageAttachment {
             id: "attachment-1".to_string(),
             blob_id: BlobId::from("jmap-blob-1"),
             part_id: Some("1".to_string()),

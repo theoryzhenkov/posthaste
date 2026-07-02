@@ -82,7 +82,7 @@ impl TestStore {
                 cursor: Some(SyncCursor {
                     object_type: SyncObject::Message,
                     state: cursor_state.to_string(),
-                    updated_at: crate::RFC3339_EPOCH.to_string(),
+                    updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
                 }),
                 mailbox_ids: mailbox_ids.iter().map(|id| MailboxId::from(*id)).collect(),
                 ..Default::default()

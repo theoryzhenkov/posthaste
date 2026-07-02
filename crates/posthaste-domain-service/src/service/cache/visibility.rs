@@ -23,7 +23,7 @@ impl MailService {
                 account_id: message.source_id.to_string(),
                 message_id: message.id.to_string(),
                 reason: "search-visible".to_string(),
-                search: Some(crate::CacheSearchSignals {
+                search: Some(posthaste_domain_model::CacheSearchSignals {
                     total_messages,
                     result_count,
                     result_rank: rank as u64,

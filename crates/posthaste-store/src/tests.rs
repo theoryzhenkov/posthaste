@@ -2,11 +2,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use posthaste_domain_service::{
-    search, MessageRecord, Recipient, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+use posthaste_domain_model::{
+    MessageRecord, Recipient, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue, SyncCursor,
 };
+use posthaste_domain_service::search;
 
 use super::*;
 
@@ -71,14 +72,14 @@ fn seed_messages(
         account_id,
         &SyncBatch {
             mailboxes: vec![
-                posthaste_domain_service::MailboxRecord {
+                posthaste_domain_model::MailboxRecord {
                     id: MailboxId::from("inbox"),
                     name: "Inbox".to_string(),
                     role: Some("inbox".to_string()),
                     unread_emails: 0,
                     total_emails: 0,
                 },
-                posthaste_domain_service::MailboxRecord {
+                posthaste_domain_model::MailboxRecord {
                     id: MailboxId::from("archive"),
                     name: "Archive".to_string(),
                     role: Some("archive".to_string()),

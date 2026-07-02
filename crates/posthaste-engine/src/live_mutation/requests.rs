@@ -1,4 +1,4 @@
-use posthaste_domain_service::{GatewayError, MailboxId, MessageId, SetKeywordsCommand};
+use posthaste_domain_model::{GatewayError, MailboxId, MessageId, SetKeywordsCommand};
 use serde_json::{json, Map, Value};
 
 use crate::live::LiveJmapGateway;

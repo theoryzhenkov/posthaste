@@ -6,13 +6,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::response::IntoResponse;
 use axum::Json;
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    AutomationAction, AutomationRule, AutomationTrigger, ConfigRepository, DomainEvent,
-    MailService, MailStore, SecretRef, SecretStore, SecretStoreError, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AutomationAction, AutomationRule, AutomationTrigger, DomainEvent, SecretRef,
+    SecretStoreError, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxValue, RFC3339_EPOCH,
 };
+use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_authority_server::AccountSupervisor;
 use posthaste_http_api_adapter::AppState;
 use posthaste_store::DatabaseStore;

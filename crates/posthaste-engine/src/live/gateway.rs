@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use posthaste_domain_service::{
-    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageId,
-    MutationOutcome, PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand,
-    SyncBatch, SyncChunkSink, SyncCursor, SyncOutcome,
+use posthaste_domain_model::{
+    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailboxId, MessageId, MutationOutcome,
+    ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncOutcome,
 };
+use posthaste_domain_service::{MailGateway, PushTransport, SyncChunkSink};
 
 use super::LiveJmapGateway;
 

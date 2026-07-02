@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
-use posthaste_domain_service::{DomainEvent, SecretStore};
+use posthaste_domain_model::DomainEvent;
+use posthaste_domain_service::SecretStore;
 use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use tokio::sync::broadcast;
 

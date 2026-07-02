@@ -1,5 +1,6 @@
 use super::*;
-use crate::{MessageRecord, SyncBatch, SyncChunkSink, SyncWriteStore};
+use crate::{SyncChunkSink, SyncWriteStore};
+use posthaste_domain_model::{MessageRecord, SyncBatch};
 
 /// Applies and publishes each sync chunk as the gateway emits it, accumulating
 /// the per-chunk messages and counts the post-sync steps need. Chunk events are
@@ -179,11 +180,11 @@ impl MailService {
             events.extend(reconcile_events);
         }
         if let Some(progress) = progress {
-            progress.report(crate::SyncProgress {
+            progress.report(posthaste_domain_model::SyncProgress {
                 sync_id: String::new(),
                 trigger: trigger.clone(),
                 started_at: String::new(),
-                stage: crate::SyncProgressStage::Storing,
+                stage: posthaste_domain_model::SyncProgressStage::Storing,
                 detail: "Applying synced changes".to_string(),
                 mailbox_name: None,
                 mailbox_index: None,
@@ -329,7 +330,7 @@ impl MailService {
 #[cfg(test)]
 mod guard_tests {
     use super::guard_unsettled;
-    use crate::{MessageId, MessageRecord, SyncBatch};
+    use posthaste_domain_model::{MessageId, MessageRecord, SyncBatch};
     use std::collections::HashSet;
 
     fn batch(upserts: &[&str], deletes: &[&str], replace_all_messages: bool) -> SyncBatch {

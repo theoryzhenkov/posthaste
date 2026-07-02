@@ -1,4 +1,4 @@
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind, OperationState,
 };
 use serde_json::json;

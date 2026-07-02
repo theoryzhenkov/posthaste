@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 hex = { workspace = true }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-observability = { path = "../posthaste-observability" }
 rusqlite = { workspace = true }

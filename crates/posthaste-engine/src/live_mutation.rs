@@ -1,7 +1,7 @@
 mod outcome;
 mod requests;
 
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     GatewayError, MailboxId, MailboxRole, MessageId, MessageReadback, MutationOutcome,
     SetKeywordsCommand,
 };

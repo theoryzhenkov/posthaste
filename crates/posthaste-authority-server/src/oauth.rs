@@ -10,7 +10,7 @@ use oauth2::{
     AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, ExtraTokenFields,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     GatewayError, ImapTransportSettings, ProviderHint, ProviderKind, ProviderProfile,
     SmtpTransportSettings,
 };

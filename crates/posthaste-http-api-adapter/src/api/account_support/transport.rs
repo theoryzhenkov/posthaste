@@ -2,7 +2,7 @@ use super::*;
 
 /// Convert an API transport request into domain transport settings,
 /// normalizing empty strings to `None`.
-impl From<AccountTransportRequest> for posthaste_domain_service::AccountTransportSettings {
+impl From<AccountTransportRequest> for posthaste_domain_model::AccountTransportSettings {
     fn from(value: AccountTransportRequest) -> Self {
         Self {
             provider: value.provider.unwrap_or_default(),

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use posthaste_domain_service::{AccountId, MailService, MessagePage, SmartMailboxRule};
+use posthaste_domain_model::{AccountId, MessagePage, SmartMailboxRule};
+use posthaste_domain_service::{MailService};
 use posthaste_observability::{events, ph_warn};
 use posthaste_contract_core::SearchVisibilityRequest;
 

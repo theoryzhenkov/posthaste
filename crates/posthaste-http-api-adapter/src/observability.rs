@@ -1,5 +1,5 @@
 use axum::http::HeaderMap;
-use posthaste_domain_service::Id;
+use posthaste_domain_model::Id;
 
 pub const REQUEST_ID_HEADER: &str = "x-posthaste-request-id";
 pub const OPERATION_ID_HEADER: &str = "x-posthaste-operation-id";

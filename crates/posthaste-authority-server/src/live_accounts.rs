@@ -1,7 +1,6 @@
 use async_trait::async_trait;
-use posthaste_domain_service::{
-    AccountId, GatewayError, ServiceError, SharedGateway, SyncMode, SyncTrigger,
-};
+use posthaste_domain_model::{AccountId, GatewayError, ServiceError, SyncMode, SyncTrigger};
+use posthaste_domain_service::{SharedGateway};
 
 use crate::supervisor::AccountSupervisor;
 

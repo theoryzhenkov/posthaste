@@ -14,6 +14,7 @@ posthaste-authority-server = { path = "../posthaste-authority-server" }
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-contract-core = { path = "../posthaste-contract-core" }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-link-core = { path = "../posthaste-link-core" }

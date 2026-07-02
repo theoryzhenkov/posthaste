@@ -374,7 +374,7 @@ async fn flush_settles_message_assertion_from_readback_and_removes_it() {
         .readbacks
         .lock()
         .expect("readbacks lock poisoned")
-        .push(crate::MessageReadback::Present(readback));
+        .push(posthaste_domain_model::MessageReadback::Present(readback));
 
     service
         .replace_mailboxes(
@@ -426,7 +426,7 @@ fn observe_batch(record: MessageRecord) -> SyncBatch {
         cursors: vec![SyncCursor {
             object_type: SyncObject::Message,
             state: "message-2".to_string(),
-            updated_at: crate::RFC3339_EPOCH.to_string(),
+            updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
         }],
     }
 }
@@ -533,7 +533,7 @@ async fn settle_adopts_the_readback_over_the_optimistic_value() {
         .readbacks
         .lock()
         .expect("readbacks lock poisoned")
-        .push(crate::MessageReadback::Present(readback));
+        .push(posthaste_domain_model::MessageReadback::Present(readback));
 
     service
         .replace_mailboxes(
@@ -642,7 +642,7 @@ async fn rejected_mutation_reverts_canonical_and_settles_failed() {
         .reject_next
         .lock()
         .expect("reject_next lock poisoned") = Some((
-        crate::MessageReadback::Present(unchanged),
+        posthaste_domain_model::MessageReadback::Present(unchanged),
         "permission denied".to_string(),
     ));
 

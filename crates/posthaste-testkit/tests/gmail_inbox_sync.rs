@@ -15,7 +15,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_domain_service::AccountId;
+use posthaste_domain_model::AccountId;
 use posthaste_client_link::RuntimeLink;
 use posthaste_contract_core::{
     AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot,

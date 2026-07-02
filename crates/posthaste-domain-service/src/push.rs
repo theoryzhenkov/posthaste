@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::Stream;
 
-use crate::{AccountId, GatewayError, PushNotification, PushStream};
+use posthaste_domain_model::{AccountId, GatewayError, PushNotification, PushStream};
 
 /// A raw push transport that opens a single connection and returns a stream.
 /// Stateless, does not reconnect. Implementations: SSE, WebSocket.

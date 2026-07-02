@@ -1,6 +1,6 @@
-use posthaste_domain_service::ProviderProfile;
+use posthaste_domain_model::ProviderProfile;
 #[cfg(test)]
-use posthaste_domain_service::{MessageId, MessageRecord, ProviderKind};
+use posthaste_domain_model::{MessageId, MessageRecord, ProviderKind};
 
 use crate::{DiscoveredImapAccount, DiscoveredImapMailbox, ImapMappedHeader};
 

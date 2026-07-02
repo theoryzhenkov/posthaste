@@ -1,4 +1,4 @@
-use posthaste_domain_service::{ImapMessageLocation, MailboxRecord, MessageRecord};
+use posthaste_domain_model::{ImapMessageLocation, MailboxRecord, MessageRecord};
 
 pub(super) fn mailbox_cursor_state(mailboxes: &[MailboxRecord]) -> String {
     let mut fingerprint = String::new();

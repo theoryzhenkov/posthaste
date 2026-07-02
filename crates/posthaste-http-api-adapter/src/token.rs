@@ -10,7 +10,8 @@ use std::path::Path;
 
 use base64::Engine;
 use macaroon::{ByteString, Caveat, Format, Macaroon, MacaroonKey, Verifier};
-use posthaste_domain_service::{Id, SecretKind, SecretRef, SecretStore};
+use posthaste_domain_model::{Id, SecretKind, SecretRef};
+use posthaste_domain_service::SecretStore;
 
 /// Stable macaroon `location` hint embedded in every minted token. Purely
 /// informational (macaroons are verified by the HMAC chain, not the location).

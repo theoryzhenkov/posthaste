@@ -1,4 +1,4 @@
-use posthaste_domain_service::AccountId;
+use posthaste_domain_model::AccountId;
 use serde_json::json;
 
 use super::{convert_sse_push_notification, convert_ws_push_object};

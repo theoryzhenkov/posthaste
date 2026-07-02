@@ -7,7 +7,7 @@ fn full_message_snapshot_removes_stale_local_messages() -> Result<(), StoreError
     let account = AccountId::from("primary");
     setup_source(&store, &account, "Primary")?;
 
-    let mailbox = posthaste_domain_service::MailboxRecord {
+    let mailbox = posthaste_domain_model::MailboxRecord {
         id: MailboxId::from("inbox"),
         name: "Inbox".to_string(),
         role: Some("inbox".to_string()),
