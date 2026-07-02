@@ -3,7 +3,7 @@ use super::*;
 /// Command to add and/or remove JMAP keywords on a message.
 ///
 /// @spec docs/L1-api#message-commands
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetKeywordsCommand {

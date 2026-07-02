@@ -1,15 +1,2 @@
-
-# Linux targets
-
-# https://github.com/rui314/mold
 [target.aarch64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-
-# MacOS targets
-
-# Windows targets
-
-# Other

@@ -110,7 +110,7 @@ package-web:
 
 # Run browser-localhost mode from the built frontend.
 serve *args:
-    cargo run --bin posthaste_daemon -- serve --frontend-dist apps/web/dist {{ args }}
+    cargo run --bin posthaste-authority-runtime-server -- serve --frontend-dist apps/web/dist {{ args }}
 
 # Print the browser automation environment exposed by the dev shell.
 browser-env:

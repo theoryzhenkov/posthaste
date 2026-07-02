@@ -88,7 +88,7 @@ impl RemoteAuthorityServer {
             let body = response.text().await.unwrap_or_default();
             return Err(RuntimeError::new(
                 RuntimeErrorCode::GatewayRejected,
-                format!("remote authority_server rejected link request ({status}): {body}"),
+                format!("remote authority server rejected link request ({status}): {body}"),
             ));
         }
         response.json::<Ret>().await.map_err(transport_error)
@@ -197,7 +197,7 @@ impl AuthorityServerLink for RemoteAuthorityServer {
             let status = response.status();
             return Err(RuntimeError::retryable(
                 RuntimeErrorCode::TransportDisconnected,
-                format!("remote authority_server refused link subscription ({status})"),
+                format!("remote authority server refused link subscription ({status})"),
             ));
         }
         let mut bytes = response.bytes_stream();
@@ -281,7 +281,7 @@ mod tests {
             Json(MutationReceipt {
                 runtime_mutation_id: Some(RuntimeMutationId::new("authority-server-1")),
                 client_mutation_id: request.client_mutation_id,
-                name: request.name,
+                name: request.operation.name().to_string(),
                 state: MutationSettlementState::Confirmed,
                 error: None,
                 output: serde_json::Value::Null,
@@ -314,13 +314,14 @@ mod tests {
         let transport = RemoteAuthorityServer::new(format!("http://{addr}"));
 
         let receipt = transport
-            .forward_mutation(MutationRequest {
-                session_id: None,
-                name: "message.setFlaggedState".into(),
-                args: json!({ "sourceId": "acct", "messageId": "m1", "flagged": true }),
-                client_mutation_id: ClientMutationId::new("c1"),
-                context: None,
-            })
+            .forward_mutation(
+                serde_json::from_value(json!({
+                    "name": "message.setFlaggedState",
+                    "args": { "sourceId": "acct", "messageId": "m1", "flagged": true },
+                    "clientMutationId": "c1",
+                }))
+                .expect("request builds from the flat wire shape"),
+            )
             .await
             .expect("forward");
         assert_eq!(receipt.client_mutation_id, ClientMutationId::new("c1"));

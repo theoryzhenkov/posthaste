@@ -1,5 +1,11 @@
 use super::*;
 
+use posthaste_contract_core::mutation_args::{
+    MessageMailboxMembershipArgs, MessageReplaceMailboxesArgs, MessageSetKeywordsMutationArgs,
+    MessageTargetArgs,
+};
+use posthaste_contract_core::MailOperation;
+
 /// POST /v1/sources/{sid}/commands/messages/{mid}/set-keywords
 ///
 /// @spec docs/L1-api#message-commands
@@ -27,11 +33,13 @@ pub async fn set_keywords(
 ) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
-        .set_message_keywords(
+        .apply(
             RuntimeCaller::api(),
-            AccountId(source_id),
-            MessageId(message_id),
-            command,
+            MailOperation::SetKeywords(MessageSetKeywordsMutationArgs {
+                source_id,
+                message_id,
+                command,
+            }),
         )
         .await
         .map(Json)
@@ -65,11 +73,13 @@ pub async fn add_to_mailbox(
 ) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
-        .add_message_to_mailbox(
+        .apply(
             RuntimeCaller::api(),
-            AccountId(source_id),
-            MessageId(message_id),
-            command,
+            MailOperation::AddToMailbox(MessageMailboxMembershipArgs {
+                source_id,
+                message_id,
+                mailbox_id: command.mailbox_id.0,
+            }),
         )
         .await
         .map(Json)
@@ -103,11 +113,13 @@ pub async fn remove_from_mailbox(
 ) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
-        .remove_message_from_mailbox(
+        .apply(
             RuntimeCaller::api(),
-            AccountId(source_id),
-            MessageId(message_id),
-            command,
+            MailOperation::RemoveFromMailbox(MessageMailboxMembershipArgs {
+                source_id,
+                message_id,
+                mailbox_id: command.mailbox_id.0,
+            }),
         )
         .await
         .map(Json)
@@ -141,11 +153,13 @@ pub async fn replace_mailboxes(
 ) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
-        .replace_message_mailboxes(
+        .apply(
             RuntimeCaller::api(),
-            AccountId(source_id),
-            MessageId(message_id),
-            command,
+            MailOperation::ReplaceMailboxes(MessageReplaceMailboxesArgs {
+                source_id,
+                message_id,
+                mailbox_ids: command.mailbox_ids.into_iter().map(|id| id.0).collect(),
+            }),
         )
         .await
         .map(Json)
@@ -177,10 +191,12 @@ pub async fn destroy_message(
 ) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
-        .destroy_message(
+        .apply(
             RuntimeCaller::api(),
-            AccountId(source_id),
-            MessageId(message_id),
+            MailOperation::Destroy(MessageTargetArgs {
+                source_id,
+                message_id,
+            }),
         )
         .await
         .map(Json)

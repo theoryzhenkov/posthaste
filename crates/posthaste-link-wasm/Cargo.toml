@@ -16,7 +16,6 @@ path = "src/lib.rs"
 
 [dependencies]
 posthaste-contract-core = { path = "../posthaste-contract-core" }
-posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
 serde = { workspace = true }

@@ -18,19 +18,19 @@ use posthaste_client_link::{
     RuntimeViewSubscription,
 };
 use posthaste_contract_core::{
-    AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
-    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
-    MutationSettlementState, PatchAccountMutation, RevCursorArgs, RuntimeAccountList, RuntimeCaller,
+    AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailOperation,
+    MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
+    MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller,
     RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes,
     RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, RuntimeStatus, ViewDescriptor, ViewId,
     ViewRevision,
 };
 use posthaste_domain_service::{
-    AccountId, AddToMailboxCommand, AppSettings, DomainEvent, EventFilter, MailboxId, MailboxSummary,
-    MessageId, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    SendMessageRequest, SetKeywordsCommand, SmartMailboxId, SyncMode,
+    AccountId, AddToMailboxCommand, AppSettings, CommandAck, DomainEvent, EventFilter, MailboxId,
+    MailboxSummary, MessageId, Operation, OperationId, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SendMessageRequest, SmartMailboxId, SyncMode,
 };
-use posthaste_authority_server_link::{message_mutation::MessageMutation, AuthorityServerLinkHandle};
+use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_link_core::{MutationId, PendingMessageMutation};
 use posthaste_runtime_api::{
     RuntimeAccountApi, RuntimeMailReadApi, RuntimeMailWriteApi, RuntimeSettingsApi,
@@ -285,24 +285,26 @@ impl RuntimeHandle {
             .core
             .sessions
             .session_scope(&session_id, caller.account_scope.as_deref())?;
-        // Phase 2: `revCursor` is a control mutation (not a message mutation) —
+        // Phase 2: `revCursor` is a control operation (not a message mutation) —
         // it carries no message target + has no outbox optimism. Route it
         // directly to the authority server (which validates + applies the cursor).
+        // The typed variant carries `RevCursorArgs`, so there is no per-site arg
+        // re-parse (D22).
         // @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
-        if request.name == "revCursor" {
+        if let MailOperation::RevCursor(args) = &request.operation {
+            let account_id = args.account_id.clone();
             return self
-                .dispatch_rev_cursor(caller, session_scope.as_deref(), request)
+                .dispatch_rev_cursor(caller, session_scope.as_deref(), account_id, request)
                 .await;
         }
         // Runtime (near-node) concern: scope enforcement per mutation. The
         // command application is the authority server's; it is forwarded up the link
-        // below, uniform across names. Undo/redo history is client-owned
+        // below, uniform across operations. Undo/redo history is client-owned
         // (@spec docs/eph/DESIGN-L2-undo-redo-synced-history): the runtime no
         // longer records change-diffs or navigates a history stack — an undo
-        // or redo is an ordinary `message.applyDiff` mutation that flows
+        // or redo is an ordinary `message.applyDiff` operation that flows
         // through this same path.
-        let mutation = MessageMutation::from_request(&request)?;
-        let source_id = mutation.account_id().to_string();
+        let source_id = request.operation.account_id().to_string();
         Self::ensure_account_in_scope(&source_id, session_scope.as_deref())?;
         // Accept the mutation into the runtime's outbox toward the authority server so
         // recomputed views fold it optimistically while it is in flight. It is
@@ -337,24 +339,23 @@ impl RuntimeHandle {
         result
     }
 
-    /// Phase 2: route a `revCursor` control mutation to the authority server. Parses the
-    /// args for the account (scope check), then forwards through the normal
-    /// accept → forward → settle flow (no outbox optimism — a cursor move has
-    /// no message assertion to fold). The authority server validates the referenced
-    /// steps exist + applies the cursor + emits the recompute trigger.
+    /// Phase 2: route a `revCursor` control operation to the authority server.
+    /// The account (for the scope check) is read from the already-typed
+    /// `RevCursorArgs` — no per-site arg re-parse (D22) — then the request is
+    /// forwarded through the normal accept → forward → settle flow (no outbox
+    /// optimism — a cursor move has no message assertion to fold). The authority
+    /// server validates the referenced steps exist + applies the cursor + emits
+    /// the recompute trigger.
     ///
     /// @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
     async fn dispatch_rev_cursor(
         &self,
         caller: RuntimeCaller,
         session_scope: Option<&[String]>,
+        account_id: String,
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        let args: RevCursorArgs =
-            serde_json::from_value(request.args.clone()).map_err(|error| {
-                RuntimeError::invalid_mutation(format!("invalid revCursor args: {error}"))
-            })?;
-        Self::ensure_account_in_scope(&args.account_id, session_scope)?;
+        Self::ensure_account_in_scope(&account_id, session_scope)?;
         let forward = self.core.authority_server_link.forward_mutation(request.clone());
         self.run_message_mutation(caller, &request, forward).await
     }
@@ -784,73 +785,89 @@ impl RuntimeMailWriteApi for RuntimeHandle {
             .await
     }
 
-    async fn set_message_keywords(
+    /// Direct-apply a mail operation at the authority (D21/D34). REST callers are
+    /// not replicas: there is no outbox, no optimistic fold, and no
+    /// `ClientMutationId` dedup on this path — the op is applied and its ack
+    /// returned. Idempotency on retry is a property of the *operations* (keyword
+    /// set, mailbox add/remove/replace, destroy are all state-idempotent), not of
+    /// a dedup ledger; the replica path (`forward_mutation`) is where per-op
+    /// idempotency lives.
+    ///
+    /// Only the typed command subset the REST surface emits is dispatched here;
+    /// operations that exist solely on the optimistic forward path (role moves,
+    /// snooze/unsnooze, applyDiff, the `revCursor` control op) have no direct
+    /// authority command and are rejected — they must flow through
+    /// `forward_mutation`.
+    async fn apply(
         &self,
         _caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: SetKeywordsCommand,
-    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
+        op: MailOperation,
+    ) -> Result<CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .set_keywords(account_id, message_id, command)
-            .await
-    }
-
-    async fn add_message_to_mailbox(
-        &self,
-        _caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: AddToMailboxCommand,
-    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
-        self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .add_to_mailbox(account_id, message_id, command)
-            .await
-    }
-
-    async fn remove_message_from_mailbox(
-        &self,
-        _caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: RemoveFromMailboxCommand,
-    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
-        self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .remove_from_mailbox(account_id, message_id, command)
-            .await
-    }
-
-    async fn replace_message_mailboxes(
-        &self,
-        _caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: ReplaceMailboxesCommand,
-    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
-        self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .replace_mailboxes(account_id, message_id, command)
-            .await
-    }
-
-    async fn destroy_message(
-        &self,
-        _caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
-        self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .destroy_message(account_id, message_id)
-            .await
+        let account = AccountId(op.account_id().to_string());
+        let message = op
+            .message_id()
+            .map(|id| MessageId(id.to_string()))
+            .ok_or_else(|| {
+                RuntimeError::invalid_mutation(format!(
+                    "operation '{}' has no direct-apply command surface",
+                    op.name()
+                ))
+            })?;
+        match op {
+            MailOperation::SetKeywords(args) => {
+                self.core
+                    .authority_server_link
+                    .set_keywords(account, message, args.command)
+                    .await
+            }
+            MailOperation::ReplaceMailboxes(args) => {
+                self.core
+                    .authority_server_link
+                    .replace_mailboxes(
+                        account,
+                        message,
+                        ReplaceMailboxesCommand {
+                            mailbox_ids: args.mailbox_ids.into_iter().map(MailboxId).collect(),
+                        },
+                    )
+                    .await
+            }
+            MailOperation::AddToMailbox(args) => {
+                self.core
+                    .authority_server_link
+                    .add_to_mailbox(
+                        account,
+                        message,
+                        AddToMailboxCommand {
+                            mailbox_id: MailboxId(args.mailbox_id),
+                        },
+                    )
+                    .await
+            }
+            MailOperation::RemoveFromMailbox(args) => {
+                self.core
+                    .authority_server_link
+                    .remove_from_mailbox(
+                        account,
+                        message,
+                        RemoveFromMailboxCommand {
+                            mailbox_id: MailboxId(args.mailbox_id),
+                        },
+                    )
+                    .await
+            }
+            MailOperation::Destroy(_) => {
+                self.core
+                    .authority_server_link
+                    .destroy_message(account, message)
+                    .await
+            }
+            other => Err(RuntimeError::invalid_mutation(format!(
+                "operation '{}' has no direct-apply command surface; forward it as a mutation",
+                other.name()
+            ))),
+        }
     }
 }
 
@@ -1044,17 +1061,17 @@ mod outbox_lifecycle_tests {
         session_id: &RuntimeSessionId,
         client_mutation_id: &ClientMutationId,
     ) -> RuntimeMutationId {
-        let request = MutationRequest {
-            session_id: Some(session_id.clone()),
-            name: "message.setKeywords".to_string(),
-            args: serde_json::json!({
+        let request: MutationRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": session_id.as_str(),
+            "name": "message.setKeywords",
+            "args": {
                 "sourceId": "outbox-acct",
                 "messageId": "m-1",
                 "command": {"add": ["$flagged"], "remove": []},
-            }),
-            client_mutation_id: client_mutation_id.clone(),
-            context: None,
-        };
+            },
+            "clientMutationId": client_mutation_id.as_str(),
+        }))
+        .expect("request builds from the flat wire shape");
         match sessions.accept_mutation(caller.clone(), &request).unwrap() {
             MutationAcceptance::New { mutation_id } => mutation_id,
             MutationAcceptance::Existing(_) => panic!("expected a new mutation"),

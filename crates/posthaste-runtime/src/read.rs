@@ -408,7 +408,7 @@ mod tests {
             _mutation: MutationRequest,
         ) -> Result<MutationReceipt, RuntimeError> {
             Err(RuntimeError::internal(
-                "counting authority_server is read-only",
+                "counting authority-server link is read-only",
                 None,
             ))
         }
@@ -514,7 +514,7 @@ mod tests {
             &self,
             _mutation: MutationRequest,
         ) -> Result<MutationReceipt, RuntimeError> {
-            Err(RuntimeError::internal("bridge authority_server is read-only", None))
+            Err(RuntimeError::internal("bridge authority-server link is read-only", None))
         }
 
         async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {

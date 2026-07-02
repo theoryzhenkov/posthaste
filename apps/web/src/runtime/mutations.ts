@@ -51,11 +51,14 @@ function confirmedMessageCommandResult(
   return receipt.output
 }
 
-/// Map a low-level message command to its runtime named mutation, or null for
-/// commands that have no named mutation yet (legacy adapter fallback).
-function namedMessageMutation(
-  request: RuntimeMessageCommandRequest,
-): { name: string; args: Record<string, unknown> } | null {
+/// Map a low-level message command to its runtime operation (`MailOperation`
+/// wire shape: the operation's serde tag is the `name`, its payload the
+/// `args`). Every command kind is covered — the typed vocabulary (M5) includes
+/// the mailbox-membership deltas, so there is no legacy fallback path.
+function namedMailOperation(request: RuntimeMessageCommandRequest): {
+  name: string
+  args: Record<string, unknown>
+} {
   const command = request.command
   switch (command.kind) {
     case 'setKeywords':
@@ -71,8 +74,15 @@ function namedMessageMutation(
     case 'destroy':
       return { name: 'message.destroy', args: {} }
     case 'addToMailbox':
+      return {
+        name: 'message.addToMailbox',
+        args: { mailboxId: command.mailboxId },
+      }
     case 'removeFromMailbox':
-      return null
+      return {
+        name: 'message.removeFromMailbox',
+        args: { mailboxId: command.mailboxId },
+      }
   }
 }
 
@@ -123,13 +133,9 @@ export const runtimeMutations = {
       options?: { userInitiated?: boolean },
     ): Promise<MessageCommandResult> {
       // Route message commands through the runtime named-mutation pipeline
-      // (Phase 5a). `addToMailbox`/`removeFromMailbox` are not emitted by the
-      // action layer; they keep the legacy adapter path until they have named
-      // mutations.
-      const named = namedMessageMutation(request)
-      if (!named) {
-        return getRuntimeAdapter().runMessageCommand(request)
-      }
+      // (Phase 5a). Post-M5 the typed vocabulary covers every command kind
+      // (incl. addToMailbox/removeFromMailbox), so all commands take this path.
+      const named = namedMailOperation(request)
       const receipt = await runtimeSessionClient.runMutation({
         name: named.name,
         args: {

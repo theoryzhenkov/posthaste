@@ -299,14 +299,15 @@ mod tests {
 
     #[test]
     fn settlement_routes_only_to_the_originating_runtime() {
-        use posthaste_authority_server_link::{WireMutationId, WireSettlementOutcome};
+        use posthaste_authority_server_link::WireSettlementOutcome;
+        use posthaste_link_core::MutationId;
         let registry = RuntimeRegistry::new();
         let a = rid("rt-A");
         let b = rid("rt-B");
         registry.emit_settlement(
             &a,
             AuthorityServerFrame::Settlement {
-                mutation_id: WireMutationId("m-1".into()),
+                mutation_id: MutationId("m-1".into()),
                 outcome: WireSettlementOutcome::Confirmed,
             },
         );
@@ -322,7 +323,8 @@ mod tests {
 
     #[test]
     fn a_reconnecting_runtime_resumes_its_settlement_stream() {
-        use posthaste_authority_server_link::{WireMutationId, WireSettlementOutcome};
+        use posthaste_authority_server_link::WireSettlementOutcome;
+        use posthaste_link_core::MutationId;
         let registry = RuntimeRegistry::new();
         let rt = rid("rt-A");
         // First subscription, then disconnect (drop the receiver).
@@ -334,7 +336,7 @@ mod tests {
         registry.emit_settlement(
             &rt,
             AuthorityServerFrame::Settlement {
-                mutation_id: WireMutationId("m-2".into()),
+                mutation_id: MutationId("m-2".into()),
                 outcome: WireSettlementOutcome::Confirmed,
             },
         );

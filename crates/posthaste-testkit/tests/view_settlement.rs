@@ -12,21 +12,22 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_contract_core::{ClientMutationId, MutationRequest};
+use posthaste_contract_core::MutationRequest;
 use posthaste_testkit::Harness;
 
 fn set_keywords_mutation(account_id: &str, message_id: &str, cmid: &str) -> MutationRequest {
-    MutationRequest {
-        session_id: None, // settle() assigns the opened session
-        name: "message.setKeywords".to_string(),
-        args: serde_json::json!({
+    // Built from the flat wire shape: the typed operation flattens its
+    // `name`/`args` into the envelope (session_id is assigned by settle()).
+    serde_json::from_value(serde_json::json!({
+        "name": "message.setKeywords",
+        "args": {
             "sourceId": account_id,
             "messageId": message_id,
             "command": {"add": ["$flagged"], "remove": []}
-        }),
-        client_mutation_id: ClientMutationId::new(cmid),
-        context: None,
-    }
+        },
+        "clientMutationId": cmid,
+    }))
+    .expect("request builds from the flat wire shape")
 }
 
 #[tokio::test]

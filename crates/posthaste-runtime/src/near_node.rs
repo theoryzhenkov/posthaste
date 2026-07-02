@@ -20,7 +20,6 @@
 
 use std::sync::{Mutex, MutexGuard};
 
-use posthaste_authority_server_link::message_mutation::MessageMutation;
 use posthaste_authority_server_link::BaseUpdate;
 use posthaste_link_core::{
     MessageAssertion, MessageReplica, MutationId, Outcome, PendingMessageMutation,
@@ -109,21 +108,23 @@ impl RuntimeAuthorityServerOutbox {
     }
 }
 
-/// The optimistic message effect of a named mutation, for the outbox, plus the
-/// message it targets. `None` for mutations whose effect the runtime cannot form
-/// from the request alone — role moves (archive/trash/moveToRole) need the
+/// The optimistic message effect of an operation, for the outbox, plus the
+/// message it targets. `None` for operations whose effect the runtime cannot
+/// form from the request alone — role moves (archive/trash/moveToRole) need the
 /// account's role→mailbox resolution, so they are not folded optimistically yet
-/// and simply forward.
+/// and simply forward — and for control operations (`revCursor`) that target no
+/// message.
 ///
-/// Delegates to [`posthaste_authority_server_link::message_mutation::MessageMutation`] so
-/// the name→assertion mapping stays in one place.
+/// Delegates to [`MailOperation::fold_effect`] — the single local-effect
+/// projection (D34 (b)) the wasm client's optimistic fold also consumes, so the
+/// two derivations cannot drift.
 pub(crate) fn named_message_assertion(
     request: &MutationRequest,
 ) -> Option<(String, MessageAssertion)> {
-    let mutation = MessageMutation::from_request(request).ok()?;
-    let message_id = mutation.message_id().to_string();
-    mutation
-        .to_assertion()
+    let message_id = request.operation.message_id()?.to_string();
+    request
+        .operation
+        .fold_effect()
         .map(|assertion| (message_id, assertion))
 }
 
@@ -402,12 +403,13 @@ mod tests {
 
     #[test]
     fn named_mutation_assertions_cover_the_derivable_set() {
-        let request = |name: &str, args: Value| MutationRequest {
-            session_id: None,
-            name: name.to_string(),
-            args,
-            client_mutation_id: posthaste_contract_core::ClientMutationId::new("c"),
-            context: None,
+        let request = |name: &str, args: Value| -> MutationRequest {
+            serde_json::from_value(json!({
+                "name": name,
+                "args": args,
+                "clientMutationId": "c",
+            }))
+            .expect("request builds from the flat wire shape")
         };
         let (id, assertion) = named_message_assertion(&request(
             "message.setFlaggedState",
@@ -423,7 +425,7 @@ mod tests {
             }
         );
         // Role moves aren't folded at the near-node (no role map here) — the
-        // client adapter resolves them via `to_assertion_with_roles`.
+        // client adapter resolves them via `fold_effect_with_roles`.
         assert!(named_message_assertion(&request(
             "message.moveToRole",
             json!({ "sourceId": "acct", "messageId": "m1", "role": "archive" }),

@@ -6,7 +6,7 @@ import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 
 // Independent end-to-end verification of BOTH archive fixes against the real
 // WASM: fix (b) resolves message.moveToRole{role:archive} -> replaceMailboxes via the role map
-// (parseMessageMutation), and fix (a) holds the resulting op through an
+// (parseMailOperation), and fix (a) holds the resulting op through an
 // equal-version stale re-serve so the archived row leaves and STAYS.
 
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
@@ -40,7 +40,7 @@ describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
-      parseMessageMutation(
+      parseMailOperation(
         requestJson: string,
         roleMapJson: string,
       ): string | undefined
@@ -55,7 +55,7 @@ describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
     })
 
     // With the account's role map → resolves to a foldable ReplaceMailboxes.
-    const resolved = mod.parseMessageMutation(
+    const resolved = mod.parseMailOperation(
       request,
       JSON.stringify({ archive: 'mbx-archive' }),
     )
@@ -68,7 +68,7 @@ describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
     // No role map (mailbox list not cached yet) → None = falls back to pass-through.
     // wasm-bindgen maps Rust None to `undefined`; the adapter's `if (!result)`
     // treats it as pass-through (no optimism).
-    expect(mod.parseMessageMutation(request, '{}')).toBeUndefined()
+    expect(mod.parseMailOperation(request, '{}')).toBeUndefined()
   })
 
   it('an archived row leaves immediately and survives an equal-version stale re-serve', async () => {
@@ -113,7 +113,7 @@ describe.skipIf(!present)('archive flicker end-to-end (real WASM)', () => {
 
     // The adapter resolves + accepts the archive op (fix b), then runs it.
     const parsed = JSON.parse(
-      mod.parseMessageMutation(
+      mod.parseMailOperation(
         JSON.stringify({
           name: 'message.moveToRole',
           args: { sourceId: 's', messageId: 'm1', role: 'archive' },
