@@ -737,6 +737,18 @@ DEVIATION row (e.g. `refactor(M1): split posthaste-domain — closes V4`).
    in the same commit; the DEVIATION register is the only place current-vs-end
    may disagree.
 
+## 10. Deferred pain points (M9+ candidates)
+
+Noted during execution reviews; each needs its own ratification pass before
+becoming an M-step. Seeded 2026-07-02 from evidence already in hand:
+
+| Ref | Pain point | Evidence | Tenet |
+|-----|-----------|----------|-------|
+| P1 | `link-replica/entity_store.rs` is a 1800+-LOC god-file (store + view predicates + retirement + sort keys in one unit) — inside a crate this RFC otherwise leaves untouched | client audit (git `e5eae6229`); §6.3 | I; XXI |
+| P2 | `apps/web` runtime adapter: `entityStoreAdapter.ts` 932 LOC, 3 module-level singletons, `isEntityStoreAdapterActive()` runtime flag splits invalidation ownership across two code paths | client audit; `handlers.ts:96` | XXI; XIV |
+| P3 | Lifecycle debt not absorbed by M-steps: push backoff/jitter/breaker, supervisor inline sync await, IMAP timeouts + allocation bounds, web reconnect backoff, snooze wall-clock | `docs/issues/L2-runtime-lifecycle-debt.md` rows 4-6, 8, 10 | V-VIII, XIX |
+| P4 | `SortKey.received_at: String` — ISO-8601 lexicographic ordering of server wall-clock at the replica boundary | client audit; `entity_store.rs:96` | XXIII |
+
 **Cross-references that live outside this workspace until merge:** the
 superseded spec tree and `docs/issues/*` are in the main tree; the eph docs the
 durable specs reference (`DESIGN-L2-deployment-topology`, the undo-redo pair,
