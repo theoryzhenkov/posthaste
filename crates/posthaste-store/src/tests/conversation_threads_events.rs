@@ -17,7 +17,7 @@ fn conversations_follow_jmap_thread_id_not_headers_or_subject() -> Result<(), St
     store.apply_sync_batch(
         &account,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain_service::MailboxRecord {
+            mailboxes: vec![posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),
@@ -57,14 +57,14 @@ fn arrival_event_only_emits_for_new_mailbox_membership() -> Result<(), StoreErro
     setup_source(&store, &account, "Primary")?;
     let first_batch = SyncBatch {
         mailboxes: vec![
-            posthaste_domain_service::MailboxRecord {
+            posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),
                 unread_emails: 0,
                 total_emails: 0,
             },
-            posthaste_domain_service::MailboxRecord {
+            posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("archive"),
                 name: "Archive".to_string(),
                 role: Some("archive".to_string()),

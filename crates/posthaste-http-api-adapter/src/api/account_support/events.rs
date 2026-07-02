@@ -70,7 +70,7 @@ pub(crate) fn append_and_publish_account_event(
     event_sender: &tokio::sync::broadcast::Sender<DomainEvent>,
     account_id: &AccountId,
     topic: &str,
-) -> Result<(), posthaste_domain_service::StoreError> {
+) -> Result<(), posthaste_domain_model::StoreError> {
     let operation = account_operation_from_topic(topic);
     let event = store.append_event(
         account_id,

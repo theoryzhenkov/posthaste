@@ -1,7 +1,7 @@
 use base64::Engine;
 use lettre::message::{header, Attachment, Body, Mailbox, MultiPart, SinglePart};
 use lettre::{Address, Message};
-use posthaste_domain_service::{Recipient, SendMessageRequest};
+use posthaste_domain_model::{Recipient, SendMessageRequest};
 use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
 use crate::smtp::SmtpConnectionConfig;
@@ -69,7 +69,7 @@ pub fn build_smtp_message(
 }
 
 fn smtp_attachment_part(
-    attachment: &posthaste_domain_service::SendMessageAttachment,
+    attachment: &posthaste_domain_model::SendMessageAttachment,
 ) -> Result<SinglePart, ImapAdapterError> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(attachment.content_base64.trim())
@@ -87,7 +87,7 @@ fn smtp_attachment_part(
     )
 }
 
-fn normalized_attachment_mime_type(attachment: &posthaste_domain_service::SendMessageAttachment) -> &str {
+fn normalized_attachment_mime_type(attachment: &posthaste_domain_model::SendMessageAttachment) -> &str {
     let mime_type = attachment.mime_type.trim();
     if mime_type.is_empty() {
         "application/octet-stream"

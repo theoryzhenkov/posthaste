@@ -3,7 +3,7 @@
 //! exchange became an authority server operation.
 
 use axum::response::IntoResponse;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountDriver, AccountId, ProviderAuthKind, ProviderHint, SecretKind, SecretRef,
     TransportSecurity,
 };

@@ -10,7 +10,7 @@ use imap_client::imap_types::{
 };
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
-use posthaste_domain_service::ImapMessageLocation;
+use posthaste_domain_model::ImapMessageLocation;
 
 use crate::{selected_mailbox_from_examine, ImapAdapterError};
 

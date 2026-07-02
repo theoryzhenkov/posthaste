@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(test)]
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountDriver, AccountSettings, AccountTransportSettings, ImapTransportSettings,
     ProviderAuthKind, ProviderHint, SecretRef, SmtpTransportSettings,
 };

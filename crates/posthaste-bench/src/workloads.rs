@@ -6,13 +6,8 @@
 //! iai-callgrind regression gate all share one source of truth. Fixtures are
 //! fully synthetic and require no network or external services.
 
-use posthaste_domain_service::{
-    search, AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid,
-    ImapUidValidity, MailboxId, MailboxRecord, MessageCommandStore, MessageDetailStore, MessageId,
-    MessageListStore, MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient,
-    SetKeywordsCommand, SmartMailboxStore, SortDirection, SourceProjectionStore, SyncBatch,
-    SyncCursor, SyncObject, SyncWriteStore, ThreadId,
-};
+use posthaste_domain_model::{AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid, ImapUidValidity, MailboxId, MailboxRecord, MessageId, MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId};
+use posthaste_domain_service::{search, MessageCommandStore, MessageDetailStore, MessageListStore, SmartMailboxStore, SourceProjectionStore, SyncWriteStore};
 use posthaste_store::DatabaseStore;
 use tempfile::TempDir;
 

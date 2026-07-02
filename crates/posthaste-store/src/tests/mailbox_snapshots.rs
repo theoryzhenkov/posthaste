@@ -76,14 +76,14 @@ fn full_mailbox_snapshot_removes_stale_local_mailboxes() -> Result<(), StoreErro
         &account,
         &SyncBatch {
             mailboxes: vec![
-                posthaste_domain_service::MailboxRecord {
+                posthaste_domain_model::MailboxRecord {
                     id: MailboxId::from("inbox"),
                     name: "Inbox".to_string(),
                     role: Some("inbox".to_string()),
                     unread_emails: 0,
                     total_emails: 0,
                 },
-                posthaste_domain_service::MailboxRecord {
+                posthaste_domain_model::MailboxRecord {
                     id: MailboxId::from("all-mail"),
                     name: "All Mail".to_string(),
                     role: None,
@@ -110,7 +110,7 @@ fn full_mailbox_snapshot_removes_stale_local_mailboxes() -> Result<(), StoreErro
     store.apply_sync_batch(
         &account,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain_service::MailboxRecord {
+            mailboxes: vec![posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),

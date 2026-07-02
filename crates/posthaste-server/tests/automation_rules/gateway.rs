@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use posthaste_domain_service::{
-    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
+use posthaste_domain_model::{
+    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailboxId, MailboxRecord, MessageId,
+    MessageRecord, MutationOutcome, ReplyContext, SendMessageRequest, SetKeywordsCommand,
+    SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
 };
+use posthaste_domain_service::{MailGateway, PushTransport};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum RecordedMutation {

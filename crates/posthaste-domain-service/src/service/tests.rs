@@ -4,6 +4,24 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::*;
+use posthaste_domain_model::{
+    AccountDriver, AccountId, AccountSettings, AppSettings, AutomationAction,
+    AutomationBackfillJob, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger,
+    CacheCandidate, CacheFetchCandidate, CacheFetchLease, CacheFetchUnit, CacheLayer,
+    CacheObjectState, CachePolicy, CachePriorityUpdate, CacheRescoreCandidate, CacheSignalUpdate,
+    CachedSenderAddress, CommandResult, ConfigError, ConversationCursor, ConversationId,
+    ConversationPage, ConversationSortField, ConversationView, DomainEvent, EventFilter,
+    FetchedBody, GatewayError, Identity, ImapMailboxSyncState, ImapMessageLocation, MailboxId,
+    MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageRecord,
+    MessageSortField, MessageSummary, MutationOutcome, Operation, OperationEntity,
+    OperationEntityKind, OperationId, OperationKind, OperationOutcome, OperationSettlement,
+    OperationState, Recipient, ReplaceMailboxesCommand, RevLogSnapshot, SendMessageRequest,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection, StoreError,
+    SyncBatch, SyncCursor, SyncMode, SyncObject, SyncTrigger, TagSummary, ThreadId, ThreadView,
+    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_OPERATION_SETTLED,
+};
 
 mod config;
 mod fixtures;

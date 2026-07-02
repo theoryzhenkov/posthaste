@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountTransportSettings, ImapTransportSettings, ProviderAuthKind, ProviderHint, SecretKind,
     SecretRef, SmtpTransportSettings, TransportSecurity,
 };
@@ -146,7 +146,7 @@ impl StalwartFixture {
     /// injection point for live-convergence scenarios: the app's own sync path
     /// (push, with a short poll fallback) observes them.
     pub async fn inject(&self, count: usize) {
-        use posthaste_domain_service::{Recipient, SendMessageRequest};
+        use posthaste_domain_model::{Recipient, SendMessageRequest};
         use posthaste_imap::{send_smtp_messages, SmtpConnectionConfig};
 
         let config = SmtpConnectionConfig {

@@ -7,7 +7,7 @@ use imap_client::imap_types::IntoStatic;
 use imap_client::tasks::tasks::select::SelectDataUnvalidated;
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
-use posthaste_domain_service::{ImapModSeq, ImapSelectedMailbox, ImapUid, ImapUidValidity};
+use posthaste_domain_model::{ImapModSeq, ImapSelectedMailbox, ImapUid, ImapUidValidity};
 
 use crate::{imap_mailbox_id, ImapAdapterError};
 

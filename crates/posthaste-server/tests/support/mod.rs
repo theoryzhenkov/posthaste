@@ -23,11 +23,13 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use posthaste_config::TomlConfigRepository;
+use posthaste_domain_model::{
+    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings, MailboxId,
+    MailboxRecord, MessageId, MessageRecord, Recipient, SecretRef, SecretStoreError, SyncBatch,
+    SyncCursor, SyncObject, ThreadId, RFC3339_EPOCH,
+};
 use posthaste_domain_service::{
-    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    ConfigRepository, MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord,
-    Recipient, SecretRef, SecretStore, SecretStoreError, SourceProjectionStore, SyncBatch,
-    SyncCursor, SyncObject, SyncWriteStore, ThreadId, RFC3339_EPOCH,
+    ConfigRepository, MailService, MailStore, SecretStore, SourceProjectionStore, SyncWriteStore,
 };
 use posthaste_contract_core::{RuntimeAccountList, RuntimeCaller, RuntimeStatus};
 use posthaste_runtime_api::{RuntimeAccountApi, RuntimeSettingsApi};

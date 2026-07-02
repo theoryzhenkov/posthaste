@@ -1,9 +1,7 @@
 use std::collections::BTreeSet;
 
-use posthaste_domain_service::{
-    AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxId,
-    MailboxRecord, SyncBatch, SyncCursor, SyncObject,
-};
+use posthaste_domain_model::{ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxRecord, SyncBatch, SyncCursor, SyncObject};
+use posthaste_domain_model::{AccountId, MailboxId};
 
 use crate::{
     DiscoveredImapAccount, ImapChangedSinceSnapshot, ImapMailboxHeaderSnapshot, ImapMappedHeader,

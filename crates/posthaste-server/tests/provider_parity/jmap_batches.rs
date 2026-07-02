@@ -1,4 +1,4 @@
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     MailboxId, MailboxRecord, MessageId, MessageRecord, SyncBatch, SyncCursor, SyncObject, ThreadId,
 };
 

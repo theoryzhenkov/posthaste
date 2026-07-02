@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use posthaste_domain_service::{
-    ImapMessageLocation, ImapMessageLocationKey, ImapUid, ImapUidValidity, MailboxId, MessageId,
-    MessageRecord,
-};
+use posthaste_domain_model::{ImapMessageLocation, ImapMessageLocationKey, ImapUid, ImapUidValidity, MessageRecord};
+use posthaste_domain_model::{MailboxId, MessageId};
 
 pub(super) fn deleted_locations_missing_from_remote(
     local_locations: &[ImapMessageLocation],

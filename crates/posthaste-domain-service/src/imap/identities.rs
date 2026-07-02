@@ -32,8 +32,8 @@ pub fn gmail_message_id(gmail_id: GmailMessageId) -> MessageId {
 /// Build a stable local thread ID from Gmail's `X-GM-THRID`.
 ///
 /// @spec docs/L0-providers#identity-and-threading
-pub fn gmail_thread_id(gmail_id: GmailThreadId) -> crate::ThreadId {
-    crate::ThreadId(format!("imap:gmail:thrid:{}", gmail_id.0))
+pub fn gmail_thread_id(gmail_id: GmailThreadId) -> posthaste_domain_model::ThreadId {
+    posthaste_domain_model::ThreadId(format!("imap:gmail:thrid:{}", gmail_id.0))
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

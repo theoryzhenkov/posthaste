@@ -233,7 +233,7 @@ impl MailService {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-        blob_id: &crate::BlobId,
+        blob_id: &posthaste_domain_model::BlobId,
         gateway: &dyn MailGateway,
     ) -> Result<Vec<u8>, ServiceError> {
         if let Some(raw) = self
@@ -354,9 +354,9 @@ pub(crate) fn message_assertions(
 ///
 /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
 pub(crate) fn project_record(
-    mut record: crate::MessageRecord,
+    mut record: posthaste_domain_model::MessageRecord,
     remaining_ops: &[Operation],
-) -> Result<Option<crate::MessageRecord>, ServiceError> {
+) -> Result<Option<posthaste_domain_model::MessageRecord>, ServiceError> {
     let assertions = message_assertions(remaining_ops, record.id.as_str())?;
     let base = MessageFoldState {
         keywords: std::mem::take(&mut record.keywords),

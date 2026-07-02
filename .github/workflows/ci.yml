@@ -47,7 +47,7 @@ jobs:
         with:
           shared-key: ci-wasm-frontier
           cache-on-failure: true
-      - run: cargo check --target wasm32-unknown-unknown -p posthaste-link-core -p posthaste-link-replica
+      - run: cargo check --target wasm32-unknown-unknown -p posthaste-link-core -p posthaste-link-replica -p posthaste-contract-core -p posthaste-domain-model -p posthaste-link-wasm
 
   frontend:
     runs-on: ubuntu-latest

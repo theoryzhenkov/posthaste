@@ -1,5 +1,5 @@
 use jmap_client::identity;
-use posthaste_domain_service::{GatewayError, Identity};
+use posthaste_domain_model::{GatewayError, Identity};
 
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 
@@ -44,7 +44,7 @@ pub(crate) async fn fetch_identities(
 /// @spec docs/L1-compose#composesession-interface
 pub(crate) async fn fetch_send_identity(
     gateway: &LiveJmapGateway,
-    requested_from: Option<&posthaste_domain_service::Recipient>,
+    requested_from: Option<&posthaste_domain_model::Recipient>,
 ) -> Result<Identity, GatewayError> {
     resolve_send_identity(fetch_identities(gateway).await?, requested_from)
 }
@@ -62,14 +62,14 @@ pub(crate) async fn fetch_send_identity(
 /// @spec docs/L1-compose#composesession-interface
 pub(crate) async fn fetch_draft_sender(
     gateway: &LiveJmapGateway,
-    requested_from: Option<&posthaste_domain_service::Recipient>,
+    requested_from: Option<&posthaste_domain_model::Recipient>,
 ) -> Result<Identity, GatewayError> {
     resolve_draft_sender(fetch_identities(gateway).await?, requested_from)
 }
 
 pub(crate) fn resolve_draft_sender(
     identities: Vec<Identity>,
-    requested_from: Option<&posthaste_domain_service::Recipient>,
+    requested_from: Option<&posthaste_domain_model::Recipient>,
 ) -> Result<Identity, GatewayError> {
     let Some(requested_from) = requested_from else {
         // No requested sender: fall back to the provider's default identity,
@@ -111,7 +111,7 @@ pub(crate) fn resolve_draft_sender(
 
 pub(crate) fn resolve_send_identity(
     mut identities: Vec<Identity>,
-    requested_from: Option<&posthaste_domain_service::Recipient>,
+    requested_from: Option<&posthaste_domain_model::Recipient>,
 ) -> Result<Identity, GatewayError> {
     let default_identity = identities
         .pop()

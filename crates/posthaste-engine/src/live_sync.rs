@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use jmap_client::client::Client;
-use posthaste_domain_service::{
-    AccountId, GatewayError, MessageRecord, SyncBatch, SyncChunkSink, SyncCursor, SyncObject,
-    SyncOutcome, SyncProgress, SyncProgressReporter, SyncProgressStage, SyncReconciliation,
-    SyncTrigger,
+use posthaste_domain_model::{
+    AccountId, GatewayError, MessageRecord, SyncBatch, SyncCursor, SyncObject, SyncOutcome,
+    SyncProgress, SyncProgressStage, SyncReconciliation, SyncTrigger,
 };
+use posthaste_domain_service::{SyncChunkSink, SyncProgressReporter};
 use posthaste_observability::{events, ph_info};
 
 use crate::sync::{

@@ -67,7 +67,7 @@ fn message_summary_carries_max_modseq_as_version() -> Result<(), StoreError> {
     store.apply_sync_batch(
         &account,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain_service::MailboxRecord {
+            mailboxes: vec![posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),
@@ -147,7 +147,7 @@ fn sync_batch_persists_and_deletes_imap_message_locations() -> Result<(), StoreE
     store.apply_sync_batch(
         &account,
         &SyncBatch {
-            mailboxes: vec![posthaste_domain_service::MailboxRecord {
+            mailboxes: vec![posthaste_domain_model::MailboxRecord {
                 id: MailboxId::from("inbox"),
                 name: "Inbox".to_string(),
                 role: Some("inbox".to_string()),

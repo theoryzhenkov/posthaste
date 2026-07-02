@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use jmap_client::client::Client;
 use jmap_client::email;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     now_iso8601 as domain_now_iso8601, GatewayError, MessageId, MessageRecord, SyncCursor,
     SyncObject,
 };
@@ -286,7 +286,7 @@ pub(crate) fn email_metadata_properties() -> [email::Property; 17] {
         email::Property::InReplyTo,
         // Stable draft identity round-tripped through the draft's headers.
         email::Property::Header(email::Header::as_text(
-            posthaste_domain_service::DRAFT_ID_HEADER,
+            posthaste_domain_model::DRAFT_ID_HEADER,
             false,
         )),
     ]

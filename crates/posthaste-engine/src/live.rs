@@ -3,7 +3,7 @@ use std::sync::Arc;
 use jmap_client::client::{Client, Credentials};
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::mailbox;
-use posthaste_domain_service::{GatewayError, MailboxId};
+use posthaste_domain_model::{GatewayError, MailboxId};
 use posthaste_observability::{events, ph_debug, ph_info};
 
 mod gateway;

@@ -6,7 +6,7 @@ impl MailService {
     /// @spec docs/L1-api#sse-event-stream
     pub fn list_events(
         &self,
-        filter: &crate::EventFilter,
+        filter: &posthaste_domain_model::EventFilter,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         self.events.list_events(filter).map_err(Into::into)
     }
@@ -109,7 +109,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         gateway: &dyn MailGateway,
-    ) -> Result<crate::ReplyContext, ServiceError> {
+    ) -> Result<posthaste_domain_model::ReplyContext, ServiceError> {
         gateway
             .fetch_reply_context(account_id, message_id)
             .await

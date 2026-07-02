@@ -1,5 +1,6 @@
 use keyring::{Entry, Error as KeyringError};
-use posthaste_domain_service::{SecretKind, SecretRef, SecretStore, SecretStoreError};
+use posthaste_domain_model::{SecretKind, SecretRef, SecretStoreError};
+use posthaste_domain_service::SecretStore;
 
 /// Keyring service name used for all OS-managed secrets.
 const KEYRING_SERVICE_NAME: &str = "posthaste";

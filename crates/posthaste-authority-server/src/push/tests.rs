@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use posthaste_domain_service::{GatewayError, PushNotification, PushStream};
+use posthaste_domain_model::{GatewayError, PushNotification, PushStream};
 
 use super::*;
 

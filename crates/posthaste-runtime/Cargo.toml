@@ -19,6 +19,7 @@ futures-util = { workspace = true }
 keyring = { workspace = true }
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-contract-core = { path = "../posthaste-contract-core" }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-core = { path = "../posthaste-link-core" }

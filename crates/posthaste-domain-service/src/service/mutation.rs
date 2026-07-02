@@ -1,4 +1,4 @@
-use crate::{
+use posthaste_domain_model::{
     AccountId, AddToMailboxCommand, CommandAck, MailboxId, MessageId, Operation, OperationEntity,
     OperationEntityKind, OperationKind, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     ServiceError, SetKeywordsCommand, StoreError, EVENT_TOPIC_MESSAGE_UPDATED,
@@ -13,7 +13,7 @@ impl MailService {
         message_id: &MessageId,
         kind: OperationKind,
         payload: serde_json::Value,
-    ) -> Result<crate::Operation, ServiceError> {
+    ) -> Result<Operation, ServiceError> {
         self.queue_operation(
             account_id,
             OperationEntity {
@@ -27,7 +27,7 @@ impl MailService {
 
     fn remove_operation_after_local_failure(
         &self,
-        operation: &crate::Operation,
+        operation: &posthaste_domain_model::Operation,
         error: ServiceError,
     ) -> ServiceError {
         let _ = self.outbox.remove_operation(&operation.id);
