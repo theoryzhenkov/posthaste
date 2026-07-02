@@ -1,8 +1,9 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use posthaste_server::config::resolve_roots;
-use posthaste_server::{start_server, write_secure_file, ServerConfig};
+use posthaste_api::config::resolve_roots;
+use posthaste_api::{write_secure_file, ServerConfig};
+use posthaste_server::start_server;
 
 mod token_cli;
 

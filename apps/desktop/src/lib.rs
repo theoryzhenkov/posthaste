@@ -3,7 +3,7 @@ use posthaste_observability::{
     ph_forwarded_warn, ph_info,
 };
 #[cfg(feature = "embedded-server")]
-use posthaste_server::ServerConfig;
+use posthaste_api::ServerConfig;
 use serde::Deserialize;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuBuilder, SubmenuBuilder};

@@ -6,9 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use posthaste_authority_runtime::oauth::OAuthTokenSet;
-use posthaste_authority_runtime::{
-    build_authority_runtime, from_api_bridge_for_migration, RuntimeBuildConfig, RuntimeBuildError,
-};
+use posthaste_authority_runtime::{build_authority_runtime, from_api_bridge_for_migration};
 use posthaste_domain_service::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
@@ -18,6 +16,7 @@ use posthaste_domain_service::{
 };
 use posthaste_engine::MockJmapGateway;
 use posthaste_client_link::RuntimeLinkOps;
+use posthaste_runtime::{RuntimeBuildConfig, RuntimeBuildError};
 use posthaste_contract_core::RuntimeCaller;
 use posthaste_runtime_api::RuntimeAccountApi;
 use posthaste_contract_core::{

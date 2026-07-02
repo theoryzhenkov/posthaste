@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::http::{header, StatusCode};
-use posthaste_server::token::{mint_full_scope_token, RootKey};
+use posthaste_api::token::{mint_full_scope_token, RootKey};
 
 use crate::support::{build_app, build_state, get_request, status_of, valid_token, CORS_ORIGIN};
 

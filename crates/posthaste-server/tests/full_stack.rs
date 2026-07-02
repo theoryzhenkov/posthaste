@@ -1,5 +1,5 @@
 //! Full-stack integration tests: real handlers + real store + real auth, driven
-//! through [`posthaste_server::build_api_router`] via the shared [`support`]
+//! through [`posthaste_api::build_api_router`] via the shared [`support`]
 //! harness. These close the data-level gap the security review flagged — the
 //! auth-layer tests prove the allow/deny matrix, but only this proves the
 //! HANDLER's SQL actually restricts an account-scoped search to that account.

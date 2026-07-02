@@ -8,7 +8,8 @@
 //! / `POSTHASTE_STATE_ROOT` per install); the link credential is `[link] token`
 //! (`POSTHASTE_LINK_TOKEN`). Bind with `--bind` or `POSTHASTE_BIND`.
 
-use posthaste_server::{start_backend, ServerConfig};
+use posthaste_api::ServerConfig;
+use posthaste_server::start_backend;
 
 #[tokio::main]
 async fn main() {

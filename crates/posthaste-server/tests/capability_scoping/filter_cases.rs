@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use posthaste_server::token::{attenuate, mint_with_caveats, RootKey};
+use posthaste_api::token::{attenuate, mint_with_caveats, RootKey};
 
 use crate::support::{full_scope, status, test_root_key};
 

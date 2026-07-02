@@ -1,6 +1,6 @@
 //! Full-stack integration harness: a real [`AppState`] (real `DatabaseStore` +
 //! `MailService` + on-disk config) wired into the REAL `/v1` router via
-//! [`posthaste_server::build_api_router`]. Tests drive the actual handlers
+//! [`posthaste_api::build_api_router`]. Tests drive the actual handlers
 //! through the actual `require_auth` perimeter — no stub routes — so handler
 //! result-side scoping and end-to-end token behavior are exercised against real
 //! seeded data.
@@ -31,9 +31,9 @@ use posthaste_domain_service::{
 };
 use posthaste_contract_core::{RuntimeAccountList, RuntimeCaller, RuntimeStatus};
 use posthaste_runtime_api::{RuntimeAccountApi, RuntimeSettingsApi};
-use posthaste_server::supervisor::AccountSupervisor;
-use posthaste_server::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
-use posthaste_server::{build_api_router, AppState};
+use posthaste_authority_runtime::AccountSupervisor;
+use posthaste_api::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
+use posthaste_api::{build_api_router, AppState};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 
@@ -124,8 +124,8 @@ impl Harness {
             auth_token: mint_full_scope_token(&root),
             macaroon_root_key: root.clone(),
             require_auth: true,
-            origin_allowlist: posthaste_server::auth::origin_allowlist(CORS_ORIGIN, &[]),
-            host_allowlist: posthaste_server::auth::host_allowlist("127.0.0.1:3001"),
+            origin_allowlist: posthaste_api::auth::origin_allowlist(CORS_ORIGIN, &[]),
+            host_allowlist: posthaste_api::auth::host_allowlist("127.0.0.1:3001"),
         });
         let router = Router::new().nest("/v1", build_api_router(state.clone()));
         Self {
