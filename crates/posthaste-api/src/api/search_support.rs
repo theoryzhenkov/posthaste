@@ -7,7 +7,7 @@ pub(super) fn parse_optional_search_rule(
     let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
         return Ok(None);
     };
-    posthaste_domain::search::parse_query(query)
+    posthaste_domain_service::search::parse_query(query)
         .map(Some)
         .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, ApiErrorCode::InvalidQuery, msg))
 }

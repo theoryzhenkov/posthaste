@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use imap_client::imap_types::core::NString;
-use posthaste_domain::{ImapUid, ImapUidValidity, MailboxId};
+use posthaste_domain_service::{ImapUid, ImapUidValidity, MailboxId};
 
 use super::*;
 

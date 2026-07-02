@@ -20,7 +20,7 @@ name = "posthaste-profile"
 path = "src/main.rs"
 
 [dependencies]
-posthaste-domain = { path = "../posthaste-domain" }
+posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-store = { path = "../posthaste-store" }
 # Runtime-tier workload: drive the full mutation -> view-recompute -> frame path
 # (not just the store), so the harness can profile the link-bus hot path.

@@ -1,6 +1,6 @@
 use imap_client::imap_types::flag::Flag;
 use mail_parser::MessageParser;
-use posthaste_domain::{
+use posthaste_domain_service::{
     gmail_message_id, gmail_thread_id, imap_message_id, GmailLabel, ImapGmailMetadata,
     ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid, MailboxId, MessageId,
     MessageRecord, Recipient, SystemKeyword, ThreadId, RFC3339_EPOCH,
@@ -87,7 +87,7 @@ pub fn imap_header_message_record_with_gmail_metadata(
         })
         .unwrap_or_default();
     let draft_id = parsed
-        .header_raw(posthaste_domain::DRAFT_ID_HEADER)
+        .header_raw(posthaste_domain_service::DRAFT_ID_HEADER)
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);

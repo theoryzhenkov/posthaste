@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings, AccountTransportSettings,
     AppSettings, ConfigError, ConfigRepository, SecretRef,
 };

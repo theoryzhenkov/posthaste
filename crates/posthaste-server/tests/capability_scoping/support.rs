@@ -8,7 +8,7 @@ use axum::http::{header, Request, StatusCode};
 use axum::routing::{get, patch, post};
 use axum::{middleware, Router};
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
+use posthaste_domain_service::{
     ConfigRepository, MailService, MailStore, SecretRef, SecretStore, SecretStoreError,
 };
 use posthaste_server::auth::require_auth_layer;

@@ -13,7 +13,7 @@ use axum::middleware;
 use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use posthaste_domain::{AccountConnectionOverview, AccountId, ServiceError};
+use posthaste_domain_service::{AccountConnectionOverview, AccountId, ServiceError};
 use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore, RuntimeError};
 
 use axum::http::StatusCode;

@@ -4,7 +4,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
     MessageId, MessageReadback, MessageRecord, MutationOutcome, PushTransport, Recipient,
     ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
@@ -140,7 +140,7 @@ impl MailGateway for MockJmapGateway {
         &self,
         account_id: &AccountId,
         _cursors: &[SyncCursor],
-        _progress: Option<posthaste_domain::SyncProgressReporter>,
+        _progress: Option<posthaste_domain_service::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         // Account-scoped gate: lets a test block the pull phase until the test
         // has enqueued more local mutations, deterministically reproducing the

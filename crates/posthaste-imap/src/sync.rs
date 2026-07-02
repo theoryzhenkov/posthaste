@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxId,
     MailboxRecord, SyncBatch, SyncCursor, SyncObject,
 };

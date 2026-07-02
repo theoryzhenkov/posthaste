@@ -4,7 +4,7 @@ impl AccountMutationService {
     pub fn patch_app_settings(
         &self,
         request: PatchAppSettingsMutation,
-    ) -> Result<posthaste_domain::AppSettings, RuntimeError> {
+    ) -> Result<posthaste_domain_service::AppSettings, RuntimeError> {
         let mut settings = self.service.get_app_settings()?;
 
         // Each entry pairs an audit name with the merge it performs, so the

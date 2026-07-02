@@ -55,7 +55,7 @@ pub async fn discard_operation(
         .discard_operation(
             RuntimeCaller::api(),
             AccountId(source_id),
-            posthaste_domain::OperationId::from(operation_id),
+            posthaste_domain_service::OperationId::from(operation_id),
         )
         .await
         .map_err(ApiError::from_runtime_error)?;
@@ -90,7 +90,7 @@ pub async fn retry_operation(
         .retry_operation(
             RuntimeCaller::api(),
             AccountId(source_id),
-            posthaste_domain::OperationId::from(operation_id),
+            posthaste_domain_service::OperationId::from(operation_id),
         )
         .await
         .map_err(ApiError::from_runtime_error)?;

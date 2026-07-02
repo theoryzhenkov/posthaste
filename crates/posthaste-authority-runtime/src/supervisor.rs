@@ -5,7 +5,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use futures_util::{future::pending, StreamExt};
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus,
     CacheMaintenanceFeedback, CacheResourceGovernor, CacheResourcePolicy, DomainEvent,
     GatewayError, Id, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream,

@@ -42,7 +42,7 @@ impl DatabaseStore {
     }
 }
 
-impl posthaste_domain::SnoozeStore for DatabaseStore {
+impl posthaste_domain_service::SnoozeStore for DatabaseStore {
     fn insert_snooze(
         &self,
         account_id: &AccountId,

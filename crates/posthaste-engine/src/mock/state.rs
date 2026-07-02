@@ -1,4 +1,4 @@
-use posthaste_domain::{
+use posthaste_domain_service::{
     GatewayError, MessageId, MessageReadback, MutationOutcome, SyncCursor, SyncObject,
 };
 

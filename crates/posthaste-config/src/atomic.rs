@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use posthaste_domain::ConfigError;
+use posthaste_domain_service::ConfigError;
 
 /// Monotonic counter that makes each `atomic_write` temp path unique within a
 /// process (the pid separates processes). Without it, concurrent writes shared a

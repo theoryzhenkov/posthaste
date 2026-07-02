@@ -9,7 +9,7 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 futures-util = { workspace = true }
 jmap-client = { workspace = true }
-posthaste-domain = { path = "../posthaste-domain" }
+posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-observability = { path = "../posthaste-observability" }
 pulldown-cmark = { workspace = true }
 reqwest = { workspace = true }

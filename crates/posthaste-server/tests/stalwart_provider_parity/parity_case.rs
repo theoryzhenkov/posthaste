@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use posthaste_domain::StaticSecretResolver;
-use posthaste_domain::*;
+use posthaste_domain_service::StaticSecretResolver;
+use posthaste_domain_service::*;
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::{ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig};
 

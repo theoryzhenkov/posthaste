@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, DomainEvent, EventFilter, MailboxId,
     MailboxSummary, MessageId, Operation, OperationId, RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, SecretStore, SendMessageRequest, ServiceError, SetKeywordsCommand,
@@ -689,7 +689,7 @@ impl RuntimeCore for RuntimeHandle {
         &self,
         _caller: RuntimeCaller,
         account_id: AccountId,
-    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+    ) -> Result<posthaste_domain_service::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .reads
@@ -712,7 +712,7 @@ impl RuntimeCore for RuntimeHandle {
         _caller: RuntimeCaller,
         scope: AccountScopeRequest,
     ) -> Result<
-        std::collections::BTreeMap<AccountId, Vec<posthaste_domain::MailboxSummary>>,
+        std::collections::BTreeMap<AccountId, Vec<posthaste_domain_service::MailboxSummary>>,
         RuntimeError,
     > {
         self.ensure_runtime_active()?;
@@ -722,7 +722,7 @@ impl RuntimeCore for RuntimeHandle {
     async fn list_smart_mailboxes(
         &self,
         _caller: RuntimeCaller,
-    ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+    ) -> Result<Vec<posthaste_domain_service::SmartMailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.reads.list_smart_mailboxes().await
     }
@@ -731,7 +731,7 @@ impl RuntimeCore for RuntimeHandle {
         &self,
         _caller: RuntimeCaller,
         smart_mailbox_id: SmartMailboxId,
-    ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+    ) -> Result<posthaste_domain_service::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.reads.get_smart_mailbox(smart_mailbox_id).await
     }
@@ -740,7 +740,7 @@ impl RuntimeCore for RuntimeHandle {
         &self,
         _caller: RuntimeCaller,
         mutation: posthaste_runtime_contract::CreateSmartMailboxMutation,
-    ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+    ) -> Result<posthaste_domain_service::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.backend_link.create_smart_mailbox(mutation).await
     }
@@ -750,7 +750,7 @@ impl RuntimeCore for RuntimeHandle {
         _caller: RuntimeCaller,
         smart_mailbox_id: SmartMailboxId,
         mutation: posthaste_runtime_contract::PatchSmartMailboxMutation,
-    ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+    ) -> Result<posthaste_domain_service::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .backend_link
@@ -773,7 +773,7 @@ impl RuntimeCore for RuntimeHandle {
     async fn reset_default_smart_mailboxes(
         &self,
         _caller: RuntimeCaller,
-    ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+    ) -> Result<Vec<posthaste_domain_service::SmartMailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.backend_link.reset_default_smart_mailboxes().await
     }
@@ -782,7 +782,7 @@ impl RuntimeCore for RuntimeHandle {
         &self,
         _caller: RuntimeCaller,
         scope: AccountScopeRequest,
-    ) -> Result<Vec<posthaste_domain::TagSummary>, RuntimeError> {
+    ) -> Result<Vec<posthaste_domain_service::TagSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.reads.list_tags(scope).await
     }
@@ -791,7 +791,7 @@ impl RuntimeCore for RuntimeHandle {
         &self,
         _caller: RuntimeCaller,
         account_id: AccountId,
-    ) -> Result<posthaste_domain::Identity, RuntimeError> {
+    ) -> Result<posthaste_domain_service::Identity, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.reads.get_identity(account_id).await
     }
@@ -799,7 +799,7 @@ impl RuntimeCore for RuntimeHandle {
     async fn list_sender_addresses(
         &self,
         _caller: RuntimeCaller,
-    ) -> Result<Vec<posthaste_domain::CachedSenderAddress>, RuntimeError> {
+    ) -> Result<Vec<posthaste_domain_service::CachedSenderAddress>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.reads.list_sender_addresses().await
     }
@@ -809,7 +809,7 @@ impl RuntimeCore for RuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-    ) -> Result<posthaste_domain::ReplyContext, RuntimeError> {
+    ) -> Result<posthaste_domain_service::ReplyContext, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .reads
@@ -1011,7 +1011,7 @@ impl RuntimeCore for RuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: SetKeywordsCommand,
-    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
+    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .backend_link
@@ -1025,7 +1025,7 @@ impl RuntimeCore for RuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: AddToMailboxCommand,
-    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
+    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .backend_link
@@ -1039,7 +1039,7 @@ impl RuntimeCore for RuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: RemoveFromMailboxCommand,
-    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
+    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .backend_link
@@ -1053,7 +1053,7 @@ impl RuntimeCore for RuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: ReplaceMailboxesCommand,
-    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
+    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .backend_link
@@ -1066,7 +1066,7 @@ impl RuntimeCore for RuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
+    ) -> Result<posthaste_domain_service::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .backend_link
@@ -1093,7 +1093,7 @@ impl RuntimeCore for RuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+    ) -> Result<posthaste_domain_service::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
         // Body-free: the detail read serves header + cached attachments only and
         // never loads the body (it is the separate `/body` lazy resource), so
@@ -1103,7 +1103,7 @@ impl RuntimeCore for RuntimeHandle {
             .reads
             .message_detail(&account_id, &message_id)
             .await?;
-        Ok(posthaste_domain::CommandResult {
+        Ok(posthaste_domain_service::CommandResult {
             detail,
             events: Vec::new(),
         })
@@ -1114,7 +1114,7 @@ impl RuntimeCore for RuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-    ) -> Result<posthaste_domain::DraftContent, RuntimeError> {
+    ) -> Result<posthaste_domain_service::DraftContent, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .reads
@@ -1180,7 +1180,7 @@ impl RuntimeCore for RuntimeHandle {
         &self,
         _caller: RuntimeCaller,
         mutation: CreateAccountMutation,
-    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+    ) -> Result<posthaste_domain_service::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.backend_link.create_account(mutation).await
     }
@@ -1190,7 +1190,7 @@ impl RuntimeCore for RuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
         mutation: PatchAccountMutation,
-    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+    ) -> Result<posthaste_domain_service::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
             .backend_link
@@ -1285,7 +1285,7 @@ pub enum RuntimeShutdownError {
 #[cfg(test)]
 mod outbox_lifecycle_tests {
     use super::*;
-    use posthaste_domain::MessageSummary;
+    use posthaste_domain_service::MessageSummary;
     use posthaste_link_contract::{DownStream, LinkCoverage};
     use posthaste_runtime_contract::ClientMutationId;
 

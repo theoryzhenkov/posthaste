@@ -1,4 +1,4 @@
-use posthaste_domain::PushTransport;
+use posthaste_domain_service::PushTransport;
 
 use crate::live::LiveJmapGateway;
 

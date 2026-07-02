@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use posthaste_domain::{
+use posthaste_domain_service::{
     now_iso8601 as domain_now_iso8601, validate_snapshot, AccountSettings, ConfigError,
     ConfigSnapshot, SmartMailbox, RFC3339_EPOCH,
 };

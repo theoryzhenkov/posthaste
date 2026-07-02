@@ -85,7 +85,7 @@ impl AccountMutationService {
 
     pub fn reset_default_smart_mailboxes(
         &self,
-    ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+    ) -> Result<Vec<posthaste_domain_service::SmartMailboxSummary>, RuntimeError> {
         self.service.reset_default_smart_mailboxes()?;
         self.append_and_publish_event(
             &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
@@ -111,8 +111,8 @@ fn normalize_smart_mailbox_role(role: Option<String>) -> Result<Option<String>, 
     if trimmed.is_empty() {
         return Ok(None);
     }
-    match posthaste_domain::MailboxRole::parse(trimmed) {
-        Some(posthaste_domain::MailboxRole::Snooze) | None => Err(RuntimeError::new(
+    match posthaste_domain_service::MailboxRole::parse(trimmed) {
+        Some(posthaste_domain_service::MailboxRole::Snooze) | None => Err(RuntimeError::new(
             RuntimeErrorCode::InvalidMutation,
             format!("'{trimmed}' is not an assignable smart mailbox role"),
         )),

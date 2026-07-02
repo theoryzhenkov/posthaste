@@ -4055,7 +4055,7 @@ dependencies = [
  "keyring",
  "macaroon",
  "posthaste-config",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-observability",
  "posthaste-runtime",
  "posthaste-runtime-contract",
@@ -4093,7 +4093,7 @@ dependencies = [
  "jsonwebtoken",
  "oauth2",
  "posthaste-config",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-engine",
  "posthaste-imap",
  "posthaste-link-contract",
@@ -4123,7 +4123,7 @@ dependencies = [
  "futures-util",
  "iai-callgrind",
  "posthaste-authority-runtime",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-runtime-contract",
  "posthaste-store",
  "pprof",
@@ -4136,7 +4136,7 @@ dependencies = [
 name = "posthaste-config"
 version = "0.1.0"
 dependencies = [
- "posthaste-domain",
+ "posthaste-domain-service",
  "serde",
  "toml 0.8.2",
  "toml_edit 0.22.27",
@@ -4164,12 +4164,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-domain"
+name = "posthaste-domain-model"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "posthaste-domain-service"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
  "mail-parser",
+ "posthaste-domain-model",
  "posthaste-link-core",
  "posthaste-observability",
  "serde",
@@ -4191,7 +4205,7 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "jmap-client",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-observability",
  "pulldown-cmark",
  "reqwest 0.12.28",
@@ -4213,7 +4227,7 @@ dependencies = [
  "imap-codec",
  "lettre",
  "mail-parser",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-observability",
  "pulldown-cmark",
  "thiserror 2.0.18",
@@ -4239,7 +4253,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
- "posthaste-domain",
+ "posthaste-domain-model",
  "posthaste-link-core",
  "posthaste-runtime-contract",
  "serde",
@@ -4294,7 +4308,7 @@ dependencies = [
  "axum",
  "futures-util",
  "keyring",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-link-replica",
@@ -4313,7 +4327,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
- "posthaste-domain",
+ "posthaste-domain-model",
  "posthaste-link-core",
  "serde",
  "serde_json",
@@ -4349,7 +4363,7 @@ dependencies = [
  "posthaste-api",
  "posthaste-authority-runtime",
  "posthaste-config",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-engine",
  "posthaste-imap",
  "posthaste-link-contract",
@@ -4381,7 +4395,7 @@ name = "posthaste-store"
 version = "0.1.0"
 dependencies = [
  "hex",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-observability",
  "rusqlite",
  "serde_json",
@@ -4397,7 +4411,7 @@ dependencies = [
  "imap-codec",
  "posthaste-authority-runtime",
  "posthaste-config",
- "posthaste-domain",
+ "posthaste-domain-service",
  "posthaste-imap",
  "posthaste-link-core",
  "posthaste-link-replica",

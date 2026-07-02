@@ -1,4 +1,4 @@
-use posthaste_domain::{ProviderAuthKind, ProviderHint, SendMessageRequest, TransportSecurity};
+use posthaste_domain_service::{ProviderAuthKind, ProviderHint, SendMessageRequest, TransportSecurity};
 
 use super::*;
 

@@ -2,7 +2,7 @@ use imap_client::imap_types::fetch::{
     MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName,
 };
 use mail_parser::{MessageParser, MimeHeaders};
-use posthaste_domain::{BlobId, FetchedBody, ImapMessageLocation, MessageAttachment, MessageId};
+use posthaste_domain_service::{BlobId, FetchedBody, ImapMessageLocation, MessageAttachment, MessageId};
 
 use crate::discovery::connect_authenticated_client;
 use crate::{selected_mailbox_from_examine, ImapAdapterError, ImapConnectionConfig};

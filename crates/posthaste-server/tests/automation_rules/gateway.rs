@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use posthaste_domain::{
+use posthaste_domain_service::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
     SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
@@ -76,7 +76,7 @@ impl MailGateway for ScriptedGateway {
         &self,
         _account_id: &AccountId,
         _cursors: &[SyncCursor],
-        _progress: Option<posthaste_domain::SyncProgressReporter>,
+        _progress: Option<posthaste_domain_service::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         let state = self
             .state
