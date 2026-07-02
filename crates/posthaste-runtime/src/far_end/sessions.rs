@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
 use posthaste_domain_model::{DomainEvent, Id};
+use posthaste_link_far_end::{Accept, DedupStore, TerminalClass};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeViewSubscription};
 use posthaste_contract_core::{
     ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MailOperation,
@@ -30,6 +31,12 @@ pub(crate) struct SessionRegistry {
     views: Arc<ViewRegistry>,
     event_sender: broadcast::Sender<DomainEvent>,
     sessions: Mutex<HashMap<RuntimeSessionId, StoredSession>>,
+    /// The shared idempotency-dedup sub-store (RFC D45/D47), keyed
+    /// `(RuntimeSessionId, ClientMutationId)` — the client↔runtime seam's
+    /// assembly of the far-end engine. Replaces the former per-session
+    /// `latest_mutations` / `mutations_by_client_id` / `settled_mutation_ids`
+    /// hand-roll; a client "session" IS this seam's `LinkId` (D42).
+    dedup: DedupStore<RuntimeSessionId, StoredMutation>,
     next_mutation_id: AtomicU64,
 }
 
@@ -42,18 +49,8 @@ struct StoredSession {
     frames: broadcast::Sender<RuntimeFrame>,
     open_views: HashSet<ViewId>,
     latest_snapshots: HashMap<ViewId, ViewSnapshot>,
-    latest_mutations: HashMap<RuntimeMutationId, StoredMutation>,
-    mutations_by_client_id: HashMap<ClientMutationId, RuntimeMutationId>,
-    /// Terminal mutation IDs in settlement order, used to evict the oldest
-    /// settled mutations once the live catch-up window reaches its cap.
-    settled_mutation_ids: VecDeque<RuntimeMutationId>,
     event_task: Option<AbortHandle>,
 }
-
-/// Upper bound on the number of terminal mutations retained in a session for
-/// catch-up retransmission. Older mutations are evicted so reconnect cost stays
-/// bounded rather than growing with session age.
-const MAX_LATEST_MUTATIONS: usize = 100;
 
 #[derive(Clone)]
 struct StoredMutation {
@@ -115,23 +112,6 @@ impl StoredMutation {
     }
 }
 
-impl StoredSession {
-    /// Evict the oldest terminal mutations once the live catch-up window is
-    /// full, keeping the `latest_mutations` and `mutations_by_client_id` maps
-    /// bounded. Pending mutations are never evicted.
-    fn prune_settled_mutations(&mut self) {
-        while self.settled_mutation_ids.len() > MAX_LATEST_MUTATIONS {
-            let Some(oldest_id) = self.settled_mutation_ids.pop_front() else {
-                break;
-            };
-            if let Some(oldest) = self.latest_mutations.remove(&oldest_id) {
-                self.mutations_by_client_id
-                    .remove(&oldest.client_mutation_id);
-            }
-        }
-    }
-}
-
 impl SessionRegistry {
     fn lock_sessions(&self) -> MutexGuard<'_, HashMap<RuntimeSessionId, StoredSession>> {
         match self.sessions.lock() {
@@ -151,6 +131,7 @@ impl SessionRegistry {
             views,
             event_sender,
             sessions: Mutex::new(HashMap::new()),
+            dedup: DedupStore::new(),
             next_mutation_id: AtomicU64::new(1),
         }
     }
@@ -171,9 +152,6 @@ impl SessionRegistry {
                 frames,
                 open_views: HashSet::new(),
                 latest_snapshots: HashMap::new(),
-                latest_mutations: HashMap::new(),
-                mutations_by_client_id: HashMap::new(),
-                settled_mutation_ids: VecDeque::new(),
                 event_task: None,
             },
         );
@@ -206,6 +184,9 @@ impl SessionRegistry {
         if is_reconnect {
             self.refresh_open_views(&session_id).await;
         }
+        // The dedup ledger's mutation records for this session — the live
+        // mutation window replayed on collapse (fetched outside the session lock).
+        let mutations = self.dedup.records_for(&session_id);
         let (catch_up, mut receiver) = {
             let mut sessions = self.lock_sessions();
             let session = sessions
@@ -214,11 +195,11 @@ impl SessionRegistry {
             ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
             let current_seq = RuntimeSessionSeq::new(session.last_seq);
             let needs_initial_frames = session.last_seq == 0
-                && (!session.latest_snapshots.is_empty() || !session.latest_mutations.is_empty());
+                && (!session.latest_snapshots.is_empty() || !mutations.is_empty());
             let catch_up = if after_seq == Some(current_seq) && !needs_initial_frames {
                 Vec::new()
             } else {
-                collapse_session_frames(session)
+                collapse_session_frames(session, &mutations)
             };
             (catch_up, session.frames.subscribe())
         };
@@ -292,6 +273,8 @@ impl SessionRegistry {
         for view_id in open_views {
             let _ = self.views.close_view(&view_id);
         }
+        // Drop the session's dedup ledger entries (its link closed).
+        self.dedup.purge(&session_id);
         Ok(())
     }
 
@@ -375,31 +358,22 @@ impl SessionRegistry {
         let session_id = request.session_id.as_ref().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
-        if let Some(mutation_id) = session
-            .mutations_by_client_id
-            .get(&request.client_mutation_id)
         {
-            let mutation = session.latest_mutations.get(mutation_id).ok_or_else(|| {
-                RuntimeError::internal("runtime mutation index is inconsistent", None)
-            })?;
-            if mutation.operation != request.operation {
-                return Err(RuntimeError::invalid_mutation(
-                    "client mutation id was already used for a different mutation",
-                ));
-            }
-            return Ok(MutationAcceptance::Existing(mutation.receipt()));
+            // Session existence + caller-scope check; the dedup ledger is the
+            // shared sub-store below (released before it is touched).
+            let sessions = self.lock_sessions();
+            let session = sessions
+                .get(session_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+            ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
         }
-
+        // Mint the id up front so the New record carries it; on a Duplicate the
+        // minted id is simply discarded (harmless).
         let mutation_id = RuntimeMutationId::new(format!(
             "mutation-{}",
             self.next_mutation_id.fetch_add(1, Ordering::Relaxed)
         ));
-        let mutation = StoredMutation {
+        let record = StoredMutation {
             mutation_id: mutation_id.clone(),
             client_mutation_id: request.client_mutation_id.clone(),
             operation: request.operation.clone(),
@@ -407,17 +381,23 @@ impl SessionRegistry {
             error: None,
             output: Value::Null,
         };
-        session
-            .mutations_by_client_id
-            .insert(request.client_mutation_id.clone(), mutation_id.clone());
-        session
-            .latest_mutations
-            .insert(mutation_id.clone(), mutation);
-        // No frame on accept: `mutation.notification` carries only terminal
-        // verdicts, and the client already tracks the in-flight op in its own
-        // outbox the moment it dispatches it.
-        drop(sessions);
-        Ok(MutationAcceptance::New { mutation_id })
+        match self
+            .dedup
+            .accept(session_id, &request.client_mutation_id, || record)
+        {
+            Accept::Duplicate(existing) => {
+                if existing.operation != request.operation {
+                    return Err(RuntimeError::invalid_mutation(
+                        "client mutation id was already used for a different mutation",
+                    ));
+                }
+                Ok(MutationAcceptance::Existing(existing.receipt()))
+            }
+            // No frame on accept: `mutation.notification` carries only terminal
+            // verdicts, and the client already tracks the in-flight op in its own
+            // outbox the moment it dispatches it.
+            Accept::New => Ok(MutationAcceptance::New { mutation_id }),
+        }
     }
 
     pub(crate) fn settle_mutation(
@@ -428,43 +408,58 @@ impl SessionRegistry {
         error: Option<RuntimeAdapterError>,
         output: Value,
     ) -> Result<MutationReceipt, RuntimeError> {
-        let mut sessions = self.lock_sessions();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        let is_confirmed = state == MutationSettlementState::Confirmed;
-        let (receipt, frame) = {
-            let mutation = session
-                .latest_mutations
-                .get_mut(mutation_id)
-                .ok_or_else(|| RuntimeError::not_found("runtime mutation not found"))?;
-            mutation.state = state;
-            mutation.error = error;
-            mutation.output = output;
-            let mutation = mutation.clone();
-            let frame = mutation.notification_frame(next_seq(session));
-            (mutation.receipt(), frame)
+        // The dedup ledger is keyed by `ClientMutationId`; settlement addresses
+        // the runtime's own `RuntimeMutationId`, so resolve the client id from
+        // the pending record (≤100 per session).
+        let base = self
+            .dedup
+            .records_for(session_id)
+            .into_iter()
+            .find(|record| &record.mutation_id == mutation_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime mutation not found"))?;
+        let client_mutation_id = base.client_mutation_id.clone();
+
+        // Derive the receipt + terminal notification frame from the settled
+        // record; the frame is emitted even for a cleared (Failed) verdict.
+        let mut settled = base;
+        settled.state = state.clone();
+        settled.error = error.clone();
+        settled.output = output.clone();
+        let receipt = settled.receipt();
+        let class = terminal_class_for(&state, error.as_ref());
+
+        let frame = {
+            let mut sessions = self.lock_sessions();
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+            let frame = settled.notification_frame(next_seq(session));
+            frame.map(|frame| (session.frames.clone(), frame))
         };
-        // Outbox C: retain `Failed` (Rejected) verdicts for the session lifetime.
-        // A rejection is retired only by delivering its verdict — the base never
-        // absorbs it (a rejection changes no state) — so evicting it before
-        // reconnect strands the client's optimistic row with no recovery path.
-        // `Confirmed` is safe to evict: absorption retires the op from the
-        // re-served snapshot independently of the verdict frame.
-        if is_confirmed {
-            session.settled_mutation_ids.push_back(mutation_id.clone());
-            session.prune_settled_mutations();
-        }
-        let sender = session.frames.clone();
-        drop(sessions);
-        if let Some(frame) = frame {
+
+        // Persist under the D47 terminal-class rule in the shared sub-store:
+        // `Confirmed` is kept + bounded-evicted; a permanent rejection (Failed
+        // with a non-retryable / absent error) is kept and exempt so a
+        // reconnecting client re-observes its verdict — the base never absorbs a
+        // rejection; a transient (retryable) `Failed` is CLEARED so a deliberate
+        // retry re-accepts and re-executes (the D47 change from the former
+        // keep-all-failures behavior).
+        self.dedup
+            .settle(session_id, &client_mutation_id, class, |record| {
+                record.state = state;
+                record.error = error;
+                record.output = output;
+            });
+
+        if let Some((sender, frame)) = frame {
             let _ = sender.send(frame);
         }
         Ok(receipt)
     }
 
     /// Read the current settlement state of a mutation by its **client** mutation
-    /// id. `None` when the session or mutation is unknown (or already evicted).
+    /// id. `None` when the session or mutation is unknown (or already evicted /
+    /// cleared).
     // Settlement-state query helper; the production caller is not wired yet (the
     // absorption path does not query it directly), so this is exercised only by
     // the build.rs unit tests. Kept as intended pub(crate) API rather than removed.
@@ -474,13 +469,9 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         client_mutation_id: &ClientMutationId,
     ) -> Option<MutationSettlementState> {
-        let sessions = self.lock_sessions();
-        let session = sessions.get(session_id)?;
-        let mutation_id = session.mutations_by_client_id.get(client_mutation_id)?;
-        session
-            .latest_mutations
-            .get(mutation_id)
-            .map(|m| m.state.clone())
+        self.dedup
+            .verdict(session_id, client_mutation_id)
+            .map(|record| record.state)
     }
 
     pub(crate) fn session_scope(
@@ -646,12 +637,13 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         caller_scope: Option<&[String]>,
     ) -> Result<Vec<RuntimeFrame>, RuntimeError> {
+        let mutations = self.dedup.records_for(session_id);
         let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
         ensure_caller_matches_session(session, caller_scope)?;
-        Ok(collapse_session_frames(session))
+        Ok(collapse_session_frames(session, &mutations))
     }
 
     /// Collapse the session and push the frames into its stream — the
@@ -662,16 +654,20 @@ impl SessionRegistry {
         &self,
         session_id: &RuntimeSessionId,
     ) -> Result<(), RuntimeError> {
+        let mutations = self.dedup.records_for(session_id);
         let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        collapse_session_frames_into(session);
+        collapse_session_frames_into(session, &mutations);
         Ok(())
     }
 }
 
-fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
+fn collapse_session_frames(
+    session: &mut StoredSession,
+    mutations: &[StoredMutation],
+) -> Vec<RuntimeFrame> {
     let mut frames = Vec::new();
     let mut snapshots: Vec<_> = session.latest_snapshots.values().cloned().collect();
     snapshots.sort_by(|left, right| left.view_id.as_str().cmp(right.view_id.as_str()));
@@ -684,7 +680,7 @@ fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
             snapshot,
         });
     }
-    let mut mutations: Vec<_> = session.latest_mutations.values().cloned().collect();
+    let mut mutations: Vec<_> = mutations.to_vec();
     mutations.sort_by(|left, right| left.mutation_id.as_str().cmp(right.mutation_id.as_str()));
     for mutation in mutations {
         // Replay only terminal verdicts on collapse; in-flight ops are re-folded
@@ -701,9 +697,9 @@ fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
 /// dropped events, so collapse to a consistent snapshot the client re-applies
 /// (re-snapshot open views + replay the live mutation window) rather than
 /// missing them (I3, `gap-detection`). Reuses [`collapse_session_frames`].
-fn collapse_session_frames_into(session: &mut StoredSession) {
+fn collapse_session_frames_into(session: &mut StoredSession, mutations: &[StoredMutation]) {
     let sender = session.frames.clone();
-    for frame in collapse_session_frames(session) {
+    for frame in collapse_session_frames(session, mutations) {
         let _ = sender.send(frame);
     }
 }
@@ -836,6 +832,29 @@ fn next_seq(session: &mut StoredSession) -> RuntimeSessionSeq {
     RuntimeSessionSeq::new(session.last_seq)
 }
 
+/// Map a runtime settlement (state + error) to the D47 dedup terminal class.
+/// `Confirmed` is kept + bounded-evicted; a `Failed` splits by the error's
+/// `retryable` flag — a transient (retryable) failure is `Failed` (cleared, so a
+/// retry re-executes), a permanent rejection (non-retryable or no error) is
+/// `Rejected` (kept so a reconnecting client re-observes it). `Accepted` is
+/// non-terminal and never settled; treated as `Rejected` defensively.
+fn terminal_class_for(
+    state: &MutationSettlementState,
+    error: Option<&RuntimeAdapterError>,
+) -> TerminalClass {
+    match state {
+        MutationSettlementState::Confirmed => TerminalClass::Confirmed,
+        MutationSettlementState::Failed => {
+            if error.map(|error| error.retryable).unwrap_or(false) {
+                TerminalClass::Failed
+            } else {
+                TerminalClass::Rejected
+            }
+        }
+        MutationSettlementState::Accepted => TerminalClass::Rejected,
+    }
+}
+
 fn event_matches_session_scope(event: &DomainEvent, account_scope: Option<&[String]>) -> bool {
     account_scope
         .map(|scope| {
@@ -947,12 +966,18 @@ mod delta_tests {
     }
 }
 
+
 #[cfg(test)]
-mod mutation_eviction_tests {
+mod collapse_tests {
+    //! Collapse-frame coverage for the runtime far-end. The dedup ledger's
+    //! eviction and the D47 terminal-class rule now live in — and are tested by
+    //! — the shared `posthaste-link-far-end` sub-store; these tests pin what
+    //! *collapse* means for this seam's frames (the mutation window replayed to a
+    //! reconnecting / lag-resyncing client).
     use super::*;
     use serde_json::json;
 
-    fn stored_mutation(id: u64, client_id: u64, state: MutationSettlementState) -> StoredMutation {
+    fn stored_mutation(id: u64, state: MutationSettlementState) -> StoredMutation {
         let operation: MailOperation = serde_json::from_value(json!({
             "name": "message.setFlaggedState",
             "args": { "sourceId": "acct", "messageId": "m1", "flagged": true },
@@ -960,7 +985,7 @@ mod mutation_eviction_tests {
         .expect("operation builds from the flat wire shape");
         StoredMutation {
             mutation_id: RuntimeMutationId::new(format!("mutation-{id}")),
-            client_mutation_id: ClientMutationId::new(format!("client-{client_id}")),
+            client_mutation_id: ClientMutationId::new(format!("client-{id}")),
             operation,
             state,
             error: None,
@@ -969,7 +994,7 @@ mod mutation_eviction_tests {
     }
 
     fn empty_session() -> StoredSession {
-        let (frames, _) = broadcast::channel(1);
+        let (frames, _) = broadcast::channel(8);
         StoredSession {
             account_scope: None,
             delta_capable: false,
@@ -977,155 +1002,37 @@ mod mutation_eviction_tests {
             frames,
             open_views: HashSet::new(),
             latest_snapshots: HashMap::new(),
-            latest_mutations: HashMap::new(),
-            mutations_by_client_id: HashMap::new(),
-            settled_mutation_ids: VecDeque::new(),
             event_task: None,
         }
     }
 
     #[test]
-    fn prune_evicts_oldest_terminal_mutations_once_window_is_full() {
+    fn collapse_replays_a_terminal_notification_per_mutation() {
         let mut session = empty_session();
-        let cap = MAX_LATEST_MUTATIONS;
-
-        for id in 1..=cap + 5 {
-            let m = stored_mutation(id as u64, id as u64, MutationSettlementState::Confirmed);
-            session
-                .latest_mutations
-                .insert(m.mutation_id.clone(), m.clone());
-            session
-                .mutations_by_client_id
-                .insert(m.client_mutation_id.clone(), m.mutation_id.clone());
-            session
-                .settled_mutation_ids
-                .push_back(m.mutation_id.clone());
-            session.prune_settled_mutations();
-            assert!(
-                session.latest_mutations.len() <= cap,
-                "latest_mutations never exceeds the cap after pruning"
-            );
-        }
-
-        assert_eq!(
-            session.latest_mutations.len(),
-            cap,
-            "the most recent terminal mutations are retained"
-        );
-        assert_eq!(
-            session.settled_mutation_ids.len(),
-            cap,
-            "settled_mutation_ids tracks only the live window"
-        );
-
-        for id in 1..=5 {
-            let evicted_id = RuntimeMutationId::new(format!("mutation-{id}"));
-            let evicted_client = ClientMutationId::new(format!("client-{id}"));
-            assert!(
-                !session.latest_mutations.contains_key(&evicted_id),
-                "oldest terminal mutation {id} was evicted"
-            );
-            assert!(
-                !session.mutations_by_client_id.contains_key(&evicted_client),
-                "client id of evicted mutation {id} was also removed"
-            );
-        }
-
-        for id in 6..=cap + 5 {
-            let retained_id = RuntimeMutationId::new(format!("mutation-{id}"));
-            assert!(
-                session.latest_mutations.contains_key(&retained_id),
-                "recent terminal mutation {id} is still retained"
-            );
-        }
-    }
-
-    #[test]
-    fn prune_never_evicts_pending_mutations() {
-        let mut session = empty_session();
-        let cap = MAX_LATEST_MUTATIONS;
-
-        // Seed many pending mutations beyond the cap.
-        for id in 1..=cap + 10 {
-            let m = stored_mutation(id as u64, id as u64, MutationSettlementState::Accepted);
-            session
-                .latest_mutations
-                .insert(m.mutation_id.clone(), m.clone());
-            session
-                .mutations_by_client_id
-                .insert(m.client_mutation_id.clone(), m.mutation_id.clone());
-        }
-
-        session.prune_settled_mutations();
-
-        assert_eq!(
-            session.latest_mutations.len(),
-            cap + 10,
-            "pending mutations are left intact when there are no terminal mutations"
-        );
-
-        // Settle only the oldest pending mutation; it should become eligible for
-        // eviction only after enough newer mutations are also settled.
-        let first_id = RuntimeMutationId::new("mutation-1");
-        let first_client = ClientMutationId::new("client-1");
-        session.settled_mutation_ids.push_back(first_id.clone());
-        session.prune_settled_mutations();
-
-        assert!(
-            session.latest_mutations.contains_key(&first_id),
-            "single settled mutation is not evicted while the window is not full"
-        );
-        assert!(
-            session.mutations_by_client_id.contains_key(&first_client),
-            "client id is not removed until the mutation leaves the window"
-        );
-    }
-
-    #[test]
-    fn collapse_session_frames_emits_at_most_the_live_mutation_window() {
-        let mut session = empty_session();
-        let cap = MAX_LATEST_MUTATIONS;
-
-        for id in 1..=cap + 50 {
-            let m = stored_mutation(id as u64, id as u64, MutationSettlementState::Confirmed);
-            session
-                .latest_mutations
-                .insert(m.mutation_id.clone(), m.clone());
-            session
-                .mutations_by_client_id
-                .insert(m.client_mutation_id.clone(), m.mutation_id.clone());
-            session
-                .settled_mutation_ids
-                .push_back(m.mutation_id.clone());
-            session.prune_settled_mutations();
-        }
-
-        let frames = collapse_session_frames(&mut session);
+        let mutations: Vec<_> = (1..=3)
+            .map(|id| stored_mutation(id, MutationSettlementState::Confirmed))
+            .collect();
+        let frames = collapse_session_frames(&mut session, &mutations);
         let mutation_frames = frames
             .iter()
             .filter(|f| matches!(f, RuntimeFrame::MutationNotification { .. }))
             .count();
-        assert_eq!(
-            mutation_frames, cap,
-            "reconnect re-emits at most MAX_LATEST_MUTATIONS settlement frames"
-        );
+        assert_eq!(mutation_frames, 3, "one settlement frame per terminal mutation");
     }
 
     #[test]
-    fn collapse_session_frames_into_streams_for_resync() {
-        // The notification forwarder lagged on the event bus and silently
-        // dropped events. `collapse_session_frames_into` pushes the session's
-        // collapsed state into the frame stream so the client resyncs (I3,
-        // gap-detection) instead of missing them.
+    fn collapse_into_stream_pushes_the_window_for_resync() {
+        // The notification forwarder lagged on the event bus and silently dropped
+        // events; `collapse_session_frames_into` pushes the session's collapsed
+        // state into the frame stream so the client resyncs (I3, gap-detection).
         let (frames, mut rx) = broadcast::channel(8);
         let mut session = empty_session();
         session.frames = frames;
-        for id in 1u64..=3 {
-            let m = stored_mutation(id, id, MutationSettlementState::Confirmed);
-            session.latest_mutations.insert(m.mutation_id.clone(), m);
-        }
+        let mutations: Vec<_> = (1..=3)
+            .map(|id| stored_mutation(id, MutationSettlementState::Confirmed))
+            .collect();
 
-        collapse_session_frames_into(&mut session);
+        collapse_session_frames_into(&mut session, &mutations);
 
         let mut streamed = 0;
         while let Ok(frame) = rx.try_recv() {
@@ -1133,9 +1040,6 @@ mod mutation_eviction_tests {
                 streamed += 1;
             }
         }
-        assert_eq!(
-            streamed, 3,
-            "collapse streamed the live mutation window into the frame stream"
-        );
+        assert_eq!(streamed, 3, "collapse streamed the mutation window into the stream");
     }
 }

@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkHandle,
-    AuthorityServerLinkId, BaseAssertion, BaseUpdate, DownStream, LinkCoverage,
+    AuthorityServerLinkId, BaseAssertion, BaseUpdate, DownStream, LinkCoverage, SequencedFrame,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_contract_core::{
@@ -51,17 +51,24 @@ impl AuthorityServerLink for StubFarNode {
         })
     }
 
-    async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-        let frame = AuthorityServerFrame::Base {
-            assertions: vec![BaseAssertion {
-                account_id: "acct".into(),
-                message_id: "m1".into(),
-                update: BaseUpdate::Present(MessageFoldState {
-                    keywords: vec!["$flagged".into()],
-                    mailbox_ids: vec!["inbox".into()],
-                }),
-            }],
-        };
+    async fn subscribe(
+        &self,
+        _coverage: LinkCoverage,
+        _after_seq: Option<u64>,
+    ) -> Result<DownStream, RuntimeError> {
+        let frame = SequencedFrame::new(
+            1,
+            AuthorityServerFrame::Base {
+                assertions: vec![BaseAssertion {
+                    account_id: "acct".into(),
+                    message_id: "m1".into(),
+                    update: BaseUpdate::Present(MessageFoldState {
+                        keywords: vec!["$flagged".into()],
+                        mailbox_ids: vec!["inbox".into()],
+                    }),
+                }],
+            },
+        );
         Ok(Box::pin(futures_util::stream::iter([frame])))
     }
 }
@@ -112,13 +119,13 @@ async fn remote_transport_reads_the_link_router_down_channel() {
     let transport = RemoteAuthorityServer::new(base_url);
 
     let mut down = transport
-        .subscribe(LinkCoverage::Complete)
+        .subscribe(LinkCoverage::Complete, None)
         .await
         .expect("subscribe over the wire");
-    let frame = down.next().await.expect("a base-assertion frame");
+    let sequenced = down.next().await.expect("a base-assertion frame");
 
     assert_eq!(
-        frame,
+        sequenced.frame,
         AuthorityServerFrame::Base {
             assertions: vec![BaseAssertion {
                 account_id: "acct".into(),
@@ -186,7 +193,11 @@ impl AuthorityServerLink for CapturingFarNode {
         })
     }
 
-    async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+    async fn subscribe(
+        &self,
+        _coverage: LinkCoverage,
+        _after_seq: Option<u64>,
+    ) -> Result<DownStream, RuntimeError> {
         Ok(Box::pin(futures_util::stream::iter(Vec::new())))
     }
 }

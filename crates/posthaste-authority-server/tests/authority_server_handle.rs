@@ -2248,8 +2248,9 @@ impl posthaste_authority_server_link::AuthorityServerLink for DeferredTransport 
     async fn subscribe(
         &self,
         coverage: posthaste_authority_server_link::LinkCoverage,
+        after_seq: Option<u64>,
     ) -> Result<posthaste_authority_server_link::DownStream, posthaste_contract_core::RuntimeError> {
-        self.inner.subscribe(coverage).await
+        self.inner.subscribe(coverage, after_seq).await
     }
 }
 

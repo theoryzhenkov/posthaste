@@ -23,8 +23,10 @@ use posthaste_domain_model::{
 };
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkId,
-    BaseAssertion, BaseUpdate, DownStream, LinkCoverage, MailCommandRequest,
+    BaseAssertion, BaseUpdate, DownStream, LinkCoverage, MailCommandRequest, SequencedFrame,
 };
+use posthaste_link_far_end::Resume;
+use tracing::warn;
 use posthaste_link_core::MessageFoldState;
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
@@ -146,8 +148,12 @@ impl AuthorityServerLink for LocalAuthorityServer {
     /// assertions; a co-located runtime that derives views from the cache is the
     /// W3-paired step (in-process the cache equals the store, so the view read
     /// path is unchanged today, keeping `colocated-unchanged`).
-    async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-        Ok(self.build_down_stream(&self.runtime_id))
+    async fn subscribe(
+        &self,
+        _coverage: LinkCoverage,
+        after_seq: Option<u64>,
+    ) -> Result<DownStream, RuntimeError> {
+        Ok(self.build_down_stream(&self.runtime_id, after_seq))
     }
 
     /// Down-channel, runtime-aware: a remote runtime (via `link_router`)
@@ -158,8 +164,9 @@ impl AuthorityServerLink for LocalAuthorityServer {
         &self,
         runtime_id: &AuthorityServerLinkId,
         _coverage: LinkCoverage,
+        after_seq: Option<u64>,
     ) -> Result<DownStream, RuntimeError> {
-        Ok(self.build_down_stream(runtime_id))
+        Ok(self.build_down_stream(runtime_id, after_seq))
     }
 
     async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
@@ -470,30 +477,74 @@ impl AuthorityServerApi for LocalAuthorityServer {
 }
 
 impl LocalAuthorityServer {
-    /// Build the merged down-stream for a runtime: the broadcast `Base` (from the
-    /// authoritative event bus) merged with this runtime's routed `Settlement`
-    /// frames. `Base` is global (every runtime sees the same authoritative
-    /// updates); `Settlement` is per-runtime (only the originator's confirmations)
-    /// — `settlement-routed-to-origin-runtime`.
-    fn build_down_stream(&self, runtime_id: &AuthorityServerLinkId) -> DownStream {
+    /// Build the merged down-stream for a runtime by assembling the far-end
+    /// sub-stores: the broadcast `Base` (from the authoritative event bus) merged
+    /// with this runtime's routed `Settlement` sink, each frame stamped with the
+    /// replay store's monotonic per-runtime seq (D46). `Base` is global (every
+    /// runtime sees the same authoritative updates); `Settlement` is per-runtime
+    /// (only the originator's confirmations) — `settlement-routed-to-origin-runtime`.
+    ///
+    /// `after_seq` (D46) resolves the resume prelude off the replay backlog:
+    /// `Fresh` starts live; `Replay` re-emits the retained frames after the
+    /// cursor; `Collapse` (the resume point fell out of the backlog) signals a
+    /// full resync — the authority server holds no cheap whole-base snapshot, so
+    /// its collapse is a logged resync signal and the near node re-reads through
+    /// on cache miss (the reconnect engine at M9b drives the fresh resubscribe).
+    fn build_down_stream(
+        &self,
+        runtime_id: &AuthorityServerLinkId,
+        after_seq: Option<u64>,
+    ) -> DownStream {
         let authority_server = self.authority_server.clone();
+        let rid = runtime_id.clone();
+        let resume = authority_server.replay_resume(&rid, after_seq);
         let mut base = authority_server.subscribe_events();
-        let mut settlement = authority_server.subscribe_settlement(runtime_id);
+        let mut settlement = authority_server.subscribe_settlement(&rid);
         Box::pin(async_stream::stream! {
+            // Resume prelude (D46).
+            match resume {
+                Resume::Fresh => {}
+                Resume::Replay(frames) => {
+                    for framed in frames {
+                        yield SequencedFrame::new(framed.seq, framed.frame);
+                    }
+                }
+                Resume::Collapse => {
+                    warn!(
+                        runtime_id = %rid.as_str(),
+                        "authority-server down-stream resume point fell out of the backlog; \
+                         signalling collapse — the near node re-reads through on cache miss",
+                    );
+                }
+            }
             loop {
                 tokio::select! {
                     biased;
                     ev = base.recv() => match ev {
                         Ok(event) => {
                             if let Some(frame) = base_frame_from_event(&authority_server, &event) {
-                                yield frame;
+                                let framed = authority_server.replay_record(&rid, frame);
+                                yield SequencedFrame::new(framed.seq, framed.frame);
                             }
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        // GAIN: lag-resync instead of the former silent swallow.
+                        // A reconnect will resume from `after_seq` and get
+                        // `Collapse`, driving the full resync (M9b engine).
+                        Err(broadcast::error::RecvError::Lagged(missed)) => {
+                            warn!(
+                                runtime_id = %rid.as_str(),
+                                missed_events = missed,
+                                "authority-server base broadcast lagged; a resubscribe resumes \
+                                 from after_seq and collapses to resync",
+                            );
+                        }
                         Err(broadcast::error::RecvError::Closed) => break,
                     },
                     frame = settlement.recv() => match frame {
-                        Some(frame) => yield frame,
+                        Some(frame) => {
+                            let framed = authority_server.replay_record(&rid, frame);
+                            yield SequencedFrame::new(framed.seq, framed.frame);
+                        }
                         // Sink sender dropped (authority server shutdown) — end the stream.
                         None => break,
                     }

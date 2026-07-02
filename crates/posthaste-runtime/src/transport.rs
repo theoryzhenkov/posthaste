@@ -19,8 +19,8 @@ use posthaste_domain_model::{
     MessageSummary,
 };
 use posthaste_authority_server_link::{
-    AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, DownStream, LinkCoverage,
-    MailCommandRequest, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_FORWARD_MUTATION_PATH,
+    AuthorityServerApi, AuthorityServerLink, DownStream, LinkCoverage, MailCommandRequest,
+    SequencedFrame, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_FORWARD_MUTATION_PATH,
     LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_contract_core::{
@@ -108,11 +108,11 @@ fn transport_error(error: reqwest::Error) -> RuntimeError {
 }
 
 /// Parse one SSE event block (the text between `\n\n` boundaries) into a
-/// [`AuthorityServerFrame`]. SSE carries the JSON frame on one or more `data:` lines;
-/// non-data lines (comments, `event:`/`id:`) are ignored. Returns `None` for a
-/// keep-alive comment or an unparseable block. Pure, so it is unit-testable
-/// without a live stream.
-pub(crate) fn parse_sse_frame(block: &str) -> Option<AuthorityServerFrame> {
+/// [`SequencedFrame`]. SSE carries the JSON envelope (`{ "seq": N, "frame": .. }`)
+/// on one or more `data:` lines; non-data lines (comments, `event:`/`id:`) are
+/// ignored. Returns `None` for a keep-alive comment or an unparseable block.
+/// Pure, so it is unit-testable without a live stream.
+pub(crate) fn parse_sse_frame(block: &str) -> Option<SequencedFrame> {
     let mut data = String::new();
     for line in block.lines() {
         if let Some(value) = line.strip_prefix("data:") {
@@ -215,14 +215,23 @@ impl AuthorityServerLink for RemoteAuthorityServer {
         self.post_link(LINK_FORWARD_MUTATION_PATH, &mutation).await
     }
 
-    async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+    async fn subscribe(
+        &self,
+        coverage: LinkCoverage,
+        after_seq: Option<u64>,
+    ) -> Result<DownStream, RuntimeError> {
         let url = format!("{}{}", self.base_url, LINK_SUBSCRIBE_PATH);
         let coverage_param = serde_json::to_string(&coverage).map_err(|error| {
             RuntimeError::internal(format!("failed to encode coverage: {error}"), None)
         })?;
+        // Coverage says WHAT to stream; `after_seq` says WHERE to resume (D46).
+        let mut query: Vec<(&str, String)> = vec![("coverage", coverage_param)];
+        if let Some(after) = after_seq {
+            query.push(("afterSeq", after.to_string()));
+        }
         let response = self
             .authed(self.client.get(&url))
-            .query(&[("coverage", coverage_param)])
+            .query(&query)
             .send()
             .await
             .map_err(transport_error)?;
@@ -267,7 +276,7 @@ posthaste_authority_server_link::for_each_link_lifecycle_op!(remote_authority_se
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_authority_server_link::{BaseAssertion, BaseUpdate};
+    use posthaste_authority_server_link::{AuthorityServerFrame, BaseAssertion, BaseUpdate};
     use posthaste_link_core::MessageFoldState;
     use posthaste_contract_core::{MutationSettlementState, RuntimeMutationId};
     use serde_json::json;
@@ -280,17 +289,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_sse_frame_reads_a_data_line_as_a_down_frame() {
-        let frame = AuthorityServerFrame::Base {
-            assertions: vec![BaseAssertion {
-                account_id: "acct".into(),
-                message_id: "m1".into(),
-                update: BaseUpdate::Removed,
-            }],
-        };
-        let data = serde_json::to_string(&frame).unwrap();
+    fn parse_sse_frame_reads_a_data_line_as_a_sequenced_frame() {
+        let sequenced = SequencedFrame::new(
+            7,
+            AuthorityServerFrame::Base {
+                assertions: vec![BaseAssertion {
+                    account_id: "acct".into(),
+                    message_id: "m1".into(),
+                    update: BaseUpdate::Removed,
+                }],
+            },
+        );
+        let data = serde_json::to_string(&sequenced).unwrap();
         let parsed = parse_sse_frame(&format!("data: {data}\n")).expect("frame");
-        assert_eq!(parsed, frame);
+        assert_eq!(parsed, sequenced);
     }
 
     #[test]
@@ -324,14 +336,17 @@ mod tests {
         async fn subscribe(
         ) -> Sse<futures_util::stream::Iter<std::vec::IntoIter<Result<Event, Infallible>>>>
         {
-            let frame = AuthorityServerFrame::Base {
-                assertions: vec![BaseAssertion {
-                    account_id: "acct".into(),
-                    message_id: "m1".into(),
-                    update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
-                }],
-            };
-            let event = Event::default().data(serde_json::to_string(&frame).unwrap());
+            let sequenced = SequencedFrame::new(
+                1,
+                AuthorityServerFrame::Base {
+                    assertions: vec![BaseAssertion {
+                        account_id: "acct".into(),
+                        message_id: "m1".into(),
+                        update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
+                    }],
+                },
+            );
+            let event = Event::default().data(serde_json::to_string(&sequenced).unwrap());
             Sse::new(futures_util::stream::iter(vec![Ok(event)]))
         }
 
@@ -364,12 +379,13 @@ mod tests {
         );
 
         let mut down = transport
-            .subscribe(LinkCoverage::Complete)
+            .subscribe(LinkCoverage::Complete, None)
             .await
             .expect("subscribe");
-        let frame = down.next().await.expect("a down frame");
+        let sequenced = down.next().await.expect("a down frame");
+        assert_eq!(sequenced.seq, 1);
         assert_eq!(
-            frame,
+            sequenced.frame,
             AuthorityServerFrame::Base {
                 assertions: vec![BaseAssertion {
                     account_id: "acct".into(),

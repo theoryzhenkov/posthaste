@@ -200,7 +200,7 @@ async fn remote_transport_reads_a_real_query_over_the_link() {
     );
 
     // The read channel is distinct from the down-channel; subscribe still works.
-    let _ = transport.subscribe(LinkCoverage::Complete).await;
+    let _ = transport.subscribe(LinkCoverage::Complete, None).await;
 }
 
 fn mail_list_descriptor(query: &str) -> ViewDescriptor {
@@ -654,7 +654,7 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
         RemoteAuthorityServer::with_token(format!("http://{addr}"), Some("t1".to_string()));
     // Subscribe first so the settlement sink exists, then forward.
     let mut down = transport
-        .subscribe(LinkCoverage::Complete)
+        .subscribe(LinkCoverage::Complete, None)
         .await
         .expect("subscribe over the wire");
     transport
@@ -679,7 +679,9 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
     let mut saw_settlement = false;
     for _ in 0..64 {
         match tokio::time::timeout(Duration::from_secs(2), down.next()).await {
-            Ok(Some(AuthorityServerFrame::Settlement { .. })) => {
+            Ok(Some(sequenced))
+                if matches!(sequenced.frame, AuthorityServerFrame::Settlement { .. }) =>
+            {
                 saw_settlement = true;
                 break;
             }

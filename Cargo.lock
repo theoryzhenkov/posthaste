@@ -4063,6 +4063,7 @@ dependencies = [
  "posthaste-engine",
  "posthaste-imap",
  "posthaste-link-core",
+ "posthaste-link-far-end",
  "posthaste-observability",
  "posthaste-runtime",
  "posthaste-runtime-api",
@@ -4087,6 +4088,7 @@ dependencies = [
  "posthaste-contract-core",
  "posthaste-domain-model",
  "posthaste-link-core",
+ "posthaste-link-far-end",
  "serde",
  "serde_json",
  "tokio",
@@ -4306,6 +4308,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-link-far-end"
+version = "0.1.0"
+dependencies = [
+ "posthaste-contract-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "posthaste-link-replica"
 version = "0.1.0"
 dependencies = [
@@ -4349,6 +4361,7 @@ dependencies = [
  "posthaste-domain-model",
  "posthaste-domain-service",
  "posthaste-link-core",
+ "posthaste-link-far-end",
  "posthaste-link-replica",
  "posthaste-runtime-api",
  "reqwest 0.12.28",
