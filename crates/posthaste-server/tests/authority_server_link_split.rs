@@ -348,11 +348,14 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session.session_id.clone()),
-                name: "message.destroy".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.destroy",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "m-split",
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("c-split"),
                 context: None,
             },
@@ -526,7 +529,7 @@ async fn standalone_authority_server_node_serves_the_link() {
         .expect("list_accounts over the link");
     assert!(
         accounts.ids.contains(&created.id),
-        "the standalone authority_server should serve the account it just created"
+        "the standalone authority server should serve the account it just created"
     );
 }
 
@@ -648,11 +651,14 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
     transport
         .forward_mutation(MutationRequest {
             session_id: None,
-            name: "message.destroy".to_string(),
-            args: serde_json::json!({
+            operation: serde_json::from_value(serde_json::json!({
+                "name": "message.destroy",
+                "args": serde_json::json!({
                 "sourceId": account.id.as_str(),
                 "messageId": "m-settle",
             }),
+            }))
+            .expect("typed operation parses"),
             client_mutation_id: ClientMutationId::new("c-settle"),
             context: None,
         })

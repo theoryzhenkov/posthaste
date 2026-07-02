@@ -20,16 +20,16 @@
 use async_trait::async_trait;
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
-    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,
+    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
     MailQueryPage, MailQueryRequest, MessageResourceKind, PatchAccountMutation,
     PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller,
     RuntimeError, RuntimeResourceBytes, RuntimeStatus,
 };
 use posthaste_domain_model::{
-    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
-    CommandResult, DraftContent, Identity, MailboxId, MailboxSummary, MessageId, Operation,
-    OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode, TagSummary,
+    AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, CommandResult,
+    DraftContent, Identity, MailboxId, MailboxSummary, MessageId, Operation, OperationId,
+    ReplyContext, SendMessageRequest, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode,
+    TagSummary,
 };
 use std::collections::BTreeMap;
 
@@ -203,11 +203,10 @@ pub trait RuntimeMailReadApi: Send + Sync {
     ) -> Result<RuntimeResourceBytes, RuntimeError>;
 }
 
-/// Compose-outbox + message-commands RPC (15 methods): identity/sender/reply/
-/// draft reads, send/save/delete draft, the outbox operation lifecycle, and the
-/// per-command message writes. The 5 per-command message RPCs
-/// (`set_message_keywords` et al.) stay as-is here; their D21 collapse into one
-/// `apply_mail_operation(MailOperation) -> CommandAck` lands at M5, not M3.
+/// Compose-outbox + message-commands RPC: identity/sender/reply/draft reads,
+/// send/save/delete draft, the outbox operation lifecycle, and the single
+/// direct-apply message-command entry `apply(op: MailOperation) -> CommandAck`
+/// (D21/D34 — the 5 per-command message RPCs collapsed into one typed entry).
 #[async_trait]
 pub trait RuntimeMailWriteApi: Send + Sync {
     async fn get_identity(
@@ -291,43 +290,22 @@ pub trait RuntimeMailWriteApi: Send + Sync {
         operation_id: OperationId,
     ) -> Result<(), RuntimeError>;
 
-    async fn set_message_keywords(
+    /// Apply a mail operation authoritatively and return its command ack (D21/
+    /// D34). This is the **direct-apply** command surface: REST callers are not
+    /// replicas and hold no outbox, so there is no optimistic fold or
+    /// `ClientMutationId` dedup here — the operation is applied at the authority
+    /// and the resulting events returned. The replica (optimistic) path forwards
+    /// the same [`MailOperation`] through `forward_mutation` on the link surface
+    /// instead.
+    ///
+    /// Covers the typed command subset the REST surface exposes (set-keywords,
+    /// add/remove-to-mailbox, replace-mailboxes, destroy); operations that only
+    /// exist on the replica forward path (role moves, snooze, applyDiff, the
+    /// `revCursor` control op) are rejected here with `InvalidMutation`.
+    async fn apply(
         &self,
         caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: SetKeywordsCommand,
-    ) -> Result<CommandAck, RuntimeError>;
-
-    async fn add_message_to_mailbox(
-        &self,
-        caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: AddToMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError>;
-
-    async fn remove_message_from_mailbox(
-        &self,
-        caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: RemoveFromMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError>;
-
-    async fn replace_message_mailboxes(
-        &self,
-        caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: ReplaceMailboxesCommand,
-    ) -> Result<CommandAck, RuntimeError>;
-
-    async fn destroy_message(
-        &self,
-        caller: RuntimeCaller,
-        account_id: AccountId,
-        message_id: MessageId,
+        op: MailOperation,
     ) -> Result<CommandAck, RuntimeError>;
 }
 

@@ -7,9 +7,11 @@
 //! Wasm-pure: serde only (no tokio/reqwest/mail-parser/axum). The `openapi`
 //! feature derives `utoipa::ToSchema` on the wire types; consumers forward it.
 
+mod mail_operation;
 mod mail_query;
 pub mod mutation_args;
 
+pub use mail_operation::MailOperation;
 pub use mail_query::*;
 
 use posthaste_domain_model::{
@@ -701,14 +703,20 @@ pub struct RevCursorArgs {
     pub redo_tail: Vec<String>,
 }
 
+/// A forwarded operation on the link's up-channel. Carries the typed
+/// [`MailOperation`] (D8) — the operation is parsed once at the wire edge and
+/// travels typed inward; there is no stringly `name`/`args` pair to re-parse per
+/// site. The wire shape is `{"sessionId": …, "name": "message.…", "args": {…},
+/// "clientMutationId": …, "context": …}` — the operation is flattened, so its
+/// adjacently-tagged `name`/`args` sit at the envelope's top level exactly where
+/// the old stringly fields were.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MutationRequest {
     pub session_id: Option<RuntimeSessionId>,
-    pub name: String,
-    #[serde(default)]
-    pub args: Value,
+    #[serde(flatten)]
+    pub operation: MailOperation,
     pub client_mutation_id: ClientMutationId,
     pub context: Option<Value>,
 }
@@ -719,6 +727,8 @@ pub struct MutationRequest {
 pub struct MutationReceipt {
     pub runtime_mutation_id: Option<RuntimeMutationId>,
     pub client_mutation_id: ClientMutationId,
+    /// The canonical operation name, echoed for the client's settlement join.
+    /// Derived from the operation variant (one fact), never a free string.
     pub name: String,
     pub state: MutationSettlementState,
     pub error: Option<RuntimeAdapterError>,
@@ -997,6 +1007,25 @@ mod tests {
         )));
 
         assert_eq!(error.envelope().code, RuntimeErrorCode::NotFound);
+    }
+
+    #[test]
+    fn mutation_request_flattens_the_operation_to_the_envelope_top_level() {
+        // The wire keeps the flat `{sessionId, name, args, clientMutationId,
+        // context}` shape: the flattened adjacently-tagged operation surfaces
+        // `name`/`args` at the top level exactly where the old stringly fields
+        // were, and round-trips back into a typed operation.
+        let wire = serde_json::json!({
+            "sessionId": "sess-1",
+            "name": "message.replaceMailboxes",
+            "args": { "sourceId": "acct", "messageId": "m1", "mailboxIds": ["inbox"] },
+            "clientMutationId": "op-1",
+            "context": null
+        });
+        let request: MutationRequest = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(request.operation.name(), "message.replaceMailboxes");
+        assert_eq!(request.operation.account_id(), "acct");
+        assert_eq!(serde_json::to_value(&request).unwrap(), wire);
     }
 
     #[test]

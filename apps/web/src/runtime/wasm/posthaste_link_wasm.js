@@ -49,7 +49,7 @@ export class EntityStoreHandle {
      * history step in either case.
      *
      * `assertion_json` is the same `ReplicaAssertion` shape `acceptMutationJson`
-     * takes (`{kind, ...}`), already role-resolved by `parseMessageMutation`.
+     * takes (`{kind, ...}`), already role-resolved by `parseMailOperation`.
      * @param {string} message_id
      * @param {string} assertion_json
      * @returns {string}
@@ -331,24 +331,26 @@ export function invertMessageChangeDiff(diff_json) {
 }
 
 /**
- * Parse a runtime mutation request and return `{ messageId, assertion }` as
- * JSON when the mutation is locally foldable. Returns `null` for mutations
- * whose effect cannot be folded from the request alone. `role_map_json` is the
+ * Parse a runtime mutation request (its flattened typed `MailOperation`) and
+ * return `{ messageId, assertion }` as JSON when the operation is locally
+ * foldable. Returns `null` for operations whose effect cannot be folded from
+ * the request alone. `role_map_json` is the
  * account's role→mailbox-id map (`{"archive": "mbx-..."}`, built client-side
  * from the mailbox list); it resolves role moves (archive/trash/restoreToInbox/
  * moveToRole) to `ReplaceMailboxes`. `{}` → role moves get no optimism (graceful
- * when the mailbox list isn't loaded yet). Mirrors the Rust near-node
- * `MessageMutation::from_request` + `to_assertion_with_roles` path.
+ * when the mailbox list isn't loaded yet). Consumes the same
+ * `MailOperation::fold_effect_with_roles` projection the Rust near node folds
+ * with (D34 — one local-effect derivation, shared).
  * @param {string} request_json
  * @param {string} role_map_json
  * @returns {string | undefined}
  */
-export function parseMessageMutation(request_json, role_map_json) {
+export function parseMailOperation(request_json, role_map_json) {
     const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(role_map_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.parseMessageMutation(ptr0, len0, ptr1, len1);
+    const ret = wasm.parseMailOperation(ptr0, len0, ptr1, len1);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }

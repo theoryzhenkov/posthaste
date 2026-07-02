@@ -147,7 +147,7 @@ export interface paths {
         put?: never;
         /**
          * Start account OAuth flow
-         * @description Creates a backend-held PKCE authorization session for an existing account.
+         * @description Creates an authority-server-held PKCE authorization session for an existing account.
          */
         post: operations["start_account_oauth"];
         delete?: never;
@@ -327,7 +327,7 @@ export interface paths {
         put?: never;
         /**
          * Start provider OAuth flow
-         * @description Creates a backend-held PKCE authorization session for provider-first setup.
+         * @description Creates an authority-server-held PKCE authorization session for provider-first setup.
          */
         post: operations["start_provider_oauth"];
         delete?: never;
@@ -1379,7 +1379,7 @@ export interface components {
          *     stored in `[appearance]` of `app.toml` as the single source of truth (moved
          *     out of the opaque `localStorage` "client-preferences" snapshot).
          *
-         *     The backend treats appearance as **pass-through storage**: it does not
+         *     The authority server treats appearance as **pass-through storage**: it does not
          *     interpret theme values (the renderer applies them). The enums give the
          *     OpenAPI schema self-documentation and reject typos at the parse boundary.
          *
@@ -1430,7 +1430,7 @@ export interface components {
             mailboxId: components["schemas"]["MailboxId"];
         };
         /**
-         * @description Account-level automation rule evaluated by backend triggers.
+         * @description Account-level automation rule evaluated by authority server triggers.
          *
          *     @spec docs/L1-accounts#toml-schema
          *     @spec docs/L1-sync#automation-actions
@@ -1768,6 +1768,10 @@ export interface components {
             rowKey: string;
             sortKey?: Record<string, never>;
         };
+        MailOperation: {
+            args?: Record<string, never>;
+            name: string;
+        };
         /**
          * @description A per-mailbox sidebar color override (presentation only). Overrides the
          *     renderer's default hash-derived color for the mailbox identified by
@@ -1938,16 +1942,27 @@ export interface components {
         MutationReceipt: {
             clientMutationId: components["schemas"]["ClientMutationId"];
             error?: null | components["schemas"]["RuntimeAdapterError"];
+            /**
+             * @description The canonical operation name, echoed for the client's settlement join.
+             *     Derived from the operation variant (one fact), never a free string.
+             */
             name: string;
             output?: Record<string, never>;
             runtimeMutationId?: null | components["schemas"]["RuntimeMutationId"];
             state: components["schemas"]["MutationSettlementState"];
         };
-        MutationRequest: {
-            args?: unknown;
+        /**
+         * @description A forwarded operation on the link's up-channel. Carries the typed
+         *     [`MailOperation`] (D8) — the operation is parsed once at the wire edge and
+         *     travels typed inward; there is no stringly `name`/`args` pair to re-parse per
+         *     site. The wire shape is `{"sessionId": …, "name": "message.…", "args": {…},
+         *     "clientMutationId": …, "context": …}` — the operation is flattened, so its
+         *     adjacently-tagged `name`/`args` sit at the envelope's top level exactly where
+         *     the old stringly fields were.
+         */
+        MutationRequest: components["schemas"]["MailOperation"] & {
             clientMutationId: components["schemas"]["ClientMutationId"];
             context?: unknown;
-            name: string;
             sessionId?: null | components["schemas"]["RuntimeSessionId"];
         };
         /** @enum {string} */

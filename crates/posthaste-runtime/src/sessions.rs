@@ -6,10 +6,11 @@ use futures_util::StreamExt;
 use posthaste_domain_service::{DomainEvent, Id};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeViewSubscription};
 use posthaste_contract_core::{
-    ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MutationNotification,
-    MutationReceipt, MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller,
-    RuntimeError, RuntimeFrame, RuntimeMutationId, RuntimeSession, RuntimeSessionId,
-    RuntimeSessionSeq, ViewDescriptor, ViewFrame, ViewId, ViewSnapshot,
+    ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MailOperation,
+    MutationNotification, MutationReceipt, MutationRequest, MutationSettlementState,
+    RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeMutationId,
+    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, ViewDescriptor, ViewFrame, ViewId,
+    ViewSnapshot,
 };
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -58,8 +59,10 @@ const MAX_LATEST_MUTATIONS: usize = 100;
 struct StoredMutation {
     mutation_id: RuntimeMutationId,
     client_mutation_id: ClientMutationId,
-    name: String,
-    args: Value,
+    /// The typed operation the client forwarded. Re-accept idempotency compares
+    /// this by value (D8 — `PartialEq` on the typed op, not a `name`+`args`
+    /// string/JSON compare); the receipt's echoed name derives from it.
+    operation: MailOperation,
     state: MutationSettlementState,
     error: Option<RuntimeAdapterError>,
     output: Value,
@@ -75,7 +78,7 @@ impl StoredMutation {
         MutationReceipt {
             runtime_mutation_id: Some(self.mutation_id.clone()),
             client_mutation_id: self.client_mutation_id.clone(),
-            name: self.name.clone(),
+            name: self.operation.name().to_string(),
             state: self.state.clone(),
             error: self.error.clone(),
             output: self.output.clone(),
@@ -384,7 +387,7 @@ impl SessionRegistry {
             let mutation = session.latest_mutations.get(mutation_id).ok_or_else(|| {
                 RuntimeError::internal("runtime mutation index is inconsistent", None)
             })?;
-            if mutation.name != request.name || mutation.args != request.args {
+            if mutation.operation != request.operation {
                 return Err(RuntimeError::invalid_mutation(
                     "client mutation id was already used for a different mutation",
                 ));
@@ -399,8 +402,7 @@ impl SessionRegistry {
         let mutation = StoredMutation {
             mutation_id: mutation_id.clone(),
             client_mutation_id: request.client_mutation_id.clone(),
-            name: request.name.clone(),
-            args: request.args.clone(),
+            operation: request.operation.clone(),
             state: MutationSettlementState::Accepted,
             error: None,
             output: Value::Null,
@@ -951,11 +953,15 @@ mod mutation_eviction_tests {
     use serde_json::json;
 
     fn stored_mutation(id: u64, client_id: u64, state: MutationSettlementState) -> StoredMutation {
+        let operation: MailOperation = serde_json::from_value(json!({
+            "name": "message.setFlaggedState",
+            "args": { "sourceId": "acct", "messageId": "m1", "flagged": true },
+        }))
+        .expect("operation builds from the flat wire shape");
         StoredMutation {
             mutation_id: RuntimeMutationId::new(format!("mutation-{id}")),
             client_mutation_id: ClientMutationId::new(format!("client-{client_id}")),
-            name: "message.setFlaggedState".to_string(),
-            args: json!({ "flagged": true }),
+            operation,
             state,
             error: None,
             output: Value::Null,

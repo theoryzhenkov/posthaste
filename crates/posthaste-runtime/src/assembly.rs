@@ -173,7 +173,7 @@ pub fn build_remote_runtime(
         AuthorityServerTransportConfig::Remote { base_url, token } => (base_url, token),
         AuthorityServerTransportConfig::InProcess => {
             return Err(crate::shutdown::RuntimeBuildError::InvalidConfig(
-                "a remote runtime requires a remote authority_server transport".to_string(),
+                "a remote runtime requires a remote authority-server transport".to_string(),
             ));
         }
     };

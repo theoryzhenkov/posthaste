@@ -62,7 +62,7 @@ import {
 } from '../mailListSelfMaintained'
 import type { OutboxRecord, OutboxStore } from './outboxStore'
 import { getUndoHistoryStore, makeRevStep } from './undoHistoryStore'
-import { parseMessageMutation } from './wasmUtil'
+import { parseMailOperation } from './wasmUtil'
 
 /** The store's sort key `[receivedAt, id]`. */
 interface SortKey {
@@ -497,7 +497,7 @@ class EntityStoreController {
   }
 
   async runMutation(request: RuntimeRunMutationRequest) {
-    const translated = await parseMessageMutation(
+    const translated = await parseMailOperation(
       request,
       this.roleMapForRequest(request),
     )

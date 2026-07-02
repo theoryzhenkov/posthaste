@@ -819,12 +819,15 @@ async fn runtime_mutation_streams_settlement_frames() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session.session_id.clone()),
-                name: "message.setKeywords".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.setKeywords",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "em-001",
                     "command": {"add": ["$flagged"], "remove": []}
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("client-1"),
                 context: None,
             },
@@ -871,12 +874,15 @@ async fn runtime_mutation_streams_settlement_frames() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session.session_id),
-                name: "message.setKeywords".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.setKeywords",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "em-001",
                     "command": {"add": ["$flagged"], "remove": []}
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("client-1"),
                 context: None,
             },
@@ -931,12 +937,15 @@ async fn message_mutation_settlement_payload_excludes_the_message_body() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session.session_id.clone()),
-                name: "message.setKeywords".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.setKeywords",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "em-001",
                     "command": {"add": ["$flagged"], "remove": []}
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("client-1"),
                 context: None,
             },
@@ -1179,12 +1188,15 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session.session_id.clone()),
-                name: "message.setReadState".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.setReadState",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "em-001",
                     "read": true
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("read-1"),
                 context: None,
             },
@@ -1195,20 +1207,19 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
     assert_eq!(receipt.state, MutationSettlementState::Confirmed);
     assert_eq!(receipt.output["events"].as_array().unwrap().len(), 1);
 
-    let unknown = build
-        .handle
-        .forward_mutation(
-            RuntimeCaller::test(),
-            MutationRequest {
-                session_id: Some(session.session_id),
-                name: "message.nonsense".to_string(),
-                args: serde_json::json!({}),
-                client_mutation_id: ClientMutationId::new("bad-1"),
-                context: None,
-            },
-        )
-        .await;
-    assert!(unknown.is_err(), "unknown mutation names are rejected");
+    // Post-M5 the operation vocabulary is typed: an unknown mutation name can
+    // no longer be *constructed* — it is rejected at the wire parse (the serde
+    // deserialization of `MutationRequest` IS the operation parse, D8).
+    let unknown = serde_json::from_value::<MutationRequest>(serde_json::json!({
+        "sessionId": session.session_id.as_str(),
+        "name": "message.nonsense",
+        "args": {},
+        "clientMutationId": "bad-1",
+    }));
+    assert!(
+        unknown.is_err(),
+        "unknown mutation names are rejected at the wire parse"
+    );
 }
 
 #[tokio::test]
@@ -2224,7 +2235,7 @@ impl posthaste_authority_server_link::AuthorityServerLink for DeferredTransport 
                 "authority-server-deferred",
             )),
             client_mutation_id: mutation.client_mutation_id,
-            name: mutation.name,
+            name: mutation.operation.name().to_string(),
             state: MutationSettlementState::Confirmed,
             error: None,
             output: serde_json::json!({ "events": [] }),
@@ -2320,12 +2331,15 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
                 RuntimeCaller::test(),
                 MutationRequest {
                     session_id: Some(session_id),
-                    name: "message.setFlaggedState".to_string(),
-                    args: serde_json::json!({
+                    operation: serde_json::from_value(serde_json::json!({
+                        "name": "message.setFlaggedState",
+                        "args": serde_json::json!({
                         "sourceId": account_id,
                         "messageId": "message-1",
                         "flagged": true,
                     }),
+                    }))
+                    .expect("typed operation parses"),
                     client_mutation_id: ClientMutationId::new("client-flag"),
                     context: None,
                 },
@@ -2432,12 +2446,15 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
                     RuntimeCaller::test(),
                     MutationRequest {
                         session_id: Some(session_id),
-                        name: "message.setKeywords".to_string(),
-                        args: serde_json::json!({
+                        operation: serde_json::from_value(serde_json::json!({
+                            "name": "message.setKeywords",
+                            "args": serde_json::json!({
                             "sourceId": account_id.as_str(),
                             "messageId": "em-001",
                             "command": {"add": add, "remove": remove}
                         }),
+                        }))
+                        .expect("typed operation parses"),
                         client_mutation_id: ClientMutationId::new(format!("burst-{i}")),
                         context: None,
                     },
@@ -2534,12 +2551,15 @@ async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session_b.session_id.clone()),
-                name: "message.setKeywords".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.setKeywords",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "xm-001",
                     "command": {"add": ["$flagged"], "remove": []}
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("client-b"),
                 context: None,
             },
@@ -2716,12 +2736,15 @@ async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session.session_id.clone()),
-                name: "message.snooze".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.snooze",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "em-001",
                     "until": 2_000_000_000,
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("snooze-1"),
                 context: None,
             },
@@ -2747,8 +2770,9 @@ async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
             RuntimeCaller::test(),
             MutationRequest {
                 session_id: Some(session.session_id.clone()),
-                name: "message.applyDiff".to_string(),
-                args: serde_json::json!({
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.applyDiff",
+                    "args": serde_json::json!({
                     "sourceId": account.id.as_str(),
                     "messageId": "em-001",
                     "diff": {
@@ -2756,6 +2780,8 @@ async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
                         "mailboxes": {"added": ["mb-inbox"], "removed": ["mb-snooze"]}
                     }
                 }),
+                }))
+                .expect("typed operation parses"),
                 client_mutation_id: ClientMutationId::new("undo-1"),
                 context: None,
             },
