@@ -1057,9 +1057,9 @@
         "tags": [
           "runtime"
         ],
-        "summary": "Open a runtime session",
-        "description": "Creates a runtime session whose stream carries RuntimeFrame values.",
-        "operationId": "open_runtime_session",
+        "summary": "Open a runtime link",
+        "description": "Creates a runtime link whose stream carries RuntimeFrame values.",
+        "operationId": "open_runtime_link",
         "parameters": [
           {
             "name": "sourceId",
@@ -1075,7 +1075,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The link can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1087,11 +1087,11 @@
         ],
         "responses": {
           "200": {
-            "description": "The opened runtime session",
+            "description": "The opened runtime link",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeSession"
+                  "$ref": "#/components/schemas/RuntimeLinkConnection"
                 }
               }
             }
@@ -1124,14 +1124,14 @@
         "tags": [
           "runtime"
         ],
-        "summary": "Close a runtime session",
-        "description": "Closes a runtime session and releases its open runtime views.",
-        "operationId": "close_runtime_session",
+        "summary": "Close a runtime link",
+        "description": "Closes a runtime link and releases its open runtime views.",
+        "operationId": "close_runtime_link",
         "parameters": [
           {
             "name": "session_id",
             "in": "path",
-            "description": "Runtime session id",
+            "description": "Runtime link id",
             "required": true,
             "schema": {
               "type": "string"
@@ -1151,7 +1151,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The link can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1163,7 +1163,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The session was closed",
+            "description": "The link was closed",
             "content": {
               "application/json": {
                 "schema": {
@@ -1183,7 +1183,7 @@
             }
           },
           "404": {
-            "description": "Unknown runtime session",
+            "description": "Unknown runtime link",
             "content": {
               "application/json": {
                 "schema": {
@@ -1211,13 +1211,13 @@
           "runtime"
         ],
         "summary": "Run a runtime mutation",
-        "description": "Submits a named mutation to a runtime session (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.",
-        "operationId": "run_runtime_session_mutation",
+        "description": "Submits a named mutation to a runtime link (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the link stream.",
+        "operationId": "run_runtime_link_mutation",
         "parameters": [
           {
             "name": "session_id",
             "in": "path",
-            "description": "Runtime session id",
+            "description": "Runtime link id",
             "required": true,
             "schema": {
               "type": "string"
@@ -1237,7 +1237,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The link can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1299,7 +1299,7 @@
             }
           },
           "404": {
-            "description": "Unknown runtime session",
+            "description": "Unknown runtime link",
             "content": {
               "application/json": {
                 "schema": {
@@ -1327,13 +1327,13 @@
           "runtime"
         ],
         "summary": "Read a runtime mutation's settlement",
-        "description": "Returns the settlement receipt the runtime holds for a client mutation id, or a null receipt when it has no record (unknown session, never accepted, or already cleared). The client near-end's reconciler queries this for sent-but-unsettled records after a session-continuity loss: a terminal receipt settles locally; a null receipt re-forwards.",
-        "operationId": "runtime_session_mutation_settlement",
+        "description": "Returns the settlement receipt the runtime holds for a client mutation id, or a null receipt when it has no record (unknown link, never accepted, or already cleared). The client near-end's reconciler queries this for sent-but-unsettled records after a link-continuity loss: a terminal receipt settles locally; a null receipt re-forwards.",
+        "operationId": "runtime_link_mutation_settlement",
         "parameters": [
           {
             "name": "session_id",
             "in": "path",
-            "description": "Runtime session id the mutation was dispatched under",
+            "description": "Runtime link id the mutation was dispatched under",
             "required": true,
             "schema": {
               "type": "string"
@@ -1362,7 +1362,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The link can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1422,13 +1422,13 @@
           "runtime"
         ],
         "summary": "Subscribe to runtime frames",
-        "description": "Streams session-scoped RuntimeFrame values as server-sent events. Event ids are sessionSeq values.",
-        "operationId": "stream_runtime_session",
+        "description": "Streams link-scoped RuntimeFrame values as server-sent events. Event ids are linkSeq values.",
+        "operationId": "stream_runtime_link",
         "parameters": [
           {
             "name": "session_id",
             "in": "path",
-            "description": "Runtime session id",
+            "description": "Runtime link id",
             "required": true,
             "schema": {
               "type": "string"
@@ -1474,7 +1474,7 @@
             }
           },
           "404": {
-            "description": "Unknown runtime session",
+            "description": "Unknown runtime link",
             "content": {
               "application/json": {
                 "schema": {
@@ -1501,14 +1501,14 @@
         "tags": [
           "runtime"
         ],
-        "summary": "Open a runtime session view",
-        "description": "Opens a view in a runtime session and returns its initial snapshot.",
-        "operationId": "open_runtime_session_view",
+        "summary": "Open a runtime link view",
+        "description": "Opens a view in a runtime link and returns its initial snapshot.",
+        "operationId": "open_runtime_link_view",
         "parameters": [
           {
             "name": "session_id",
             "in": "path",
-            "description": "Runtime session id",
+            "description": "Runtime link id",
             "required": true,
             "schema": {
               "type": "string"
@@ -1528,7 +1528,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The link can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1542,7 +1542,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OpenRuntimeSessionViewRequest"
+                "$ref": "#/components/schemas/OpenRuntimeLinkViewRequest"
               }
             }
           },
@@ -1554,7 +1554,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OpenRuntimeSessionViewResponse"
+                  "$ref": "#/components/schemas/OpenRuntimeLinkViewResponse"
                 }
               }
             }
@@ -1580,7 +1580,7 @@
             }
           },
           "404": {
-            "description": "Unknown runtime session",
+            "description": "Unknown runtime link",
             "content": {
               "application/json": {
                 "schema": {
@@ -1607,14 +1607,14 @@
         "tags": [
           "runtime"
         ],
-        "summary": "Close a runtime session view",
-        "description": "Closes a runtime view for a session and emits a viewClosed RuntimeFrame.",
-        "operationId": "close_runtime_session_view",
+        "summary": "Close a runtime link view",
+        "description": "Closes a runtime view for a link and emits a viewClosed RuntimeFrame.",
+        "operationId": "close_runtime_link_view",
         "parameters": [
           {
             "name": "session_id",
             "in": "path",
-            "description": "Runtime session id",
+            "description": "Runtime link id",
             "required": true,
             "schema": {
               "type": "string"
@@ -1643,7 +1643,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The link can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1675,7 +1675,7 @@
             }
           },
           "404": {
-            "description": "Unknown runtime session",
+            "description": "Unknown runtime link",
             "content": {
               "application/json": {
                 "schema": {
@@ -1702,14 +1702,14 @@
         "tags": [
           "runtime"
         ],
-        "summary": "Extend a runtime session view window",
+        "summary": "Extend a runtime link view window",
         "description": "Grows an open windowed view (e.g. mailList) by the requested row count and returns the extended snapshot, also broadcast as a viewReplace RuntimeFrame.",
-        "operationId": "extend_runtime_session_view",
+        "operationId": "extend_runtime_link_view",
         "parameters": [
           {
             "name": "session_id",
             "in": "path",
-            "description": "Runtime session id",
+            "description": "Runtime link id",
             "required": true,
             "schema": {
               "type": "string"
@@ -1738,7 +1738,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The link can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1752,7 +1752,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ExtendRuntimeSessionViewRequest"
+                "$ref": "#/components/schemas/ExtendRuntimeLinkViewRequest"
               }
             }
           },
@@ -1764,7 +1764,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OpenRuntimeSessionViewResponse"
+                  "$ref": "#/components/schemas/OpenRuntimeLinkViewResponse"
                 }
               }
             }
@@ -1790,7 +1790,7 @@
             }
           },
           "404": {
-            "description": "Unknown runtime session or view",
+            "description": "Unknown runtime link or view",
             "content": {
               "application/json": {
                 "schema": {
@@ -5524,7 +5524,7 @@
           }
         }
       },
-      "ExtendRuntimeSessionViewRequest": {
+      "ExtendRuntimeLinkViewRequest": {
         "type": "object",
         "required": [
           "count"
@@ -5646,7 +5646,7 @@
       },
       "MailListDelta": {
         "type": "object",
-        "description": "An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):\nthe rows that changed since the last snapshot, instead of the whole view. The\nclient reconciles it against its held rows — drop rows absent from `order`,\nreorder to `order`, then apply `upserts` by `row_key`. Emitted only to a\nsession that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),\nand only when the change is row-local (structural changes still send a whole\n`ViewReplace`).",
+        "description": "An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):\nthe rows that changed since the last snapshot, instead of the whole view. The\nclient reconciles it against its held rows — drop rows absent from `order`,\nreorder to `order`, then apply `upserts` by `row_key`. Emitted only to a\nlink that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),\nand only when the change is row-local (structural changes still send a whole\n`ViewReplace`).",
         "required": [
           "upserts"
         ],
@@ -6141,20 +6141,20 @@
                 "$ref": "#/components/schemas/ClientMutationId"
               },
               "context": {},
-              "sessionId": {
+              "linkId": {
                 "oneOf": [
                   {
                     "type": "null"
                   },
                   {
-                    "$ref": "#/components/schemas/RuntimeSessionId"
+                    "$ref": "#/components/schemas/RuntimeLinkId"
                   }
                 ]
               }
             }
           }
         ],
-        "description": "A forwarded operation on the link's up-channel. Carries the typed\n[`MailOperation`] (D8) — the operation is parsed once at the wire edge and\ntravels typed inward; there is no stringly `name`/`args` pair to re-parse per\nsite. The wire shape is `{\"sessionId\": …, \"name\": \"message.…\", \"args\": {…},\n\"clientMutationId\": …, \"context\": …}` — the operation is flattened, so its\nadjacently-tagged `name`/`args` sit at the envelope's top level exactly where\nthe old stringly fields were."
+        "description": "A forwarded operation on the link's up-channel. Carries the typed\n[`MailOperation`] (D8) — the operation is parsed once at the wire edge and\ntravels typed inward; there is no stringly `name`/`args` pair to re-parse per\nsite. The wire shape is `{\"linkId\": …, \"name\": \"message.…\", \"args\": {…},\n\"clientMutationId\": …, \"context\": …}` — the operation is flattened, so its\nadjacently-tagged `name`/`args` sit at the envelope's top level exactly where\nthe old stringly fields were."
       },
       "MutationSettlementState": {
         "type": "string",
@@ -6194,7 +6194,7 @@
           }
         }
       },
-      "OpenRuntimeSessionViewRequest": {
+      "OpenRuntimeLinkViewRequest": {
         "type": "object",
         "required": [
           "descriptor"
@@ -6205,7 +6205,7 @@
           }
         }
       },
-      "OpenRuntimeSessionViewResponse": {
+      "OpenRuntimeLinkViewResponse": {
         "type": "object",
         "required": [
           "viewId",
@@ -7019,18 +7019,18 @@
           {
             "type": "object",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "viewId",
               "revision",
               "snapshot",
               "type"
             ],
             "properties": {
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
+              },
               "revision": {
                 "$ref": "#/components/schemas/ViewRevision"
-              },
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
               },
               "snapshot": {
                 "$ref": "#/components/schemas/ViewSnapshot"
@@ -7049,18 +7049,18 @@
           {
             "type": "object",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "viewId",
               "revision",
               "snapshot",
               "type"
             ],
             "properties": {
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
+              },
               "revision": {
                 "$ref": "#/components/schemas/ViewRevision"
-              },
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
               },
               "snapshot": {
                 "$ref": "#/components/schemas/ViewSnapshot"
@@ -7078,9 +7078,9 @@
           },
           {
             "type": "object",
-            "description": "An incremental mail-list update: only the rows that changed since the\nlast snapshot, for a session that opted into deltas\n([replication client-link L1](../../replication/client-link/L1.md)). Replaces a whole `ViewReplace`\nfor row-local changes (flags, reads, removals).",
+            "description": "An incremental mail-list update: only the rows that changed since the\nlast snapshot, for a link that opted into deltas\n([replication client-link L1](../../replication/client-link/L1.md)). Replaces a whole `ViewReplace`\nfor row-local changes (flags, reads, removals).",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "viewId",
               "revision",
               "delta",
@@ -7090,11 +7090,11 @@
               "delta": {
                 "$ref": "#/components/schemas/MailListDelta"
               },
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
+              },
               "revision": {
                 "$ref": "#/components/schemas/ViewRevision"
-              },
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
               },
               "type": {
                 "type": "string",
@@ -7110,7 +7110,7 @@
           {
             "type": "object",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "viewId",
               "error",
               "type"
@@ -7119,8 +7119,8 @@
               "error": {
                 "$ref": "#/components/schemas/RuntimeAdapterError"
               },
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
               },
               "type": {
                 "type": "string",
@@ -7136,13 +7136,13 @@
           {
             "type": "object",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "viewId",
               "type"
             ],
             "properties": {
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
               },
               "type": {
                 "type": "string",
@@ -7159,7 +7159,7 @@
             "type": "object",
             "description": "A verdict about a named client mutation, keyed to its **client** mutation\nid so the client correlates it to the optimistic op in its outbox. The\nauthoritative state change (if any) arrives *separately* as a\n`message.updated` domain fact via [`Self::Notification`] — this frame is\nthe verdict, not the data, and the two are never merged (facts come from\nthe firehose uncorrelated; verdicts come from the command path keyed by\nid). A `Confirmed` retires the op by absorption when the base carries its\neffect (no revert); a `Rejected` reverts the optimism and surfaces the\nerror. Replaces the former `MutationSettlement`\n([mutation.notification design](../../eph/DESIGN-L2-mutation-notification.md)).",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "clientMutationId",
               "notification",
               "type"
@@ -7168,11 +7168,11 @@
               "clientMutationId": {
                 "$ref": "#/components/schemas/ClientMutationId"
               },
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
+              },
               "notification": {
                 "$ref": "#/components/schemas/MutationNotification"
-              },
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
               },
               "type": {
                 "type": "string",
@@ -7185,7 +7185,7 @@
           {
             "type": "object",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "kind",
               "payload",
               "type"
@@ -7194,11 +7194,11 @@
               "kind": {
                 "type": "string"
               },
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
+              },
               "payload": {
                 "type": "object"
-              },
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
               },
               "type": {
                 "type": "string",
@@ -7211,12 +7211,12 @@
           {
             "type": "object",
             "required": [
-              "sessionSeq",
+              "linkSeq",
               "type"
             ],
             "properties": {
-              "sessionSeq": {
-                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              "linkSeq": {
+                "$ref": "#/components/schemas/RuntimeLinkSeq"
               },
               "type": {
                 "type": "string",
@@ -7228,12 +7228,31 @@
           }
         ]
       },
+      "RuntimeLinkConnection": {
+        "type": "object",
+        "required": [
+          "linkId"
+        ],
+        "properties": {
+          "linkId": {
+            "$ref": "#/components/schemas/RuntimeLinkId"
+          }
+        }
+      },
+      "RuntimeLinkId": {
+        "type": "string"
+      },
+      "RuntimeLinkSeq": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
+      },
       "RuntimeMutationId": {
         "type": "string"
       },
       "RuntimeMutationSettlement": {
         "type": "object",
-        "description": "The settlement-query response for one `(session, clientMutationId)` key\n(`GET /runtime/sessions/{id}/mutations/{clientMutationId}`): the receipt the\nruntime holds, or `null` when it has no record (unknown session, never\naccepted, or already evicted/cleared under the D47 ledger rule). Consumed by\nthe near-end reconciler's sent-but-unsettled step (D44b): a terminal receipt\nsettles locally, `null` re-forwards.",
+        "description": "The settlement-query response for one `(link, clientMutationId)` key\n(`GET /runtime/links/{id}/mutations/{clientMutationId}`): the receipt the\nruntime holds, or `null` when it has no record (unknown link, never\naccepted, or already evicted/cleared under the D47 ledger rule). Consumed by\nthe near-end reconciler's sent-but-unsettled step (D44b): a terminal receipt\nsettles locally, `null` re-forwards.",
         "properties": {
           "receipt": {
             "oneOf": [
@@ -7246,25 +7265,6 @@
             ]
           }
         }
-      },
-      "RuntimeSession": {
-        "type": "object",
-        "required": [
-          "sessionId"
-        ],
-        "properties": {
-          "sessionId": {
-            "$ref": "#/components/schemas/RuntimeSessionId"
-          }
-        }
-      },
-      "RuntimeSessionId": {
-        "type": "string"
-      },
-      "RuntimeSessionSeq": {
-        "type": "integer",
-        "format": "int64",
-        "minimum": 0
       },
       "SaveDraftRequest": {
         "type": "object",
@@ -8290,7 +8290,7 @@
     },
     {
       "name": "runtime",
-      "description": "Session-scoped runtime frame stream"
+      "description": "Link-scoped runtime frame stream"
     },
     {
       "name": "auth",

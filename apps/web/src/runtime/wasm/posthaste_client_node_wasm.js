@@ -1,4 +1,4 @@
-/* @ts-self-types="./posthaste_link_wasm.d.ts" */
+/* @ts-self-types="./posthaste_client_node_wasm.d.ts" */
 
 /**
  * A live reactive entity store owned by JS: messages, mailboxes (count
@@ -319,8 +319,8 @@ export class NearEndHandle {
         wasm.__wbg_nearendhandle_free(ptr, 0);
     }
     /**
-     * Open the session and start the frame loop (idempotent). The Promise
-     * resolves once the session is open; the reconnect loop then runs in the
+     * Open the link and start the frame loop (idempotent). The Promise
+     * resolves once the link is open; the reconnect loop then runs in the
      * background (`spawn_local`) until [`Self::disconnect`].
      * @returns {Promise<any>}
      */
@@ -329,7 +329,7 @@ export class NearEndHandle {
         return ret;
     }
     /**
-     * The engine-owned resume cursor (last seen `sessionSeq`). The host mirrors
+     * The engine-owned resume cursor (last seen `linkSeq`). The host mirrors
      * this to durable storage so a reload resumes where it left off — callers no
      * longer thread `afterSeq`.
      * @returns {number | undefined}
@@ -339,7 +339,7 @@ export class NearEndHandle {
         return ret[0] === 0 ? undefined : ret[1];
     }
     /**
-     * Stop the frame loop (no further reconnects). Session close is a host
+     * Stop the frame loop (no further reconnects). Link close is a host
      * concern (a policy-free `DELETE` via the api client) since the transport is
      * post-only.
      * @returns {Promise<any>}
@@ -362,6 +362,19 @@ export class NearEndHandle {
         return ret;
     }
     /**
+     * The current link id, once connected.
+     * @returns {string | undefined}
+     */
+    linkId() {
+        const ret = wasm.nearendhandle_linkId(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
      * Build the engine from the JS IO object and a config JSON string.
      *
      * `io` must expose: `postJson(url, headersJson, body) => Promise<{status,
@@ -371,7 +384,7 @@ export class NearEndHandle {
      * re-seed the adapter), `onStatus(label, message)` (labels include
      * `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
      * forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
-     * Promise<string>` (a JSON array of `{sessionId, clientMutationId,
+     * Promise<string>` (a JSON array of `{linkId, clientMutationId,
      * request?}`), and `onSettlement(receiptJson)`.
      * @param {any} io
      * @param {string} config_json
@@ -386,19 +399,6 @@ export class NearEndHandle {
         this.__wbg_ptr = ret[0] >>> 0;
         NearEndHandleFinalization.register(this, this.__wbg_ptr, this);
         return this;
-    }
-    /**
-     * The current session id, once connected.
-     * @returns {string | undefined}
-     */
-    sessionId() {
-        const ret = wasm.nearendhandle_sessionId(this.__wbg_ptr);
-        let v1;
-        if (ret[0] !== 0) {
-            v1 = getStringFromWasm0(ret[0], ret[1]).slice();
-            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        }
-        return v1;
     }
 }
 if (Symbol.dispose) NearEndHandle.prototype[Symbol.dispose] = NearEndHandle.prototype.free;
@@ -599,7 +599,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [String, String, F64], shim_idx: 129, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__ha433c4c869742dc2);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
@@ -624,7 +624,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./posthaste_link_wasm_bg.js": import0,
+        "./posthaste_client_node_wasm_bg.js": import0,
     };
 }
 
@@ -643,12 +643,12 @@ function wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d(arg0, arg
     wasm.wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d(arg0, arg1, arg2, arg3);
 }
 
-function wasm_bindgen__convert__closures_____invoke__ha433c4c869742dc2(arg0, arg1, arg2, arg3, arg4) {
+function wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7(arg0, arg1, arg2, arg3, arg4) {
     const ptr0 = passStringToWasm0(arg2, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(arg3, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    wasm.wasm_bindgen__convert__closures_____invoke__ha433c4c869742dc2(arg0, arg1, ptr0, len0, ptr1, len1, arg4);
+    wasm.wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7(arg0, arg1, ptr0, len0, ptr1, len1, arg4);
 }
 
 const EntityStoreHandleFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -880,7 +880,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('posthaste_link_wasm_bg.wasm', import.meta.url);
+        module_or_path = new URL('posthaste_client_node_wasm_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 

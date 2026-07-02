@@ -326,11 +326,11 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
     ))
     .await
     .expect("remote runtime builds");
-    let session = remote
+    let link = remote
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session opens");
+        .expect("link opens");
 
     // Precondition: the authority server message exists.
     let before = authority_server
@@ -352,7 +352,7 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session.session_id.clone()),
+                link_id: Some(link.link_id.clone()),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.destroy",
                     "args": serde_json::json!({
@@ -659,7 +659,7 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
         .expect("subscribe over the wire");
     transport
         .forward_mutation(MutationRequest {
-            session_id: None,
+            link_id: None,
             operation: serde_json::from_value(serde_json::json!({
                 "name": "message.destroy",
                 "args": serde_json::json!({

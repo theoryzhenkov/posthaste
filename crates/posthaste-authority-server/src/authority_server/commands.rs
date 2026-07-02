@@ -534,7 +534,7 @@ impl AuthorityServer {
     /// typed commands ([replication authority-server-link L1 §3](../replication/authority-server-link/L1.md)).
     /// The operation arrives already typed (parsed once at the wire edge, D8);
     /// there is no string lookup and no per-arm arg re-parse. The runtime keeps
-    /// the session/undo/scope concerns around this call; this node only applies
+    /// the link/undo/scope concerns around this call; this node only applies
     /// the effect and returns the resulting events.
     ///
     /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog

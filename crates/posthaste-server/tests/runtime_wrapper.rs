@@ -158,29 +158,29 @@ async fn open_mail_list_view_returns_runtime_snapshot() {
 }
 
 #[tokio::test]
-async fn runtime_session_stream_returns_collapsed_view_snapshot() {
+async fn runtime_link_stream_returns_collapsed_view_snapshot() {
     let harness = Harness::new();
     harness.save_account("primary", "Primary", true);
     harness.seed_source("primary", "Primary");
     harness.seed_messages("primary", "inbox", vec![message("m1", "Subject", "inbox")]);
     let token = harness.full_scope();
 
-    let (session_status, session_body) = harness
+    let (link_status, link_body) = harness
         .post_json(
             &token,
             "/v1/runtime/sessions?sourceId=primary",
             serde_json::json!({}),
         )
         .await;
-    assert_eq!(session_status, StatusCode::OK, "{session_body}");
-    let session_id = session_body["sessionId"]
+    assert_eq!(link_status, StatusCode::OK, "{link_body}");
+    let link_id = link_body["linkId"]
         .as_str()
-        .expect("session id should serialize");
+        .expect("link id should serialize");
 
     let (view_status, view_body) = harness
         .post_json(
             &token,
-            &format!("/v1/runtime/sessions/{session_id}/views?sourceId=primary"),
+            &format!("/v1/runtime/sessions/{link_id}/views?sourceId=primary"),
             serde_json::json!({
                 "descriptor": {
                     "family": "mailList",
@@ -204,19 +204,19 @@ async fn runtime_session_stream_returns_collapsed_view_snapshot() {
     let (stream_status, frame) = harness
         .get_text_frame(
             &token,
-            &format!("/v1/runtime/sessions/{session_id}/stream?afterSeq=0&sourceId=primary"),
+            &format!("/v1/runtime/sessions/{link_id}/stream?afterSeq=0&sourceId=primary"),
         )
         .await;
     assert_eq!(stream_status, StatusCode::OK);
     assert!(frame.contains("id: 1"), "{frame}");
     assert!(frame.contains(r#""type":"viewSnapshot""#), "{frame}");
-    assert!(frame.contains(r#""sessionSeq":1"#), "{frame}");
+    assert!(frame.contains(r#""linkSeq":1"#), "{frame}");
     assert!(frame.contains(r#""id":"m1""#), "{frame}");
 
     let (close_status, close_body) = harness
         .delete_json(
             &token,
-            &format!("/v1/runtime/sessions/{session_id}?sourceId=primary"),
+            &format!("/v1/runtime/sessions/{link_id}?sourceId=primary"),
         )
         .await;
     assert_eq!(close_status, StatusCode::OK, "{close_body}");
@@ -225,7 +225,7 @@ async fn runtime_session_stream_returns_collapsed_view_snapshot() {
     let (closed_stream_status, _) = harness
         .get_json(
             &token,
-            &format!("/v1/runtime/sessions/{session_id}/stream?sourceId=primary"),
+            &format!("/v1/runtime/sessions/{link_id}/stream?sourceId=primary"),
         )
         .await;
     assert_eq!(closed_stream_status, StatusCode::NOT_FOUND);
@@ -233,7 +233,7 @@ async fn runtime_session_stream_returns_collapsed_view_snapshot() {
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
 #[tokio::test]
-async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
+async fn runtime_link_mutation_returns_receipt_and_collapsed_settlement() {
     let harness = Harness::new();
     harness.save_account("primary", "Primary", true);
     harness.seed_source("primary", "Primary");
@@ -245,22 +245,22 @@ async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
     harness.start_account_runtime("primary").await;
     let token = harness.scoped(&["action = read,tag", "account = primary"]);
 
-    let (session_status, session_body) = harness
+    let (link_status, link_body) = harness
         .post_json(
             &token,
             "/v1/runtime/sessions?sourceId=primary",
             serde_json::json!({}),
         )
         .await;
-    assert_eq!(session_status, StatusCode::OK, "{session_body}");
-    let session_id = session_body["sessionId"]
+    assert_eq!(link_status, StatusCode::OK, "{link_body}");
+    let link_id = link_body["linkId"]
         .as_str()
-        .expect("session id should serialize");
+        .expect("link id should serialize");
 
     let (mutation_status, mutation_body) = harness
         .post_json(
             &token,
-            &format!("/v1/runtime/sessions/{session_id}/mutations?sourceId=primary"),
+            &format!("/v1/runtime/sessions/{link_id}/mutations?sourceId=primary"),
             serde_json::json!({
                 "name": "message.setKeywords",
                 "clientMutationId": "client-1",
@@ -284,7 +284,7 @@ async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
     let (stream_status, frame) = harness
         .get_text_frame(
             &token,
-            &format!("/v1/runtime/sessions/{session_id}/stream?afterSeq=0&sourceId=primary"),
+            &format!("/v1/runtime/sessions/{link_id}/stream?afterSeq=0&sourceId=primary"),
         )
         .await;
     assert_eq!(stream_status, StatusCode::OK);
@@ -305,7 +305,7 @@ async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
     let (tag_only_status, tag_only_body) = harness
         .post_json(
             &tag_only_token,
-            &format!("/v1/runtime/sessions/{session_id}/mutations?sourceId=primary"),
+            &format!("/v1/runtime/sessions/{link_id}/mutations?sourceId=primary"),
             serde_json::json!({
                 "name": "message.setKeywords",
                 "clientMutationId": "client-2",

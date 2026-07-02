@@ -27,7 +27,7 @@ use posthaste_authority_server_link::{
 };
 use posthaste_link_far_end::Resume;
 use tracing::warn;
-use posthaste_link_core::MessageFoldState;
+use posthaste_replica_core::MessageFoldState;
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,

@@ -8,7 +8,7 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 mail-parser = { workspace = true }
 posthaste-domain-model = { path = "../posthaste-domain-model" }
-posthaste-link-core = { path = "../posthaste-link-core" }
+posthaste-replica-core = { path = "../posthaste-replica-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 posthaste-observability = { path = "../posthaste-observability" }

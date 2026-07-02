@@ -2,7 +2,7 @@
 //!
 //! The [`crate::workloads`] module bottoms out at `posthaste-store`. This module
 //! drives the **full co-located application path** — the authority runtime's
-//! session/view machinery, the named-mutation pipeline, and the view recompute
+//! link/view machinery, the named-mutation pipeline, and the view recompute
 //! that produces a frame — so the flamegraph harness can see the
 //! mutation -> view-recompute -> frame hot path the runtime<->authority server "link bus"
 //! introduced, not just the store floor.
@@ -24,7 +24,7 @@ use posthaste_domain_service::{SecretStore};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLink};
 use posthaste_contract_core::{
     AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
-    MailQueryRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionId, RuntimeSessionSeq,
+    MailQueryRequest, RuntimeCaller, RuntimeFrame, RuntimeLinkId, RuntimeLinkSeq,
     SecretWriteMutation, ViewDescriptor, ViewId,
 };
 use posthaste_runtime::RuntimeBuildConfig;
@@ -46,7 +46,7 @@ pub struct RuntimeInbox {
     // dropped; the temp dir is removed last.
     build: posthaste_authority_server::AuthorityServerBuild,
     account_id: AccountId,
-    session_id: RuntimeSessionId,
+    link_id: RuntimeLinkId,
     view_id: ViewId,
     subscription: RuntimeFrameSubscription,
     /// A message id known to be inside the view window, toggled each iteration.
@@ -97,17 +97,17 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
         .apply_sync_batch(&account.id, &batch)
         .map_err(|error| anyhow!("seed inbox: {error}"))?;
 
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .map_err(|error| anyhow!("open session: {error}"))?;
+        .map_err(|error| anyhow!("open link: {error}"))?;
 
     let snapshot = build
         .handle
-        .open_session_view(
+        .open_link_view(
             RuntimeCaller::test(),
-            session.session_id.clone(),
+            link.link_id.clone(),
             mail_list_descriptor(&format!("in:{ACCOUNT}/inbox"), PAGE_LIMIT),
         )
         .await
@@ -127,15 +127,15 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
         .handle
         .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            session.session_id.clone(),
-            Some(RuntimeSessionSeq::new(0)),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
         )
         .await
         .map_err(|error| anyhow!("subscribe runtime frames: {error}"))?;
 
     Ok(RuntimeInbox {
         account_id: account.id,
-        session_id: session.session_id.clone(),
+        link_id: link.link_id.clone(),
         view_id: snapshot.view_id.clone(),
         subscription,
         visible_id,
@@ -227,7 +227,7 @@ pub async fn mutate_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -> R
 /// of the whole state -> `mail_list_delta`) the runtime USED to run on every
 /// affecting `message.updated` per open mail-list view, and no longer does.
 ///
-/// Measured via `extend_session_view` by **0 rows**: a fixed-window recompute
+/// Measured via `extend_link_view` by **0 rows**: a fixed-window recompute
 /// (same window as the event pump's `recompute_view_if_changed`) that always
 /// emits a `ViewReplace`/`ViewDelta`, so its iterations/3s is the per-event
 /// runtime cost option iii eliminated. (The extend path is retained — pagination;
@@ -236,14 +236,14 @@ pub async fn recompute_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -
     inbox
         .build
         .handle
-        .extend_session_view(
+        .extend_link_view(
             RuntimeCaller::test(),
-            inbox.session_id.clone(),
+            inbox.link_id.clone(),
             inbox.view_id.clone(),
             0,
         )
         .await
-        .map_err(|error| anyhow!("extend_session_view: {error}"))?;
+        .map_err(|error| anyhow!("extend_link_view: {error}"))?;
 
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {

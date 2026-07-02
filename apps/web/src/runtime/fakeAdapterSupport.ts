@@ -18,7 +18,7 @@ import type {
 
 import type {
   RuntimeAdapter,
-  RuntimeCloseSessionRequest,
+  RuntimeCloseLinkRequest,
   RuntimeFrame,
   RuntimeFrameSubscriptionRequest,
   RuntimeMailListViewState,
@@ -28,14 +28,14 @@ import type {
   RuntimeMutationReceipt,
   RuntimeOpenMessageListViewResult,
   RuntimeOpenViewResult,
-  RuntimeOpenSessionRequest,
+  RuntimeOpenLinkRequest,
   RuntimeResourceDescriptor,
   RuntimeRunMutationRequest,
-  RuntimeSession,
-  RuntimeSessionObjectViewRequest,
-  RuntimeSessionViewCloseRequest,
-  RuntimeSessionViewExtendRequest,
-  RuntimeSessionViewRequest,
+  RuntimeLinkConnection,
+  RuntimeLinkObjectViewRequest,
+  RuntimeLinkViewCloseRequest,
+  RuntimeLinkViewExtendRequest,
+  RuntimeLinkViewRequest,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
   RuntimeViewFrame,
@@ -79,12 +79,12 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly accountUpdateCalls: AccountUpdateCall[]
   readonly accountVerificationCalls: string[]
   readonly conversationCalls: string[]
-  readonly runtimeSessionCalls: RuntimeOpenSessionRequest[]
-  readonly runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
-  readonly runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
-  readonly runtimeSessionObjectViewOpenCalls: RuntimeSessionObjectViewRequest[]
-  readonly runtimeSessionViewExtendCalls: RuntimeSessionViewExtendRequest[]
-  readonly runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
+  readonly runtimeLinkCalls: RuntimeOpenLinkRequest[]
+  readonly runtimeLinkCloseCalls: RuntimeCloseLinkRequest[]
+  readonly runtimeLinkViewOpenCalls: RuntimeLinkViewRequest[]
+  readonly runtimeLinkObjectViewOpenCalls: RuntimeLinkObjectViewRequest[]
+  readonly runtimeLinkViewExtendCalls: RuntimeLinkViewExtendRequest[]
+  readonly runtimeLinkViewCloseCalls: RuntimeLinkViewCloseRequest[]
   readonly runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   readonly runtimeMutationCalls: RuntimeMutationCall[]
   readonly viewOpenCalls: RuntimeMessagePageRequest[]
@@ -121,16 +121,16 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   queueMessagePageError(error: Error): void
   queueOpenMessageListView(result: RuntimeOpenMessageListViewResult): void
   queueOpenMessageListViewError(error: Error): void
-  queueRuntimeSession(session: RuntimeSession): void
-  queueRuntimeSessionError(error: Error): void
-  queueRuntimeSessionMessageListView(
+  queueRuntimeLinkConnection(link: RuntimeLinkConnection): void
+  queueRuntimeLinkError(error: Error): void
+  queueRuntimeLinkMessageListView(
     result: RuntimeOpenMessageListViewResult,
   ): void
-  queueRuntimeSessionMessageListViewError(error: Error): void
-  queueRuntimeSessionView(result: RuntimeOpenViewResult): void
-  queueRuntimeSessionViewError(error: Error): void
-  queueRuntimeSessionViewExtend(result: RuntimeOpenMessageListViewResult): void
-  queueRuntimeSessionViewExtendError(error: Error): void
+  queueRuntimeLinkMessageListViewError(error: Error): void
+  queueRuntimeLinkView(result: RuntimeOpenViewResult): void
+  queueRuntimeLinkViewError(error: Error): void
+  queueRuntimeLinkViewExtend(result: RuntimeOpenMessageListViewResult): void
+  queueRuntimeLinkViewExtendError(error: Error): void
   queueRuntimeMutationReceipt(receipt: RuntimeMutationReceipt): void
   queueRuntimeMutationError(error: Error): void
   queueOAuthStartResponse(response: StartOAuthResponse): void
@@ -156,12 +156,12 @@ export type FakeCallRecords = {
   accountUpdateCalls: AccountUpdateCall[]
   accountVerificationCalls: string[]
   conversationCalls: string[]
-  runtimeSessionCalls: RuntimeOpenSessionRequest[]
-  runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
-  runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
-  runtimeSessionObjectViewOpenCalls: RuntimeSessionObjectViewRequest[]
-  runtimeSessionViewExtendCalls: RuntimeSessionViewExtendRequest[]
-  runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
+  runtimeLinkCalls: RuntimeOpenLinkRequest[]
+  runtimeLinkCloseCalls: RuntimeCloseLinkRequest[]
+  runtimeLinkViewOpenCalls: RuntimeLinkViewRequest[]
+  runtimeLinkObjectViewOpenCalls: RuntimeLinkObjectViewRequest[]
+  runtimeLinkViewExtendCalls: RuntimeLinkViewExtendRequest[]
+  runtimeLinkViewCloseCalls: RuntimeLinkViewCloseRequest[]
   runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   runtimeMutationCalls: RuntimeMutationCall[]
   viewOpenCalls: RuntimeMessagePageRequest[]
@@ -187,10 +187,10 @@ export type FakeQueues = {
   messageCommands: QueuedOutcome<MessageCommandResult>[]
   messagePages: QueuedOutcome<MessagePage>[]
   openMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
-  runtimeSessions: QueuedOutcome<RuntimeSession>[]
-  runtimeSessionMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
-  runtimeSessionViews: QueuedOutcome<RuntimeOpenViewResult>[]
-  runtimeSessionViewExtends: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
+  runtimeLinks: QueuedOutcome<RuntimeLinkConnection>[]
+  runtimeLinkMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
+  runtimeLinkViews: QueuedOutcome<RuntimeOpenViewResult>[]
+  runtimeLinkViewExtends: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
   runtimeMutations: QueuedOutcome<RuntimeMutationReceipt>[]
   oauthStartResponses: QueuedOutcome<StartOAuthResponse>[]
   reads: QueuedOutcome<ReadResponse>[]
@@ -210,10 +210,10 @@ export interface FakeRuntimeAdapterOptions {
   defaultMessageCommandResult?: MessageCommandResult
   defaultMessagePage?: MessagePage
   defaultOpenMessageListView?: RuntimeOpenMessageListViewResult
-  defaultRuntimeSession?: RuntimeSession
-  defaultRuntimeSessionMessageListView?: RuntimeOpenMessageListViewResult
-  defaultRuntimeSessionView?: RuntimeOpenViewResult
-  defaultRuntimeSessionViewExtend?: RuntimeOpenMessageListViewResult
+  defaultRuntimeLinkConnection?: RuntimeLinkConnection
+  defaultRuntimeLinkMessageListView?: RuntimeOpenMessageListViewResult
+  defaultRuntimeLinkView?: RuntimeOpenViewResult
+  defaultRuntimeLinkViewExtend?: RuntimeOpenMessageListViewResult
   defaultRuntimeMutationReceipt?: RuntimeMutationReceipt
   defaultOAuthStartResponse?: StartOAuthResponse
   defaultReadResponse?: ReadResponse
@@ -245,12 +245,12 @@ export function createFakeCallRecords(): FakeCallRecords {
     accountUpdateCalls: [],
     accountVerificationCalls: [],
     conversationCalls: [],
-    runtimeSessionCalls: [],
-    runtimeSessionCloseCalls: [],
-    runtimeSessionViewOpenCalls: [],
-    runtimeSessionObjectViewOpenCalls: [],
-    runtimeSessionViewExtendCalls: [],
-    runtimeSessionViewCloseCalls: [],
+    runtimeLinkCalls: [],
+    runtimeLinkCloseCalls: [],
+    runtimeLinkViewOpenCalls: [],
+    runtimeLinkObjectViewOpenCalls: [],
+    runtimeLinkViewExtendCalls: [],
+    runtimeLinkViewCloseCalls: [],
     runtimeFrameSubscriptionCalls: [],
     runtimeMutationCalls: [],
     viewOpenCalls: [],
@@ -275,12 +275,12 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.accountUpdateCalls.length = 0
   calls.accountVerificationCalls.length = 0
   calls.conversationCalls.length = 0
-  calls.runtimeSessionCalls.length = 0
-  calls.runtimeSessionCloseCalls.length = 0
-  calls.runtimeSessionViewOpenCalls.length = 0
-  calls.runtimeSessionObjectViewOpenCalls.length = 0
-  calls.runtimeSessionViewExtendCalls.length = 0
-  calls.runtimeSessionViewCloseCalls.length = 0
+  calls.runtimeLinkCalls.length = 0
+  calls.runtimeLinkCloseCalls.length = 0
+  calls.runtimeLinkViewOpenCalls.length = 0
+  calls.runtimeLinkObjectViewOpenCalls.length = 0
+  calls.runtimeLinkViewExtendCalls.length = 0
+  calls.runtimeLinkViewCloseCalls.length = 0
   calls.runtimeFrameSubscriptionCalls.length = 0
   calls.runtimeMutationCalls.length = 0
   calls.viewOpenCalls.length = 0
@@ -307,10 +307,10 @@ export function createFakeQueues(): FakeQueues {
     messageCommands: [],
     messagePages: [],
     openMessageListViews: [],
-    runtimeSessions: [],
-    runtimeSessionMessageListViews: [],
-    runtimeSessionViews: [],
-    runtimeSessionViewExtends: [],
+    runtimeLinks: [],
+    runtimeLinkMessageListViews: [],
+    runtimeLinkViews: [],
+    runtimeLinkViewExtends: [],
     runtimeMutations: [],
     oauthStartResponses: [],
     reads: [],
@@ -331,10 +331,10 @@ export function resetFakeQueues(queues: FakeQueues): void {
   queues.messageCommands.length = 0
   queues.messagePages.length = 0
   queues.openMessageListViews.length = 0
-  queues.runtimeSessions.length = 0
-  queues.runtimeSessionMessageListViews.length = 0
-  queues.runtimeSessionViews.length = 0
-  queues.runtimeSessionViewExtends.length = 0
+  queues.runtimeLinks.length = 0
+  queues.runtimeLinkMessageListViews.length = 0
+  queues.runtimeLinkViews.length = 0
+  queues.runtimeLinkViewExtends.length = 0
   queues.runtimeMutations.length = 0
   queues.oauthStartResponses.length = 0
   queues.reads.length = 0

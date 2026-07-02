@@ -147,7 +147,7 @@ export interface paths {
         put?: never;
         /**
          * Start account OAuth flow
-         * @description Creates a backend-held PKCE authorization session for an existing account.
+         * @description Creates an authority-server-held PKCE authorization session for an existing account.
          */
         post: operations["start_account_oauth"];
         delete?: never;
@@ -327,7 +327,7 @@ export interface paths {
         put?: never;
         /**
          * Start provider OAuth flow
-         * @description Creates a backend-held PKCE authorization session for provider-first setup.
+         * @description Creates an authority-server-held PKCE authorization session for provider-first setup.
          */
         post: operations["start_provider_oauth"];
         delete?: never;
@@ -366,10 +366,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Open a runtime session
-         * @description Creates a runtime session whose stream carries RuntimeFrame values.
+         * Open a runtime link
+         * @description Creates a runtime link whose stream carries RuntimeFrame values.
          */
-        post: operations["open_runtime_session"];
+        post: operations["open_runtime_link"];
         delete?: never;
         options?: never;
         head?: never;
@@ -387,10 +387,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Close a runtime session
-         * @description Closes a runtime session and releases its open runtime views.
+         * Close a runtime link
+         * @description Closes a runtime link and releases its open runtime views.
          */
-        delete: operations["close_runtime_session"];
+        delete: operations["close_runtime_link"];
         options?: never;
         head?: never;
         patch?: never;
@@ -407,9 +407,29 @@ export interface paths {
         put?: never;
         /**
          * Run a runtime mutation
-         * @description Submits a named mutation to a runtime session (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.
+         * @description Submits a named mutation to a runtime link (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the link stream.
          */
-        post: operations["run_runtime_session_mutation"];
+        post: operations["run_runtime_link_mutation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runtime/sessions/{session_id}/mutations/{client_mutation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a runtime mutation's settlement
+         * @description Returns the settlement receipt the runtime holds for a client mutation id, or a null receipt when it has no record (unknown link, never accepted, or already cleared). The client near-end's reconciler queries this for sent-but-unsettled records after a link-continuity loss: a terminal receipt settles locally; a null receipt re-forwards.
+         */
+        get: operations["runtime_link_mutation_settlement"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -425,9 +445,9 @@ export interface paths {
         };
         /**
          * Subscribe to runtime frames
-         * @description Streams session-scoped RuntimeFrame values as server-sent events. Event ids are sessionSeq values.
+         * @description Streams link-scoped RuntimeFrame values as server-sent events. Event ids are linkSeq values.
          */
-        get: operations["stream_runtime_session"];
+        get: operations["stream_runtime_link"];
         put?: never;
         post?: never;
         delete?: never;
@@ -446,10 +466,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Open a runtime session view
-         * @description Opens a view in a runtime session and returns its initial snapshot.
+         * Open a runtime link view
+         * @description Opens a view in a runtime link and returns its initial snapshot.
          */
-        post: operations["open_runtime_session_view"];
+        post: operations["open_runtime_link_view"];
         delete?: never;
         options?: never;
         head?: never;
@@ -467,10 +487,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Close a runtime session view
-         * @description Closes a runtime view for a session and emits a viewClosed RuntimeFrame.
+         * Close a runtime link view
+         * @description Closes a runtime view for a link and emits a viewClosed RuntimeFrame.
          */
-        delete: operations["close_runtime_session_view"];
+        delete: operations["close_runtime_link_view"];
         options?: never;
         head?: never;
         patch?: never;
@@ -486,10 +506,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Extend a runtime session view window
+         * Extend a runtime link view window
          * @description Grows an open windowed view (e.g. mailList) by the requested row count and returns the extended snapshot, also broadcast as a viewReplace RuntimeFrame.
          */
-        post: operations["extend_runtime_session_view"];
+        post: operations["extend_runtime_link_view"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1379,7 +1399,7 @@ export interface components {
          *     stored in `[appearance]` of `app.toml` as the single source of truth (moved
          *     out of the opaque `localStorage` "client-preferences" snapshot).
          *
-         *     The backend treats appearance as **pass-through storage**: it does not
+         *     The authority server treats appearance as **pass-through storage**: it does not
          *     interpret theme values (the renderer applies them). The enums give the
          *     OpenAPI schema self-documentation and reject typos at the parse boundary.
          *
@@ -1430,7 +1450,7 @@ export interface components {
             mailboxId: components["schemas"]["MailboxId"];
         };
         /**
-         * @description Account-level automation rule evaluated by backend triggers.
+         * @description Account-level automation rule evaluated by authority server triggers.
          *
          *     @spec docs/L1-accounts#toml-schema
          *     @spec docs/L1-sync#automation-actions
@@ -1682,7 +1702,7 @@ export interface components {
             subject: string;
             to: components["schemas"]["Recipient"][];
         };
-        ExtendRuntimeSessionViewRequest: {
+        ExtendRuntimeLinkViewRequest: {
             /** @description Number of additional rows to grow the view's window by. */
             count: number;
         };
@@ -1747,7 +1767,7 @@ export interface components {
          *     the rows that changed since the last snapshot, instead of the whole view. The
          *     client reconciles it against its held rows — drop rows absent from `order`,
          *     reorder to `order`, then apply `upserts` by `row_key`. Emitted only to a
-         *     session that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),
+         *     link that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),
          *     and only when the change is row-local (structural changes still send a whole
          *     `ViewReplace`).
          */
@@ -1767,6 +1787,10 @@ export interface components {
             resourceRef?: string | null;
             rowKey: string;
             sortKey?: Record<string, never>;
+        };
+        MailOperation: {
+            args?: Record<string, never>;
+            name: string;
         };
         /**
          * @description A per-mailbox sidebar color override (presentation only). Overrides the
@@ -1938,17 +1962,28 @@ export interface components {
         MutationReceipt: {
             clientMutationId: components["schemas"]["ClientMutationId"];
             error?: null | components["schemas"]["RuntimeAdapterError"];
+            /**
+             * @description The canonical operation name, echoed for the client's settlement join.
+             *     Derived from the operation variant (one fact), never a free string.
+             */
             name: string;
             output?: Record<string, never>;
             runtimeMutationId?: null | components["schemas"]["RuntimeMutationId"];
             state: components["schemas"]["MutationSettlementState"];
         };
-        MutationRequest: {
-            args?: unknown;
+        /**
+         * @description A forwarded operation on the link's up-channel. Carries the typed
+         *     [`MailOperation`] (D8) — the operation is parsed once at the wire edge and
+         *     travels typed inward; there is no stringly `name`/`args` pair to re-parse per
+         *     site. The wire shape is `{"linkId": …, "name": "message.…", "args": {…},
+         *     "clientMutationId": …, "context": …}` — the operation is flattened, so its
+         *     adjacently-tagged `name`/`args` sit at the envelope's top level exactly where
+         *     the old stringly fields were.
+         */
+        MutationRequest: components["schemas"]["MailOperation"] & {
             clientMutationId: components["schemas"]["ClientMutationId"];
             context?: unknown;
-            name: string;
-            sessionId?: null | components["schemas"]["RuntimeSessionId"];
+            linkId?: null | components["schemas"]["RuntimeLinkId"];
         };
         /** @enum {string} */
         MutationSettlementState: "accepted" | "confirmed" | "failed";
@@ -1971,10 +2006,10 @@ export interface components {
         OkResponse: {
             ok: boolean;
         };
-        OpenRuntimeSessionViewRequest: {
+        OpenRuntimeLinkViewRequest: {
             descriptor: Record<string, never>;
         };
-        OpenRuntimeSessionViewResponse: {
+        OpenRuntimeLinkViewResponse: {
             snapshot: components["schemas"]["ViewSnapshot"];
             viewId: string;
         };
@@ -2298,61 +2333,72 @@ export interface components {
         /** @enum {string} */
         RuntimeErrorCode: "runtime_not_ready" | "invalid_descriptor" | "invalid_mutation" | "invalid_secret" | "invalid_account" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "unauthorized" | "not_found" | "provider_unavailable" | "conflict" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse" | "transport_disconnected" | "internal";
         RuntimeFrame: {
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             revision: components["schemas"]["ViewRevision"];
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             snapshot: components["schemas"]["ViewSnapshot"];
             /** @enum {string} */
             type: "viewSnapshot";
             viewId: components["schemas"]["ViewId"];
         } | {
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             revision: components["schemas"]["ViewRevision"];
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             snapshot: components["schemas"]["ViewSnapshot"];
             /** @enum {string} */
             type: "viewReplace";
             viewId: components["schemas"]["ViewId"];
         } | {
             delta: components["schemas"]["MailListDelta"];
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             revision: components["schemas"]["ViewRevision"];
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
             type: "viewDelta";
             viewId: components["schemas"]["ViewId"];
         } | {
             error: components["schemas"]["RuntimeAdapterError"];
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             /** @enum {string} */
             type: "viewError";
             viewId: components["schemas"]["ViewId"];
         } | {
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             /** @enum {string} */
             type: "viewClosed";
             viewId: components["schemas"]["ViewId"];
         } | {
             clientMutationId: components["schemas"]["ClientMutationId"];
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             notification: components["schemas"]["MutationNotification"];
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
             type: "mutationNotification";
         } | {
             kind: string;
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             payload: Record<string, never>;
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
             type: "notification";
         } | {
-            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            linkSeq: components["schemas"]["RuntimeLinkSeq"];
             /** @enum {string} */
             type: "heartbeat";
         };
-        RuntimeMutationId: string;
-        RuntimeSession: {
-            sessionId: components["schemas"]["RuntimeSessionId"];
+        RuntimeLinkConnection: {
+            linkId: components["schemas"]["RuntimeLinkId"];
         };
-        RuntimeSessionId: string;
+        RuntimeLinkId: string;
         /** Format: int64 */
-        RuntimeSessionSeq: number;
+        RuntimeLinkSeq: number;
+        RuntimeMutationId: string;
+        /**
+         * @description The settlement-query response for one `(link, clientMutationId)` key
+         *     (`GET /runtime/links/{id}/mutations/{clientMutationId}`): the receipt the
+         *     runtime holds, or `null` when it has no record (unknown link, never
+         *     accepted, or already evicted/cleared under the D47 ledger rule). Consumed by
+         *     the near-end reconciler's sent-but-unsettled step (D44b): a terminal receipt
+         *     settles locally, `null` re-forwards.
+         */
+        RuntimeMutationSettlement: {
+            receipt?: null | components["schemas"]["MutationReceipt"];
+        };
         /** @description Request body for `POST /v1/sources/{source_id}/commands/save-draft`. */
         SaveDraftRequest: {
             /** @description The existing draft id when editing; omit for a brand-new draft. */
@@ -3541,12 +3587,12 @@ export interface operations {
             };
         };
     };
-    open_runtime_session: {
+    open_runtime_link: {
         parameters: {
             query?: {
                 sourceId?: string | null;
                 /**
-                 * @description The session can apply incremental mail-list deltas
+                 * @description The link can apply incremental mail-list deltas
                  *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
@@ -3558,13 +3604,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The opened runtime session */
+            /** @description The opened runtime link */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RuntimeSession"];
+                    "application/json": components["schemas"]["RuntimeLinkConnection"];
                 };
             };
             /** @description Unauthorized */
@@ -3587,12 +3633,12 @@ export interface operations {
             };
         };
     };
-    close_runtime_session: {
+    close_runtime_link: {
         parameters: {
             query?: {
                 sourceId?: string | null;
                 /**
-                 * @description The session can apply incremental mail-list deltas
+                 * @description The link can apply incremental mail-list deltas
                  *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
@@ -3600,14 +3646,14 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Runtime session id */
+                /** @description Runtime link id */
                 session_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The session was closed */
+            /** @description The link was closed */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3625,7 +3671,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
-            /** @description Unknown runtime session */
+            /** @description Unknown runtime link */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3645,12 +3691,12 @@ export interface operations {
             };
         };
     };
-    run_runtime_session_mutation: {
+    run_runtime_link_mutation: {
         parameters: {
             query?: {
                 sourceId?: string | null;
                 /**
-                 * @description The session can apply incremental mail-list deltas
+                 * @description The link can apply incremental mail-list deltas
                  *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
@@ -3658,7 +3704,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Runtime session id */
+                /** @description Runtime link id */
                 session_id: string;
             };
             cookie?: never;
@@ -3705,7 +3751,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
-            /** @description Unknown runtime session */
+            /** @description Unknown runtime link */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3725,7 +3771,67 @@ export interface operations {
             };
         };
     };
-    stream_runtime_session: {
+    runtime_link_mutation_settlement: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+                /**
+                 * @description The link can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime link id the mutation was dispatched under */
+                session_id: string;
+                /** @description Client mutation id */
+                client_mutation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runtime's settlement record (receipt is null when unknown) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeMutationSettlement"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    stream_runtime_link: {
         parameters: {
             query?: {
                 afterSeq?: number | null;
@@ -3733,7 +3839,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Runtime session id */
+                /** @description Runtime link id */
                 session_id: string;
             };
             cookie?: never;
@@ -3756,7 +3862,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
-            /** @description Unknown runtime session */
+            /** @description Unknown runtime link */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3776,12 +3882,12 @@ export interface operations {
             };
         };
     };
-    open_runtime_session_view: {
+    open_runtime_link_view: {
         parameters: {
             query?: {
                 sourceId?: string | null;
                 /**
-                 * @description The session can apply incremental mail-list deltas
+                 * @description The link can apply incremental mail-list deltas
                  *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
@@ -3789,14 +3895,14 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Runtime session id */
+                /** @description Runtime link id */
                 session_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OpenRuntimeSessionViewRequest"];
+                "application/json": components["schemas"]["OpenRuntimeLinkViewRequest"];
             };
         };
         responses: {
@@ -3806,7 +3912,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpenRuntimeSessionViewResponse"];
+                    "application/json": components["schemas"]["OpenRuntimeLinkViewResponse"];
                 };
             };
             /** @description Invalid view descriptor */
@@ -3827,7 +3933,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
-            /** @description Unknown runtime session */
+            /** @description Unknown runtime link */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3847,12 +3953,12 @@ export interface operations {
             };
         };
     };
-    close_runtime_session_view: {
+    close_runtime_link_view: {
         parameters: {
             query?: {
                 sourceId?: string | null;
                 /**
-                 * @description The session can apply incremental mail-list deltas
+                 * @description The link can apply incremental mail-list deltas
                  *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
@@ -3860,7 +3966,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Runtime session id */
+                /** @description Runtime link id */
                 session_id: string;
                 /** @description Runtime view id */
                 view_id: string;
@@ -3887,7 +3993,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
-            /** @description Unknown runtime session */
+            /** @description Unknown runtime link */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3907,12 +4013,12 @@ export interface operations {
             };
         };
     };
-    extend_runtime_session_view: {
+    extend_runtime_link_view: {
         parameters: {
             query?: {
                 sourceId?: string | null;
                 /**
-                 * @description The session can apply incremental mail-list deltas
+                 * @description The link can apply incremental mail-list deltas
                  *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
@@ -3920,7 +4026,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Runtime session id */
+                /** @description Runtime link id */
                 session_id: string;
                 /** @description Runtime view id */
                 view_id: string;
@@ -3929,7 +4035,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExtendRuntimeSessionViewRequest"];
+                "application/json": components["schemas"]["ExtendRuntimeLinkViewRequest"];
             };
         };
         responses: {
@@ -3939,7 +4045,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpenRuntimeSessionViewResponse"];
+                    "application/json": components["schemas"]["OpenRuntimeLinkViewResponse"];
                 };
             };
             /** @description View does not support window extension */
@@ -3960,7 +4066,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
-            /** @description Unknown runtime session or view */
+            /** @description Unknown runtime link or view */
             404: {
                 headers: {
                     [name: string]: unknown;

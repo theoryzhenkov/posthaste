@@ -24,13 +24,13 @@ let factory: EntityStoreHandleFactory
 
 async function loadFactory(): Promise<EntityStoreHandleFactory> {
   const mod = (await import(
-    join(WASM_DIR, 'posthaste_link_wasm.js')
+    join(WASM_DIR, 'posthaste_client_node_wasm.js')
   )) as unknown as {
     initSync(input: { module: BufferSource }): unknown
     EntityStoreHandle: new () => EntityStoreHandle
   }
   mod.initSync({
-    module: readFileSync(join(WASM_DIR, 'posthaste_link_wasm_bg.wasm')),
+    module: readFileSync(join(WASM_DIR, 'posthaste_client_node_wasm_bg.wasm')),
   })
   return () => new mod.EntityStoreHandle()
 }

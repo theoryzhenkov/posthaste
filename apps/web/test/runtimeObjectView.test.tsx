@@ -12,7 +12,7 @@ import {
   createFakeRuntimeAdapter,
   type FakeRuntimeAdapter,
 } from '../src/runtime/fakeAdapter'
-import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
+import { resetRuntimeLinkClientForTesting } from '../src/runtime/linkClient'
 import type { RuntimeViewSnapshot } from '../src/runtime/types'
 import { useRuntimeObjectView } from '../src/runtime/useRuntimeObjectView'
 import { setupDomEnvironment } from './dom-env'
@@ -90,7 +90,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  resetRuntimeSessionClientForTesting()
+  resetRuntimeLinkClientForTesting()
   resetRuntimeAdapterForTesting()
   queryClient.clear()
 })
@@ -98,8 +98,8 @@ afterEach(() => {
 describe('useRuntimeObjectView', () => {
   it('opens an object view by descriptor, seeds the cache, and applies replaces', async () => {
     const queryKey = ['conversation', 'c1'] as const
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
-    runtimeAdapter.queueRuntimeSessionView({
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
+    runtimeAdapter.queueRuntimeLinkView({
       viewId: 'view-1',
       snapshot: snapshot('conversation', 1, { conversationId: 'c1', count: 1 }),
     })
@@ -122,14 +122,14 @@ describe('useRuntimeObjectView', () => {
         count: 1,
       }),
     )
-    expect(runtimeAdapter.runtimeSessionObjectViewOpenCalls).toHaveLength(1)
-    expect(
-      runtimeAdapter.runtimeSessionObjectViewOpenCalls[0].descriptor,
-    ).toEqual({ family: 'conversation', payload: { conversationId: 'c1' } })
+    expect(runtimeAdapter.runtimeLinkObjectViewOpenCalls).toHaveLength(1)
+    expect(runtimeAdapter.runtimeLinkObjectViewOpenCalls[0].descriptor).toEqual(
+      { family: 'conversation', payload: { conversationId: 'c1' } },
+    )
 
     runtimeAdapter.emitRuntimeFrame({
       type: 'viewReplace',
-      sessionSeq: 2,
+      linkSeq: 2,
       viewId: 'view-1',
       revision: 2,
       snapshot: snapshot('conversation', 2, { conversationId: 'c1', count: 2 }),
@@ -144,8 +144,8 @@ describe('useRuntimeObjectView', () => {
 
     unmount()
     await waitFor(() =>
-      expect(runtimeAdapter.runtimeSessionViewCloseCalls).toEqual([
-        { sessionId: 'session-1', viewId: 'view-1', sourceId: 'primary' },
+      expect(runtimeAdapter.runtimeLinkViewCloseCalls).toEqual([
+        { linkId: 'link-1', viewId: 'view-1', sourceId: 'primary' },
       ]),
     )
   })
@@ -154,8 +154,8 @@ describe('useRuntimeObjectView', () => {
     const queryKey = ['message', 'primary', 'm1'] as const
     // The HTTP detail query has already loaded the body.
     queryClient.setQueryData(queryKey, detailWithBody)
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
-    runtimeAdapter.queueRuntimeSessionView({
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
+    runtimeAdapter.queueRuntimeLinkView({
       viewId: 'view-1',
       snapshot: snapshot('messageDetail', 1, flaggedHeaderOnly),
     })

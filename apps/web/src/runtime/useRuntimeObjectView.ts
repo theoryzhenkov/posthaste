@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
-import { runtimeSessionClient } from '@/runtime/sessionClient'
+import { runtimeLinkClient } from '@/runtime/linkClient'
 import type { RuntimeViewSnapshot } from '@/runtime/types'
 
 /**
@@ -52,7 +52,7 @@ export function useRuntimeObjectView<TData>({
       }
       const closingViewId = viewId
       viewId = undefined
-      runtimeSessionClient.closeView(closingViewId)
+      runtimeLinkClient.closeView(closingViewId)
     }
 
     const write = (data: TData) => {
@@ -61,7 +61,7 @@ export function useRuntimeObjectView<TData>({
       )
     }
 
-    void runtimeSessionClient
+    void runtimeLinkClient
       .openView<TData>({ family, payload, sourceId })
       .then((opened) => {
         viewId = opened.viewId
@@ -71,7 +71,7 @@ export function useRuntimeObjectView<TData>({
         }
         const openedViewId = opened.viewId
         write(opened.snapshot.data)
-        unsubscribe = runtimeSessionClient.subscribe(
+        unsubscribe = runtimeLinkClient.subscribe(
           {
             onFrame(frame) {
               switch (frame.type) {

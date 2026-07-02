@@ -86,7 +86,7 @@ pub struct SettlementResult {
 /// I/O: persistence, transport, and view recomputation are the node's job; it
 /// only holds the base + outbox and runs the rebase loop.
 ///
-/// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-link-core
+/// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-replica-core
 #[derive(Clone, Debug)]
 pub struct Replica<C: Convergence> {
     base: BTreeMap<C::Key, C::State>,
@@ -401,7 +401,7 @@ impl<C: Convergence> Replica<C> {
 /// gated where the consumer tracks authority versions).
 ///
 /// Both near nodes compose this one kernel (`one-replica-both-seams`, RFC D34):
-/// the client's `EntityStore` (posthaste-link-replica) and the runtime's
+/// the client's `EntityStore` (posthaste-replica-projector) and the runtime's
 /// `RuntimeAuthorityServerOutbox` (posthaste-runtime). The trait is a *view*
 /// over the single-owner [`Replica`] — one store (base + pending), never a
 /// second copy (a split store was considered and rejected, RFC R2). The

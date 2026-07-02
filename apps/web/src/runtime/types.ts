@@ -189,81 +189,81 @@ export interface RuntimeMutationReceipt {
 export type RuntimeFrame<TData = unknown> =
   | {
       type: 'viewSnapshot'
-      sessionSeq: number
+      linkSeq: number
       viewId: string
       revision: number
       snapshot: RuntimeViewSnapshot<TData>
     }
   | {
       type: 'viewReplace'
-      sessionSeq: number
+      linkSeq: number
       viewId: string
       revision: number
       snapshot: RuntimeViewSnapshot<TData>
     }
   | {
       type: 'viewDelta'
-      sessionSeq: number
+      linkSeq: number
       viewId: string
       revision: number
       delta: RuntimeMailListDelta
     }
-  | { type: 'viewError'; sessionSeq: number; viewId: string; error: unknown }
-  | { type: 'viewClosed'; sessionSeq: number; viewId: string }
+  | { type: 'viewError'; linkSeq: number; viewId: string; error: unknown }
+  | { type: 'viewClosed'; linkSeq: number; viewId: string }
   | {
       type: 'mutationNotification'
-      sessionSeq: number
+      linkSeq: number
       clientMutationId: string
       notification: RuntimeMutationNotification
     }
-  | { type: 'notification'; sessionSeq: number; kind: string; payload: unknown }
-  | { type: 'heartbeat'; sessionSeq: number }
+  | { type: 'notification'; linkSeq: number; kind: string; payload: unknown }
+  | { type: 'heartbeat'; linkSeq: number }
 
-export interface RuntimeSession {
-  sessionId: string
+export interface RuntimeLinkConnection {
+  linkId: string
 }
 
-export interface RuntimeOpenSessionRequest {
+export interface RuntimeOpenLinkRequest {
   sourceId?: string | null
   /** Opt into incremental mail-list view deltas (replication client-link). */
   viewDelta?: boolean
 }
 
-export interface RuntimeCloseSessionRequest {
-  sessionId: string
+export interface RuntimeCloseLinkRequest {
+  linkId: string
   sourceId?: string | null
 }
 
-export interface RuntimeSessionViewRequest {
-  sessionId: string
+export interface RuntimeLinkViewRequest {
+  linkId: string
   view: RuntimeMessagePageRequest
   sourceId?: string | null
 }
 
-export interface RuntimeSessionViewCloseRequest {
-  sessionId: string
+export interface RuntimeLinkViewCloseRequest {
+  linkId: string
   viewId: string
   sourceId?: string | null
 }
 
-export interface RuntimeSessionViewExtendRequest {
-  sessionId: string
+export interface RuntimeLinkViewExtendRequest {
+  linkId: string
   viewId: string
   count: number
   sourceId?: string | null
 }
 
 /// Open any runtime view family by descriptor (messageDetail, conversation, …).
-/// `openRuntimeSessionMessageListView` stays specialized for the typed mail-list
+/// `openRuntimeLinkMessageListView` stays specialized for the typed mail-list
 /// page result; this is the generic single-object path.
-export interface RuntimeSessionObjectViewRequest {
-  sessionId: string
+export interface RuntimeLinkObjectViewRequest {
+  linkId: string
   descriptor: RuntimeViewDescriptor
   sourceId?: string | null
 }
 
 export interface RuntimeRunMutationRequest {
-  sessionId?: string | null
+  linkId?: string | null
   name: string
   args?: unknown
   clientMutationId: string
@@ -288,7 +288,7 @@ export interface RuntimeViewSubscriptionRequest {
 }
 
 export interface RuntimeFrameSubscriptionRequest {
-  sessionId: string
+  linkId: string
   afterSeq?: number | null
   sourceId?: string | null
 }
@@ -387,21 +387,21 @@ export type RuntimeUnsubscribe = () => void
 
 /** Renderer-facing runtime adapter facade. */
 export interface RuntimeAdapter {
-  openRuntimeSession(
-    request: RuntimeOpenSessionRequest,
-  ): Promise<RuntimeSession>
-  closeRuntimeSession(request: RuntimeCloseSessionRequest): Promise<OkResponse>
-  openRuntimeSessionMessageListView(
-    request: RuntimeSessionViewRequest,
+  openRuntimeLink(
+    request: RuntimeOpenLinkRequest,
+  ): Promise<RuntimeLinkConnection>
+  closeRuntimeLink(request: RuntimeCloseLinkRequest): Promise<OkResponse>
+  openRuntimeLinkMessageListView(
+    request: RuntimeLinkViewRequest,
   ): Promise<RuntimeOpenMessageListViewResult>
-  openRuntimeSessionView(
-    request: RuntimeSessionObjectViewRequest,
+  openRuntimeLinkView(
+    request: RuntimeLinkObjectViewRequest,
   ): Promise<RuntimeOpenViewResult>
-  extendRuntimeSessionView(
-    request: RuntimeSessionViewExtendRequest,
+  extendRuntimeLinkView(
+    request: RuntimeLinkViewExtendRequest,
   ): Promise<RuntimeOpenMessageListViewResult>
-  closeRuntimeSessionView(
-    request: RuntimeSessionViewCloseRequest,
+  closeRuntimeLinkView(
+    request: RuntimeLinkViewCloseRequest,
   ): Promise<OkResponse>
   runRuntimeMutation(
     request: RuntimeRunMutationRequest,

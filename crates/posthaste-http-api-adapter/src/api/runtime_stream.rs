@@ -1,14 +1,14 @@
 use super::*;
 use posthaste_contract_core::{
     MutationReceipt, MutationRequest, RuntimeError, RuntimeFrame, RuntimeMutationSettlement,
-    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, ViewDescriptor, ViewId, ViewSnapshot,
+    RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, ViewDescriptor, ViewId, ViewSnapshot,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeSessionQuery {
+pub struct RuntimeLinkQuery {
     pub source_id: Option<String>,
-    /// The session can apply incremental mail-list deltas
+    /// The link can apply incremental mail-list deltas
     /// ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
     /// runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
     #[serde(default)]
@@ -17,21 +17,21 @@ pub struct RuntimeSessionQuery {
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeSessionStreamQuery {
+pub struct RuntimeLinkStreamQuery {
     pub after_seq: Option<u64>,
     pub source_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenRuntimeSessionViewRequest {
+pub struct OpenRuntimeLinkViewRequest {
     #[schema(value_type = Object)]
     pub descriptor: ViewDescriptor,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenRuntimeSessionViewResponse {
+pub struct OpenRuntimeLinkViewResponse {
     #[schema(value_type = String)]
     pub view_id: ViewId,
     pub snapshot: ViewSnapshot,
@@ -39,19 +39,19 @@ pub struct OpenRuntimeSessionViewResponse {
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ExtendRuntimeSessionViewRequest {
+pub struct ExtendRuntimeLinkViewRequest {
     /// Number of additional rows to grow the view's window by.
     pub count: usize,
 }
 
 pub(crate) mod mutations;
-pub(crate) mod sessions;
+pub(crate) mod links;
 pub(crate) mod views;
 
-pub use mutations::{run_runtime_session_mutation, runtime_session_mutation_settlement};
-pub use sessions::{close_runtime_session, open_runtime_session, stream_runtime_session};
+pub use mutations::{run_runtime_link_mutation, runtime_link_mutation_settlement};
+pub use links::{close_runtime_link, open_runtime_link, stream_runtime_link};
 pub use views::{
-    close_runtime_session_view, extend_runtime_session_view, open_runtime_session_view,
+    close_runtime_link_view, extend_runtime_link_view, open_runtime_link_view,
 };
 
 fn runtime_caller(source_id: Option<&str>) -> RuntimeCaller {
@@ -62,7 +62,7 @@ fn runtime_caller(source_id: Option<&str>) -> RuntimeCaller {
 
 fn frame_to_sse(frame: RuntimeFrame) -> Result<Event, Infallible> {
     Ok(Event::default()
-        .id(frame.session_seq().get().to_string())
+        .id(frame.link_seq().get().to_string())
         .json_data(frame)
         .unwrap_or_else(|_| Event::default().data("{}")))
 }

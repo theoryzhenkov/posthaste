@@ -4,7 +4,7 @@
 //! responses/streams), so a no-op-waker `block_on` busy-poll drives the async
 //! engine without a real executor — keeping the crate dependency-free while
 //! still exercising the full reconnect/forward/reconcile paths. The harness
-//! instantiates the engine over the client seam's [`RuntimeSessionWire`]; the
+//! instantiates the engine over the client seam's [`RuntimeLinkWire`]; the
 //! authority-server wire's profile is exercised natively in `posthaste-runtime`.
 
 use std::cell::RefCell;
@@ -26,7 +26,7 @@ use crate::sink::{ConnectionStatus, FrameSink};
 use crate::transport::{
     GetRequest, PostRequest, PostResponse, StreamEvent, StreamRequest, Transport, TransportError,
 };
-use crate::wire::RuntimeSessionWire;
+use crate::wire::RuntimeLinkWire;
 
 use super::NearEnd;
 
@@ -52,7 +52,7 @@ fn block_on<F: Future>(fut: F) -> F::Output {
 // ---- fakes -----------------------------------------------------------------
 
 struct FakeTransport {
-    session_response: PostResponse,
+    link_response: PostResponse,
     mutation_responses: RefCell<VecDeque<Result<PostResponse, TransportError>>>,
     /// If set, mutation POSTs never resolve (to exercise the deadline).
     hang_mutations: bool,
@@ -67,9 +67,9 @@ struct FakeTransport {
 impl FakeTransport {
     fn new() -> Self {
         Self {
-            session_response: PostResponse {
+            link_response: PostResponse {
                 status: 200,
-                body: r#"{"sessionId":"session-test"}"#.to_string(),
+                body: r#"{"linkId":"link-test"}"#.to_string(),
             },
             mutation_responses: RefCell::new(VecDeque::new()),
             hang_mutations: false,
@@ -123,7 +123,7 @@ impl Transport for FakeTransport {
                 .unwrap_or_else(|| ok_response(200, EMPTY_RECEIPT));
             ready(next).boxed_local()
         } else {
-            ready(Ok(self.session_response.clone())).boxed_local()
+            ready(Ok(self.link_response.clone())).boxed_local()
         }
     }
 
@@ -255,7 +255,7 @@ fn confirmed_receipt(client_mutation_id: &str) -> String {
 }
 
 struct Harness {
-    engine: Rc<NearEnd<RuntimeSessionWire>>,
+    engine: Rc<NearEnd<RuntimeLinkWire>>,
     transport: Rc<FakeTransport>,
     scheduler: Rc<FakeScheduler>,
     sink: Rc<RecordingSink>,
@@ -268,9 +268,9 @@ fn harness(transport: FakeTransport, outbox: FakeOutbox, config: NearEndConfig) 
     let sink = Rc::new(RecordingSink::default());
     let outbox = Rc::new(outbox);
     let engine = NearEnd::new(
-        RuntimeSessionWire {
+        RuntimeLinkWire {
             view_delta: true,
-            ..RuntimeSessionWire::default()
+            ..RuntimeLinkWire::default()
         },
         transport.clone(),
         scheduler.clone(),
@@ -303,11 +303,11 @@ fn forward_returns_receipt_and_stamps_session() {
 
     assert_eq!(receipt.client_mutation_id.as_str(), "op-1");
     assert_eq!(receipt.name, "message.setReadState");
-    // The forward body stamped the opened session id and round-tripped the op.
+    // The forward body stamped the opened link id and round-tripped the op.
     let posts = h.transport.posts.borrow();
     let (url, body) = posts.iter().find(|(u, _)| u.contains("/mutations")).unwrap();
-    assert!(url.contains("/runtime/sessions/session-test/mutations"), "{url}");
-    assert!(body.contains("\"sessionId\":\"session-test\""), "{body}");
+    assert!(url.contains("/runtime/sessions/link-test/mutations"), "{url}");
+    assert!(body.contains("\"linkId\":\"link-test\""), "{body}");
     assert!(body.contains("\"name\":\"message.setReadState\""), "{body}");
 }
 
@@ -392,7 +392,7 @@ fn stream_reconnects_and_carries_the_resume_cursor() {
     let transport = FakeTransport::new()
         .with_stream(vec![
             StreamEvent::Open,
-            StreamEvent::Message(r#"{"type":"heartbeat","sessionSeq":5}"#.to_string()),
+            StreamEvent::Message(r#"{"type":"heartbeat","linkSeq":5}"#.to_string()),
             StreamEvent::Closed,
         ])
         .with_stream(vec![
@@ -463,9 +463,9 @@ fn a_seq_gap_reseeds_and_resubscribes_from_the_cursor() {
     let transport = FakeTransport::new()
         .with_stream(vec![
             StreamEvent::Open,
-            StreamEvent::Message(r#"{"type":"heartbeat","sessionSeq":1}"#.to_string()),
+            StreamEvent::Message(r#"{"type":"heartbeat","linkSeq":1}"#.to_string()),
             // seq 3 skips 2 → a gap.
-            StreamEvent::Message(r#"{"type":"heartbeat","sessionSeq":3}"#.to_string()),
+            StreamEvent::Message(r#"{"type":"heartbeat","linkSeq":3}"#.to_string()),
         ])
         .with_stream(vec![
             StreamEvent::Open,
@@ -524,7 +524,7 @@ fn a_good_frame_resets_the_malformed_streak() {
             StreamEvent::Open,
             StreamEvent::Message("garbage-1".to_string()),
             StreamEvent::Message("garbage-2".to_string()),
-            StreamEvent::Message(r#"{"type":"heartbeat","sessionSeq":1}"#.to_string()),
+            StreamEvent::Message(r#"{"type":"heartbeat","linkSeq":1}"#.to_string()),
             StreamEvent::Message("garbage-3".to_string()),
             StreamEvent::Closed,
         ])
@@ -583,7 +583,7 @@ fn reconciler_replays_never_dispatched_on_connect() {
 fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
     let mut outbox = FakeOutbox::default();
     outbox.unsettled.get_mut().push(SentUnsettled {
-        session_id: "session-old".to_string(),
+        link_id: "link-old".to_string(),
         client_mutation_id: "sent-1".to_string(),
         request: Some(sample_request("sent-1")),
     });
@@ -603,11 +603,11 @@ fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
 
     block_on(h.engine.clone().run());
 
-    // The query hit the OLD session's settlement route.
+    // The query hit the OLD link's settlement route.
     let gets = h.transport.gets.borrow();
     assert_eq!(gets.len(), 1);
     assert!(
-        gets[0].contains("/runtime/sessions/session-old/mutations/sent-1"),
+        gets[0].contains("/runtime/sessions/link-old/mutations/sent-1"),
         "{}",
         gets[0]
     );
@@ -630,7 +630,7 @@ fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
 fn reconciler_reforwards_when_the_runtime_has_no_record() {
     let mut outbox = FakeOutbox::default();
     outbox.unsettled.get_mut().push(SentUnsettled {
-        session_id: "session-old".to_string(),
+        link_id: "link-old".to_string(),
         client_mutation_id: "sent-2".to_string(),
         request: Some(sample_request("sent-2")),
     });
@@ -655,12 +655,12 @@ fn reconciler_reforwards_when_the_runtime_has_no_record() {
 }
 
 // D44b: a still-pending server-side record is left alone — the frame stream
-// (session collapse re-delivers terminal notifications) settles it.
+// (link collapse re-delivers terminal notifications) settles it.
 #[test]
 fn reconciler_leaves_a_still_pending_record_alone() {
     let mut outbox = FakeOutbox::default();
     outbox.unsettled.get_mut().push(SentUnsettled {
-        session_id: "session-old".to_string(),
+        link_id: "link-old".to_string(),
         client_mutation_id: "sent-3".to_string(),
         request: Some(sample_request("sent-3")),
     });

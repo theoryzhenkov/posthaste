@@ -17,7 +17,7 @@ use crate::handle::{RuntimeCoreState, RuntimeHandle};
 use crate::near_node::RuntimeAuthorityServerOutbox;
 use crate::read::ReadCache;
 use crate::secret::SystemSecretStore;
-use crate::far_end::sessions::SessionRegistry;
+use crate::far_end::links::LinkRegistry;
 use crate::shutdown::RuntimeShutdownHandle;
 use crate::transport::RemoteAuthorityServer;
 use crate::far_end::view_registry::ViewRegistry;
@@ -259,7 +259,7 @@ pub struct ComposedRuntime {
     pub shutdown: RuntimeShutdownHandle,
 }
 
-/// Assemble a runtime near node over an authority server link: the outbox, view/session
+/// Assemble a runtime near node over an authority server link: the outbox, view/link
 /// registries, and the handle. The far-node crate calls this to compose an
 /// in-process runtime over a `LocalAuthorityServer`; [`build_remote_runtime`] calls it
 /// over a [`RemoteAuthorityServer`]. Must run within a Tokio runtime when
@@ -295,14 +295,14 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         outbox.clone(),
         reads.clone(),
     ));
-    let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
+    let links = Arc::new(LinkRegistry::new(views.clone(), event_sender.clone()));
     let core = Arc::new(RuntimeCoreState {
         authority_server_link,
         outbox,
         reads,
         event_sender,
         views,
-        sessions,
+        links,
         startup_status,
         stopped: stopped.clone(),
     });

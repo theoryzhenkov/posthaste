@@ -75,22 +75,23 @@ disk:
 reclaim:
     bash tools/disk-guard.sh clean
 
-# Build the client-layer replica WASM bundle (posthaste-link-wasm) and emit the
-# JS loader + .d.ts into apps/web/src/runtime/wasm/. The replicaAdapter loads
+# Build the client node WASM bundle (posthaste-client-node-wasm: kernel +
+# projector + near-end, RFC-L2-architecture-cleanup D41/D43) and emit the JS
+# loader + .d.ts into apps/web/src/runtime/wasm/. The replicaAdapter loads
 # these only when VITE_RUNTIME_REPLICA is enabled. The artifacts are generated
 # but committed (like apps/web/src/api/schema.gen.ts) so web builds need no Rust
 # toolchain; re-run this and commit the result after changing the boundary, and
 # CI re-runs it to verify the bindings are fresh.
-build-replica-wasm:
-    cargo build -p posthaste-link-wasm --release --target wasm32-unknown-unknown
-    wasm-bindgen target/wasm32-unknown-unknown/release/posthaste_link_wasm.wasm \
+build-client-node-wasm:
+    cargo build -p posthaste-client-node-wasm --release --target wasm32-unknown-unknown
+    wasm-bindgen target/wasm32-unknown-unknown/release/posthaste_client_node_wasm.wasm \
         --out-dir apps/web/src/runtime/wasm --target web
     # Skip wasm-opt when SKIP_WASM_OPT is set (e.g. CI smoke tests where the
     # available binaryen version produces a table-max that is incompatible with
     # the committed wasm-bindgen JS glue). Release builds still optimize.
     if [ -z "${SKIP_WASM_OPT:-}" ]; then \
-        wasm-opt -Oz apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm \
-            -o apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm; \
+        wasm-opt -Oz apps/web/src/runtime/wasm/posthaste_client_node_wasm_bg.wasm \
+            -o apps/web/src/runtime/wasm/posthaste_client_node_wasm_bg.wasm; \
     fi
 
 # Build the browser-localhost distributable assets and server binary.

@@ -28,7 +28,7 @@ avoids double churn.
 | 5 | Account sync awaited inline in the supervisor `select!` loop with no timeout — a hung provider blocks push/commands/ticks for that account | V, VI | `supervisor/sync_flow.rs:172`; `runtime.rs:67` | — (follow-up unit) |
 | 6 | IMAP: zero `tokio::time::timeout` in the whole crate; unbounded `BODY.PEEK[]`/`uid_search` allocations from a hostile server | VI, VII, IV | `posthaste-imap/src/{discovery.rs:123,idle.rs:40,body.rs:65,fetch/headers.rs:18}` | — (follow-up unit) |
 | 7 | Domain outbox retries `FlushError::Transient` with no backoff and no max-attempts | XIX, VII | `posthaste-domain/src/service/outbox.rs:460-466` | M1 moves this file into `domain-service` |
-| 8 | Web client: flat 1s reconnect forever (no backoff/jitter/breaker, no degraded-mode UI); unbounded request-waiter queue with no timeout | VI, VII, XIX | `apps/web/src/runtime/sessionClient.ts:40-55`; `core.ts:121-145` | — (follow-up unit) |
+| 8 | Web client: flat 1s reconnect forever (no backoff/jitter/breaker, no degraded-mode UI); unbounded request-waiter queue with no timeout | VI, VII, XIX | `apps/web/src/runtime/linkClient.ts:40-55`; `core.ts:121-145` | — (follow-up unit) |
 | 9 | SSE frames and HTTP responses cast unchecked at the network boundary (`JSON.parse(…) as RuntimeFrame`) | III, IV | `httpAdapter.ts:246,336`; `core.ts:218` | M5's typed vocabulary is the natural moment to add a parse boundary client-side |
 | 10 | Snooze scheduler compares wall-clock (`SystemTime::now`) for due-times | XXIII | `supervisor/runtime.rs:241-244` | — (follow-up unit; small) |
 
@@ -37,5 +37,5 @@ Related open issues in the main tree's `docs/issues/` that intersect M-steps:
 phantom seq gaps; item D's dead `Conflict` arm is D16, executed at M5),
 `L2-engine-absorption-footguns` (retire invariant lives only in
 `EntityStore::settle` — D9/M6 lifts it into the engine seam),
-`L2-store-correctness-grabbag` (`link-replica` `in_range`/GC),
+`L2-store-correctness-grabbag` (`replica-projector` `in_range`/GC),
 `L2-legacy-leftover-structures` (item B, ungated invalidation storm).

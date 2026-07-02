@@ -24,7 +24,7 @@ posthaste-domain-model = { path = "../posthaste-domain-model" }
 # The generic `Sequenced<F>` wire envelope for the down-channel seq (D46) lives
 # in the engine crate; this seam types its `DownStream` as `Sequenced<AuthorityServerFrame>`.
 posthaste-link-far-end = { path = "../posthaste-link-far-end" }
-posthaste-link-core = { path = "../posthaste-link-core" }
+posthaste-replica-core = { path = "../posthaste-replica-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

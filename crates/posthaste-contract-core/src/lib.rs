@@ -62,20 +62,20 @@ macro_rules! define_id {
 }
 
 define_id!(
-    RuntimeSessionId,
+    RuntimeLinkId,
     ViewId,
     SubscriptionId,
     ClientMutationId,
     RuntimeMutationId,
 );
 define_id!(ViewRevision, u64, get);
-define_id!(RuntimeSessionSeq, u64, get);
+define_id!(RuntimeLinkSeq, u64, get);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeSession {
-    pub session_id: RuntimeSessionId,
+pub struct RuntimeLinkConnection {
+    pub link_id: RuntimeLinkId,
 }
 
 /// The identity + capabilities of whoever is calling the runtime surface. Shared
@@ -86,7 +86,7 @@ pub struct RuntimeSession {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCaller {
-    pub session_id: Option<RuntimeSessionId>,
+    pub link_id: Option<RuntimeLinkId>,
     pub capabilities: RuntimeCallerCapabilities,
     pub account_scope: Option<Vec<String>>,
     pub operation_source: RuntimeOperationSource,
@@ -96,7 +96,7 @@ pub struct RuntimeCaller {
 impl RuntimeCaller {
     pub fn system() -> Self {
         Self {
-            session_id: None,
+            link_id: None,
             capabilities: RuntimeCallerCapabilities::default(),
             account_scope: None,
             operation_source: RuntimeOperationSource::System,
@@ -124,7 +124,7 @@ impl RuntimeCaller {
 pub struct RuntimeCallerCapabilities {
     #[serde(default)]
     pub actions: Vec<RuntimeCapability>,
-    /// The caller's session can apply incremental mail-list view deltas
+    /// The caller's link can apply incremental mail-list view deltas
     /// ([`RuntimeFrame::ViewDelta`]) rather than whole-view replaces. When set,
     /// the runtime sends only the rows that changed instead of re-serializing
     /// the entire view on each recompute ([replication client-link L1](../../replication/client-link/L1.md)).
@@ -349,43 +349,43 @@ pub struct RuntimeResourceBytes {
 )]
 pub enum RuntimeFrame {
     ViewSnapshot {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
         #[serde(rename = "viewId")]
         view_id: ViewId,
         revision: ViewRevision,
         snapshot: ViewSnapshot,
     },
     ViewReplace {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
         #[serde(rename = "viewId")]
         view_id: ViewId,
         revision: ViewRevision,
         snapshot: ViewSnapshot,
     },
     /// An incremental mail-list update: only the rows that changed since the
-    /// last snapshot, for a session that opted into deltas
+    /// last snapshot, for a link that opted into deltas
     /// ([replication client-link L1](../../replication/client-link/L1.md)). Replaces a whole `ViewReplace`
     /// for row-local changes (flags, reads, removals).
     ViewDelta {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
         #[serde(rename = "viewId")]
         view_id: ViewId,
         revision: ViewRevision,
         delta: MailListDelta,
     },
     ViewError {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
         #[serde(rename = "viewId")]
         view_id: ViewId,
         error: RuntimeAdapterError,
     },
     ViewClosed {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
         #[serde(rename = "viewId")]
         view_id: ViewId,
     },
@@ -400,36 +400,36 @@ pub enum RuntimeFrame {
     /// error. Replaces the former `MutationSettlement`
     /// ([mutation.notification design](../../eph/DESIGN-L2-mutation-notification.md)).
     MutationNotification {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
         #[serde(rename = "clientMutationId")]
         client_mutation_id: ClientMutationId,
         notification: MutationNotification,
     },
     Notification {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
         kind: String,
         #[cfg_attr(feature = "openapi", schema(value_type = Object))]
         payload: Value,
     },
     Heartbeat {
-        #[serde(rename = "sessionSeq")]
-        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "linkSeq")]
+        link_seq: RuntimeLinkSeq,
     },
 }
 
 impl RuntimeFrame {
-    pub fn session_seq(&self) -> RuntimeSessionSeq {
+    pub fn link_seq(&self) -> RuntimeLinkSeq {
         match self {
-            Self::ViewSnapshot { session_seq, .. }
-            | Self::ViewReplace { session_seq, .. }
-            | Self::ViewDelta { session_seq, .. }
-            | Self::ViewError { session_seq, .. }
-            | Self::ViewClosed { session_seq, .. }
-            | Self::MutationNotification { session_seq, .. }
-            | Self::Notification { session_seq, .. }
-            | Self::Heartbeat { session_seq } => *session_seq,
+            Self::ViewSnapshot { link_seq, .. }
+            | Self::ViewReplace { link_seq, .. }
+            | Self::ViewDelta { link_seq, .. }
+            | Self::ViewError { link_seq, .. }
+            | Self::ViewClosed { link_seq, .. }
+            | Self::MutationNotification { link_seq, .. }
+            | Self::Notification { link_seq, .. }
+            | Self::Heartbeat { link_seq } => *link_seq,
         }
     }
 }
@@ -613,7 +613,7 @@ pub struct MailListRowState {
 /// the rows that changed since the last snapshot, instead of the whole view. The
 /// client reconciles it against its held rows — drop rows absent from `order`,
 /// reorder to `order`, then apply `upserts` by `row_key`. Emitted only to a
-/// session that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),
+/// link that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),
 /// and only when the change is row-local (structural changes still send a whole
 /// `ViewReplace`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -706,7 +706,7 @@ pub struct RevCursorArgs {
 /// A forwarded operation on the link's up-channel. Carries the typed
 /// [`MailOperation`] (D8) — the operation is parsed once at the wire edge and
 /// travels typed inward; there is no stringly `name`/`args` pair to re-parse per
-/// site. The wire shape is `{"sessionId": …, "name": "message.…", "args": {…},
+/// site. The wire shape is `{"linkId": …, "name": "message.…", "args": {…},
 /// "clientMutationId": …, "context": …}` — the operation is flattened, so its
 /// adjacently-tagged `name`/`args` sit at the envelope's top level exactly where
 /// the old stringly fields were.
@@ -714,7 +714,7 @@ pub struct RevCursorArgs {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MutationRequest {
-    pub session_id: Option<RuntimeSessionId>,
+    pub link_id: Option<RuntimeLinkId>,
     #[serde(flatten)]
     pub operation: MailOperation,
     pub client_mutation_id: ClientMutationId,
@@ -737,9 +737,9 @@ pub struct MutationReceipt {
     pub output: Value,
 }
 
-/// The settlement-query response for one `(session, clientMutationId)` key
-/// (`GET /runtime/sessions/{id}/mutations/{clientMutationId}`): the receipt the
-/// runtime holds, or `null` when it has no record (unknown session, never
+/// The settlement-query response for one `(link, clientMutationId)` key
+/// (`GET /runtime/links/{id}/mutations/{clientMutationId}`): the receipt the
+/// runtime holds, or `null` when it has no record (unknown link, never
 /// accepted, or already evicted/cleared under the D47 ledger rule). Consumed by
 /// the near-end reconciler's sent-but-unsettled step (D44b): a terminal receipt
 /// settles locally, `null` re-forwards.
@@ -788,7 +788,7 @@ pub enum MutationSettlementState {
 
 impl MutationSettlementState {
     /// A terminal state will not transition again and can be safely evicted from
-    /// the session's live mutation cache once the client has had a chance to
+    /// the link's live mutation cache once the client has had a chance to
     /// observe the settlement.
     pub fn is_terminal(&self) -> bool {
         matches!(
@@ -1024,12 +1024,12 @@ mod tests {
 
     #[test]
     fn mutation_request_flattens_the_operation_to_the_envelope_top_level() {
-        // The wire keeps the flat `{sessionId, name, args, clientMutationId,
+        // The wire keeps the flat `{linkId, name, args, clientMutationId,
         // context}` shape: the flattened adjacently-tagged operation surfaces
         // `name`/`args` at the top level exactly where the old stringly fields
         // were, and round-trips back into a typed operation.
         let wire = serde_json::json!({
-            "sessionId": "sess-1",
+            "linkId": "sess-1",
             "name": "message.replaceMailboxes",
             "args": { "sourceId": "acct", "messageId": "m1", "mailboxIds": ["inbox"] },
             "clientMutationId": "op-1",
@@ -1119,7 +1119,7 @@ mod tests {
             error: None,
         };
         let serialized = serde_json::to_value(RuntimeFrame::ViewReplace {
-            session_seq: RuntimeSessionSeq::new(2),
+            link_seq: RuntimeLinkSeq::new(2),
             view_id: ViewId::new("view-1"),
             revision: ViewRevision::new(7),
             snapshot,
@@ -1127,9 +1127,9 @@ mod tests {
         .expect("frame should serialize");
 
         assert_eq!(serialized["type"], "viewReplace");
-        assert_eq!(serialized["sessionSeq"], 2);
+        assert_eq!(serialized["linkSeq"], 2);
         assert_eq!(serialized["viewId"], "view-1");
-        assert!(serialized.get("session_seq").is_none());
+        assert!(serialized.get("link_seq").is_none());
         assert!(serialized.get("view_id").is_none());
     }
 

@@ -7,7 +7,7 @@
 //! ([`crate::mechanism`]) and never touches the outbox lifecycle itself —
 //! accept/settle/retire are the mechanism's; rows and windows are this
 //! layer's. Wire-agnostic by requirement (RFC D37): it does not know whether
-//! its views render directly or get framed/sessioned/paginated.
+//! its views render directly or get framed/linked/paginated.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};

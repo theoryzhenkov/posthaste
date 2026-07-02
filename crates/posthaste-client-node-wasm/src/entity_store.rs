@@ -12,7 +12,7 @@
 //! ## Wire contract
 //!
 //! The JSON shapes are pinned by `entity_store::tests::*_round_trips_*` in
-//! `posthaste-link-replica` (camelCase, externally-tagged enums). The host
+//! `posthaste-replica-projector` (camelCase, externally-tagged enums). The host
 //! builds these shapes; a mismatch fails the `serde_json` deserialize and
 //! surfaces as a `JsError`.
 //!
@@ -23,11 +23,11 @@ use serde::Deserialize;
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-use posthaste_link_core::{
+use posthaste_replica_core::{
     apply_message_assertion, MessageAssertion, MessageChangeDiff, MessageOutcome, MutationId,
     SettlementOutcome,
 };
-use posthaste_link_replica::{
+use posthaste_replica_projector::{
     fold_state_from_projection, EntityStore, SortDirection, SortKey, StoreUpdate, ViewPredicate,
     ViewRow,
 };
@@ -305,7 +305,7 @@ mod tests {
     /// place its rows, ingest an authoritative message batch (projection +
     /// count delta), drain dirty, and read the projected message + view rows +
     /// mailbox counts. Pins the wiring (the serde shapes themselves are pinned
-    /// in `posthaste-link-replica`).
+    /// in `posthaste-replica-projector`).
     #[test]
     fn handle_round_trips_an_authoritative_batch() {
         let mut handle = EntityStoreHandle::new();

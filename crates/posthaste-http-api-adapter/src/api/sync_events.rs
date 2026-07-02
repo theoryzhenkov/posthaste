@@ -83,7 +83,7 @@ pub struct EventsQuery {
 ///
 /// WHY THIS EXISTS — do **not** remove again as "no consumer": this is the flat,
 /// *view-less* projection of the very same `DomainEvent` broadcast the UI already
-/// consumes in view-coupled form (the runtime session stream's `Notification`
+/// consumes in view-coupled form (the runtime link stream's `Notification`
 /// frames; see `posthaste-runtime`'s `spawn_notification_forwarder`). Its consumer
 /// is `posthastectl events` — the scriptable CLI / MCP bridge in `apps/mcp` — plus
 /// other view-less integrations, none of which are visible from this crate. The

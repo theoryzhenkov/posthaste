@@ -2,11 +2,24 @@
 //! (family-specific [`ViewKind`] identity, descriptor parsing, scope
 //! validation), when a domain event affects it, and how its snapshot is
 //! recomputed — base rows + coverage + the pending-outbox overlay → windowed
-//! view state. Wire-agnostic: no frames, sessions or pagination here — the
+//! view state. Wire-agnostic: no frames, links or pagination here — the
 //! serving half lives in the far-end grouping
 //! ([`crate::far_end::view_registry`], RFC D39).
 
-// projector: merges into link-replica projection layer (RFC D38, M9)
+// D38 M9 verdict (RFC-L2-architecture-cleanup, verify-and-lift): this file does
+// NOT merge into posthaste-replica-projector. `build_snapshot`/`mail_list_state`
+// read through `ReadCache` (async, native, contract-core/domain-model-typed) to
+// produce a view's FIRST authoritative rows — a step the client mount has no
+// analog for (it only ever reconciles already-served JSON rows via
+// `ViewProjection::set_view_rows`/`rederive_message`, never independently reads
+// a source). Forcing the move would require replica-projector — today
+// dependency-free above replica-core by design — to grow a new dependency on
+// contract-core+domain-model plus an async read trait mirroring nearly the
+// whole `AuthorityServerApi` read surface, for a mount (wasm client) that would
+// never call it. Reported per the RFC's "STOP if it needs more than a narrow
+// trait" clause rather than forced. What genuinely IS shared already lives in
+// replica-projector's `mechanism`/`projection` modules (fold pending ops over
+// served rows); this file is the runtime-only read+dispatch half.
 
 use posthaste_contract_core::{
     CoverageRange, MailListAnchorState, MailListContinuation, MailListProjectionKind,
