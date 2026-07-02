@@ -23,7 +23,6 @@ mod store;
 mod sync_state;
 
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
-pub use posthaste_domain_service::{RevCursor, RevLogSnapshot, RevLogStep, RevLogStore};
 pub use rev_log::MAX_REV_LOG_HISTORY;
 
 use std::collections::BTreeSet;
@@ -48,6 +47,7 @@ use posthaste_domain_service::{
     MessageId, MessageListStore, MessageMailboxStore, MessagePage, MessageSortField,
     MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
     OperationOutboxStore, OperationState, RawMessageRef, Recipient, ReplaceMailboxesCommand,
+    RevCursor, RevLogSnapshot, RevLogStep, RevLogStore,
     SenderAddressCacheStore, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
     SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
     SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
