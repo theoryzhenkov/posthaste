@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use posthaste_domain_service::{AccountId, MailService, MessagePage, SmartMailboxRule};
 use posthaste_observability::{events, ph_warn};
-use posthaste_runtime_contract::SearchVisibilityRequest;
+use posthaste_contract_core::SearchVisibilityRequest;
 
 use crate::supervisor::AccountSupervisor;
 

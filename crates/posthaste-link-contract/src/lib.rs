@@ -42,7 +42,7 @@ use posthaste_domain_model::{
     SyncMode, TagSummary,
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest, PatchAccountMutation,
@@ -1001,7 +1001,7 @@ macro_rules! for_each_link_op {
 
 /// Re-exports so [`for_each_link_op`] can name `runtime-contract` types with a
 /// single stable path that resolves in every crate that expands the table
-/// (`posthaste_runtime_contract` may not be a direct dependency name everywhere,
+/// (`posthaste_contract_core` may not be a direct dependency name everywhere,
 /// but `posthaste_link_contract` always is).
 pub mod reexport {
     pub use posthaste_domain_model::{
@@ -1011,7 +1011,7 @@ pub mod reexport {
         ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
         SmartMailboxSummary, SyncMode, TagSummary,
     };
-    pub use posthaste_runtime_contract::{
+    pub use posthaste_contract_core::{
         AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
         AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,
         MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation,
@@ -1117,7 +1117,7 @@ mod tests {
                 runtime_mutation_id: None,
                 client_mutation_id: mutation.client_mutation_id,
                 name: mutation.name,
-                state: posthaste_runtime_contract::MutationSettlementState::Accepted,
+                state: posthaste_contract_core::MutationSettlementState::Accepted,
                 error: None,
                 output: serde_json::Value::Null,
             })
@@ -1131,7 +1131,7 @@ mod tests {
     #[tokio::test]
     async fn backend_link_forwards_through_its_transport() {
         use futures_util::StreamExt;
-        use posthaste_runtime_contract::ClientMutationId;
+        use posthaste_contract_core::ClientMutationId;
 
         let link = BackendLink::new(Arc::new(StubTransport));
         let receipt = link

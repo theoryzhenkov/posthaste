@@ -8,7 +8,7 @@ use posthaste_domain_service::{
     ProviderAuthKind, SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError,
     SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, TagSummary,
 };
-use posthaste_runtime_contract::{AccountScopeRequest, RuntimeAccountList};
+use posthaste_contract_core::{AccountScopeRequest, RuntimeAccountList};
 
 use crate::supervisor::AccountSupervisor;
 

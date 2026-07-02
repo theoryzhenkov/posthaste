@@ -33,7 +33,7 @@ use posthaste_domain_service::{
 };
 use posthaste_link_core::{MessageChangeDiff, MessageFoldState};
 use posthaste_observability::{events, ph_warn};
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
@@ -52,7 +52,7 @@ use posthaste_link_contract::{
     message_mutation::MessageMutation, DownFrame, RuntimeId, WireMutationId,
     WireSettlementOutcome,
 };
-use posthaste_runtime_contract::mutation_args::keyword_toggle;
+use posthaste_contract_core::mutation_args::keyword_toggle;
 
 /// The backend far node ([replication backend-link L1 §3](../replication/backend-link/L1.md)): owns the
 /// service + store + the live-account supervisor + the event publisher, and

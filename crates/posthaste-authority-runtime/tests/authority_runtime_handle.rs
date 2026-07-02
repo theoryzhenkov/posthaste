@@ -17,12 +17,12 @@ use posthaste_domain_service::{
     EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_engine::MockJmapGateway;
-use posthaste_runtime_contract::{
+use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore};
+use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,
-    MutationSettlementState, RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame,
-    RuntimeLifecycle, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor,
-    ViewFrame, ViewRevision,
+    MutationSettlementState, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle, RuntimeSessionSeq,
+    SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame, ViewRevision,
 };
 use tokio::sync::Notify;
 
@@ -308,7 +308,7 @@ fn mail_list_descriptor_with_limit(query: &str, limit: usize) -> ViewDescriptor 
     }
 }
 
-fn mail_list_state(snapshot: &posthaste_runtime_contract::ViewSnapshot) -> MailListViewState {
+fn mail_list_state(snapshot: &posthaste_contract_core::ViewSnapshot) -> MailListViewState {
     serde_json::from_value(snapshot.data.clone()).expect("snapshot data should be mail list state")
 }
 
@@ -2212,14 +2212,14 @@ impl posthaste_link_contract::BackendApi for DeferredTransport {
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,
-    ) -> Result<posthaste_runtime_contract::MutationReceipt, posthaste_runtime_contract::RuntimeError>
+    ) -> Result<posthaste_contract_core::MutationReceipt, posthaste_contract_core::RuntimeError>
     {
         // Signal that the forward has begun (so the outbox already holds the
         // mutation), then wait for the test to release it.
         self.entered.notify_one();
         self.release.notified().await;
-        Ok(posthaste_runtime_contract::MutationReceipt {
-            runtime_mutation_id: Some(posthaste_runtime_contract::RuntimeMutationId::new(
+        Ok(posthaste_contract_core::MutationReceipt {
+            runtime_mutation_id: Some(posthaste_contract_core::RuntimeMutationId::new(
                 "backend-deferred",
             )),
             client_mutation_id: mutation.client_mutation_id,
@@ -2233,7 +2233,7 @@ impl posthaste_link_contract::BackendApi for DeferredTransport {
     async fn subscribe(
         &self,
         coverage: posthaste_link_contract::LinkCoverage,
-    ) -> Result<posthaste_link_contract::DownStream, posthaste_runtime_contract::RuntimeError> {
+    ) -> Result<posthaste_link_contract::DownStream, posthaste_contract_core::RuntimeError> {
         self.inner.subscribe(coverage).await
     }
 
@@ -2244,7 +2244,7 @@ impl posthaste_link_contract::BackendApi for DeferredTransport {
     async fn create_account(
         &self,
         mutation: CreateAccountMutation,
-    ) -> Result<posthaste_domain_service::AccountOverview, posthaste_runtime_contract::RuntimeError> {
+    ) -> Result<posthaste_domain_service::AccountOverview, posthaste_contract_core::RuntimeError> {
         self.inner.create_account(mutation).await
     }
 }

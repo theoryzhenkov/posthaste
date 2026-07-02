@@ -13,13 +13,13 @@
 use std::collections::HashMap;
 
 use posthaste_link_core::MessageAssertion;
-use posthaste_runtime_contract::mutation_args::{
+use posthaste_contract_core::mutation_args::{
     keyword_toggle, MessageApplyDiffArgs, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
     MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
     MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageSnoozeArgs, MessageTargetArgs,
     MessageUnsnoozeArgs,
 };
-use posthaste_runtime_contract::{MutationRequest, RuntimeError};
+use posthaste_contract_core::{MutationRequest, RuntimeError};
 
 /// A parsed message mutation understood by both the runtime near node and the
 /// authority far node.
@@ -174,7 +174,7 @@ fn parse_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>
 where
     T: for<'de> serde::Deserialize<'de>,
 {
-    posthaste_runtime_contract::mutation_args::parse_args(request)
+    posthaste_contract_core::mutation_args::parse_args(request)
 }
 
 #[cfg(test)]

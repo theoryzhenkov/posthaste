@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use posthaste_link_contract::message_mutation::MessageMutation;
 use posthaste_link_core::{MessageAssertion, MessageChangeDiff};
-use posthaste_runtime_contract::MutationRequest;
+use posthaste_contract_core::MutationRequest;
 
 /// Parse a runtime mutation request and return `{ messageId, assertion }` as
 /// JSON when the mutation is locally foldable. Returns `null` for mutations
