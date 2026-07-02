@@ -1,5 +1,5 @@
 use super::*;
-use posthaste_runtime_contract::{ViewDescriptor, ViewFrame, ViewId, ViewRevision, ViewSnapshot};
+use posthaste_contract_core::{ViewDescriptor, ViewFrame, ViewId, ViewRevision, ViewSnapshot};
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

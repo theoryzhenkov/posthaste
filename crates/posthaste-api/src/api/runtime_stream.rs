@@ -1,5 +1,5 @@
 use super::*;
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     MutationReceipt, MutationRequest, RuntimeError, RuntimeFrame, RuntimeSession, RuntimeSessionId,
     RuntimeSessionSeq, ViewDescriptor, ViewId, ViewSnapshot,
 };

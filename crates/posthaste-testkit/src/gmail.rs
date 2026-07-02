@@ -26,10 +26,11 @@ use std::sync::{Arc, Mutex};
 
 use posthaste_domain_service::{AccountDriver, AccountId, ImapTransportSettings, SmtpTransportSettings};
 use posthaste_domain_service::{ProviderAuthKind, ProviderHint, TransportSecurity};
-use posthaste_runtime_contract::{
-    AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, SecretWriteMode,
+use posthaste_contract_core::{
+    AccountTransportMutation, CreateAccountMutation, RuntimeCaller, SecretWriteMode,
     SecretWriteMutation,
 };
+use posthaste_runtime_api::RuntimeAccountApi;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;

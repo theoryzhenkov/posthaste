@@ -31,11 +31,13 @@ use posthaste_domain_service::{
     SyncObject, ThreadId,
 };
 use posthaste_link_contract::{BackendApi, DownFrame, LinkCoverage, RuntimeId};
-use posthaste_runtime_contract::{
+use posthaste_client_link::RuntimeLinkOps;
+use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,
-    RuntimeCore, SecretWriteMutation, ViewDescriptor,
+    SecretWriteMutation, ViewDescriptor,
 };
+use posthaste_runtime_api::{RuntimeAccountApi, RuntimeMailReadApi};
 use posthaste_server::{link_router, LinkAuth};
 
 use futures_util::StreamExt;

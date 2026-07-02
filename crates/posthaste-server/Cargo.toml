@@ -40,8 +40,9 @@ posthaste-domain-service = { path = "../posthaste-domain-service", features = ["
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-link-contract = { path = "../posthaste-link-contract" }
+posthaste-contract-core = { path = "../posthaste-contract-core", features = ["openapi"] }
 posthaste-observability = { path = "../posthaste-observability" }
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract", features = ["openapi"] }
+posthaste-runtime-api = { path = "../posthaste-runtime-api", features = ["openapi"] }
 posthaste-store = { path = "../posthaste-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -62,6 +63,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 async-trait = { workspace = true }
 http-body-util = "0.1"
+posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-testkit = { path = "../posthaste-testkit" }

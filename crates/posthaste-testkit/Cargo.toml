@@ -11,12 +11,14 @@ path = "src/lib.rs"
 [dependencies]
 futures-util = { workspace = true }
 posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
+posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-config = { path = "../posthaste-config" }
+posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
+posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 posthaste-store = { path = "../posthaste-store" }
 imap-codec = "2.0.0-alpha.7"
 serde = { workspace = true }

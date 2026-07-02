@@ -4,12 +4,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
 use posthaste_domain_service::{DomainEvent, Id};
-use posthaste_runtime_contract::{
+use posthaste_client_link::{RuntimeFrameSubscription, RuntimeViewSubscription};
+use posthaste_contract_core::{
     ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MutationNotification,
     MutationReceipt, MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller,
-    RuntimeError, RuntimeFrame, RuntimeFrameSubscription, RuntimeMutationId, RuntimeSession,
-    RuntimeSessionId, RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor, ViewFrame,
-    ViewId, ViewSnapshot,
+    RuntimeError, RuntimeFrame, RuntimeMutationId, RuntimeSession, RuntimeSessionId,
+    RuntimeSessionSeq, ViewDescriptor, ViewFrame, ViewId, ViewSnapshot,
 };
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -864,7 +864,7 @@ fn ensure_caller_matches_session(
 #[cfg(test)]
 mod delta_tests {
     use super::*;
-    use posthaste_runtime_contract::{CoverageRange, RuntimeCoverage, ViewLifecycle, ViewRevision};
+    use posthaste_contract_core::{CoverageRange, RuntimeCoverage, ViewLifecycle, ViewRevision};
     use serde_json::json;
 
     fn row(key: &str, flagged: bool) -> Value {

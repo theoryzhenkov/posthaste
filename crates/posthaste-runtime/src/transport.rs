@@ -20,7 +20,7 @@ use posthaste_link_contract::{
     BackendApi, DownFrame, DownStream, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeError,
     RuntimeErrorCode,
 };
@@ -236,7 +236,7 @@ mod tests {
     use super::*;
     use posthaste_link_contract::{BaseAssertion, BaseUpdate};
     use posthaste_link_core::MessageFoldState;
-    use posthaste_runtime_contract::{MutationSettlementState, RuntimeMutationId};
+    use posthaste_contract_core::{MutationSettlementState, RuntimeMutationId};
     use serde_json::json;
 
     fn fold(keywords: &[&str], mailboxes: &[&str]) -> MessageFoldState {
@@ -274,7 +274,7 @@ mod tests {
         use axum::response::sse::{Event, Sse};
         use axum::routing::{get, post};
         use axum::{Json, Router};
-        use posthaste_runtime_contract::ClientMutationId;
+        use posthaste_contract_core::ClientMutationId;
         use std::convert::Infallible;
 
         async fn forward(Json(request): Json<MutationRequest>) -> Json<MutationReceipt> {

@@ -8,11 +8,12 @@ use posthaste_domain_service::{
     EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_ACCOUNT_UPDATED,
     EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_REV_LOG_APPENDED,
 };
-use posthaste_runtime_contract::{
+use posthaste_client_link::RuntimeViewSubscription;
+use posthaste_contract_core::{
     CoverageRange, MailListAnchorState, MailListContinuation, MailListProjectionKind,
     MailListRowState, MailListViewState, MailPresentationRequest, MailQueryPage, MailQueryRequest,
-    ReadWatermark, RuntimeCoverage, RuntimeError, RuntimeErrorCode, RuntimeViewSubscription,
-    ViewDescriptor, ViewFrame, ViewId, ViewLifecycle, ViewRevision, ViewSnapshot,
+    ReadWatermark, RuntimeCoverage, RuntimeError, RuntimeErrorCode, ViewDescriptor, ViewFrame,
+    ViewId, ViewLifecycle, ViewRevision, ViewSnapshot,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -872,7 +873,7 @@ mod rev_log_view_tests {
     use async_trait::async_trait;
     use posthaste_domain_service::{RevCursor, RevLogSnapshot, RevLogStep};
     use posthaste_link_contract::{BackendApi, DownStream, LinkCoverage};
-    use posthaste_runtime_contract::{MutationReceipt, MutationRequest};
+    use posthaste_contract_core::{MutationReceipt, MutationRequest};
 
     /// A read-only `BackendApi` stub that serves a canned `RevLogSnapshot` for
     /// every account — enough to drive the `RevLog` view's build/read path

@@ -23,11 +23,13 @@ use posthaste_domain_service::{
     AccountDriver, AccountId, MessageId, MessageSortField, SecretRef, SecretStore,
     SecretStoreError, SetKeywordsCommand, SortDirection,
 };
-use posthaste_runtime_contract::{
+use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLinkOps};
+use posthaste_contract_core::{
     AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
-    MailQueryRequest, RuntimeCaller, RuntimeCore, RuntimeFrame, RuntimeFrameSubscription,
-    RuntimeSessionId, RuntimeSessionSeq, SecretWriteMutation, ViewDescriptor, ViewId,
+    MailQueryRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionId, RuntimeSessionSeq,
+    SecretWriteMutation, ViewDescriptor, ViewId,
 };
+use posthaste_runtime_api::RuntimeAccountApi;
 use tempfile::TempDir;
 
 use crate::workloads;

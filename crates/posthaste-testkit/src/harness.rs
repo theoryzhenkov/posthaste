@@ -19,7 +19,7 @@ use crate::paths::temp_root;
 /// should not rely on it surviving the process.
 ///
 /// `with_runtime()` consumes this harness and stands up an in-process
-/// `RuntimeCore` against the same config root (see `docs/testing/L1.md`),
+/// `RuntimeApi` against the same config root (see `docs/testing/L1.md`),
 /// exposing the runtime handle, store, and event bus so view-settlement
 /// assertions can observe the recompute path. The `store`/`service` fields are
 /// the seam for direct driving without the runtime.
