@@ -4312,7 +4312,6 @@ dependencies = [
 name = "posthaste-link-wasm"
 version = "0.1.0"
 dependencies = [
- "posthaste-authority-server-link",
  "posthaste-contract-core",
  "posthaste-link-core",
  "posthaste-link-replica",

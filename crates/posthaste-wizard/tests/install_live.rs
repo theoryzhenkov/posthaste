@@ -156,7 +156,7 @@ fn install_fetches_verifies_and_provisions_over_http() {
     let app_toml = std::fs::read_to_string(&installed.provisioned.app_toml_path).unwrap();
     assert!(
         app_toml.contains("[link]"),
-        "authority_server writes a [link] section"
+        "authority server writes a [link] section"
     );
     let unit_path = installed
         .service_path
@@ -171,6 +171,6 @@ fn install_fetches_verifies_and_provisions_over_http() {
     // A authority server node emits a join string for the runtime machine.
     assert!(
         installed.join_string.is_some(),
-        "authority_server install emits a join string"
+        "authority server install emits a join string"
     );
 }

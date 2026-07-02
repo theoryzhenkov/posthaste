@@ -3,14 +3,14 @@ name = "posthaste-authority-server-link"
 version = "0.1.0"
 edition = "2021"
 
-# The shared coherent-link contract (docs/replication/authority-server-link/L1): the
-# transport-neutral replication subset both the client<->runtime and
-# runtime<->authority server links speak. It is only the two replication channels —
-# named mutations up, authoritative base assertions + per-mutation confirmation
-# down — not the full RuntimeCore surface. `LinkTransport` is the Rust
-# abstraction over one link's two channels; `AuthorityServerLinkHandle` is the
-# runtime<->authority server instantiation. One definition, two consumers, no divergence
-# (assertion `one-link-transport`).
+# The runtime<->authority-server link surface
+# (docs/replication/authority-server-link/L1). It is only the two replication
+# channels — named mutations up, authoritative base assertions + per-mutation
+# confirmation down — not the full RuntimeCore surface, and not the
+# client<->runtime link's own surface (posthaste-client-link).
+# `AuthorityServerLink` is the Rust abstraction over this link's two channels;
+# `AuthorityServerLinkHandle` is the owning wrapper (assertion
+# `one-link-transport`).
 
 [lib]
 name = "posthaste_authority_server_link"

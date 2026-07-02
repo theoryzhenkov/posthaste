@@ -664,17 +664,37 @@ describe('entityStoreAdapter', () => {
     expect(harness.mutations).toHaveLength(0)
   })
 
-  it('passes non-message mutations straight through', async () => {
+  it('passes control operations (no local fold effect) straight through', async () => {
+    // `revCursor` is the live control operation: a valid MailOperation variant
+    // with no message target and no fold effect — the adapter forwards it
+    // without touching the outbox or the optimistic store.
     const { adapter, outbox, harness } = build()
     await adapter.openRuntimeSessionMessageListView(viewRequest)
     await adapter.runRuntimeMutation({
       sessionId: 'sess',
-      name: 'account.sync',
-      args: { sourceId: 's' },
+      name: 'revCursor',
+      args: { accountId: 's', cursorStepId: null, redoTail: [] },
       clientMutationId: 'c9',
     })
-    expect(harness.mutations.map((m) => m.name)).toEqual(['account.sync'])
+    expect(harness.mutations.map((m) => m.name)).toEqual(['revCursor'])
     expect(await outbox.all()).toHaveLength(0)
+  })
+
+  it('rejects operations outside the typed vocabulary at the wasm parse', async () => {
+    // Post-M5 the operation vocabulary is closed: an unknown name is not a
+    // pass-through — it fails the typed `MutationRequest` parse at the client
+    // edge (the same rejection every wire crossing applies, D8/III).
+    const { adapter, harness } = build()
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await expect(
+      adapter.runRuntimeMutation({
+        sessionId: 'sess',
+        name: 'account.sync',
+        args: { sourceId: 's' },
+        clientMutationId: 'c9',
+      }),
+    ).rejects.toThrow()
+    expect(harness.mutations).toHaveLength(0)
   })
 
   it('records an undo step only for user-initiated mutations (Phase 2 Slice 5d)', async () => {

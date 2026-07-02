@@ -34,7 +34,7 @@ export class EntityStoreHandle {
      * history step in either case.
      *
      * `assertion_json` is the same `ReplicaAssertion` shape `acceptMutationJson`
-     * takes (`{kind, ...}`), already role-resolved by `parseMessageMutation`.
+     * takes (`{kind, ...}`), already role-resolved by `parseMailOperation`.
      */
     captureMutationDiffJson(message_id: string, assertion_json: string): string;
     /**
@@ -126,16 +126,18 @@ export class EntityStoreHandle {
 export function invertMessageChangeDiff(diff_json: string): string;
 
 /**
- * Parse a runtime mutation request and return `{ messageId, assertion }` as
- * JSON when the mutation is locally foldable. Returns `null` for mutations
- * whose effect cannot be folded from the request alone. `role_map_json` is the
+ * Parse a runtime mutation request (its flattened typed `MailOperation`) and
+ * return `{ messageId, assertion }` as JSON when the operation is locally
+ * foldable. Returns `null` for operations whose effect cannot be folded from
+ * the request alone. `role_map_json` is the
  * account's role→mailbox-id map (`{"archive": "mbx-..."}`, built client-side
  * from the mailbox list); it resolves role moves (archive/trash/restoreToInbox/
  * moveToRole) to `ReplaceMailboxes`. `{}` → role moves get no optimism (graceful
- * when the mailbox list isn't loaded yet). Mirrors the Rust near-node
- * `MessageMutation::from_request` + `to_assertion_with_roles` path.
+ * when the mailbox list isn't loaded yet). Consumes the same
+ * `MailOperation::fold_effect_with_roles` projection the Rust near node folds
+ * with (D34 — one local-effect derivation, shared).
  */
-export function parseMessageMutation(request_json: string, role_map_json: string): string | undefined;
+export function parseMailOperation(request_json: string, role_map_json: string): string | undefined;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -158,7 +160,7 @@ export interface InitOutput {
     readonly entitystorehandle_settle: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
     readonly invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
-    readonly parseMessageMutation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

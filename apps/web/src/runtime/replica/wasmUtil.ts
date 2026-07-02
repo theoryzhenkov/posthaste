@@ -9,7 +9,7 @@
  */
 import type { MessageChangeDiff, ReplicaAssertion } from './handle'
 
-export interface ParsedMessageMutation {
+export interface ParsedMailOperation {
   messageId: string
   assertion: ReplicaAssertion
 }
@@ -22,7 +22,7 @@ interface WasmModule {
    * the bundled URL.
    */
   initSync(input: BufferSource | WebAssembly.Module): unknown
-  parseMessageMutation(
+  parseMailOperation(
     requestJson: string,
     roleMapJson: string,
   ): string | undefined
@@ -53,31 +53,33 @@ async function loadWasmModule(): Promise<WasmModule> {
 }
 
 /**
- * Parse a runtime mutation request into the message id and the optimistic
- * assertion the local replica can fold. Returns `null` when the mutation is
- * not locally foldable. `roleMap` is the account's role→mailbox-id map
- * (`{ archive: 'mbx-...' }`), built client-side from the mailbox list; it
- * resolves role moves (archive/trash/restoreToInbox/moveToRole) to
- * `replaceMailboxes`. An empty map → role moves get no optimism (graceful when
- * the mailbox list isn't loaded yet).
+ * Parse a runtime mutation request (its typed `MailOperation`, flat
+ * `{name, args}` on the wire) into the message id and the optimistic assertion
+ * the local replica can fold — the shared `MailOperation::fold_effect`
+ * projection. Returns `null` when the operation is not locally foldable.
+ * `roleMap` is the account's role→mailbox-id map (`{ archive: 'mbx-...' }`),
+ * built client-side from the mailbox list; it resolves role moves
+ * (archive/trash/restoreToInbox/moveToRole) to `replaceMailboxes`. An empty
+ * map → role moves get no optimism (graceful when the mailbox list isn't
+ * loaded yet).
  */
-export async function parseMessageMutation(
+export async function parseMailOperation(
   request: {
     name: string
     args?: unknown
     clientMutationId: string
   },
   roleMap: Record<string, string> = {},
-): Promise<ParsedMessageMutation | null> {
+): Promise<ParsedMailOperation | null> {
   const module = await loadWasmModule()
-  const result = module.parseMessageMutation(
+  const result = module.parseMailOperation(
     JSON.stringify(request),
     JSON.stringify(roleMap),
   )
   if (result == null) {
     return null
   }
-  return JSON.parse(result) as ParsedMessageMutation
+  return JSON.parse(result) as ParsedMailOperation
 }
 
 /**

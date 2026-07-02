@@ -1,6 +1,6 @@
 //! Bundled-server OpenAPI document.
 //!
-//! The bundled/authority server server serves the near `/v1` platform PLUS the OAuth-flow
+//! The bundled/authority-server server serves the near `/v1` platform PLUS the OAuth-flow
 //! routes (which need the provider machinery in the far crate). [`document`]
 //! merges the near document with those routes, and is the source for the
 //! committed `openapi.json` contract + the runtime `/v1/openapi.json` the bundled

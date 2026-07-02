@@ -42,7 +42,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
-      parseMessageMutation(
+      parseMailOperation(
         requestJson: string,
         roleMapJson: string,
       ): string | undefined
@@ -56,10 +56,10 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
       clientMutationId: 'arc-1',
     })
     // No role map → no optimism (mailbox list not loaded yet; graceful).
-    expect(mod.parseMessageMutation(request, '{}')).toBeUndefined()
+    expect(mod.parseMailOperation(request, '{}')).toBeUndefined()
     // With the account's archive mailbox → replaceMailboxes([mbx-archive]).
     const out = JSON.parse(
-      mod.parseMessageMutation(request, '{"archive":"mbx-archive"}'),
+      mod.parseMailOperation(request, '{"archive":"mbx-archive"}'),
     )
     expect(out.messageId).toBe('m1')
     expect(out.assertion.kind).toBe('replaceMailboxes')
@@ -72,7 +72,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
-      parseMessageMutation(
+      parseMailOperation(
         requestJson: string,
         roleMapJson: string,
       ): string | undefined
@@ -113,7 +113,7 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
 
     // Archive: resolve the role → replaceMailboxes op, accept it (row leaves).
     const parsed = JSON.parse(
-      mod.parseMessageMutation(
+      mod.parseMailOperation(
         JSON.stringify({
           name: 'message.moveToRole',
           args: { sourceId: 'acct', messageId: 'm1', role: 'archive' },

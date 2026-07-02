@@ -449,7 +449,7 @@
           "oauth"
         ],
         "summary": "Start account OAuth flow",
-        "description": "Creates a backend-held PKCE authorization session for an existing account.",
+        "description": "Creates an authority-server-held PKCE authorization session for an existing account.",
         "operationId": "start_account_oauth",
         "parameters": [
           {
@@ -964,7 +964,7 @@
           "oauth"
         ],
         "summary": "Start provider OAuth flow",
-        "description": "Creates a backend-held PKCE authorization session for provider-first setup.",
+        "description": "Creates an authority-server-held PKCE authorization session for provider-first setup.",
         "operationId": "start_provider_oauth",
         "requestBody": {
           "content": {
@@ -4651,7 +4651,7 @@
       },
       "Appearance": {
         "type": "object",
-        "description": "App-level appearance/theme preferences — the renderer's visual settings,\nstored in `[appearance]` of `app.toml` as the single source of truth (moved\nout of the opaque `localStorage` \"client-preferences\" snapshot).\n\nThe backend treats appearance as **pass-through storage**: it does not\ninterpret theme values (the renderer applies them). The enums give the\nOpenAPI schema self-documentation and reject typos at the parse boundary.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
+        "description": "App-level appearance/theme preferences — the renderer's visual settings,\nstored in `[appearance]` of `app.toml` as the single source of truth (moved\nout of the opaque `localStorage` \"client-preferences\" snapshot).\n\nThe authority server treats appearance as **pass-through storage**: it does not\ninterpret theme values (the renderer applies them). The enums give the\nOpenAPI schema self-documentation and reject typos at the parse boundary.\n\n@spec docs/eph/DESIGN-L2-appearance-toml",
         "properties": {
           "dark": {
             "oneOf": [
@@ -4830,7 +4830,7 @@
       },
       "AutomationRule": {
         "type": "object",
-        "description": "Account-level automation rule evaluated by backend triggers.\n\n@spec docs/L1-accounts#toml-schema\n@spec docs/L1-sync#automation-actions",
+        "description": "Account-level automation rule evaluated by authority server triggers.\n\n@spec docs/L1-accounts#toml-schema\n@spec docs/L1-sync#automation-actions",
         "required": [
           "id",
           "name",
@@ -5602,6 +5602,20 @@
           }
         }
       },
+      "MailOperation": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "args": {
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "MailboxColor": {
         "type": "object",
         "description": "A per-mailbox sidebar color override (presentation only). Overrides the\nrenderer's default hash-derived color for the mailbox identified by\n`(source_id, mailbox_id)`.\n\n@spec docs/eph/RFC-L2-configuration-matrix",
@@ -5996,7 +6010,8 @@
             ]
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "The canonical operation name, echoed for the client's settlement join.\nDerived from the operation variant (one fact), never a free string."
           },
           "output": {
             "type": "object"
@@ -6017,31 +6032,34 @@
         }
       },
       "MutationRequest": {
-        "type": "object",
-        "required": [
-          "name",
-          "clientMutationId"
-        ],
-        "properties": {
-          "args": {},
-          "clientMutationId": {
-            "$ref": "#/components/schemas/ClientMutationId"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MailOperation"
           },
-          "context": {},
-          "name": {
-            "type": "string"
-          },
-          "sessionId": {
-            "oneOf": [
-              {
-                "type": "null"
+          {
+            "type": "object",
+            "required": [
+              "clientMutationId"
+            ],
+            "properties": {
+              "clientMutationId": {
+                "$ref": "#/components/schemas/ClientMutationId"
               },
-              {
-                "$ref": "#/components/schemas/RuntimeSessionId"
+              "context": {},
+              "sessionId": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RuntimeSessionId"
+                  }
+                ]
               }
-            ]
+            }
           }
-        }
+        ],
+        "description": "A forwarded operation on the link's up-channel. Carries the typed\n[`MailOperation`] (D8) — the operation is parsed once at the wire edge and\ntravels typed inward; there is no stringly `name`/`args` pair to re-parse per\nsite. The wire shape is `{\"sessionId\": …, \"name\": \"message.…\", \"args\": {…},\n\"clientMutationId\": …, \"context\": …}` — the operation is flattened, so its\nadjacently-tagged `name`/`args` sit at the envelope's top level exactly where\nthe old stringly fields were."
       },
       "MutationSettlementState": {
         "type": "string",

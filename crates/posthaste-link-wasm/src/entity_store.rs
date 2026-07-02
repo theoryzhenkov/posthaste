@@ -1,8 +1,8 @@
 //! wasm-bindgen boundary for the reactive [`EntityStore`].
 //!
 //! The web `entityStoreAdapter` (client-link L2 §6, slice 2e) drives the
-//! normalized, keyed entity store from JavaScript. As with
-//! [`crate::MailListReplicaHandle`], values cross the boundary as JSON strings
+//! normalized, keyed entity store from JavaScript. As with the other wasm
+//! helpers ([`crate::mutation`]), values cross the boundary as JSON strings
 //! (no `serde-wasm-bindgen`), keeping the dependency surface to `wasm-bindgen`
 //! alone. The host (JS) owns transport + persistence; this boundary is pure
 //! compute over the store's [`EntityStore`] API: register/subscribe by key,
@@ -201,7 +201,7 @@ impl EntityStoreHandle {
     /// history step in either case.
     ///
     /// `assertion_json` is the same `ReplicaAssertion` shape `acceptMutationJson`
-    /// takes (`{kind, ...}`), already role-resolved by `parseMessageMutation`.
+    /// takes (`{kind, ...}`), already role-resolved by `parseMailOperation`.
     #[wasm_bindgen(js_name = captureMutationDiffJson)]
     pub fn capture_mutation_diff_json(
         &self,
