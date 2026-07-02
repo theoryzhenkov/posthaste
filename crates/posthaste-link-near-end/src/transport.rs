@@ -66,6 +66,14 @@ impl TransportError {
     }
 }
 
+/// A JSON GET the engine asks the host to perform (the reconciler's
+/// settlement query). Same zero-policy contract as [`PostRequest`].
+#[derive(Clone, Debug)]
+pub struct GetRequest {
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+}
+
 /// A frame stream the engine asks the host to open. `url` already carries the
 /// engine-owned resume cursor (`?afterSeq=`) — the host opens exactly this URL
 /// and streams back [`StreamEvent`]s, nothing more.
@@ -104,6 +112,14 @@ pub trait Transport {
     fn post_json(
         &self,
         request: PostRequest,
+    ) -> LocalBoxFuture<'static, Result<PostResponse, TransportError>>;
+
+    /// GET a JSON resource and resolve with the raw status + body — the
+    /// reconciler's settlement query. Same zero-policy contract as
+    /// [`Self::post_json`].
+    fn get_json(
+        &self,
+        request: GetRequest,
     ) -> LocalBoxFuture<'static, Result<PostResponse, TransportError>>;
 
     /// Open a frame stream. The returned stream yields [`StreamEvent`]s until it

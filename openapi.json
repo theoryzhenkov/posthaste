@@ -1321,6 +1321,101 @@
         }
       }
     },
+    "/v1/runtime/sessions/{session_id}/mutations/{client_mutation_id}": {
+      "get": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Read a runtime mutation's settlement",
+        "description": "Returns the settlement receipt the runtime holds for a client mutation id, or a null receipt when it has no record (unknown session, never accepted, or already cleared). The client near-end's reconciler queries this for sent-but-unsettled records after a session-continuity loss: a terminal receipt settles locally; a null receipt re-forwards.",
+        "operationId": "runtime_session_mutation_settlement",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Runtime session id the mutation was dispatched under",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "client_mutation_id",
+            "in": "path",
+            "description": "Client mutation id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "viewDelta",
+            "in": "query",
+            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The runtime's settlement record (receipt is null when unknown)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeMutationSettlement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runtime/sessions/{session_id}/stream": {
       "get": {
         "tags": [
@@ -7135,6 +7230,22 @@
       },
       "RuntimeMutationId": {
         "type": "string"
+      },
+      "RuntimeMutationSettlement": {
+        "type": "object",
+        "description": "The settlement-query response for one `(session, clientMutationId)` key\n(`GET /runtime/sessions/{id}/mutations/{clientMutationId}`): the receipt the\nruntime holds, or `null` when it has no record (unknown session, never\naccepted, or already evicted/cleared under the D47 ledger rule). Consumed by\nthe near-end reconciler's sent-but-unsettled step (D44b): a terminal receipt\nsettles locally, `null` re-forwards.",
+        "properties": {
+          "receipt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MutationReceipt"
+              }
+            ]
+          }
+        }
       },
       "RuntimeSession": {
         "type": "object",

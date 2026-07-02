@@ -13,8 +13,11 @@ const allowedStorageFiles = new Set([
   'src/connection/store.ts',
   'src/onboarding/store.ts',
   'src/developerTools.ts',
-  'src/hooks/useDaemonEvents.ts',
   'src/hooks/useMailLayoutPersistence.ts',
+  // The near-end engine binding mirrors the engine-owned resume cursor (a
+  // plain sequence number) to sessionStorage so a reload resumes the frame
+  // stream where it left off - no bodies or auth material.
+  'src/runtime/nearEnd.ts',
   'src/observability.ts',
   'src/repairFeedback.ts',
   // The client-layer replica's durable state lives in one IndexedDB DB

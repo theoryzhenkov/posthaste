@@ -54,12 +54,14 @@ afterEach(() => {
 })
 
 describe('useDaemonEvents runtime adapter subscription', () => {
-  it('subscribes through the runtime session stream and tracks the frame cursor', async () => {
+  it('subscribes through the runtime session stream without threading a cursor', async () => {
     const { unmount } = renderHook(() => useDaemonEvents(), { wrapper })
 
+    // Stream resume is the near-end engine's job (M9b2): the hook passes no
+    // afterSeq — the engine owns and persists the cursor.
     await waitFor(() =>
       expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-        { request: { sessionId: 'session-1', afterSeq: null } },
+        { request: { sessionId: 'session-1' } },
       ]),
     )
     runtimeAdapter.emitRuntimeFrame({
@@ -69,10 +71,10 @@ describe('useDaemonEvents runtime adapter subscription', () => {
       payload: event,
     })
 
-    await waitFor(() =>
-      expect(window.sessionStorage.getItem('mail:last-runtime-frame-seq')).toBe(
-        '1',
-      ),
+    // The hook applies the event to the query cache but does NOT touch the
+    // cursor storage — that moved behind the engine binding.
+    expect(window.sessionStorage.getItem('mail:last-runtime-frame-seq')).toBe(
+      null,
     )
 
     unmount()
@@ -81,26 +83,18 @@ describe('useDaemonEvents runtime adapter subscription', () => {
         { sessionId: 'session-1', sourceId: undefined },
       ]),
     )
-    runtimeAdapter.emitRuntimeFrame({
-      type: 'notification',
-      sessionSeq: 2,
-      kind: event.topic,
-      payload: { ...event, seq: 43 },
-    })
-    // After unmount the subscription is closed; the cursor does not advance.
-    expect(window.sessionStorage.getItem('mail:last-runtime-frame-seq')).toBe(
-      '1',
-    )
   })
 
-  it('resumes from the stored runtime frame sequence', async () => {
+  it('keeps a single subscription across a stored legacy cursor (no afterSeq resume here)', async () => {
+    // A cursor persisted by the engine binding must not leak back into the
+    // hook's subscription request.
     window.sessionStorage.setItem('mail:last-runtime-frame-seq', '7')
 
     renderHook(() => useDaemonEvents(), { wrapper })
 
     await waitFor(() =>
       expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-        { request: { sessionId: 'session-1', afterSeq: 7 } },
+        { request: { sessionId: 'session-1' } },
       ]),
     )
   })

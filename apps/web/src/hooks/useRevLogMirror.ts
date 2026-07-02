@@ -85,7 +85,8 @@ export function useRevLogMirror(accountId: string | null): void {
               }
             },
           },
-          { afterSeq: 0, sourceId: accountId },
+          // No afterSeq: the near-end engine owns the resume cursor (M9b2).
+          { sourceId: accountId },
         )
       })
       .catch(() => {

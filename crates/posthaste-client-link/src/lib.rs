@@ -20,9 +20,9 @@
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_contract_core::{
-    MutationReceipt, MutationRequest, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeSession,
-    RuntimeSessionId, RuntimeSessionSeq, ViewDescriptor, ViewFrame, ViewId, ViewRevision,
-    ViewSnapshot,
+    ClientMutationId, MutationReceipt, MutationRequest, RuntimeCaller, RuntimeError, RuntimeFrame,
+    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, ViewDescriptor, ViewFrame, ViewId,
+    ViewRevision, ViewSnapshot,
 };
 use posthaste_domain_model::{DomainEvent, EventFilter};
 
@@ -98,6 +98,18 @@ pub trait RuntimeLink: Send + Sync {
         caller: RuntimeCaller,
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError>;
+
+    /// The settlement the runtime holds for one `(session, clientMutationId)`
+    /// key, or `None` when it has no record (unknown session, never accepted,
+    /// or already evicted/cleared under the D47 ledger rule). The near-end
+    /// reconciler's cross-session sent-but-unsettled query (D44b): a terminal
+    /// receipt settles locally; `None` re-forwards.
+    async fn mutation_settlement(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        client_mutation_id: ClientMutationId,
+    ) -> Result<Option<MutationReceipt>, RuntimeError>;
 
     async fn open_view(
         &self,

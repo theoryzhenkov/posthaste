@@ -31,13 +31,15 @@ pub mod outbox;
 pub mod scheduler;
 pub mod sink;
 pub mod transport;
+pub mod wire;
 
 pub use config::{BackoffPolicy, NearEndConfig};
 pub use engine::{EngineError, NearEnd};
 pub use error::{classify_status, Disposition};
-pub use outbox::OutboxHooks;
+pub use outbox::{OutboxHooks, SentUnsettled};
 pub use scheduler::Scheduler;
 pub use sink::{ConnectionStatus, FrameSink};
 pub use transport::{
-    PostRequest, PostResponse, StreamEvent, StreamRequest, Transport, TransportError,
+    GetRequest, PostRequest, PostResponse, StreamEvent, StreamRequest, Transport, TransportError,
 };
+pub use wire::{RuntimeSessionWire, Wire};

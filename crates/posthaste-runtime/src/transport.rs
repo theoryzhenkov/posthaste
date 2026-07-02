@@ -20,13 +20,16 @@ use posthaste_domain_model::{
 };
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerLink, DownStream, LinkCoverage, MailCommandRequest,
-    SequencedFrame, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_FORWARD_MUTATION_PATH,
-    LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
+    SequencedFrame, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_QUERY_PATH,
+    LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_contract_core::{
     MailOperation, MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
     RuntimeError, RuntimeErrorCode,
 };
+use tokio::sync::mpsc;
+
+use crate::link_near_end::{sse_payloads, NativeNearEnd};
 
 // The default transport: the runtime calls the co-located authority server directly.
 
@@ -36,6 +39,15 @@ use posthaste_contract_core::{
 /// base-assertion frames. This is what lets the authority server live on another
 /// process or host; it is selected by config, the symmetric twin of the
 /// in-process transport.
+///
+/// The link's resilience-bearing halves — `forward_mutation` and the production
+/// down-channel — are driven by the shared `LinkNearEnd` engine
+/// ([`crate::link_near_end`], D40): request deadline, jittered capped backoff,
+/// permanent-vs-transient classification, and the reconnect loop that owns the
+/// `afterSeq` resume cursor all come from the engine's config — no policy lives
+/// here. The request/response reads (`post_link`) and the raw one-shot
+/// [`Self::subscribe`] (the wire primitive tests exercise; the engine opens its
+/// own streams) remain plain reqwest.
 pub struct RemoteAuthorityServer {
     base_url: String,
     client: reqwest::Client,
@@ -43,6 +55,9 @@ pub struct RemoteAuthorityServer {
     /// `link_router` requires one ([`LinkAuth::PerRuntime`](posthaste_server)). `None`
     /// for an unauthenticated link (in-process tests / dormant mounts).
     token: Option<String>,
+    /// The near-end engine actor (dedicated thread): up-channel forwards + the
+    /// resilient down-channel.
+    near_end: NativeNearEnd,
 }
 
 impl RemoteAuthorityServer {
@@ -53,12 +68,24 @@ impl RemoteAuthorityServer {
     /// A remote transport that presents `token` (when `Some`) as a bearer
     /// credential on every link request.
     pub fn with_token(base_url: String, token: Option<String>) -> Self {
+        // Trim a trailing slash so `base_url + path` never doubles it.
+        let base_url = base_url.trim_end_matches('/').to_string();
+        let client = reqwest::Client::new();
+        let near_end = NativeNearEnd::spawn(client.clone(), base_url.clone(), token.clone());
         Self {
-            // Trim a trailing slash so `base_url + path` never doubles it.
-            base_url: base_url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::new(),
+            base_url,
+            client,
             token,
+            near_end,
         }
+    }
+
+    /// Take the engine-driven down-channel: starts the engine's reconnect loop
+    /// (subscribe → consume → resubscribe from the engine-owned `afterSeq`
+    /// cursor, jittered backoff between attempts) and hands back the frame
+    /// receiver the read path consumes. `None` after the first take.
+    pub fn take_down_channel(&self) -> Option<mpsc::UnboundedReceiver<SequencedFrame>> {
+        self.near_end.take_down_channel()
     }
 
     /// Attach the link bearer token to a request, if configured.
@@ -105,24 +132,6 @@ fn transport_error(error: reqwest::Error) -> RuntimeError {
         RuntimeErrorCode::TransportDisconnected,
         format!("runtime↔authority-server link transport error: {error}"),
     )
-}
-
-/// Parse one SSE event block (the text between `\n\n` boundaries) into a
-/// [`SequencedFrame`]. SSE carries the JSON envelope (`{ "seq": N, "frame": .. }`)
-/// on one or more `data:` lines; non-data lines (comments, `event:`/`id:`) are
-/// ignored. Returns `None` for a keep-alive comment or an unparseable block.
-/// Pure, so it is unit-testable without a live stream.
-pub(crate) fn parse_sse_frame(block: &str) -> Option<SequencedFrame> {
-    let mut data = String::new();
-    for line in block.lines() {
-        if let Some(value) = line.strip_prefix("data:") {
-            data.push_str(value.trim_start_matches(' '));
-        }
-    }
-    if data.is_empty() {
-        return None;
-    }
-    serde_json::from_str(&data).ok()
 }
 
 /// Emit the full [`RemoteAuthorityServer`] [`AuthorityServerApi`] impl: the
@@ -208,13 +217,21 @@ macro_rules! remote_authority_server_link_impl {
     ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
 #[async_trait]
 impl AuthorityServerLink for RemoteAuthorityServer {
+    /// Forward through the shared near-end engine: request deadline, jittered
+    /// backoff retry of transient failures, permanent 4xx surfaced without a
+    /// retry — the engine config is the only policy source (D40; fixes
+    /// lifecycle-debt row 1's deadline-less POST).
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        self.post_link(LINK_FORWARD_MUTATION_PATH, &mutation).await
+        self.near_end.forward(mutation).await
     }
 
+    /// The raw wire primitive: ONE subscription attempt, no resilience. The
+    /// production down-channel does not call this — it rides the engine's
+    /// reconnect loop ([`Self::take_down_channel`]); this remains the trait's
+    /// one-shot stream for in-process parity and the wire tests.
     async fn subscribe(
         &self,
         coverage: LinkCoverage,
@@ -242,22 +259,13 @@ impl AuthorityServerLink for RemoteAuthorityServer {
                 format!("remote authority server refused link subscription ({status})"),
             ));
         }
-        let mut bytes = response.bytes_stream();
-        let stream = async_stream::stream! {
-            // Accumulate the byte stream and emit a frame per `\n\n`-delimited
-            // SSE event block.
-            let mut buffer = String::new();
-            while let Some(chunk) = bytes.next().await {
-                let Ok(chunk) = chunk else { break };
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-                while let Some(boundary) = buffer.find("\n\n") {
-                    let block: String = buffer.drain(..boundary + 2).collect();
-                    if let Some(frame) = parse_sse_frame(&block) {
-                        yield frame;
-                    }
-                }
-            }
-        };
+        // One SSE framing fact (`sse_payloads`, shared with the engine's native
+        // transport); the JSON parse into the typed envelope happens here at
+        // the boundary — an unparseable payload is dropped, never cast.
+        let stream = sse_payloads(response.bytes_stream())
+            .filter_map(|payload| async move {
+                serde_json::from_str::<SequencedFrame>(&payload).ok()
+            });
         Ok(Box::pin(stream))
     }
 
@@ -276,7 +284,9 @@ posthaste_authority_server_link::for_each_link_lifecycle_op!(remote_authority_se
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_authority_server_link::{AuthorityServerFrame, BaseAssertion, BaseUpdate};
+    use posthaste_authority_server_link::{
+        AuthorityServerFrame, BaseAssertion, BaseUpdate, LINK_FORWARD_MUTATION_PATH,
+    };
     use posthaste_link_core::MessageFoldState;
     use posthaste_contract_core::{MutationSettlementState, RuntimeMutationId};
     use serde_json::json;
@@ -286,29 +296,6 @@ mod tests {
             keywords: keywords.iter().map(|k| k.to_string()).collect(),
             mailbox_ids: mailboxes.iter().map(|m| m.to_string()).collect(),
         }
-    }
-
-    #[test]
-    fn parse_sse_frame_reads_a_data_line_as_a_sequenced_frame() {
-        let sequenced = SequencedFrame::new(
-            7,
-            AuthorityServerFrame::Base {
-                assertions: vec![BaseAssertion {
-                    account_id: "acct".into(),
-                    message_id: "m1".into(),
-                    update: BaseUpdate::Removed,
-                }],
-            },
-        );
-        let data = serde_json::to_string(&sequenced).unwrap();
-        let parsed = parse_sse_frame(&format!("data: {data}\n")).expect("frame");
-        assert_eq!(parsed, sequenced);
-    }
-
-    #[test]
-    fn parse_sse_frame_ignores_keep_alive_comments() {
-        assert!(parse_sse_frame(": keep-alive\n").is_none());
-        assert!(parse_sse_frame("").is_none());
     }
 
     // A mock far-node HTTP surface stands in for the authority server's (W3b) link
@@ -393,6 +380,87 @@ mod tests {
                     update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
                 }],
             }
+        );
+    }
+
+    // The engine-driven down-channel (M9b2 native adoption): each subscription
+    // serves ONE frame then closes; the engine must reconnect on its own and
+    // resume from the engine-owned cursor (`afterSeq`) — the subscribe-once-
+    // and-die loop is gone (lifecycle-debt row 2), and resume consumes the last
+    // seen seq (D46).
+    #[tokio::test]
+    async fn down_channel_engine_reconnects_and_resumes_from_the_cursor() {
+        use axum::extract::{Query, State};
+        use axum::response::sse::{Event, Sse};
+        use axum::routing::get;
+        use axum::Router;
+        use std::collections::HashMap;
+        use std::convert::Infallible;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct SubscribeLog {
+            after_seqs: Mutex<Vec<Option<u64>>>,
+            connections: std::sync::atomic::AtomicU64,
+        }
+
+        async fn subscribe(
+            State(log): State<Arc<SubscribeLog>>,
+            Query(query): Query<HashMap<String, String>>,
+        ) -> Sse<futures_util::stream::Iter<std::vec::IntoIter<Result<Event, Infallible>>>>
+        {
+            let after = query.get("afterSeq").and_then(|s| s.parse().ok());
+            log.after_seqs.lock().unwrap().push(after);
+            let seq = log
+                .connections
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            let sequenced = SequencedFrame::new(
+                seq,
+                AuthorityServerFrame::Base {
+                    assertions: vec![BaseAssertion {
+                        account_id: "acct".into(),
+                        message_id: format!("m{seq}"),
+                        update: BaseUpdate::Removed,
+                    }],
+                },
+            );
+            let event = Event::default().data(serde_json::to_string(&sequenced).unwrap());
+            // One frame, then the stream closes — forcing a reconnect.
+            Sse::new(futures_util::stream::iter(vec![Ok(event)]))
+        }
+
+        let log = Arc::new(SubscribeLog::default());
+        let app = Router::new()
+            .route(LINK_SUBSCRIBE_PATH, get(subscribe))
+            .with_state(log.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let transport = RemoteAuthorityServer::new(format!("http://{addr}"));
+        let mut frames = transport
+            .take_down_channel()
+            .expect("first take yields the down channel");
+        assert!(
+            transport.take_down_channel().is_none(),
+            "one consumer owns the channel"
+        );
+
+        // Two frames can only arrive over two subscriptions (one frame each).
+        let first = frames.recv().await.expect("first frame");
+        assert_eq!(first.seq, 1);
+        let second = frames.recv().await.expect("second frame after reconnect");
+        assert_eq!(second.seq, 2);
+
+        let after_seqs = log.after_seqs.lock().unwrap().clone();
+        assert_eq!(after_seqs[0], None, "fresh subscribe has no cursor");
+        assert_eq!(
+            after_seqs[1],
+            Some(1),
+            "the reconnect resumed from the engine-owned cursor"
         );
     }
 }

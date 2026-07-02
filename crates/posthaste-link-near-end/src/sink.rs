@@ -6,8 +6,6 @@
 //! engine never hands the host an unparsed frame — malformed input is reported
 //! separately and dropped, never cast.
 
-use posthaste_contract_core::RuntimeFrame;
-
 /// A connection-lifecycle transition the engine reports so the host can drive
 /// degraded-mode UI (the flat-retry TS client had none — lifecycle-debt row 8).
 #[derive(Clone, Debug)]
@@ -26,12 +24,13 @@ pub enum ConnectionStatus {
     PermanentError(String),
 }
 
-/// The engine's output surface. Object-safe: held as `Rc<dyn FrameSink>`.
-pub trait FrameSink {
-    /// A parsed, validated runtime frame in arrival order.
-    fn on_frame(&self, frame: RuntimeFrame);
+/// The engine's output surface, generic over the seam's frame type
+/// ([`crate::wire::Wire::Frame`]). Object-safe: held as `Rc<dyn FrameSink<F>>`.
+pub trait FrameSink<Frame> {
+    /// A parsed, validated frame in arrival order.
+    fn on_frame(&self, frame: Frame);
 
-    /// A stream payload that failed to parse into a [`RuntimeFrame`]. Dropped,
+    /// A stream payload that failed to parse into the seam's frame. Dropped,
     /// not cast (lifecycle-debt row 9). `raw` is the offending payload; `error`
     /// the parse message.
     fn on_malformed(&self, raw: String, error: String);

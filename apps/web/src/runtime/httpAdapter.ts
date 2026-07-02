@@ -8,7 +8,6 @@ import {
   buildAccountLogoUrl,
   buildMessageAttachmentUrl,
   buildMessageBodyUrl,
-  buildRuntimeSessionStreamUrl,
   buildViewStreamUrl,
   buildOAuthRedirectUri,
   closeRuntimeSession,
@@ -36,7 +35,6 @@ import {
   fetchSmartMailboxes,
   fetchSourceMessages,
   extendRuntimeSessionView,
-  openRuntimeSession,
   openRuntimeSessionView,
   openView,
   patchMailbox,
@@ -45,7 +43,6 @@ import {
   previewAutomationRule,
   read,
   resetDefaultSmartMailboxes,
-  runRuntimeMutation,
   saveDraft,
   deleteDraft,
   discardOperation,
@@ -64,7 +61,6 @@ import type { KnownMailboxRole, Mailbox } from '../api/types'
 
 import type {
   RuntimeAdapter,
-  RuntimeFrame,
   RuntimeFrameHandlers,
   RuntimeMailListViewState,
   RuntimeMailQueryRequest,
@@ -80,6 +76,12 @@ import {
   buildMailListPredicateContext,
   isMailListSelfMaintained,
 } from './mailListSelfMaintained'
+import {
+  connectNearEnd,
+  disconnectNearEnd,
+  forwardNearEndMutation,
+  subscribeNearEndFrames,
+} from './nearEnd'
 
 /**
  * Default runtime adapter during migration.
@@ -197,13 +199,18 @@ function handleMalformedFrame(
 }
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
+  // The session lifecycle, frame stream, and mutation forward ride the shared
+  // near-end ENGINE (wasm, D41): session open, reconnect + resume cursor,
+  // deadlines, backoff, typed frame parse and 4xx classification all live in
+  // the engine — this adapter carries zero transport policy for them.
   openRuntimeSession(request) {
-    return openRuntimeSession({
-      sourceId: request.sourceId,
-      viewDelta: request.viewDelta,
-    })
+    // `viewDelta` is engine config (always on for engine sessions).
+    return connectNearEnd({ sourceId: request.sourceId })
   },
-  closeRuntimeSession(request) {
+  async closeRuntimeSession(request) {
+    // Stop the engine's frame loop, then close the session server-side (a
+    // policy-free DELETE — the engine's transport is post/stream only).
+    await disconnectNearEnd()
     return closeRuntimeSession(request.sessionId, {
       sourceId: request.sourceId,
     })
@@ -234,75 +241,15 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     })
   },
   runRuntimeMutation(request) {
-    if (!request.sessionId) {
-      return Promise.reject(new Error('runtime mutation requires a session id'))
-    }
-    return runRuntimeMutation(
-      request.sessionId,
-      {
-        sessionId: request.sessionId,
-        name: request.name,
-        args: request.args,
-        clientMutationId: request.clientMutationId,
-        context: request.context,
-      },
-      { sourceId: request.sourceId },
-    )
+    // The engine stamps its own session id, applies the request deadline,
+    // retries transients with jittered backoff, and parses the receipt typed.
+    return forwardNearEndMutation(request)
   },
-  subscribeRuntimeFrames(request, handlers) {
-    const controller = new AbortController()
-    void fetchEventSource(
-      buildRuntimeSessionStreamUrl({
-        sessionId: request.sessionId,
-        afterSeq: request.afterSeq,
-        sourceId: request.sourceId,
-      }),
-      {
-        headers: authHeaders(),
-        signal: controller.signal,
-        openWhenHidden: true,
-        async onopen(response) {
-          const contentType = response.headers.get('content-type') ?? ''
-          if (response.ok && contentType.startsWith(EventStreamContentType)) {
-            return
-          }
-          if (response.status >= 400 && response.status < 500) {
-            throw new FatalStreamError(
-              `runtime stream rejected with ${response.status}`,
-            )
-          }
-          throw new Error(`runtime stream returned ${response.status}`)
-        },
-        onmessage(event) {
-          if (!event.data) {
-            return
-          }
-          let payload: RuntimeFrame<RuntimeMailListViewState>
-          try {
-            payload = JSON.parse(
-              event.data,
-            ) as RuntimeFrame<RuntimeMailListViewState>
-          } catch (error) {
-            handleMalformedFrame(handlers, event.data, error)
-            return
-          }
-          handlers.onFrame(payload)
-        },
-        onerror(error) {
-          if (error instanceof FatalStreamError) {
-            handlers.onPermanentError?.(error)
-            throw error
-          }
-          handlers.onTransientError?.(error)
-        },
-      },
-    ).catch((error) => {
-      if (controller.signal.aborted || error instanceof FatalStreamError) {
-        return
-      }
-      handlers.onClosed?.(error)
-    })
-    return () => controller.abort()
+  subscribeRuntimeFrames(_request, handlers) {
+    // Frames arrive already parsed + validated by the engine; the reconnect
+    // loop and the `afterSeq` resume cursor are engine-owned (callers no
+    // longer thread `afterSeq`).
+    return subscribeNearEndFrames(handlers)
   },
   async openMessageListView(request) {
     const descriptor = mailListViewDescriptor(request)
