@@ -1,4 +1,4 @@
-use posthaste_domain_service::{ProviderAuthKind, ProviderHint, SendMessageRequest};
+use posthaste_domain_model::{ProviderAuthKind, ProviderHint, SendMessageRequest};
 
 use crate::ImapAdapterError;
 
@@ -62,7 +62,7 @@ fn builds_multipart_mixed_message_with_attachments() {
         body: "See attached.".to_string(),
         in_reply_to: None,
         references: None,
-        attachments: vec![posthaste_domain_service::SendMessageAttachment {
+        attachments: vec![posthaste_domain_model::SendMessageAttachment {
             filename: "notes.txt".to_string(),
             mime_type: "text/plain".to_string(),
             content_base64: "aGVsbG8gYXR0YWNobWVudA==".to_string(),

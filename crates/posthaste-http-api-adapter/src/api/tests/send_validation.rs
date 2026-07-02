@@ -34,7 +34,7 @@ fn send_message_rejects_invalid_attachment_base64() {
         body: "Body".to_string(),
         in_reply_to: None,
         references: None,
-        attachments: vec![posthaste_domain_service::SendMessageAttachment {
+        attachments: vec![posthaste_domain_model::SendMessageAttachment {
             filename: "notes.txt".to_string(),
             mime_type: "text/plain".to_string(),
             content_base64: "not base64".to_string(),
@@ -62,7 +62,7 @@ fn send_message_rejects_too_many_attachments() {
         in_reply_to: None,
         references: None,
         attachments: (0..=MAX_SEND_ATTACHMENTS)
-            .map(|index| posthaste_domain_service::SendMessageAttachment {
+            .map(|index| posthaste_domain_model::SendMessageAttachment {
                 filename: format!("notes-{index}.txt"),
                 mime_type: "text/plain".to_string(),
                 content_base64: "aGVsbG8=".to_string(),

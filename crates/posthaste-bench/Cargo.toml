@@ -20,6 +20,7 @@ name = "posthaste-profile"
 path = "src/main.rs"
 
 [dependencies]
+posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-store = { path = "../posthaste-store" }
 # Runtime-tier workload: drive the full mutation -> view-recompute -> frame path

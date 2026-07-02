@@ -22,11 +22,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_server::{build_authority_server, build_authority_server_node};
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
-    SecretStore, SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
-    SyncObject, ThreadId,
+    SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject,
+    ThreadId,
 };
+use posthaste_domain_service::SecretStore;
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkId,
     LinkCoverage,
@@ -113,7 +114,7 @@ fn build_config(root: PathBuf) -> RuntimeBuildConfig {
 
 fn seed_inbox_message(
     build: &posthaste_authority_server::AuthorityServerBuild,
-    account: &posthaste_domain_service::AccountId,
+    account: &posthaste_domain_model::AccountId,
     message_id: &str,
 ) {
     build

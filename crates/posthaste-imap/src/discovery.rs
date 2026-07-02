@@ -1,10 +1,8 @@
 use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::flag::FlagNameAttribute;
 use imap_client::imap_types::mailbox::Mailbox;
-use posthaste_domain_service::{
-    AccountTransportSettings, ImapCapabilities, MailboxId, MailboxRole, ProviderAuthKind,
-    ProviderProfile, TransportSecurity,
-};
+use posthaste_domain_model::{AccountTransportSettings, ImapCapabilities, MailboxRole, ProviderAuthKind, ProviderProfile, TransportSecurity};
+use posthaste_domain_model::MailboxId;
 
 use crate::ImapAdapterError;
 
@@ -164,7 +162,7 @@ pub fn map_imap_mailbox(
     attributes: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> DiscoveredImapMailbox {
     map_imap_mailbox_with_provider(
-        ProviderProfile::from_kind(posthaste_domain_service::ProviderKind::Generic),
+        ProviderProfile::from_kind(posthaste_domain_model::ProviderKind::Generic),
         name,
         attributes,
     )

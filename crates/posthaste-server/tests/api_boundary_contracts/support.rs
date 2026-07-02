@@ -7,10 +7,12 @@ use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use posthaste_config::TomlConfigRepository;
+use posthaste_domain_model::{
+    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, MailboxId, MailboxRecord,
+    MessageId, MessageRecord, SecretRef, SecretStoreError, SyncBatch, ThreadId, RFC3339_EPOCH,
+};
 use posthaste_domain_service::{
-    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ConfigRepository,
-    MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord, SecretRef,
-    SecretStore, SecretStoreError, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
+    ConfigRepository, MailService, MailStore, SecretStore, SyncWriteStore,
 };
 use posthaste_http_api_adapter::api::{ApiError, ListSourceMessagesQuery};
 use posthaste_authority_server::AccountSupervisor;

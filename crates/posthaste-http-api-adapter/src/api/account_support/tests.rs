@@ -1,6 +1,7 @@
 use super::*;
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore, SecretStoreError};
+use posthaste_domain_model::SecretStoreError;
+use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_store::DatabaseStore;
 use std::fs;
 use std::path::PathBuf;
@@ -50,12 +51,12 @@ fn test_account(secret_ref: Option<SecretRef>) -> AccountSettings {
             imap: Some(ImapTransportSettings {
                 host: "imap.example.com".to_string(),
                 port: 993,
-                security: posthaste_domain_service::TransportSecurity::Tls,
+                security: posthaste_domain_model::TransportSecurity::Tls,
             }),
             smtp: Some(SmtpTransportSettings {
                 host: "smtp.example.com".to_string(),
                 port: 587,
-                security: posthaste_domain_service::TransportSecurity::StartTls,
+                security: posthaste_domain_model::TransportSecurity::StartTls,
             }),
             ..Default::default()
         },

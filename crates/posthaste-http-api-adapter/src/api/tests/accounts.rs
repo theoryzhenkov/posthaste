@@ -11,7 +11,7 @@ fn jmap_account_requires_configured_secret() {
         driver: AccountDriver::Jmap,
         enabled: true,
         appearance: None,
-        transport: posthaste_domain_service::AccountTransportSettings {
+        transport: posthaste_domain_model::AccountTransportSettings {
             base_url: Some("https://example.com/jmap".to_string()),
             username: Some("alice@example.com".to_string()),
             secret_ref: None,
@@ -38,7 +38,7 @@ fn jmap_account_allows_bearer_secret_without_username() {
         driver: AccountDriver::Jmap,
         enabled: true,
         appearance: None,
-        transport: posthaste_domain_service::AccountTransportSettings {
+        transport: posthaste_domain_model::AccountTransportSettings {
             base_url: Some("https://example.com/jmap".to_string()),
             username: None,
             secret_ref: Some(SecretRef {
@@ -118,7 +118,7 @@ fn patch_account_preserves_username_when_username_is_omitted() {
         driver: AccountDriver::Jmap,
         enabled: true,
         appearance: None,
-        transport: posthaste_domain_service::AccountTransportSettings {
+        transport: posthaste_domain_model::AccountTransportSettings {
             base_url: Some("https://before.example/jmap".to_string()),
             username: Some("alice@example.com".to_string()),
             secret_ref: None,
@@ -177,12 +177,12 @@ fn account_transport_request_keeps_provider_hint_json_field() {
     let request: AccountTransportRequest =
         serde_json::from_str(r#"{"provider":"gmail","auth":"oauth2"}"#)
             .expect("legacy provider field should deserialize");
-    let transport = posthaste_domain_service::AccountTransportSettings::from(request);
+    let transport = posthaste_domain_model::AccountTransportSettings::from(request);
 
     assert_eq!(transport.provider, ProviderHint::Gmail);
     assert_eq!(
         transport.provider_kind(),
-        posthaste_domain_service::ProviderKind::Gmail
+        posthaste_domain_model::ProviderKind::Gmail
     );
     assert_eq!(transport.auth, ProviderAuthKind::OAuth2);
 }
@@ -197,7 +197,7 @@ fn imap_smtp_account(username: &str, email_patterns: Vec<&str>) -> AccountSettin
         driver: AccountDriver::ImapSmtp,
         enabled: true,
         appearance: None,
-        transport: posthaste_domain_service::AccountTransportSettings {
+        transport: posthaste_domain_model::AccountTransportSettings {
             username: Some(username.to_string()),
             secret_ref: Some(SecretRef {
                 kind: SecretKind::Env,
@@ -206,12 +206,12 @@ fn imap_smtp_account(username: &str, email_patterns: Vec<&str>) -> AccountSettin
             imap: Some(ImapTransportSettings {
                 host: "imap.example.com".to_string(),
                 port: 993,
-                security: posthaste_domain_service::TransportSecurity::Tls,
+                security: posthaste_domain_model::TransportSecurity::Tls,
             }),
             smtp: Some(SmtpTransportSettings {
                 host: "smtp.example.com".to_string(),
                 port: 587,
-                security: posthaste_domain_service::TransportSecurity::StartTls,
+                security: posthaste_domain_model::TransportSecurity::StartTls,
             }),
             ..Default::default()
         },

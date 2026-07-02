@@ -14,7 +14,7 @@ use posthaste_contract_core::{
     ReadWatermark, RuntimeCoverage, RuntimeError, RuntimeErrorCode, ViewDescriptor, ViewId,
     ViewLifecycle, ViewRevision, ViewSnapshot,
 };
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountId, ConversationId, DomainEvent, MessageId, EVENT_TOPIC_ACCOUNT_CREATED,
     EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_ACCOUNT_UPDATED,
     EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_REV_LOG_APPENDED,
@@ -483,7 +483,7 @@ fn presentation_window(presentation: &MailPresentationRequest) -> Value {
 #[cfg(test)]
 mod recompute_trigger_tests {
     use super::*;
-    use posthaste_domain_service::EVENT_TOPIC_MESSAGE_UPDATED;
+    use posthaste_domain_model::EVENT_TOPIC_MESSAGE_UPDATED;
     use serde_json::json;
 
     fn message_event(payload: serde_json::Value) -> DomainEvent {

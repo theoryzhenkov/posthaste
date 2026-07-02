@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use posthaste_domain_service::{
-    AccountId, AccountSettings, MailService, SecretKind, SecretRef, SecretStore, ServiceError,
-};
+use posthaste_domain_model::{AccountId, AccountSettings, SecretKind, SecretRef, ServiceError};
+use posthaste_domain_service::{MailService, SecretStore};
 use posthaste_observability::{events, ph_error, ph_warn};
 use posthaste_contract_core::{RuntimeError, SecretWriteMode, SecretWriteMutation};
 
@@ -287,11 +286,8 @@ mod tests {
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use posthaste_domain_service::{
-        AccountDriver, AccountTransportSettings, AppSettings, ConfigDiff, ConfigError,
-        ConfigRepository, ConfigSnapshot, SecretStoreError, SmartMailbox, SmartMailboxId,
-        RFC3339_EPOCH,
-    };
+    use posthaste_domain_model::{AccountDriver, AccountTransportSettings, AppSettings, ConfigError, SecretStoreError, SmartMailbox, SmartMailboxId, RFC3339_EPOCH};
+use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
     use posthaste_contract_core::RuntimeErrorCode;
     use posthaste_store::DatabaseStore;
 

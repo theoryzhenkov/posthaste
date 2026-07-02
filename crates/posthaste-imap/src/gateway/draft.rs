@@ -1,5 +1,6 @@
 use imap_client::imap_types::flag::Flag;
-use posthaste_domain_service::{imap_message_id, RFC3339_EPOCH};
+use posthaste_domain_model::RFC3339_EPOCH;
+use posthaste_domain_service::imap_message_id;
 
 use crate::build_smtp_message;
 
@@ -59,7 +60,7 @@ pub(crate) async fn save_imap_draft(
         .map(str::trim)
         .filter(|id| !id.is_empty())
     {
-        let header_line = format!("{}: {}\r\n", posthaste_domain_service::DRAFT_ID_HEADER, draft_id);
+        let header_line = format!("{}: {}\r\n", posthaste_domain_model::DRAFT_ID_HEADER, draft_id);
         let mut prefixed = header_line.into_bytes();
         prefixed.extend_from_slice(&raw_message);
         raw_message = prefixed;

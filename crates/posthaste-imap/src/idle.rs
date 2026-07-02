@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_stream::stream;
-use posthaste_domain_service::{
-    now_iso8601, AccountId, PushEventStream, PushNotification, PushStreamEvent, SecretResolver,
-};
+use posthaste_domain_model::{PushNotification, now_iso8601};
+use posthaste_domain_model::AccountId;
+use posthaste_domain_service::{PushEventStream, PushStreamEvent, SecretResolver};
 use posthaste_observability::{events, ph_debug, ph_warn};
 
 use crate::discovery::connect_authenticated_client;

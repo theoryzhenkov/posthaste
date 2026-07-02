@@ -34,10 +34,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
 use posthaste_config::DaemonSettings;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
-use posthaste_domain_service::CommandAck;
+use posthaste_domain_model::CommandAck;
 use posthaste_authority_server_link::{
     AddToMailboxRequest, AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink,
     AuthorityServerLinkHandle, AuthorityServerLinkId, DestroyMessageRequest, LinkCoverage,

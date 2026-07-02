@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use posthaste_domain_service::ConfigError;
+use posthaste_domain_model::ConfigError;
 
 use crate::TomlConfigRepository;
 

@@ -4,12 +4,12 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use posthaste_domain_service::{
-    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageReadback, MessageRecord, MutationOutcome, PushTransport, Recipient,
-    ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
-    ThreadId,
+use posthaste_domain_model::{
+    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailboxId, MailboxRecord, MessageId,
+    MessageReadback, MessageRecord, MutationOutcome, Recipient, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, ThreadId,
 };
+use posthaste_domain_service::{MailGateway, PushTransport};
 use tokio::sync::Notify;
 
 mod samples;

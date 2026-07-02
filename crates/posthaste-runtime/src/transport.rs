@@ -14,7 +14,7 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
 
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountId, CommandAck, ConversationId, ConversationView, MessageDetail, MessageId,
     MessageSummary,
 };

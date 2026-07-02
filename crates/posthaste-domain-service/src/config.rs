@@ -1,4 +1,4 @@
-use crate::{
+use posthaste_domain_model::{
     AccountId, AccountSettings, AppSettings, ConfigError, SmartMailbox, SmartMailboxId,
 };
 

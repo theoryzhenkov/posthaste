@@ -2,7 +2,7 @@ use super::*;
 use base64::Engine;
 use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::{encode, EncodingKey, Header};
-use posthaste_domain_service::TransportSecurity;
+use posthaste_domain_model::TransportSecurity;
 
 const TEST_RSA_PRIVATE_KEY: &str = r"-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCptW7Vkr5e34U+

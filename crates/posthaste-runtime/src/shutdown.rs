@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use posthaste_domain_service::{ConfigError, ServiceError, StoreError};
+use posthaste_domain_model::{ConfigError, ServiceError, StoreError};
 use thiserror::Error;
 
 /// Shutdown ownership for authority runtime tasks and resources.

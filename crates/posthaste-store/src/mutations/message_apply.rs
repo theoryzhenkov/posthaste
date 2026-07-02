@@ -23,7 +23,7 @@ pub(crate) fn effective_mailbox_role_tx(
 pub(crate) fn apply_message_record_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
-    message: &posthaste_domain_service::MessageRecord,
+    message: &posthaste_domain_model::MessageRecord,
     raw_ref: Option<&RawMessageRef>,
     affected: &mut ProjectionInputs,
     events: &mut EventRecorder<'_, '_, '_>,
@@ -92,7 +92,7 @@ pub(crate) fn fetch_message_before_apply_tx(
 pub(crate) fn upsert_message_record_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
-    message: &posthaste_domain_service::MessageRecord,
+    message: &posthaste_domain_model::MessageRecord,
     conversation_id: &ConversationId,
 ) -> Result<(), StoreError> {
     tx.execute_cached(
@@ -226,7 +226,7 @@ pub(crate) fn replace_message_keywords_tx(
 pub(crate) fn upsert_message_body_cache_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
-    message: &posthaste_domain_service::MessageRecord,
+    message: &posthaste_domain_model::MessageRecord,
     raw_ref: Option<&RawMessageRef>,
 ) -> Result<(), StoreError> {
     let body_present =

@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{ConfigRepository, DomainEvent, MailService, MailStore, SecretStore};
+use posthaste_domain_model::{DomainEvent};
+use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_store::DatabaseStore;

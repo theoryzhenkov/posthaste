@@ -104,8 +104,8 @@ impl MailService {
 /// the mailbox itself), vs a Posthaste-local role like "snooze".
 fn is_provider_role(role: &str) -> bool {
     matches!(
-        crate::MailboxRole::parse(role),
-        Some(role) if role != crate::MailboxRole::Snooze
+        posthaste_domain_model::MailboxRole::parse(role),
+        Some(role) if role != posthaste_domain_model::MailboxRole::Snooze
     )
 }
 

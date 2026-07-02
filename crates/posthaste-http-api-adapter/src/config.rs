@@ -2,10 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings, AccountTransportSettings,
-    AppSettings, ConfigRepository, SecretRef,
+    AppSettings, SecretRef,
 };
+use posthaste_domain_service::ConfigRepository;
 use serde::Deserialize;
 
 /// Application directory name used under XDG paths.

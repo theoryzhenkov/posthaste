@@ -1,5 +1,5 @@
 use jmap_client::email;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     synthesize_plain_text_raw_mime_with_recipients, BlobId, FetchedBody, GatewayError,
     MessageAttachment, MessageId, MessageRecord,
 };

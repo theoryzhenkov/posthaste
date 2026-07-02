@@ -1,7 +1,5 @@
 use mail_parser::{Address, MessageParser};
-use posthaste_domain_service::{
-    format_forwarded_body, recipients_to_header, ImapMessageLocation, Recipient, ReplyContext,
-};
+use posthaste_domain_model::{ImapMessageLocation, Recipient, ReplyContext, format_forwarded_body, recipients_to_header};
 
 use crate::{fetch_raw_message_by_location, ImapAdapterError, ImapConnectionConfig};
 

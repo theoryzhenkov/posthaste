@@ -1,5 +1,5 @@
 use super::*;
-use posthaste_domain_service::{BlobId, MessageAttachment, Recipient};
+use posthaste_domain_model::{BlobId, MessageAttachment, Recipient};
 use rusqlite::types::Type;
 
 mod attachments;

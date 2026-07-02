@@ -22,7 +22,7 @@ impl AutomationBackfillStore for TestStore {
             status: AutomationBackfillJobStatus::Pending,
             attempts: 0,
             last_error: None,
-            updated_at: crate::RFC3339_EPOCH.to_string(),
+            updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
         };
         jobs.push(job.clone());
         Ok(job)
@@ -106,7 +106,7 @@ impl AutomationBackfillStore for TestStore {
             status: AutomationBackfillJobStatus::Pending,
             attempts: 0,
             last_error: None,
-            updated_at: crate::RFC3339_EPOCH.to_string(),
+            updated_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
         };
         jobs.push(job.clone());
         Ok(job)

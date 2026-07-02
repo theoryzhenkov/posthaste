@@ -8,12 +8,14 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use posthaste_config::TomlConfigRepository;
+use posthaste_domain_model::{
+    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, MailboxId, MailboxRecord,
+    MessageId, MessageRecord, SecretRef, SecretStoreError, SmartMailboxCondition,
+    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SyncBatch, ThreadId, RFC3339_EPOCH,
+};
 use posthaste_domain_service::{
-    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ConfigRepository,
-    MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord, SecretRef,
-    SecretStore, SecretStoreError, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
+    ConfigRepository, MailService, MailStore, SecretStore, SyncWriteStore,
 };
 use posthaste_http_api_adapter::api::{
     preview_automation_rule, AutomationRulePreviewResponse, PreviewAutomationRuleRequest,

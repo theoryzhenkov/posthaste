@@ -7,7 +7,7 @@ async fn flow_store_transitions_pending_state_once() {
     let store = OAuthFlowStore::default();
     let profile = OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile");
     let flow = PendingOAuthFlow {
-        account_id: Some(posthaste_domain_service::AccountId::from("gmail")),
+        account_id: Some(posthaste_domain_model::AccountId::from("gmail")),
         profile,
         client_id: "client-id".to_string(),
         client_secret: Some("client-secret".to_string()),
@@ -48,7 +48,7 @@ async fn flow_store_expires_pending_states_after_ttl() {
     let store = OAuthFlowStore::default();
     let profile = OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile");
     let flow = PendingOAuthFlow {
-        account_id: Some(posthaste_domain_service::AccountId::from("gmail")),
+        account_id: Some(posthaste_domain_model::AccountId::from("gmail")),
         profile,
         client_id: "client-id".to_string(),
         client_secret: Some("client-secret".to_string()),

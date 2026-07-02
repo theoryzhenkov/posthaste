@@ -9,7 +9,7 @@ use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 use tokio::sync::RwLock;
 
 use crate::live::map_gateway_error;
-use posthaste_domain_service::GatewayError;
+use posthaste_domain_model::GatewayError;
 
 /// A shared WebSocket connection that supports both API calls and push.
 ///

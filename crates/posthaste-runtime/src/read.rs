@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::StreamExt;
 use std::collections::BTreeMap;
 
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     now_iso8601, AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId,
     ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary,
     MessageDetail, MessageId, MessageSummary, Operation, ReplyContext, RevLogSnapshot,
@@ -366,7 +366,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use async_trait::async_trait;
-    use posthaste_domain_service::MessagePage;
+    use posthaste_domain_model::MessagePage;
     use posthaste_authority_server_link::{
         AuthorityServerLink, BaseAssertion, BaseUpdate, DownStream,
     };

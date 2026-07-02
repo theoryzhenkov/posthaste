@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use posthaste_domain_service::{GmailLabel, MailboxId, MessageId, MessageRecord, SystemKeyword};
+use posthaste_domain_model::{GmailLabel, MessageRecord, SystemKeyword};
+use posthaste_domain_model::{MailboxId, MessageId};
 
 use crate::{message::ImapMailboxMembershipSource, DiscoveredImapMailbox, ImapMappedHeader};
 

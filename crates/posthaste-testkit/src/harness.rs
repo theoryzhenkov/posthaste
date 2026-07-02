@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use posthaste_authority_server::build_authority_server;
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain_service::{
+use posthaste_domain_model::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, RFC3339_EPOCH,
 };
 use posthaste_runtime::RuntimeBuildConfig;

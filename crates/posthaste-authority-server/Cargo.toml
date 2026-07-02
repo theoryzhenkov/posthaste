@@ -17,6 +17,7 @@ jsonwebtoken = { workspace = true }
 oauth2 = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-contract-core = { path = "../posthaste-contract-core" }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }

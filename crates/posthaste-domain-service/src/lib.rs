@@ -3,8 +3,8 @@
 //! This crate holds the [`MailService`] orchestrator, the port traits (gateway,
 //! store, secrets, config, push), provider policies, imap planning logic, cache
 //! scoring/governor, and search parsing. Pure domain types live in the leaf
-//! crate [`posthaste_domain_model`]; this crate re-exports them flat (temporary
-//! migration shim) so consumers keep resolving `posthaste_domain_service::X`.
+//! crate [`posthaste_domain_model`]; consumers that need those types import
+//! them from there directly.
 //!
 //! @spec docs/L1-jmap
 //! @spec docs/L0-api
@@ -18,9 +18,6 @@ pub mod search;
 mod secret;
 mod service;
 mod validation;
-
-// TEMPORARY migration shim — sunset at RFC-L2-architecture-cleanup M8
-pub use posthaste_domain_model::*;
 
 pub use cache::*;
 pub use config::*;

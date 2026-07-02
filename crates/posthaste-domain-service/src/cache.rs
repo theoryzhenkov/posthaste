@@ -2,7 +2,13 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use posthaste_domain_model::*;
+use posthaste_domain_model::{
+    clamp_unit, CacheBudget, CacheCandidateSignals, CacheFetchLease, CacheLayer,
+    CacheMaintenanceFeedback, CacheMaintenanceLease, CacheMessageSignals, CacheResourcePolicy,
+    CacheScore, CacheScoringWeights, CacheSearchSignals, CacheSignalUpdate,
+};
+#[cfg(test)]
+use posthaste_domain_model::CacheFetchUnit;
 
 const MIB: f64 = 1024.0 * 1024.0;
 const MIN_BILLABLE_BYTES: f64 = 4.0 * 1024.0;
