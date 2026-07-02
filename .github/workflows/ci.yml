@@ -35,6 +35,20 @@ jobs:
       - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-link-wasm -- -D warnings
       - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-link-wasm
 
+  # The four-crate frontier set is extended by later refactor steps (RFC-L2-architecture-cleanup D15/M8).
+  wasm-frontier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-wasm-frontier
+          cache-on-failure: true
+      - run: cargo check --target wasm32-unknown-unknown -p posthaste-link-core -p posthaste-link-replica
+
   frontend:
     runs-on: ubuntu-latest
     steps:
