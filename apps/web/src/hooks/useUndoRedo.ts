@@ -44,7 +44,7 @@ function sendRevCursor(snapshot: UndoHistorySnapshot, accountId: string): void {
       args: { accountId, cursorStepId, redoTail },
     })
     .catch(() => {
-      // Transient transport failures are non-fatal; the outbox/convergence
+      // Transient transport failures are non-fatal; the pending-set/convergence
       // guard reconciles. The local cursor is already correct (optimistic).
     })
 }
@@ -85,7 +85,7 @@ export function useUndoRedo(): UndoRedo {
           },
         })
         .catch(() => {
-          // Transient transport failures are non-fatal; the outbox/convergence
+          // Transient transport failures are non-fatal; the pending-set/convergence
           // guard reconciles. (Cursor rollback on a rejected settlement is the
           // Phase 2 concern; the applyDiff is idempotent.)
         })

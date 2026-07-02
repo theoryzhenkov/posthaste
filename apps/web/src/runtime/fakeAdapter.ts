@@ -2,7 +2,6 @@ import type {
   RuntimeFrameHandlers,
   RuntimeMutationReceipt,
   RuntimeRunMutationRequest,
-  RuntimeViewFrameHandlers,
 } from './types'
 import { createFakeQueueControls } from './fakeAdapterQueues'
 import {
@@ -45,7 +44,6 @@ export function createFakeRuntimeAdapter(
   const calls = createFakeCallRecords()
   const queues = createFakeQueues()
   const runtimeFrameHandlers = new Set<RuntimeFrameHandlers>()
-  const viewHandlers = new Set<RuntimeViewFrameHandlers>()
   let accountCalls = 0
   let smartMailboxCalls = 0
 
@@ -68,15 +66,11 @@ export function createFakeRuntimeAdapter(
       runtimeFrameHandlers.clear()
       for (const handlers of closing) handlers.onClosed?.(error)
     },
-    emitViewFrame(frame) {
-      for (const handlers of viewHandlers) handlers.onFrame(frame)
-    },
     ...createFakeQueueControls(queues),
     reset() {
       accountCalls = 0
       smartMailboxCalls = 0
       runtimeFrameHandlers.clear()
-      viewHandlers.clear()
       resetFakeCallRecords(calls)
       resetFakeQueues(queues)
     },
@@ -145,19 +139,6 @@ export function createFakeRuntimeAdapter(
       calls.runtimeFrameSubscriptionCalls.push({ request })
       runtimeFrameHandlers.add(handlers)
       return () => runtimeFrameHandlers.delete(handlers)
-    },
-    openMessageListView(request) {
-      calls.viewOpenCalls.push({ ...request })
-      return resolveQueuedOptional(
-        queues.openMessageListViews,
-        input?.defaultOpenMessageListView,
-        'open message list view result',
-      )
-    },
-    subscribeView(request, handlers) {
-      calls.viewSubscriptionCalls.push({ request })
-      viewHandlers.add(handlers)
-      return () => viewHandlers.delete(handlers)
     },
     createAccount(accountInput) {
       calls.accountCreateCalls.push(accountInput)

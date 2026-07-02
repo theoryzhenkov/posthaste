@@ -5,7 +5,7 @@
 //! forward — plus the subscription/stream types those methods return.
 //!
 //! The four families are one protocol: every consumer (api `runtime_stream` +
-//! `views` + `sync_events`, testkit `settle`, bench workload) opens a link,
+//! `sync_events`, testkit `settle`, bench workload) opens a link,
 //! opens views, subscribes, and forwards mutations *together*; splitting one
 //! protocol across traits is ceremony with no subset consumer (XXI). So this is
 //! ONE trait, not several.
@@ -14,15 +14,20 @@
 //! calls itself to build the subscription's replay backlog — that logic stays a
 //! private fn in `posthaste-runtime`; the public replay rides on
 //! [`RuntimeEventSubscription::replay`]). The sessionless `open_view`/
-//! `subscribe_view` pair **is** here: `posthaste-http-api-adapter`'s `POST /v1/views` and
-//! `GET /v1/views/{id}/stream` routes are live production consumers.
+//! `subscribe_view` pair is **not** here either (D51/M10): it had zero call
+//! sites post-M9b2 (all views flow link-scoped through
+//! [`open_link_view`](RuntimeLink::open_link_view)/[`subscribe_runtime_frames`](RuntimeLink::subscribe_runtime_frames));
+//! the D23 verdict that kept it verified wiring, not call sites, and was
+//! stale. [`RuntimeViewSubscription`]/[`RuntimeViewFrameStream`] stay: the
+//! far-end `ViewRegistry` still uses them for the link-scoped path's internal
+//! per-view broadcast.
 
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationRequest, RuntimeCaller, RuntimeError, RuntimeFrame,
     RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, ViewDescriptor, ViewFrame, ViewId,
-    ViewRevision, ViewSnapshot,
+    ViewSnapshot,
 };
 use posthaste_domain_model::{DomainEvent, EventFilter};
 
@@ -110,19 +115,6 @@ pub trait RuntimeLink: Send + Sync {
         link_id: RuntimeLinkId,
         client_mutation_id: ClientMutationId,
     ) -> Result<Option<MutationReceipt>, RuntimeError>;
-
-    async fn open_view(
-        &self,
-        caller: RuntimeCaller,
-        descriptor: ViewDescriptor,
-    ) -> Result<ViewSnapshot, RuntimeError>;
-
-    async fn subscribe_view(
-        &self,
-        caller: RuntimeCaller,
-        view_id: ViewId,
-        after_revision: Option<ViewRevision>,
-    ) -> Result<RuntimeViewSubscription, RuntimeError>;
 
     async fn subscribe_events(
         &self,

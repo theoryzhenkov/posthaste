@@ -70,7 +70,6 @@ pub mod settings;
 pub mod smart_mailboxes;
 mod support;
 pub(crate) mod sync_events;
-pub(crate) mod views;
 
 pub use accounts::{
     create_account, delete_account, disable_account, enable_account, get_account, get_account_logo,
@@ -110,8 +109,6 @@ pub use smart_mailboxes::{
 pub use sync_events::{
     stream_events, trigger_sync, EventsQuery, TriggerSyncRequest, TriggerSyncResponse,
 };
-pub use views::{open_view, stream_view, OpenViewRequest, OpenViewResponse, ViewStreamQuery};
-
 #[cfg(test)]
 use account_support::apply_account_patch;
 #[cfg(test)]

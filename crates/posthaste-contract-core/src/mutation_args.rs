@@ -130,7 +130,7 @@ pub struct MessageUnsnoozeArgs {
 /// `message.applyDiff`: apply an invertible change-diff (add/remove keywords +
 /// add/remove mailboxes) to one message. The undo/redo vehicle — undo submits
 /// `inverse(diff)`, redo submits `diff` — and an ordinary optimistic mutation
-/// through the outbox + replay guard. Undo/redo history is client-owned
+/// through the pending set + replay guard. Undo/redo history is client-owned
 /// (@spec docs/eph/DESIGN-L2-undo-redo-synced-history), so the runtime applies
 /// the diff without navigating or recording any history.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

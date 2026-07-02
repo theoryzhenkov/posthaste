@@ -113,8 +113,6 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             "/runtime/sessions/{session_id}/mutations/{client_mutation_id}",
             get(api::runtime_stream::runtime_link_mutation_settlement),
         )
-        .route("/views", post(api::open_view))
-        .route("/views/{view_id}/stream", get(api::stream_view))
         .route(
             "/sources/{source_id}/messages/{message_id}",
             get(api::get_message),

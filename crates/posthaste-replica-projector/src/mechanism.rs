@@ -237,8 +237,8 @@ impl ReplicaMechanism {
 /// engine holds no base for the key or a pending destroy removed the entity.
 ///
 /// Both near nodes consume this one recipe: the client entity store's
-/// `message()` read / view placement, and the runtime's outbox overlay over
-/// served mail-list rows (`posthaste-runtime`'s `apply_outbox_overlay`).
+/// `message()` read / view placement, and the runtime's pending-set overlay over
+/// served mail-list rows (`posthaste-runtime`'s `apply_pending_set_overlay`).
 pub fn project_optimistic(engine: &MessageReplica, key: &str, base: &Value) -> Option<Value> {
     match engine.project(&key.to_string())? {
         Outcome::Present(state) => Some(apply_fold_to_projection(base.clone(), &state)),

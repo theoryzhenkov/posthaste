@@ -20,11 +20,6 @@ async fn full_scope_token_still_reads_conversation_lists() {
         status(&t, "GET", "/v1/smart-mailboxes/sm-1/conversations").await,
         StatusCode::OK
     );
-    assert_eq!(status(&t, "POST", "/v1/views").await, StatusCode::OK);
-    assert_eq!(
-        status(&t, "GET", "/v1/views/view-1/stream").await,
-        StatusCode::OK
-    );
 }
 
 #[tokio::test]
@@ -38,11 +33,6 @@ async fn read_only_token_reads_conversation_lists() {
     );
     assert_eq!(
         status(&t, "GET", "/v1/smart-mailboxes/sm-1/conversations").await,
-        StatusCode::OK
-    );
-    assert_eq!(status(&t, "POST", "/v1/views").await, StatusCode::OK);
-    assert_eq!(
-        status(&t, "GET", "/v1/views/view-1/stream").await,
         StatusCode::OK
     );
 }
@@ -236,32 +226,6 @@ async fn runtime_link_mutation_route_filters_on_source_id_and_tag_action() {
             "/v1/runtime/sessions/link-1/mutations?sourceId=acct-a",
         )
         .await,
-        StatusCode::FORBIDDEN
-    );
-}
-
-#[tokio::test]
-async fn runtime_view_routes_filter_on_source_id() {
-    let t = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
-    assert_eq!(
-        status(&t, "POST", "/v1/views?sourceId=acct-a").await,
-        StatusCode::OK
-    );
-    assert_eq!(
-        status(&t, "GET", "/v1/views/view-1/stream?sourceId=acct-a").await,
-        StatusCode::OK
-    );
-    assert_eq!(
-        status(&t, "POST", "/v1/views?sourceId=acct-b").await,
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        status(&t, "GET", "/v1/views/view-1/stream?sourceId=acct-b").await,
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(status(&t, "POST", "/v1/views").await, StatusCode::FORBIDDEN);
-    assert_eq!(
-        status(&t, "GET", "/v1/views/view-1/stream").await,
         StatusCode::FORBIDDEN
     );
 }

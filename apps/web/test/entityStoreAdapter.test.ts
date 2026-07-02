@@ -9,7 +9,7 @@ import type { Mailbox } from '../src/api/types'
 import { queryKeys } from '../src/queryKeys'
 import { createEntityStoreAdapter } from '../src/runtime/replica/entityStoreAdapter'
 import type { EntityStoreHandle } from '../src/runtime/replica/handle'
-import { MemoryOutboxStore } from '../src/runtime/replica/outboxStore'
+import { MemoryPendingSetStore } from '../src/runtime/replica/pendingSetStore'
 import {
   MemoryUndoHistoryStore,
   resetUndoHistoryStoreForTesting,
@@ -25,7 +25,7 @@ import type {
   RuntimeLinkViewRequest,
   RuntimeViewSnapshot,
 } from '../src/runtime/types'
-import type { NearEndOutboxHooks } from '../src/runtime/nearEnd'
+import type { NearEndPendingSetHooks } from '../src/runtime/nearEnd'
 
 // The adapter test drives the REAL wasm EntityStore handle (not a TS re-impl of
 // the engine), so the controller's orchestration is verified against the engine
@@ -227,7 +227,7 @@ function build() {
     row('m1', '2026-04-29T10:00:00Z'),
     row('m2', '2026-04-28T10:00:00Z'),
   ])
-  const outbox = new MemoryOutboxStore()
+  const pendingSet = new MemoryPendingSetStore()
   const queryClient = new QueryClient()
   // Seed the sidebar's mailbox cache so count writes have a row to update.
   queryClient.setQueryData<Mailbox[]>(queryKeys.mailboxes('s'), [
@@ -239,26 +239,27 @@ function build() {
       totalEmails: 2,
     },
   ])
-  // The adapter registers its durable-outbox hooks with the near-end engine at
+  // The adapter registers its durable-pending-set hooks with the near-end engine at
   // construction (D44); the stub captures them so tests can drive the
   // reconciler's calls directly (the engine's TIMING is pinned by the
   // `nearEndEngine` suite over fake IO).
-  const captured: { hooks: NearEndOutboxHooks | null } = { hooks: null }
+  const captured: { hooks: NearEndPendingSetHooks | null } = { hooks: null }
   const adapter = createEntityStoreAdapter({
     base: harness.base,
     makeHandle: () => makeRealHandle(),
-    outbox,
+    pendingSet,
     queryClient,
     now: () => 1,
     nearEnd: {
-      setOutboxHooks: (hooks) => {
+      setPendingSetHooks: (hooks) => {
         captured.hooks = hooks
       },
       linkId: () => 'sess-live',
     },
   })
   const hooks = () => {
-    if (!captured.hooks) throw new Error('outbox hooks were not registered')
+    if (!captured.hooks)
+      throw new Error('pending-set hooks were not registered')
     return captured.hooks
   }
   const frames: RuntimeFrame<RuntimeMailListViewState>[] = []
@@ -266,7 +267,7 @@ function build() {
     { linkId: 'sess' },
     { onFrame: (f) => frames.push(f) },
   )
-  return { adapter, outbox, frames, harness, queryClient, hooks }
+  return { adapter, pendingSet, frames, harness, queryClient, hooks }
 }
 
 /** Drain all pending microtasks (the serialized store queue) via a macrotask. */
@@ -281,23 +282,23 @@ describe('entityStoreAdapter', () => {
     ).toEqual(['m1', 'm2'])
   })
 
-  it('folds a message mutation optimistically + forwards the POST + outbox', async () => {
-    const { adapter, outbox, frames, harness } = build()
+  it('folds a message mutation optimistically + forwards the POST + pending set', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
     await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     const receipt = await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
 
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
     expect(harness.mutations.map((m) => m.clientMutationId)).toEqual(['c1'])
-    const records = await outbox.all()
+    const records = await pendingSet.all()
     expect(records).toHaveLength(1)
     expect(records[0]?.runtimeMutationId).toBe('r-1')
     expect(receipt.clientMutationId).toBe('c1')
   })
 
-  it('reverts optimism + clears the outbox on failure', async () => {
+  it('reverts optimism + clears the pending set on failure', async () => {
     const built = build()
-    const { adapter, outbox, frames } = built
+    const { adapter, pendingSet, frames } = built
     await adapter.openRuntimeLinkMessageListView(viewRequest)
     await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
@@ -317,19 +318,19 @@ describe('entityStoreAdapter', () => {
     })
     await tick()
 
-    expect(await outbox.all()).toHaveLength(0)
+    expect(await pendingSet.all()).toHaveLength(0)
     expect(keywordsOf(frames, 'm1')).not.toContain('$flagged')
   })
 
   it('confirmed before the base update does not revert (flicker fix)', async () => {
     const built = build()
-    const { adapter, outbox, frames } = built
+    const { adapter, pendingSet, frames } = built
     await adapter.openRuntimeLinkMessageListView(viewRequest)
     await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
 
     // The confirmation outruns the authoritative message.updated. It must NOT
-    // flip the row back to the un-flagged base; the durable outbox RETAINS the
+    // flip the row back to the un-flagged base; the durable pending set RETAINS the
     // op (outbox D: not retired yet — the base hasn't caught up to absorb it).
     built.harness.push({
       type: 'mutationNotification',
@@ -339,7 +340,7 @@ describe('entityStoreAdapter', () => {
     })
     await tick()
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
-    expect(await outbox.all()).toHaveLength(1)
+    expect(await pendingSet.all()).toHaveLength(1)
 
     // The base then catches up; still flagged, no revert anywhere.
     built.harness.push(
@@ -360,16 +361,16 @@ describe('entityStoreAdapter', () => {
     )
     await tick()
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
-    expect(await outbox.all()).toHaveLength(0)
+    expect(await pendingSet.all()).toHaveLength(0)
   })
 
   it('rehydration keeps reconcilable sent records and drops legacy ones', async () => {
-    const { adapter, outbox, hooks } = build()
+    const { adapter, pendingSet, hooks } = build()
     // A prior link left durable records: a sent one WITH its dispatch
     // link (the engine's reconciler can query its settlement — D44b, keep),
     // a legacy sent one WITHOUT (unqueryable → dropped, the old leak guard),
     // and a never-sent one (still-unconfirmed intent that must survive).
-    await outbox.put({
+    await pendingSet.put({
       clientMutationId: 'sent-reconcilable',
       messageId: 'm1',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
@@ -378,14 +379,14 @@ describe('entityStoreAdapter', () => {
       linkId: 'sess-old',
       request: setFlagged('m1', 'sent-reconcilable'),
     })
-    await outbox.put({
+    await pendingSet.put({
       clientMutationId: 'sent-legacy',
       messageId: 'm1',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
       runtimeMutationId: 'r-prev-2',
       acceptedAt: 1,
     })
-    await outbox.put({
+    await pendingSet.put({
       clientMutationId: 'never-sent-1',
       messageId: 'm2',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
@@ -395,7 +396,7 @@ describe('entityStoreAdapter', () => {
 
     await adapter.openRuntimeLinkMessageListView(viewRequest)
 
-    const remaining = await outbox.all()
+    const remaining = await pendingSet.all()
     expect(remaining.map((r) => r.clientMutationId).sort()).toEqual([
       'never-sent-1',
       'sent-reconcilable',
@@ -461,7 +462,7 @@ describe('entityStoreAdapter', () => {
     const adapter = createEntityStoreAdapter({
       base: harness.base,
       makeHandle: () => makeRealHandle(),
-      outbox: new MemoryOutboxStore(),
+      pendingSet: new MemoryPendingSetStore(),
       queryClient,
       now: () => 1,
       scheduleFlush: (cb) => {
@@ -540,7 +541,7 @@ describe('entityStoreAdapter', () => {
     const adapter = createEntityStoreAdapter({
       base: harness.base,
       makeHandle: () => countingHandle,
-      outbox: new MemoryOutboxStore(),
+      pendingSet: new MemoryPendingSetStore(),
       now: () => 1,
       scheduleFlush: (cb) => {
         scheduledFlush = cb
@@ -646,12 +647,12 @@ describe('entityStoreAdapter', () => {
   })
 
   it('exposes never-dispatched records to the engine reconciler + links receipts (D44a)', async () => {
-    const { adapter, outbox, hooks, harness } = build()
+    const { adapter, pendingSet, hooks, harness } = build()
     // A record optimistically accepted on a prior link but never dispatched
     // (runtimeMutationId === null), carrying its original send for replay —
     // plus a sent record and a request-less legacy record the replay hook
     // must NOT expose.
-    await outbox.put({
+    await pendingSet.put({
       clientMutationId: 'c-orphan',
       messageId: 'm1',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
@@ -659,7 +660,7 @@ describe('entityStoreAdapter', () => {
       acceptedAt: 1,
       request: setFlagged('m1', 'c-orphan'),
     })
-    await outbox.put({
+    await pendingSet.put({
       clientMutationId: 'c-sent',
       messageId: 'm1',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
@@ -668,7 +669,7 @@ describe('entityStoreAdapter', () => {
       linkId: 'sess-old',
       request: setFlagged('m1', 'c-sent'),
     })
-    await outbox.put({
+    await pendingSet.put({
       clientMutationId: 'c-legacy',
       messageId: 'm2',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
@@ -695,7 +696,7 @@ describe('entityStoreAdapter', () => {
       },
       'sess-new',
     )
-    const record = (await outbox.all()).find(
+    const record = (await pendingSet.all()).find(
       (r) => r.clientMutationId === 'c-orphan',
     )
     expect(record?.runtimeMutationId).toBe('r-1')
@@ -705,13 +706,13 @@ describe('entityStoreAdapter', () => {
 
   it('a terminal settlement from the reconciler settles optimism + clears the record (D44b)', async () => {
     const built = build()
-    const { adapter, outbox, frames, hooks } = built
+    const { adapter, pendingSet, frames, hooks } = built
     await adapter.openRuntimeLinkMessageListView(viewRequest)
 
     // A live mutation: optimism folded, receipt linked under the live link.
     await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
-    expect((await outbox.all())[0]?.linkId).toBe('sess-live')
+    expect((await pendingSet.all())[0]?.linkId).toBe('sess-live')
 
     // The engine's settlement query found a terminal FAILED verdict for it
     // (link-continuity loss): the optimism reverts and the record clears.
@@ -724,15 +725,15 @@ describe('entityStoreAdapter', () => {
     })
     await tick()
 
-    expect(await outbox.all()).toHaveLength(0)
+    expect(await pendingSet.all()).toHaveLength(0)
     expect(keywordsOf(frames, 'm1')).not.toContain('$flagged')
   })
 
   it('passes control operations (no local fold effect) straight through', async () => {
     // `revCursor` is the live control operation: a valid MailOperation variant
     // with no message target and no fold effect — the adapter forwards it
-    // without touching the outbox or the optimistic store.
-    const { adapter, outbox, harness } = build()
+    // without touching the pending set or the optimistic store.
+    const { adapter, pendingSet, harness } = build()
     await adapter.openRuntimeLinkMessageListView(viewRequest)
     await adapter.runRuntimeMutation({
       linkId: 'sess',
@@ -741,7 +742,7 @@ describe('entityStoreAdapter', () => {
       clientMutationId: 'c9',
     })
     expect(harness.mutations.map((m) => m.name)).toEqual(['revCursor'])
-    expect(await outbox.all()).toHaveLength(0)
+    expect(await pendingSet.all()).toHaveLength(0)
   })
 
   it('rejects operations outside the typed vocabulary at the wasm parse', async () => {

@@ -1,7 +1,7 @@
 //! The runtime's view **projection** parts (RFC D37): what a view *is*
 //! (family-specific [`ViewKind`] identity, descriptor parsing, scope
 //! validation), when a domain event affects it, and how its snapshot is
-//! recomputed — base rows + coverage + the pending-outbox overlay → windowed
+//! recomputed — base rows + coverage + the pending-set overlay → windowed
 //! view state. Wire-agnostic: no frames, links or pagination here — the
 //! serving half lives in the far-end grouping
 //! ([`crate::far_end::view_registry`], RFC D39).
@@ -91,11 +91,11 @@ struct RevLogDescriptor {
 
 /// Recompute one view's snapshot: read the base through the near node's read
 /// path, project it per family, and (for mail lists) fold the runtime→authority
-/// server outbox over the served rows so views are optimistic over
+/// server pending set over the served rows so views are optimistic over
 /// forwarded-but-unconfirmed mutations.
 pub(crate) async fn build_snapshot(
     reads: &crate::read::ReadCache,
-    outbox: &crate::near_node::RuntimeAuthorityServerOutbox,
+    pending_set: &crate::near_node::AuthorityServerPendingSet,
     view_id: ViewId,
     descriptor: ViewDescriptor,
     kind: &ViewKind,
@@ -105,11 +105,11 @@ pub(crate) async fn build_snapshot(
         ViewKind::MailList(request) => {
             let page = reads.query_mail_page(request.clone()).await?;
             let mut state = mail_list_state(request, page)?;
-            // Fold the runtime→authority server outbox: served rows are optimistic
+            // Fold the runtime→authority server pending set: served rows are optimistic
             // over forwarded-but-unconfirmed mutations. A no-op when the
-            // outbox is empty (the in-process default), so co-located
+            // pending set is empty (the in-process default), so co-located
             // behavior is unchanged (`colocated-unchanged`).
-            crate::near_node::apply_outbox_overlay(&mut state, &outbox.snapshot());
+            crate::near_node::apply_pending_set_overlay(&mut state, &pending_set.snapshot());
             let read_watermark = state.read_watermark.clone();
             let coverage = state.coverage.clone();
             let data = serde_json::to_value(state)

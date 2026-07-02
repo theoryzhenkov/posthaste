@@ -50,7 +50,7 @@ use tokio::sync::broadcast;
 ///   membership/order, so a list is always a fresh read-through that warms the
 ///   message cache.)
 ///
-/// The summary cache is keyed by message id alone (as the outbox is): a
+/// The summary cache is keyed by message id alone (as the pending set is): a
 /// down-channel assertion carries the message id, so eviction is by id and may
 /// over-evict across accounts — which is safe (a cache miss), only less
 /// efficient. Carrying the account id on the assertion is a later refinement.
@@ -302,7 +302,7 @@ impl ReadCache {
 }
 
 /// Consume the authority server's down-channel and drive the near node from it: evict the
-/// read cache (so the next read re-fetches), retire any outbox op the asserted
+/// read cache (so the next read re-fetches), retire any pending-set op the asserted
 /// base now absorbs (the absorption-gated retire — a confirmed op held since its
 /// receipt outran this assertion), AND republish each base assertion as a domain
 /// event on the runtime's event bus, so the existing view machinery
@@ -325,7 +325,7 @@ pub(crate) async fn run_authority_server_down_channel(
     >,
     reads: Arc<ReadCache>,
     events: broadcast::Sender<DomainEvent>,
-    outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
+    pending_set: Arc<crate::near_node::AuthorityServerPendingSet>,
 ) {
     // A monotonic local sequence for the synthesized events. These do NOT match
     // the authority server's authoritative seqs (those come via `replay_events` over the
@@ -343,10 +343,10 @@ pub(crate) async fn run_authority_server_down_channel(
         if let AuthorityServerFrame::Base { assertions } = frame {
             for assertion in assertions {
                 // The authoritative base now carries the asserted state, so a
-                // confirmed outbox op it absorbs is retired here — NOT on the
+                // confirmed pending-set op it absorbs is retired here — NOT on the
                 // mutation's receipt, which can outrun this assertion when the
                 // authority server is remote.
-                outbox.apply_base(&assertion.message_id, &assertion.update);
+                pending_set.apply_base(&assertion.message_id, &assertion.update);
                 seq += 1;
                 // A send error means there are no live subscribers yet; the next
                 // read still re-fetches (the cache was evicted above).
@@ -550,8 +550,8 @@ mod tests {
         // A confirmed flag op on m1, held pending because its receipt outran the
         // base assertion (the remote seam). The assertion fed below carries
         // the flag, so the absorption-gated retire drops it.
-        let outbox = Arc::new(crate::near_node::RuntimeAuthorityServerOutbox::new(true));
-        outbox.accept(posthaste_replica_core::PendingMessageMutation {
+        let pending_set = Arc::new(crate::near_node::AuthorityServerPendingSet::new(true));
+        pending_set.accept(posthaste_replica_core::PendingMessageMutation {
             id: posthaste_replica_core::MutationId("op1".into()),
             key: "m1".into(),
             effect: posthaste_replica_core::MessageAssertion::SetKeywords {
@@ -559,9 +559,9 @@ mod tests {
                 remove: vec![],
             },
         });
-        outbox.settle_receipt(&posthaste_replica_core::MutationId("op1".into()), true);
+        pending_set.settle_receipt(&posthaste_replica_core::MutationId("op1".into()), true);
         assert_eq!(
-            outbox.snapshot().len(),
+            pending_set.snapshot().len(),
             1,
             "op held until the base absorbs it"
         );
@@ -587,11 +587,11 @@ mod tests {
             ))
             .expect("frame enqueues");
         drop(frames_tx);
-        run_authority_server_down_channel(frames_rx, cache.clone(), events, outbox.clone()).await;
+        run_authority_server_down_channel(frames_rx, cache.clone(), events, pending_set.clone()).await;
 
         // The base now carries the flag: the held op is retired by absorption.
         assert!(
-            outbox.snapshot().is_empty(),
+            pending_set.snapshot().is_empty(),
             "absorbed op retired by the bridge"
         );
 

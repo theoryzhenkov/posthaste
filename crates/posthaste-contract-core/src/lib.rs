@@ -390,7 +390,7 @@ pub enum RuntimeFrame {
         view_id: ViewId,
     },
     /// A verdict about a named client mutation, keyed to its **client** mutation
-    /// id so the client correlates it to the optimistic op in its outbox. The
+    /// id so the client correlates it to the optimistic op in its pending set. The
     /// authoritative state change (if any) arrives *separately* as a
     /// `message.updated` domain fact via [`Self::Notification`] — this frame is
     /// the verdict, not the data, and the two are never merged (facts come from
@@ -754,7 +754,7 @@ pub struct RuntimeMutationSettlement {
 /// [`RuntimeFrame::MutationNotification`] and keyed to the client mutation id.
 /// The two outcomes are deliberately the only ones on the wire: `Confirmed` is
 /// otherwise implicit in the base update (it serves the no-op-confirmation and
-/// durable-outbox-clear cases), and `Rejected` is the *only* signal a failed
+/// durable-pending-set-clear cases), and `Rejected` is the *only* signal a failed
 /// mutation produces — a rejection changes no state, so no `message.updated`
 /// accompanies it. The non-terminal acks (Accepted/Queued) are not emitted: the
 /// client already tracks the op the moment it enqueues it.

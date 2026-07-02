@@ -1,4 +1,4 @@
-//! The reconciler's hooks into the host's durable outbox (D44).
+//! The reconciler's hooks into the host's durable pending set (D44).
 //!
 //! The engine owns *when* reconciliation runs (every connect, first included)
 //! and *how* it drives forward — but it does not know IndexedDB. The host
@@ -27,8 +27,8 @@ pub struct SentUnsettled {
 }
 
 /// Host callbacks for the level-triggered reconciler. Object-safe: held as
-/// `Rc<dyn OutboxHooks>`.
-pub trait OutboxHooks {
+/// `Rc<dyn PendingSetHooks>`.
+pub trait PendingSetHooks {
     /// The forward requests the host optimistically accepted but has **no**
     /// evidence reached the runtime (no linked runtime-mutation id). The
     /// reconciler replays each on connect — safe because never-dispatched means
@@ -49,6 +49,6 @@ pub trait OutboxHooks {
 
     /// The settlement query found a terminal verdict for a sent-but-unsettled
     /// record: the host settles it locally (retire/revert the optimism, clear
-    /// the durable record).
+    /// the durable pending-set record).
     fn on_settlement(&self, receipt: MutationReceipt) -> LocalBoxFuture<'static, ()>;
 }

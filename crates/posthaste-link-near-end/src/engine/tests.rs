@@ -20,7 +20,7 @@ use futures_util::{FutureExt, StreamExt};
 use posthaste_contract_core::{MutationReceipt, MutationRequest, RuntimeFrame};
 
 use crate::config::NearEndConfig;
-use crate::outbox::{OutboxHooks, SentUnsettled};
+use crate::pending_set::{PendingSetHooks, SentUnsettled};
 use crate::scheduler::Scheduler;
 use crate::sink::{ConnectionStatus, FrameSink};
 use crate::transport::{
@@ -214,14 +214,14 @@ impl FrameSink<RuntimeFrame> for RecordingSink {
 }
 
 #[derive(Default)]
-struct FakeOutbox {
+struct FakePendingSet {
     never: RefCell<Vec<MutationRequest>>,
     unsettled: RefCell<Vec<SentUnsettled>>,
     reconciled: RefCell<Vec<MutationReceipt>>,
     settled: RefCell<Vec<MutationReceipt>>,
 }
 
-impl OutboxHooks for FakeOutbox {
+impl PendingSetHooks for FakePendingSet {
     fn never_dispatched(&self) -> LocalBoxFuture<'static, Vec<MutationRequest>> {
         // Drain: a replayed record is no longer never-dispatched.
         let taken = std::mem::take(&mut *self.never.borrow_mut());
@@ -259,14 +259,14 @@ struct Harness {
     transport: Rc<FakeTransport>,
     scheduler: Rc<FakeScheduler>,
     sink: Rc<RecordingSink>,
-    outbox: Rc<FakeOutbox>,
+    pending_set: Rc<FakePendingSet>,
 }
 
-fn harness(transport: FakeTransport, outbox: FakeOutbox, config: NearEndConfig) -> Harness {
+fn harness(transport: FakeTransport, pending_set: FakePendingSet, config: NearEndConfig) -> Harness {
     let transport = Rc::new(transport);
     let scheduler = Rc::new(FakeScheduler::new());
     let sink = Rc::new(RecordingSink::default());
-    let outbox = Rc::new(outbox);
+    let pending_set = Rc::new(pending_set);
     let engine = NearEnd::new(
         RuntimeLinkWire {
             view_delta: true,
@@ -275,7 +275,7 @@ fn harness(transport: FakeTransport, outbox: FakeOutbox, config: NearEndConfig) 
         transport.clone(),
         scheduler.clone(),
         sink.clone(),
-        outbox.clone(),
+        pending_set.clone(),
         config,
     );
     Harness {
@@ -283,7 +283,7 @@ fn harness(transport: FakeTransport, outbox: FakeOutbox, config: NearEndConfig) 
         transport,
         scheduler,
         sink,
-        outbox,
+        pending_set,
     }
 }
 
@@ -293,7 +293,7 @@ fn harness(transport: FakeTransport, outbox: FakeOutbox, config: NearEndConfig) 
 fn forward_returns_receipt_and_stamps_session() {
     let transport =
         FakeTransport::new().with_mutation(ok_response(200, &confirmed_receipt("op-1")));
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     let receipt = block_on(async {
         h.engine.open().await.unwrap();
@@ -316,7 +316,7 @@ fn forward_retries_transient_then_succeeds() {
     let transport = FakeTransport::new()
         .with_mutation(ok_response(503, "unavailable"))
         .with_mutation(ok_response(200, &confirmed_receipt("op-2")));
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     let receipt = block_on(async {
         h.engine.open().await.unwrap();
@@ -341,7 +341,7 @@ fn forward_retries_transient_then_succeeds() {
 fn forward_4xx_is_permanent_with_envelope() {
     let body = r#"{"code":"invalid_mutation","message":"nope","retryable":false,"correlationId":null,"details":null}"#;
     let transport = FakeTransport::new().with_mutation(ok_response(422, body));
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     let err = block_on(async {
         h.engine.open().await.unwrap();
@@ -372,7 +372,7 @@ fn forward_honors_request_deadline() {
         forward_max_attempts: 1,
         ..NearEndConfig::default()
     };
-    let h = harness(transport, FakeOutbox::default(), config);
+    let h = harness(transport, FakePendingSet::default(), config);
 
     let err = block_on(async {
         h.engine.open().await.unwrap();
@@ -402,7 +402,7 @@ fn stream_reconnects_and_carries_the_resume_cursor() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -426,7 +426,7 @@ fn permanent_stream_error_stops_the_loop() {
             message: "forbidden".to_string(),
         },
     ]);
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -446,7 +446,7 @@ fn malformed_frame_is_reported_not_cast() {
             message: "stop".to_string(),
         },
     ]);
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -474,7 +474,7 @@ fn a_seq_gap_reseeds_and_resubscribes_from_the_cursor() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -504,7 +504,7 @@ fn consecutive_malformed_frames_degrade_and_stop() {
         StreamEvent::Message("garbage-2".to_string()),
         StreamEvent::Message("garbage-3".to_string()),
     ]);
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -535,7 +535,7 @@ fn a_good_frame_resets_the_malformed_streak() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -547,8 +547,8 @@ fn a_good_frame_resets_the_malformed_streak() {
 
 #[test]
 fn reconciler_replays_never_dispatched_on_connect() {
-    let mut outbox = FakeOutbox::default();
-    outbox.never.get_mut().push(sample_request("replay-1"));
+    let mut pending_set = FakePendingSet::default();
+    pending_set.never.get_mut().push(sample_request("replay-1"));
     let transport = FakeTransport::new()
         .with_mutation(ok_response(200, &confirmed_receipt("replay-1")))
         .with_stream(vec![
@@ -558,7 +558,7 @@ fn reconciler_replays_never_dispatched_on_connect() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, outbox, NearEndConfig::default());
+    let h = harness(transport, pending_set, NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -572,7 +572,7 @@ fn reconciler_replays_never_dispatched_on_connect() {
         .filter(|(u, _)| u.contains("/mutations"))
         .count();
     assert_eq!(mutation_posts, 1);
-    let reconciled = h.outbox.reconciled.borrow();
+    let reconciled = h.pending_set.reconciled.borrow();
     assert_eq!(reconciled.len(), 1);
     assert_eq!(reconciled[0].client_mutation_id.as_str(), "replay-1");
 }
@@ -581,8 +581,8 @@ fn reconciler_replays_never_dispatched_on_connect() {
 // receipt is settled locally — no re-forward.
 #[test]
 fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
-    let mut outbox = FakeOutbox::default();
-    outbox.unsettled.get_mut().push(SentUnsettled {
+    let mut pending_set = FakePendingSet::default();
+    pending_set.unsettled.get_mut().push(SentUnsettled {
         link_id: "link-old".to_string(),
         client_mutation_id: "sent-1".to_string(),
         request: Some(sample_request("sent-1")),
@@ -599,7 +599,7 @@ fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, outbox, NearEndConfig::default());
+    let h = harness(transport, pending_set, NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
@@ -612,8 +612,8 @@ fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
         gets[0]
     );
     // Settled locally; never re-forwarded.
-    assert_eq!(h.outbox.settled.borrow().len(), 1);
-    assert_eq!(h.outbox.settled.borrow()[0].client_mutation_id.as_str(), "sent-1");
+    assert_eq!(h.pending_set.settled.borrow().len(), 1);
+    assert_eq!(h.pending_set.settled.borrow()[0].client_mutation_id.as_str(), "sent-1");
     let mutation_posts = h
         .transport
         .posts
@@ -628,8 +628,8 @@ fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
 // reconciler re-forwards the stored request and links the fresh receipt.
 #[test]
 fn reconciler_reforwards_when_the_runtime_has_no_record() {
-    let mut outbox = FakeOutbox::default();
-    outbox.unsettled.get_mut().push(SentUnsettled {
+    let mut pending_set = FakePendingSet::default();
+    pending_set.unsettled.get_mut().push(SentUnsettled {
         link_id: "link-old".to_string(),
         client_mutation_id: "sent-2".to_string(),
         request: Some(sample_request("sent-2")),
@@ -644,12 +644,12 @@ fn reconciler_reforwards_when_the_runtime_has_no_record() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, outbox, NearEndConfig::default());
+    let h = harness(transport, pending_set, NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
-    assert_eq!(h.outbox.settled.borrow().len(), 0);
-    let reconciled = h.outbox.reconciled.borrow();
+    assert_eq!(h.pending_set.settled.borrow().len(), 0);
+    let reconciled = h.pending_set.reconciled.borrow();
     assert_eq!(reconciled.len(), 1, "no-record must re-forward and link");
     assert_eq!(reconciled[0].client_mutation_id.as_str(), "sent-2");
 }
@@ -658,8 +658,8 @@ fn reconciler_reforwards_when_the_runtime_has_no_record() {
 // (link collapse re-delivers terminal notifications) settles it.
 #[test]
 fn reconciler_leaves_a_still_pending_record_alone() {
-    let mut outbox = FakeOutbox::default();
-    outbox.unsettled.get_mut().push(SentUnsettled {
+    let mut pending_set = FakePendingSet::default();
+    pending_set.unsettled.get_mut().push(SentUnsettled {
         link_id: "link-old".to_string(),
         client_mutation_id: "sent-3".to_string(),
         request: Some(sample_request("sent-3")),
@@ -677,18 +677,18 @@ fn reconciler_leaves_a_still_pending_record_alone() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, outbox, NearEndConfig::default());
+    let h = harness(transport, pending_set, NearEndConfig::default());
 
     block_on(h.engine.clone().run());
 
-    assert_eq!(h.outbox.settled.borrow().len(), 0);
-    assert_eq!(h.outbox.reconciled.borrow().len(), 0);
+    assert_eq!(h.pending_set.settled.borrow().len(), 0);
+    assert_eq!(h.pending_set.reconciled.borrow().len(), 0);
 }
 
 #[test]
 fn shutdown_prevents_reconnect() {
     let transport = FakeTransport::new().with_stream(vec![StreamEvent::Open, StreamEvent::Closed]);
-    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
     // Request shutdown before running; the loop opens once then exits at the
     // clean close without a reconnect.
     block_on(async {

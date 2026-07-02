@@ -24,7 +24,7 @@ use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,
     MutationSettlementState, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle, RuntimeLinkSeq,
-    SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame, ViewRevision,
+    SecretWriteMode, SecretWriteMutation, ViewDescriptor,
 };
 use tokio::sync::Notify;
 
@@ -550,10 +550,16 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
     let snapshot = build
         .handle
-        .open_view(
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             mail_list_descriptor("in:view-account/inbox"),
         )
         .await
@@ -564,14 +570,25 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
 
     let mut subscription = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(1)),
         )
         .await
-        .expect("view should subscribe");
-    assert!(subscription.catch_up.is_none());
+        .expect("runtime stream should subscribe");
+    // The link's collapse-on-first-subscribe (D50) always re-serves the open
+    // view's current state as catch-up (there is no cheaper "already caught up"
+    // signal at the link level the way the retired per-view protocol had it).
+    let RuntimeFrame::ViewSnapshot { snapshot, .. } = subscription
+        .catch_up
+        .into_iter()
+        .next()
+        .expect("first subscribe should catch up with the open view's snapshot")
+    else {
+        panic!("catch-up should be a view snapshot");
+    };
+    assert_eq!(snapshot.revision.get(), 1);
 
     let result = build
         .api_bridge
@@ -594,11 +611,21 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
             .expect("event should broadcast");
     }
 
-    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
-        .await
-        .expect("view frame should arrive")
-        .expect("view stream should remain open");
-    let ViewFrame::Replace { snapshot } = frame else {
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("view frame should arrive");
+    let RuntimeFrame::ViewReplace { snapshot, .. } = frame else {
         panic!("expected replace frame");
     };
     assert_eq!(snapshot.revision.get(), 2);
@@ -616,16 +643,15 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
 
     let catch_up = build
         .handle
-        .subscribe_view(
-            RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(ViewRevision::new(1)),
-        )
+        .subscribe_runtime_frames(RuntimeCaller::test(), link.link_id.clone(), Some(RuntimeLinkSeq::new(0)))
         .await
         .expect("behind subscriber should get collapsed catch-up")
-        .catch_up
-        .expect("behind subscriber should get snapshot");
-    let ViewFrame::Snapshot { snapshot } = catch_up else {
+        .catch_up;
+    let RuntimeFrame::ViewSnapshot { snapshot, .. } = catch_up
+        .into_iter()
+        .next()
+        .expect("behind subscriber should get a snapshot frame")
+    else {
         panic!("catch-up should be a fresh snapshot");
     };
     assert_eq!(snapshot.revision.get(), 2);
@@ -988,10 +1014,16 @@ async fn message_detail_view_replaces_snapshot_after_keyword_event() {
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
     let snapshot = build
         .handle
-        .open_view(
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             message_detail_descriptor(account.id.as_str(), "message-1"),
         )
         .await
@@ -1002,14 +1034,24 @@ async fn message_detail_view_replaces_snapshot_after_keyword_event() {
 
     let mut subscription = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(1)),
         )
         .await
-        .expect("view should subscribe");
-    assert!(subscription.catch_up.is_none());
+        .expect("runtime stream should subscribe");
+    // The link's collapse-on-first-subscribe (D50) always re-serves the open
+    // view's current state as catch-up.
+    let RuntimeFrame::ViewSnapshot { snapshot, .. } = subscription
+        .catch_up
+        .into_iter()
+        .next()
+        .expect("first subscribe should catch up with the open view's snapshot")
+    else {
+        panic!("catch-up should be a view snapshot");
+    };
+    assert_eq!(snapshot.revision.get(), 1);
 
     let result = build
         .api_bridge
@@ -1032,11 +1074,21 @@ async fn message_detail_view_replaces_snapshot_after_keyword_event() {
             .expect("event should broadcast");
     }
 
-    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
-        .await
-        .expect("view frame should arrive")
-        .expect("view stream should remain open");
-    let ViewFrame::Replace { snapshot } = frame else {
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("view frame should arrive");
+    let RuntimeFrame::ViewReplace { snapshot, .. } = frame else {
         panic!("expected replace frame");
     };
     assert_eq!(snapshot.revision.get(), 2);
@@ -1063,11 +1115,18 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
+
     // Resolve message-1's conversation id from a list snapshot.
     let list = build
         .handle
-        .open_view(
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             mail_list_descriptor("in:conv-account/inbox"),
         )
         .await
@@ -1085,8 +1144,9 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
 
     let snapshot = build
         .handle
-        .open_view(
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             ViewDescriptor {
                 family: "conversation".to_string(),
                 payload: serde_json::json!({ "conversationId": conversation_id }),
@@ -1106,14 +1166,17 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
 
     let mut subscription = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(2)),
         )
         .await
-        .expect("view should subscribe");
-    assert!(subscription.catch_up.is_none());
+        .expect("runtime stream should subscribe");
+    // The link's collapse-on-first-subscribe (D50) always re-serves every open
+    // view's current state as catch-up — both the mail-list and conversation
+    // views opened above.
+    assert_eq!(subscription.catch_up.len(), 2);
 
     let result = build
         .api_bridge
@@ -1136,11 +1199,22 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
             .expect("event should broadcast");
     }
 
-    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
-        .await
-        .expect("view frame should arrive")
-        .expect("view stream should remain open");
-    let ViewFrame::Replace { snapshot } = frame else {
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(&frame, RuntimeFrame::ViewReplace { view_id, .. } if view_id == &snapshot.view_id)
+            {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("view frame should arrive");
+    let RuntimeFrame::ViewReplace { snapshot, .. } = frame else {
         panic!("expected replace frame");
     };
     let message = snapshot.data["messages"]
@@ -1461,36 +1535,48 @@ async fn mail_list_view_enforces_caller_account_scope() {
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
+    // Link-scoped views bind the caller's account scope to the link at
+    // `open_link` time (`link_scope`); a mismatched caller on a later
+    // `open_link_view`/`subscribe_runtime_frames` call is rejected as
+    // `Unauthorized` (`ensure_caller_matches_link`), not `InvalidDescriptor`.
+    let link = build
+        .handle
+        .open_link(scoped_test_caller("view-account-scope"))
+        .await
+        .expect("link should open");
+
     let denied = build
         .handle
-        .open_view(
+        .open_link_view(
             scoped_test_caller("other-account"),
+            link.link_id.clone(),
             mail_list_descriptor("in:view-account-scope/inbox"),
         )
         .await
         .expect_err("out-of-scope view should be rejected");
-    assert_eq!(denied.envelope().code, RuntimeErrorCode::InvalidDescriptor);
+    assert_eq!(denied.envelope().code, RuntimeErrorCode::Unauthorized);
 
-    let snapshot = build
+    build
         .handle
-        .open_view(
+        .open_link_view(
             scoped_test_caller("view-account-scope"),
+            link.link_id.clone(),
             mail_list_descriptor("in:view-account-scope/inbox"),
         )
         .await
         .expect("matching account scope should open");
     let subscription = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             scoped_test_caller("other-account"),
-            snapshot.view_id,
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
         )
         .await;
     let Err(error) = subscription else {
         panic!("out-of-scope subscription should be rejected");
     };
-    assert_eq!(error.envelope().code, RuntimeErrorCode::InvalidDescriptor);
+    assert_eq!(error.envelope().code, RuntimeErrorCode::Unauthorized);
 }
 
 #[tokio::test]
@@ -1512,29 +1598,38 @@ async fn mail_list_view_fans_out_keyword_replaces_to_all_subscribers() {
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
-    let snapshot = build
+    let link = build
         .handle
-        .open_view(
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
+    build
+        .handle
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             mail_list_descriptor("in:view-account-fanout/inbox"),
         )
         .await
         .expect("mail list view should open");
+    // Two independent frame-stream subscribers on the SAME link (fan-out is
+    // per-subscriber, not per-link): the runtime stream is multiplexed over
+    // the link, not the view, so both attach to the link's frame stream.
     let mut first = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(1)),
         )
         .await
         .expect("first subscriber should open");
     let mut second = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(1)),
         )
         .await
         .expect("second subscriber should open");
@@ -1561,12 +1656,21 @@ async fn mail_list_view_fans_out_keyword_replaces_to_all_subscribers() {
     }
 
     for subscription in [&mut first, &mut second] {
-        let frame =
-            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
-                .await
-                .expect("view frame should arrive")
-                .expect("view stream should remain open");
-        let ViewFrame::Replace { snapshot } = frame else {
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let frame = subscription
+                    .live
+                    .next()
+                    .await
+                    .expect("runtime stream should remain open");
+                if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("view frame should arrive");
+        let RuntimeFrame::ViewReplace { snapshot, .. } = frame else {
             panic!("expected replace frame");
         };
         assert_eq!(snapshot.revision.get(), 2);
@@ -1592,10 +1696,16 @@ async fn mail_list_view_keeps_open_view_fresh_without_active_subscribers() {
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
-    let snapshot = build
+    let link = build
         .handle
-        .open_view(
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
+    build
+        .handle
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             mail_list_descriptor("in:view-account-reconnect/inbox"),
         )
         .await
@@ -1626,14 +1736,16 @@ async fn mail_list_view_keeps_open_view_fresh_without_active_subscribers() {
         loop {
             let subscription = build
                 .handle
-                .subscribe_view(
+                .subscribe_runtime_frames(
                     RuntimeCaller::test(),
-                    snapshot.view_id.clone(),
-                    Some(ViewRevision::new(1)),
+                    link.link_id.clone(),
+                    Some(RuntimeLinkSeq::new(0)),
                 )
                 .await
                 .expect("subscription should open");
-            if let Some(ViewFrame::Snapshot { snapshot }) = subscription.catch_up {
+            if let Some(RuntimeFrame::ViewSnapshot { snapshot, .. }) =
+                subscription.catch_up.into_iter().next()
+            {
                 if snapshot.revision.get() == 2 {
                     break snapshot;
                 }
@@ -1671,10 +1783,16 @@ async fn mail_list_view_replaces_snapshot_when_keyword_event_changes_membership(
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
     let snapshot = build
         .handle
-        .open_view(
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             mail_list_descriptor("in:view-account-flagged/inbox is:flagged"),
         )
         .await
@@ -1682,13 +1800,13 @@ async fn mail_list_view_replaces_snapshot_when_keyword_event_changes_membership(
     assert!(mail_list_state(&snapshot).rows.is_empty());
     let mut subscription = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(1)),
         )
         .await
-        .expect("view should subscribe");
+        .expect("runtime stream should subscribe");
 
     let result = build
         .api_bridge
@@ -1711,11 +1829,21 @@ async fn mail_list_view_replaces_snapshot_when_keyword_event_changes_membership(
             .expect("event should broadcast");
     }
 
-    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
-        .await
-        .expect("view frame should arrive")
-        .expect("view stream should remain open");
-    let ViewFrame::Replace { snapshot } = frame else {
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("view frame should arrive");
+    let RuntimeFrame::ViewReplace { snapshot, .. } = frame else {
         panic!("expected replace frame");
     };
     let state = mail_list_state(&snapshot);
@@ -1742,10 +1870,16 @@ async fn mail_list_view_ignores_keyword_events_for_messages_outside_window() {
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
     let snapshot = build
         .handle
-        .open_view(
+        .open_link_view(
             RuntimeCaller::test(),
+            link.link_id.clone(),
             mail_list_descriptor("in:view-account-2/archive"),
         )
         .await
@@ -1753,13 +1887,13 @@ async fn mail_list_view_ignores_keyword_events_for_messages_outside_window() {
     assert!(mail_list_state(&snapshot).rows.is_empty());
     let mut subscription = build
         .handle
-        .subscribe_view(
+        .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            snapshot.view_id.clone(),
-            Some(snapshot.revision),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(1)),
         )
         .await
-        .expect("view should subscribe");
+        .expect("runtime stream should subscribe");
 
     let result = build
         .api_bridge
@@ -1782,14 +1916,25 @@ async fn mail_list_view_ignores_keyword_events_for_messages_outside_window() {
             .expect("event should broadcast");
     }
 
-    let no_frame = tokio::time::timeout(
-        std::time::Duration::from_millis(50),
-        subscription.live.next(),
-    )
+    // The link's stream also carries the flat `Notification` firehose frame for
+    // every domain event on the account, unrelated to view membership — only a
+    // `ViewReplace`/`ViewDelta` on the unaffected view itself would indicate a
+    // (wrong) recompute, so filter those out rather than asserting silence.
+    let no_view_frame = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+        loop {
+            let frame = subscription.live.next().await?;
+            if matches!(
+                frame,
+                RuntimeFrame::ViewReplace { .. } | RuntimeFrame::ViewDelta { .. }
+            ) {
+                return Some(frame);
+            }
+        }
+    })
     .await;
     assert!(
-        no_frame.is_err(),
-        "unaffected view should not receive a frame"
+        no_view_frame.is_err(),
+        "unaffected view should not receive a replace/delta frame"
     );
 }
 
@@ -2213,7 +2358,7 @@ async fn zero_event_channel_capacity_returns_typed_build_error() {
 }
 
 /// An authority server link transport whose up-channel blocks until released — a test seam
-/// for observing the runtime's outbox overlay while a mutation is in flight.
+/// for observing the runtime's pending-set overlay while a mutation is in flight.
 /// Wraps the real transport pair (`AuthorityServerLinkHandle`, D33) and
 /// implements both trait halves, intercepting only the Link half's up-channel.
 struct DeferredTransport {
@@ -2229,7 +2374,7 @@ impl posthaste_authority_server_link::AuthorityServerLink for DeferredTransport 
         mutation: MutationRequest,
     ) -> Result<posthaste_contract_core::MutationReceipt, posthaste_contract_core::RuntimeError>
     {
-        // Signal that the forward has begun (so the outbox already holds the
+        // Signal that the forward has begun (so the pending set already holds the
         // mutation), then wait for the test to release it.
         self.entered.notify_one();
         self.release.notified().await;
@@ -2279,9 +2424,9 @@ fn flagged(state: &MailListViewState, message_id: &str) -> bool {
         .expect("isFlagged should be a bool")
 }
 
-// spec: docs/replication/authority-server-link/L2#5-the-runtime-near-node-read-replica-outbox
+// spec: docs/replication/authority-server-link/L2#5-the-runtime-near-node-read-replica-pending-set
 #[tokio::test]
-async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_flight() {
+async fn runtime_serves_optimistic_rows_from_its_pending_set_while_a_forward_is_in_flight() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let entered_for_transport = entered.clone();
@@ -2325,12 +2470,12 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
     // Baseline: message-1 is not flagged.
     let baseline = build
         .handle
-        .open_view(RuntimeCaller::test(), descriptor.clone())
+        .open_link_view(RuntimeCaller::test(), link.link_id.clone(), descriptor.clone())
         .await
         .expect("baseline view should open");
     assert!(!flagged(&mail_list_state(&baseline), "message-1"));
 
-    // Forward a flag mutation whose up-channel blocks, leaving it in the outbox.
+    // Forward a flag mutation whose up-channel blocks, leaving it in the pending set.
     let handle = build.handle.clone();
     let link_id = link.link_id.clone();
     let account_id = account.id.as_str().to_string();
@@ -2357,14 +2502,14 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
             .expect("mutation should run")
     });
 
-    // Wait for the forward to begin (the outbox now holds the flag).
+    // Wait for the forward to begin (the pending set now holds the flag).
     entered.notified().await;
 
     // While the forward is in flight, the runtime serves the row optimistically
-    // flagged — folded from its outbox via the shared MailListReplica.
+    // flagged — folded from its pending set via the shared MailListReplica.
     let optimistic = build
         .handle
-        .open_view(RuntimeCaller::test(), descriptor.clone())
+        .open_link_view(RuntimeCaller::test(), link.link_id.clone(), descriptor.clone())
         .await
         .expect("optimistic view should open");
     assert!(
@@ -2372,15 +2517,15 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
         "the in-flight mutation should show optimistically"
     );
 
-    // Release the forward; the mutation completes and the outbox retires.
+    // Release the forward; the mutation completes and the pending set retires.
     release.notify_one();
     task.await.expect("mutation task should join");
 
-    // The deferred authority server never applied the change, so once the outbox retires
+    // The deferred authority server never applied the change, so once the pending set retires
     // the served row reflects the (unchanged) authoritative store again.
     let settled = build
         .handle
-        .open_view(RuntimeCaller::test(), descriptor)
+        .open_link_view(RuntimeCaller::test(), link.link_id.clone(), descriptor)
         .await
         .expect("settled view should open");
     assert!(
