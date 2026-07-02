@@ -135,17 +135,18 @@ Runtime-owned view snapshots and streams
 
 ## runtime
 
-Session-scoped runtime frame stream
+Link-scoped runtime frame stream
 
 | Method | Path | Summary | Operation |
 | --- | --- | --- | --- |
-| `POST` | `/v1/runtime/sessions` | Open a runtime session | `open_runtime_session` |
-| `DELETE` | `/v1/runtime/sessions/{session_id}` | Close a runtime session | `close_runtime_session` |
-| `POST` | `/v1/runtime/sessions/{session_id}/mutations` | Run a runtime mutation | `run_runtime_session_mutation` |
-| `GET` | `/v1/runtime/sessions/{session_id}/stream` | Subscribe to runtime frames | `stream_runtime_session` |
-| `POST` | `/v1/runtime/sessions/{session_id}/views` | Open a runtime session view | `open_runtime_session_view` |
-| `DELETE` | `/v1/runtime/sessions/{session_id}/views/{view_id}` | Close a runtime session view | `close_runtime_session_view` |
-| `POST` | `/v1/runtime/sessions/{session_id}/views/{view_id}/extend` | Extend a runtime session view window | `extend_runtime_session_view` |
+| `POST` | `/v1/runtime/sessions` | Open a runtime link | `open_runtime_link` |
+| `DELETE` | `/v1/runtime/sessions/{session_id}` | Close a runtime link | `close_runtime_link` |
+| `POST` | `/v1/runtime/sessions/{session_id}/mutations` | Run a runtime mutation | `run_runtime_link_mutation` |
+| `GET` | `/v1/runtime/sessions/{session_id}/mutations/{client_mutation_id}` | Read a runtime mutation's settlement | `runtime_link_mutation_settlement` |
+| `GET` | `/v1/runtime/sessions/{session_id}/stream` | Subscribe to runtime frames | `stream_runtime_link` |
+| `POST` | `/v1/runtime/sessions/{session_id}/views` | Open a runtime link view | `open_runtime_link_view` |
+| `DELETE` | `/v1/runtime/sessions/{session_id}/views/{view_id}` | Close a runtime link view | `close_runtime_link_view` |
+| `POST` | `/v1/runtime/sessions/{session_id}/views/{view_id}/extend` | Extend a runtime link view window | `extend_runtime_link_view` |
 
 ## auth
 

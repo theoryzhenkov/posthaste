@@ -2,8 +2,8 @@
  * The client's link near-end, behind the wasm boundary (D41/M9b2).
  *
  * The shared `LinkNearEnd` engine (`posthaste-link-near-end`, compiled into
- * `posthaste-link-wasm`'s `NearEndHandle`) owns EVERY scrap of transport
- * policy the old TS fork held: session open, the reconnect loop, the
+ * `posthaste-client-node-wasm`'s `NearEndHandle`) owns EVERY scrap of transport
+ * policy the old TS fork held: link open, the reconnect loop, the
  * `afterSeq` resume cursor, request deadlines, jittered capped backoff,
  * typed frame parsing, permanent-vs-transient classification, and the
  * level-triggered reconciler (never-dispatched replay + the sent-but-unsettled
@@ -145,8 +145,8 @@ let transportIo: NearEndTransportIo = browserTransportIo
 
 /** A sent-but-unsettled record for the engine's settlement query (D44b). */
 export interface NearEndSentUnsettled {
-  /** The session the record was dispatched under. */
-  sessionId: string
+  /** The link the record was dispatched under. */
+  linkId: string
   clientMutationId: string
   request?: RuntimeRunMutationRequest
 }
@@ -158,12 +158,12 @@ export interface NearEndOutboxHooks {
    * runtime — replayed on every connect. */
   neverDispatched(): Promise<RuntimeRunMutationRequest[]>
   /** A replayed forward succeeded: link the receipt so the record is no longer
-   * never-dispatched. `sessionId` is the session it was re-sent under. */
+   * never-dispatched. `linkId` is the link it was re-sent under. */
   onReconciled(
     receipt: RuntimeMutationReceipt,
-    sessionId: string | null,
+    linkId: string | null,
   ): Promise<void>
-  /** Records with a receipt but no terminal settlement (session-continuity
+  /** Records with a receipt but no terminal settlement (link-continuity
    * loss) — queried against the runtime on every connect. */
   sentUnsettled(): Promise<NearEndSentUnsettled[]>
   /** The settlement query found a terminal verdict: settle locally. */
@@ -191,12 +191,12 @@ const frameHandlers = new Set<RuntimeFrameHandlers>()
 
 let engine: NearEndWasmHandle | null = null
 let engineSourceId: string | null | undefined
-let connectPromise: Promise<{ sessionId: string }> | undefined
+let connectPromise: Promise<{ linkId: string }> | undefined
 
 /** The wire shape the engine's `MutationRequest` parse accepts — strip the
  * TS-side extras (`sourceId` travels as engine config, never in the body). */
 function wireMutationRequest(request: RuntimeRunMutationRequest): {
-  sessionId?: string | null
+  linkId?: string | null
   name: string
   args?: unknown
   clientMutationId: string
@@ -220,9 +220,9 @@ function storedCursor(): number | undefined {
   }
 }
 
-function persistCursor(sessionSeq: number): void {
+function persistCursor(linkSeq: number): void {
   try {
-    window.sessionStorage.setItem(CURSOR_STORAGE_KEY, String(sessionSeq))
+    window.sessionStorage.setItem(CURSOR_STORAGE_KEY, String(linkSeq))
   } catch {
     // Storage unavailable: resume starts fresh next load.
   }
@@ -242,7 +242,7 @@ function buildIo() {
       // The engine already parsed + validated the frame; this parse only
       // rehydrates it across the JSON-string boundary.
       const frame = JSON.parse(json) as RuntimeFrame<RuntimeMailListViewState>
-      persistCursor(frame.sessionSeq)
+      persistCursor(frame.linkSeq)
       for (const handlers of frameHandlers) {
         handlers.onFrame(frame)
       }
@@ -287,13 +287,13 @@ function buildIo() {
     },
     onReconciled(receiptJson: string) {
       const receipt = JSON.parse(receiptJson) as RuntimeMutationReceipt
-      void outboxHooks.onReconciled(receipt, engine?.sessionId() ?? null)
+      void outboxHooks.onReconciled(receipt, engine?.linkId() ?? null)
     },
     sentUnsettled: async () => {
       const records = await outboxHooks.sentUnsettled()
       return JSON.stringify(
         records.map((record) => ({
-          sessionId: record.sessionId,
+          linkId: record.linkId,
           clientMutationId: record.clientMutationId,
           ...(record.request
             ? { request: wireMutationRequest(record.request) }
@@ -321,13 +321,13 @@ async function createEngine(
 }
 
 /**
- * Ensure the engine exists for `sourceId` and its session is open; resolves
- * with the session id. Reuses the live engine while the source scope matches;
+ * Ensure the engine exists for `sourceId` and its link is open; resolves
+ * with the link id. Reuses the live engine while the source scope matches;
  * a scope change tears the old engine down first.
  */
 export function connectNearEnd(options?: {
   sourceId?: string | null
-}): Promise<{ sessionId: string }> {
+}): Promise<{ linkId: string }> {
   const sourceId = options?.sourceId
   if (connectPromise && engineSourceId === sourceId) {
     return connectPromise
@@ -340,15 +340,15 @@ export function connectNearEnd(options?: {
     const handle = await createEngine(sourceId)
     engine = handle
     await handle.connect()
-    const sessionId = handle.sessionId()
-    if (!sessionId) {
-      throw new Error('near-end engine connected without a session id')
+    const linkId = handle.linkId()
+    if (!linkId) {
+      throw new Error('near-end engine connected without a link id')
     }
     syncLogger.debug(
-      { event: LOG_EVENTS.runtimeAdapterInitialized, sessionId },
+      { event: LOG_EVENTS.runtimeAdapterInitialized, linkId },
       'near-end engine connected',
     )
-    return { sessionId }
+    return { linkId }
   })()
   connectPromise.catch(() => {
     // A failed connect is not sticky: the next call retries from scratch.
@@ -358,7 +358,7 @@ export function connectNearEnd(options?: {
   return connectPromise
 }
 
-/** Stop the frame loop (no further reconnects) and drop the engine. Session
+/** Stop the frame loop (no further reconnects) and drop the engine. Link
  * close on the server is the caller's concern (a policy-free DELETE). */
 export async function disconnectNearEnd(): Promise<void> {
   const handle = engine
@@ -371,9 +371,9 @@ export async function disconnectNearEnd(): Promise<void> {
   }
 }
 
-/** The engine's current session id, once connected. */
-export function nearEndSessionId(): string | null {
-  return engine?.sessionId() ?? null
+/** The engine's current link id, once connected. */
+export function nearEndLinkId(): string | null {
+  return engine?.linkId() ?? null
 }
 
 /**
@@ -391,7 +391,7 @@ export function subscribeNearEndFrames(
 
 /**
  * Forward a mutation through the engine: deadline, jittered transient retry,
- * typed receipt parse — all engine policy. Ensures the session first.
+ * typed receipt parse — all engine policy. Ensures the link first.
  */
 export async function forwardNearEndMutation(
   request: RuntimeRunMutationRequest,

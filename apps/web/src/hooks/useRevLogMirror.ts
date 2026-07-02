@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-import { runtimeSessionClient } from '@/runtime/sessionClient'
+import { runtimeLinkClient } from '@/runtime/linkClient'
 import {
   getUndoHistoryStore,
   type RevLogSnapshotWire,
@@ -19,7 +19,7 @@ import {
  * converges after a timeout if the `revCursor` was lost/overridden). So the
  * round-trip-free UX from Phase 1 is preserved.
  *
- * Degrades gracefully: if the view can't open (no session, transport error),
+ * Degrades gracefully: if the view can't open (no link, transport error),
  * the store keeps its local (Phase 1) state — undo/redo still works locally.
  *
  * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
@@ -41,7 +41,7 @@ export function useRevLogMirror(accountId: string | null): void {
       }
     }
 
-    void runtimeSessionClient
+    void runtimeLinkClient
       .openView<RevLogSnapshotWire>({
         family: 'revLog',
         payload: { accountId },
@@ -52,12 +52,12 @@ export function useRevLogMirror(accountId: string | null): void {
         if (closed) {
           const closingViewId = viewId
           viewId = undefined
-          runtimeSessionClient.closeView(closingViewId)
+          runtimeLinkClient.closeView(closingViewId)
           return
         }
         const openedViewId = opened.viewId
         reconcile(opened.snapshot.data)
-        unsubscribe = runtimeSessionClient.subscribe(
+        unsubscribe = runtimeLinkClient.subscribe(
           {
             onFrame(frame) {
               switch (frame.type) {
@@ -98,7 +98,7 @@ export function useRevLogMirror(accountId: string | null): void {
       closed = true
       unsubscribe?.()
       if (viewId) {
-        runtimeSessionClient.closeView(viewId)
+        runtimeLinkClient.closeView(viewId)
       }
     }
   }, [accountId])

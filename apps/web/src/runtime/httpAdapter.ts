@@ -10,8 +10,8 @@ import {
   buildMessageBodyUrl,
   buildViewStreamUrl,
   buildOAuthRedirectUri,
-  closeRuntimeSession,
-  closeRuntimeSessionView,
+  closeRuntimeLink,
+  closeRuntimeLinkView,
   createAccount,
   createSmartMailbox,
   deleteAccount,
@@ -34,8 +34,8 @@ import {
   fetchSmartMailboxMessages,
   fetchSmartMailboxes,
   fetchSourceMessages,
-  extendRuntimeSessionView,
-  openRuntimeSessionView,
+  extendRuntimeLinkView,
+  openRuntimeLinkView,
   openView,
   patchMailbox,
   patchSettings,
@@ -199,49 +199,54 @@ function handleMalformedFrame(
 }
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
-  // The session lifecycle, frame stream, and mutation forward ride the shared
-  // near-end ENGINE (wasm, D41): session open, reconnect + resume cursor,
+  // The link lifecycle, frame stream, and mutation forward ride the shared
+  // near-end ENGINE (wasm, D41): link open, reconnect + resume cursor,
   // deadlines, backoff, typed frame parse and 4xx classification all live in
   // the engine — this adapter carries zero transport policy for them.
-  openRuntimeSession(request) {
-    // `viewDelta` is engine config (always on for engine sessions).
+  openRuntimeLink(request) {
+    // `viewDelta` is engine config (always on for engine links).
     return connectNearEnd({ sourceId: request.sourceId })
   },
-  async closeRuntimeSession(request) {
-    // Stop the engine's frame loop, then close the session server-side (a
+  async closeRuntimeLink(request) {
+    // Stop the engine's frame loop, then close the link server-side (a
     // policy-free DELETE — the engine's transport is post/stream only).
     await disconnectNearEnd()
-    return closeRuntimeSession(request.sessionId, {
+    return closeRuntimeLink(request.linkId, {
       sourceId: request.sourceId,
     })
   },
-  async openRuntimeSessionMessageListView(request) {
+  async openRuntimeLinkMessageListView(request) {
     const descriptor = mailListViewDescriptor(request.view)
-    return openRuntimeSessionView<
-      RuntimeViewSnapshot<RuntimeMailListViewState>
-    >(request.sessionId, { descriptor }, { sourceId: request.sourceId })
+    return openRuntimeLinkView<RuntimeViewSnapshot<RuntimeMailListViewState>>(
+      request.linkId,
+      { descriptor },
+      { sourceId: request.sourceId },
+    )
   },
-  openRuntimeSessionView(request) {
-    return openRuntimeSessionView(
-      request.sessionId,
+  openRuntimeLinkView(request) {
+    return openRuntimeLinkView(
+      request.linkId,
       { descriptor: request.descriptor },
       { sourceId: request.sourceId },
     )
   },
-  extendRuntimeSessionView(request) {
-    return extendRuntimeSessionView<
-      RuntimeViewSnapshot<RuntimeMailListViewState>
-    >(request.sessionId, request.viewId, request.count, {
-      sourceId: request.sourceId,
-    })
+  extendRuntimeLinkView(request) {
+    return extendRuntimeLinkView<RuntimeViewSnapshot<RuntimeMailListViewState>>(
+      request.linkId,
+      request.viewId,
+      request.count,
+      {
+        sourceId: request.sourceId,
+      },
+    )
   },
-  closeRuntimeSessionView(request) {
-    return closeRuntimeSessionView(request.sessionId, request.viewId, {
+  closeRuntimeLinkView(request) {
+    return closeRuntimeLinkView(request.linkId, request.viewId, {
       sourceId: request.sourceId,
     })
   },
   runRuntimeMutation(request) {
-    // The engine stamps its own session id, applies the request deadline,
+    // The engine stamps its own link id, applies the request deadline,
     // retries transients with jittered backoff, and parses the receipt typed.
     return forwardNearEndMutation(request)
   },

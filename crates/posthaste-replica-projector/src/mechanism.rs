@@ -1,5 +1,5 @@
 //! The replica **mechanism** layer of the entity store (RFC D36 layer 1
-//! mount): the accept/settle/retire plumbing over link-core's
+//! mount): the accept/settle/retire plumbing over replica-core's
 //! [`OptimisticReplica`] kernel, plus the JSON bridge between wire
 //! presentation projections and the kernel's canonical fold state.
 //!
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use posthaste_link_core::{
+use posthaste_replica_core::{
     MessageAssertion, MessageFoldState, MessageReplica, MutationId, OptimisticReplica, Outcome,
     PendingMessageMutation, SettlementOutcome, SettlementResult,
 };

@@ -23,7 +23,7 @@ use posthaste_runtime_api::RuntimeAccountApi;
 use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,
-    MutationSettlementState, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle, RuntimeSessionSeq,
+    MutationSettlementState, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle, RuntimeLinkSeq,
     SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame, ViewRevision,
 };
 use tokio::sync::Notify;
@@ -632,7 +632,7 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
 }
 
 #[tokio::test]
-async fn runtime_session_ids_are_not_predictable_counters() {
+async fn runtime_link_ids_are_not_predictable_counters() {
     let root = temp_root();
     let config =
         RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
@@ -643,29 +643,29 @@ async fn runtime_session_ids_are_not_predictable_counters() {
 
     let first = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("first session should open");
+        .expect("first link should open");
     let second = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("second session should open");
+        .expect("second link should open");
 
-    for session_id in [&first.session_id, &second.session_id] {
-        let raw = session_id.as_str();
+    for link_id in [&first.link_id, &second.link_id] {
+        let raw = link_id.as_str();
         let suffix = raw
-            .strip_prefix("session-")
-            .expect("session id should carry the session prefix");
+            .strip_prefix("link-")
+            .expect("link id should carry the link prefix");
         assert_eq!(suffix.len(), 32);
         assert!(suffix.chars().all(|ch| ch.is_ascii_hexdigit()));
     }
-    assert_ne!(first.session_id.as_str(), "session-1");
-    assert_ne!(second.session_id.as_str(), "session-2");
+    assert_ne!(first.link_id.as_str(), "link-1");
+    assert_ne!(second.link_id.as_str(), "link-2");
 }
 
 #[tokio::test]
-async fn runtime_session_stream_carries_keyword_view_replace_frames() {
+async fn runtime_link_stream_carries_keyword_view_replace_frames() {
     let root = temp_root();
     let config =
         RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
@@ -677,38 +677,38 @@ async fn runtime_session_stream_carries_keyword_view_replace_frames() {
         .handle
         .create_account(
             RuntimeCaller::test(),
-            mock_account_mutation("runtime-session-account"),
+            mock_account_mutation("runtime-link-account"),
         )
         .await
         .expect("account should create");
     seed_message_batch(&build, &account.id);
 
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
     let snapshot = build
         .handle
-        .open_session_view(
+        .open_link_view(
             RuntimeCaller::test(),
-            session.session_id.clone(),
-            mail_list_descriptor("in:runtime-session-account/inbox"),
+            link.link_id.clone(),
+            mail_list_descriptor("in:runtime-link-account/inbox"),
         )
         .await
-        .expect("session view should open");
+        .expect("link view should open");
     let mut subscription = build
         .handle
         .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            session.session_id.clone(),
-            Some(RuntimeSessionSeq::new(0)),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
         )
         .await
         .expect("runtime stream should subscribe");
     assert_eq!(subscription.catch_up.len(), 1);
     let RuntimeFrame::ViewSnapshot {
-        session_seq,
+        link_seq,
         view_id,
         revision,
         ..
@@ -716,7 +716,7 @@ async fn runtime_session_stream_carries_keyword_view_replace_frames() {
     else {
         panic!("expected collapsed view snapshot");
     };
-    assert_eq!(session_seq.get(), 1);
+    assert_eq!(link_seq.get(), 1);
     assert_eq!(view_id, &snapshot.view_id);
     assert_eq!(revision.get(), 1);
 
@@ -756,7 +756,7 @@ async fn runtime_session_stream_carries_keyword_view_replace_frames() {
     .await
     .expect("runtime replace frame should arrive");
     let RuntimeFrame::ViewReplace {
-        session_seq,
+        link_seq,
         view_id,
         revision,
         snapshot,
@@ -764,7 +764,7 @@ async fn runtime_session_stream_carries_keyword_view_replace_frames() {
     else {
         panic!("expected runtime view replace frame");
     };
-    assert!(session_seq.get() >= 2);
+    assert!(link_seq.get() >= 2);
     assert_eq!(view_id, snapshot.view_id);
     assert_eq!(revision.get(), 2);
     let state = mail_list_state(&snapshot);
@@ -798,17 +798,17 @@ async fn runtime_mutation_streams_settlement_frames() {
         .await
         .expect("mock account runtime should sync");
     seed_single_message_batch(&build, &account.id, "em-001", "mb-inbox");
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
     let mut subscription = build
         .handle
         .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            session.session_id.clone(),
-            Some(RuntimeSessionSeq::new(0)),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
         )
         .await
         .expect("runtime stream should subscribe");
@@ -819,7 +819,7 @@ async fn runtime_mutation_streams_settlement_frames() {
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session.session_id.clone()),
+                link_id: Some(link.link_id.clone()),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.setKeywords",
                     "args": serde_json::json!({
@@ -874,7 +874,7 @@ async fn runtime_mutation_streams_settlement_frames() {
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session.session_id),
+                link_id: Some(link.link_id),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.setKeywords",
                     "args": serde_json::json!({
@@ -896,7 +896,7 @@ async fn runtime_mutation_streams_settlement_frames() {
 
 /// Cost contract: a state-assertion mutation acknowledges the change; it must
 /// NOT shuttle the message body. The settlement payload (`receipt.output`,
-/// serialized onto the session stream) must stay bounded regardless of how
+/// serialized onto the link stream) must stay bounded regardless of how
 /// large the message's cached body is — otherwise archive/delete/keyword ops on
 /// attachment-shaped messages pay a load + serialize + transfer tax for data the
 /// client discards. This is the regression that shipped; the bound makes it
@@ -926,18 +926,18 @@ async fn message_mutation_settlement_payload_excludes_the_message_body() {
     // A 256 KiB cached body — the shape of an attachment-bearing email.
     let body_bytes = 256 * 1024;
     seed_heavy_body_message_batch(&build, &account.id, "em-001", "mb-inbox", body_bytes);
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
 
     let receipt = build
         .handle
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session.session_id.clone()),
+                link_id: Some(link.link_id.clone()),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.setKeywords",
                     "args": serde_json::json!({
@@ -1177,18 +1177,18 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
         .await
         .expect("mock account runtime should sync");
     seed_single_message_batch(&build, &account.id, "em-001", "mb-inbox");
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
 
     let receipt = build
         .handle
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session.session_id.clone()),
+                link_id: Some(link.link_id.clone()),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.setReadState",
                     "args": serde_json::json!({
@@ -1212,7 +1212,7 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
     // no longer be *constructed* — it is rejected at the wire parse (the serde
     // deserialization of `MutationRequest` IS the operation parse, D8).
     let unknown = serde_json::from_value::<MutationRequest>(serde_json::json!({
-        "sessionId": session.session_id.as_str(),
+        "linkId": link.link_id.as_str(),
         "name": "message.nonsense",
         "args": {},
         "clientMutationId": "bad-1",
@@ -1224,7 +1224,7 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
 }
 
 #[tokio::test]
-async fn runtime_session_view_extends_its_window_in_place() {
+async fn runtime_link_view_extends_its_window_in_place() {
     // A windowed mailList view grows in place: extend re-queries the larger
     // window, keeps the same view id, and broadcasts a ViewReplace.
     let root = temp_root();
@@ -1243,22 +1243,22 @@ async fn runtime_session_view_extends_its_window_in_place() {
         .await
         .expect("account should create");
     seed_message_batch(&build, &account.id);
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
 
     // Open with a one-row window so the second seeded message is past it.
     let snapshot = build
         .handle
-        .open_session_view(
+        .open_link_view(
             RuntimeCaller::test(),
-            session.session_id.clone(),
+            link.link_id.clone(),
             mail_list_descriptor_with_limit("in:runtime-extend-account/inbox", 1),
         )
         .await
-        .expect("session view should open");
+        .expect("link view should open");
     let opened = mail_list_state(&snapshot);
     assert_eq!(opened.rows.len(), 1);
     assert!(opened.continuation.has_after, "more rows past the window");
@@ -1267,17 +1267,17 @@ async fn runtime_session_view_extends_its_window_in_place() {
         .handle
         .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            session.session_id.clone(),
-            Some(RuntimeSessionSeq::new(0)),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
         )
         .await
         .expect("runtime stream should subscribe");
 
     let extended = build
         .handle
-        .extend_session_view(
+        .extend_link_view(
             RuntimeCaller::test(),
-            session.session_id.clone(),
+            link.link_id.clone(),
             snapshot.view_id.clone(),
             5,
         )
@@ -1322,9 +1322,9 @@ async fn runtime_session_view_extends_its_window_in_place() {
     // Extending a non-windowed view family is rejected.
     let detail = build
         .handle
-        .open_session_view(
+        .open_link_view(
             RuntimeCaller::test(),
-            session.session_id.clone(),
+            link.link_id.clone(),
             ViewDescriptor {
                 family: "messageDetail".to_string(),
                 payload: serde_json::json!({
@@ -1338,9 +1338,9 @@ async fn runtime_session_view_extends_its_window_in_place() {
         .expect("detail view should open");
     let rejected = build
         .handle
-        .extend_session_view(
+        .extend_link_view(
             RuntimeCaller::test(),
-            session.session_id.clone(),
+            link.link_id.clone(),
             detail.view_id,
             5,
         )
@@ -1368,16 +1368,16 @@ async fn runtime_account_status_view_serves_and_recomputes() {
         .await
         .expect("first account should create");
 
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
     let snapshot = build
         .handle
-        .open_session_view(
+        .open_link_view(
             RuntimeCaller::test(),
-            session.session_id.clone(),
+            link.link_id.clone(),
             ViewDescriptor {
                 family: "accountStatus".to_string(),
                 payload: serde_json::Value::Null,
@@ -1398,8 +1398,8 @@ async fn runtime_account_status_view_serves_and_recomputes() {
         .handle
         .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            session.session_id.clone(),
-            Some(RuntimeSessionSeq::new(0)),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
         )
         .await
         .expect("runtime stream should subscribe");
@@ -2120,7 +2120,7 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
 }
 
 #[tokio::test]
-async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
+async fn runtime_link_stream_carries_scoped_domain_event_notifications() {
     let root = temp_root();
     let config =
         RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
@@ -2133,14 +2133,14 @@ async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
         account_scope: Some(vec!["primary".to_string()]),
         ..RuntimeCaller::test()
     };
-    let session = build
+    let link = build
         .handle
-        .open_session(caller.clone())
+        .open_link(caller.clone())
         .await
-        .expect("runtime session should open");
+        .expect("runtime link should open");
     let mut subscription = build
         .handle
-        .subscribe_runtime_frames(caller, session.session_id, Some(RuntimeSessionSeq::new(0)))
+        .subscribe_runtime_frames(caller, link.link_id, Some(RuntimeLinkSeq::new(0)))
         .await
         .expect("runtime frames should subscribe");
 
@@ -2182,14 +2182,14 @@ async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
         .expect("notification frame should arrive")
         .expect("runtime stream should remain open");
     let RuntimeFrame::Notification {
-        session_seq,
+        link_seq,
         kind,
         payload,
     } = frame
     else {
         panic!("expected notification frame");
     };
-    assert_eq!(session_seq.get(), 1);
+    assert_eq!(link_seq.get(), 1);
     assert_eq!(kind, EVENT_TOPIC_MESSAGE_UPDATED);
     assert_eq!(payload["seq"], matching.seq);
     assert_eq!(payload["accountId"], "primary");
@@ -2314,11 +2314,11 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
         .await
         .expect("account should create");
     seed_message_batch(&build, &account.id);
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
 
     let descriptor = mail_list_descriptor("in:optimism-account/inbox");
 
@@ -2332,14 +2332,14 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
 
     // Forward a flag mutation whose up-channel blocks, leaving it in the outbox.
     let handle = build.handle.clone();
-    let session_id = session.session_id.clone();
+    let link_id = link.link_id.clone();
     let account_id = account.id.as_str().to_string();
     let task = tokio::spawn(async move {
         handle
             .forward_mutation(
                 RuntimeCaller::test(),
                 MutationRequest {
-                    session_id: Some(session_id),
+                    link_id: Some(link_id),
                     operation: serde_json::from_value(serde_json::json!({
                         "name": "message.setFlaggedState",
                         "args": serde_json::json!({
@@ -2427,22 +2427,22 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
     // with an in-flight sync and exercise the coalescing path.
     MockJmapGateway::set_sync_delay_for_tests(50);
 
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
 
     // Fire 15 rapid flag/unflag toggles concurrently. Under the old behavior
     // each toggle would enqueue a full provider sync; with coalescing they
     // collapse into at most one in-flight + one pending follow-up cycle.
     let handle = build.handle.clone();
-    let session_id = session.session_id.clone();
+    let link_id = link.link_id.clone();
     let account_id = account.id.clone();
     let mut burst = Vec::with_capacity(15);
     for i in 0..15 {
         let handle = handle.clone();
-        let session_id = session_id.clone();
+        let link_id = link_id.clone();
         let account_id = account_id.clone();
         let (add, remove) = if i % 2 == 0 {
             (vec!["$flagged"], Vec::<&str>::new())
@@ -2454,7 +2454,7 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
                 .forward_mutation(
                     RuntimeCaller::test(),
                     MutationRequest {
-                        session_id: Some(session_id),
+                        link_id: Some(link_id),
                         operation: serde_json::from_value(serde_json::json!({
                             "name": "message.setKeywords",
                             "args": serde_json::json!({
@@ -2509,7 +2509,7 @@ async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
     let build = build_authority_server(config)
         .await
         .expect("authority runtime should build");
-    let mut mutation = mock_account_mutation("cross-session-mutation-account");
+    let mut mutation = mock_account_mutation("cross-link-mutation-account");
     mutation.enabled = Some(true);
     let account = build
         .handle
@@ -2523,43 +2523,43 @@ async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
         .expect("mock account runtime should sync");
     seed_single_message_batch(&build, &account.id, "xm-001", "mb-inbox");
 
-    let session_a = build
+    let link_a = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session A should open");
+        .expect("link A should open");
     let snapshot_a = build
         .handle
-        .open_session_view(
+        .open_link_view(
             RuntimeCaller::test(),
-            session_a.session_id.clone(),
-            mail_list_descriptor("in:cross-session-mutation-account/mb-inbox"),
+            link_a.link_id.clone(),
+            mail_list_descriptor("in:cross-link-mutation-account/mb-inbox"),
         )
         .await
-        .expect("session A view should open");
+        .expect("link A view should open");
     let mut subscription_a = build
         .handle
         .subscribe_runtime_frames(
             RuntimeCaller::test(),
-            session_a.session_id.clone(),
-            Some(RuntimeSessionSeq::new(0)),
+            link_a.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
         )
         .await
-        .expect("session A stream should subscribe");
+        .expect("link A stream should subscribe");
     assert_eq!(subscription_a.catch_up.len(), 1);
 
-    let session_b = build
+    let link_b = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session B should open");
+        .expect("link B should open");
 
     let receipt = build
         .handle
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session_b.session_id.clone()),
+                link_id: Some(link_b.link_id.clone()),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.setKeywords",
                     "args": serde_json::json!({
@@ -2574,7 +2574,7 @@ async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
             },
         )
         .await
-        .expect("session B mutation should run");
+        .expect("link B mutation should run");
 
     assert_eq!(receipt.name, "message.setKeywords");
     assert_eq!(receipt.state, MutationSettlementState::Confirmed);
@@ -2585,14 +2585,14 @@ async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
                 .live
                 .next()
                 .await
-                .expect("session A stream should remain open");
+                .expect("link A stream should remain open");
             if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
                 break frame;
             }
         }
     })
     .await
-    .expect("session A should receive a view update after session B mutation");
+    .expect("link A should receive a view update after link B mutation");
     let RuntimeFrame::ViewReplace {
         view_id: fid,
         snapshot,
@@ -2732,11 +2732,11 @@ async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
         .await
         .expect("mock account runtime should sync");
     seed_message_with_snooze_mailbox(&build, &account.id, "em-001");
-    let session = build
+    let link = build
         .handle
-        .open_session(RuntimeCaller::test())
+        .open_link(RuntimeCaller::test())
         .await
-        .expect("session should open");
+        .expect("link should open");
 
     // Snooze: move em-001 to the Snoozed mailbox + record a return time.
     let snooze_receipt = build
@@ -2744,7 +2744,7 @@ async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session.session_id.clone()),
+                link_id: Some(link.link_id.clone()),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.snooze",
                     "args": serde_json::json!({
@@ -2778,7 +2778,7 @@ async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
         .forward_mutation(
             RuntimeCaller::test(),
             MutationRequest {
-                session_id: Some(session.session_id.clone()),
+                link_id: Some(link.link_id.clone()),
                 operation: serde_json::from_value(serde_json::json!({
                     "name": "message.applyDiff",
                     "args": serde_json::json!({

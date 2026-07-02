@@ -1,5 +1,5 @@
 [package]
-name = "posthaste-link-wasm"
+name = "posthaste-client-node-wasm"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,14 +10,14 @@ edition = "2021"
 # from the native CI workspace build.
 
 [lib]
-name = "posthaste_link_wasm"
+name = "posthaste_client_node_wasm"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
 posthaste-contract-core = { path = "../posthaste-contract-core" }
-posthaste-link-core = { path = "../posthaste-link-core" }
-posthaste-link-replica = { path = "../posthaste-link-replica" }
+posthaste-replica-core = { path = "../posthaste-replica-core" }
+posthaste-replica-projector = { path = "../posthaste-replica-projector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Pinned to exactly match the `wasm-bindgen-cli` nixpkgs provides (the generated

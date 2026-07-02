@@ -12,13 +12,13 @@ use posthaste_contract_core::MutationReceipt;
 use posthaste_contract_core::MutationRequest;
 
 /// A record the host sent (holds a `runtimeMutationId`) but never saw settle
-/// terminally — the session-continuity-loss case the reconciler resolves via
+/// terminally — the link-continuity-loss case the reconciler resolves via
 /// the wire's settlement query (D44b).
 #[derive(Clone, Debug)]
 pub struct SentUnsettled {
-    /// The session the record was dispatched under (the settlement query is
-    /// keyed to it — a later session cannot see another session's ledger).
-    pub session_id: String,
+    /// The link the record was dispatched under (the settlement query is
+    /// keyed to it — a later link cannot see another link's ledger).
+    pub link_id: String,
     pub client_mutation_id: String,
     /// The original forward request, for the re-forward path when the runtime
     /// has no record. `None` when the host cannot reconstruct it (the record is
@@ -32,7 +32,7 @@ pub trait OutboxHooks {
     /// The forward requests the host optimistically accepted but has **no**
     /// evidence reached the runtime (no linked runtime-mutation id). The
     /// reconciler replays each on connect — safe because never-dispatched means
-    /// no server-side application, and the runtime dedups a same-session
+    /// no server-side application, and the runtime dedups a same-link
     /// re-forward by `clientMutationId`.
     fn never_dispatched(&self) -> LocalBoxFuture<'static, Vec<MutationRequest>>;
 

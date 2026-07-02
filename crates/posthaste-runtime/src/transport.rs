@@ -287,7 +287,7 @@ mod tests {
     use posthaste_authority_server_link::{
         AuthorityServerFrame, BaseAssertion, BaseUpdate, LINK_FORWARD_MUTATION_PATH,
     };
-    use posthaste_link_core::MessageFoldState;
+    use posthaste_replica_core::MessageFoldState;
     use posthaste_contract_core::{MutationSettlementState, RuntimeMutationId};
     use serde_json::json;
 

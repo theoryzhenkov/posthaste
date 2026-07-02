@@ -21,7 +21,7 @@ import {
   setUndoHistoryStoreForTesting,
   type RevStep,
 } from '../src/runtime/replica/undoHistoryStore'
-import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
+import { resetRuntimeLinkClientForTesting } from '../src/runtime/linkClient'
 import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
@@ -41,7 +41,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  resetRuntimeSessionClientForTesting()
+  resetRuntimeLinkClientForTesting()
   resetRuntimeAdapterForTesting()
   resetUndoHistoryStoreForTesting()
 })
@@ -86,7 +86,7 @@ function revCursorCalls(): {
 
 describe('useUndoRedo (client-owned, round-trip-free)', () => {
   it('undo dispatches applyDiff with the inverse diff, with no frame round trip', async () => {
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
     runtimeAdapter.queueRuntimeMutationReceipt({
       runtimeMutationId: 'rm-1',
       clientMutationId: 'undo-1',
@@ -117,7 +117,7 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
   })
 
   it('rapid undos all dispatch immediately (no busyRef serialization)', async () => {
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
     runtimeAdapter.queueRuntimeMutationReceipt({
       runtimeMutationId: 'rm-1',
       clientMutationId: 'u1',
@@ -166,7 +166,7 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
   })
 
   it('redo dispatches applyDiff with the forward diff', async () => {
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
     runtimeAdapter.queueRuntimeMutationReceipt({
       runtimeMutationId: 'rm-1',
       clientMutationId: 'redo-1',
@@ -193,7 +193,7 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
   })
 
   it('undo sends a revCursor cursor-arbitration mutation (Phase 2)', async () => {
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
     runtimeAdapter.queueRuntimeMutationReceipt({
       runtimeMutationId: 'rm-1',
       clientMutationId: 'undo-1',
@@ -224,7 +224,7 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
   })
 
   it('canUndo/canRedo track the store cursor', async () => {
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
 
     await act(() => store.pushForward('primary', makeStep('a')))
@@ -241,7 +241,7 @@ describe('useUndoRedo (client-owned, round-trip-free)', () => {
   })
 
   it('a forward action clears the redo tail (no phantom redo)', async () => {
-    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
     const { result } = renderHook(() => useUndoRedo(), { wrapper })
 
     await act(() => store.pushForward('primary', makeStep('a')))

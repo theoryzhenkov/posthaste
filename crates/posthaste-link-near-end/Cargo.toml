@@ -10,7 +10,7 @@ edition = "2021"
 # classification) and the level-triggered reconciler. Wasm-pure: no tokio, no
 # reqwest; async is expressed as boxed local futures/streams over an injected
 # `Transport` (postJson + openStream) and `Scheduler` (sleep + jitter), so the
-# same engine drives the browser (compiled to wasm via `posthaste-link-wasm`) and
+# same engine drives the browser (compiled to wasm via `posthaste-client-node-wasm`) and
 # a native in-process client. Timing/IO impls live on the host side of the
 # boundary, never here — that keeps the crate on the wasm frontier CI list.
 

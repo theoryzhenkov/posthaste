@@ -5,10 +5,10 @@ use super::*;
     path = "/v1/runtime/sessions/{session_id}/mutations",
     tag = "runtime",
     summary = "Run a runtime mutation",
-    description = "Submits a named mutation to a runtime session (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.",
+    description = "Submits a named mutation to a runtime link (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the link stream.",
     params(
-        ("session_id" = String, Path, description = "Runtime session id"),
-        RuntimeSessionQuery
+        ("session_id" = String, Path, description = "Runtime link id"),
+        RuntimeLinkQuery
     ),
     request_body = MutationRequest,
     responses(
@@ -16,29 +16,29 @@ use super::*;
         (status = 400, description = "Invalid mutation", body = ApiErrorBody),
         (status = 401, description = "Unauthorized", body = ApiErrorBody),
         (status = 403, description = "Forbidden", body = ApiErrorBody),
-        (status = 404, description = "Unknown runtime session", body = ApiErrorBody),
+        (status = 404, description = "Unknown runtime link", body = ApiErrorBody),
         (status = 500, description = "Internal error", body = ApiErrorBody)
     )
 )]
-pub async fn run_runtime_session_mutation(
+pub async fn run_runtime_link_mutation(
     State(state): State<Arc<AppState>>,
-    Path(session_id): Path<String>,
-    Query(query): Query<RuntimeSessionQuery>,
+    Path(link_id): Path<String>,
+    Query(query): Query<RuntimeLinkQuery>,
     presented: Option<Extension<crate::auth::PresentedToken>>,
     Json(mut request): Json<MutationRequest>,
 ) -> Result<Json<MutationReceipt>, ApiError> {
-    let path_session_id = RuntimeSessionId::new(session_id);
+    let path_link_id = RuntimeLinkId::new(link_id);
     if request
-        .session_id
+        .link_id
         .as_ref()
-        .is_some_and(|body_session_id| body_session_id != &path_session_id)
+        .is_some_and(|body_link_id| body_link_id != &path_link_id)
     {
         return Err(ApiError::from_runtime_error(
-            RuntimeError::invalid_mutation("request session id does not match path session id"),
+            RuntimeError::invalid_mutation("request link id does not match path link id"),
         ));
     }
-    request.session_id = Some(path_session_id);
-    require_read_for_session_mutation(
+    request.link_id = Some(path_link_id);
+    require_read_for_link_mutation(
         state.as_ref(),
         query.source_id.as_deref(),
         presented.as_ref().map(|Extension(token)| token),
@@ -56,11 +56,11 @@ pub async fn run_runtime_session_mutation(
     path = "/v1/runtime/sessions/{session_id}/mutations/{client_mutation_id}",
     tag = "runtime",
     summary = "Read a runtime mutation's settlement",
-    description = "Returns the settlement receipt the runtime holds for a client mutation id, or a null receipt when it has no record (unknown session, never accepted, or already cleared). The client near-end's reconciler queries this for sent-but-unsettled records after a session-continuity loss: a terminal receipt settles locally; a null receipt re-forwards.",
+    description = "Returns the settlement receipt the runtime holds for a client mutation id, or a null receipt when it has no record (unknown link, never accepted, or already cleared). The client near-end's reconciler queries this for sent-but-unsettled records after a link-continuity loss: a terminal receipt settles locally; a null receipt re-forwards.",
     params(
-        ("session_id" = String, Path, description = "Runtime session id the mutation was dispatched under"),
+        ("session_id" = String, Path, description = "Runtime link id the mutation was dispatched under"),
         ("client_mutation_id" = String, Path, description = "Client mutation id"),
-        RuntimeSessionQuery
+        RuntimeLinkQuery
     ),
     responses(
         (status = 200, description = "The runtime's settlement record (receipt is null when unknown)", body = RuntimeMutationSettlement),
@@ -69,13 +69,13 @@ pub async fn run_runtime_session_mutation(
         (status = 500, description = "Internal error", body = ApiErrorBody)
     )
 )]
-pub async fn runtime_session_mutation_settlement(
+pub async fn runtime_link_mutation_settlement(
     State(state): State<Arc<AppState>>,
-    Path((session_id, client_mutation_id)): Path<(String, String)>,
-    Query(query): Query<RuntimeSessionQuery>,
+    Path((link_id, client_mutation_id)): Path<(String, String)>,
+    Query(query): Query<RuntimeLinkQuery>,
     presented: Option<Extension<crate::auth::PresentedToken>>,
 ) -> Result<Json<RuntimeMutationSettlement>, ApiError> {
-    require_read_for_session_mutation(
+    require_read_for_link_mutation(
         state.as_ref(),
         query.source_id.as_deref(),
         presented.as_ref().map(|Extension(token)| token),
@@ -84,7 +84,7 @@ pub async fn runtime_session_mutation_settlement(
         .runtime
         .mutation_settlement(
             runtime_caller(query.source_id.as_deref()),
-            RuntimeSessionId::new(session_id),
+            RuntimeLinkId::new(link_id),
             posthaste_contract_core::ClientMutationId::new(client_mutation_id),
         )
         .await
@@ -92,7 +92,7 @@ pub async fn runtime_session_mutation_settlement(
         .map_err(ApiError::from_runtime_error)
 }
 
-fn require_read_for_session_mutation(
+fn require_read_for_link_mutation(
     state: &AppState,
     source_id: Option<&str>,
     presented: Option<&crate::auth::PresentedToken>,

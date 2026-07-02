@@ -6,8 +6,8 @@ import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
 const present =
-  existsSync(join(wasmDir, 'posthaste_link_wasm.js')) &&
-  existsSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm'))
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm.js')) &&
+  existsSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm'))
 
 function projection(keywords: string[], version?: number) {
   return {
@@ -30,13 +30,13 @@ async function stillPendingAfterConfirmAndAbsorbingBase(
   base: string[],
 ): Promise<boolean> {
   const mod = (await import(
-    join(wasmDir, 'posthaste_link_wasm.js')
+    join(wasmDir, 'posthaste_client_node_wasm.js')
   )) as unknown as {
     initSync(input: { module: BufferSource }): unknown
     EntityStoreHandle: new () => EntityStoreHandle
   }
   mod.initSync({
-    module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+    module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
   })
   const h = new mod.EntityStoreHandle()
   h.registerViewJson(
@@ -110,13 +110,13 @@ describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
   })
   it('a stale provider re-serve BEFORE confirm does not revert (confirmed-gating, Bug 1a)', async () => {
     const mod = (await import(
-      join(wasmDir, 'posthaste_link_wasm.js')
+      join(wasmDir, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
     }
     mod.initSync({
-      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
     })
     const h = new mod.EntityStoreHandle()
     h.registerViewJson(
@@ -192,13 +192,13 @@ describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
   })
   it('BUG 1b guard target: a stale re-serve (older version) after confirm is rejected', async () => {
     const mod = (await import(
-      join(wasmDir, 'posthaste_link_wasm.js')
+      join(wasmDir, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
     }
     mod.initSync({
-      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')),
     })
     const h = new mod.EntityStoreHandle()
     h.registerViewJson(

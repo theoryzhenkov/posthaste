@@ -6,13 +6,13 @@
  * across all accounts) — no globally-ordered log needed. Navigation is LOCAL:
  * chained undo pops the cursor in memory + returns each step to invert, so N
  * undos do not cost N round trips. The diff is captured client-side
- * (`captureMutationDiffJson`); the runtime's per-session seq-keyed stacks are
+ * (`captureMutationDiffJson`); the runtime's per-link seq-keyed stacks are
  * retired. Persisted alongside the outbox (IndexedDB) so it survives reload.
  *
  * The store is the mirror of the server-authoritative `RevLog` synced view
  * (Phase 2 Slice 5b): `reconcileWithServer` adopts the server's steps + cursor
  * per account, with an optimism guard so a local move isn't reverted by a stale
- * server view. Steps carry stable `id`s (not session seqs) + cursor moves are
+ * server view. Steps carry stable `id`s (not link seqs) + cursor moves are
  * idempotent id-keyed assignments.
  *
  * @spec docs/eph/DESIGN-L2-undo-redo-revlog-contract
@@ -22,7 +22,7 @@ import { openReplicaDatabase, UNDO_HISTORY_STORE } from './replicaDatabase'
 
 /** One recorded reversible step on the history. */
 export interface RevStep {
-  /** Stable, globally-orderable id (not a session seq) — the Phase 2 cursor key. */
+  /** Stable, globally-orderable id (not a link seq) — the Phase 2 cursor key. */
   id: string
   messageId: string
   sourceId: string
@@ -537,7 +537,7 @@ export function defaultUndoHistoryStore(): UndoHistoryStore {
   return new MemoryUndoHistoryStore()
 }
 
-// --- singleton (mirrors `runtimeSessionClient`) ---
+// --- singleton (mirrors `runtimeLinkClient`) ---
 
 let singletonStore: UndoHistoryStore | undefined
 

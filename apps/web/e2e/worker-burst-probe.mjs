@@ -68,9 +68,9 @@ window.__PROBE__ = (async () => {
     function makeBase() {
       let sink = null
       const base = {
-        openRuntimeSessionMessageListView: async () => ({ viewId: 'v1', snapshot: snapshot() }),
-        extendRuntimeSessionView: async () => ({ viewId: 'v1', snapshot: snapshot() }),
-        closeRuntimeSessionView: async () => ({ ok: true }),
+        openRuntimeLinkMessageListView: async () => ({ viewId: 'v1', snapshot: snapshot() }),
+        extendRuntimeLinkView: async () => ({ viewId: 'v1', snapshot: snapshot() }),
+        closeRuntimeLinkView: async () => ({ ok: true }),
         subscribeRuntimeFrames: (_req, handlers) => { sink = handlers; return () => { sink = null } },
         runRuntimeMutation: async (req) => ({ runtimeMutationId: 'r', clientMutationId: req.clientMutationId, name: req.name, state: 'accepted', error: null }),
       }
@@ -78,7 +78,7 @@ window.__PROBE__ = (async () => {
     }
 
     const viewRequest = {
-      sessionId: 'sess',
+      linkId: 'sess',
       view: {
         scope: { kind: 'source-mailbox', sourceId: 's', mailboxId: 'inbox' },
         limit: 50, sort: 'date', sortDir: 'desc', operation: { name: 'probe' },
@@ -87,7 +87,7 @@ window.__PROBE__ = (async () => {
 
     function msgUpdated(i) {
       return {
-        type: 'notification', sessionSeq: 100, kind: 'message.updated',
+        type: 'notification', linkSeq: 100, kind: 'message.updated',
         payload: {
           seq: 1, accountId: 's', topic: 'message.updated', occurredAt: 'now',
           payload: {
@@ -116,8 +116,8 @@ window.__PROBE__ = (async () => {
       queryClient.setQueryData(queryKeys.mailboxes('s'), [{ id: 'inbox', name: 'Inbox', role: 'inbox', unreadEmails: 0, totalEmails: SEED_ROWS }])
       const adapter = createEntityStoreAdapter({ base: harness.base, outbox, queryClient, now: () => 1, ...storeDeps })
       const frames = []
-      adapter.subscribeRuntimeFrames({ sessionId: 'sess' }, { onFrame: (f) => frames.push(f) })
-      await adapter.openRuntimeSessionMessageListView(viewRequest)
+      adapter.subscribeRuntimeFrames({ linkId: 'sess' }, { onFrame: (f) => frames.push(f) })
+      await adapter.openRuntimeLinkMessageListView(viewRequest)
       step(label + ': view opened')
 
       const probe = startRafProbe()

@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-query'
 
 import type { MessagePage, MessageSummary } from '@/api/types'
-import { runtimeSessionClient } from '@/runtime/sessionClient'
+import { runtimeLinkClient } from '@/runtime/linkClient'
 import type {
   RuntimeMailListDelta,
   RuntimeMailListViewState,
@@ -171,7 +171,7 @@ export function useRuntimeMailListView({
       const closingViewId = viewId
       viewId = undefined
       viewIdRef.current = undefined
-      runtimeSessionClient.closeView(closingViewId)
+      runtimeLinkClient.closeView(closingViewId)
     }
     const request = buildMessagePageRequest(
       selectedView,
@@ -182,7 +182,7 @@ export function useRuntimeMailListView({
       operation,
     )
 
-    void runtimeSessionClient
+    void runtimeLinkClient
       .openMessageListView(request)
       .then((opened) => {
         viewId = opened.viewId
@@ -197,7 +197,7 @@ export function useRuntimeMailListView({
           queryKey,
           applySnapshotToQueryData({ ...snapshot, viewId: openedViewId }),
         )
-        unsubscribe = runtimeSessionClient.subscribe(
+        unsubscribe = runtimeLinkClient.subscribe(
           {
             onFrame(frame) {
               switch (frame.type) {
@@ -211,7 +211,7 @@ export function useRuntimeMailListView({
                       event: LOG_EVENTS.viewSnapshotApplied,
                       viewId: frame.viewId,
                       type: frame.type,
-                      sessionSeq: frame.sessionSeq,
+                      linkSeq: frame.linkSeq,
                       revision: frame.revision,
                       rowCount: frame.snapshot.data.rows.length,
                       flaggedCount: frame.snapshot.data.rows.filter(
@@ -238,7 +238,7 @@ export function useRuntimeMailListView({
                       event: LOG_EVENTS.viewDeltaApplied,
                       viewId: frame.viewId,
                       type: frame.type,
-                      sessionSeq: frame.sessionSeq,
+                      linkSeq: frame.linkSeq,
                       revision: frame.revision,
                       upsertCount: frame.delta.upserts.length,
                       orderChanged: frame.delta.order !== null,
@@ -316,7 +316,7 @@ export function useRuntimeMailListView({
     }
     loadingMoreRef.current = true
     setIsLoadingMore(true)
-    void runtimeSessionClient
+    void runtimeLinkClient
       .extendMessageListView(viewId, MESSAGE_PAGE_SIZE)
       .then((result) => {
         // The view id is unchanged; the broadcast viewReplace also lands, but

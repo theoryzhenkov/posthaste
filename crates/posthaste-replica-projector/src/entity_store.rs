@@ -12,7 +12,7 @@
 //!
 //! [`EntityStore`] is the public **composition** of the two near-node layers
 //! (RFC D36): the replica *mechanism* ([`crate::mechanism`] — accept/settle/
-//! retire plumbing over link-core's `OptimisticReplica` kernel) and the view
+//! retire plumbing over replica-core's `OptimisticReplica` kernel) and the view
 //! *projection* ([`crate::projection`] — rows, predicates, windowing, sort
 //! keys, dirty tracking). A headless client consumes exactly these two layers.
 //!
@@ -28,7 +28,7 @@
 //! ## Optimism
 //!
 //! The mechanism layer holds a `MessageReplica` (the shared convergence engine,
-//! `posthaste-link-core`'s `Replica<MessageConvergence>`) over message fold
+//! `posthaste-replica-core`'s `Replica<MessageConvergence>`) over message fold
 //! state. [`accept_mutation`](EntityStore::accept_mutation) folds an optimistic
 //! assertion into the outbox; [`message`](EntityStore::message) and view
 //! placement read the *projected* state — the confirmed base with pending
@@ -56,7 +56,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use posthaste_link_core::{MessageAssertion, MutationId, SettlementOutcome, SettlementResult};
+use posthaste_replica_core::{MessageAssertion, MutationId, SettlementOutcome, SettlementResult};
 
 use crate::mechanism::{BaseApplied, ReplicaMechanism};
 use crate::projection::{
@@ -88,7 +88,7 @@ pub enum StoreUpdate {
 /// The reactive entity store. Pure compute: no transport, no persistence.
 ///
 /// Composes the replica mechanism (the shared convergence kernel behind
-/// link-core's `OptimisticReplica` seam) with the view projection layer, so
+/// replica-core's `OptimisticReplica` seam) with the view projection layer, so
 /// message optimism is a pure fold over the confirmed base (keywords + mailbox
 /// membership); views and the message read derive from the projected state.
 /// Bases are seeded per-key on ingest; the outbox is never cleared by a base
@@ -243,7 +243,7 @@ impl EntityStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_link_core::{MessageAssertion, MutationId, SettlementOutcome};
+    use posthaste_replica_core::{MessageAssertion, MutationId, SettlementOutcome};
     use serde_json::json;
 
     fn summary(id: &str, received_at: &str, mailboxes: &[&str]) -> Value {

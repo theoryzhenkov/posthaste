@@ -2,7 +2,7 @@
  * The client near-end behind the wasm boundary (D41/M9b2): these suites drive
  * the REAL `LinkNearEnd` engine (the shipped wasm) through the binding's fake
  * transport IO — no TS policy seams left to fake. Replaces the old
- * `sessionClientReconnect` suite (the TS reconnect timer it pinned is deleted;
+ * `linkClientReconnect` suite (the TS reconnect timer it pinned is deleted;
  * the engine owns reconnects) and the transport halves of the adapter suites.
  *
  * Behavior pinned here: reconnect-with-cursor, replay-on-connect (the outbox
@@ -68,8 +68,8 @@ class FakeIo implements NearEndTransportIo {
         body: JSON.stringify(confirmedReceipt(request.clientMutationId)),
       }
     }
-    // Session open.
-    return { status: 200, body: JSON.stringify({ sessionId: 'session-A' }) }
+    // Link open.
+    return { status: 200, body: JSON.stringify({ linkId: 'link-A' }) }
   }
 
   async getJson(url: string) {
@@ -137,24 +137,24 @@ const waitForStreams = (count: number) =>
   waitFor(() => expect(io.streams.length).toBe(count), { timeout: 4000 })
 
 describe('the near-end engine over fake IO', () => {
-  it('opens the session and delivers engine-parsed frames to subscribers', async () => {
+  it('opens the link and delivers engine-parsed frames to subscribers', async () => {
     const frames: RuntimeFrame<RuntimeMailListViewState>[] = []
     subscribeNearEndFrames({ onFrame: (frame) => frames.push(frame) })
 
-    const { sessionId } = await connectNearEnd()
-    expect(sessionId).toBe('session-A')
-    // The engine's prepare POST carries the session options.
+    const { linkId } = await connectNearEnd()
+    expect(linkId).toBe('link-A')
+    // The engine's prepare POST carries the link options.
     expect(io.posts[0]?.url).toContain('/runtime/sessions?viewDelta=true')
 
     await waitForStreams(1)
     io.streams[0]!.emit('open', '')
     io.streams[0]!.emit(
       'message',
-      JSON.stringify({ type: 'heartbeat', sessionSeq: 5 }),
+      JSON.stringify({ type: 'heartbeat', linkSeq: 5 }),
     )
 
     await waitFor(() => expect(frames.length).toBe(1))
-    expect(frames[0]).toEqual({ type: 'heartbeat', sessionSeq: 5 })
+    expect(frames[0]).toEqual({ type: 'heartbeat', linkSeq: 5 })
     // The binding mirrors the engine-owned cursor for reload resume.
     expect(window.sessionStorage.getItem('mail:last-runtime-frame-seq')).toBe(
       '5',
@@ -169,7 +169,7 @@ describe('the near-end engine over fake IO', () => {
     io.streams[0]!.emit('open', '')
     io.streams[0]!.emit(
       'message',
-      JSON.stringify({ type: 'heartbeat', sessionSeq: 5 }),
+      JSON.stringify({ type: 'heartbeat', linkSeq: 5 }),
     )
     io.streams[0]!.emit('closed', '')
 
@@ -242,8 +242,8 @@ describe('the near-end engine over fake IO', () => {
     expect(receipt.state).toBe('confirmed')
     const mutationPosts = io.posts.filter((p) => p.url.includes('/mutations'))
     expect(mutationPosts.length).toBe(2)
-    // The engine stamped ITS session onto the wire request.
-    expect(mutationPosts[1]!.body).toContain('"sessionId":"session-A"')
+    // The engine stamped ITS link onto the wire request.
+    expect(mutationPosts[1]!.body).toContain('"linkId":"link-A"')
   })
 
   it('forward surfaces a 4xx as permanent without a retry', async () => {
@@ -268,7 +268,7 @@ describe('the near-end engine over fake IO', () => {
   it('replays never-dispatched outbox records on every connect (D44a)', async () => {
     const reconciled: {
       receipt: RuntimeMutationReceipt
-      sessionId: string | null
+      linkId: string | null
     }[] = []
     let pending: RuntimeRunMutationRequest[] = [sampleRequest('c-replay')]
     setNearEndOutboxHooks({
@@ -277,8 +277,8 @@ describe('the near-end engine over fake IO', () => {
         pending = []
         return drained
       },
-      onReconciled: async (receipt, sessionId) => {
-        reconciled.push({ receipt, sessionId })
+      onReconciled: async (receipt, linkId) => {
+        reconciled.push({ receipt, linkId })
       },
       sentUnsettled: async () => [],
       onSettlement: async () => {},
@@ -292,14 +292,14 @@ describe('the near-end engine over fake IO', () => {
 
     await waitFor(() => expect(reconciled.length).toBe(1))
     expect(reconciled[0]!.receipt.clientMutationId).toBe('c-replay')
-    expect(reconciled[0]!.sessionId).toBe('session-A')
+    expect(reconciled[0]!.linkId).toBe('link-A')
     expect(io.posts.filter((p) => p.url.includes('/mutations')).length).toBe(1)
   })
 
   it('settles a sent-but-unsettled record from a terminal settlement query (D44b)', async () => {
     const settled: RuntimeMutationReceipt[] = []
     const record: NearEndSentUnsettled = {
-      sessionId: 'session-old',
+      linkId: 'link-old',
       clientMutationId: 'c-sent',
       request: sampleRequest('c-sent'),
     }
@@ -326,10 +326,8 @@ describe('the near-end engine over fake IO', () => {
     io.streams[0]!.emit('open', '')
 
     await waitFor(() => expect(settled.length).toBe(1))
-    // The query hit the OLD session's ledger, not the live session's.
-    expect(io.gets[0]).toContain(
-      '/runtime/sessions/session-old/mutations/c-sent',
-    )
+    // The query hit the OLD link's ledger, not the live link's.
+    expect(io.gets[0]).toContain('/runtime/sessions/link-old/mutations/c-sent')
     // Terminal verdict: settled locally, never re-forwarded.
     expect(io.posts.filter((p) => p.url.includes('/mutations')).length).toBe(0)
   })
@@ -338,7 +336,7 @@ describe('the near-end engine over fake IO', () => {
     const reconciled: RuntimeMutationReceipt[] = []
     let unsettled: NearEndSentUnsettled[] = [
       {
-        sessionId: 'session-old',
+        linkId: 'link-old',
         clientMutationId: 'c-lost',
         request: sampleRequest('c-lost'),
       },
@@ -355,7 +353,7 @@ describe('the near-end engine over fake IO', () => {
       },
       onSettlement: async () => {},
     })
-    // The runtime has no record (session-continuity loss).
+    // The runtime has no record (link-continuity loss).
     io.settlementResponses.push({
       status: 200,
       body: JSON.stringify({ receipt: null }),

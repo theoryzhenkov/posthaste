@@ -4,7 +4,7 @@
 //! name→assertion mapping and the `MessageChangeDiff` inverse. These functions
 //! expose the canonical Rust implementations from `posthaste-contract-core`
 //! (the typed `MailOperation` vocabulary + its `fold_effect`) and
-//! `posthaste-link-core` across the WASM boundary, eliminating that drift.
+//! `posthaste-replica-core` across the WASM boundary, eliminating that drift.
 
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -12,7 +12,7 @@ use wasm_bindgen::prelude::*;
 use std::collections::HashMap;
 
 use posthaste_contract_core::{MailOperation, MutationRequest};
-use posthaste_link_core::{MessageAssertion, MessageChangeDiff};
+use posthaste_replica_core::{MessageAssertion, MessageChangeDiff};
 
 /// Parse a runtime mutation request (its flattened typed `MailOperation`) and
 /// return `{ messageId, assertion }` as JSON when the operation is locally

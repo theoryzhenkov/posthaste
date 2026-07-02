@@ -20,7 +20,7 @@ use posthaste_domain_service::{MailStore, SecretStore};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLink};
 use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MutationNotification,
-    MutationReceipt, MutationRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionSeq,
+    MutationReceipt, MutationRequest, RuntimeCaller, RuntimeFrame, RuntimeLinkSeq,
     SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewId, ViewSnapshot,
 };
 use posthaste_runtime::RuntimeHandle;
@@ -258,29 +258,29 @@ impl RuntimeHarness {
         }
     }
 
-    /// Open a session + view, subscribe to the runtime frame stream, run a
+    /// Open a link + view, subscribe to the runtime frame stream, run a
     /// mutation, and drain the ordered frames through settlement and the view's
-    /// recompute. `mutation.session_id` is set to the opened session.
+    /// recompute. `mutation.link_id` is set to the opened link.
     pub async fn settle(
         &self,
         mut mutation: MutationRequest,
         view: ViewDescriptor,
     ) -> ViewSettlement {
         let caller = RuntimeCaller::test();
-        let session = self
+        let link = self
             .build
             .handle
-            .open_session(caller.clone())
+            .open_link(caller.clone())
             .await
-            .expect("session should open");
-        mutation.session_id = Some(session.session_id.clone());
+            .expect("link should open");
+        mutation.link_id = Some(link.link_id.clone());
 
         let snapshot = self
             .build
             .handle
-            .open_session_view(caller.clone(), session.session_id.clone(), view)
+            .open_link_view(caller.clone(), link.link_id.clone(), view)
             .await
-            .expect("session view should open");
+            .expect("link view should open");
         let view_id = snapshot.view_id.clone();
 
         let mut subscription = self
@@ -288,8 +288,8 @@ impl RuntimeHarness {
             .handle
             .subscribe_runtime_frames(
                 caller.clone(),
-                session.session_id.clone(),
-                Some(RuntimeSessionSeq::new(0)),
+                link.link_id.clone(),
+                Some(RuntimeLinkSeq::new(0)),
             )
             .await
             .expect("runtime stream should subscribe");
@@ -338,28 +338,28 @@ impl RuntimeHarness {
         }
     }
 
-    /// Open a session + view and subscribe to its frame stream, returning a
+    /// Open a link + view and subscribe to its frame stream, returning a
     /// [`ViewWatch`] that stays subscribed across an external action (e.g.
     /// [`StalwartFixture::inject`]) and drains until a snapshot satisfies a
     /// predicate. The sync-driven counterpart to mutation-centric [`settle`].
     pub async fn watch_view(&self, view: ViewDescriptor) -> ViewWatch<'_> {
         let caller = RuntimeCaller::test();
-        let session = self
+        let link = self
             .build
             .handle
-            .open_session(caller.clone())
+            .open_link(caller.clone())
             .await
-            .expect("session should open");
+            .expect("link should open");
         let snapshot = self
             .build
             .handle
-            .open_session_view(caller.clone(), session.session_id.clone(), view)
+            .open_link_view(caller.clone(), link.link_id.clone(), view)
             .await
-            .expect("session view should open");
+            .expect("link view should open");
         let mut subscription = self
             .build
             .handle
-            .subscribe_runtime_frames(caller, session.session_id, Some(RuntimeSessionSeq::new(0)))
+            .subscribe_runtime_frames(caller, link.link_id, Some(RuntimeLinkSeq::new(0)))
             .await
             .expect("runtime stream should subscribe");
         let frames = std::mem::take(&mut subscription.catch_up);
@@ -450,7 +450,7 @@ impl<'a> ViewWatch<'a> {
         );
     }
 
-    /// Assert `session_seq` is strictly increasing across the captured frames.
+    /// Assert `link_seq` is strictly increasing across the captured frames.
     pub fn assert_seq_monotonic(&self) {
         assert_frames_seq_monotonic(&self.frames);
     }
@@ -590,7 +590,7 @@ impl ViewSettlement {
         );
     }
 
-    /// Assert `session_seq` is strictly increasing across the captured frames.
+    /// Assert `link_seq` is strictly increasing across the captured frames.
     pub fn assert_seq_monotonic(&self) {
         assert_frames_seq_monotonic(&self.frames);
     }
@@ -599,11 +599,11 @@ impl ViewSettlement {
 fn assert_frames_seq_monotonic(frames: &[RuntimeFrame]) {
     let mut last: Option<u64> = None;
     for frame in frames {
-        let seq = frame.session_seq().get();
+        let seq = frame.link_seq().get();
         if let Some(prev) = last {
             assert!(
                 seq > prev,
-                "session_seq went backward or stalled: {prev} -> {seq}"
+                "link_seq went backward or stalled: {prev} -> {seq}"
             );
         }
         last = Some(seq);

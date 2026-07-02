@@ -2,36 +2,36 @@ import { getRuntimeAdapter } from './adapter'
 import type {
   RuntimeFrameHandlers,
   RuntimeFrameSubscriptionRequest,
-  RuntimeOpenSessionRequest,
+  RuntimeOpenLinkRequest,
   RuntimeOpenViewResult,
   RuntimeRunMutationRequest,
-  RuntimeSessionObjectViewRequest,
-  RuntimeSessionViewExtendRequest,
-  RuntimeSessionViewRequest,
+  RuntimeLinkObjectViewRequest,
+  RuntimeLinkViewExtendRequest,
+  RuntimeLinkViewRequest,
   RuntimeUnsubscribe,
 } from './types'
 
 export const runtimeStream = {
-  openSession(request: RuntimeOpenSessionRequest) {
-    return getRuntimeAdapter().openRuntimeSession(request)
+  openLink(request: RuntimeOpenLinkRequest) {
+    return getRuntimeAdapter().openRuntimeLink(request)
   },
-  closeSession(sessionId: string, sourceId?: string | null) {
-    return getRuntimeAdapter().closeRuntimeSession({ sessionId, sourceId })
+  closeLink(linkId: string, sourceId?: string | null) {
+    return getRuntimeAdapter().closeRuntimeLink({ linkId, sourceId })
   },
-  openMessageListView(request: RuntimeSessionViewRequest) {
-    return getRuntimeAdapter().openRuntimeSessionMessageListView(request)
+  openMessageListView(request: RuntimeLinkViewRequest) {
+    return getRuntimeAdapter().openRuntimeLinkMessageListView(request)
   },
-  openView<TData = unknown>(request: RuntimeSessionObjectViewRequest) {
-    return getRuntimeAdapter().openRuntimeSessionView(request) as Promise<
+  openView<TData = unknown>(request: RuntimeLinkObjectViewRequest) {
+    return getRuntimeAdapter().openRuntimeLinkView(request) as Promise<
       RuntimeOpenViewResult<TData>
     >
   },
-  extendView(request: RuntimeSessionViewExtendRequest) {
-    return getRuntimeAdapter().extendRuntimeSessionView(request)
+  extendView(request: RuntimeLinkViewExtendRequest) {
+    return getRuntimeAdapter().extendRuntimeLinkView(request)
   },
-  closeView(sessionId: string, viewId: string, sourceId?: string | null) {
-    return getRuntimeAdapter().closeRuntimeSessionView({
-      sessionId,
+  closeView(linkId: string, viewId: string, sourceId?: string | null) {
+    return getRuntimeAdapter().closeRuntimeLinkView({
+      linkId,
       viewId,
       sourceId,
     })

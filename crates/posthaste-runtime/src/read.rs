@@ -392,7 +392,7 @@ mod tests {
     use posthaste_authority_server_link::{
         BaseAssertion, BaseUpdate, SequencedFrame,
     };
-    use posthaste_link_core::MessageFoldState;
+    use posthaste_replica_core::MessageFoldState;
     use serde_json::json;
 
     fn summary(id: &str) -> MessageSummary {
@@ -551,15 +551,15 @@ mod tests {
         // base assertion (the remote seam). The assertion fed below carries
         // the flag, so the absorption-gated retire drops it.
         let outbox = Arc::new(crate::near_node::RuntimeAuthorityServerOutbox::new(true));
-        outbox.accept(posthaste_link_core::PendingMessageMutation {
-            id: posthaste_link_core::MutationId("op1".into()),
+        outbox.accept(posthaste_replica_core::PendingMessageMutation {
+            id: posthaste_replica_core::MutationId("op1".into()),
             key: "m1".into(),
-            effect: posthaste_link_core::MessageAssertion::SetKeywords {
+            effect: posthaste_replica_core::MessageAssertion::SetKeywords {
                 add: vec!["$flagged".into()],
                 remove: vec![],
             },
         });
-        outbox.settle_receipt(&posthaste_link_core::MutationId("op1".into()), true);
+        outbox.settle_receipt(&posthaste_replica_core::MutationId("op1".into()), true);
         assert_eq!(
             outbox.snapshot().len(),
             1,

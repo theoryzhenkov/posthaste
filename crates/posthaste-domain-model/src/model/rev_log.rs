@@ -2,7 +2,7 @@ use super::*;
 
 /// One reversible-operation step in the per-account `rev_log` — the Phase 2
 /// server-authoritative undo/redo log. The `diff` is a `MessageChangeDiff`
-/// JSON, opaque at this layer: the semantics live in `posthaste-link-core` /
+/// JSON, opaque at this layer: the semantics live in `posthaste-replica-core` /
 /// the client. The store holds it as JSON text; the `RevLog` synced view mirrors
 /// it to every device.
 ///

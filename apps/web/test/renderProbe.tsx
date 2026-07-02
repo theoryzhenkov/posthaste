@@ -42,8 +42,8 @@ import {
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
 } from '../src/runtime/adapter'
-import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
-import { runtimeSessionClient } from '../src/runtime/sessionClient'
+import { resetRuntimeLinkClientForTesting } from '../src/runtime/linkClient'
+import { runtimeLinkClient } from '../src/runtime/linkClient'
 import {
   createFakeRuntimeAdapter,
   type FakeRuntimeAdapter,
@@ -65,13 +65,15 @@ let cachedFactory: EntityStoreHandleFactory | undefined
 async function loadRealHandleFactory(): Promise<EntityStoreHandleFactory> {
   cachedFactory ??= await (async () => {
     const mod = (await import(
-      join(WASM_DIR, 'posthaste_link_wasm.js')
+      join(WASM_DIR, 'posthaste_client_node_wasm.js')
     )) as unknown as {
       initSync(input: { module: BufferSource }): unknown
       EntityStoreHandle: new () => EntityStoreHandle
     }
     mod.initSync({
-      module: readFileSync(join(WASM_DIR, 'posthaste_link_wasm_bg.wasm')),
+      module: readFileSync(
+        join(WASM_DIR, 'posthaste_client_node_wasm_bg.wasm'),
+      ),
     })
     return () => new mod.EntityStoreHandle()
   })()
@@ -90,7 +92,7 @@ const OPERATION = {
   operationId: 'op_1',
   operationKind: 'mail.list',
   operationSource: 'test',
-  sessionId: 'sess',
+  linkId: 'sess',
 }
 const PREPARED_QUERY = {
   query: undefined,
@@ -299,7 +301,7 @@ export class RenderProbe {
   readonly queryClient: QueryClient
   readonly fakeBase: FakeRuntimeAdapter
   readonly viewId: string
-  /** Every frame that reached the session client (tap for diagnosis). */
+  /** Every frame that reached the link client (tap for diagnosis). */
   readonly frames: RuntimeFrame<RuntimeMailListViewState>[] = []
   private frameTap?: () => void
 
@@ -329,8 +331,8 @@ export class RenderProbe {
     })
     const fakeBase = createFakeRuntimeAdapter()
     const viewId = 'v1'
-    fakeBase.queueRuntimeSession({ sessionId: 'sess' })
-    fakeBase.queueRuntimeSessionMessageListView({
+    fakeBase.queueRuntimeLinkConnection({ linkId: 'sess' })
+    fakeBase.queueRuntimeLinkMessageListView({
       viewId,
       snapshot: viewSnapshot(viewId, opts.rows, opts.sourceId ?? 's'),
     })
@@ -369,8 +371,8 @@ export class RenderProbe {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0))
     })
-    // Tap the session-client stream for diagnosis (what reaches the hook).
-    probe.frameTap = runtimeSessionClient.subscribe({
+    // Tap the link-client stream for diagnosis (what reaches the hook).
+    probe.frameTap = runtimeLinkClient.subscribe({
       onFrame: (f) =>
         probe.frames.push(f as RuntimeFrame<RuntimeMailListViewState>),
     })
@@ -443,7 +445,7 @@ export class RenderProbe {
     this.frameTap?.()
     this.unmountFn()
     this.restoreAdapter()
-    resetRuntimeSessionClientForTesting()
+    resetRuntimeLinkClientForTesting()
     resetRuntimeAdapterForTesting()
   }
 }
@@ -499,7 +501,7 @@ export function viewReplaceFrame(
 ): RuntimeFrame<RuntimeMailListViewState> {
   return {
     type: 'viewReplace',
-    sessionSeq: 2,
+    linkSeq: 2,
     viewId,
     revision,
     snapshot: viewSnapshot(viewId, rows, sourceId),
@@ -514,7 +516,7 @@ export function messageUpdatedFrame(
 ): RuntimeFrame<RuntimeMailListViewState> {
   return {
     type: 'notification',
-    sessionSeq: 100,
+    linkSeq: 100,
     kind: 'message.updated',
     payload: {
       seq: 1,
@@ -533,7 +535,7 @@ export function mutationNotificationFrame(
 ): RuntimeFrame<RuntimeMailListViewState> {
   return {
     type: 'mutationNotification',
-    sessionSeq: 5,
+    linkSeq: 5,
     clientMutationId,
     notification:
       verdict === 'confirmed'

@@ -5,8 +5,8 @@
  * {@link loadEntityStoreHandleFactory}; tests substitute an in-memory fake.
  *
  * Values cross the boundary as JSON strings (camelCase, externally-tagged) —
- * the wire contract is pinned by `entity_store::tests` in `posthaste-link-replica`
- * + the end-to-end handle tests in `posthaste-link-wasm`.
+ * the wire contract is pinned by `entity_store::tests` in `posthaste-replica-projector`
+ * + the end-to-end handle tests in `posthaste-client-node-wasm`.
  *
  * @spec docs/eph/DESIGN-L2-client-link-reactive-store (2e)
  */
@@ -31,7 +31,7 @@ export interface KeywordDelta {
 
 /**
  * An invertible change-diff over a message's mutable state: keywords + mailbox
- * membership, each an add/remove pair. Mirrors `posthaste-link-core`'s
+ * membership, each an add/remove pair. Mirrors `posthaste-replica-core`'s
  * `MessageChangeDiff`; the canonical inverse is computed in WASM via
  * {@link ../wasmUtil#invertMessageChangeDiff}.
  */
@@ -93,7 +93,7 @@ let cachedEntityStoreFactory: Promise<EntityStoreHandleFactory> | undefined
  */
 export function loadEntityStoreHandleFactory(): Promise<EntityStoreHandleFactory> {
   cachedEntityStoreFactory ??= (async () => {
-    const module = await import('../wasm/posthaste_link_wasm.js')
+    const module = await import('../wasm/posthaste_client_node_wasm.js')
     await module.default()
     return () => new module.EntityStoreHandle() as EntityStoreHandle
   })()

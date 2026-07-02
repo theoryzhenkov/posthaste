@@ -1,11 +1,11 @@
 /**
- * Typed wrappers for the `posthaste-link-wasm` JSON-string boundary.
+ * Typed wrappers for the `posthaste-client-node-wasm` JSON-string boundary.
  *
  * These helpers load and initialize the WASM module once, and translate
  * between runtime contract JSON and the TS discriminated unions the adapter
  * already uses.
  *
- * @spec docs/replication/client-link/L2#3-the-wasm-boundary-posthaste-link-wasm
+ * @spec docs/replication/client-link/L2#3-the-wasm-boundary-posthaste-client-node-wasm
  */
 import type { MessageChangeDiff, ReplicaAssertion } from './handle'
 
@@ -20,7 +20,7 @@ export interface NearEndWasmHandle {
   connect(): Promise<unknown>
   disconnect(): Promise<unknown>
   forward(requestJson: string): Promise<string>
-  sessionId(): string | undefined
+  linkId(): string | undefined
   cursor(): number | undefined
   free(): void
 }
@@ -53,14 +53,14 @@ export function loadLinkWasmModule(): Promise<WasmModule> {
 async function loadWasmModule(): Promise<WasmModule> {
   wasmModulePromise ??= (async () => {
     const module =
-      (await import('../wasm/posthaste_link_wasm.js')) as unknown as WasmModule
+      (await import('../wasm/posthaste_client_node_wasm.js')) as unknown as WasmModule
     if (typeof (globalThis as Record<string, unknown>).Bun !== 'undefined') {
       // Bun test environment: avoid happy-dom's fetch by reading the wasm
       // binary directly. Once initSync() runs, default() is a no-op.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fs = (await import('node:fs')) as any
       const wasmPath = new URL(
-        '../wasm/posthaste_link_wasm_bg.wasm',
+        '../wasm/posthaste_client_node_wasm_bg.wasm',
         import.meta.url,
       ).pathname
       module.initSync({ module: fs.readFileSync(wasmPath) })

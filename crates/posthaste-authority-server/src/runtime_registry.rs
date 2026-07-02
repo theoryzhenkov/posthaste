@@ -341,7 +341,7 @@ mod tests {
     use super::*;
     use posthaste_authority_server_link::WireSettlementOutcome;
     use posthaste_contract_core::RuntimeErrorCode;
-    use posthaste_link_core::MutationId;
+    use posthaste_replica_core::MutationId;
 
     fn rid(s: &str) -> AuthorityServerLinkId {
         AuthorityServerLinkId(s.to_string())

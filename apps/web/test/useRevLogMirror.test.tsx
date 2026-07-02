@@ -22,7 +22,7 @@ import {
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
 } from '../src/runtime/adapter'
-import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
+import { resetRuntimeLinkClientForTesting } from '../src/runtime/linkClient'
 import type { RuntimeViewSnapshot } from '../src/runtime/types'
 import { setupDomEnvironment } from './dom-env'
 
@@ -74,18 +74,18 @@ beforeEach(() => {
   setRuntimeAdapterForTesting(runtimeAdapter)
   store = new MemoryUndoHistoryStore()
   setUndoHistoryStoreForTesting(store)
-  runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+  runtimeAdapter.queueRuntimeLinkConnection({ linkId: 'link-1' })
 })
 
 afterEach(() => {
-  resetRuntimeSessionClientForTesting()
+  resetRuntimeLinkClientForTesting()
   resetRuntimeAdapterForTesting()
   resetUndoHistoryStoreForTesting()
 })
 
 describe('useRevLogMirror (Phase 2 RevLog view → store reconciliation)', () => {
   it('opens the revLog view + adopts the initial snapshot', async () => {
-    runtimeAdapter.queueRuntimeSessionView({
+    runtimeAdapter.queueRuntimeLinkView({
       viewId: 'view-1',
       snapshot: viewSnapshot('view-1', revLogSnapshot(['a', 'b'], 'b')),
     })
@@ -103,14 +103,14 @@ describe('useRevLogMirror (Phase 2 RevLog view → store reconciliation)', () =>
     expect(store.snapshot('primary').cursor).toBe(1) // b
 
     // The view was opened with family 'revLog' + the accountId payload.
-    expect(runtimeAdapter.runtimeSessionObjectViewOpenCalls).toHaveLength(1)
-    expect(
-      runtimeAdapter.runtimeSessionObjectViewOpenCalls[0].descriptor,
-    ).toEqual({ family: 'revLog', payload: { accountId: 'primary' } })
+    expect(runtimeAdapter.runtimeLinkObjectViewOpenCalls).toHaveLength(1)
+    expect(runtimeAdapter.runtimeLinkObjectViewOpenCalls[0].descriptor).toEqual(
+      { family: 'revLog', payload: { accountId: 'primary' } },
+    )
   })
 
   it('reconciles viewReplace frames (cross-device updates)', async () => {
-    runtimeAdapter.queueRuntimeSessionView({
+    runtimeAdapter.queueRuntimeLinkView({
       viewId: 'view-1',
       snapshot: viewSnapshot('view-1', revLogSnapshot(['a'], 'a')),
     })
@@ -126,7 +126,7 @@ describe('useRevLogMirror (Phase 2 RevLog view → store reconciliation)', () =>
     // Another device appended step 'b' + the cursor advanced to it.
     runtimeAdapter.emitRuntimeFrame({
       type: 'viewReplace',
-      sessionSeq: 2,
+      linkSeq: 2,
       viewId: 'view-1',
       revision: 2,
       snapshot: viewSnapshot('view-1', revLogSnapshot(['a', 'b'], 'b')),
@@ -146,6 +146,6 @@ describe('useRevLogMirror (Phase 2 RevLog view → store reconciliation)', () =>
       wrapper: ({ children }: { children: ReactNode }) => children as ReactNode,
     })
     // No view opened; the store stays empty.
-    expect(runtimeAdapter.runtimeSessionObjectViewOpenCalls).toHaveLength(0)
+    expect(runtimeAdapter.runtimeLinkObjectViewOpenCalls).toHaveLength(0)
   })
 })

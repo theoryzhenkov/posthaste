@@ -149,22 +149,22 @@ async fn conversation_views_filter_on_source_id() {
 }
 
 #[tokio::test]
-async fn runtime_session_routes_filter_on_source_id() {
+async fn runtime_link_routes_filter_on_source_id() {
     let t = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
     for (method, path) in [
         ("POST", "/v1/runtime/sessions?sourceId=acct-a"),
-        ("DELETE", "/v1/runtime/sessions/session-1?sourceId=acct-a"),
+        ("DELETE", "/v1/runtime/sessions/link-1?sourceId=acct-a"),
         (
             "GET",
-            "/v1/runtime/sessions/session-1/stream?sourceId=acct-a",
+            "/v1/runtime/sessions/link-1/stream?sourceId=acct-a",
         ),
         (
             "POST",
-            "/v1/runtime/sessions/session-1/views?sourceId=acct-a",
+            "/v1/runtime/sessions/link-1/views?sourceId=acct-a",
         ),
         (
             "DELETE",
-            "/v1/runtime/sessions/session-1/views/view-1?sourceId=acct-a",
+            "/v1/runtime/sessions/link-1/views/view-1?sourceId=acct-a",
         ),
     ] {
         assert_eq!(
@@ -175,24 +175,24 @@ async fn runtime_session_routes_filter_on_source_id() {
     }
     for (method, path) in [
         ("POST", "/v1/runtime/sessions?sourceId=acct-b"),
-        ("DELETE", "/v1/runtime/sessions/session-1?sourceId=acct-b"),
+        ("DELETE", "/v1/runtime/sessions/link-1?sourceId=acct-b"),
         (
             "GET",
-            "/v1/runtime/sessions/session-1/stream?sourceId=acct-b",
+            "/v1/runtime/sessions/link-1/stream?sourceId=acct-b",
         ),
         (
             "POST",
-            "/v1/runtime/sessions/session-1/views?sourceId=acct-b",
+            "/v1/runtime/sessions/link-1/views?sourceId=acct-b",
         ),
         (
             "DELETE",
-            "/v1/runtime/sessions/session-1/views/view-1?sourceId=acct-b",
+            "/v1/runtime/sessions/link-1/views/view-1?sourceId=acct-b",
         ),
         ("POST", "/v1/runtime/sessions"),
-        ("DELETE", "/v1/runtime/sessions/session-1"),
-        ("GET", "/v1/runtime/sessions/session-1/stream"),
-        ("POST", "/v1/runtime/sessions/session-1/views"),
-        ("DELETE", "/v1/runtime/sessions/session-1/views/view-1"),
+        ("DELETE", "/v1/runtime/sessions/link-1"),
+        ("GET", "/v1/runtime/sessions/link-1/stream"),
+        ("POST", "/v1/runtime/sessions/link-1/views"),
+        ("DELETE", "/v1/runtime/sessions/link-1/views/view-1"),
     ] {
         assert_eq!(
             status(&t, method, path).await,
@@ -203,13 +203,13 @@ async fn runtime_session_routes_filter_on_source_id() {
 }
 
 #[tokio::test]
-async fn runtime_session_mutation_route_filters_on_source_id_and_tag_action() {
+async fn runtime_link_mutation_route_filters_on_source_id_and_tag_action() {
     let t = mint_with_caveats(&test_root_key(), &["action = tag", "account = acct-a"]);
     assert_eq!(
         status(
             &t,
             "POST",
-            "/v1/runtime/sessions/session-1/mutations?sourceId=acct-a",
+            "/v1/runtime/sessions/link-1/mutations?sourceId=acct-a",
         )
         .await,
         StatusCode::OK
@@ -218,13 +218,13 @@ async fn runtime_session_mutation_route_filters_on_source_id_and_tag_action() {
         status(
             &t,
             "POST",
-            "/v1/runtime/sessions/session-1/mutations?sourceId=acct-b",
+            "/v1/runtime/sessions/link-1/mutations?sourceId=acct-b",
         )
         .await,
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        status(&t, "POST", "/v1/runtime/sessions/session-1/mutations").await,
+        status(&t, "POST", "/v1/runtime/sessions/link-1/mutations").await,
         StatusCode::FORBIDDEN
     );
 
@@ -233,7 +233,7 @@ async fn runtime_session_mutation_route_filters_on_source_id_and_tag_action() {
         status(
             &read_only,
             "POST",
-            "/v1/runtime/sessions/session-1/mutations?sourceId=acct-a",
+            "/v1/runtime/sessions/link-1/mutations?sourceId=acct-a",
         )
         .await,
         StatusCode::FORBIDDEN

@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use posthaste_link_core::{MessageAssertion, MessageChangeDiff};
+use posthaste_replica_core::{MessageAssertion, MessageChangeDiff};
 
 use crate::mutation_args::{
     keyword_toggle, MessageApplyDiffArgs, MessageMailboxMembershipArgs, MessageMoveToMailboxArgs,
@@ -136,7 +136,7 @@ impl MailOperation {
         })
     }
 
-    /// The pure projection of this operation into link-core's fold vocabulary
+    /// The pure projection of this operation into replica-core's fold vocabulary
     /// (D34 (b)) — the single local-effect derivation both the client's
     /// optimistic fold (wasm) and the runtime near node's outbox fold consume,
     /// so the two can never drift. `None` for operations with no local effect
@@ -188,7 +188,7 @@ impl MailOperation {
             // Membership deltas fold as an ApplyDiff over the mailbox facet.
             MailOperation::AddToMailbox(args) => Some(MessageAssertion::ApplyDiff {
                 diff: MessageChangeDiff {
-                    mailboxes: posthaste_link_core::KeywordDelta {
+                    mailboxes: posthaste_replica_core::KeywordDelta {
                         added: vec![args.mailbox_id.clone()],
                         removed: Vec::new(),
                     },
@@ -197,7 +197,7 @@ impl MailOperation {
             }),
             MailOperation::RemoveFromMailbox(args) => Some(MessageAssertion::ApplyDiff {
                 diff: MessageChangeDiff {
-                    mailboxes: posthaste_link_core::KeywordDelta {
+                    mailboxes: posthaste_replica_core::KeywordDelta {
                         added: Vec::new(),
                         removed: vec![args.mailbox_id.clone()],
                     },
@@ -222,7 +222,7 @@ impl MailOperation {
 /// Hand-written OpenAPI schema: the operation flattens into [`MutationRequest`]
 /// as the top-level `name` (string) + `args` (open object) pair, matching the
 /// wire the TS client builds. A typed `oneOf` over every arg struct would drag
-/// `utoipa::ToSchema` through link-core (a wasm-pure frontier crate) for no
+/// `utoipa::ToSchema` through replica-core (a wasm-pure frontier crate) for no
 /// client gain — the client constructs these payloads by hand, not from the
 /// generated schema.
 #[cfg(feature = "openapi")]

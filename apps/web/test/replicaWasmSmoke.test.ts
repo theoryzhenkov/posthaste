@@ -15,8 +15,8 @@ import { join } from 'node:path'
  * runs this file, while the general `frontend` job has no artifact and skips.
  */
 const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
-const loaderPath = join(wasmDir, 'posthaste_link_wasm.js')
-const binaryPath = join(wasmDir, 'posthaste_link_wasm_bg.wasm')
+const loaderPath = join(wasmDir, 'posthaste_client_node_wasm.js')
+const binaryPath = join(wasmDir, 'posthaste_client_node_wasm_bg.wasm')
 
 const artifactsPresent = existsSync(loaderPath) && existsSync(binaryPath)
 

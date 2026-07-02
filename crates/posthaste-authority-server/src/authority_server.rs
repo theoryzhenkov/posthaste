@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use posthaste_domain_model::{now_iso8601, AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck, ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot, SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger, TagSummary, EVENT_TOPIC_REV_LOG_APPENDED};
 use posthaste_domain_service::{MailService, MailStore, SharedGateway};
-use posthaste_link_core::{MessageChangeDiff, MessageFoldState};
+use posthaste_replica_core::{MessageChangeDiff, MessageFoldState};
 use posthaste_observability::{events, ph_warn};
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
@@ -46,7 +46,7 @@ use posthaste_authority_server_link::{
 };
 use posthaste_contract_core::mutation_args::keyword_toggle;
 use posthaste_contract_core::MailOperation;
-use posthaste_link_core::MutationId;
+use posthaste_replica_core::MutationId;
 
 /// The authority server far node ([replication authority-server-link L1 §3](../replication/authority-server-link/L1.md)): owns the
 /// service + store + the live-account supervisor + the event publisher, and
