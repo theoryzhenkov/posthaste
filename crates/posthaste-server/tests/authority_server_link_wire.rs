@@ -16,7 +16,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_authority_server_link::{
-    AuthorityServerLink, BaseAssertion, BaseUpdate, AuthorityServerFrame, DownStream, LinkCoverage, AuthorityServerLinkId,
+    AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkHandle,
+    AuthorityServerLinkId, BaseAssertion, BaseUpdate, DownStream, LinkCoverage,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_contract_core::{
@@ -27,7 +28,12 @@ use posthaste_runtime::RemoteAuthorityServer;
 use posthaste_authority_server::{link_router, LinkAuth};
 
 /// A far node that records the forwarded mutation and serves one base assertion.
+/// The Api half is all defaults (this stub carries no read channel); every real
+/// transport implements the pair (D33).
 struct StubFarNode;
+
+#[async_trait]
+impl AuthorityServerApi for StubFarNode {}
 
 #[async_trait]
 impl AuthorityServerLink for StubFarNode {
@@ -61,7 +67,10 @@ impl AuthorityServerLink for StubFarNode {
 }
 
 async fn serve_far_node() -> String {
-    let router = link_router(Arc::new(StubFarNode), LinkAuth::Disabled);
+    let router = link_router(
+        AuthorityServerLinkHandle::new(Arc::new(StubFarNode)),
+        LinkAuth::Disabled,
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -132,9 +141,10 @@ async fn remote_transport_reads_the_link_router_down_channel() {
 fn link_router_merges_under_a_v1_nest_without_route_conflict() {
     let api: axum::Router =
         axum::Router::new().route("/sources", axum::routing::get(|| async { "ok" }));
-    let _app: axum::Router = axum::Router::new()
-        .nest("/v1", api)
-        .merge(link_router(Arc::new(StubFarNode), LinkAuth::Disabled));
+    let _app: axum::Router = axum::Router::new().nest("/v1", api).merge(link_router(
+        AuthorityServerLinkHandle::new(Arc::new(StubFarNode)),
+        LinkAuth::Disabled,
+    ));
 }
 
 // A far node that captures the `AuthorityServerLinkId` the link router threaded into
@@ -144,6 +154,9 @@ fn link_router_merges_under_a_v1_nest_without_route_conflict() {
 struct CapturingFarNode {
     seen_runtime_id: Mutex<Option<String>>,
 }
+
+#[async_trait]
+impl AuthorityServerApi for CapturingFarNode {}
 
 #[async_trait]
 impl AuthorityServerLink for CapturingFarNode {
@@ -185,7 +198,7 @@ async fn link_router_threads_the_authed_runtime_id_into_forward_mutation_for() {
     });
     // X = 1: one runtime, "rt-1", authenticated by token "t1".
     let router = link_router(
-        node.clone(),
+        AuthorityServerLinkHandle::new(node.clone()),
         LinkAuth::PerRuntime(HashMap::from([(
             "t1".to_string(),
             AuthorityServerLinkId::new("rt-1"),

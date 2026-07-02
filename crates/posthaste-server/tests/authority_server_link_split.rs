@@ -27,12 +27,16 @@ use posthaste_domain_service::{
     SecretStore, SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
     SyncObject, ThreadId,
 };
-use posthaste_authority_server_link::{AuthorityServerLink, AuthorityServerFrame, LinkCoverage, AuthorityServerLinkId};
+use posthaste_authority_server_link::{
+    AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkId,
+    LinkCoverage,
+};
 use posthaste_client_link::RuntimeLink;
+use posthaste_contract_core::mutation_args::MessageSetKeywordsMutationArgs;
 use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
-    MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,
-    SecretWriteMutation, ViewDescriptor,
+    MailOperation, MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest,
+    RuntimeCaller, SecretWriteMutation, ViewDescriptor,
 };
 use posthaste_runtime::{build_remote_runtime, AuthorityServerTransportConfig, RemoteAuthorityServer, RuntimeBuildConfig};
 use posthaste_runtime_api::{RuntimeAccountApi, RuntimeMailReadApi};
@@ -146,7 +150,7 @@ fn seed_inbox_message(
 }
 
 async fn serve_link(authority_server: &posthaste_authority_server::AuthorityServerBuild) -> String {
-    let router = link_router(authority_server.authority_server_link.transport().clone(), LinkAuth::Disabled);
+    let router = link_router(authority_server.authority_server_link.clone(), LinkAuth::Disabled);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -305,7 +309,7 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
         .expect("seed applies");
 
     // Serve the authority server's in-process link over the wire.
-    let router = link_router(authority_server.authority_server_link.transport().clone(), LinkAuth::Disabled);
+    let router = link_router(authority_server.authority_server_link.clone(), LinkAuth::Disabled);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -383,9 +387,11 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
     );
 }
 
-// The macro-generated wire (one method per `for_each_link_op!` row) round-trips
-// a read and a write end to end: production `RemoteAuthorityServer` (generated client)
-// -> `link_router` (generated handler) -> in-process `AuthorityServer`.
+// The macro-generated wire (one method per `for_each_link_api_op!` row) plus
+// the M5b direct-apply command bridge round-trip a read and a write end to end:
+// production `RemoteAuthorityServer` (generated client + `apply` dispatch)
+// -> `link_router` (generated handler / preserved per-command route)
+// -> in-process `AuthorityServer`.
 //
 // spec: docs/replication/authority-server-link/L2#2-backendapi-implementations-localbackend-remotebackend
 #[tokio::test]
@@ -413,18 +419,20 @@ async fn generated_wire_round_trips_a_read_and_a_write() {
         "the generated read should see the authority server's account"
     );
 
-    // Generated WRITE over the wire: flag the seeded message at the authority server.
+    // Typed WRITE over the wire: flag the seeded message at the authority
+    // server through the single direct-apply entry (M5b — `apply(op)` rides the
+    // preserved per-command route).
     transport
-        .set_keywords(
-            account.id.clone(),
-            MessageId::from("m-wire"),
-            SetKeywordsCommand {
+        .apply(MailOperation::SetKeywords(MessageSetKeywordsMutationArgs {
+            source_id: account.id.as_str().to_string(),
+            message_id: "m-wire".to_string(),
+            command: SetKeywordsCommand {
                 add: vec!["$flagged".to_string()],
                 remove: Vec::new(),
             },
-        )
+        }))
         .await
-        .expect("set_keywords over the link");
+        .expect("apply(set-keywords) over the link");
 
     // The write hit the authoritative store: a point read reflects it.
     let summary = transport
@@ -456,7 +464,7 @@ async fn link_auth_requires_a_matching_bearer_token() {
 
     // Serve the link behind a required bearer token.
     let router = link_router(
-        authority_server.authority_server_link.transport().clone(),
+        authority_server.authority_server_link.clone(),
         LinkAuth::PerRuntime(HashMap::from([(
             "s3cret-link-token".to_string(),
             AuthorityServerLinkId::new("rt-test"),
@@ -629,7 +637,7 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
 
     // Serve the link behind per-runtime auth: one runtime, "rt-1", token "t1".
     let router = link_router(
-        authority_server.authority_server_link.transport().clone(),
+        authority_server.authority_server_link.clone(),
         LinkAuth::PerRuntime(HashMap::from([(
             "t1".to_string(),
             AuthorityServerLinkId::new("rt-1"),

@@ -358,8 +358,7 @@ mod rev_log_view_tests {
     use crate::near_node::RuntimeAuthorityServerOutbox;
     use crate::read::ReadCache;
     use async_trait::async_trait;
-    use posthaste_authority_server_link::{AuthorityServerLink, DownStream, LinkCoverage};
-    use posthaste_contract_core::{MutationReceipt, MutationRequest};
+    use posthaste_authority_server_link::AuthorityServerApi;
     use posthaste_domain_service::{AccountId, RevCursor, RevLogSnapshot, RevLogStep};
     use serde_json::{json, Value};
 
@@ -371,21 +370,7 @@ mod rev_log_view_tests {
     }
 
     #[async_trait]
-    impl AuthorityServerLink for RevLogStubAuthorityServerLink {
-        async fn forward_mutation(
-            &self,
-            _mutation: MutationRequest,
-        ) -> Result<MutationReceipt, RuntimeError> {
-            Err(RuntimeError::internal(
-                "rev_log view test is read-only",
-                None,
-            ))
-        }
-
-        async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-            Ok(Box::pin(futures_util::stream::empty()))
-        }
-
+    impl AuthorityServerApi for RevLogStubAuthorityServerLink {
         async fn rev_log_snapshot(
             &self,
             _account_id: AccountId,
