@@ -10,8 +10,6 @@ use posthaste_domain_service::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::DaemonRuntimeTuning;
-
 mod app;
 mod automation;
 mod enum_maps;
