@@ -675,6 +675,16 @@ signatures DIFFER-BECAUSE-CALLER-ARITY — `RuntimeLink` threads per-call
 fan-in). A shared supertrait would force one shape onto both — contortion.
 **Same-name convention stands; no supertrait.**
 
+### 6.12 M9a review findings (wf_f2d75ef5, opus-verified; the D49 worklist)
+
+8 CONFIRMED + 2 PLAUSIBLE (29 candidates, 2 refuted). Clusters:
+**Gap recovery broken** — [0] Lagged frames never recorded (backlog written in the delivery loop, after the lossy hop → no seq gap, no resync; local_authority_server.rs:533); [1] Resume::Collapse is log-only, no wire signal (:512); [5] resume(after>highest) returns Replay(empty), should Collapse (replay.rs:142).
+**Sessions atomicity regressions** — [2] settle can complete between catch-up snapshot and stream subscribe → verdict lost; retryable-Failed clear makes it permanent (sessions.rs:189); [4] accept races close_session → orphaned eviction-exempt Pending, unbounded leak (:385); [7] retryable-Failed one-shot verdict window (:447, PLAUSIBLE).
+**Leaks** — [6] AS never purges dedup/replay for departed runtimes (runtime_registry.rs:195); [9] sink reaper exempts never-subscribed sinks (sink.rs:57).
+**Wire robustness** — [3] version-skew freezes silently (malformed frame = keepalive; link_wire.rs:474); [8] concurrent down-streams per id split the broadcast (:501, PLAUSIBLE).
+
+| D49 | **M9a fix design** (2026-07-02). (a) Record-at-emission: replay_record moves before the broadcast send — backlog complete by construction; client-side gap detection (engine sees seq>last+1 → resubscribe after_seq=last); Sequenced gains a Reset{highest_seq} control variant emitted on Collapse — engine surfaces it, near node evicts coverage + refetches; after>highest → Collapse. (b) Ordering fixes: settle = ledger-then-broadcast, subscribe = subscribe-then-snapshot (duplicate delivery is idempotent); accept = insert-then-revalidate-session (self-sweep on race). (c) D48 lands here: resume(after_seq) is the ack; terminal records evict on settlement_seq<=acked, TTL tick fallback, generous safety-valve cap, uniform Confirmed/Rejected — subsumes [7] and the M9b2 cap knob. Departure = sink-reaper event purges ALL per-link state ([6]); sinks reap on age regardless of subscription ([9]). (d) N consecutive malformed frames → permanent-class error + Degraded status ([3]); per-LinkId generation counter supersedes prior down-stream ([8]). | X; XIV; VIII | accepted |
+
 ## 7. Drain map (Phase 3 worklist)
 
 Revised specs land at the same relative paths the stale tree mirrors
