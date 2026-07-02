@@ -50,7 +50,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
                 .expect("failed to build authority runtime");
             let link_transport = daemon
                 .link_serve
-                .then(|| build.authority_server_link.transport().clone());
+                .then(|| build.authority_server_link.clone());
             (
                 build.handle,
                 build.shutdown,

@@ -26,9 +26,8 @@ use posthaste_contract_core::{
     ViewRevision,
 };
 use posthaste_domain_service::{
-    AccountId, AddToMailboxCommand, AppSettings, CommandAck, DomainEvent, EventFilter, MailboxId,
-    MailboxSummary, MessageId, Operation, OperationId, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SendMessageRequest, SmartMailboxId, SyncMode,
+    AccountId, AppSettings, CommandAck, DomainEvent, EventFilter, MailboxId, MailboxSummary,
+    MessageId, Operation, OperationId, SendMessageRequest, SmartMailboxId, SyncMode,
 };
 use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_link_core::{MutationId, PendingMessageMutation};
@@ -793,81 +792,19 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     /// a dedup ledger; the replica path (`forward_mutation`) is where per-op
     /// idempotency lives.
     ///
-    /// Only the typed command subset the REST surface emits is dispatched here;
-    /// operations that exist solely on the optimistic forward path (role moves,
-    /// snooze/unsnooze, applyDiff, the `revCursor` control op) have no direct
-    /// authority command and are rejected — they must flow through
-    /// `forward_mutation`.
+    /// The op flows typed through `AuthorityServerApi::apply` (M5b): the
+    /// op→command dispatch lives with the link contract
+    /// (`MailCommandRequest::from_operation`), which also rejects operations
+    /// that exist solely on the optimistic forward path (role moves,
+    /// snooze/unsnooze, applyDiff, the `revCursor` control op) — those must
+    /// flow through `forward_mutation`.
     async fn apply(
         &self,
         _caller: RuntimeCaller,
         op: MailOperation,
     ) -> Result<CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        let account = AccountId(op.account_id().to_string());
-        let message = op
-            .message_id()
-            .map(|id| MessageId(id.to_string()))
-            .ok_or_else(|| {
-                RuntimeError::invalid_mutation(format!(
-                    "operation '{}' has no direct-apply command surface",
-                    op.name()
-                ))
-            })?;
-        match op {
-            MailOperation::SetKeywords(args) => {
-                self.core
-                    .authority_server_link
-                    .set_keywords(account, message, args.command)
-                    .await
-            }
-            MailOperation::ReplaceMailboxes(args) => {
-                self.core
-                    .authority_server_link
-                    .replace_mailboxes(
-                        account,
-                        message,
-                        ReplaceMailboxesCommand {
-                            mailbox_ids: args.mailbox_ids.into_iter().map(MailboxId).collect(),
-                        },
-                    )
-                    .await
-            }
-            MailOperation::AddToMailbox(args) => {
-                self.core
-                    .authority_server_link
-                    .add_to_mailbox(
-                        account,
-                        message,
-                        AddToMailboxCommand {
-                            mailbox_id: MailboxId(args.mailbox_id),
-                        },
-                    )
-                    .await
-            }
-            MailOperation::RemoveFromMailbox(args) => {
-                self.core
-                    .authority_server_link
-                    .remove_from_mailbox(
-                        account,
-                        message,
-                        RemoveFromMailboxCommand {
-                            mailbox_id: MailboxId(args.mailbox_id),
-                        },
-                    )
-                    .await
-            }
-            MailOperation::Destroy(_) => {
-                self.core
-                    .authority_server_link
-                    .destroy_message(account, message)
-                    .await
-            }
-            other => Err(RuntimeError::invalid_mutation(format!(
-                "operation '{}' has no direct-apply command surface; forward it as a mutation",
-                other.name()
-            ))),
-        }
+        self.core.authority_server_link.apply(op).await
     }
 }
 
@@ -1014,24 +951,15 @@ mod outbox_lifecycle_tests {
     use super::*;
     use posthaste_contract_core::ClientMutationId;
     use posthaste_domain_service::MessageSummary;
-    use posthaste_authority_server_link::{AuthorityServerLink, DownStream, LinkCoverage};
+    use posthaste_authority_server_link::AuthorityServerApi;
 
-    // A never-invoked `AuthorityServerLink`: the outbox-lifecycle paths under test touch
-    // only the session registry, never the authority server, so the stub's methods are
-    // inert. (Only the 4 non-defaulted trait methods need bodies; the rest
-    // inherit defaults.)
+    // A never-invoked authority-server Api half: the outbox-lifecycle paths
+    // under test touch only the session registry, never the authority server,
+    // so the stub's methods are inert. (Only the reads the view registry may
+    // touch get bodies; the rest inherit the erroring defaults.)
     struct NoopAuthorityServerLink;
     #[async_trait]
-    impl AuthorityServerLink for NoopAuthorityServerLink {
-        async fn forward_mutation(
-            &self,
-            _: MutationRequest,
-        ) -> Result<MutationReceipt, RuntimeError> {
-            unimplemented!("outbox-lifecycle tests do not dispatch")
-        }
-        async fn subscribe(&self, _: LinkCoverage) -> Result<DownStream, RuntimeError> {
-            Ok(Box::pin(futures_util::stream::empty()))
-        }
+    impl AuthorityServerApi for NoopAuthorityServerLink {
         async fn query_mail_page(
             &self,
             _: MailQueryRequest,

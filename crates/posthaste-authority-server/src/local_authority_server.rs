@@ -1,4 +1,5 @@
-//! `LocalAuthorityServer`: the in-process [`AuthorityServerLink`] implementation.
+//! `LocalAuthorityServer`: the in-process implementation of the far-node trait
+//! pair ([`AuthorityServerApi`] + [`AuthorityServerLink`], D33).
 //!
 //! The default ([replication authority-server-link L2 §2](../replication/authority-server-link/L2.md)):
 //! direct calls to a co-located [`AuthorityServer`] far node, zero serialization, instant
@@ -14,23 +15,23 @@ use async_trait::async_trait;
 use tokio::sync::broadcast;
 
 use posthaste_domain_service::{
-    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
-    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
-    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot,
-    SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, ConversationId,
+    ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId, MailboxSummary,
+    MessageDetail, MessageId, MessageSummary, Operation, OperationId, ReplyContext,
+    RevLogSnapshot, SendMessageRequest, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
     SyncMode, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_authority_server_link::{
-    AuthorityServerLink, BaseAssertion, BaseUpdate, AuthorityServerFrame, DownStream, LinkCoverage, AuthorityServerLinkId,
+    AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkId,
+    BaseAssertion, BaseUpdate, DownStream, LinkCoverage, MailCommandRequest,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
-    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
-    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest, PatchAccountMutation,
-    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
-    RuntimeResourceBytes,
+    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
+    MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
+    PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList,
+    RuntimeError, RuntimeResourceBytes,
 };
 
 use crate::authority_server::AuthorityServer;
@@ -145,6 +146,71 @@ impl AuthorityServerLink for LocalAuthorityServer {
     /// assertions; a co-located runtime that derives views from the cache is the
     /// W3-paired step (in-process the cache equals the store, so the view read
     /// path is unchanged today, keeping `colocated-unchanged`).
+    async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+        Ok(self.build_down_stream(&self.runtime_id))
+    }
+
+    /// Down-channel, runtime-aware: a remote runtime (via `link_router`)
+    /// subscribes under its credential-derived `AuthorityServerLinkId`; the co-located path
+    /// uses [`subscribe`](Self::subscribe) with this node's minted id. Both merge
+    /// the broadcast `Base` with this runtime's routed `Settlement`s.
+    async fn subscribe_for(
+        &self,
+        runtime_id: &AuthorityServerLinkId,
+        _coverage: LinkCoverage,
+    ) -> Result<DownStream, RuntimeError> {
+        Ok(self.build_down_stream(runtime_id))
+    }
+
+    async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
+        self.authority_server.discard_operation(operation_id)
+    }
+
+    async fn retry_operation(
+        &self,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.authority_server.retry_operation(account_id, operation_id).await
+    }
+}
+
+#[async_trait]
+impl AuthorityServerApi for LocalAuthorityServer {
+    /// Direct-apply a mail operation (D34): project it onto its typed command
+    /// via the shared bridge ([`MailCommandRequest::from_operation`], which also
+    /// rejects replica-only operations) and dispatch to the co-located far
+    /// node's command surface.
+    async fn apply(&self, op: MailOperation) -> Result<CommandAck, RuntimeError> {
+        match MailCommandRequest::from_operation(op)? {
+            MailCommandRequest::SetKeywords(request) => {
+                self.authority_server
+                    .set_keywords(request.account_id, request.message_id, request.command)
+                    .await
+            }
+            MailCommandRequest::AddToMailbox(request) => {
+                self.authority_server
+                    .add_to_mailbox(request.account_id, request.message_id, request.command)
+                    .await
+            }
+            MailCommandRequest::RemoveFromMailbox(request) => {
+                self.authority_server
+                    .remove_from_mailbox(request.account_id, request.message_id, request.command)
+                    .await
+            }
+            MailCommandRequest::ReplaceMailboxes(request) => {
+                self.authority_server
+                    .replace_mailboxes(request.account_id, request.message_id, request.command)
+                    .await
+            }
+            MailCommandRequest::Destroy(request) => {
+                self.authority_server
+                    .destroy(request.account_id, request.message_id)
+                    .await
+            }
+        }
+    }
+
     /// Read channel: serve the co-located authority server's query computation directly.
     /// This is what a remote runtime reads through to (via `link_router`).
     async fn query_mail_page(
@@ -278,58 +344,6 @@ impl AuthorityServerLink for LocalAuthorityServer {
             .await
     }
 
-    async fn set_keywords(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: SetKeywordsCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.authority_server
-            .set_keywords(account_id, message_id, command)
-            .await
-    }
-
-    async fn add_to_mailbox(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: AddToMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.authority_server
-            .add_to_mailbox(account_id, message_id, command)
-            .await
-    }
-
-    async fn remove_from_mailbox(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: RemoveFromMailboxCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.authority_server
-            .remove_from_mailbox(account_id, message_id, command)
-            .await
-    }
-
-    async fn replace_mailboxes(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        command: ReplaceMailboxesCommand,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.authority_server
-            .replace_mailboxes(account_id, message_id, command)
-            .await
-    }
-
-    async fn destroy_message(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-    ) -> Result<CommandAck, RuntimeError> {
-        self.authority_server.destroy(account_id, message_id).await
-    }
-
     async fn set_mailbox_role(
         &self,
         account_id: AccountId,
@@ -364,18 +378,6 @@ impl AuthorityServerLink for LocalAuthorityServer {
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
         self.authority_server.delete_draft(account_id, draft_id).await
-    }
-
-    async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
-        self.authority_server.discard_operation(operation_id)
-    }
-
-    async fn retry_operation(
-        &self,
-        account_id: AccountId,
-        operation_id: OperationId,
-    ) -> Result<(), RuntimeError> {
-        self.authority_server.retry_operation(account_id, operation_id).await
     }
 
     async fn sync_account(
@@ -464,22 +466,6 @@ impl AuthorityServerLink for LocalAuthorityServer {
 
     async fn reload_config(&self) -> Result<(), RuntimeError> {
         self.authority_server.reload_config().await
-    }
-
-    async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
-        Ok(self.build_down_stream(&self.runtime_id))
-    }
-
-    /// Down-channel, runtime-aware: a remote runtime (via `link_router`)
-    /// subscribes under its credential-derived `AuthorityServerLinkId`; the co-located path
-    /// uses [`subscribe`](Self::subscribe) with this node's minted id. Both merge
-    /// the broadcast `Base` with this runtime's routed `Settlement`s.
-    async fn subscribe_for(
-        &self,
-        runtime_id: &AuthorityServerLinkId,
-        _coverage: LinkCoverage,
-    ) -> Result<DownStream, RuntimeError> {
-        Ok(self.build_down_stream(runtime_id))
     }
 }
 

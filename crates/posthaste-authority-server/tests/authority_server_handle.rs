@@ -2213,8 +2213,10 @@ async fn zero_event_channel_capacity_returns_typed_build_error() {
 
 /// An authority server link transport whose up-channel blocks until released — a test seam
 /// for observing the runtime's outbox overlay while a mutation is in flight.
+/// Wraps the real transport pair (`AuthorityServerLinkHandle`, D33) and
+/// implements both trait halves, intercepting only the Link half's up-channel.
 struct DeferredTransport {
-    inner: Arc<dyn posthaste_authority_server_link::AuthorityServerLink>,
+    inner: posthaste_authority_server_link::AuthorityServerLinkHandle,
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
 }
@@ -2248,7 +2250,10 @@ impl posthaste_authority_server_link::AuthorityServerLink for DeferredTransport 
     ) -> Result<posthaste_authority_server_link::DownStream, posthaste_contract_core::RuntimeError> {
         self.inner.subscribe(coverage).await
     }
+}
 
+#[async_trait::async_trait]
+impl posthaste_authority_server_link::AuthorityServerApi for DeferredTransport {
     // Everything other than the gated up-channel delegates to the real authority server,
     // so setup (account creation) hits the live store the local reads observe.
     // (forward_mutation deliberately does *not* delegate: it confirms without
@@ -2287,11 +2292,13 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
             // Decorate the real in-process transport: gate the up-channel, delegate the
             // rest (so account-creation setup reaches the live authority server).
             .with_authority_server_transport_override(move |inner| {
-                Arc::new(DeferredTransport {
-                    inner,
-                    entered: entered_for_transport,
-                    release: release_for_transport,
-                })
+                posthaste_authority_server_link::AuthorityServerLinkHandle::new(Arc::new(
+                    DeferredTransport {
+                        inner,
+                        entered: entered_for_transport,
+                        release: release_for_transport,
+                    },
+                ))
             });
     let build = build_authority_server(config)
         .await
