@@ -1048,10 +1048,50 @@ mod outbox_lifecycle_tests {
         );
     }
 
-    // Outbox C: a `Failed` (Rejected) verdict is retired only by delivering its
-    // frame — the base never absorbs a rejection — so it must NOT be evicted by
-    // the `Confirmed` pruning cap. Otherwise a disconnect-stranded client never
-    // reverts its optimistic row (no recovery path).
+    // D47 (runtime seam): a transient (retryable) `Failed` settlement CLEARS the
+    // dedup ledger entry, so a deliberate retry with the same `ClientMutationId`
+    // re-accepts as New and re-executes. The former path kept every failure and
+    // deduped the retry into the stale failure — this is the runtime-seam half of
+    // D47's fix, landing in the shared dedup sub-store.
+    #[tokio::test]
+    async fn retryable_failure_clears_the_ledger_so_a_retry_re_executes() {
+        let sessions = test_session_registry();
+        let caller = RuntimeCaller::test();
+        let session = sessions
+            .open_session(caller.clone())
+            .expect("session opens");
+        let session_id = session.session_id;
+        let cmid = ClientMutationId::new("retry-cmid");
+        let mid = accept(&sessions, &caller, &session_id, &cmid);
+        sessions
+            .settle_mutation(
+                &session_id,
+                &mid,
+                MutationSettlementState::Failed,
+                Some(
+                    RuntimeError::retryable(
+                        RuntimeErrorCode::TransportDisconnected,
+                        "link transiently down",
+                    )
+                    .envelope()
+                    .clone(),
+                ),
+                serde_json::Value::Null,
+            )
+            .unwrap();
+        assert!(
+            sessions.mutation_state(&session_id, &cmid).is_none(),
+            "a transient failure clears the ledger entry"
+        );
+        // `accept` asserts the retry re-accepts as New (re-executes); it would
+        // panic if the retry deduped into the cleared failure.
+        let _ = accept(&sessions, &caller, &session_id, &cmid);
+    }
+
+    // Outbox C / D47 (permanent rejection): a non-retryable `Failed` verdict is
+    // KEPT and exempt from the `Confirmed` eviction window — a rejection is
+    // retired only by delivering its frame (the base never absorbs it), so a
+    // disconnect-stranded client can always revert its optimistic row.
     #[tokio::test]
     async fn rejected_verdict_survives_the_confirmed_eviction_window() {
         let sessions = test_session_registry();

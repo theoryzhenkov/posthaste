@@ -22,6 +22,7 @@ posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
+posthaste-link-far-end = { path = "../posthaste-link-far-end" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }
