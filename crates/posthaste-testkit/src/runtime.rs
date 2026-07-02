@@ -20,12 +20,13 @@ use posthaste_domain_service::{
     ProviderAuthKind, ProviderHint, SecretRef, SecretStore, SecretStoreError, SyncBatch,
     SyncCursor, SyncObject,
 };
-use posthaste_runtime_contract::{
+use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLinkOps};
+use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MutationNotification,
-    MutationReceipt, MutationRequest, RuntimeCaller, RuntimeCore, RuntimeFrame,
-    RuntimeFrameSubscription, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation,
-    ViewDescriptor, ViewId, ViewSnapshot,
+    MutationReceipt, MutationRequest, RuntimeCaller, RuntimeFrame, RuntimeSessionSeq,
+    SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewId, ViewSnapshot,
 };
+use posthaste_runtime_api::RuntimeAccountApi;
 
 use crate::fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
 
@@ -37,7 +38,7 @@ const SETTLE_GRACE: Duration = Duration::from_millis(80);
 /// An in-process authority runtime on disposable roots.
 ///
 /// Built by [`Harness::with_runtime`](crate::Harness::with_runtime). Exposes
-/// the [`RuntimeCore`](posthaste_runtime_contract::RuntimeCore) handle, the
+/// the [`RuntimeApi`](posthaste_runtime_api::RuntimeApi) handle, the
 /// store (for direct seeding), the event bus, and the
 /// [`settle`](Self::settle) recorder.
 pub struct RuntimeHarness {
@@ -49,7 +50,7 @@ impl RuntimeHarness {
         Self { build }
     }
 
-    /// The cloneable runtime handle (implements `RuntimeCore`).
+    /// The cloneable runtime handle (implements the runtime-api + client-link surfaces).
     pub fn core(&self) -> RuntimeHandle {
         self.build.handle.clone()
     }

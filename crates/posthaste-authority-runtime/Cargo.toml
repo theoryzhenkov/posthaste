@@ -36,10 +36,11 @@ uuid = { workspace = true }
 [dev-dependencies]
 axum = { workspace = true }
 # The authority-runtime test harness (tests/authority_runtime_handle.rs) drives
-# the near node through the RuntimeCore trait + RuntimeCaller, so it needs
-# runtime-contract (the trait surface). Production code is type-only and uses
-# posthaste-contract-core directly (RFC D5).
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
+# the near node through the runtime-api + client-link traits + RuntimeCaller,
+# so it needs both trait surfaces (the RuntimeCore split, RFC D7/D23).
+# Production code is type-only and uses posthaste-contract-core directly (D5).
+posthaste-client-link = { path = "../posthaste-client-link" }
+posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 tokio = { workspace = true, features = ["net"] }
 tokio-stream = { workspace = true }
 

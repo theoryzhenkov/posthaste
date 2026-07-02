@@ -1,0 +1,34 @@
+[package]
+name = "posthaste-runtime-api"
+version = "0.1.0"
+edition = "2021"
+
+# The typed, wire-free client-facing domain RPC extracted from `RuntimeCore`
+# (RFC-L2-architecture-cleanup D7/D23): the 41 of 52 `RuntimeCore` methods that
+# return serde domain types, never frames/streams. Split into four narrow
+# traits along change-cadence so a subset consumer (e.g. `oauth_routes`) can
+# depend on just `&dyn RuntimeAccountApi`; an umbrella `RuntimeApi` supertrait
+# (blanket-impl'd) keeps `AppState` at one object. Depends on `contract-core`
+# for `RuntimeCaller` + the wire return types, and `domain-model` for the domain
+# types — both wasm-pure, so this crate is serde-only (no tokio/reqwest/...).
+# The 5 per-command message RPCs stay as-is here; their D21 collapse into one
+# `apply_mail_operation` lands at M5, not M3.
+
+[lib]
+name = "posthaste_runtime_api"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+posthaste-contract-core = { path = "../posthaste-contract-core" }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
+serde = { workspace = true }
+
+[features]
+default = []
+# Forwarded to contract-core so consumers enabling `runtime-api/openapi`
+# (api, server) still get the ToSchema derives on the wire/domain return types.
+openapi = ["posthaste-contract-core/openapi"]
+
+[lints]
+workspace = true

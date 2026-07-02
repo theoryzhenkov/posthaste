@@ -22,10 +22,12 @@ dirs = { workspace = true }
 keyring = { workspace = true }
 macaroon = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }
+posthaste-client-link = { path = "../posthaste-client-link" }
+posthaste-contract-core = { path = "../posthaste-contract-core", features = ["openapi"] }
 posthaste-domain-service = { path = "../posthaste-domain-service", features = ["openapi"] }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime = { path = "../posthaste-runtime" }
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract", features = ["openapi"] }
+posthaste-runtime-api = { path = "../posthaste-runtime-api", features = ["openapi"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 tokio-rustls = { workspace = true }

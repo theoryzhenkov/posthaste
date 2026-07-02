@@ -76,6 +76,84 @@ pub struct RuntimeSession {
     pub session_id: RuntimeSessionId,
 }
 
+/// The identity + capabilities of whoever is calling the runtime surface. Shared
+/// by both trait crates extracted from `RuntimeCore` (`posthaste-runtime-api` and
+/// `posthaste-client-link`) so they share one caller vocabulary without an edge
+/// between them (RFC-L2-architecture-cleanup D7/D23 — RuntimeCaller lives in the
+/// shared vocabulary crate).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCaller {
+    pub session_id: Option<RuntimeSessionId>,
+    pub capabilities: RuntimeCallerCapabilities,
+    pub account_scope: Option<Vec<String>>,
+    pub operation_source: RuntimeOperationSource,
+    pub correlation_id: Option<String>,
+}
+
+impl RuntimeCaller {
+    pub fn system() -> Self {
+        Self {
+            session_id: None,
+            capabilities: RuntimeCallerCapabilities::default(),
+            account_scope: None,
+            operation_source: RuntimeOperationSource::System,
+            correlation_id: None,
+        }
+    }
+
+    pub fn api() -> Self {
+        Self {
+            operation_source: RuntimeOperationSource::Api,
+            ..Self::system()
+        }
+    }
+
+    pub fn test() -> Self {
+        Self {
+            operation_source: RuntimeOperationSource::Test,
+            ..Self::system()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCallerCapabilities {
+    #[serde(default)]
+    pub actions: Vec<RuntimeCapability>,
+    /// The caller's session can apply incremental mail-list view deltas
+    /// ([`RuntimeFrame::ViewDelta`]) rather than whole-view replaces. When set,
+    /// the runtime sends only the rows that changed instead of re-serializing
+    /// the entire view on each recompute ([replication client-link L1](../../replication/client-link/L1.md)).
+    /// Default `false`, so a client that does not understand deltas keeps
+    /// receiving whole `ViewReplace` frames.
+    #[serde(default)]
+    pub view_delta: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeCapability {
+    Read,
+    Manage,
+    Send,
+    Tag,
+    Move,
+    Delete,
+    Resource,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeOperationSource {
+    System,
+    Api,
+    Desktop,
+    Renderer,
+    Test,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]

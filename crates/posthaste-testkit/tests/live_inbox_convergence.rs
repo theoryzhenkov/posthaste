@@ -15,12 +15,11 @@ mod common;
 
 use std::time::Duration;
 
-use posthaste_runtime_contract::{
-    AccountScopeRequest, MailListViewState, RuntimeCaller, RuntimeCore,
-};
+use posthaste_contract_core::{AccountScopeRequest, MailListViewState, RuntimeCaller};
+use posthaste_runtime_api::RuntimeMailReadApi;
 use posthaste_testkit::{Harness, StalwartFixture};
 
-fn mail_list_rows(snapshot: &posthaste_runtime_contract::ViewSnapshot) -> usize {
+fn mail_list_rows(snapshot: &posthaste_contract_core::ViewSnapshot) -> usize {
     serde_json::from_value::<MailListViewState>(snapshot.data.clone())
         .expect("snapshot data should be mail list state")
         .rows

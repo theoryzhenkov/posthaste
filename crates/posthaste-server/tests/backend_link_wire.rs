@@ -20,7 +20,7 @@ use posthaste_link_contract::{
     BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, RuntimeId,
 };
 use posthaste_link_core::MessageFoldState;
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationRequest, MutationSettlementState, RuntimeError,
     RuntimeMutationId,
 };

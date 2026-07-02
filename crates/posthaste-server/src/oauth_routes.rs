@@ -14,7 +14,8 @@ use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use posthaste_domain_service::{AccountConnectionOverview, AccountId, ServiceError};
-use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore, RuntimeError};
+use posthaste_contract_core::{RuntimeCaller, RuntimeError};
+use posthaste_runtime_api::RuntimeAccountApi;
 
 use axum::http::StatusCode;
 use posthaste_api::api::{

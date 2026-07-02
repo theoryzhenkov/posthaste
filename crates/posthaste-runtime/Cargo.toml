@@ -17,11 +17,13 @@ async-stream = "0.3"
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 keyring = { workspace = true }
+posthaste-client-link = { path = "../posthaste-client-link" }
+posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
+posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

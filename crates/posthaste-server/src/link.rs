@@ -32,7 +32,7 @@ use posthaste_link_contract::{
     BackendApi, DownFrame, LinkCoverage, RuntimeId, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
-use posthaste_runtime_contract::{
+use posthaste_contract_core::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
 };
 use serde::Deserialize;
@@ -217,7 +217,7 @@ macro_rules! emit_link_routes {
                 State(state): State<LinkState>,
                 Json(req): Json<posthaste_link_contract::$req>,
             ) -> Result<Json<$ret>, ApiError> {
-                let result: Result<$ret, posthaste_runtime_contract::RuntimeError> =
+                let result: Result<$ret, posthaste_contract_core::RuntimeError> =
                     state.transport.$method($(req.$field),*).await;
                 result.map(Json).map_err(ApiError::from_runtime_error)
             }
