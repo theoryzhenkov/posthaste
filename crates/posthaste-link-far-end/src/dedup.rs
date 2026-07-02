@@ -1,4 +1,4 @@
-//! The idempotency-dedup sub-store (RFC D45/D47).
+//! The idempotency-dedup sub-store (RFC D45/D47/D48).
 //!
 //! One keyed ledger of `(LinkId, ClientMutationId)` → a caller-owned record,
 //! shared by both far-ends: a near node dedups its clients' mutations; the
@@ -8,20 +8,30 @@
 //! double-apply; `settle` records the terminal outcome under the **D47
 //! terminal-class rule**:
 //!
-//! - [`TerminalClass::Confirmed`] — success. The record is kept and joins the
-//!   per-link bounded eviction window ([`DEFAULT_TERMINAL_CAPACITY`]).
+//! - [`TerminalClass::Confirmed`] — success. The record is kept so a duplicate
+//!   re-observes the confirmation.
 //! - [`TerminalClass::Rejected`] — a permanent verdict (validation/authz). The
-//!   record is kept and exempt from the eviction window, so a reconnecting
-//!   subscriber always re-observes it; a duplicate `ClientMutationId` returns
-//!   the same verdict and never re-executes.
+//!   record is kept so a duplicate returns the same verdict and never re-executes.
 //! - [`TerminalClass::Failed`] — a transient execution error. The record is
 //!   **cleared** on settlement, so a deliberate retry re-accepts as
 //!   [`Accept::New`] and re-executes.
 //!
-//! This split (D47) fixes both seams' former half-wrong behavior in one place:
-//! the runtime seam used to keep transient failures (a retry deduped into the
-//! stale failure), and the authority server seam used to clear everything (a
-//! retry re-executed a permanent rejection). Pending records are never evicted.
+//! **Retention is time-and-acknowledgment bounded, not count bounded (D48).** A
+//! kept terminal record (Confirmed OR Rejected, uniformly) evicts when either:
+//!
+//! - (a) the subscriber's **resume cursor** has passed the settlement frame's seq
+//!   ([`ack`](DedupStore::ack), fed from the replay store's resume calls — the ack
+//!   signal M9a already tracks), i.e. the client has demonstrably seen the verdict; or
+//! - (b) its **age** exceeds a tick-driven TTL ([`reap`](DedupStore::reap),
+//!   reusing the sink reaper's tick), which must dominate the near-end engine's
+//!   retry horizon (4 attempts / 30s cap) so a retry never outlives the record.
+//!
+//! A generous per-link hard cap ([`DEFAULT_TERMINAL_CAPACITY`]) remains only as a
+//! flood safety valve. This replaces the M9a per-class count windows and the
+//! M9b2 Rejected-cap knob: retention protects retry-dedup and verdict
+//! re-observation, both bounded by time-and-acknowledgment, not count (a count
+//! cap breaks dedup under burst — when retries are likeliest — and hoards when
+//! idle). Pending records are never evicted.
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
@@ -29,27 +39,27 @@ use std::sync::Mutex;
 
 use posthaste_contract_core::ClientMutationId;
 
-/// Default bound on retained [`TerminalClass::Confirmed`] records **per link**,
-/// preserving the cap the two hand-rolled far-ends each used (`100`). Bounds
-/// reconnect/dedup memory rather than letting it grow with a link's age.
-pub const DEFAULT_TERMINAL_CAPACITY: usize = 100;
+/// Generous per-link **safety-valve** cap on retained terminal records (Confirmed
+/// AND Rejected, uniform — D48). This is not the operative retention bound —
+/// acked-cursor eviction and the TTL are — only a flood ceiling so a pathological
+/// burst cannot grow the ledger without limit. Sized thousands, not the M9a `100`.
+pub const DEFAULT_TERMINAL_CAPACITY: usize = 4096;
 
-/// Default per-link bound on retained [`TerminalClass::Rejected`] records for
-/// an assembly that opts into one ([`DedupStore::with_rejected_capacity`]).
-/// The V14 follow-up knob: the AS seam's links live for a runtime's whole
-/// uptime, so its Rejected ledger is bounded here; the runtime seam leaves it
-/// unbounded (a client session's lifetime bounds it naturally, and a stranded
-/// client must always be able to re-observe its rejection verdicts).
-pub const DEFAULT_REJECTED_CAPACITY: usize = 100;
+/// Default TTL for a terminal record, in the sink reaper's `now` tick units
+/// (**seconds** as the authority server drives it) — `900` = fifteen minutes.
+/// It must dominate the near-end engine's retry horizon (4 attempts, 30s backoff
+/// cap ⇒ ~2 min worst case) so a deliberate retry can never outlive the record
+/// that would dedup it; acked-cursor eviction reclaims sooner in the common case.
+pub const DEFAULT_TERMINAL_TTL: u64 = 900;
 
 /// The terminal class of a settled mutation (D47) — the keep-vs-clear verdict
 /// the assembling far-end derives from its own settlement state + error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerminalClass {
-    /// Success. The record is kept and bounded-evicted (per-link window).
+    /// Success. The record is kept (D48 retention), so a duplicate re-observes it.
     Confirmed,
-    /// A permanent verdict (validation/authz). The record is kept and exempt
-    /// from the eviction window; a duplicate re-observes it, never re-executes.
+    /// A permanent verdict (validation/authz). The record is kept; a duplicate
+    /// re-observes it, never re-executes.
     Rejected,
     /// A transient execution error. The record is cleared on settlement; a
     /// deliberate retry re-accepts as [`Accept::New`] and re-executes.
@@ -67,10 +77,25 @@ pub enum Accept<R> {
     Duplicate(R),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// A kept terminal outcome (D48): the class, the replay seq of the settlement
+/// frame this seam emitted for it (for acked-cursor eviction), and the tick it
+/// settled at (for the TTL fallback).
+#[derive(Clone, Copy)]
+struct Terminal {
+    class: TerminalClass,
+    /// The replay seq of the emitted settlement frame, if any. `None` when this
+    /// seam emits no down-frame for the class (the AS seam's Rejected — the near
+    /// node learns of it via the up-channel error, not a settlement frame), so
+    /// acked-cursor eviction never fires for it and the TTL/cap govern alone.
+    settlement_seq: Option<u64>,
+    /// The reaper tick at which it settled — drives the TTL fallback.
+    settled_at: u64,
+}
+
+#[derive(Clone, Copy)]
 enum Status {
     Pending,
-    Terminal(TerminalClass),
+    Terminal(Terminal),
 }
 
 struct Entry<R> {
@@ -80,40 +105,39 @@ struct Entry<R> {
 
 struct LinkLedger<R> {
     entries: HashMap<ClientMutationId, Entry<R>>,
-    /// `Confirmed` terminals in settlement order, for bounded eviction. Pending,
-    /// `Rejected`, and (already-removed) `Failed` records never appear here.
-    confirmed_order: VecDeque<ClientMutationId>,
-    /// `Rejected` terminals in settlement order — populated (and pruned) only
-    /// when the assembly bounds its Rejected window
-    /// ([`DedupStore::with_rejected_capacity`]).
-    rejected_order: VecDeque<ClientMutationId>,
+    /// Terminal keys (Confirmed AND Rejected, uniform — D48) in settlement order,
+    /// for the safety-valve cap. Pending and cleared `Failed` never appear.
+    terminal_order: VecDeque<ClientMutationId>,
 }
 
 impl<R> LinkLedger<R> {
     fn new() -> Self {
         Self {
             entries: HashMap::new(),
-            confirmed_order: VecDeque::new(),
-            rejected_order: VecDeque::new(),
+            terminal_order: VecDeque::new(),
         }
     }
 
     fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Drop a key from the ledger (entry + settlement-order bookkeeping).
+    fn drop_key(&mut self, key: &ClientMutationId) {
+        self.entries.remove(key);
+        self.terminal_order.retain(|k| k != key);
+    }
 }
 
 /// The shared idempotency-dedup ledger, generic over the seam's `LinkId` and the
-/// caller-owned record `R`. Keyed `(LinkId, ClientMutationId)`; eviction is
-/// per-link so one busy link never evicts another's window.
+/// caller-owned record `R`. Keyed `(LinkId, ClientMutationId)`; retention is
+/// per-link, time-and-acknowledgment bounded (D48).
 pub struct DedupStore<LinkId, R> {
     links: Mutex<HashMap<LinkId, LinkLedger<R>>>,
+    /// Per-link safety-valve cap (D48) — not the operative bound.
     capacity: usize,
-    /// Per-link bound on retained `Rejected` terminals. `None` = unbounded
-    /// (the runtime seam: the link is a client session, whose lifetime bounds
-    /// the ledger); `Some` = a settlement-order eviction window (the AS seam:
-    /// links live for a runtime's uptime — V14 follow-up).
-    rejected_capacity: Option<usize>,
+    /// Terminal-record TTL in reaper ticks (D48).
+    ttl: u64,
 }
 
 impl<LinkId, R> DedupStore<LinkId, R>
@@ -121,28 +145,23 @@ where
     LinkId: Clone + Eq + Hash,
     R: Clone,
 {
-    /// A store with the default per-link `Confirmed` retention cap
-    /// ([`DEFAULT_TERMINAL_CAPACITY`]) and an unbounded `Rejected` window.
+    /// A store with the default safety-valve cap and TTL (D48).
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_TERMINAL_CAPACITY)
     }
 
-    /// A store with an explicit per-link `Confirmed` retention cap and an
-    /// unbounded `Rejected` window.
+    /// A store with an explicit per-link safety-valve cap and the default TTL.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             links: Mutex::new(HashMap::new()),
-            capacity,
-            rejected_capacity: None,
+            capacity: capacity.max(1),
+            ttl: DEFAULT_TERMINAL_TTL,
         }
     }
 
-    /// Bound the per-link `Rejected` retention window (settlement-order
-    /// eviction, like the `Confirmed` window). For assemblies whose links
-    /// outlive any client session (the AS seam); leaving it unbounded is
-    /// correct where the link's own lifetime bounds the ledger.
-    pub fn with_rejected_capacity(mut self, capacity: usize) -> Self {
-        self.rejected_capacity = Some(capacity);
+    /// Override the terminal-record TTL (reaper ticks).
+    pub fn with_ttl(mut self, ttl: u64) -> Self {
+        self.ttl = ttl;
         self
     }
 
@@ -175,15 +194,20 @@ where
         Accept::New
     }
 
-    /// Settle a reserved record under the D47 terminal-class rule. `update`
-    /// writes the verdict payload into the stored record before the class rule
-    /// applies (for `Failed` it is not called — the record is cleared). A
+    /// Settle a reserved record under the D47 terminal-class rule with D48
+    /// retention. `update` writes the verdict payload into the stored record
+    /// before the class rule applies (for `Failed` it is not called — the record
+    /// is cleared). `settlement_seq` is the replay seq of the settlement frame
+    /// emitted for this mutation (the ack target), or `None` when this seam emits
+    /// none for the class. `now` is the reaper tick the TTL counts from. A
     /// missing key is a no-op (already evicted or cleared).
     pub fn settle(
         &self,
         link: &LinkId,
         client_mutation_id: &ClientMutationId,
         class: TerminalClass,
+        settlement_seq: Option<u64>,
+        now: u64,
         update: impl FnOnce(&mut R),
     ) {
         let mut links = self.lock();
@@ -193,34 +217,85 @@ where
         match class {
             TerminalClass::Failed => {
                 // Transient: clear the record so a deliberate retry re-executes.
-                ledger.entries.remove(client_mutation_id);
+                ledger.drop_key(client_mutation_id);
             }
-            TerminalClass::Rejected => {
+            // Confirmed and Rejected are retained uniformly (D48): stamped with
+            // the settlement seq + tick, subject to acked-cursor / TTL / cap
+            // eviction all the same. The only D47 distinction is keep-vs-clear
+            // (both keep) and what a duplicate re-observes.
+            TerminalClass::Confirmed | TerminalClass::Rejected => {
                 if let Some(entry) = ledger.entries.get_mut(client_mutation_id) {
                     update(&mut entry.record);
-                    entry.status = Status::Terminal(TerminalClass::Rejected);
-                    // Kept and exempt from the `Confirmed` window (recovery
-                    // path); an assembly may bound Rejected retention with its
-                    // own window (V14 follow-up knob).
-                    if let Some(capacity) = self.rejected_capacity {
-                        ledger.rejected_order.push_back(client_mutation_id.clone());
-                        prune_rejected(ledger, capacity);
-                    }
+                    entry.status = Status::Terminal(Terminal {
+                        class,
+                        settlement_seq,
+                        settled_at: now,
+                    });
+                    ledger.terminal_order.push_back(client_mutation_id.clone());
+                    prune_capacity(ledger, self.capacity);
                 }
-            }
-            TerminalClass::Confirmed => {
-                let Some(entry) = ledger.entries.get_mut(client_mutation_id) else {
-                    return;
-                };
-                update(&mut entry.record);
-                entry.status = Status::Terminal(TerminalClass::Confirmed);
-                ledger.confirmed_order.push_back(client_mutation_id.clone());
-                prune_confirmed(ledger, self.capacity);
             }
         }
         if ledger.is_empty() {
             links.remove(link);
         }
+    }
+
+    /// Acked-cursor eviction (D48 (a)): the subscriber's resume cursor passed
+    /// `cursor`, so every kept terminal whose settlement frame the subscriber has
+    /// now demonstrably seen (`settlement_seq <= cursor`) is reclaimed. Wired from
+    /// the replay store's resume calls — resume(after_seq) IS the ack.
+    pub fn ack(&self, link: &LinkId, cursor: u64) {
+        let mut links = self.lock();
+        let Some(ledger) = links.get_mut(link) else {
+            return;
+        };
+        let evict: Vec<ClientMutationId> = ledger
+            .entries
+            .iter()
+            .filter_map(|(key, entry)| match entry.status {
+                Status::Terminal(Terminal {
+                    settlement_seq: Some(seq),
+                    ..
+                }) if seq <= cursor => Some(key.clone()),
+                _ => None,
+            })
+            .collect();
+        for key in evict {
+            ledger.drop_key(&key);
+        }
+        if ledger.is_empty() {
+            links.remove(link);
+        }
+    }
+
+    /// TTL fallback eviction (D48 (b)): drop every terminal record older than the
+    /// TTL, driven by the explicit `now` tick (the sink reaper's tick — reused, so
+    /// dedup TTL and sink expiry share one cadence). Returns the number reaped.
+    pub fn reap(&self, now: u64) -> usize {
+        let mut links = self.lock();
+        let ttl = self.ttl;
+        let mut reaped = 0;
+        links.retain(|_, ledger| {
+            let expired: Vec<ClientMutationId> = ledger
+                .entries
+                .iter()
+                .filter_map(|(key, entry)| match entry.status {
+                    Status::Terminal(Terminal { settled_at, .. })
+                        if now.saturating_sub(settled_at) >= ttl =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            for key in expired {
+                ledger.drop_key(&key);
+                reaped += 1;
+            }
+            !ledger.is_empty()
+        });
+        reaped
     }
 
     /// Drop a reserved pending record without recording any verdict — an atomic
@@ -230,7 +305,7 @@ where
     pub fn clear(&self, link: &LinkId, client_mutation_id: &ClientMutationId) {
         let mut links = self.lock();
         if let Some(ledger) = links.get_mut(link) {
-            ledger.entries.remove(client_mutation_id);
+            ledger.drop_key(client_mutation_id);
             if ledger.is_empty() {
                 links.remove(link);
             }
@@ -256,7 +331,7 @@ where
     ) -> Option<TerminalClass> {
         let links = self.lock();
         match links.get(link)?.entries.get(client_mutation_id)?.status {
-            Status::Terminal(class) => Some(class),
+            Status::Terminal(terminal) => Some(terminal.class),
             Status::Pending => None,
         }
     }
@@ -273,7 +348,8 @@ where
     }
 
     /// Drop every record for a link — the far-end's teardown when the link
-    /// closes (e.g. a runtime session ends).
+    /// closes (a runtime session ends / a runtime departs — the sink reaper's
+    /// departure purge, [6]).
     pub fn purge(&self, link: &LinkId) {
         self.lock().remove(link);
     }
@@ -289,37 +365,19 @@ where
     }
 }
 
-/// Evict the oldest `Confirmed` terminals once a link's window exceeds the cap.
-/// Pending / `Rejected` records never enter `confirmed_order`, so they are never
-/// touched here; an entry already removed (raced) is skipped.
-fn prune_confirmed<R>(ledger: &mut LinkLedger<R>, capacity: usize) {
-    while ledger.confirmed_order.len() > capacity {
-        let Some(oldest) = ledger.confirmed_order.pop_front() else {
+/// Enforce the per-link safety-valve cap (D48): once a link's terminal window
+/// exceeds the cap, evict the oldest terminals (settlement order). This is the
+/// flood ceiling only — acked-cursor / TTL eviction do the real reclaiming.
+fn prune_capacity<R>(ledger: &mut LinkLedger<R>, capacity: usize) {
+    while ledger.terminal_order.len() > capacity {
+        let Some(oldest) = ledger.terminal_order.pop_front() else {
             break;
         };
-        // Only evict if still a Confirmed terminal (defensive against a re-push).
+        // Only evict if still terminal (defensive against a re-push after a
+        // Failed clear + re-accept + re-settle of the same key).
         if matches!(
             ledger.entries.get(&oldest).map(|e| e.status),
-            Some(Status::Terminal(TerminalClass::Confirmed))
-        ) {
-            ledger.entries.remove(&oldest);
-        }
-    }
-}
-
-/// Evict the oldest `Rejected` terminals once a link's bounded Rejected window
-/// exceeds its cap (only assemblies that opted in via
-/// [`DedupStore::with_rejected_capacity`] ever populate `rejected_order`).
-fn prune_rejected<R>(ledger: &mut LinkLedger<R>, capacity: usize) {
-    while ledger.rejected_order.len() > capacity {
-        let Some(oldest) = ledger.rejected_order.pop_front() else {
-            break;
-        };
-        // Only evict if still a Rejected terminal (a Failed retry may have
-        // cleared + re-accepted the key since).
-        if matches!(
-            ledger.entries.get(&oldest).map(|e| e.status),
-            Some(Status::Terminal(TerminalClass::Rejected))
+            Some(Status::Terminal(_))
         ) {
             ledger.entries.remove(&oldest);
         }
@@ -334,6 +392,16 @@ mod tests {
         ClientMutationId::new(s)
     }
 
+    // Convenience: settle Confirmed with a settlement seq at tick 0.
+    fn settle_confirmed<L: Clone + Eq + Hash>(
+        store: &DedupStore<L, String>,
+        link: &L,
+        c: &ClientMutationId,
+        seq: u64,
+    ) {
+        store.settle(link, c, TerminalClass::Confirmed, Some(seq), 0, |_| {});
+    }
+
     // D47: a Failed (transient) terminal CLEARS the record, so a deliberate
     // retry re-accepts as New and re-executes.
     #[test]
@@ -343,8 +411,7 @@ mod tests {
             store.accept(&"link", &cid("op-1"), || "verdict-a".to_string()),
             Accept::New
         ));
-        store.settle(&"link", &cid("op-1"), TerminalClass::Failed, |_| {});
-        // The record is gone: the query returns None and a retry re-accepts New.
+        store.settle(&"link", &cid("op-1"), TerminalClass::Failed, None, 0, |_| {});
         assert!(store.verdict(&"link", &cid("op-1")).is_none());
         assert!(matches!(
             store.accept(&"link", &cid("op-1"), || "verdict-b".to_string()),
@@ -361,7 +428,7 @@ mod tests {
             store.accept(&"link", &cid("op-1"), || "pending".to_string()),
             Accept::New
         ));
-        store.settle(&"link", &cid("op-1"), TerminalClass::Rejected, |record| {
+        store.settle(&"link", &cid("op-1"), TerminalClass::Rejected, Some(1), 0, |record| {
             *record = "rejected-verdict".to_string();
         });
         match store.accept(&"link", &cid("op-1"), || "should-not-run".to_string()) {
@@ -374,7 +441,7 @@ mod tests {
         );
     }
 
-    // Pending dedup is unchanged by D47: a duplicate while in flight returns the
+    // Pending dedup is unchanged: a duplicate while in flight returns the
     // reserved (pending) record.
     #[test]
     fn pending_dedup_returns_the_in_flight_record() {
@@ -390,87 +457,109 @@ mod tests {
         assert!(store.terminal_class(&"link", &cid("op-1")).is_none());
     }
 
+    // D48 (a): a terminal record survives until the subscriber's resume cursor
+    // passes its settlement seq — verdict re-observation guaranteed until ack,
+    // then reclaimed. Uniform for Confirmed AND Rejected.
     #[test]
-    fn confirmed_terminals_evict_per_link_at_capacity() {
-        let store: DedupStore<&str, u64> = DedupStore::with_capacity(4);
-        for i in 0..9u64 {
-            let c = cid(&format!("op-{i}"));
-            store.accept(&"link", &c, || i);
-            store.settle(&"link", &c, TerminalClass::Confirmed, |_| {});
+    fn acked_cursor_evicts_terminals_it_has_passed() {
+        let store: DedupStore<&str, String> = DedupStore::new();
+        for (op, seq) in [("op-1", 3u64), ("op-2", 5), ("op-3", 9)] {
+            store.accept(&"link", &cid(op), || String::new());
+            settle_confirmed(&store, &"link", &cid(op), seq);
         }
-        assert!(store.verdict(&"link", &cid("op-0")).is_none(), "oldest evicted");
-        assert!(store.verdict(&"link", &cid("op-8")).is_some(), "newest kept");
-        let held = store.records_for(&"link").len();
-        assert!(held <= 4, "per-link window bounded, got {held}");
+        // Ack up to seq 5: op-1 (seq 3) and op-2 (seq 5) are seen and reclaimed;
+        // op-3 (seq 9) is not yet acked and is still re-observable.
+        store.ack(&"link", 5);
+        assert!(store.verdict(&"link", &cid("op-1")).is_none(), "acked, reclaimed");
+        assert!(store.verdict(&"link", &cid("op-2")).is_none(), "acked (== cursor)");
+        assert!(store.verdict(&"link", &cid("op-3")).is_some(), "not yet acked");
     }
 
+    // D48 (a) uniform: a Rejected verdict with a settlement seq is acked-evicted
+    // just like a Confirmed one (the runtime seam emits a notification frame for
+    // rejections, so they carry a seq).
     #[test]
-    fn per_link_windows_are_independent() {
-        let store: DedupStore<&str, u64> = DedupStore::with_capacity(2);
-        for link in ["a", "b"] {
-            for i in 0..2u64 {
-                let c = cid(&format!("{link}-{i}"));
-                store.accept(&link, &c, || i);
-                store.settle(&link, &c, TerminalClass::Confirmed, |_| {});
-            }
-        }
-        // Filling link "a" past its cap must not evict link "b".
-        for i in 2..5u64 {
-            let c = cid(&format!("a-{i}"));
-            store.accept(&"a", &c, || i);
-            store.settle(&"a", &c, TerminalClass::Confirmed, |_| {});
-        }
-        assert!(store.verdict(&"b", &cid("b-0")).is_some());
-        assert!(store.verdict(&"b", &cid("b-1")).is_some());
+    fn acked_cursor_evicts_rejected_too() {
+        let store: DedupStore<&str, String> = DedupStore::new();
+        store.accept(&"link", &cid("rej"), || String::new());
+        store.settle(&"link", &cid("rej"), TerminalClass::Rejected, Some(4), 0, |r| {
+            *r = "no".into()
+        });
+        store.ack(&"link", 4);
+        assert!(store.verdict(&"link", &cid("rej")).is_none(), "acked rejection reclaimed");
     }
 
-    // The V14 follow-up knob: a bounded Rejected window evicts oldest-first,
-    // independently of the Confirmed window; unbounded (default) keeps all.
+    // D48: a Rejected with no settlement frame (settlement_seq None — the AS
+    // seam) is never acked-evicted; only TTL/cap reclaim it.
     #[test]
-    fn bounded_rejected_window_evicts_oldest_first() {
-        let store: DedupStore<&str, u64> = DedupStore::with_capacity(100).with_rejected_capacity(2);
-        for i in 0..5u64 {
-            let c = cid(&format!("rej-{i}"));
-            store.accept(&"link", &c, || i);
-            store.settle(&"link", &c, TerminalClass::Rejected, |_| {});
-        }
-        assert!(store.verdict(&"link", &cid("rej-0")).is_none(), "oldest evicted");
-        assert!(store.verdict(&"link", &cid("rej-2")).is_none(), "next-oldest evicted");
-        assert_eq!(store.verdict(&"link", &cid("rej-3")), Some(3));
-        assert_eq!(store.verdict(&"link", &cid("rej-4")), Some(4));
-        // The Confirmed window is untouched by Rejected pruning.
-        store.accept(&"link", &cid("cf"), || 99);
-        store.settle(&"link", &cid("cf"), TerminalClass::Confirmed, |_| {});
-        assert_eq!(store.verdict(&"link", &cid("cf")), Some(99));
+    fn a_frameless_rejection_survives_acks_until_ttl() {
+        let store: DedupStore<&str, String> = DedupStore::with_capacity(4096).with_ttl(10);
+        store.accept(&"link", &cid("rej"), || String::new());
+        store.settle(&"link", &cid("rej"), TerminalClass::Rejected, None, 100, |r| {
+            *r = "no".into()
+        });
+        // No cursor can ack a frameless rejection.
+        store.ack(&"link", u64::MAX);
+        assert!(store.verdict(&"link", &cid("rej")).is_some(), "no seq → ack cannot evict");
+        // Within TTL it survives; past TTL it is reaped.
+        assert_eq!(store.reap(105), 0, "within ttl");
+        assert!(store.verdict(&"link", &cid("rej")).is_some());
+        assert_eq!(store.reap(111), 1, "past ttl (111 - 100 >= 10)");
+        assert!(store.verdict(&"link", &cid("rej")).is_none());
     }
 
+    // D48 (b): the TTL fallback reaps stale terminals uniformly.
     #[test]
-    fn rejected_is_exempt_from_the_confirmed_window() {
-        let store: DedupStore<&str, &str> = DedupStore::with_capacity(3);
-        store.accept(&"link", &cid("rej"), || "");
-        store.settle(&"link", &cid("rej"), TerminalClass::Rejected, |r| *r = "verdict");
-        for i in 0..20u64 {
-            let c = cid(&format!("cf-{i}"));
-            store.accept(&"link", &c, || "");
-            store.settle(&"link", &c, TerminalClass::Confirmed, |_| {});
-        }
-        assert_eq!(
-            store.verdict(&"link", &cid("rej")),
-            Some("verdict"),
-            "a Rejected verdict survives the Confirmed eviction window"
-        );
+    fn ttl_reaps_stale_terminals() {
+        let store: DedupStore<&str, String> = DedupStore::with_capacity(4096).with_ttl(10);
+        store.accept(&"link", &cid("op"), || String::new());
+        store.settle(&"link", &cid("op"), TerminalClass::Confirmed, Some(1), 100, |_| {});
+        assert_eq!(store.reap(109), 0, "within ttl");
+        assert_eq!(store.reap(110), 1, "at ttl boundary (110 - 100 >= 10)");
+        assert!(store.verdict(&"link", &cid("op")).is_none());
     }
 
+    // Pending records are never touched by ack, TTL, or the cap.
     #[test]
     fn pending_is_never_evicted() {
-        let store: DedupStore<&str, u64> = DedupStore::with_capacity(2);
+        let store: DedupStore<&str, u64> = DedupStore::with_capacity(2).with_ttl(1);
         store.accept(&"link", &cid("pending"), || 999);
         for i in 0..10u64 {
             let c = cid(&format!("cf-{i}"));
             store.accept(&"link", &c, || i);
-            store.settle(&"link", &c, TerminalClass::Confirmed, |_| {});
+            store.settle(&"link", &c, TerminalClass::Confirmed, Some(i + 1), 0, |_| {});
         }
+        store.ack(&"link", u64::MAX);
+        store.reap(u64::MAX);
         assert_eq!(store.verdict(&"link", &cid("pending")), Some(999));
+    }
+
+    // The safety-valve cap bounds a flood: past the cap the oldest terminals fall
+    // out (settlement order), but the cap is generous, not the operative bound.
+    #[test]
+    fn safety_valve_cap_bounds_a_flood() {
+        let store: DedupStore<&str, u64> = DedupStore::with_capacity(4);
+        for i in 0..9u64 {
+            let c = cid(&format!("op-{i}"));
+            store.accept(&"link", &c, || i);
+            store.settle(&"link", &c, TerminalClass::Confirmed, Some(i + 1), 0, |_| {});
+        }
+        assert!(store.verdict(&"link", &cid("op-0")).is_none(), "oldest flooded out");
+        assert!(store.verdict(&"link", &cid("op-8")).is_some(), "newest kept");
+        assert!(store.records_for(&"link").len() <= 4, "cap bounds the window");
+    }
+
+    #[test]
+    fn per_link_ledgers_are_independent() {
+        let store: DedupStore<&str, u64> = DedupStore::with_capacity(4096).with_ttl(10);
+        store.accept(&"a", &cid("a-0"), || 0);
+        store.settle(&"a", &cid("a-0"), TerminalClass::Confirmed, Some(1), 100, |_| {});
+        store.accept(&"b", &cid("b-0"), || 0);
+        store.settle(&"b", &cid("b-0"), TerminalClass::Confirmed, Some(1), 100, |_| {});
+        // Acking link "a" leaves link "b" untouched.
+        store.ack(&"a", 1);
+        assert!(store.verdict(&"a", &cid("a-0")).is_none());
+        assert!(store.verdict(&"b", &cid("b-0")).is_some());
     }
 
     #[test]
@@ -478,10 +567,7 @@ mod tests {
         let store: DedupStore<&str, u64> = DedupStore::new();
         store.accept(&"link", &cid("op"), || 1);
         store.clear(&"link", &cid("op"));
-        assert!(matches!(
-            store.accept(&"link", &cid("op"), || 2),
-            Accept::New
-        ));
+        assert!(matches!(store.accept(&"link", &cid("op"), || 2), Accept::New));
     }
 
     #[test]

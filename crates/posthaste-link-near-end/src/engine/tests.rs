@@ -187,6 +187,7 @@ struct RecordingSink {
     frames: RefCell<Vec<RuntimeFrame>>,
     malformed: RefCell<Vec<(String, String)>>,
     statuses: RefCell<Vec<String>>,
+    resets: RefCell<u32>,
 }
 
 impl FrameSink<RuntimeFrame> for RecordingSink {
@@ -196,12 +197,16 @@ impl FrameSink<RuntimeFrame> for RecordingSink {
     fn on_malformed(&self, raw: String, error: String) {
         self.malformed.borrow_mut().push((raw, error));
     }
+    fn on_reset(&self) {
+        *self.resets.borrow_mut() += 1;
+    }
     fn on_status(&self, status: ConnectionStatus) {
         let label = match status {
             ConnectionStatus::Connecting => "connecting",
             ConnectionStatus::Connected => "connected",
             ConnectionStatus::Reconnecting => "reconnecting",
             ConnectionStatus::TransientError(_) => "transient",
+            ConnectionStatus::Degraded(_) => "degraded",
             ConnectionStatus::PermanentError(_) => "permanent",
         };
         self.statuses.borrow_mut().push(label.to_string());
@@ -448,6 +453,96 @@ fn malformed_frame_is_reported_not_cast() {
     assert_eq!(h.sink.frames.borrow().len(), 0);
     assert_eq!(h.sink.malformed.borrow().len(), 1);
     assert_eq!(h.engine.cursor(), None);
+}
+
+// D49 gap recovery: a frame whose seq jumps past the next expected one is a
+// gap — the engine re-seeds (on_reset), does NOT deliver the gap frame, and
+// immediately resubscribes from the resume cursor (no backoff) to replay it.
+#[test]
+fn a_seq_gap_reseeds_and_resubscribes_from_the_cursor() {
+    let transport = FakeTransport::new()
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Message(r#"{"type":"heartbeat","sessionSeq":1}"#.to_string()),
+            // seq 3 skips 2 → a gap.
+            StreamEvent::Message(r#"{"type":"heartbeat","sessionSeq":3}"#.to_string()),
+        ])
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+
+    block_on(h.engine.clone().run());
+
+    // Only the in-order seq-1 frame was delivered; the gap frame was not.
+    assert_eq!(h.sink.frames.borrow().len(), 1);
+    assert_eq!(*h.sink.resets.borrow(), 1, "the gap triggered a reseed");
+    // Cursor stayed at 1 (the gap frame did not advance it).
+    assert_eq!(h.engine.cursor(), Some(1));
+    // Immediate resubscribe from the cursor, and NO reconnect-backoff sleep.
+    let urls = h.transport.stream_urls.borrow();
+    assert_eq!(urls.len(), 2, "gap forces a resubscribe");
+    assert!(urls[1].contains("afterSeq=1"), "resumes from the cursor: {}", urls[1]);
+    assert!(
+        !h.sink.statuses.borrow().iter().any(|s| s == "reconnecting"),
+        "a gap resubscribe is not a reconnect"
+    );
+}
+
+// [3]: N (=3) consecutive malformed frames is a version skew / corrupt peer —
+// the engine surfaces Degraded and stops, rather than swallowing them as
+// keep-alives forever.
+#[test]
+fn consecutive_malformed_frames_degrade_and_stop() {
+    let transport = FakeTransport::new().with_stream(vec![
+        StreamEvent::Open,
+        StreamEvent::Message("garbage-1".to_string()),
+        StreamEvent::Message("garbage-2".to_string()),
+        StreamEvent::Message("garbage-3".to_string()),
+    ]);
+    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+
+    block_on(h.engine.clone().run());
+
+    assert_eq!(h.sink.malformed.borrow().len(), 3);
+    assert!(h.sink.statuses.borrow().iter().any(|s| s == "degraded"));
+    // Permanent-class: the loop stopped, no reconnect.
+    assert_eq!(h.transport.stream_urls.borrow().len(), 1);
+    assert!(!h.sink.statuses.borrow().iter().any(|s| s == "reconnecting"));
+}
+
+// A good frame between malformed ones resets the streak, so isolated glitches
+// never trip the degraded threshold.
+#[test]
+fn a_good_frame_resets_the_malformed_streak() {
+    let transport = FakeTransport::new()
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Message("garbage-1".to_string()),
+            StreamEvent::Message("garbage-2".to_string()),
+            StreamEvent::Message(r#"{"type":"heartbeat","sessionSeq":1}"#.to_string()),
+            StreamEvent::Message("garbage-3".to_string()),
+            StreamEvent::Closed,
+        ])
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakeOutbox::default(), NearEndConfig::default());
+
+    block_on(h.engine.clone().run());
+
+    assert_eq!(h.sink.malformed.borrow().len(), 3);
+    // Never hit 3 *consecutive* → never degraded; the clean close reconnected.
+    assert!(!h.sink.statuses.borrow().iter().any(|s| s == "degraded"));
+    assert!(h.sink.statuses.borrow().iter().any(|s| s == "reconnecting"));
 }
 
 #[test]
