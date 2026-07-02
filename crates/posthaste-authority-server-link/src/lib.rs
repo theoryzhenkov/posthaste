@@ -1474,7 +1474,7 @@ mod tests {
             .await
             .expect("subscribe");
         assert_eq!(
-            down.next().await.map(|s| s.frame),
+            down.next().await.and_then(|s| s.frame().cloned()),
             Some(AuthorityServerFrame::Heartbeat)
         );
     }

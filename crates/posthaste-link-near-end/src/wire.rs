@@ -17,6 +17,17 @@ use posthaste_contract_core::{MutationRequest, RuntimeFrame, RuntimeSession};
 use crate::engine::EngineError;
 use crate::transport::{GetRequest, PostRequest, StreamRequest};
 
+/// The outcome of parsing one down-stream payload (D49). A seam's wire either
+/// yields a stamped data frame carrying its resume seq, or a `Reset` control
+/// element telling the engine the far-end could not serve the resume point — the
+/// near node must collapse-and-reseed and adopt `highest_seq` as its cursor.
+pub enum ParsedFrame<Frame> {
+    /// A data frame stamped with its resume seq.
+    Frame { seq: u64, frame: Frame },
+    /// A reset control element: collapse-and-reseed, adopt `highest_seq`.
+    Reset { highest_seq: u64 },
+}
+
 /// A seam's wire profile: request shapes + frame parse. Everything here is
 /// policy-free — cursor placement, retries, deadlines and classification stay
 /// in the engine.
@@ -45,9 +56,10 @@ pub trait Wire {
     /// cursor (`None` on a fresh subscribe).
     fn stream_request(&self, token: Option<&str>, cursor: Option<u64>) -> StreamRequest;
 
-    /// Parse one raw stream payload into `(seq, frame)`. The seq drives the
-    /// engine's resume cursor.
-    fn parse_frame(&self, data: &str) -> Result<(u64, Self::Frame), String>;
+    /// Parse one raw stream payload into a [`ParsedFrame`] — a stamped data frame
+    /// (its seq drives the engine's resume cursor + gap detection) or a `Reset`
+    /// control element (D49). `Err` is a malformed payload (dropped, counted).
+    fn parse_frame(&self, data: &str) -> Result<ParsedFrame<Self::Frame>, String>;
 
     /// The settlement-query GET for a sent-but-unsettled record (D44b), or
     /// `None` when this seam has no cross-session settlement query (the
@@ -147,9 +159,17 @@ impl Wire for RuntimeSessionWire {
         }
     }
 
-    fn parse_frame(&self, data: &str) -> Result<(u64, RuntimeFrame), String> {
+    fn parse_frame(&self, data: &str) -> Result<ParsedFrame<RuntimeFrame>, String> {
+        // The client↔runtime session stream carries `RuntimeFrame` (its seq rides
+        // inside as `sessionSeq`); it has no `Reset` control element — the runtime
+        // far-end's collapse re-serves whole `ViewSnapshot`s, and a detected gap
+        // resubscribes into that re-serve, so the reset is surfaced by the engine's
+        // gap detection rather than a wire element.
         let frame: RuntimeFrame = serde_json::from_str(data).map_err(|e| e.to_string())?;
-        Ok((frame.session_seq().get(), frame))
+        Ok(ParsedFrame::Frame {
+            seq: frame.session_seq().get(),
+            frame,
+        })
     }
 
     fn settlement_request(

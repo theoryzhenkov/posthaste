@@ -60,7 +60,7 @@ impl LocalAuthorityServer {
 /// fold state), or `None` if the event yields no assertion. Reads the current
 /// state from the authority server so the assertion carries the *complete* post-state
 /// ([replication authority-server-link L1 §3](../replication/authority-server-link/L1.md)).
-fn base_frame_from_event(authority_server: &AuthorityServer, event: &DomainEvent) -> Option<AuthorityServerFrame> {
+pub(crate) fn base_frame_from_event(authority_server: &AuthorityServer, event: &DomainEvent) -> Option<AuthorityServerFrame> {
     let current = event
         .message_id
         .as_ref()
@@ -477,19 +477,19 @@ impl AuthorityServerApi for LocalAuthorityServer {
 }
 
 impl LocalAuthorityServer {
-    /// Build the merged down-stream for a runtime by assembling the far-end
-    /// sub-stores: the broadcast `Base` (from the authoritative event bus) merged
-    /// with this runtime's routed `Settlement` sink, each frame stamped with the
-    /// replay store's monotonic per-runtime seq (D46). `Base` is global (every
-    /// runtime sees the same authoritative updates); `Settlement` is per-runtime
-    /// (only the originator's confirmations) — `settlement-routed-to-origin-runtime`.
+    /// Build the merged down-stream for a runtime from the far-end sub-stores: a
+    /// per-runtime `Base` live broadcast (recorded at emission into the backlog —
+    /// D49 [0]) merged with this runtime's routed `Settlement` sink (also recorded
+    /// at emission), each frame carrying the replay store's monotonic per-runtime
+    /// seq (D46). `Base` is authored globally but recorded per-runtime; `Settlement`
+    /// is per-runtime (`settlement-routed-to-origin-runtime`).
     ///
-    /// `after_seq` (D46) resolves the resume prelude off the replay backlog:
-    /// `Fresh` starts live; `Replay` re-emits the retained frames after the
-    /// cursor; `Collapse` (the resume point fell out of the backlog) signals a
-    /// full resync — the authority server holds no cheap whole-base snapshot, so
-    /// its collapse is a logged resync signal and the near node re-reads through
-    /// on cache miss (the reconnect engine at M9b drives the fresh resubscribe).
+    /// Both channels are read behind a **monotonic cursor gate**: every seq is
+    /// emitted at most once, a lagged/gapped `Base` delivery is recovered by
+    /// replaying the (complete-by-construction) backlog, and a resume point that
+    /// fell out of the backlog yields a `Reset` control element so the near node
+    /// collapses-and-reseeds (D49 — was a log-only warning). A newer down-stream
+    /// for the same runtime supersedes this one via the generation stamp (D49 [8]).
     fn build_down_stream(
         &self,
         runtime_id: &AuthorityServerLinkId,
@@ -497,60 +497,114 @@ impl LocalAuthorityServer {
     ) -> DownStream {
         let authority_server = self.authority_server.clone();
         let rid = runtime_id.clone();
+        let crate::runtime_registry::DownStreamChannels {
+            mut base,
+            mut settlement,
+            generation,
+        } = authority_server.register_down_stream(&rid);
         let resume = authority_server.replay_resume(&rid, after_seq);
-        let mut base = authority_server.subscribe_events();
-        let mut settlement = authority_server.subscribe_settlement(&rid);
         Box::pin(async_stream::stream! {
-            // Resume prelude (D46).
+            // The last seq emitted downstream — the cursor gate (dedups the two
+            // channels + drives gap replay).
+            let mut cursor = after_seq.unwrap_or(0);
+
+            // Resume prelude (D46/D49).
             match resume {
                 Resume::Fresh => {}
                 Resume::Replay(frames) => {
                     for framed in frames {
-                        yield SequencedFrame::new(framed.seq, framed.frame);
+                        cursor = framed.seq();
+                        yield framed;
                     }
                 }
                 Resume::Collapse => {
-                    warn!(
-                        runtime_id = %rid.as_str(),
-                        "authority-server down-stream resume point fell out of the backlog; \
-                         signalling collapse — the near node re-reads through on cache miss",
-                    );
+                    // The resume point fell out of the backlog: reset the near
+                    // node to current state and hand it our cursor (D49).
+                    let highest = authority_server.highest_seq(&rid);
+                    cursor = highest;
+                    yield SequencedFrame::reset(highest);
                 }
             }
+
             loop {
+                // A newer down-stream superseded this one (D49 [8]) — terminate.
+                if authority_server.current_generation(&rid) != generation {
+                    break;
+                }
                 tokio::select! {
                     biased;
                     ev = base.recv() => match ev {
-                        Ok(event) => {
-                            if let Some(frame) = base_frame_from_event(&authority_server, &event) {
-                                let framed = authority_server.replay_record(&rid, frame);
-                                yield SequencedFrame::new(framed.seq, framed.frame);
+                        Ok(framed) => {
+                            let seq = framed.seq();
+                            // A live gap (an earlier frame was dropped by the lossy
+                            // broadcast): replay the complete backlog to bridge it
+                            // (D49 [0]).
+                            if seq > cursor + 1 {
+                                for framed in replay_gap(&authority_server, &rid, &mut cursor) {
+                                    yield framed;
+                                }
+                            }
+                            // Emit only if not already covered by a replay/settlement.
+                            if seq > cursor {
+                                cursor = seq;
+                                yield framed;
                             }
                         }
-                        // GAIN: lag-resync instead of the former silent swallow.
-                        // A reconnect will resume from `after_seq` and get
-                        // `Collapse`, driving the full resync (M9b engine).
                         Err(broadcast::error::RecvError::Lagged(missed)) => {
                             warn!(
                                 runtime_id = %rid.as_str(),
                                 missed_events = missed,
-                                "authority-server base broadcast lagged; a resubscribe resumes \
-                                 from after_seq and collapses to resync",
+                                "authority-server base broadcast lagged; replaying the backlog",
                             );
+                            for framed in replay_gap(&authority_server, &rid, &mut cursor) {
+                                yield framed;
+                            }
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     },
                     frame = settlement.recv() => match frame {
-                        Some(frame) => {
-                            let framed = authority_server.replay_record(&rid, frame);
-                            yield SequencedFrame::new(framed.seq, framed.frame);
+                        // Settlements are pre-sequenced at emission and non-lossy;
+                        // the cursor gate skips any the backlog replay already covered.
+                        Some(framed) => {
+                            let seq = framed.seq();
+                            if seq > cursor {
+                                cursor = seq;
+                                yield framed;
+                            }
                         }
-                        // Sink sender dropped (authority server shutdown) — end the stream.
+                        // Sink sender dropped (authority server shutdown) — end.
                         None => break,
                     }
                 }
             }
         })
+    }
+}
+
+/// Replay the backlog from `cursor` to bridge a live gap (D49 [0]): the missing
+/// frames are still retained (records precede the lossy broadcast), so `Replay`
+/// fills them; a `Collapse` (backlog overflowed) resets the near node. Advances
+/// `cursor` past everything it returns.
+fn replay_gap(
+    authority_server: &AuthorityServer,
+    rid: &AuthorityServerLinkId,
+    cursor: &mut u64,
+) -> Vec<SequencedFrame> {
+    match authority_server.replay_resume(rid, Some(*cursor)) {
+        Resume::Replay(frames) => {
+            let mut out = Vec::with_capacity(frames.len());
+            for framed in frames {
+                *cursor = framed.seq();
+                out.push(framed);
+            }
+            out
+        }
+        Resume::Collapse => {
+            let highest = authority_server.highest_seq(rid);
+            *cursor = highest;
+            vec![SequencedFrame::reset(highest)]
+        }
+        Resume::Fresh => Vec::new(),
     }
 }
 

@@ -42,4 +42,4 @@ pub use sink::{ConnectionStatus, FrameSink};
 pub use transport::{
     GetRequest, PostRequest, PostResponse, StreamEvent, StreamRequest, Transport, TransportError,
 };
-pub use wire::{RuntimeSessionWire, Wire};
+pub use wire::{ParsedFrame, RuntimeSessionWire, Wire};

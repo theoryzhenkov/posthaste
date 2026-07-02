@@ -252,9 +252,21 @@ function buildIo() {
         handlers.onMalformedFrame?.({ raw, error })
       }
     },
+    onReset() {
+      // D49: the near node's incremental view is broken (a seq gap the far-end
+      // could not replay). Surface it so the adapter re-seeds; the runtime then
+      // re-serves whole snapshots over the fresh subscription.
+      for (const handlers of frameHandlers) {
+        handlers.onReset?.()
+      }
+    },
     onStatus(label: string, message: string) {
       switch (label) {
         case 'permanentError':
+        case 'degraded':
+          // 'degraded' ([3]): N consecutive malformed frames — a version skew /
+          // corrupt peer. The engine has stopped, so surface it as a permanent
+          // error the host must re-establish from.
           for (const handlers of frameHandlers) {
             handlers.onPermanentError?.(new Error(message))
           }
