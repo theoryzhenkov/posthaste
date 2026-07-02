@@ -10,10 +10,13 @@
 // `crate::api`/`crate::auth`/… paths and the public `posthaste_server::` surface.
 pub use posthaste_api::{
     api, auth, authz, build_api_router, build_app_state, config, logging, observability,
-    read_daemon_settings, resolve_roots, sanitize, secret, serve, token, write_secure_file,
-    AppState, DaemonSettings, ResolvedRoots, ServeOptions, ServerConfig, ServerHandle,
-    SystemSecretStore,
+    resolve_roots, sanitize, secret, serve, token, write_secure_file, AppState, ResolvedRoots,
+    ServeOptions, ServerConfig, ServerHandle, SystemSecretStore,
 };
+/// Daemon config resolution is owned by `posthaste-config` (D25): the
+/// `DaemonSettings` struct and `read_daemon_settings`/`load_daemon_settings`
+/// resolution live there and no longer route through `posthaste-api`.
+pub use posthaste_config::{read_daemon_settings, DaemonSettings};
 
 /// The bundled server's OpenAPI document = the near `/v1` platform + the OAuth
 /// routes it serves on top (the lean near node serves the OAuth-free near doc).

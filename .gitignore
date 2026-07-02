@@ -50,3 +50,4 @@ apps/desktop/gen/schemas/
 # OS
 .DS_Store
 Thumbs.db
+target-shared-note/

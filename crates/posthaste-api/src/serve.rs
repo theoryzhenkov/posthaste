@@ -15,7 +15,8 @@ use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
 use tracing_appender::non_blocking::WorkerGuard;
 
-use crate::config::{DaemonSettings, ResolvedRoots};
+use crate::config::ResolvedRoots;
+use posthaste_config::DaemonSettings;
 use crate::{auth, observability, token, AppState, ServerConfig, ServerHandle};
 
 /// Build the near `/v1` application state from a runtime handle + resolved
@@ -71,7 +72,7 @@ pub struct ServeOptions {
     pub log_guard: WorkerGuard,
     pub runtime_shutdown: RuntimeShutdownHandle,
     /// Optional in-daemon TLS; present ⇒ serve HTTPS via `crate::tls`.
-    pub tls: Option<crate::config::TlsConfig>,
+    pub tls: Option<posthaste_config::TlsConfig>,
 }
 
 /// Apply the runtime-only outer layers (CORS + request tracing), nest under

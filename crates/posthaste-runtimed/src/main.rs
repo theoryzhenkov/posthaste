@@ -19,7 +19,7 @@ use posthaste_runtime::{build_remote_runtime, BackendTransportConfig, RuntimeBui
 #[tokio::main]
 async fn main() {
     let roots = resolve_roots();
-    let daemon = posthaste_api::load_daemon_settings(&roots.config_root);
+    let daemon = posthaste_config::load_daemon_settings(&roots.config_root);
     let log_guard = logging::init(&roots.state_root, &daemon.log_level);
 
     let base_url = daemon.link_backend_url.clone().unwrap_or_else(|| {

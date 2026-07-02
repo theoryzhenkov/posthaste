@@ -98,8 +98,10 @@ impl TomlConfigRepository {
     }
 
     /// Reads and parses `app.toml` directly from disk (bypasses snapshot).
-    /// Used at startup to access daemon-only settings.
-    pub fn read_app_toml(&self) -> Result<AppToml, ConfigError> {
+    /// Used at startup by [`daemon::read_daemon_settings`](crate::daemon::read_daemon_settings)
+    /// to access daemon-only settings. `pub(crate)`: the `AppToml` return type
+    /// is a private schema type and must not escape the crate's public surface.
+    pub(crate) fn read_app_toml(&self) -> Result<AppToml, ConfigError> {
         read_app_toml(&self.config_root)
     }
 }

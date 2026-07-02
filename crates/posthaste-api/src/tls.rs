@@ -26,7 +26,7 @@ use tokio::task::JoinSet;
 use tokio_rustls::{server::TlsStream, TlsAcceptor};
 use tracing::{error, warn};
 
-use crate::config::TlsConfig;
+use posthaste_config::TlsConfig;
 
 /// A TLS handshake must complete within this window or the connection is
 /// dropped. Bounds the lifetime of a half-open connection so a client that

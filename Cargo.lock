@@ -4366,6 +4366,7 @@ name = "posthaste-runtimed"
 version = "0.1.0"
 dependencies = [
  "posthaste-api",
+ "posthaste-config",
  "posthaste-runtime",
  "tokio",
 ]
