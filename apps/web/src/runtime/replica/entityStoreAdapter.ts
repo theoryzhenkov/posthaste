@@ -60,9 +60,14 @@ import {
   resolveMailListPredicate,
   type MailListPredicate,
 } from '../mailListSelfMaintained'
-import type { OutboxRecord, OutboxStore } from './outboxStore'
+import type { OutboxStore } from './outboxStore'
 import { getUndoHistoryStore, makeRevStep } from './undoHistoryStore'
 import { parseMailOperation } from './wasmUtil'
+import {
+  nearEndSessionId,
+  setNearEndOutboxHooks,
+  type NearEndOutboxHooks,
+} from '../nearEnd'
 
 /** The store's sort key `[receivedAt, id]`. */
 interface SortKey {
@@ -155,6 +160,13 @@ export interface EntityStoreAdapterDeps {
   /** Coalesces the `message.updated` sync burst (default: one flush per
    * animation frame). Injected synchronously in tests. */
   scheduleFlush?: FlushScheduler
+  /** The near-end engine surface the adapter wires its durable outbox into
+   * (the engine's level-triggered reconciler drives replay + settlement,
+   * D44). Defaults to the live wasm engine binding; injected in tests. */
+  nearEnd?: {
+    setOutboxHooks(hooks: NearEndOutboxHooks): void
+    sessionId(): string | null
+  }
 }
 
 interface ViewEntry {
@@ -226,6 +238,8 @@ class EntityStoreController {
   private cancelScheduledFlush: FlushCanceller | null = null
   private readonly scheduleFlush: FlushScheduler
 
+  private readonly nearEnd: NonNullable<EntityStoreAdapterDeps['nearEnd']>
+
   constructor(deps: EntityStoreAdapterDeps) {
     this.deps = deps
     if (deps.makeStore) {
@@ -238,6 +252,83 @@ class EntityStoreController {
     this.queryClient = deps.queryClient ?? singletonQueryClient
     this.now = deps.now ?? (() => Date.now())
     this.scheduleFlush = deps.scheduleFlush ?? defaultFlushScheduler
+    this.nearEnd = deps.nearEnd ?? {
+      setOutboxHooks: setNearEndOutboxHooks,
+      sessionId: nearEndSessionId,
+    }
+    // Wire the durable outbox into the engine's level-triggered reconciler
+    // (D44): the engine decides WHEN (every connect); these hooks are HOW.
+    this.nearEnd.setOutboxHooks(this.buildOutboxHooks())
+  }
+
+  /**
+   * The engine's reconciler hooks over the durable outbox:
+   *
+   * - never-dispatched replay (D44a — subsumes and replaces the deleted
+   *   view-open `resendNeverDispatched` trigger);
+   * - sent-but-unsettled settlement (D44b — the cross-session query the old
+   *   adapter left as a TODO): a terminal verdict settles the optimism +
+   *   clears the record; a runtime with no record re-forwards.
+   */
+  private buildOutboxHooks(): NearEndOutboxHooks {
+    return {
+      neverDispatched: async () => {
+        const records = await this.deps.outbox.all()
+        return records
+          .filter((record) => record.runtimeMutationId === null)
+          .flatMap((record) => {
+            if (record.request) {
+              return [record.request]
+            }
+            syncLogger.warn(
+              {
+                event: LOG_EVENTS.outboxRehydrateSkipped,
+                clientMutationId: record.clientMutationId,
+              },
+              'outbox record predates the stored request; cannot replay it',
+            )
+            return []
+          })
+      },
+      onReconciled: async (receipt, sessionId) => {
+        if (!receipt.runtimeMutationId) {
+          return
+        }
+        syncLogger.info(
+          {
+            event: LOG_EVENTS.outboxRehydrateResent,
+            clientMutationId: receipt.clientMutationId,
+          },
+          'reconciler replayed an outbox record; linking its receipt',
+        )
+        await this.deps.outbox.linkRuntimeMutationId(
+          receipt.clientMutationId,
+          receipt.runtimeMutationId,
+          sessionId ?? undefined,
+        )
+      },
+      sentUnsettled: async () => {
+        const records = await this.deps.outbox.all()
+        return records
+          .filter(
+            (record) => record.runtimeMutationId !== null && record.sessionId,
+          )
+          .map((record) => ({
+            sessionId: record.sessionId as string,
+            clientMutationId: record.clientMutationId,
+            ...(record.request ? { request: record.request } : {}),
+          }))
+      },
+      onSettlement: async (receipt) => {
+        // The runtime already settled it terminally in a prior session: settle
+        // the optimism (a no-op when nothing is folded) and clear the record.
+        await this.settleAll(
+          receipt.clientMutationId,
+          receipt.state === 'confirmed' ? 'confirmed' : 'failed',
+        )
+        await this.deps.outbox.remove(receipt.clientMutationId)
+      },
+    }
   }
 
   /**
@@ -298,22 +389,27 @@ class EntityStoreController {
     // Rehydrate durable intent over the freshly-served base.
     //
     // A record already sent to the runtime (`runtimeMutationId !== null`) is
-    // owned by the runtime: the base served just above already reflects its
-    // outcome (and the firehose reconciles anything still in flight), so
-    // re-applying it as pending intent would never retire it — `accept` only
-    // folds, and nothing re-checks absorption after a reload, so the durable
-    // outbox grows unbounded across reloads (the settled-record leak that grew
-    // one real DB to 88 records on a single message). Drop those; the
-    // never-sent records below are both replayed (optimism) and re-sent.
+    // runtime-owned: the base served just above already reflects its outcome
+    // when settled, and the near-end engine's reconciler resolves the
+    // sent-but-unsettled remainder on every connect (D44b: query the runtime's
+    // settlement by the stored session + client mutation id; settle locally or
+    // re-forward). So it is NOT re-applied as pending intent here — and, when
+    // it carries the session id the settlement query needs, it is KEPT for the
+    // reconciler. A legacy sent record without one cannot be queried; drop it
+    // (the pre-reconciler behavior, which also caps the old settled-record
+    // leak). Never-sent records are re-folded below; the reconciler replays
+    // them on connect (the view-open resend trigger is deleted, D44a).
     //
     // A single un-deserializable record (e.g. a durable assertion written before
     // a wire-schema change) must never abort the whole view-open — that bricks
     // every mail-list view silently. Skip + log the bad record and keep going.
     const rehydrated = await this.deps.outbox.all()
-    const droppedSettled: string[] = []
+    const droppedLegacy: string[] = []
     for (const record of rehydrated) {
       if (record.runtimeMutationId !== null) {
-        droppedSettled.push(record.clientMutationId)
+        if (!record.sessionId) {
+          droppedLegacy.push(record.clientMutationId)
+        }
         continue
       }
       try {
@@ -336,14 +432,14 @@ class EntityStoreController {
         )
       }
     }
-    if (droppedSettled.length) {
-      await Promise.all(droppedSettled.map((id) => this.deps.outbox.remove(id)))
+    if (droppedLegacy.length) {
+      await Promise.all(droppedLegacy.map((id) => this.deps.outbox.remove(id)))
       syncLogger.debug(
         {
           event: LOG_EVENTS.outboxRehydrateDropped,
-          count: droppedSettled.length,
+          count: droppedLegacy.length,
         },
-        'dropped already-sent outbox records on rehydration (runtime-owned)',
+        'dropped sent outbox records with no session id (not reconcilable)',
       )
     }
     const projected = await this.projectView(viewId)
@@ -353,9 +449,6 @@ class EntityStoreController {
       lastProjectionJson: projected.json,
     }
     this.views.set(viewId, entry)
-    // Replay records that were optimistically accepted but never reached the
-    // runtime; fire-and-forget so the view open is not blocked on the network.
-    void this.resendNeverDispatched(rehydrated)
     return { viewId, snapshot: this.snapshotFrom(entry, projected.rows) }
   }
 
@@ -571,9 +664,11 @@ class EntityStoreController {
 
   /**
    * Send a translated mutation to the runtime and link/settle its receipt
-   * against the durable outbox. The single send path shared by the live
-   * `runMutation` and the rehydration replay (`resendNeverDispatched`); on a
+   * against the durable outbox (stamping the dispatching session so the
+   * engine's reconciler can query its settlement cross-session, D44b). On a
    * synchronous rejection it retires the optimism (revert) and rethrows.
+   * Replay of never-dispatched records is NOT here anymore — the engine's
+   * level-triggered reconciler owns it (D44a).
    */
   private async dispatchToRuntime(
     request: RuntimeRunMutationRequest,
@@ -586,6 +681,7 @@ class EntityStoreController {
         await this.deps.outbox.linkRuntimeMutationId(
           clientMutationId,
           receipt.runtimeMutationId,
+          this.nearEnd.sessionId() ?? request.sessionId ?? undefined,
         )
       }
     } catch (error) {
@@ -594,53 +690,6 @@ class EntityStoreController {
       throw error
     }
     return receipt
-  }
-
-  /**
-   * Re-send records that were optimistically accepted but never reached the
-   * runtime (`runtimeMutationId === null`): on the reload that built this view,
-   * the live send was lost, so the server never learned of them. Replaying is
-   * safe — never-sent means no double-apply, and the runtime dedupes by
-   * `clientMutationId` within a session (`MutationAcceptance::Existing` returns
-   * the existing receipt). A record predating the stored `request` field can't
-   * be reconstructed → skip (the optimism stays durable, but the server is not
-   * told) and log.
-   *
-   * Deliberately NOT handled: sent-but-unsettled records
-   * (`runtimeMutationId !== null`). The runtime may already have applied them in
-   * a prior session, so a cross-session replay risks a double-apply; reconciling
-   * those needs a server reconciliation endpoint (TODO, out of scope).
-   */
-  private async resendNeverDispatched(records: OutboxRecord[]): Promise<void> {
-    for (const record of records) {
-      if (record.runtimeMutationId !== null) {
-        continue
-      }
-      if (!record.request) {
-        syncLogger.warn(
-          {
-            event: LOG_EVENTS.outboxRehydrateSkipped,
-            clientMutationId: record.clientMutationId,
-          },
-          'outbox record predates the stored request; cannot re-send on rehydration',
-        )
-        continue
-      }
-      syncLogger.info(
-        {
-          event: LOG_EVENTS.outboxRehydrateResent,
-          clientMutationId: record.clientMutationId,
-        },
-        're-sending never-dispatched outbox record on rehydration',
-      )
-      try {
-        await this.dispatchToRuntime(record.request, record.clientMutationId)
-      } catch {
-        // dispatchToRuntime already reverted the optimism + surfaced the
-        // failure via settleAll; swallow so one failed replay does not abort
-        // the remaining records.
-      }
-    }
   }
 
   private onBaseFrame(

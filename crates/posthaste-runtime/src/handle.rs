@@ -18,7 +18,8 @@ use posthaste_client_link::{
     RuntimeViewSubscription,
 };
 use posthaste_contract_core::{
-    AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailOperation,
+    AccountScopeRequest, AccountVerificationResult, ClientMutationId, CreateAccountMutation,
+    MailOperation,
     MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
     MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller,
     RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes,
@@ -897,6 +898,18 @@ impl RuntimeLink for RuntimeHandle {
             .await
     }
 
+    async fn mutation_settlement(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        client_mutation_id: ClientMutationId,
+    ) -> Result<Option<MutationReceipt>, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .sessions
+            .mutation_settlement(caller, &session_id, &client_mutation_id)
+    }
+
     async fn open_view(
         &self,
         caller: RuntimeCaller,
@@ -985,6 +998,19 @@ mod outbox_lifecycle_tests {
         Arc::new(SessionRegistry::new(views, event_sender))
     }
 
+    /// The tests' state probe over the production settlement query
+    /// (`mutation_settlement`, D44b): receipt → bare settlement state.
+    fn mutation_state(
+        sessions: &Arc<SessionRegistry>,
+        session_id: &RuntimeSessionId,
+        client_mutation_id: &ClientMutationId,
+    ) -> Option<MutationSettlementState> {
+        sessions
+            .mutation_settlement(RuntimeCaller::test(), session_id, client_mutation_id)
+            .expect("settlement query succeeds")
+            .map(|receipt| receipt.state)
+    }
+
     fn accept(
         sessions: &Arc<SessionRegistry>,
         caller: &RuntimeCaller,
@@ -1026,7 +1052,7 @@ mod outbox_lifecycle_tests {
         let mutation_id = accept(&sessions, &caller, &session_id, &client_mutation_id);
 
         assert_eq!(
-            sessions.mutation_state(&session_id, &client_mutation_id),
+            mutation_state(&sessions, &session_id, &client_mutation_id),
             Some(MutationSettlementState::Accepted),
             "mutation is Accepted once dispatched, before any verdict"
         );
@@ -1042,7 +1068,7 @@ mod outbox_lifecycle_tests {
             };
         }
         assert_eq!(
-            sessions.mutation_state(&session_id, &client_mutation_id),
+            mutation_state(&sessions, &session_id, &client_mutation_id),
             Some(MutationSettlementState::Failed),
             "cancelled dispatch must settle Failed, not leak Accepted"
         );
@@ -1080,7 +1106,7 @@ mod outbox_lifecycle_tests {
             )
             .unwrap();
         assert!(
-            sessions.mutation_state(&session_id, &cmid).is_none(),
+            mutation_state(&sessions, &session_id, &cmid).is_none(),
             "a transient failure clears the ledger entry"
         );
         // `accept` asserts the retry re-accepts as New (re-executes); it would
@@ -1130,9 +1156,46 @@ mod outbox_lifecycle_tests {
         }
 
         assert_eq!(
-            sessions.mutation_state(&session_id, &rejected_cmid),
+            mutation_state(&sessions, &session_id, &rejected_cmid),
             Some(MutationSettlementState::Failed),
             "Rejected verdict must be retained across the Confirmed eviction window"
+        );
+    }
+
+    // V14 follow-up knob (runtime assembly): this seam's Rejected ledger is
+    // UNBOUNDED — a client session's lifetime bounds it naturally, and a
+    // stranded client must always be able to re-observe every rejection verdict
+    // it never saw. (The AS assembly bounds its window; see
+    // `runtime_registry::tests::the_rejected_window_is_bounded_at_this_seam`.)
+    #[tokio::test]
+    async fn the_rejected_ledger_is_unbounded_at_the_client_seam() {
+        let sessions = test_session_registry();
+        let caller = RuntimeCaller::test();
+        let session = sessions
+            .open_session(caller.clone())
+            .expect("session opens");
+        let session_id = session.session_id;
+
+        // Bury the first rejection under well over any bounded window's cap
+        // (the AS seam evicts at 100).
+        for i in 0..120 {
+            let cmid = ClientMutationId::new(format!("rej-{i}"));
+            let mid = accept(&sessions, &caller, &session_id, &cmid);
+            sessions
+                .settle_mutation(
+                    &session_id,
+                    &mid,
+                    MutationSettlementState::Failed,
+                    None,
+                    serde_json::Value::Null,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            mutation_state(&sessions, &session_id, &ClientMutationId::new("rej-0")),
+            Some(MutationSettlementState::Failed),
+            "the client seam keeps every Rejected verdict for the session's life"
         );
     }
 }

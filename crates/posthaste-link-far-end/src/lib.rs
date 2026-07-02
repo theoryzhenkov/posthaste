@@ -23,6 +23,8 @@ pub mod dedup;
 pub mod replay;
 pub mod sink;
 
-pub use dedup::{Accept, DedupStore, TerminalClass, DEFAULT_TERMINAL_CAPACITY};
+pub use dedup::{
+    Accept, DedupStore, TerminalClass, DEFAULT_REJECTED_CAPACITY, DEFAULT_TERMINAL_CAPACITY,
+};
 pub use replay::{ReplayStore, Resume, Sequenced, DEFAULT_BACKLOG_CAPACITY};
 pub use sink::{SettlementSinkStore, DEFAULT_SINK_TTL};

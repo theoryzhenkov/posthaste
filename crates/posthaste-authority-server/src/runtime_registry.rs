@@ -94,7 +94,12 @@ pub(crate) struct RuntimeRegistry {
 impl RuntimeRegistry {
     pub(crate) fn new() -> Self {
         Self {
-            dedup: DedupStore::new(),
+            // An AS link lives for a runtime's whole uptime (unlike a client
+            // session), so its Rejected ledger is bounded (V14 follow-up knob):
+            // oldest-first eviction at the default cap. The runtime seam's
+            // assembly stays unbounded — a session's lifetime bounds it there.
+            dedup: DedupStore::new()
+                .with_rejected_capacity(posthaste_link_far_end::DEFAULT_REJECTED_CAPACITY),
             sinks: SettlementSinkStore::new(),
             replay: ReplayStore::new(),
         }
@@ -305,6 +310,39 @@ mod tests {
             }
             _ => panic!("a Rejected retry must re-observe the rejection"),
         }
+    }
+
+    // V14 follow-up knob (AS assembly): this seam's links outlive any client
+    // session, so its Rejected ledger is BOUNDED — the oldest rejection falls
+    // out of the window and a very late retry re-accepts as New instead of
+    // re-observing a verdict held forever.
+    #[test]
+    fn the_rejected_window_is_bounded_at_this_seam() {
+        let registry = RuntimeRegistry::new();
+        let r = rid("rt-A");
+        let rejection = |message: &str| RuntimeAdapterError {
+            code: RuntimeErrorCode::InvalidMutation,
+            message: message.into(),
+            retryable: false,
+            correlation_id: None,
+            details: Value::Null,
+        };
+        for i in 0..(posthaste_link_far_end::DEFAULT_REJECTED_CAPACITY + 5) {
+            let c = cid(&format!("rej-{i}"));
+            registry.accept(&r, &c, "message.setKeywords");
+            registry.settle_rejected(&r, &c, rejection("nope"));
+        }
+        // The oldest rejection was evicted: its retry re-accepts as New.
+        assert!(matches!(
+            registry.accept(&r, &cid("rej-0"), "message.setKeywords"),
+            ForwardAcceptance::New { .. }
+        ));
+        // A recent rejection is still re-observed (the window holds the cap).
+        let recent = format!("rej-{}", posthaste_link_far_end::DEFAULT_REJECTED_CAPACITY + 4);
+        assert!(matches!(
+            registry.accept(&r, &cid(&recent), "message.setKeywords"),
+            ForwardAcceptance::Rejected(_)
+        ));
     }
 
     // D47 at the seam: a transient (retryable) failure is CLEARED — a deliberate

@@ -1,7 +1,7 @@
 use super::*;
 use posthaste_contract_core::{
-    MutationReceipt, MutationRequest, RuntimeError, RuntimeFrame, RuntimeSession, RuntimeSessionId,
-    RuntimeSessionSeq, ViewDescriptor, ViewId, ViewSnapshot,
+    MutationReceipt, MutationRequest, RuntimeError, RuntimeFrame, RuntimeMutationSettlement,
+    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, ViewDescriptor, ViewId, ViewSnapshot,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -48,7 +48,7 @@ pub(crate) mod mutations;
 pub(crate) mod sessions;
 pub(crate) mod views;
 
-pub use mutations::run_runtime_session_mutation;
+pub use mutations::{run_runtime_session_mutation, runtime_session_mutation_settlement};
 pub use sessions::{close_runtime_session, open_runtime_session, stream_runtime_session};
 pub use views::{
     close_runtime_session_view, extend_runtime_session_view, open_runtime_session_view,

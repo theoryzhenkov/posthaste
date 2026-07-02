@@ -294,7 +294,7 @@ pub(crate) fn build_runtime(
         ..
     } = config;
 
-    let authority_server_link = select_authority_server_link(
+    let (authority_server_link, down_channel) = select_authority_server_link(
         &authority_server_transport,
         authority_server_transport_override,
         authority_server.clone(),
@@ -306,13 +306,12 @@ pub(crate) fn build_runtime(
     ));
     // A split runtime drives its cache + views from the authority server down-channel; an
     // in-process runtime shares the authority server's bus, so no bridge is needed.
-    let drive_down_channel = matches!(authority_server_transport, AuthorityServerTransportConfig::Remote { .. });
     let composed = assemble_runtime(RuntimeAssembly {
         authority_server_link: authority_server_link.clone(),
         reads,
         event_sender,
         startup_status: runtime_status.clone(),
-        drive_down_channel,
+        down_channel,
     });
 
     AuthorityServerBuild {
@@ -355,22 +354,31 @@ fn select_authority_server_link(
     transport: &AuthorityServerTransportConfig,
     override_decorator: Option<AuthorityServerTransportDecorator>,
     authority_server: Arc<AuthorityServer>,
-) -> AuthorityServerLinkHandle {
-    let base = match transport {
-        AuthorityServerTransportConfig::InProcess => {
-            AuthorityServerLinkHandle::new(Arc::new(LocalAuthorityServer::new(authority_server)))
-        }
+) -> (
+    AuthorityServerLinkHandle,
+    Option<tokio::sync::mpsc::UnboundedReceiver<posthaste_authority_server_link::SequencedFrame>>,
+) {
+    let (base, down_channel) = match transport {
+        AuthorityServerTransportConfig::InProcess => (
+            AuthorityServerLinkHandle::new(Arc::new(LocalAuthorityServer::new(authority_server))),
+            None,
+        ),
         AuthorityServerTransportConfig::Remote { base_url, token } => {
-            AuthorityServerLinkHandle::new(Arc::new(RemoteAuthorityServer::with_token(
+            // The remote down-channel is the near-end ENGINE's reconnect loop
+            // (M9b2) — taken from the raw transport, not a trait subscribe.
+            let remote = Arc::new(RemoteAuthorityServer::with_token(
                 base_url.clone(),
                 token.clone(),
-            )))
+            ));
+            let down_channel = remote.take_down_channel();
+            (AuthorityServerLinkHandle::new(remote), down_channel)
         }
     };
-    match override_decorator {
+    let handle = match override_decorator {
         Some(decorate) => decorate(base),
         None => base,
-    }
+    };
+    (handle, down_channel)
 }
 
 /// A runtime handle built from pre-existing api parts, plus the authority server's
@@ -482,7 +490,7 @@ fn migration_runtime(
         reads,
         event_sender: api_bridge.event_sender,
         startup_status: runtime_status,
-        drive_down_channel: false,
+        down_channel: None,
     });
     (composed.handle, account_mutations)
 }

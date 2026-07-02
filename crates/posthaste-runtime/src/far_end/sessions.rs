@@ -457,21 +457,30 @@ impl SessionRegistry {
         Ok(receipt)
     }
 
-    /// Read the current settlement state of a mutation by its **client** mutation
-    /// id. `None` when the session or mutation is unknown (or already evicted /
-    /// cleared).
-    // Settlement-state query helper; the production caller is not wired yet (the
-    // absorption path does not query it directly), so this is exercised only by
-    // the build.rs unit tests. Kept as intended pub(crate) API rather than removed.
-    #[allow(dead_code)]
-    pub(crate) fn mutation_state(
+    /// Read the current settlement of a mutation by its **client** mutation id —
+    /// the near-end reconciler's cross-session query (D44b, `RuntimeLink::
+    /// mutation_settlement`). `Ok(None)` when the runtime has no record: an
+    /// unknown session (closed/restarted — its ledger was purged) or an unknown
+    /// / already-cleared mutation id. A known session still enforces the caller
+    /// scope; an unknown one cannot leak anything (there is nothing to read).
+    pub(crate) fn mutation_settlement(
         &self,
+        caller: RuntimeCaller,
         session_id: &RuntimeSessionId,
         client_mutation_id: &ClientMutationId,
-    ) -> Option<MutationSettlementState> {
-        self.dedup
+    ) -> Result<Option<MutationReceipt>, RuntimeError> {
+        {
+            let sessions = self.lock_sessions();
+            if let Some(session) = sessions.get(session_id) {
+                ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
+            } else {
+                return Ok(None);
+            }
+        }
+        Ok(self
+            .dedup
             .verdict(session_id, client_mutation_id)
-            .map(|record| record.state)
+            .map(|record| record.receipt()))
     }
 
     pub(crate) fn session_scope(

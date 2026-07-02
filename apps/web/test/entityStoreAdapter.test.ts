@@ -25,6 +25,7 @@ import type {
   RuntimeSessionViewRequest,
   RuntimeViewSnapshot,
 } from '../src/runtime/types'
+import type { NearEndOutboxHooks } from '../src/runtime/nearEnd'
 
 // The adapter test drives the REAL wasm EntityStore handle (not a TS re-impl of
 // the engine), so the controller's orchestration is verified against the engine
@@ -237,19 +238,34 @@ function build() {
       totalEmails: 2,
     },
   ])
+  // The adapter registers its durable-outbox hooks with the near-end engine at
+  // construction (D44); the stub captures them so tests can drive the
+  // reconciler's calls directly (the engine's TIMING is pinned by the
+  // `nearEndEngine` suite over fake IO).
+  const captured: { hooks: NearEndOutboxHooks | null } = { hooks: null }
   const adapter = createEntityStoreAdapter({
     base: harness.base,
     makeHandle: () => makeRealHandle(),
     outbox,
     queryClient,
     now: () => 1,
+    nearEnd: {
+      setOutboxHooks: (hooks) => {
+        captured.hooks = hooks
+      },
+      sessionId: () => 'sess-live',
+    },
   })
+  const hooks = () => {
+    if (!captured.hooks) throw new Error('outbox hooks were not registered')
+    return captured.hooks
+  }
   const frames: RuntimeFrame<RuntimeMailListViewState>[] = []
   adapter.subscribeRuntimeFrames(
     { sessionId: 'sess' },
     { onFrame: (f) => frames.push(f) },
   )
-  return { adapter, outbox, frames, harness, queryClient }
+  return { adapter, outbox, frames, harness, queryClient, hooks }
 }
 
 /** Drain all pending microtasks (the serialized store queue) via a macrotask. */
@@ -346,16 +362,26 @@ describe('entityStoreAdapter', () => {
     expect(await outbox.all()).toHaveLength(0)
   })
 
-  it('drops already-sent outbox records on rehydration (no settled-record leak)', async () => {
-    const { adapter, outbox } = build()
-    // A prior session left durable records: one already sent to the runtime
-    // (runtime-owned — the served base reflects its outcome) and one never sent
-    // (still-unconfirmed intent that must survive the reload).
+  it('rehydration keeps reconcilable sent records and drops legacy ones', async () => {
+    const { adapter, outbox, hooks } = build()
+    // A prior session left durable records: a sent one WITH its dispatch
+    // session (the engine's reconciler can query its settlement — D44b, keep),
+    // a legacy sent one WITHOUT (unqueryable → dropped, the old leak guard),
+    // and a never-sent one (still-unconfirmed intent that must survive).
     await outbox.put({
-      clientMutationId: 'sent-1',
+      clientMutationId: 'sent-reconcilable',
       messageId: 'm1',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
       runtimeMutationId: 'r-prev',
+      acceptedAt: 1,
+      sessionId: 'sess-old',
+      request: setFlagged('m1', 'sent-reconcilable'),
+    })
+    await outbox.put({
+      clientMutationId: 'sent-legacy',
+      messageId: 'm1',
+      assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      runtimeMutationId: 'r-prev-2',
       acceptedAt: 1,
     })
     await outbox.put({
@@ -368,11 +394,21 @@ describe('entityStoreAdapter', () => {
 
     await adapter.openRuntimeSessionMessageListView(viewRequest)
 
-    // The sent record is dropped (the runtime owns it); the never-sent one is
-    // retained for replay — so the durable outbox can't grow unbounded across
-    // reloads.
     const remaining = await outbox.all()
-    expect(remaining.map((r) => r.clientMutationId)).toEqual(['never-sent-1'])
+    expect(remaining.map((r) => r.clientMutationId).sort()).toEqual([
+      'never-sent-1',
+      'sent-reconcilable',
+    ])
+    // The reconcilable record is exactly what the engine's sent-but-unsettled
+    // query sees, keyed to its ORIGINAL session.
+    const unsettled = await hooks().sentUnsettled()
+    expect(unsettled).toEqual([
+      {
+        sessionId: 'sess-old',
+        clientMutationId: 'sent-reconcilable',
+        request: setFlagged('m1', 'sent-reconcilable'),
+      },
+    ])
   })
 
   it('ingests a message.updated notification and re-projects the row', async () => {
@@ -608,10 +644,12 @@ describe('entityStoreAdapter', () => {
     expect(mailboxes?.find((m) => m.id === 'inbox')?.unreadEmails).toBe(1)
   })
 
-  it('re-sends never-dispatched records on rehydration + links the receipt', async () => {
-    const { adapter, outbox, harness } = build()
+  it('exposes never-dispatched records to the engine reconciler + links receipts (D44a)', async () => {
+    const { adapter, outbox, hooks, harness } = build()
     // A record optimistically accepted on a prior session but never dispatched
-    // (runtimeMutationId === null), carrying its original send for replay.
+    // (runtimeMutationId === null), carrying its original send for replay —
+    // plus a sent record and a request-less legacy record the replay hook
+    // must NOT expose.
     await outbox.put({
       clientMutationId: 'c-orphan',
       messageId: 'm1',
@@ -620,48 +658,73 @@ describe('entityStoreAdapter', () => {
       acceptedAt: 1,
       request: setFlagged('m1', 'c-orphan'),
     })
-
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
-    // The replay is fire-and-forget; let its microtasks settle.
-    await tick()
-
-    expect(harness.mutations.map((m) => m.clientMutationId)).toEqual([
-      'c-orphan',
-    ])
-    const records = await outbox.all()
-    expect(records).toHaveLength(1)
-    expect(records[0]?.runtimeMutationId).toBe('r-1')
-  })
-
-  it('does not re-send sent-but-unsettled or request-less records on rehydration', async () => {
-    const { adapter, harness } = build()
-    // Already dispatched in a prior session (runtimeMutationId !== null): NOT
-    // replayed (could double-apply; needs server reconciliation — out of scope).
-    const built = build()
-    await built.outbox.put({
+    await outbox.put({
       clientMutationId: 'c-sent',
       messageId: 'm1',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
       runtimeMutationId: 'r-prev',
       acceptedAt: 1,
+      sessionId: 'sess-old',
       request: setFlagged('m1', 'c-sent'),
     })
-    // Predates the stored request: can't reconstruct the send → skipped.
-    await built.outbox.put({
+    await outbox.put({
       clientMutationId: 'c-legacy',
       messageId: 'm2',
       assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
       runtimeMutationId: null,
       acceptedAt: 2,
     })
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
 
-    await built.adapter.openRuntimeSessionMessageListView(viewRequest)
+    // View open no longer resends anything — the trigger is DELETED (D44a);
+    // the engine's connect-time reconciler drives replay through the hooks.
+    expect(harness.mutations).toHaveLength(0)
+    const replayable = await hooks().neverDispatched()
+    expect(replayable.map((r) => r.clientMutationId)).toEqual(['c-orphan'])
+
+    // A successful replay reports back: the receipt is linked (with the
+    // session it was re-sent under), so the record leaves the replay set.
+    await hooks().onReconciled(
+      {
+        runtimeMutationId: 'r-1',
+        clientMutationId: 'c-orphan',
+        name: 'message.setKeywords',
+        state: 'accepted',
+        error: null,
+      },
+      'sess-new',
+    )
+    const record = (await outbox.all()).find(
+      (r) => r.clientMutationId === 'c-orphan',
+    )
+    expect(record?.runtimeMutationId).toBe('r-1')
+    expect(record?.sessionId).toBe('sess-new')
+    expect(await hooks().neverDispatched()).toHaveLength(0)
+  })
+
+  it('a terminal settlement from the reconciler settles optimism + clears the record (D44b)', async () => {
+    const built = build()
+    const { adapter, outbox, frames, hooks } = built
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+
+    // A live mutation: optimism folded, receipt linked under the live session.
+    await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+    expect((await outbox.all())[0]?.sessionId).toBe('sess-live')
+
+    // The engine's settlement query found a terminal FAILED verdict for it
+    // (session-continuity loss): the optimism reverts and the record clears.
+    await hooks().onSettlement({
+      runtimeMutationId: 'r-1',
+      clientMutationId: 'c1',
+      name: 'message.setKeywords',
+      state: 'failed',
+      error: null,
+    })
     await tick()
 
-    expect(built.harness.mutations).toHaveLength(0)
-    // Unrelated sanity: a fresh adapter with no outbox sends nothing.
-    await adapter.openRuntimeSessionMessageListView(viewRequest)
-    expect(harness.mutations).toHaveLength(0)
+    expect(await outbox.all()).toHaveLength(0)
+    expect(keywordsOf(frames, 'm1')).not.toContain('$flagged')
   })
 
   it('passes control operations (no local fold effect) straight through', async () => {

@@ -49,16 +49,14 @@ impl BackoffPolicy {
     }
 }
 
-/// The near-end engine's tunables. Constructed once and held for the engine's
-/// life. `base_url` is a path prefix the host prepends the API origin to.
+/// The near-end engine's policy tunables. Constructed once and held for the
+/// engine's life. Wire-shape settings (base path, session options) live on the
+/// seam's [`crate::wire::Wire`] profile, not here — this is pure policy.
 #[derive(Clone, Debug)]
 pub struct NearEndConfig {
-    /// Path prefix for every runtime route (e.g. `/v1`). The host resolves the
-    /// origin + auth; the engine only builds the protocol path + cursor query.
-    pub base_url: String,
-    /// Wall-clock ceiling on a single `forward_mutation` POST attempt. A hung
-    /// authority server no longer wedges the pipeline forever (row 1).
-    /// **Review** (default 30s).
+    /// Wall-clock ceiling on a single request attempt (forward POST, prepare
+    /// POST, settlement GET). A hung far node no longer wedges the pipeline
+    /// forever (row 1). **Review** (default 30s).
     pub request_deadline: Duration,
     /// How many times a *transient* forward failure is retried (with backoff)
     /// before giving up and surfacing the error. Permanent (4xx) failures are
@@ -66,12 +64,7 @@ pub struct NearEndConfig {
     pub forward_max_attempts: u32,
     /// Backoff shared by forward-retry and stream-reconnect. **Review.**
     pub backoff: BackoffPolicy,
-    /// Whether the session opts into incremental mail-list deltas (mirrors the
-    /// TS `viewDelta: true`).
-    pub view_delta: bool,
-    /// Optional account scope for a source-scoped session (`?sourceId=`).
-    pub source_id: Option<String>,
-    /// Resume cursor to seed on construction — the last `sessionSeq` the host
+    /// Resume cursor to seed on construction — the last frame seq the host
     /// persisted from a prior run. The engine owns the cursor thereafter
     /// ([`crate::engine::NearEnd::cursor`]); callers no longer thread `afterSeq`.
     pub initial_cursor: Option<u64>,
@@ -80,15 +73,9 @@ pub struct NearEndConfig {
 impl Default for NearEndConfig {
     fn default() -> Self {
         Self {
-            // Empty by default: the host's IO shim prepends the API origin +
-            // path prefix (it owns `baseUrl()`); the engine builds only the
-            // protocol path + its policy query (the resume cursor).
-            base_url: String::new(),
             request_deadline: Duration::from_secs(30),
             forward_max_attempts: 4,
             backoff: BackoffPolicy::default(),
-            view_delta: true,
-            source_id: None,
             initial_cursor: None,
         }
     }
