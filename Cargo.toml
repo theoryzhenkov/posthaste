@@ -15,6 +15,7 @@ default-members = [
   "crates/posthaste-authority-server-link",
   "crates/posthaste-link-far-end",
   "crates/posthaste-link-core",
+  "crates/posthaste-link-near-end",
   "crates/posthaste-link-replica",
   "crates/posthaste-observability",
   "crates/posthaste-http-api-adapter",

@@ -120,6 +120,53 @@ export class EntityStoreHandle {
 }
 
 /**
+ * The near-end engine, driven from JS. Constructed with an IO object + a
+ * config JSON string; `connect`/`disconnect`/`forward` return Promises.
+ */
+export class NearEndHandle {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Open the session and start the frame loop (idempotent). The Promise
+     * resolves once the session is open; the reconnect loop then runs in the
+     * background (`spawn_local`) until [`Self::disconnect`].
+     */
+    connect(): Promise<any>;
+    /**
+     * The engine-owned resume cursor (last seen `sessionSeq`). The host mirrors
+     * this to durable storage so a reload resumes where it left off — callers no
+     * longer thread `afterSeq`.
+     */
+    cursor(): number | undefined;
+    /**
+     * Stop the frame loop (no further reconnects). Session close is a host
+     * concern (a policy-free `DELETE` via the api client) since the transport is
+     * post-only.
+     */
+    disconnect(): Promise<any>;
+    /**
+     * Forward a mutation (JSON of a `MutationRequest`). Resolves with the
+     * receipt JSON on 2xx (including an authority `failed` verdict); rejects on
+     * a permanent 4xx or exhausted transient retries.
+     */
+    forward(request_json: string): Promise<any>;
+    /**
+     * Build the engine from the JS IO object and a config JSON string.
+     *
+     * `io` must expose: `postJson(url, headersJson, body) => Promise<{status,
+     * body}>`, `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
+     * status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onStatus(label,
+     * message)`, `neverDispatched() => Promise<string>` (a JSON array of
+     * forward requests), and `onReconciled(receiptJson)`.
+     */
+    constructor(io: any, config_json: string);
+    /**
+     * The current session id, once connected.
+     */
+    sessionId(): string | undefined;
+}
+
+/**
  * Swap added↔removed for both the keyword and mailbox facets — the inverse
  * diff applied by undo. Uses `MessageChangeDiff::inverse` in Rust.
  */
@@ -161,9 +208,23 @@ export interface InitOutput {
     readonly entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
     readonly invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
     readonly parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbg_nearendhandle_free: (a: number, b: number) => void;
+    readonly nearendhandle_connect: (a: number) => any;
+    readonly nearendhandle_cursor: (a: number) => [number, number];
+    readonly nearendhandle_disconnect: (a: number) => any;
+    readonly nearendhandle_forward: (a: number, b: number, c: number) => any;
+    readonly nearendhandle_new: (a: any, b: number, c: number) => [number, number, number];
+    readonly nearendhandle_sessionId: (a: number) => [number, number];
+    readonly wasm_bindgen__convert__closures_____invoke__hb442c339423f200d: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__hbd70f3a990e4cad7: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen__convert__closures_____invoke__h385b7305685c474c: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h2423c9da95588df5: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
