@@ -131,6 +131,30 @@ Rules:
   is an exhaustive match. No crate re-mirrors ids (`WireMutationId` is deleted;
   `link_core::MutationId` is the one wire id).
 
+### 2.1b Node anatomy (D36–D39)
+
+Every node is a composition of these parts — shared parts have exactly one
+implementation; bracketed parts are mounts, not forks:
+
+```
+node = OptimisticReplica (kernel, link-core)              ← shared
+     + Projector (windowed views, link-replica)           ← shared (D38)
+     + link near-end (Link trait + transport)             ← every near node
+     [+ link far-end (sessions/frames/registry/wire)]     ← only fan-in nodes (D37, D39)
+     [+ UI composition (reactivity, persistence)]         ← client only (D36)
+     [+ Evaluator + providers (MailService)]              ← authority server only (D38)
+```
+
+client = kernel + projector + near-end(`RuntimeLink`) + UI.
+runtime = kernel + projector + near-end(`AuthorityServerLink`) + far-end(serves clients).
+authority server = evaluator + providers + far-end(serves runtimes).
+
+The *evaluator* (query → membership over unbounded mail) is authority-only by
+the windowed-view-replica product decision; the D15 frontier CI proves the
+client closure cannot contain it. The *projector* (rows + coverage + pending →
+windowed views) is one component both near nodes mount. A headless client is
+kernel + projector + near-end — no UI mount required.
+
 ### 2.1 Replica seams
 
 [::state partial plan=eph/RFC-L2-architecture-cleanup]
