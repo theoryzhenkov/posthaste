@@ -1,9 +1,9 @@
 ---
 scope: L2
-summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. End-state per RFC-L2-architecture-cleanup; sections whose code lags carry [::state] markers."
+summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. Realized per RFC-L2-architecture-cleanup M0–M8; only next-wave (M9) sections still carry [::state] markers."
 modified: 2026-07-02
 reviewed: 2026-07-02
-state: planned
+state: active
 depends:
   - path: docs/replication/L1
   - path: docs/runtime/internals/L1
@@ -36,10 +36,13 @@ pattern); **`*Adapter`** = protocol translation (`HttpApiAdapter`).
 ## 1. The crate set (end-state)
 
 [::state partial plan=eph/RFC-L2-architecture-cleanup]
-*The splits and renames below are drained intent; code still has `posthaste-domain`
-(unsplit), `posthaste-runtime-contract` (fused), `posthaste-link-contract` and
-`posthaste-authority-runtime` (old names, `Backend*` types). See
-DEVIATION-L2-architecture-cleanup rows V1–V6.*
+*The crate set below is REAL as of 2026-07-02 (M0–M8: the domain/contract-core
+splits, the `RuntimeCore` and far-node trait splits, the authority-server renames,
+the typed `MailOperation`, `OptimisticReplica`, the frontier CI). Next-wave lag
+(M9, RFC §8) only: the `LinkFarEnd`/`LinkNearEnd` engines + wasm client transport
+(D40/D41), `RuntimeSessionId → RuntimeLinkId` + session→link vocabulary (D42), the
+`replica-core`/`replica-projector` crate renames (D43), and the full projector
+merge into link-replica (D38).*
 
 ### 1.1 Shared vocabulary tier (wasm-pure)
 
@@ -60,7 +63,7 @@ DEVIATION-L2-architecture-cleanup rows V1–V6.*
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `posthaste-authority-server-link` | The runtime↔authority-server seam, mirroring the client↔runtime seam's shape (RFC D33): **`AuthorityServerApi`** (the typed request surface — reads, account/settings ops, `apply(op: MailOperation)`) + **`AuthorityServerLink`** (the coherent-link mechanics — `forward_mutation`, `subscribe(coverage)` → frames, settlement/watermark, outbox op-lifecycle) + `AuthorityServerLinkHandle` (wrapper), `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). *(Split pending: one fused trait until M5b — [::state] per §1 marker.)* | contract-core, domain-model, link-core |
+| `posthaste-authority-server-link` | The runtime↔authority-server seam, mirroring the client↔runtime seam's shape (RFC D33): **`AuthorityServerApi`** (the typed request surface — reads, account/settings ops, `apply(op: MailOperation)`) + **`AuthorityServerLink`** (the coherent-link mechanics — `forward_mutation`, `subscribe(coverage)` → frames, settlement/watermark, outbox op-lifecycle) + `AuthorityServerLinkHandle` (wrapper), `AuthorityServerFrame` (base assertions + settlement), `AuthorityServerLinkId`, `LinkCoverage`, `LINK_*_PATH`, generated request structs. No shared vocabulary lives here (that is contract-core). | contract-core, domain-model, link-core |
 | `posthaste-runtime-api` | The typed, wire-free client-facing domain RPC extracted from `RuntimeCore` (41 of its 52 methods): returns serde domain types, no frames. **Four traits** — `RuntimeAccountApi`, `RuntimeSettingsApi`, `RuntimeMailReadApi`, `RuntimeMailWriteApi` (whose message commands are one typed `apply(op: MailOperation) -> CommandAck` entry (D34), not per-command RPCs) — plus an umbrella supertrait; narrow consumers take one trait (`&dyn RuntimeAccountApi`). | contract-core, domain-model |
 | `posthaste-client-link` | The client↔runtime link ops extracted from `RuntimeCore` (**one trait, `RuntimeLink`**, 10 methods): `forward_mutation` (the up-channel flush, one verb across both seams per D35), the three stream families (`subscribe_runtime_frames`, `subscribe_events`, session-view snapshots), session open/close, view open/extend/close. | contract-core, domain-model, link-core |
 
@@ -81,11 +84,6 @@ DEVIATION-L2-architecture-cleanup rows V1–V6.*
 | `posthaste-observability`, `posthaste-testkit`, `posthaste-bench`, `posthaste-lab`, `posthaste-wizard` | Telemetry, test harness, benches, tooling. | (tier-appropriate) |
 
 ### 1.5 Role binaries
-
-[::state partial plan=eph/RFC-L2-architecture-cleanup]
-*Current bins: `posthaste_backend`, `posthaste_daemon` (posthaste-server),
-`posthaste_runtime_daemon` (posthaste-runtimed); desktop app unnamed as a role
-bin (RFC D18).*
 
 A binary is named after the component it runs — no more, no less:
 
@@ -133,6 +131,12 @@ Rules:
 
 ### 2.1b Node anatomy (D36–D39)
 
+[::state partial plan=eph/RFC-L2-architecture-cleanup]
+*Next-wave lag (M9, RFC §8): the link ends are per-seam modules today (the
+runtime's `far_end/`, the authority server's `link_wire.rs` + registry), not the
+shared `LinkFarEnd`/`LinkNearEnd` engines (D40/D41); the runtime's remaining
+projector code in `views.rs` has not merged into link-replica (D38).*
+
 Every node is a composition of these parts — shared parts have exactly one
 implementation; bracketed parts are mounts, not forks:
 
@@ -157,13 +161,10 @@ kernel + projector + near-end — no UI mount required.
 
 ### 2.1 Replica seams
 
-[::state partial plan=eph/RFC-L2-architecture-cleanup]
-*Trait seams not yet extracted (RFC D9); the retire invariant still lives only
-in `EntityStore::settle`.*
-
 The Link/Replica/Outbox layering is legible **in types**, not only in
-structure: `link-core` exposes an explicit `Replica` trait (and `Link`/`Outbox`
-views only if a caller benefits) over the single-owner `MessageReplica`. There
+structure: `link-core` exposes the explicit `OptimisticReplica` trait (D35a;
+`Link`/`Outbox` views only if a caller benefits) over the single-owner
+`MessageReplica`. There
 is exactly one store — base + pending, optimism folded on read; the seams are
 *views* over that owner, never a second copy (a split store was considered and
 rejected). The version-gated race-free retire invariant lives in the engine
@@ -172,9 +173,6 @@ runtime near node's `RuntimeAuthorityServerOutbox` — inherit it rather than
 re-implementing it.
 
 ## 3. The wasm-pure frontier
-
-[::state partial plan=eph/RFC-L2-architecture-cleanup]
-*CI enforcement does not exist yet (RFC D15).*
 
 `link-core`, `link-replica`, `domain-model`, `contract-core` are serde-only: no
 `tokio`, `reqwest`, `rusqlite`, `mail-parser`, `axum`, `uuid`-free except
