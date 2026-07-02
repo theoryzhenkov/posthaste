@@ -124,15 +124,6 @@ Server-sent domain event stream
 | --- | --- | --- | --- |
 | `GET` | `/v1/events` | Stream events | `stream_events` |
 
-## views
-
-Runtime-owned view snapshots and streams
-
-| Method | Path | Summary | Operation |
-| --- | --- | --- | --- |
-| `POST` | `/v1/views` | Open a runtime view | `open_view` |
-| `GET` | `/v1/views/{view_id}/stream` | Subscribe to a runtime view stream | `stream_view` |
-
 ## runtime
 
 Link-scoped runtime frame stream

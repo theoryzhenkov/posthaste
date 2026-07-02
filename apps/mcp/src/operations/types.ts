@@ -25,10 +25,10 @@ export interface CliBinding {
 
 /**
  * One API operation, lifted out of any front-end. The MCP server and the CLI are
- * two *renderings* of this same descriptor (DESIGN-L2-posthastectl §3): MCP
- * registers it as a tool, the CLI renders it as a subcommand. Neither front-end
- * can drift from the other or from the `/v1` contract, because both consume the
- * same `argSchema` + `handler`.
+ * two *renderings* of this same descriptor (docs/eph/RFC-L2-scripting.md §7,
+ * the ladder): MCP registers it as a tool, the CLI renders it as a subcommand.
+ * Neither front-end can drift from the other or from the `/v1` contract,
+ * because both consume the same `argSchema` + `handler`.
  */
 export interface Operation {
   /** Stable MCP tool name (unchanged from the original `tools/` registration). */

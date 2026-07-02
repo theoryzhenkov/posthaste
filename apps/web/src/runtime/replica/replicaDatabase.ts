@@ -1,11 +1,12 @@
 /**
- * Shared IndexedDB schema for the replica's durable state. The outbox + undo
- * history live in one database (`posthaste-replica`) and upgrade together:
- * whichever store opens first runs `onupgradeneeded` and creates BOTH object
- * stores. This prevents the version-drift regression where one store bumped the
- * shared DB past the other — a downgrade `open(..., olderVersion)` throws
- * `VersionError`, which surfaced as views stuck loading forever (the outbox
- * rehydration in `openMailListView` rejected + was swallowed).
+ * Shared IndexedDB schema for the replica's durable state. The pending set +
+ * undo history live in one database (`posthaste-replica`) and upgrade
+ * together: whichever store opens first runs `onupgradeneeded` and creates
+ * BOTH object stores. This prevents the version-drift regression where one
+ * store bumped the shared DB past the other — a downgrade
+ * `open(..., olderVersion)` throws `VersionError`, which surfaced as views
+ * stuck loading forever (the pending-set rehydration in `openMailListView`
+ * rejected + was swallowed).
  *
  * Add new replica object stores here, in the shared `onupgradeneeded`, and bump
  * `REPLICA_DB_VERSION`. Never open `posthaste-replica` at a different version
@@ -15,6 +16,10 @@
  */
 export const REPLICA_DB_NAME = 'posthaste-replica'
 export const REPLICA_DB_VERSION = 2
+// D54 renamed the in-code pending-mutation-set vocabulary from "outbox" to
+// "PendingSet" (see `pendingSetStore.ts`), but this object-store name is
+// on-disk data for every existing install — renaming the persisted string
+// would need a migration, which is out of scope here. Keep the literal.
 export const OUTBOX_STORE = 'outbox'
 export const UNDO_HISTORY_STORE = 'undoHistory'
 
@@ -58,14 +63,16 @@ export function openReplicaDatabase(): Promise<IDBDatabase> {
 }
 
 /**
- * Delete the entire replica database (outbox + undo history) — the client-side
- * store that the reactive mail-list views are computed from. This is the missing
- * half of "repair": rebuilding the server-side `mail.sqlite` leaves a wedged
- * replica untouched, which is the real cause of "views stuck loading forever".
+ * Delete the entire replica database (pending set + undo history) — the
+ * client-side store that the reactive mail-list views are computed from. This
+ * is the missing half of "repair": rebuilding the server-side `mail.sqlite`
+ * leaves a wedged replica untouched, which is the real cause of "views stuck
+ * loading forever".
  *
  * The replica is a rebuildable cache: on the next open it re-hydrates from the
- * runtime/server. The only data lost is never-dispatched outbox mutations (the
- * caller must warn the user). Intended to be followed by a relaunch / re-init.
+ * runtime/server. The only data lost is never-dispatched pending-set
+ * mutations (the caller must warn the user). Intended to be followed by a
+ * relaunch / re-init.
  *
  * Closes every tracked connection first (an open connection blocks the delete);
  * callers that hold a cached connection must drop it after this resolves.

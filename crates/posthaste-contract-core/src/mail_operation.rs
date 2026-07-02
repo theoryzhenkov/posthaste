@@ -138,7 +138,7 @@ impl MailOperation {
 
     /// The pure projection of this operation into replica-core's fold vocabulary
     /// (D34 (b)) — the single local-effect derivation both the client's
-    /// optimistic fold (wasm) and the runtime near node's outbox fold consume,
+    /// optimistic fold (wasm) and the runtime near node's pending-set fold consume,
     /// so the two can never drift. `None` for operations with no local effect
     /// the tier can form from the request alone: role moves without a role map
     /// (see [`fold_effect_with_roles`](Self::fold_effect_with_roles)) and the

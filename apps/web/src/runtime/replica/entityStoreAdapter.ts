@@ -60,13 +60,13 @@ import {
   resolveMailListPredicate,
   type MailListPredicate,
 } from '../mailListSelfMaintained'
-import type { OutboxStore } from './outboxStore'
+import type { PendingSetStore } from './pendingSetStore'
 import { getUndoHistoryStore, makeRevStep } from './undoHistoryStore'
 import { parseMailOperation } from './wasmUtil'
 import {
   nearEndLinkId,
-  setNearEndOutboxHooks,
-  type NearEndOutboxHooks,
+  setNearEndPendingSetHooks,
+  type NearEndPendingSetHooks,
 } from '../nearEnd'
 
 /** The store's sort key `[receivedAt, id]`. */
@@ -152,7 +152,7 @@ export interface EntityStoreAdapterDeps {
   /** Overrides the store entirely — e.g. a `WorkerStorePort` running the WASM
    *  store off the UI thread. Takes precedence over `makeHandle`. */
   makeStore?: () => StorePort
-  outbox: OutboxStore
+  pendingSet: PendingSetStore
   /** React Query cache the adapter writes mailbox counts into. Defaults to the
    * app singleton. */
   queryClient?: QueryClient
@@ -160,11 +160,11 @@ export interface EntityStoreAdapterDeps {
   /** Coalesces the `message.updated` sync burst (default: one flush per
    * animation frame). Injected synchronously in tests. */
   scheduleFlush?: FlushScheduler
-  /** The near-end engine surface the adapter wires its durable outbox into
+  /** The near-end engine surface the adapter wires its durable pending set into
    * (the engine's level-triggered reconciler drives replay + settlement,
    * D44). Defaults to the live wasm engine binding; injected in tests. */
   nearEnd?: {
-    setOutboxHooks(hooks: NearEndOutboxHooks): void
+    setPendingSetHooks(hooks: NearEndPendingSetHooks): void
     linkId(): string | null
   }
 }
@@ -253,16 +253,16 @@ class EntityStoreController {
     this.now = deps.now ?? (() => Date.now())
     this.scheduleFlush = deps.scheduleFlush ?? defaultFlushScheduler
     this.nearEnd = deps.nearEnd ?? {
-      setOutboxHooks: setNearEndOutboxHooks,
+      setPendingSetHooks: setNearEndPendingSetHooks,
       linkId: nearEndLinkId,
     }
-    // Wire the durable outbox into the engine's level-triggered reconciler
+    // Wire the durable pending set into the engine's level-triggered reconciler
     // (D44): the engine decides WHEN (every connect); these hooks are HOW.
-    this.nearEnd.setOutboxHooks(this.buildOutboxHooks())
+    this.nearEnd.setPendingSetHooks(this.buildPendingSetHooks())
   }
 
   /**
-   * The engine's reconciler hooks over the durable outbox:
+   * The engine's reconciler hooks over the durable pending set:
    *
    * - never-dispatched replay (D44a — subsumes and replaces the deleted
    *   view-open `resendNeverDispatched` trigger);
@@ -270,10 +270,10 @@ class EntityStoreController {
    *   adapter left as a TODO): a terminal verdict settles the optimism +
    *   clears the record; a runtime with no record re-forwards.
    */
-  private buildOutboxHooks(): NearEndOutboxHooks {
+  private buildPendingSetHooks(): NearEndPendingSetHooks {
     return {
       neverDispatched: async () => {
-        const records = await this.deps.outbox.all()
+        const records = await this.deps.pendingSet.all()
         return records
           .filter((record) => record.runtimeMutationId === null)
           .flatMap((record) => {
@@ -285,7 +285,7 @@ class EntityStoreController {
                 event: LOG_EVENTS.outboxRehydrateSkipped,
                 clientMutationId: record.clientMutationId,
               },
-              'outbox record predates the stored request; cannot replay it',
+              'pending-set record predates the stored request; cannot replay it',
             )
             return []
           })
@@ -299,16 +299,16 @@ class EntityStoreController {
             event: LOG_EVENTS.outboxRehydrateResent,
             clientMutationId: receipt.clientMutationId,
           },
-          'reconciler replayed an outbox record; linking its receipt',
+          'reconciler replayed a pending-set record; linking its receipt',
         )
-        await this.deps.outbox.linkRuntimeMutationId(
+        await this.deps.pendingSet.linkRuntimeMutationId(
           receipt.clientMutationId,
           receipt.runtimeMutationId,
           linkId ?? undefined,
         )
       },
       sentUnsettled: async () => {
-        const records = await this.deps.outbox.all()
+        const records = await this.deps.pendingSet.all()
         return records
           .filter(
             (record) => record.runtimeMutationId !== null && record.linkId,
@@ -326,7 +326,7 @@ class EntityStoreController {
           receipt.clientMutationId,
           receipt.state === 'confirmed' ? 'confirmed' : 'failed',
         )
-        await this.deps.outbox.remove(receipt.clientMutationId)
+        await this.deps.pendingSet.remove(receipt.clientMutationId)
       },
     }
   }
@@ -402,7 +402,7 @@ class EntityStoreController {
     // A single un-deserializable record (e.g. a durable assertion written before
     // a wire-schema change) must never abort the whole view-open — that bricks
     // every mail-list view silently. Skip + log the bad record and keep going.
-    const rehydrated = await this.deps.outbox.all()
+    const rehydrated = await this.deps.pendingSet.all()
     const droppedLegacy: string[] = []
     for (const record of rehydrated) {
       if (record.runtimeMutationId !== null) {
@@ -427,18 +427,20 @@ class EntityStoreController {
             messageId: record.messageId,
             error: error instanceof Error ? error.message : String(error),
           },
-          'skipped an un-deserializable outbox record during rehydration',
+          'skipped an un-deserializable pending-set record during rehydration',
         )
       }
     }
     if (droppedLegacy.length) {
-      await Promise.all(droppedLegacy.map((id) => this.deps.outbox.remove(id)))
+      await Promise.all(
+        droppedLegacy.map((id) => this.deps.pendingSet.remove(id)),
+      )
       syncLogger.debug(
         {
           event: LOG_EVENTS.outboxRehydrateDropped,
           count: droppedLegacy.length,
         },
-        'dropped sent outbox records with no link id (not reconcilable)',
+        'dropped sent pending-set records with no link id (not reconcilable)',
       )
     }
     const projected = await this.projectView(viewId)
@@ -624,7 +626,7 @@ class EntityStoreController {
       (request.context as { userInitiated?: boolean } | null | undefined)
         ?.userInitiated === true
     // Atomic optimism: capture the undo diff, fold the assertion, persist the
-    // outbox record, and re-project — serialized against flushes/settles so the
+    // pending-set record, and re-project — serialized against flushes/settles so the
     // fold never interleaves another store op.
     const capturedDiff = await this.enqueue(async () => {
       let diff: MessageChangeDiff | null = null
@@ -644,14 +646,14 @@ class EntityStoreController {
           assertion: translated.assertion,
         }),
       )
-      await this.deps.outbox.put({
+      await this.deps.pendingSet.put({
         clientMutationId,
         messageId: translated.messageId,
         assertion: translated.assertion as ReplicaAssertion,
         runtimeMutationId: null,
         acceptedAt: this.now(),
         // Store the original send so a never-dispatched record can be replayed
-        // verbatim on rehydration (outbox-rehydrate-resend).
+        // verbatim on rehydration (pending-set-rehydrate-resend).
         request,
       })
       await this.drainAndEmit()
@@ -675,7 +677,7 @@ class EntityStoreController {
 
   /**
    * Send a translated mutation to the runtime and link/settle its receipt
-   * against the durable outbox (stamping the dispatching link so the
+   * against the durable pending set (stamping the dispatching link so the
    * engine's reconciler can query its settlement cross-link, D44b). On a
    * synchronous rejection it retires the optimism (revert) and rethrows.
    * Replay of never-dispatched records is NOT here anymore — the engine's
@@ -689,7 +691,7 @@ class EntityStoreController {
     try {
       receipt = await this.deps.base.runRuntimeMutation(request)
       if (receipt.runtimeMutationId) {
-        await this.deps.outbox.linkRuntimeMutationId(
+        await this.deps.pendingSet.linkRuntimeMutationId(
           clientMutationId,
           receipt.runtimeMutationId,
           this.nearEnd.linkId() ?? request.linkId ?? undefined,
@@ -752,7 +754,7 @@ class EntityStoreController {
         // The verdict for a named mutation. `confirmed` retires the op by
         // absorption (no revert — it never outruns the base into a revert);
         // `rejected` reverts the optimism and surfaces the error. Either way the
-        // durable outbox record clears (the server has reached a terminal state).
+        // durable pending-set record clears (the server has reached a terminal state).
         const verdict = settlementVerdict(frame.notification)
         if (frame.notification.type === 'rejected') {
           syncLogger.warn(
@@ -849,13 +851,13 @@ class EntityStoreController {
     })
   }
 
-  /** Clear durable-outbox records for ops the engine retired since the last
+  /** Clear durable-pending-set records for ops the engine retired since the last
    *  drain (settle-confirm or base catch-up). An un-retired op stays durable so
    *  it survives a reload to be replayed. (outbox D) */
   private async clearRetired(): Promise<void> {
     const retired = JSON.parse(await this.store.drainRetiredJson()) as string[]
     if (retired.length) {
-      await Promise.all(retired.map((id) => this.deps.outbox.remove(id)))
+      await Promise.all(retired.map((id) => this.deps.pendingSet.remove(id)))
     }
   }
 

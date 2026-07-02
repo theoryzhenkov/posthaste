@@ -19,7 +19,7 @@
 //!   sent-but-unsettled settlement query (when the wire has one).
 //!
 //! No timers, no HTTP client, no persistence live here — those are the injected
-//! [`Transport`]/[`Scheduler`]/[`FrameSink`]/[`OutboxHooks`]. That is what keeps
+//! [`Transport`]/[`Scheduler`]/[`FrameSink`]/[`PendingSetHooks`]. That is what keeps
 //! the crate wasm-pure.
 
 use std::cell::RefCell;
@@ -34,7 +34,7 @@ use posthaste_contract_core::{
 
 use crate::config::NearEndConfig;
 use crate::error::{classify_status, Disposition};
-use crate::outbox::OutboxHooks;
+use crate::pending_set::PendingSetHooks;
 use crate::scheduler::Scheduler;
 use crate::sink::{ConnectionStatus, FrameSink};
 use crate::transport::{
@@ -136,7 +136,7 @@ pub struct NearEnd<W: Wire> {
     transport: Rc<dyn Transport>,
     scheduler: Rc<dyn Scheduler>,
     sink: Rc<dyn FrameSink<W::Frame>>,
-    outbox: Rc<dyn OutboxHooks>,
+    pending_set: Rc<dyn PendingSetHooks>,
     config: NearEndConfig,
     state: RefCell<State>,
 }
@@ -147,7 +147,7 @@ impl<W: Wire> NearEnd<W> {
         transport: Rc<dyn Transport>,
         scheduler: Rc<dyn Scheduler>,
         sink: Rc<dyn FrameSink<W::Frame>>,
-        outbox: Rc<dyn OutboxHooks>,
+        pending_set: Rc<dyn PendingSetHooks>,
         config: NearEndConfig,
     ) -> Rc<Self> {
         let cursor = config.initial_cursor;
@@ -156,7 +156,7 @@ impl<W: Wire> NearEnd<W> {
             transport,
             scheduler,
             sink,
-            outbox,
+            pending_set,
             config,
             state: RefCell::new(State {
                 cursor,
@@ -459,16 +459,16 @@ impl<W: Wire> NearEnd<W> {
     ///   frame stream, and a record the runtime does not know is re-forwarded
     ///   (the far-end dedup ledger guards a raced duplicate).
     async fn reconcile(self: Rc<Self>) {
-        let pending = self.outbox.never_dispatched().await;
+        let pending = self.pending_set.never_dispatched().await;
         for request in pending {
             // A transient/permanent replay failure surfaces through the normal
             // frame/settlement stream; the record stays for the next connect.
             if let Ok(receipt) = self.forward(request).await {
-                self.outbox.on_reconciled(receipt).await;
+                self.pending_set.on_reconciled(receipt).await;
             }
         }
 
-        let unsettled = self.outbox.sent_unsettled().await;
+        let unsettled = self.pending_set.sent_unsettled().await;
         for record in unsettled {
             let Some(get) = self
                 .wire
@@ -491,7 +491,7 @@ impl<W: Wire> NearEnd<W> {
             match settlement.receipt {
                 Some(receipt) if receipt.state.is_terminal() => {
                     // The runtime already settled it — settle locally.
-                    self.outbox.on_settlement(receipt).await;
+                    self.pending_set.on_settlement(receipt).await;
                 }
                 Some(_) => {
                     // Still pending server-side; the frame stream will settle it.
@@ -501,7 +501,7 @@ impl<W: Wire> NearEnd<W> {
                     // re-forward, if the host still holds the original request.
                     let Some(request) = record.request else { continue };
                     if let Ok(receipt) = self.forward(request).await {
-                        self.outbox.on_reconciled(receipt).await;
+                        self.pending_set.on_reconciled(receipt).await;
                     }
                 }
             }

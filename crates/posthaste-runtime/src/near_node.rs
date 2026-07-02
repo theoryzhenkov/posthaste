@@ -2,22 +2,22 @@
 //!
 //! Two pieces ([replication authority-server-link L2 §5](../replication/authority-server-link/L2.md)):
 //!
-//! - [`RuntimeAuthorityServerOutbox`] — the runtime's outbox **toward the authority server**: the
+//! - [`AuthorityServerPendingSet`] — the runtime's pending set **toward the authority server**: the
 //!   mutations it has forwarded but the authority server has not yet confirmed. A
 //!   mutation is accepted here when it is forwarded and retired when its receipt
 //!   returns; while it is held, the runtime's served views fold it optimistically.
 //!   In the co-located in-process deployment confirmation is synchronous, so the
-//!   outbox is empty between mutations and the fold is a pass-through; it holds
+//!   pending set is empty between mutations and the fold is a pass-through; it holds
 //!   work only when the authority server is remote or unreachable (optimistic offline).
 //!
-//! - [`apply_outbox_overlay`] — folds the outbox over a recomputed mail-list view
+//! - [`apply_pending_set_overlay`] — folds the pending set over a recomputed mail-list view
 //!   using the **shared** convergence kernel and per-entity optimism read
 //!   (`posthaste-replica-projector`'s `project_optimistic`), the same fold the
 //!   browser client's entity store runs as WASM (assertion `one-replica`). The
-//!   served rows are the base; the outbox is the pending set; the projection is
-//!   the optimistic result.
+//!   served rows are the base; the runtime's pending set folds over them; the
+//!   projection is the optimistic result.
 //!
-//! @spec docs/replication/authority-server-link/L2#5-the-runtime-near-node-read-replica-outbox
+//! @spec docs/replication/authority-server-link/L2#5-the-runtime-near-node-read-replica-pending-set
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -27,7 +27,7 @@ use posthaste_replica_projector::{fold_state_from_projection, project_optimistic
 use posthaste_contract_core::{MailListViewState, MutationRequest};
 use serde_json::Value;
 
-/// The runtime's outbox toward the authority server: forwarded-but-unconfirmed message
+/// The runtime's pending set toward the authority server: forwarded-but-unconfirmed message
 /// mutations, ordered, idempotent on mutation id. Composes the shared
 /// [`MessageReplica`] — replica-core's `OptimisticReplica` kernel, the same
 /// accept-pending / fold-on-read / retire-on-absorption mechanism the client's
@@ -47,12 +47,12 @@ use serde_json::Value;
 ///   Retiring on the receipt instead would recompute against a stale base — the
 ///   revert-then-reapply flicker the client tier's absorption-gated retire
 ///   already eliminated.
-pub(crate) struct RuntimeAuthorityServerOutbox {
+pub(crate) struct AuthorityServerPendingSet {
     engine: Mutex<MessageReplica>,
     retire_on_down_channel: bool,
 }
 
-impl RuntimeAuthorityServerOutbox {
+impl AuthorityServerPendingSet {
     /// `retire_on_down_channel` mirrors `drive_down_channel`: a remote authority server
     /// (down-channel bridge spawned) gates retirement on the base assertion; a
     /// co-located one retires on receipt.
@@ -64,7 +64,7 @@ impl RuntimeAuthorityServerOutbox {
     }
 
     fn engine(&self) -> MutexGuard<'_, MessageReplica> {
-        self.engine.lock().expect("outbox lock poisoned")
+        self.engine.lock().expect("pending set lock poisoned")
     }
 
     /// Accept a forwarded mutation (idempotent on id).
@@ -110,7 +110,7 @@ impl RuntimeAuthorityServerOutbox {
     }
 }
 
-/// The optimistic message effect of an operation, for the outbox, plus the
+/// The optimistic message effect of an operation, for the pending set, plus the
 /// message it targets. `None` for operations whose effect the runtime cannot
 /// form from the request alone — role moves (archive/trash/moveToRole) need the
 /// account's role→mailbox resolution, so they are not folded optimistically yet
@@ -130,17 +130,17 @@ pub(crate) fn named_message_assertion(
         .map(|assertion| (message_id, assertion))
 }
 
-/// Fold the runtime→authority server outbox over a recomputed mail-list view, in place,
+/// Fold the runtime→authority server pending set over a recomputed mail-list view, in place,
 /// using the shared convergence engine (the same fold the browser client's
 /// entity store runs — assertion `one-replica`). Behavior-preserving when the
-/// outbox is empty (the in-process default): a short-circuit that leaves the
+/// pending set is empty (the in-process default): a short-circuit that leaves the
 /// served rows untouched.
 ///
 /// The served rows are the confirmed base; each pending mutation is folded over
 /// them; destroyed rows drop. Membership beyond destroy (e.g. archived out of a
 /// concrete mailbox) is left for the runtime's next recompute to correct, as the
 /// client store does for views it cannot evaluate locally.
-pub(crate) fn apply_outbox_overlay(
+pub(crate) fn apply_pending_set_overlay(
     state: &mut MailListViewState,
     pending: &[PendingMessageMutation],
 ) {
@@ -185,7 +185,7 @@ pub(crate) fn apply_outbox_overlay(
         .collect();
 }
 
-/// A mail-list row's message id — the key both the replica and the outbox use.
+/// A mail-list row's message id — the key both the replica and the pending set use.
 /// Read from the row's projection (`MessageSummary.id`).
 fn row_message_id(row: &posthaste_contract_core::MailListRowState) -> String {
     row.projection
@@ -255,10 +255,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_outbox_leaves_rows_untouched() {
+    fn empty_pending_set_leaves_rows_untouched() {
         let mut view = state(vec![row("m1", &[], &["inbox"])]);
         let before = serde_json::to_value(&view.rows).unwrap();
-        apply_outbox_overlay(&mut view, &[]);
+        apply_pending_set_overlay(&mut view, &[]);
         assert_eq!(serde_json::to_value(&view.rows).unwrap(), before);
     }
 
@@ -268,7 +268,7 @@ mod tests {
             row("m1", &[], &["inbox"]),
             row("m2", &["$seen"], &["inbox"]),
         ]);
-        apply_outbox_overlay(
+        apply_pending_set_overlay(
             &mut view,
             &[pending(
                 "op1",
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn pending_destroy_drops_the_row() {
         let mut view = state(vec![row("m1", &[], &["inbox"]), row("m2", &[], &["inbox"])]);
-        apply_outbox_overlay(
+        apply_pending_set_overlay(
             &mut view,
             &[pending("op1", "m1", MessageAssertion::Destroy)],
         );
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn the_composed_engine_is_the_shared_optimistic_replica_seam() {
-        // Compile-time proof of composition (RFC D35a/D36): the outbox's engine
+        // Compile-time proof of composition (RFC D35a/D36): the pending set's engine
         // is replica-core's `OptimisticReplica` kernel — the same seam the client
         // `EntityStore` mounts — not a runtime-grown sibling.
         use posthaste_replica_core::{MessageConvergence, OptimisticReplica};
@@ -322,22 +322,22 @@ mod tests {
     }
 
     #[test]
-    fn outbox_accept_is_idempotent() {
-        let outbox = RuntimeAuthorityServerOutbox::new(false);
+    fn pending_set_accept_is_idempotent() {
+        let pending_set = AuthorityServerPendingSet::new(false);
         let mutation = pending("op1", "m1", MessageAssertion::Destroy);
-        outbox.accept(mutation.clone());
-        outbox.accept(mutation);
-        assert_eq!(outbox.snapshot().len(), 1);
+        pending_set.accept(mutation.clone());
+        pending_set.accept(mutation);
+        assert_eq!(pending_set.snapshot().len(), 1);
     }
 
     #[test]
     fn colocated_confirm_retires_on_receipt() {
         // Co-located: the base already carries the effect when the receipt
         // returns, so a confirmed op is dropped outright (`colocated-unchanged`).
-        let outbox = RuntimeAuthorityServerOutbox::new(false);
-        outbox.accept(pending("op1", "m1", flag()));
-        outbox.settle_receipt(&MutationId("op1".into()), true);
-        assert!(outbox.snapshot().is_empty());
+        let pending_set = AuthorityServerPendingSet::new(false);
+        pending_set.accept(pending("op1", "m1", flag()));
+        pending_set.settle_receipt(&MutationId("op1".into()), true);
+        assert!(pending_set.snapshot().is_empty());
     }
 
     #[test]
@@ -345,10 +345,10 @@ mod tests {
         // A `Failed` verdict (confirmed == false) is dropped on receipt even on
         // the remote seam: the base never absorbs a rejection.
         for remote in [false, true] {
-            let outbox = RuntimeAuthorityServerOutbox::new(remote);
-            outbox.accept(pending("op1", "m1", flag()));
-            outbox.settle_receipt(&MutationId("op1".into()), false);
-            assert!(outbox.snapshot().is_empty(), "remote={remote}");
+            let pending_set = AuthorityServerPendingSet::new(remote);
+            pending_set.accept(pending("op1", "m1", flag()));
+            pending_set.settle_receipt(&MutationId("op1".into()), false);
+            assert!(pending_set.snapshot().is_empty(), "remote={remote}");
         }
     }
 
@@ -359,24 +359,24 @@ mod tests {
         // must NOT retire the op — it stays folded so a recompute in that window
         // reads the optimistic (flagged) state, not a stale revert. It retires
         // only once the down-channel base assertion carries the effect.
-        let outbox = RuntimeAuthorityServerOutbox::new(true);
-        outbox.accept(pending("op1", "m1", flag()));
+        let pending_set = AuthorityServerPendingSet::new(true);
+        pending_set.accept(pending("op1", "m1", flag()));
 
         // Receipt confirms, but the base assertion has not arrived yet.
-        outbox.settle_receipt(&MutationId("op1".into()), true);
-        let snapshot = outbox.snapshot();
+        pending_set.settle_receipt(&MutationId("op1".into()), true);
+        let snapshot = pending_set.snapshot();
         assert_eq!(snapshot.len(), 1, "op held until absorbed");
 
         // A recompute in this window folds the still-pending op: the row stays
         // optimistically flagged — no revert (the flicker would show it unflagged
         // here, then re-flag on the firehose).
         let mut view = state(vec![row("m1", &[], &["inbox"])]);
-        apply_outbox_overlay(&mut view, &snapshot);
+        apply_pending_set_overlay(&mut view, &snapshot);
         assert_eq!(view.rows[0].projection["isFlagged"], json!(true));
 
         // The firehose arrives: the base now carries the flag, so the op is
         // retired by absorption.
-        let retired = outbox.apply_base(
+        let retired = pending_set.apply_base(
             "m1",
             &BaseUpdate::Present(posthaste_replica_core::MessageFoldState {
                 keywords: vec!["$flagged".into()],
@@ -384,12 +384,12 @@ mod tests {
             }),
         );
         assert_eq!(retired, vec![MutationId("op1".into())]);
-        assert!(outbox.snapshot().is_empty());
+        assert!(pending_set.snapshot().is_empty());
 
         // Recomputing over the (now flagged) authoritative base with the empty
-        // outbox is still flagged — the convergence completed without a flicker.
+        // pending set is still flagged — the convergence completed without a flicker.
         let mut view = state(vec![row("m1", &["$flagged"], &["inbox"])]);
-        apply_outbox_overlay(&mut view, &outbox.snapshot());
+        apply_pending_set_overlay(&mut view, &pending_set.snapshot());
         assert_eq!(view.rows[0].projection["isFlagged"], json!(true));
     }
 
@@ -398,10 +398,10 @@ mod tests {
         // A base assertion that arrives BEFORE the mutation applied (an unrelated
         // re-serve) must not retire the confirmed op: it is not absorbed, so it
         // holds for a later assertion that carries the effect.
-        let outbox = RuntimeAuthorityServerOutbox::new(true);
-        outbox.accept(pending("op1", "m1", flag()));
-        outbox.settle_receipt(&MutationId("op1".into()), true);
-        let retired = outbox.apply_base(
+        let pending_set = AuthorityServerPendingSet::new(true);
+        pending_set.accept(pending("op1", "m1", flag()));
+        pending_set.settle_receipt(&MutationId("op1".into()), true);
+        let retired = pending_set.apply_base(
             "m1",
             &BaseUpdate::Present(posthaste_replica_core::MessageFoldState {
                 keywords: vec![],
@@ -409,7 +409,7 @@ mod tests {
             }),
         );
         assert!(retired.is_empty());
-        assert_eq!(outbox.snapshot().len(), 1);
+        assert_eq!(pending_set.snapshot().len(), 1);
     }
 
     #[test]

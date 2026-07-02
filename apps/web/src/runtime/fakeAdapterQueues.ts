@@ -23,8 +23,6 @@ type QueueControls = Pick<
   | 'queueMessageCommandError'
   | 'queueMessagePage'
   | 'queueMessagePageError'
-  | 'queueOpenMessageListView'
-  | 'queueOpenMessageListViewError'
   | 'queueRuntimeLinkConnection'
   | 'queueRuntimeLinkError'
   | 'queueRuntimeLinkMessageListView'
@@ -70,10 +68,6 @@ export function createFakeQueueControls(queues: FakeQueues): QueueControls {
       queueReject(queues.messageCommands, error),
     queueMessagePage: (page) => queueResolve(queues.messagePages, page),
     queueMessagePageError: (error) => queueReject(queues.messagePages, error),
-    queueOpenMessageListView: (result) =>
-      queueResolve(queues.openMessageListViews, result),
-    queueOpenMessageListViewError: (error) =>
-      queueReject(queues.openMessageListViews, error),
     queueRuntimeLinkConnection: (link) =>
       queueResolve(queues.runtimeLinks, link),
     queueRuntimeLinkError: (error) => queueReject(queues.runtimeLinks, error),

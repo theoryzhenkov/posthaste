@@ -1,6 +1,6 @@
 //! Far-node assembly: builds the authority server (store + provider engine + IMAP) and
 //! composes a runtime over it via [`posthaste_runtime::assemble_runtime`]. The
-//! near node itself (handle, views, links, read cache, outbox, the remote
+//! near node itself (handle, views, links, read cache, pending set, the remote
 //! transport, and `build_remote_runtime`) lives in `posthaste-runtime`.
 
 use std::fs;
@@ -146,7 +146,7 @@ pub async fn build_authority_server_node(
 }
 
 /// A lean runtime near node ([replication authority-server-link L2 §7](../replication/authority-server-link/L2.md)): the
-/// link / view / outbox machinery over a REMOTE authority server link, with NO local
+/// link / view / pending-set machinery over a REMOTE authority server link, with NO local
 /// authority server (no store, service, or supervisor). The `posthaste-runtime` role (the
 /// daemon configured with a remote authority server) builds this — reads + writes cross
 /// the link, and the down-channel bridge keeps the cache and views live.

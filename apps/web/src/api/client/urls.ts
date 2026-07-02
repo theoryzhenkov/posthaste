@@ -52,19 +52,3 @@ export function buildRuntimeLinkStreamUrl(input: {
   const search = params.toString()
   return `${baseUrl()}/runtime/sessions/${encodeURIComponent(input.linkId)}/stream${search ? `?${search}` : ''}`
 }
-
-export function buildViewStreamUrl(input: {
-  viewId: string
-  afterRevision?: number | null
-  sourceId?: string | null
-}): string {
-  const params = new URLSearchParams()
-  if (input.afterRevision != null) {
-    params.set('afterRevision', String(input.afterRevision))
-  }
-  if (input.sourceId) {
-    params.set('sourceId', input.sourceId)
-  }
-  const search = params.toString()
-  return `${baseUrl()}/views/${encodeURIComponent(input.viewId)}/stream${search ? `?${search}` : ''}`
-}

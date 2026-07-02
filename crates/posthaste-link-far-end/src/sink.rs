@@ -5,7 +5,7 @@
 //! (`settlement-routed-to-origin-runtime`) — never broadcast. Each sink is an
 //! unbounded channel (a settlement emitted before the subscriber connects, or
 //! while its stream is briefly behind, must never be dropped — a lost settlement
-//! strands the near node's outbox entry). A subscriber takes the receiver via
+//! strands the near node's pending-set entry). A subscriber takes the receiver via
 //! [`subscribe`](SettlementSinkStore::subscribe); a reconnect recreates the
 //! channel so future settlements drain to the fresh receiver.
 //!

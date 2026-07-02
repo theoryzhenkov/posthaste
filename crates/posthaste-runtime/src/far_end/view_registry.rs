@@ -25,10 +25,10 @@ use crate::views::{
 
 pub(crate) struct ViewRegistry {
     event_sender: broadcast::Sender<DomainEvent>,
-    /// The runtime's outbox toward the authority server, folded over mail-list recomputes
+    /// The runtime's pending set toward the authority server, folded over mail-list recomputes
     /// so served views are optimistic over forwarded-but-unconfirmed mutations
     /// ([replication authority-server-link L2 §5](../replication/authority-server-link/L2.md)).
-    outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
+    pending_set: Arc<crate::near_node::AuthorityServerPendingSet>,
     /// The mail-list base read through the far node (W4a: passthrough cache over
     /// the in-process authority server, behavior-preserving).
     reads: Arc<crate::read::ReadCache>,
@@ -58,12 +58,12 @@ impl ViewRegistry {
 
     pub(crate) fn new(
         event_sender: broadcast::Sender<DomainEvent>,
-        outbox: Arc<crate::near_node::RuntimeAuthorityServerOutbox>,
+        pending_set: Arc<crate::near_node::AuthorityServerPendingSet>,
         reads: Arc<crate::read::ReadCache>,
     ) -> Self {
         Self {
             event_sender,
-            outbox,
+            pending_set,
             reads,
             views: Mutex::new(HashMap::new()),
             next_view_id: AtomicU64::new(1),
@@ -83,7 +83,7 @@ impl ViewRegistry {
         ));
         let snapshot = build_snapshot(
             &self.reads,
-            &self.outbox,
+            &self.pending_set,
             view_id.clone(),
             descriptor.clone(),
             &kind,
@@ -133,7 +133,7 @@ impl ViewRegistry {
         let next_revision = ViewRevision::new(current.snapshot.revision.get() + 1);
         let snapshot = build_snapshot(
             &self.reads,
-            &self.outbox,
+            &self.pending_set,
             view_id.clone(),
             current.descriptor.clone(),
             &kind,
@@ -314,7 +314,7 @@ impl ViewRegistry {
         let next_revision = ViewRevision::new(current.snapshot.revision.get() + 1);
         let snapshot = build_snapshot(
             &self.reads,
-            &self.outbox,
+            &self.pending_set,
             view_id.clone(),
             current.descriptor.clone(),
             &current.kind,
@@ -335,7 +335,7 @@ impl ViewRegistry {
         let next_revision = ViewRevision::new(current.snapshot.revision.get() + 1);
         let snapshot = build_snapshot(
             &self.reads,
-            &self.outbox,
+            &self.pending_set,
             view_id.clone(),
             current.descriptor.clone(),
             &current.kind,
@@ -355,7 +355,7 @@ impl ViewRegistry {
 #[cfg(test)]
 mod rev_log_view_tests {
     use super::*;
-    use crate::near_node::RuntimeAuthorityServerOutbox;
+    use crate::near_node::AuthorityServerPendingSet;
     use crate::read::ReadCache;
     use async_trait::async_trait;
     use posthaste_authority_server_link::AuthorityServerApi;
@@ -381,11 +381,11 @@ mod rev_log_view_tests {
 
     fn registry(snapshot: RevLogSnapshot) -> Arc<ViewRegistry> {
         let (event_sender, _) = broadcast::channel(16);
-        let outbox = Arc::new(RuntimeAuthorityServerOutbox::new(false));
+        let pending_set = Arc::new(AuthorityServerPendingSet::new(false));
         let reads = Arc::new(ReadCache::passthrough(Arc::new(
             RevLogStubAuthorityServerLink { snapshot },
         )));
-        Arc::new(ViewRegistry::new(event_sender, outbox, reads))
+        Arc::new(ViewRegistry::new(event_sender, pending_set, reads))
     }
 
     fn rev_log_descriptor(account_id: &str) -> ViewDescriptor {

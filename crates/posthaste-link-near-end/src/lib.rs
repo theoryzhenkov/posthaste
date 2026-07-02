@@ -16,8 +16,8 @@
 //!   parse at the boundary, permanent-vs-transient classification, and the
 //!   level-triggered reconciler that replays never-dispatched forwards on every
 //!   connect;
-//! * [`Scheduler`] / [`FrameSink`] / [`OutboxHooks`] — the remaining host seams
-//!   (timing+jitter, frame/status delivery, durable-outbox replay/settle).
+//! * [`Scheduler`] / [`FrameSink`] / [`PendingSetHooks`] — the remaining host seams
+//!   (timing+jitter, frame/status delivery, durable-pending-set replay/settle).
 //!
 //! Nothing here pulls a timer, an HTTP client, or persistence: those are host IO
 //! injected through the traits above, which is what keeps the crate compiling to
@@ -27,7 +27,7 @@
 pub mod config;
 pub mod engine;
 pub mod error;
-pub mod outbox;
+pub mod pending_set;
 pub mod scheduler;
 pub mod sink;
 pub mod transport;
@@ -36,7 +36,7 @@ pub mod wire;
 pub use config::{BackoffPolicy, NearEndConfig};
 pub use engine::{EngineError, NearEnd};
 pub use error::{classify_status, Disposition};
-pub use outbox::{OutboxHooks, SentUnsettled};
+pub use pending_set::{PendingSetHooks, SentUnsettled};
 pub use scheduler::Scheduler;
 pub use sink::{ConnectionStatus, FrameSink};
 pub use transport::{

@@ -292,7 +292,7 @@ pub trait RuntimeMailWriteApi: Send + Sync {
 
     /// Apply a mail operation authoritatively and return its command ack (D21/
     /// D34). This is the **direct-apply** command surface: REST callers are not
-    /// replicas and hold no outbox, so there is no optimistic fold or
+    /// replicas and hold no pending set, so there is no optimistic fold or
     /// `ClientMutationId` dedup here — the operation is applied at the authority
     /// and the resulting events returned. The replica (optimistic) path forwards
     /// the same [`MailOperation`] through `forward_mutation` on the link surface

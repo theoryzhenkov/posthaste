@@ -138,7 +138,7 @@ pub enum AuthorityServerFrame {
     /// A batch of ordered authoritative base updates to apply to the base cache.
     Base { assertions: Vec<BaseAssertion> },
     /// A forwarded mutation reached its terminal outcome at the far node — the
-    /// per-mutation confirmation watermark. Retires the matching outbox entry.
+    /// per-mutation confirmation watermark. Retires the matching pending-set entry.
     Settlement {
         /// The engine's mutation id, carried directly on the wire (D12 — no
         /// serde mirror type; `MutationId` is already serde and this crate
@@ -543,7 +543,7 @@ pub trait AuthorityServerApi: Send + Sync {
     /// Write: apply a mail operation authoritatively and return its command ack
     /// (D21/D34 — the five per-command message RPCs collapsed into one typed
     /// entry). This is the **direct-apply** command surface: REST callers are
-    /// not replicas and hold no outbox, so there is no optimistic fold or
+    /// not replicas and hold no pending set, so there is no optimistic fold or
     /// `ClientMutationId` dedup here. The replica (optimistic) path forwards the
     /// same [`MailOperation`] through `AuthorityServerLink::forward_mutation`
     /// instead.
@@ -740,7 +740,7 @@ fn write_channel_unsupported() -> RuntimeError {
 /// request/response surface and the [`AuthorityServerLink`] replication
 /// channels. Both `Arc`s point at the same config-selected transport object;
 /// carrying them separately is what lets a subset consumer (the runtime's
-/// `ReadCache`, the outbox forwarding path) hold only the half it uses.
+/// `ReadCache`, the pending-set forwarding path) hold only the half it uses.
 ///
 /// This is the runtime↔authority-server *instantiation* of the shared contract. The
 /// client↔runtime link is the same contract carried by the same transport
