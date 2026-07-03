@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::num::{NonZeroU32, NonZeroU64};
 
 use imap_client::imap_types::body::{BasicFields, Body, BodyStructure, SpecificFields};
@@ -71,8 +72,8 @@ fn fetched_header_extracts_typed_gmail_metadata() {
             MessageDataItem::GmailMessageId(1278455344230334865),
             MessageDataItem::GmailThreadId(1266894439832287888),
             MessageDataItem::GmailLabels(vec![
-                Text::try_from("INBOX").expect("inbox label"),
-                Text::try_from("\\Important").expect("important label"),
+                Cow::from("INBOX"),
+                Cow::from("\\Important"),
             ]),
         ],
         "2026-04-25T00:00:00Z".to_string(),

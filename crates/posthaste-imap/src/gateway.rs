@@ -5,24 +5,27 @@ use async_trait::async_trait;
 use imap_client::client::tokio::Client as ImapClient;
 use posthaste_domain_model::{FetchedBody, GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState, ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MutationOutcome, ProviderProfile, ReplyContext, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress, SyncProgressStage, SyncTrigger, now_iso8601};
 use posthaste_domain_model::{AccountId, BlobId, MailboxId, MessageId};
-use posthaste_domain_service::{MailGateway, MailStore, PushTransport, SecretResolver, SyncProgressReporter, plan_imap_mailbox_sync, plan_imap_move};
+use posthaste_domain_service::{MailGateway, MailStore, PushEventStream, PushTransport, SecretResolver, SyncProgressReporter, plan_imap_mailbox_sync, plan_imap_move};
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
-use crate::discovery::connect_authenticated_client;
 use crate::fetch::{
     fetch_mailbox_changed_since_snapshot_with_client, fetch_mailbox_header_snapshot_with_client,
     fetch_mailbox_headers_after_uid_with_client,
 };
 use crate::mailbox::{examine_selected_mailbox, status_imap_mailbox, ImapMailboxStatus};
+use crate::session::ImapSessionManager;
+use crate::body::{fetch_message_body_by_location, fetch_raw_message_by_location};
+use crate::compose::fetch_imap_reply_context_by_location;
+use crate::mutation::{
+    apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
+    expunge_imap_message_by_location, mark_imap_message_deleted_by_location,
+    move_imap_message_to_mailbox_by_location,
+};
+use crate::smtp::transport::append_smtp_sent_copy;
 use crate::{
-    append_smtp_sent_copy, apply_imap_keyword_delta_by_location,
-    copy_imap_message_to_mailbox_by_location, discover_imap_account,
-    expunge_imap_message_by_location, fetch_imap_reply_context_by_location,
-    fetch_message_body_by_location, fetch_raw_message_by_location,
     imap_attachment_bytes_from_raw_mime, imap_condstore_delta_sync_batch, imap_delta_sync_batch,
     imap_full_sync_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_changed_since_snapshot, imap_mailbox_state_from_header_snapshot,
-    mark_imap_message_deleted_by_location, move_imap_message_to_mailbox_by_location,
     normalize_imap_capabilities, parse_imap_attachment_blob_id, smtp_sent_copy_strategy,
     submit_smtp_message, DiscoveredImapAccount, DiscoveredImapMailbox, ImapAdapterError,
     ImapChangedSinceSnapshot, ImapConnectionConfig, ImapMailboxHeaderSnapshot,

@@ -5,7 +5,6 @@ use crate::smtp::smtp_stable_message_id;
 
 pub(crate) async fn send_message_via_smtp(
     gateway: &LiveImapSmtpGateway,
-    imap_config: &ImapConnectionConfig,
     smtp_config: &SmtpConnectionConfig,
     request: &SendMessageRequest,
     idempotency_key: &str,
@@ -35,9 +34,16 @@ pub(crate) async fn send_message_via_smtp(
             .iter()
             .find(|mailbox| mailbox.selectable && mailbox.role == Some("sent"))
         {
-            if let Err(error) =
-                append_smtp_sent_copy(imap_config, &sent_mailbox.name, &submitted.raw_message).await
-            {
+            let append_result = match gateway.sessions.acquire("append_sent_copy").await {
+                Ok(mut lease) => {
+                    let result =
+                        append_smtp_sent_copy(lease.client(), &sent_mailbox.name, &submitted.raw_message)
+                            .await;
+                    lease.finish(result)
+                }
+                Err(error) => Err(error),
+            };
+            if let Err(error) = append_result {
                 ph_warn!(
                     events::IMAP_SMTP_SENT_APPEND_FAILED,
                     mailbox = sent_mailbox.name,

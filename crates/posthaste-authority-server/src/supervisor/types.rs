@@ -98,6 +98,13 @@ pub(crate) struct SupervisorShared {
     pub(crate) account_count: AtomicUsize,
     pub(crate) cache_resources: Mutex<CacheResourceGovernor>,
     pub(crate) poll_interval: Duration,
+    /// Per-secret-ref OAuth refresh single-flight (the minimal M37 piece
+    /// pulled into M34): concurrent resolvers of the same secret — IMAP
+    /// session reconnects, SMTP sends, the proactive refresh tick — serialize
+    /// here, and each flight re-reads the stored token set under the lock, so
+    /// two racing refreshes can no longer both exchange and then clobber each
+    /// other's rotated refresh token in the secret store (audit A1).
+    pub(crate) oauth_refresh_flights: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 /// Monotonic identity for a spawned account runtime.

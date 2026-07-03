@@ -26,6 +26,7 @@ impl AccountSupervisor {
                     CacheResourcePolicy::default(),
                 )),
                 poll_interval,
+                oauth_refresh_flights: Mutex::new(HashMap::new()),
             }),
             runtimes: RwLock::new(HashMap::new()),
             root_cancel: CancellationToken::new(),

@@ -1,14 +1,14 @@
 mod keywords;
 mod validation;
 
+use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::flag::{Flag, StoreType};
 use posthaste_domain_model::{ImapMessageLocation, MutationOutcome, SetKeywordsCommand};
 
-use crate::discovery::connect_authenticated_client;
 use crate::mutation::validation::{
     select_validated_mailbox, uid_expunge, uid_sequence_set, verify_uid_fetch_response,
 };
-use crate::{ImapAdapterError, ImapConnectionConfig};
+use crate::ImapAdapterError;
 
 pub use keywords::{
     imap_flags_for_keywords, imap_mailbox_replacement_delta, ImapMailboxReplacementDelta,
@@ -28,29 +28,30 @@ pub(crate) use validation::{verify_message_data_contains_uid, UidExpungeTask};
 /// response for accepted STORE commands.
 ///
 /// @spec docs/L1-api#message-commands
-pub async fn apply_imap_keyword_delta_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn apply_imap_keyword_delta_by_location(
+    client: &mut ImapClient,
     mailbox_name: &str,
     location: &ImapMessageLocation,
     command: &SetKeywordsCommand,
 ) -> Result<MutationOutcome, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    select_validated_mailbox(&mut client, mailbox_name, location).await?;
+    select_validated_mailbox(client, mailbox_name, location).await?;
 
     let uid_set = uid_sequence_set(location)?;
     let add_flags = imap_flags_for_keywords(&command.add)?;
     let remove_flags = imap_flags_for_keywords(&command.remove)?;
     if !add_flags.is_empty() {
-        client
-            .uid_silent_store(uid_set.clone(), StoreType::Add, add_flags)
-            .await
-            .map_err(ImapAdapterError::from)?;
+        crate::timeout::with_deadline(
+            "uid_store",
+            client.uid_silent_store(uid_set.clone(), StoreType::Add, add_flags),
+        )
+        .await?;
     }
     if !remove_flags.is_empty() {
-        client
-            .uid_silent_store(uid_set, StoreType::Remove, remove_flags)
-            .await
-            .map_err(ImapAdapterError::from)?;
+        crate::timeout::with_deadline(
+            "uid_store",
+            client.uid_silent_store(uid_set, StoreType::Remove, remove_flags),
+        )
+        .await?;
     }
 
     Ok(MutationOutcome {
@@ -66,15 +67,14 @@ pub async fn apply_imap_keyword_delta_by_location(
 /// discover the destination UID location.
 ///
 /// @spec docs/L1-api#message-commands
-pub async fn copy_imap_message_to_mailbox_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn copy_imap_message_to_mailbox_by_location(
+    client: &mut ImapClient,
     source_mailbox_name: &str,
     location: &ImapMessageLocation,
     target_mailbox_name: &str,
 ) -> Result<(), ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    select_validated_mailbox(&mut client, source_mailbox_name, location).await?;
-    verify_uid_fetch_response(&mut client, location).await?;
+    select_validated_mailbox(client, source_mailbox_name, location).await?;
+    verify_uid_fetch_response(client, location).await?;
     crate::timeout::with_deadline(
         "uid_copy",
         client.uid_copy(uid_sequence_set(location)?, target_mailbox_name),
@@ -89,15 +89,14 @@ pub async fn copy_imap_message_to_mailbox_by_location(
 /// and relies on the next sync to discover the destination UID location.
 ///
 /// @spec docs/L1-api#message-commands
-pub async fn move_imap_message_to_mailbox_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn move_imap_message_to_mailbox_by_location(
+    client: &mut ImapClient,
     source_mailbox_name: &str,
     location: &ImapMessageLocation,
     target_mailbox_name: &str,
 ) -> Result<(), ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    select_validated_mailbox(&mut client, source_mailbox_name, location).await?;
-    verify_uid_fetch_response(&mut client, location).await?;
+    select_validated_mailbox(client, source_mailbox_name, location).await?;
+    verify_uid_fetch_response(client, location).await?;
     crate::timeout::with_deadline(
         "uid_move",
         client.uid_move(uid_sequence_set(location)?, target_mailbox_name),
@@ -112,14 +111,13 @@ pub async fn move_imap_message_to_mailbox_by_location(
 /// a true permanent delete when the dependency exposes it.
 ///
 /// @spec docs/L1-api#message-commands
-pub async fn mark_imap_message_deleted_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn mark_imap_message_deleted_by_location(
+    client: &mut ImapClient,
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<MutationOutcome, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    select_validated_mailbox(&mut client, mailbox_name, location).await?;
-    verify_uid_fetch_response(&mut client, location).await?;
+    select_validated_mailbox(client, mailbox_name, location).await?;
+    verify_uid_fetch_response(client, location).await?;
     crate::timeout::with_deadline(
         "uid_store",
         client.uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted]),
@@ -137,20 +135,19 @@ pub async fn mark_imap_message_deleted_by_location(
 /// Only call this when the server advertises UIDPLUS or IMAP4rev2 support.
 ///
 /// @spec docs/L1-api#message-commands
-pub async fn expunge_imap_message_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn expunge_imap_message_by_location(
+    client: &mut ImapClient,
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<MutationOutcome, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    select_validated_mailbox(&mut client, mailbox_name, location).await?;
-    verify_uid_fetch_response(&mut client, location).await?;
+    select_validated_mailbox(client, mailbox_name, location).await?;
+    verify_uid_fetch_response(client, location).await?;
     crate::timeout::with_deadline(
         "uid_store",
         client.uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted]),
     )
     .await?;
-    let _expunged = uid_expunge(&mut client, location).await?;
+    let _expunged = uid_expunge(client, location).await?;
 
     Ok(MutationOutcome {
         cursor: None,

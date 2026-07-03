@@ -1,17 +1,20 @@
 use mail_parser::{Address, MessageParser};
 use posthaste_domain_model::{ImapMessageLocation, Recipient, ReplyContext, format_forwarded_body, recipients_to_header};
 
-use crate::{fetch_raw_message_by_location, ImapAdapterError, ImapConnectionConfig};
+use imap_client::client::tokio::Client as ImapClient;
+
+use crate::body::fetch_raw_message_by_location;
+use crate::ImapAdapterError;
 
 /// Fetch and parse IMAP reply/forward metadata from the authoritative message.
 ///
 /// @spec docs/L1-compose#reply-quoting
-pub async fn fetch_imap_reply_context_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn fetch_imap_reply_context_by_location(
+    client: &mut ImapClient,
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<ReplyContext, ImapAdapterError> {
-    let raw_mime = fetch_raw_message_by_location(config, mailbox_name, location).await?;
+    let raw_mime = fetch_raw_message_by_location(client, mailbox_name, location).await?;
     imap_reply_context_from_raw_mime(raw_mime)
 }
 

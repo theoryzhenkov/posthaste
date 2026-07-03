@@ -560,20 +560,36 @@ pub(crate) async fn handle_oauth_refresh_tick(
 
     if let Some(last_secret) = state.last_secret() {
         if last_secret != current_secret {
-            ph_info!(
-                events::SUPERVISOR_OAUTH_TOKEN_REFRESHED,
-                account_id = %account_id,
-                "OAuth access token refreshed; rebuilding gateway"
-            );
-            connection.disconnect();
-            if let Err(error) = ensure_connection(shared, account, generation, connection).await {
-                ph_warn!(
-                    events::SUPERVISOR_OAUTH_REFRESH_FAILED,
+            if account.driver == AccountDriver::Jmap {
+                // JMAP bakes auth into the client at construction, so a
+                // rotated token requires a gateway rebuild.
+                ph_info!(
+                    events::SUPERVISOR_OAUTH_TOKEN_REFRESHED,
                     account_id = %account_id,
-                    error = %error,
-                    "OAuth gateway rebuild after token refresh failed"
+                    "OAuth access token refreshed; rebuilding gateway"
                 );
-                return;
+                connection.disconnect();
+                if let Err(error) = ensure_connection(shared, account, generation, connection).await {
+                    ph_warn!(
+                        events::SUPERVISOR_OAUTH_REFRESH_FAILED,
+                        account_id = %account_id,
+                        error = %error,
+                        "OAuth gateway rebuild after token refresh failed"
+                    );
+                    return;
+                }
+            } else {
+                // IMAP (M34): the session manager resolves the secret at every
+                // (re)connect, and an already-authenticated IMAP session stays
+                // valid across token rotation — tearing the gateway (and its
+                // IDLE stream, sync state, and in-flight work) down here was
+                // exactly the chaotic hourly drop the D92 connection envelope
+                // removes.
+                ph_info!(
+                    events::SUPERVISOR_OAUTH_TOKEN_REFRESHED,
+                    account_id = %account_id,
+                    "OAuth access token refreshed; live IMAP session kept, next reconnect uses it"
+                );
             }
         }
     }

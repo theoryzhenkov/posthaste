@@ -121,6 +121,11 @@ pub const IMAP_IDLE_MAILBOX_MISSING: LogEvent = LogEvent::new("imap.idle.mailbox
 pub const IMAP_IDLE_PERIODIC_POLL_ONLY: LogEvent = LogEvent::new("imap.idle.periodic_poll_only");
 pub const IMAP_IDLE_PUSH_ENABLED: LogEvent = LogEvent::new("imap.idle.push_enabled");
 pub const IMAP_IDLE_RETURNED: LogEvent = LogEvent::new("imap.idle.returned");
+pub const IMAP_IDLE_REJECT_BACKOFF: LogEvent = LogEvent::new("imap.idle.reject_backoff");
+pub const IMAP_SESSION_CONNECTED: LogEvent = LogEvent::new("imap.session.connected");
+pub const IMAP_SESSION_CONNECT_FAILED: LogEvent = LogEvent::new("imap.session.connect_failed");
+pub const IMAP_SESSION_DROPPED: LogEvent = LogEvent::new("imap.session.dropped");
+pub const IMAP_SESSION_POISONED: LogEvent = LogEvent::new("imap.session.poisoned");
 pub const IMAP_DISCOVERY_COMPLETED: LogEvent = LogEvent::new("imap.discovery_completed");
 pub const IMAP_MAILBOX_HEADER_FETCH_COMPLETED: LogEvent =
     LogEvent::new("imap.mailbox.header_fetch_completed");
