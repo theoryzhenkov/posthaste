@@ -2509,6 +2509,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -2581,6 +2593,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -2642,6 +2666,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -2715,6 +2751,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -2786,6 +2834,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -4975,6 +5035,15 @@
           "items"
         ],
         "properties": {
+          "asOfSeq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log\nhead seq as-of this read. A level-triggered script reads state here, then\ntails `/v1/events` from `asOfSeq` for a gap-free attach with zero\nserver-side per-consumer state. `null` when the head is unavailable.",
+            "minimum": 0
+          },
           "items": {
             "type": "array",
             "items": {
@@ -5771,6 +5840,15 @@
           "items"
         ],
         "properties": {
+          "asOfSeq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log\nhead seq as-of this read. A level-triggered script reads state here, then\ntails `/v1/events` from `asOfSeq` for a gap-free attach with zero\nserver-side per-consumer state. `null` when the head is unavailable.",
+            "minimum": 0
+          },
           "items": {
             "type": "array",
             "items": {

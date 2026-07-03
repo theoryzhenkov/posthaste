@@ -8,6 +8,7 @@ import type { Operation } from "../operations/index.js";
 import { parseOperationArgs, UsageError } from "./args.js";
 import { streamEvents, type EventsOptions } from "./events.js";
 import { commandHelp, topLevelHelp } from "./help.js";
+import { mintToken, parseTokenMintOptions } from "./token.js";
 import { watchEvents, type WatchOptions } from "./watch.js";
 
 /**
@@ -66,6 +67,28 @@ Filters:
   --topic <topic>    Only events with this topic (e.g. sync.completed)
   --account <id>     Only events for this account
   --mailbox <id>     Only events for this mailbox`;
+
+const TOKEN_HELP = `Usage: posthastectl token mint --grant <scopes> [--expiry <dur>]
+
+Mint a least-privilege capability token by attenuating the auto-discovered
+bootstrap token (attenuation happens server-side, so it can only narrow
+authority). The token is printed to stdout — so TOKEN=$(posthastectl token mint
+...) captures exactly the credential — and a ready-to-paste line to stderr.
+
+Grants (--grant, comma-separated, repeatable):
+  tap:read   Subscribe to the event tap (/v1/events)
+  read       Bootstrap reads (mail list, message detail, ...)
+  apply      Write-back via apply (set-keywords / mailbox moves / destroy)
+  <verb>     A raw action verb: read, send, tag, move, delete, manage
+
+Narrowing (optional):
+  --account <id>   Restrict to one account (source)
+  --mailbox <id>   Restrict to one mailbox
+  --message <id>   Restrict to one message
+  --expiry <dur>   Lifetime: 3600, 90m, 1h, 7d (recommended for scripts/agents)
+
+Example:
+  TOKEN=$(posthastectl token mint --grant tap:read,apply,read --expiry 1h)`;
 
 const WATCH_HELP = `Usage: posthastectl watch [filters] [--exec <command>]
 
@@ -247,6 +270,39 @@ export async function run(argv: string[], deps: RunDeps): Promise<number> {
   if (globals.version) {
     deps.stdout(`posthastectl ${deps.version}\n`);
     return ExitCode.Ok;
+  }
+
+  // `token mint` — the token-mint UX rider. Bespoke (its `--grant`/`--expiry`
+  // surface and human-duration parsing don't match a registry operation's
+  // schema-derived flags).
+  if (rest[0] === "token") {
+    if (globals.help) {
+      deps.stdout(`${TOKEN_HELP}\n`);
+      return ExitCode.Ok;
+    }
+    if (rest[1] !== "mint") {
+      deps.stderr(`posthastectl: usage: ${TOKEN_HELP}\n`);
+      return ExitCode.Usage;
+    }
+    try {
+      const opts = parseTokenMintOptions(rest.slice(2));
+      const conn = connect(deps, globals);
+      const minted = await mintToken(conn, opts);
+      // The bare token on stdout so command-substitution captures only the
+      // credential; the paste hint + scope summary go to stderr.
+      deps.stdout(`${minted.token}\n`);
+      const expiry = minted.expiresAt ? ` (expires ${minted.expiresAt})` : "";
+      deps.stderr(
+        `posthastectl: minted token for [${opts.actions.join(", ")}]${expiry}\n`,
+      );
+      deps.stderr(`  export POSTHASTE_TOKEN=${minted.token}\n`);
+      deps.stderr(
+        `  # or per-invocation: posthastectl --token <token> <command>\n`,
+      );
+      return ExitCode.Ok;
+    } catch (error) {
+      return failRuntime(error, deps);
+    }
   }
 
   // The `watch` runner is a streaming command, not a registry operation.

@@ -153,10 +153,14 @@ pub(super) fn encode_conversation_cursor(cursor: &ConversationCursor) -> String 
 /// the next cursor if more results exist.
 ///
 /// @spec docs/L1-api#cursor-pagination
-pub(super) fn conversation_page_response(page: ConversationPage) -> ConversationPageResponse {
+pub(super) fn conversation_page_response(
+    page: ConversationPage,
+    as_of_seq: Option<u64>,
+) -> ConversationPageResponse {
     ConversationPageResponse {
         items: page.items,
         next_cursor: page.next_cursor.as_ref().map(encode_conversation_cursor),
+        as_of_seq,
     }
 }
 
@@ -221,9 +225,13 @@ pub(super) fn encode_message_cursor(cursor: &MessageCursor) -> String {
 /// cursor if more results exist.
 ///
 /// @spec docs/L1-api#cursor-pagination
-pub(super) fn message_page_response(page: MessagePage) -> MessagePageResponse {
+pub(super) fn message_page_response(
+    page: MessagePage,
+    as_of_seq: Option<u64>,
+) -> MessagePageResponse {
     MessagePageResponse {
         items: page.items,
         next_cursor: page.next_cursor.as_ref().map(encode_message_cursor),
+        as_of_seq,
     }
 }

@@ -76,6 +76,12 @@ pub struct GetBodyQuery {
 pub struct ConversationPageResponse {
     pub items: Vec<ConversationSummary>,
     pub next_cursor: Option<String>,
+    /// Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log
+    /// head seq as-of this read. A level-triggered script reads state here, then
+    /// tails `/v1/events` from `asOfSeq` for a gap-free attach with zero
+    /// server-side per-consumer state. `null` when the head is unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of_seq: Option<u64>,
 }
 
 /// Paginated message list response with an opaque cursor for the next page.
@@ -86,4 +92,10 @@ pub struct ConversationPageResponse {
 pub struct MessagePageResponse {
     pub items: Vec<MessageSummary>,
     pub next_cursor: Option<String>,
+    /// Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log
+    /// head seq as-of this read. A level-triggered script reads state here, then
+    /// tails `/v1/events` from `asOfSeq` for a gap-free attach with zero
+    /// server-side per-consumer state. `null` when the head is unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of_seq: Option<u64>,
 }
