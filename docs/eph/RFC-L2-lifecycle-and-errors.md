@@ -5,7 +5,7 @@ modified: 2026-07-03
 reviewed: 2026-07-03
 lifecycle: ephemeral
 type: RFC
-state: draft
+state: ratified
 depends:
   - path: eph/AUDIT-L2-lifecycle-resources
   - path: issues/L2-runtime-lifecycle-debt
@@ -17,7 +17,7 @@ dependents: []
 
 # RFC — L2 Lifecycle & Errors
 
-Status: **draft — for ratification.** This is the drain/outbox for the next
+Status: **ratified 2026-07-03** (rulings in §7). Execution queued as the next refactor run. This is the drain/outbox for the next
 refactor run: two intertwined domains, **lifecycle** (shutdown, deadlines,
 bounded growth, drain/liveness) and **errors** (one typed retryability
 vocabulary + boundary hygiene). It cites the audit register rather than
@@ -232,3 +232,12 @@ force the boundary codes to be reworked once the vocabulary lands.
 6. **Reaper TTL reuse (D68).** Confirm the idle-session reaper should share the
    D48 acked-cursor/TTL tick machinery rather than introduce its own timer, and
    agree the session-idle TTL value.
+
+## 7. Rulings (owner, 2026-07-03)
+
+1. **Teardown budget**: 8s total inside the ~10s SIGTERM window — ~3s HTTP drain / ~3s supervisor join / ~2s store checkpoint; the checkpoint may NOT overrun (a missed checkpoint costs a WAL replay, not data).
+2. **Watchdog policy (D61)**: restart with bounded backoff, cap 3 attempts, then halt with a truthful `AccountStatus`. ONE backoff vocabulary shared with push and the M9 engine.
+3. **Retryability type home (D70)**: `posthaste-domain-model` — "domain-model is for shared types" (owner). Serde-only, wasm-frontier-safe.
+4. **D49 `Degraded`**: orthogonal availability state composing with Transient/Permanent — confirmed, not a third terminality class.
+5. **Web trio (D69/M31)**: land now as TS fixes — durability/deadlock/quota are IndexedDB/page-lifecycle concerns, not superseded by the wasm transport.
+6. **Idle-session reaper (D68)**: reuses the D48 TTL tick machinery. One clock, one reaper discipline.
