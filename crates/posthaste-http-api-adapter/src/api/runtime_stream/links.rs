@@ -82,15 +82,25 @@ pub async fn stream_runtime_link(
     Path(link_id): Path<String>,
     Query(query): Query<RuntimeLinkStreamQuery>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let subscription = state
-        .runtime
-        .subscribe_runtime_frames(
-            runtime_caller(query.source_id.as_deref()),
-            RuntimeLinkId::new(link_id),
-            query.after_seq.map(RuntimeLinkSeq::new),
-        )
-        .await
-        .map_err(ApiError::from_runtime_error)?;
+    // D64/M24: this route is excluded from the blanket `TimeoutLayer` (a
+    // stream is supposed to live long), so the SETUP await — the runtime call
+    // that produces the subscription/catch-up — takes its own explicit
+    // deadline instead. The streaming phase after this point is unbounded.
+    let subscription = crate::deadlines::with_stream_setup_deadline(
+        "runtime frame subscription",
+        async {
+            state
+                .runtime
+                .subscribe_runtime_frames(
+                    runtime_caller(query.source_id.as_deref()),
+                    RuntimeLinkId::new(link_id),
+                    query.after_seq.map(RuntimeLinkSeq::new),
+                )
+                .await
+                .map_err(ApiError::from_runtime_error)
+        },
+    )
+    .await?;
     let catch_up_stream = tokio_stream::iter(subscription.catch_up.into_iter().map(frame_to_sse));
     let live_stream = subscription.live.map(frame_to_sse);
     Ok(Sse::new(catch_up_stream.chain(live_stream)).keep_alive(KeepAlive::default()))

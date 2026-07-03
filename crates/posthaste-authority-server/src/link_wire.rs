@@ -24,15 +24,17 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{Extension, Query, Request, State};
 use axum::http::{header, StatusCode};
-use axum::middleware::{from_fn_with_state, Next};
+use axum::middleware::{from_fn, from_fn_with_state, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
+use tower_http::timeout::TimeoutLayer;
 use posthaste_config::DaemonSettings;
 use posthaste_domain_model::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
@@ -60,6 +62,52 @@ use serde::Deserialize;
 struct LinkState {
     api: Arc<dyn AuthorityServerApi>,
     link: Arc<dyn AuthorityServerLink>,
+}
+
+// ---- server-side deadlines (RFC-L2-lifecycle-and-errors D64 / M24) --------
+//
+// This wire has the same gap the `/v1` boundary had (audit N10): every
+// up-channel handler and the down-channel's SETUP await were unbounded, with
+// no deadline anywhere in this file. Same treatment, mirrored from
+// `posthaste-http-api-adapter`'s `router.rs`/`deadlines.rs`: a blanket
+// `TimeoutLayer` over the regular (non-stream) routes, plus an explicit
+// deadline on the down-channel's own subscribe-setup call — the streaming
+// phase itself stays unbounded (keepalive/idle-reap is a separate concern).
+//
+// The values are **not** shared with the adapter's constants (different
+// crate, no shared dependency for this narrow purpose) but are chosen to
+// match: 30s for a regular up-channel call, 10s for the down-channel's
+// in-process subscribe-setup — review-flagged defaults, not measurements.
+const LINK_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const LINK_SUBSCRIBE_SETUP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Internal sentinel status `TimeoutLayer` emits when [`LINK_REQUEST_TIMEOUT`]
+/// elapses (`tower_http::timeout::TimeoutLayer` ≥0.6.7 returns a bare
+/// empty-body response at this status directly, never a `BoxError` — no
+/// `HandleErrorLayer` needed). Not otherwise returned by any regular link
+/// handler, so [`rewrite_link_timeout_response`] recognizes it unambiguously.
+const LINK_TIMEOUT_SENTINEL_STATUS: StatusCode = StatusCode::GATEWAY_TIMEOUT;
+
+/// Rewrite the bare [`LINK_TIMEOUT_SENTINEL_STATUS`] response into the same
+/// typed [`LinkError`] envelope every other link-wire error uses.
+async fn rewrite_link_timeout_response(request: Request, next: Next) -> Response {
+    let response = next.run(request).await;
+    if response.status() == LINK_TIMEOUT_SENTINEL_STATUS {
+        LinkError::timeout().into_response()
+    } else {
+        response
+    }
+}
+
+/// Apply the blanket per-request deadline (D64) to the link wire's regular
+/// (non-stream) routes.
+fn with_link_request_timeout(router: Router<LinkState>) -> Router<LinkState> {
+    router
+        .layer(TimeoutLayer::with_status_code(
+            LINK_TIMEOUT_SENTINEL_STATUS,
+            LINK_REQUEST_TIMEOUT,
+        ))
+        .layer(from_fn(rewrite_link_timeout_response))
 }
 
 /// Authentication + identity policy for the runtime↔authority-server link surface.
@@ -170,6 +218,24 @@ impl LinkError {
                 code: "unauthorized",
                 message: "missing or invalid bearer token".to_string(),
                 terminality: Terminality::Permanent,
+                details: serde_json::json!({}),
+            },
+        }
+    }
+
+    /// 503: a server-side deadline elapsed waiting on a runtime call (D64) —
+    /// either the blanket regular-route `TimeoutLayer` or the down-channel's
+    /// subscribe-setup deadline. Transient (M29 vocabulary): a retry after
+    /// backoff may succeed. Mirrors `RuntimeErrorCode::ProviderUnavailable`'s
+    /// existing `gateway_unavailable`/503 pairing rather than inventing a new
+    /// code.
+    pub(crate) fn timeout() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: LinkErrorBody {
+                code: "gateway_unavailable",
+                message: "request exceeded its deadline".to_string(),
+                terminality: Terminality::Transient,
                 details: serde_json::json!({}),
             },
         }
@@ -325,11 +391,22 @@ async fn subscribe(
         .as_deref()
         .and_then(|raw| serde_json::from_str(raw).ok())
         .unwrap_or(LinkCoverage::Complete);
-    let stream = state
-        .link
-        .subscribe_for(&runtime_id, coverage, query.after_seq)
-        .await
-        .map_err(LinkError::from_runtime_error)?;
+    // D64/M24: this route is excluded from the blanket regular-route
+    // `TimeoutLayer` (a stream is supposed to live long), so the SETUP await
+    // — the runtime call that produces the subscription — takes its own
+    // explicit deadline instead. The streaming phase after this point is
+    // unbounded.
+    let stream = match tokio::time::timeout(
+        LINK_SUBSCRIBE_SETUP_TIMEOUT,
+        state
+            .link
+            .subscribe_for(&runtime_id, coverage, query.after_seq),
+    )
+    .await
+    {
+        Ok(result) => result.map_err(LinkError::from_runtime_error)?,
+        Err(_) => return Err(LinkError::timeout()),
+    };
     Ok(Sse::new(stream.map(down_frame_to_sse)).keep_alive(KeepAlive::default()))
 }
 
@@ -494,9 +571,15 @@ pub fn link_router(transport: AuthorityServerLinkHandle, auth: LinkAuth) -> Rout
         api: transport.api().clone(),
         link: transport.link().clone(),
     };
-    let router = Router::new()
+
+    // D64/M24: the down-channel SSE stream is split into its own sub-router so
+    // the blanket `TimeoutLayer` below — applied only to `regular_routes` —
+    // cannot wrongly cut a long-lived stream; `subscribe` deadline-wraps its
+    // own SETUP await instead (see the const block above).
+    let stream_routes = Router::new().route(LINK_SUBSCRIBE_PATH, get(subscribe));
+
+    let regular_routes = Router::new()
         .route(LINK_FORWARD_MUTATION_PATH, post(forward_mutation))
-        .route(LINK_SUBSCRIBE_PATH, get(subscribe))
         .route(LINK_QUERY_PATH, post(query_mail_page))
         .route(LINK_SUMMARY_PATH, post(current_summary))
         .route(LINK_DETAIL_PATH, post(message_detail))
@@ -504,10 +587,12 @@ pub fn link_router(transport: AuthorityServerLinkHandle, auth: LinkAuth) -> Rout
     // The full request/response surface (reads + typed writes + the preserved
     // message-command routes + the op-lifecycle) is generated from the shared
     // link-op tables.
-    let router = register_command_routes(register_generated_lifecycle_routes(
-        register_generated_api_routes(router),
-    ))
-    .with_state(state);
+    let regular_routes = register_command_routes(register_generated_lifecycle_routes(
+        register_generated_api_routes(regular_routes),
+    ));
+    let regular_routes = with_link_request_timeout(regular_routes);
+
+    let router = regular_routes.merge(stream_routes).with_state(state);
     match auth {
         LinkAuth::Disabled => router.layer(from_fn_with_state(
             AuthorityServerLinkId::new(uuid::Uuid::new_v4().to_string()),
@@ -516,5 +601,93 @@ pub fn link_router(transport: AuthorityServerLinkHandle, auth: LinkAuth) -> Rout
         LinkAuth::PerRuntime(tokens) => {
             router.layer(from_fn_with_state(Arc::new(tokens), require_link_token))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use async_trait::async_trait;
+    use posthaste_authority_server_link::{AuthorityServerLinkHandle, DownStream};
+    use tower::ServiceExt;
+
+    /// A far-node transport whose read-channel `current_summary` (a regular
+    /// up-channel route) and `subscribe` (the down-channel's SETUP call) never
+    /// resolve — the wedge-prone case D64/M24 exists to fix.
+    struct HangingFarNode;
+
+    #[async_trait]
+    impl AuthorityServerApi for HangingFarNode {
+        async fn current_summary(
+            &self,
+            _account_id: AccountId,
+            _message_id: MessageId,
+        ) -> Result<Option<MessageSummary>, RuntimeError> {
+            std::future::pending().await
+        }
+    }
+
+    #[async_trait]
+    impl AuthorityServerLink for HangingFarNode {
+        async fn forward_mutation(
+            &self,
+            _mutation: MutationRequest,
+        ) -> Result<MutationReceipt, RuntimeError> {
+            std::future::pending().await
+        }
+
+        async fn subscribe(
+            &self,
+            _coverage: LinkCoverage,
+            _after_seq: Option<u64>,
+        ) -> Result<DownStream, RuntimeError> {
+            std::future::pending().await
+        }
+    }
+
+    fn hanging_router() -> Router {
+        link_router(
+            AuthorityServerLinkHandle::new(Arc::new(HangingFarNode)),
+            LinkAuth::Disabled,
+        )
+    }
+
+    /// M24 gate: a wedged runtime call behind a regular (non-stream) link-wire
+    /// route must return a timeout, not hang the up-channel handler forever —
+    /// the same gap the `/v1` boundary had (audit N10), mirrored here.
+    #[tokio::test(start_paused = true)]
+    async fn a_wedged_up_channel_call_times_out_instead_of_hanging() {
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(LINK_SUMMARY_PATH)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({ "accountId": "acct-1", "messageId": "m-1" }).to_string(),
+            ))
+            .unwrap();
+        let response = hanging_router()
+            .oneshot(request)
+            .await
+            .expect("service must not error");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// M24 gate: a wedged down-channel SETUP await (the `subscribe_for` call
+    /// that produces the SSE stream) must return a timeout, not hang — the
+    /// streaming route is excluded from the blanket layer, so this proves the
+    /// per-await deadline inside `subscribe` itself is load-bearing.
+    #[tokio::test(start_paused = true)]
+    async fn a_wedged_down_channel_setup_await_times_out_instead_of_hanging() {
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri(LINK_SUBSCRIBE_PATH)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = hanging_router()
+            .oneshot(request)
+            .await
+            .expect("service must not error");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }
