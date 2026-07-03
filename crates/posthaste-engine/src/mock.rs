@@ -384,6 +384,7 @@ impl MailGateway for MockJmapGateway {
         &self,
         _account_id: &AccountId,
         _request: &SendMessageRequest,
+        _idempotency_key: &str,
     ) -> Result<(), GatewayError> {
         Ok(())
     }

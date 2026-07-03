@@ -1,14 +1,32 @@
 use super::*;
+use posthaste_call_policy::SEND_TOTAL;
+
+use crate::smtp::smtp_stable_message_id;
 
 pub(crate) async fn send_message_via_smtp(
     gateway: &LiveImapSmtpGateway,
     imap_config: &ImapConnectionConfig,
     smtp_config: &SmtpConnectionConfig,
     request: &SendMessageRequest,
+    idempotency_key: &str,
 ) -> Result<(), GatewayError> {
-    let submitted = submit_smtp_message(smtp_config, request)
-        .await
-        .map_err(imap_error_to_gateway)?;
+    // SMTP has no submission idempotency token; a stable Message-ID is the only
+    // dedup hook (D85, best-effort). The send is bounded by the send-class
+    // deadline: a timeout may leave the message already transmitted to the MTA,
+    // so it is classified dispatch-uncertain — parked, never blind-resent (D86;
+    // O5: at-most-once-on-uncertainty is the accepted SMTP contract).
+    let message_id = smtp_stable_message_id(idempotency_key, smtp_config);
+    let submitted =
+        match tokio::time::timeout(SEND_TOTAL, submit_smtp_message(smtp_config, request, Some(&message_id)))
+            .await
+        {
+            Ok(result) => result.map_err(imap_error_to_gateway)?,
+            Err(_elapsed) => {
+                return Err(GatewayError::DispatchUncertain(
+                    "SMTP send timed out; delivery uncertain".to_string(),
+                ))
+            }
+        };
 
     if smtp_sent_copy_strategy(&smtp_config.provider) == SmtpSentCopyStrategy::AppendToSentMailbox {
         if let Some(sent_mailbox) = gateway

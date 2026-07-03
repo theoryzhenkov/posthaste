@@ -11,16 +11,32 @@
 use super::message_queries::project_record;
 use super::*;
 use posthaste_domain_model::{
-    MessageReadback, MessageRecord, MutationOutcome, SyncBatch, Terminality,
+    MessageReadback, MessageRecord, MutationOutcome, OperationDispatchUncertain, SyncBatch,
+    EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN,
 };
 
-/// Outcome of attempting to push one operation to the provider: the typed
-/// retryability verdict ([`Terminality`], RFC-L2 D70) plus the human-readable
-/// message recorded on the operation / surfaced in the settlement. The verdict
-/// is data, not a string bucket — a `Transient` verdict keeps the op pending
-/// and stops draining (offline), a `Permanent` verdict fails it.
+/// How a push failure routes the operation. A superset of the D70 retryability
+/// verdict ([`Terminality`]): the send path adds a third, non-blind-retryable
+/// disposition (`Uncertain`) for a possibly-delivered send.
+enum FlushDisposition {
+    /// The network recovers on its own — keep the op pending, stop draining
+    /// (offline), retry next window.
+    Transient,
+    /// Retrying the same push cannot change the outcome — fail and surface.
+    Permanent,
+    /// A **send** whose delivery outcome is unknown (timeout/transport-loss
+    /// after the submission may have committed). Park in `DispatchUncertain`
+    /// (RFC-L2 D86) — never blind-resent; only an explicit user retry (under the
+    /// same idempotency identity) or a discard resolves it.
+    Uncertain,
+}
+
+/// Outcome of attempting to push one operation to the provider: the routing
+/// [`FlushDisposition`] plus the human-readable message recorded on the
+/// operation / surfaced in the settlement. The verdict is data, not a string
+/// bucket.
 struct FlushError {
-    terminality: Terminality,
+    disposition: FlushDisposition,
     message: String,
 }
 
@@ -29,7 +45,7 @@ impl FlushError {
     /// stored payload) — there is no `GatewayError` to classify.
     fn permanent(message: impl Into<String>) -> Self {
         Self {
-            terminality: Terminality::Permanent,
+            disposition: FlushDisposition::Permanent,
             message: message.into(),
         }
     }
@@ -46,29 +62,37 @@ enum DependencyStatus {
 /// (the M29 gate): a new variant fails to compile here until its terminality is
 /// decided — no `other => Permanent(to_string())` free-text catch-all.
 fn classify_gateway_error(error: GatewayError) -> FlushError {
-    let (terminality, message) = match error {
+    let (disposition, message) = match error {
         // Reachable-again: the network recovers on its own.
         GatewayError::Network(message) | GatewayError::Unavailable(message) => {
-            (Terminality::Transient, message)
+            (FlushDisposition::Transient, message)
         }
         // Auth failures are transient: they clear once the account re-authenticates.
-        GatewayError::Auth => (Terminality::Transient, "authentication required".to_string()),
+        GatewayError::Auth => (
+            FlushDisposition::Transient,
+            "authentication required".to_string(),
+        ),
+        // A send whose outcome is unknown — the request may have committed after
+        // the transport dropped. Never blind-resend: park it (D86).
+        GatewayError::DispatchUncertain(message) => (FlushDisposition::Uncertain, message),
         // Terminal as written — a diverged state, a provider rejection, a corrupt
         // local store, or an internal codec bug — retrying the same push cannot
         // change the outcome.
-        GatewayError::StateMismatch => {
-            (Terminality::Permanent, "provider state diverged".to_string())
-        }
-        GatewayError::CannotCalculateChanges => {
-            (Terminality::Permanent, "cannot calculate changes".to_string())
-        }
+        GatewayError::StateMismatch => (
+            FlushDisposition::Permanent,
+            "provider state diverged".to_string(),
+        ),
+        GatewayError::CannotCalculateChanges => (
+            FlushDisposition::Permanent,
+            "cannot calculate changes".to_string(),
+        ),
         GatewayError::Rejected(message)
         | GatewayError::Corruption(message)
-        | GatewayError::Internal(message) => (Terminality::Permanent, message),
-        GatewayError::MutationRejected { reason, .. } => (Terminality::Permanent, reason),
+        | GatewayError::Internal(message) => (FlushDisposition::Permanent, message),
+        GatewayError::MutationRejected { reason, .. } => (FlushDisposition::Permanent, reason),
     };
     FlushError {
-        terminality,
+        disposition,
         message,
     }
 }
@@ -163,18 +187,26 @@ impl MailService {
         Ok(true)
     }
 
-    /// Re-arm a failed outbox operation to `pending` so the next flush
-    /// re-attempts it (e.g. after the cause of the failure is fixed). Clears the
-    /// recorded error. Only failed ops are retryable.
+    /// Re-arm a failed or dispatch-uncertain outbox operation to `pending` so
+    /// the next flush re-attempts it (e.g. after the cause of the failure is
+    /// fixed, or the user confirms a parked send should be re-dispatched).
+    /// Clears the recorded error. A parked send is re-dispatched under the same
+    /// idempotency identity (D84/D85), so a re-forward of one that already
+    /// committed is deduplicated rather than duplicated on JMAP (best-effort on
+    /// SMTP — O5).
     ///
     /// @spec docs/L1-outbox#state-machine
+    /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
     pub fn retry_operation(&self, operation_id: &OperationId) -> Result<bool, ServiceError> {
         let Some(operation) = self.outbox.get_operation(operation_id)? else {
             return Ok(false);
         };
-        if operation.state != OperationState::Failed {
+        if !matches!(
+            operation.state,
+            OperationState::Failed | OperationState::DispatchUncertain
+        ) {
             return Err(GatewayError::Rejected(
-                "only failed operations can be retried".to_string(),
+                "only failed or dispatch-uncertain operations can be retried".to_string(),
             )
             .into());
         }
@@ -423,32 +455,22 @@ impl MailService {
             }
             // Send-once: a `send` found already `inflight` was interrupted after
             // a prior flush began, so the message may already have left the
-            // provider. SMTP is not idempotent, so never auto-resend it; fail it
-            // terminally and let the user decide rather than risk a duplicate.
+            // provider. Never blind-resend it; park it as dispatch-uncertain and
+            // surface it for the user to confirm or discard (RFC-L2 D86 —
+            // generalizes the crashed-inflight guard from "crash" to
+            // "uncertainty"; the timeout path below reaches the same state).
             //
-            // @spec docs/L1-outbox#operation-model
+            // @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
             if operation.kind == OperationKind::Send && operation.state == OperationState::Inflight
             {
-                let message =
-                    "send interrupted mid-flush; not retried to avoid a duplicate send".to_string();
+                let reason = "send interrupted mid-flush; delivery uncertain".to_string();
                 self.outbox.update_operation_state(
                     &operation.id,
-                    OperationState::Failed,
+                    OperationState::DispatchUncertain,
                     operation.attempts,
-                    Some(&message),
+                    Some(&reason),
                 )?;
-                let settlement = OperationSettlement {
-                    id: operation.id.clone(),
-                    outcome: OperationOutcome::Failed,
-                    assigned_entity_id: None,
-                    error: Some(message),
-                };
-                events.push(self.emit_settlement(account_id, &operation, &settlement)?);
-                if let Some(correction) =
-                    self.emit_failure_base_correction(account_id, &operation)?
-                {
-                    events.push(correction);
-                }
+                events.push(self.emit_dispatch_uncertain(account_id, &operation, reason)?);
                 continue;
             }
             match self.dependency_status(&operation)? {
@@ -523,7 +545,7 @@ impl MailService {
                     );
                 }
                 Err(FlushError {
-                    terminality: Terminality::Transient,
+                    disposition: FlushDisposition::Transient,
                     message,
                 }) => {
                     self.outbox.update_operation_state(
@@ -536,7 +558,28 @@ impl MailService {
                     break;
                 }
                 Err(FlushError {
-                    terminality: Terminality::Permanent,
+                    disposition: FlushDisposition::Uncertain,
+                    message,
+                }) => {
+                    // A send whose delivery is unknown: park it, never resend
+                    // (D86). Removed from the flush set until the user acts.
+                    self.outbox.update_operation_state(
+                        &operation.id,
+                        OperationState::DispatchUncertain,
+                        operation.attempts + 1,
+                        Some(&message),
+                    )?;
+                    events.push(self.emit_dispatch_uncertain(
+                        account_id,
+                        &operation,
+                        message,
+                    )?);
+                    // A send timeout signals a struggling link; stop draining so
+                    // the rest retries on the next connectivity window.
+                    break;
+                }
+                Err(FlushError {
+                    disposition: FlushDisposition::Permanent,
                     message,
                 }) => {
                     self.outbox.update_operation_state(
@@ -622,8 +665,13 @@ impl MailService {
             }
             OperationKind::Send => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
+                // The operation id is the send's stable idempotency identity
+                // (constant across retries): the gateway derives the JMAP
+                // EmailSubmission create-id + `ifInState` and the SMTP/JMAP
+                // Message-ID from it (D84/D85), so a re-forward of a send that
+                // already committed is deduplicated, not duplicated.
                 gateway
-                    .send_message(account_id, &request)
+                    .send_message(account_id, &request, operation.id.as_str())
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
@@ -750,6 +798,37 @@ impl MailService {
             }),
         )?;
         Ok(Some(event))
+    }
+
+    /// Emit `operation.dispatch_uncertain` for a parked send. Carries the op id
+    /// and the uncertainty reason so downstream tiers (web notification center,
+    /// the tap/scripting surface) can raise a needs-attention signal — a parked
+    /// send with no surface is data loss with extra steps (RFC-L2 §7/O1).
+    ///
+    /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+    fn emit_dispatch_uncertain(
+        &self,
+        account_id: &AccountId,
+        operation: &Operation,
+        reason: String,
+    ) -> Result<DomainEvent, ServiceError> {
+        let message_id = MessageId::from(operation.entity.id.as_str());
+        let payload = encode_payload(
+            &OperationDispatchUncertain {
+                id: operation.id.clone(),
+                reason,
+            },
+            "operation dispatch-uncertain",
+        )?;
+        self.events
+            .append_event(
+                account_id,
+                EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN,
+                None,
+                Some(&message_id),
+                payload,
+            )
+            .map_err(Into::into)
     }
 
     fn emit_settlement(

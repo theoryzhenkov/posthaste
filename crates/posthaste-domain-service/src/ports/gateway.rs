@@ -140,13 +140,24 @@ pub trait MailGateway: Send + Sync {
         message_id: &MessageId,
     ) -> Result<ReplyContext, GatewayError>;
 
-    /// Send an email via `EmailSubmission/set`.
+    /// Send an email via `EmailSubmission/set` (JMAP) or SMTP submission.
+    ///
+    /// `idempotency_key` is the outbox operation id — stable across retries. The
+    /// gateway derives its send identity from it (JMAP: a deterministic
+    /// `EmailSubmission` create-id + `ifInState`; SMTP/JMAP: a stable
+    /// `Message-ID`) so a re-forward of a send that already committed is
+    /// deduplicated rather than duplicated (D84/D85). On a timeout or a
+    /// transport loss where the submission may already have committed, the
+    /// implementation returns [`GatewayError::DispatchUncertain`] so the outbox
+    /// parks the send instead of blind-resending it (D86).
     ///
     /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
     async fn send_message(
         &self,
         account_id: &AccountId,
         request: &SendMessageRequest,
+        idempotency_key: &str,
     ) -> Result<(), GatewayError>;
 
     /// Persist a draft to the provider's Drafts mailbox, returning the new

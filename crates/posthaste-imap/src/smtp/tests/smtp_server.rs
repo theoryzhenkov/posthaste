@@ -26,7 +26,7 @@ async fn submits_message_to_smtp_server_and_returns_raw_copy() {
         ..Default::default()
     };
 
-    let submitted = submit_smtp_message(&config, &request)
+    let submitted = submit_smtp_message(&config, &request, None)
         .await
         .expect("SMTP submission");
     let captured = captured.await.expect("fake SMTP captured message");

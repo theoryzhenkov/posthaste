@@ -142,7 +142,8 @@
           "account.status_changed",
           "push.connected",
           "push.disconnected",
-          "operation.settled"
+          "operation.settled",
+          "operation.dispatch_uncertain"
         ]
       }
     }
