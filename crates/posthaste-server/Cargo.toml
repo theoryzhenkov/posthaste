@@ -71,6 +71,7 @@ posthaste-authority-server-link = { path = "../posthaste-authority-server-link" 
 posthaste-replica-core = { path = "../posthaste-replica-core" }
 posthaste-testkit = { path = "../posthaste-testkit" }
 reqwest = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tower = { version = "0.5", features = ["util"] }
 
