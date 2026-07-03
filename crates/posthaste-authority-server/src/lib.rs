@@ -12,6 +12,7 @@ mod account_repository;
 mod authority_server;
 mod bootstrap;
 mod build;
+mod fact_log;
 mod live_accounts;
 mod link_wire;
 mod local_authority_server;
