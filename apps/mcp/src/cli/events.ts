@@ -166,6 +166,44 @@ export async function consumeSse(
   }
 }
 
+/**
+ * Callbacks over a live domain-event stream: one for an ordinary `DomainEvent`
+ * frame, one for a **gap frame** (the tap's durability signal). Both the CLI
+ * `events` tap and the MCP subscription are built on these — the SSE
+ * open/parse/gap-detect primitives (`openEventStream`/`consumeSse`/`gapFrame`)
+ * live in one place so a second consumer never re-derives the framing.
+ */
+export interface EventStreamHandlers {
+  /** An ordinary event: the raw JSON `data` payload and the SSE `id:` (the seq). */
+  onEvent: (data: string, seq?: string) => Promise<void> | void;
+  /** A gap: the log's current `highestSeq` (adopt as the new cursor) + raw payload. */
+  onGap: (highestSeq: number, data: string) => Promise<void> | void;
+}
+
+/**
+ * Open `GET /v1/events` and dispatch each parsed frame to `handlers`, routing
+ * gap frames to `onGap` and everything else to `onEvent`. The single place the
+ * SSE stream is opened and demultiplexed; callers supply only what to *do* with
+ * a frame, never how to parse one.
+ */
+export async function forwardEventStream(
+  conn: Connection,
+  opts: EventsOptions,
+  deps: { fetch: typeof fetch; signal?: AbortSignal },
+  handlers: EventStreamHandlers,
+): Promise<void> {
+  const body = await openEventStream(conn, opts, deps);
+  if (!body) return;
+  await consumeSse(body, async (data, id, event) => {
+    const gap = gapFrame(data, event);
+    if (gap) {
+      await handlers.onGap(gap.highestSeq, data);
+      return;
+    }
+    await handlers.onEvent(data, id);
+  });
+}
+
 /** Injectable side-effects for the `events` tap. */
 export interface EventsDeps {
   fetch: typeof fetch;
@@ -186,20 +224,20 @@ export async function streamEvents(
   opts: EventsOptions,
   deps: EventsDeps,
 ): Promise<void> {
-  const body = await openEventStream(conn, opts, {
-    fetch: deps.fetch,
-    signal: deps.signal,
-  });
-  if (!body) return;
-  await consumeSse(body, (data, id, event) => {
-    const gap = gapFrame(data, event);
-    if (gap) {
-      deps.log?.(
-        `gap: missed events before seq ${gap.highestSeq} were truncated; resuming from ${gap.highestSeq}`,
-      );
-      return;
-    }
-    deps.emit(data);
-    if (id && deps.log) deps.log(`seq=${id}`);
-  });
+  await forwardEventStream(
+    conn,
+    opts,
+    { fetch: deps.fetch, signal: deps.signal },
+    {
+      onEvent: (data, id) => {
+        deps.emit(data);
+        if (id && deps.log) deps.log(`seq=${id}`);
+      },
+      onGap: (highestSeq) => {
+        deps.log?.(
+          `gap: missed events before seq ${highestSeq} were truncated; resuming from ${highestSeq}`,
+        );
+      },
+    },
+  );
 }

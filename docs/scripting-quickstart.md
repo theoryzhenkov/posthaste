@@ -337,12 +337,113 @@ REST-settable exec action would be remote code execution. The REST surface for
 rules is **read-only** (list + preview); creating or editing a rule — especially
 an `exec` rule — is a deliberate, file-system-level act by the host operator.
 
+## Agent via MCP
+
+The north-star agent flow (RFC-L2-scripting ruling 22): a **rule at the
+authority server** provides the *trigger*, and a **persistent localhost agent,
+connected once over MCP**, provides the *capability*. One connection gives the
+agent both — it is pushed each `rule.fired` fact as an MCP notification and acts
+through the same typed tools, with **no script and no hand-written types**.
+
+Posthaste ships an MCP server (`apps/mcp` — the same package as `posthastectl`).
+It exposes:
+
+- **The action tools** — `list_conversations`, `get_conversation`,
+  `get_message`, `search_messages`, `set_keywords`, `move_to_mailbox`, `send_message`,
+  `trigger_sync`, `list_mailboxes`, and a first-class **`reply`** tool (give it a
+  `sourceId` + `messageId` + `body`; it looks up the reply context — recipient,
+  subject, `In-Reply-To`/`References` — and sends, so the agent replies without
+  knowing the compose plumbing).
+- **The fact subscription** — after connecting, the server opens the `/v1/events`
+  tap and forwards every `DomainEvent` to the agent as a standard MCP
+  `notifications/message`. The event rides in the notification's structured
+  `data` (`{ kind: "event", topic, seq, event }`), tagged `logger: "posthaste"`.
+  `rule.fired` and `rule.delivery.failed` are the point of the subscription
+  (a failed delivery arrives at `level: "error"`).
+  - **Gap frames are distinct.** If the tap's durable history was truncated past
+    your resume point, the agent gets a `{ kind: "gap", highestSeq }` payload at
+    `level: "warning"` — never a silent drop. Treat it as "reconcile now"
+    (re-read state) rather than assuming you saw every event.
+
+### The rule (trigger)
+
+Author an `emit` or `webhook` rule as in [Zero-code rules](#zero-code-rules-levels-0-1)
+above — scoped by sender. The simplest pairing for a localhost agent is `emit`
+(evaluate centrally, act at the edge):
+
+```toml
+[[rule]]
+id = "agent-instruct"
+name = "Hand instruct-tagged mail to the MCP agent"
+when = "tag:instruct from:me@mydomain.com"
+enabled = true
+action = { kind = "emit" }
+```
+
+The agent receives the resulting `rule.fired` notification and decides how to act.
+
+### The agent host config (capability)
+
+An MCP host spawns the stdio server as a child process. Point it at the server
+entry and declare the grant set in the environment — this is where **connect-time
+per-connection minting** happens: on startup the server attenuates the discovered
+bootstrap token into a token scoped to exactly these grants, and uses it for
+every tool call and the subscription.
+
+```json
+{
+  "mcpServers": {
+    "posthaste": {
+      "command": "bun",
+      "args": ["run", "/path/to/posthaste/apps/mcp/src/index.ts"],
+      "env": {
+        "POSTHASTE_MCP_GRANTS": "tap:read,read",
+        "POSTHASTE_MCP_TOKEN_EXPIRY": "1h"
+      }
+    }
+  }
+}
+```
+
+The server auto-discovers `daemon.json` (no URL/token needed), or honors
+`POSTHASTE_API_URL`/`POSTHASTE_TOKEN` if you set them.
+
+Connection environment:
+
+- `POSTHASTE_MCP_GRANTS` — comma-separated grants, the same vocabulary as
+  `token mint --grant` (`tap:read`, `read`, `apply`, or raw verbs). **Default:
+  `tap:read,read` — read-only + subscribe.** Write verbs are an explicit opt-in.
+- `POSTHASTE_MCP_TOKEN_EXPIRY` — a human duration (`1h`, `90m`, `3600`) for the
+  minted token.
+- `POSTHASTE_MCP_ACCOUNT` — optional, narrows the minted token to one account.
+- `POSTHASTE_MCP_AFTER_SEQ` — resume the subscription from a last-seen seq. Omit
+  it to attach at the live head (snapshot-attach): read current state, note its
+  `asOfSeq`, then reconnect with that seq for a gap-free follow.
+
+### Least-grant is the security boundary
+
+An agent reads message content — which is attacker-authored (anyone can email
+you). An agent that **also holds `apply`/`send` and reads untrusted content is
+the prompt-injection surface**: a crafted message can instruct the agent, which
+then acts with your token. So:
+
+- **Keep the default `tap:read,read`** unless the agent genuinely needs to write.
+  A summarizer never grants more than `read`.
+- **Scope the rule's WHEN-clause by sender** (`from:`) so only mail you trust
+  can trigger the agent at all.
+- Only add `apply`/`send` grants once you have accepted that surface.
+
+**Read [scripting-security.md](scripting-security.md) — threat 2 (prompt
+injection / confused deputy) — before granting an autonomous agent any write
+capability.**
+
 ## The ladder
 
 This quickstart's `watch --exec` flow is level 2 of the scripting ladder (the
 CLI owns the cursor, reconnect, and auth). Levels 0-1 (the declarative rules
-above) run in the authority server with no client at all; the agent-native MCP
-tool surface (level "agent-native") lands alongside.
+above) run in the authority server with no client at all; the **agent-native
+MCP surface** ([Agent via MCP](#agent-via-mcp) above) is the level-"agent-native"
+rung — trigger + capability over one connection.
 
 ## Reference
 
