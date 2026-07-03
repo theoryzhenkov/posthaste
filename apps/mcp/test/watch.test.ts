@@ -223,6 +223,67 @@ describe("watch — gap frame", () => {
   });
 });
 
+describe("watch — --topic / --rule (RFC-L2-scripting ruling 19)", () => {
+  /**
+   * Two `rule.fired` events for different rules — the shape the AS engine
+   * emits (`emit_rule_fired` in `crates/posthaste-authority-server/src/rules/
+   * engine.rs`): `payload.ruleId` is the filterable field, and there is no
+   * `arrivedMailboxIds` at all (unlike `message.updated`).
+   */
+  const RULE_FIRED_SSE =
+    'id: 20\ndata: {"seq":20,"accountId":"acct","messageId":"m20","topic":"rule.fired","payload":{"ruleId":"flag-for-edge","eventSeq":19,"actionKind":"emit","outcome":"applied"}}\n\n' +
+    'id: 21\ndata: {"seq":21,"accountId":"acct","messageId":"m21","topic":"rule.fired","payload":{"ruleId":"other-rule","eventSeq":19,"actionKind":"emit","outcome":"applied"}}\n\n';
+
+  test("--topic subscribes to the given topic (server-side query param)", async () => {
+    const h = harness({ sse: RULE_FIRED_SSE });
+    await watch(h, { topic: "rule.fired", exec: "./handler.sh" });
+    expect(h.cap.eventsUrl).toContain("topic=rule.fired");
+  });
+
+  test("a rule.fired watch skips the arrival gate (no arrivedMailboxIds to check)", async () => {
+    const h = harness({ sse: RULE_FIRED_SSE });
+    await watch(h, { topic: "rule.fired", exec: "./handler.sh" });
+    // Both events dispatch — neither is a message.updated "arrival".
+    expect(h.cap.commands).toHaveLength(2);
+  });
+
+  test("--rule filters dispatch to only the named rule's rule.fired events", async () => {
+    const h = harness({ sse: RULE_FIRED_SSE });
+    await watch(h, {
+      topic: "rule.fired",
+      rule: "flag-for-edge",
+      exec: "./handler.sh",
+    });
+    expect(h.cap.commands).toHaveLength(1);
+    const call = h.cap.commands[0]!;
+    expect(call.env.PH_RULE).toBe("flag-for-edge");
+    expect(call.env.PH_TOPIC).toBe("rule.fired");
+    expect(call.env.PH_MESSAGE_ID).toBe("m20");
+    // Both events are still fetched (the message detail, for stdin) up to the
+    // rule filter, but only the matching one is dispatched to --exec.
+    expect(h.cap.details).toEqual([
+      "http://daemon/v1/sources/acct/messages/m20",
+    ]);
+  });
+
+  test("--rule with no matching events dispatches nothing", async () => {
+    const h = harness({ sse: RULE_FIRED_SSE });
+    await watch(h, {
+      topic: "rule.fired",
+      rule: "no-such-rule",
+      exec: "./handler.sh",
+    });
+    expect(h.cap.commands).toHaveLength(0);
+    expect(h.cap.details).toHaveLength(0);
+  });
+
+  test("PH_RULE is empty on an ordinary message.updated watch", async () => {
+    const h = harness();
+    await watch(h, { exec: "./handler.sh" });
+    expect(h.cap.commands[0]!.env.PH_RULE).toBe("");
+  });
+});
+
 describe("watch — resilience", () => {
   test("a failed detail fetch is logged and skipped, cursor still advances", async () => {
     const h = harness({
