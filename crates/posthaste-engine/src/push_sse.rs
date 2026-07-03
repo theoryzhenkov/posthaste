@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -9,6 +10,20 @@ use posthaste_observability::{events, ph_debug, ph_warn};
 
 use crate::live::map_gateway_error;
 use crate::push_common::convert_sse_push_notification;
+
+/// Read deadline for the SSE push stream (PP1/D88). The server is asked to send a
+/// keepalive ping every 60 s (see `open` below); silence past this window means
+/// the stream is dead. Set above 60 s so a healthy ping cycle never trips it.
+/// **Review.**
+///
+/// NOTE (fork follow-up): the pinned jmap-client fork surfaces SSE keepalive
+/// pings as stream items only under its `debug` feature; in release builds a
+/// genuinely idle-but-healthy stream can trip this deadline and reconnect. That
+/// is bounded and non-lossy — every reconnect runs an unconditional catch-up sync
+/// (PP3) — but a future fork change should surface the keepalive so an idle
+/// healthy stream is not needlessly recycled. SSE is the *fallback* transport
+/// (WS is preferred), which bounds the blast radius.
+pub(crate) const PUSH_SSE_READ_DEADLINE: Duration = Duration::from_secs(90);
 
 /// Push transport that reads JMAP state-change notifications via Server-Sent Events.
 ///
@@ -37,6 +52,14 @@ impl PushTransport for SsePushTransport {
     /// Transport identifier used in logging and push status tracking.
     fn name(&self) -> &'static str {
         "sse"
+    }
+
+    /// Client-enforced read deadline for the SSE push stream (PP1/D88): the
+    /// resilient wrapper declares the stream dead if no item arrives within this
+    /// window, rather than trusting the server-side ping it requested but never
+    /// verified.
+    fn read_deadline(&self) -> Duration {
+        PUSH_SSE_READ_DEADLINE
     }
 
     /// Open an EventSource connection and return a filtered stream of `PushNotification`.

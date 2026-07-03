@@ -465,7 +465,21 @@ pub(crate) async fn handle_push_event(
             shared
                 .set_push_status(account_id, generation, PushStatus::Connected)
                 .await;
-            false
+            // Catch-up sync on (re)connect (PP3/D90, ruling O6 — unconditional,
+            // no pushState resume): anything that changed during the outage
+            // surfaces now instead of waiting up to the 60 s poll. Routed through
+            // the coalescer (`process_sync_trigger_with_state`), so a burst of
+            // reconnect flaps collapses into a single follow-up cycle.
+            let _ = process_sync_trigger_with_state(
+                sync_state,
+                shared,
+                account,
+                generation,
+                SyncTriggerRequest::new(SyncTrigger::Push, SyncMode::Incremental),
+                connection,
+            )
+            .await;
+            true
         }
         PushStreamEvent::Disconnected { transport, reason } => {
             ph_warn!(
@@ -494,6 +508,23 @@ pub(crate) async fn handle_push_event(
                     generation,
                     &format!("falling back from {from} to {to}"),
                 )
+                .await;
+            false
+        }
+        PushStreamEvent::Terminal { transport, reason } => {
+            // A structurally-broken push transport (PP6/D91): stop cycling
+            // `Reconnecting` forever, mark push terminally unavailable with the
+            // reason, and rely on the 60 s poll. The resilient stream has parked,
+            // so no further push events arrive on this connection.
+            ph_warn!(
+                events::PUSH_TERMINAL,
+                account_id = %account_id,
+                transport,
+                reason = %reason,
+                "push terminally unavailable; account is poll-only"
+            );
+            shared
+                .mark_push_terminal(account_id, generation, transport, &reason)
                 .await;
             false
         }

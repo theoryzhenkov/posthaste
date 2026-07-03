@@ -153,6 +153,25 @@ impl SharedWsConnection {
         .map_err(map_gateway_error)
     }
 
+    /// Send a WebSocket keepalive ping over the shared connection (PP1/D88).
+    ///
+    /// This is the sole production caller of the fork's `CorrelatedWs::ws_ping`.
+    /// A dead-enough socket makes the underlying write fail here; a NAT half-open
+    /// socket (write still buffers) is instead caught by the push consumer's
+    /// read-deadline. Either way the connection stops silently masquerading as
+    /// alive.
+    ///
+    /// @spec docs/L2-transport#websocket-connection-lifecycle
+    pub async fn ws_ping(&self) -> Result<(), GatewayError> {
+        let ws = self
+            .state
+            .read()
+            .await
+            .connection()
+            .ok_or_else(|| GatewayError::Network("WebSocket not connected".to_string()))?;
+        ws.ws_ping().await.map_err(map_gateway_error)
+    }
+
     /// Clear the WS connection state (e.g. after a connection error).
     ///
     /// @spec docs/L2-transport#http-fallback
