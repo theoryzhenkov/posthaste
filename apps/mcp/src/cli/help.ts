@@ -27,7 +27,7 @@ export function topLevelHelp(operations: Operation[]): string {
 
   const width = Math.max(
     ...operations.map((op) => op.cli.path.join(" ").length),
-    "watch".length,
+    "token mint".length,
   );
   for (const op of operations) {
     const path = op.cli.path.join(" ").padEnd(width);
@@ -38,6 +38,9 @@ export function topLevelHelp(operations: Operation[]): string {
   );
   lines.push(
     `  ${"watch".padEnd(width)}  Run a command (or emit JSON) per new matching message`,
+  );
+  lines.push(
+    `  ${"token mint".padEnd(width)}  Mint a least-privilege capability token (attenuated)`,
   );
   lines.push("");
   lines.push(`Run '${PROG} <command> --help' for command details.`);

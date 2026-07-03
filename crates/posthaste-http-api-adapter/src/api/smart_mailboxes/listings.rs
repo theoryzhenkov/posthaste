@@ -59,7 +59,8 @@ pub async fn list_smart_mailbox_messages(
         .await
         .map_err(ApiError::from_runtime_error)
         .and_then(expect_message_page)?;
-    Ok(Json(message_page_response(page)))
+    let as_of_seq = state.runtime.current_event_seq().await;
+    Ok(Json(message_page_response(page, as_of_seq)))
 }
 
 /// GET /v1/smart-mailboxes/{id}/conversations
@@ -106,7 +107,7 @@ pub async fn list_smart_mailbox_conversations(
         source_query,
         optional_user_query(query.q.as_deref()),
     ]);
-    state
+    let page = state
         .runtime
         .query_mail_page(
             RuntimeCaller::api(),
@@ -123,7 +124,7 @@ pub async fn list_smart_mailbox_conversations(
         )
         .await
         .map_err(ApiError::from_runtime_error)
-        .and_then(expect_conversation_page)
-        .map(conversation_page_response)
-        .map(Json)
+        .and_then(expect_conversation_page)?;
+    let as_of_seq = state.runtime.current_event_seq().await;
+    Ok(Json(conversation_page_response(page, as_of_seq)))
 }
