@@ -21,6 +21,7 @@ posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
+posthaste-link-near-end = { path = "../posthaste-link-near-end" }
 posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-far-end = { path = "../posthaste-link-far-end" }
 posthaste-replica-core = { path = "../posthaste-replica-core" }
@@ -33,6 +34,7 @@ serde_json = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
@@ -44,7 +46,7 @@ uuid = { workspace = true }
 # Production code is type-only and uses posthaste-contract-core directly (D5).
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "test-util"] }
 
 [lints]
 workspace = true
