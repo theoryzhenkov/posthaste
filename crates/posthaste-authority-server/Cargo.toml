@@ -50,6 +50,7 @@ uuid = { workspace = true }
 # Production code is type-only and uses posthaste-contract-core directly (D5).
 posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net", "test-util"] }
 # `util` for `ServiceExt::oneshot` in the link-wire timeout tests (D64).
 tower = { version = "0.5", features = ["util"] }

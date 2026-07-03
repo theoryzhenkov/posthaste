@@ -150,23 +150,7 @@ struct BootstrapAccountTransportConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    fn temp_root() -> PathBuf {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "posthaste-bootstrap-test-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            n
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::temp_root;
 
     fn write_valid_bootstrap(path: &Path) {
         fs::write(

@@ -6,16 +6,6 @@
 use super::*;
 use tokio::sync::oneshot;
 
-/// Removes the test's tempdir on drop so a panicking or early-returning test
-/// still leaves no state behind (P6).
-struct TempDirGuard(PathBuf);
-
-impl Drop for TempDirGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
 /// A slow write offloaded to the blocking pool must not block a concurrent
 /// read: the read completes *while the write transaction is still open* (holding
 /// the write mutex + an in-flight SQLite txn).
@@ -28,8 +18,7 @@ impl Drop for TempDirGuard {
 /// `spawn_blocking` seam.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn slow_write_does_not_block_concurrent_read() {
-    let root = temp_root();
-    let _guard = TempDirGuard(root.clone());
+    let root = crate::test_support::temp_root();
     let store =
         Arc::new(DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap());
     let account = AccountId::from("primary");

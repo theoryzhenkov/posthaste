@@ -63,15 +63,7 @@ mod tests {
         // race on the rename — one won, the other hit ENOENT → ConfigError::Io
         // → HTTP 500 (~30% under a PATCH storm from the appearance sliders).
         // Unique temp paths make every write succeed (last-writer-wins).
-        let dir = std::env::temp_dir().join(format!(
-            "ph-atomic-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::temp_root();
         let path = Arc::new(dir.join("app.toml"));
 
         let n = 50;
@@ -101,7 +93,5 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
             .collect();
         assert!(orphans.is_empty(), "orphaned temp files: {orphans:?}");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

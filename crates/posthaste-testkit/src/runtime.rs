@@ -27,6 +27,7 @@ use posthaste_runtime::RuntimeHandle;
 use posthaste_runtime_api::RuntimeAccountApi;
 
 use crate::fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
+use crate::guard::TempDirGuard;
 
 /// Drain deadline for a mutation to settle + its view to recompute.
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -41,11 +42,14 @@ const SETTLE_GRACE: Duration = Duration::from_millis(80);
 /// [`settle`](Self::settle) recorder.
 pub struct RuntimeHarness {
     build: AuthorityServerBuild,
+    /// Keeps the harness's temp root alive (and removed on drop, P6) for as
+    /// long as the runtime built against it is in use. Never read directly.
+    _root: TempDirGuard,
 }
 
 impl RuntimeHarness {
-    pub(crate) fn new(build: AuthorityServerBuild) -> Self {
-        Self { build }
+    pub(crate) fn new(build: AuthorityServerBuild, root: TempDirGuard) -> Self {
+        Self { build, _root: root }
     }
 
     /// The cloneable runtime handle (implements the runtime-api + client-link surfaces).

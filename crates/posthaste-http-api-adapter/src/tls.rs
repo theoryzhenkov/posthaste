@@ -208,8 +208,7 @@ mod tests {
 
     #[test]
     fn build_acceptor_rejects_empty_cert() {
-        let dir = std::env::temp_dir().join("posthaste-tls-empty-cert");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::temp_root("tls-empty-cert");
         let cert = dir.join("empty.crt");
         let key = dir.join("empty.key");
         let mut f = std::fs::File::create(&cert).unwrap();

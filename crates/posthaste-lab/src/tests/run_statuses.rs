@@ -15,13 +15,12 @@ timeout_seconds = 5
 "#,
     )
     .unwrap();
-    let temp_root =
-        std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+    let temp_root = crate::test_support::temp_root();
 
     let output = write_verify_run_with_env(
         &registry,
         VerifyOptions {
-            run_root: temp_root.clone(),
+            run_root: temp_root.path().to_path_buf(),
             registry_path: PathBuf::from("tools/lab/suites.toml"),
             argv: vec!["posthaste-lab".to_string(), "verify".to_string()],
             criteria: SelectionCriteria::default(),
@@ -42,8 +41,6 @@ timeout_seconds = 5
         .as_str()
         .unwrap()
         .contains("display unavailable"));
-
-    fs::remove_dir_all(temp_root).ok();
 }
 
 #[test]
@@ -61,13 +58,12 @@ timeout_seconds = 5
 "#,
     )
     .unwrap();
-    let temp_root =
-        std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+    let temp_root = crate::test_support::temp_root();
 
     let output = write_verify_run_with_env(
         &registry,
         VerifyOptions {
-            run_root: temp_root.clone(),
+            run_root: temp_root.path().to_path_buf(),
             registry_path: PathBuf::from("tools/lab/suites.toml"),
             argv: vec!["posthaste-lab".to_string(), "verify".to_string()],
             criteria: SelectionCriteria::default(),
@@ -93,8 +89,6 @@ timeout_seconds = 5
         summary_path: output.summary_path.display().to_string(),
     };
     assert_eq!(err.exit_code(), 77);
-
-    fs::remove_dir_all(temp_root).ok();
 }
 
 #[test]
@@ -112,13 +106,12 @@ timeout_seconds = 1
 "#,
     )
     .unwrap();
-    let temp_root =
-        std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+    let temp_root = crate::test_support::temp_root();
 
     let output = write_verify_run_with_env(
         &registry,
         VerifyOptions {
-            run_root: temp_root.clone(),
+            run_root: temp_root.path().to_path_buf(),
             registry_path: PathBuf::from("tools/lab/suites.toml"),
             argv: vec!["posthaste-lab".to_string(), "verify".to_string()],
             criteria: SelectionCriteria::default(),
@@ -142,6 +135,4 @@ timeout_seconds = 1
     let stderr_path = summary["suiteResults"][0]["stderrPath"].as_str().unwrap();
     assert_eq!(fs::read_to_string(stdout_path).unwrap(), "before sleep\n");
     assert_eq!(fs::read_to_string(stderr_path).unwrap(), "still waiting\n");
-
-    fs::remove_dir_all(temp_root).ok();
 }
