@@ -70,7 +70,11 @@ impl SyncWriteStore for DatabaseStore {
 
     /// Like [`apply_sync_batch`](Self::apply_sync_batch), but for a
     /// `replace_all_messages` snapshot: excludes `protected_message_ids` from
-    /// the prune-by-absence pass (S3 unsettled-guard).
+    /// the prune-by-absence pass (M35 durable snapshot guard, D93). The caller
+    /// folds an un-acked op's effect over any snapshot row it *is* present in;
+    /// this exemption covers the rows a full snapshot *omits* (a not-yet-uploaded
+    /// local create, or a row that folded to removed), which would otherwise be
+    /// pruned as "absent from remote".
     fn apply_sync_batch_protected(
         &self,
         account_id: &AccountId,
@@ -145,8 +149,10 @@ impl SyncWriteStore for DatabaseStore {
     }
 
     /// Like [`reconcile_sync`](Self::reconcile_sync), but excludes
-    /// `protected_message_ids` from the prune-by-absence pass (S3
-    /// unsettled-guard).
+    /// `protected_message_ids` from the streamed prune-by-absence pass (M35
+    /// durable snapshot guard, D93) — the reconciliation-pass twin of
+    /// [`apply_sync_batch_protected`](Self::apply_sync_batch_protected), for the
+    /// streamed full-snapshot fallback (e.g. JMAP `cannotCalculateChanges`).
     fn reconcile_sync_protected(
         &self,
         account_id: &AccountId,

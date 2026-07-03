@@ -3,9 +3,9 @@ use super::*;
 /// Queue a `SetKeywords` op for `message-1` and arm the gateway so the flush
 /// inside `sync_account_with_mode` fails transiently — the op resets to
 /// `Pending` (not settled, not removed), so `message-1` stays in
-/// `unsettled_message_ids` for the OBSERVE phase that follows. This is the S3
-/// unsettled-guard scenario: a locally-modified message the sync must not
-/// clobber or prune.
+/// `unsettled_message_ids` for the OBSERVE phase that follows. This is the M35
+/// durable-guard scenario: a locally-modified message the sync must fold over,
+/// not clobber or prune.
 async fn queue_unsettled_message(service: &MailService, account_id: &AccountId) {
     service
         .set_keywords(
@@ -18,6 +18,220 @@ async fn queue_unsettled_message(service: &MailService, account_id: &AccountId) 
         )
         .await
         .expect("set_keywords queues an op");
+}
+
+/// The keywords of `message_id` in the last batch the store applied, if any.
+fn last_applied_keywords(store: &TestStore, message_id: &str) -> Option<Vec<String>> {
+    store
+        .applied_messages
+        .lock()
+        .expect("applied messages lock poisoned")
+        .iter()
+        .rev()
+        .find(|record| record.id.as_str() == message_id)
+        .map(|record| record.keywords.clone())
+}
+
+#[tokio::test]
+async fn full_snapshot_folds_a_pending_flag_over_server_truth() {
+    // THE M35 HEADLINE (D93): a full snapshot (replace_all — the shape an
+    // initial sync / UIDVALIDITY resync / QRESYNC resync takes) carries
+    // message-1 as *server* truth (unflagged). A local `$flagged` that hasn't
+    // round-tripped must NOT revert; the durable guard folds it back over the
+    // snapshot row rather than dropping the row, so server truth still lands and
+    // the un-acked flag rides on top.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    queue_unsettled_message(&service, &account_id).await;
+
+    // The server snapshot's message-1 is unflagged (keywords default-empty).
+    let gateway = MutationGateway::with_sync_batch(
+        1,
+        SyncBatch {
+            messages: vec![sample_message_record("message-1", 1024, false)],
+            replace_all_messages: true,
+            ..SyncBatch::default()
+        },
+    );
+    // Both in-cycle flushes fail transiently so message-1 stays un-acked.
+    gateway
+        .set_keywords_results
+        .lock()
+        .expect("set keywords results lock poisoned")
+        .extend([
+            Err(GatewayError::Network("offline".to_string())),
+            Err(GatewayError::Network("offline".to_string())),
+        ]);
+
+    let mut publish = |_: &[DomainEvent]| {};
+    service
+        .sync_account_with_mode(
+            &account_id,
+            SyncTrigger::Manual,
+            SyncMode::Incremental,
+            &gateway,
+            None,
+            &mut publish,
+        )
+        .await
+        .expect("sync completes");
+
+    // The row the snapshot upserted for message-1 carries the un-acked flag —
+    // folded over server truth, not reverted.
+    let keywords = last_applied_keywords(&store, "message-1")
+        .expect("the snapshot still upserts message-1 (folded, not dropped)");
+    assert!(
+        keywords.iter().any(|keyword| keyword == "$flagged"),
+        "the un-acked $flagged survives the full snapshot (folded over server truth), got {keywords:?}",
+    );
+}
+
+#[tokio::test]
+async fn an_acked_operation_is_superseded_by_the_snapshot() {
+    // The ack gate (M32 outbox settlement): once the pre-observe FLUSH acks the
+    // op, message-1 leaves the unsettled set, so the snapshot's server truth
+    // supersedes it cleanly — no stale overlay re-layered, and message-1 is NOT
+    // in the store's protected set.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    queue_unsettled_message(&service, &account_id).await;
+
+    // No pushed set_keywords errors: the first flush settles (acks) the op.
+    let gateway = MutationGateway::with_sync_batch(
+        1,
+        SyncBatch {
+            messages: vec![sample_message_record("message-1", 1024, false)],
+            replace_all_messages: true,
+            ..SyncBatch::default()
+        },
+    );
+
+    let mut publish = |_: &[DomainEvent]| {};
+    service
+        .sync_account_with_mode(
+            &account_id,
+            SyncTrigger::Manual,
+            SyncMode::Incremental,
+            &gateway,
+            None,
+            &mut publish,
+        )
+        .await
+        .expect("sync completes");
+
+    assert!(
+        service
+            .unsettled_message_ids(&account_id)
+            .expect("unsettled set")
+            .is_empty(),
+        "the op acked on the pre-observe flush, so nothing stays unsettled",
+    );
+    // Server truth won: the upserted row has no folded-in $flagged.
+    let keywords = last_applied_keywords(&store, "message-1")
+        .expect("the snapshot upserts message-1 with plain server truth");
+    assert!(
+        !keywords.iter().any(|keyword| keyword == "$flagged"),
+        "an acked op is not re-layered — the snapshot supersedes it, got {keywords:?}",
+    );
+    let protected_calls = store
+        .protected_message_ids
+        .lock()
+        .expect("protected message ids lock poisoned");
+    assert!(
+        protected_calls
+            .iter()
+            .all(|protected| !protected.contains("message-1")),
+        "an acked message is not protected — the snapshot owns it",
+    );
+}
+
+#[tokio::test]
+async fn full_resync_preserves_pending_intent_via_stable_message_identity() {
+    // D95: a UIDVALIDITY change (or any full resync) invalidates local UID
+    // mappings and arrives as a `replace_all` snapshot under *fresh* provider
+    // UIDs. Pending user intent must survive the remap. The guard keys on the
+    // stable MessageId (Gmail X-GM-MSGID, or the store's identity), not the UID,
+    // so as long as the snapshot carries message-1 under its stable id the
+    // pending `$flagged` is folded back — no revert, and exactly one row (no
+    // duplicate protected-old + inserted-new).
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    queue_unsettled_message(&service, &account_id).await;
+
+    // The post-UIDVALIDITY full snapshot re-lists message-1 under its stable id.
+    let gateway = MutationGateway::with_sync_batch(
+        1,
+        SyncBatch {
+            messages: vec![sample_message_record("message-1", 1024, false)],
+            replace_all_messages: true,
+            ..SyncBatch::default()
+        },
+    );
+    gateway
+        .set_keywords_results
+        .lock()
+        .expect("set keywords results lock poisoned")
+        .extend([
+            Err(GatewayError::Network("offline".to_string())),
+            Err(GatewayError::Network("offline".to_string())),
+        ]);
+
+    let mut publish = |_: &[DomainEvent]| {};
+    service
+        .sync_account_with_mode(
+            &account_id,
+            SyncTrigger::Manual,
+            SyncMode::Incremental,
+            &gateway,
+            None,
+            &mut publish,
+        )
+        .await
+        .expect("resync completes");
+
+    let applied = store
+        .applied_messages
+        .lock()
+        .expect("applied messages lock poisoned");
+    let message_1_rows = applied
+        .iter()
+        .filter(|record| record.id.as_str() == "message-1")
+        .count();
+    assert_eq!(
+        message_1_rows, 1,
+        "message-1 is upserted exactly once across the resync — folded, not duplicated",
+    );
+    let keywords = applied
+        .iter()
+        .rev()
+        .find(|record| record.id.as_str() == "message-1")
+        .map(|record| record.keywords.clone())
+        .expect("message-1 present under its stable id");
+    assert!(
+        keywords.iter().any(|keyword| keyword == "$flagged"),
+        "pending intent survives the UIDVALIDITY remap via stable identity, got {keywords:?}",
+    );
 }
 
 #[tokio::test]

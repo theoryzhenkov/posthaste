@@ -1,7 +1,10 @@
-// Store-level coverage for the S3 unsettled-guard's `replace_all` extension
-// (P1/S2 hotfix): `apply_sync_batch_protected`/`reconcile_sync_protected`
-// must exclude `protected_message_ids` from the prune-by-absence pass, while
-// still pruning every other locally-absent message normally.
+// Store-level coverage for the M35 durable snapshot guard's prune exemption
+// (D93 — supersedes the P1/S2 hotfix): `apply_sync_batch_protected`/
+// `reconcile_sync_protected` must exclude `protected_message_ids` from the
+// prune-by-absence pass, while still pruning every other locally-absent message
+// normally. These tests exercise the store's half of the guard — the exemption
+// for messages a full snapshot *omits*; the domain-service `guard_unsettled`
+// folds an un-acked op over any row the snapshot *does* carry (tested there).
 use super::*;
 
 #[test]
@@ -96,12 +99,13 @@ fn full_snapshot_still_prunes_unprotected_messages_absent_from_remote() -> Resul
 
 #[test]
 fn full_snapshot_leaves_a_protected_messages_local_state_untouched() -> Result<(), StoreError> {
-    // S2: a pending local mailbox/flag change must not be visibly reverted by
-    // a full-snapshot upsert. The caller (guard_unsettled) has already dropped
-    // the protected message from `batch.messages`, so this batch never
-    // upserts it; this test asserts the store also doesn't prune it, so the
-    // local row — mailbox move and keyword both included — survives exactly
-    // as the optimistic write left it.
+    // S2: a pending local mailbox/flag change must not be visibly reverted by a
+    // full-snapshot upsert. This test covers the case where the message is
+    // *absent* from the server snapshot (so `guard_unsettled` leaves it out of
+    // `batch.messages`); the store must then also skip pruning it, so the local
+    // row — mailbox move and keyword both included — survives exactly as the
+    // optimistic write left it. (When the snapshot *does* carry the row, the
+    // service folds server-truth-plus-pending in-batch instead — tested there.)
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
