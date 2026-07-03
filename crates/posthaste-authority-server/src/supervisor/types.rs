@@ -547,6 +547,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sync_trigger_state_reset_recovers_a_stuck_active_after_an_arm_timeout() {
+        // Review finding #1: a sync cycle whose future is DROPPED mid-flight
+        // (arm-budget timeout on a hung provider) leaves `active` stuck true, so
+        // every later trigger coalesces without ever enqueuing a cycle. reset()
+        // — called from record_arm_timeout — must recover: the next trigger
+        // claims a fresh cycle instead of coalescing into a dead one.
+        let state = SyncTriggerState::new();
+        state.begin_cycle().await; // cycle starts...
+        // ...its future is dropped before finish_cycle (the timeout). A trigger
+        // arriving now would coalesce (active is stuck).
+        assert!(
+            state.claim_or_coalesce(SyncTrigger::Manual).await,
+            "with active stuck, a trigger coalesces (the bug)"
+        );
+        state.reset().await; // record_arm_timeout's recovery
+        assert!(
+            !state.claim_or_coalesce(SyncTrigger::Manual).await,
+            "after reset, the next trigger claims a fresh cycle (the fix)"
+        );
+    }
+
+    #[tokio::test]
     async fn sync_trigger_state_drains_a_coalesced_trigger_on_finish() {
         let state = SyncTriggerState::new();
 
