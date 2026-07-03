@@ -95,6 +95,7 @@ pub fn build_app_state(
     Arc::new(AppState {
         runtime,
         account_logo_root: roots.config_root.join("account-assets").join("logos"),
+        config_root: roots.config_root.clone(),
         auth_token,
         macaroon_root_key,
         require_auth: daemon.require_auth,

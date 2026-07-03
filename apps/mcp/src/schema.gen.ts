@@ -356,6 +356,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List automation rules
+         * @description Lists the automation rules loaded from the host's rules.toml. Read-only: rules are config-file-only (there is no REST write path — a REST-settable exec action would be remote code execution). Draft WHEN-clauses are previewed via POST /v1/automation-rules:preview.
+         */
+        get: operations["list_rules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runtime/sessions": {
         parameters: {
             query?: never;
@@ -2276,6 +2296,84 @@ export interface components {
             replySubject: string;
             to: components["schemas"]["Recipient"][];
         };
+        /**
+         * @description An automation rule evaluated at the authority server against facts on the tap
+         *     (RFC-L2-scripting §8). The rule owns *what it reacts to* ([`on`](Rule::on))
+         *     and *what it matches* ([`when`](Rule::when)); a hook target is a pure handler
+         *     and never self-registers (ruling 13).
+         *
+         *     Rules are authored in a config-root `rules.toml` file (beta cut, ruling 6);
+         *     the REST surface is read-only list + preview. See the crate docs for the
+         *     **exec trust model**: [`RuleAction::Exec`] is config-file-only and can never
+         *     be set over REST — a REST-settable exec would be remote code execution.
+         */
+        Rule: {
+            action: components["schemas"]["RuleAction"];
+            enabled: boolean;
+            id: string;
+            name: string;
+            /**
+             * @description The event topics whose facts trigger evaluation. Empty ⇒
+             *     [`DEFAULT_RULE_TRIGGER_TOPICS`] (the message-update family).
+             */
+            on?: string[];
+            /**
+             * @description The WHEN-clause: the shared query grammar's [`SmartMailboxRule`] output,
+             *     reused (not wrapped). Evaluated against the message a triggering fact
+             *     names — a match means the action runs.
+             */
+            when: components["schemas"]["SmartMailboxRule"];
+        };
+        /**
+         * @description What a matched [`Rule`] does. Level 0 (`Tag`/`Move`/`Notify`) acts through the
+         *     authority server's own Api surface in-process. Level 1 (`Webhook`/`Exec`)
+         *     reaches outside the process under a per-invocation attenuated token minted to
+         *     exactly the rule's [`grants`](RuleAction::Webhook::grants) and expiry (D53).
+         */
+        RuleAction: {
+            /** @enum {string} */
+            kind: "tag";
+            tag: string;
+        } | {
+            /** @enum {string} */
+            kind: "move";
+            mailboxId: components["schemas"]["MailboxId"];
+        } | {
+            body?: string | null;
+            /** @enum {string} */
+            kind: "notify";
+            title: string;
+        } | {
+            /** @enum {string} */
+            kind: "emit";
+        } | {
+            /** Format: int64 */
+            expiry_seconds?: number;
+            grants?: components["schemas"]["RuleGrant"][];
+            /** @enum {string} */
+            kind: "webhook";
+            url: string;
+        } | {
+            command: string;
+            /** Format: int64 */
+            expiry_seconds?: number;
+            grants?: components["schemas"]["RuleGrant"][];
+            /** @enum {string} */
+            kind: "exec";
+        };
+        /**
+         * @description A single capability a hook action's per-invocation token carries. These are
+         *     the substantive authz verbs (never `mint`/`manage`): a hook token is a
+         *     least-privilege credential scoped to exactly what the handler needs, over
+         *     exactly the matched message.
+         * @enum {string}
+         */
+        RuleGrant: "read" | "send" | "tag" | "move" | "delete";
+        /** @description The read-only automation-rules listing. */
+        RulesListResponse: {
+            /** @description The rules loaded from `rules.toml`, in file order. */
+            rules: components["schemas"]["Rule"][];
+        };
         RuntimeAdapterError: {
             code: components["schemas"]["RuntimeErrorCode"];
             correlationId?: string | null;
@@ -3579,6 +3677,35 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    list_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The configured rules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RulesListResponse"];
+                };
+            };
+            /** @description rules.toml could not be read */
             500: {
                 headers: {
                     [name: string]: unknown;

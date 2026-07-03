@@ -221,6 +221,22 @@ pub const EVENT_TOPIC_OPERATION_SETTLED: &str = "operation.settled";
 /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
 pub const EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN: &str = "operation.dispatch_uncertain";
 
+/// Event topic emitted every time an automation **rule** fires — its WHEN-clause
+/// matched a triggering fact and its action was executed. Payload is a
+/// [`RuleFired`]. A rule-action invocation is itself a fact (RFC-L2-scripting
+/// §8): scriptable and auditable through the same tap as every other event.
+///
+/// @spec docs/eph/RFC-L2-scripting#8-rules-run-at-the-authority-server
+pub const EVENT_TOPIC_RULE_FIRED: &str = "rule.fired";
+
+/// Event topic emitted when a rule's webhook/exec delivery is abandoned after
+/// its bounded retry schedule is exhausted — the dead-letter fact (RFC-L2-scripting
+/// ruling 5). Payload is a [`RuleDeliveryFailed`]. Delivery state is itself
+/// observable on the tap; a consumer can react to a failed delivery.
+///
+/// @spec docs/eph/RFC-L2-scripting#7-rulings (ruling 5)
+pub const EVENT_TOPIC_RULE_DELIVERY_FAILED: &str = "rule.delivery.failed";
+
 /// Every event topic the server emits, in declaration order.
 ///
 /// Single source of truth for the documented topic set: the committed
@@ -247,6 +263,8 @@ pub const ALL_EVENT_TOPICS: &[&str] = &[
     EVENT_TOPIC_PUSH_DISCONNECTED,
     EVENT_TOPIC_OPERATION_SETTLED,
     EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN,
+    EVENT_TOPIC_RULE_FIRED,
+    EVENT_TOPIC_RULE_DELIVERY_FAILED,
 ];
 
 mod account_overview;
@@ -261,6 +279,7 @@ mod notifications;
 mod outbox;
 mod records;
 mod rev_log;
+mod rules;
 mod smart_mailboxes;
 mod sync;
 
@@ -276,6 +295,7 @@ pub use notifications::*;
 pub use outbox::*;
 pub use records::*;
 pub use rev_log::*;
+pub use rules::*;
 pub use smart_mailboxes::*;
 pub use sync::*;
 

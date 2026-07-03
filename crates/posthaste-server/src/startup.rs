@@ -40,6 +40,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // the link, the down-channel drives views); otherwise the full bundled graph
     // is built in-process. Only an in-process authority server can serve the link or run
     // the OAuth holdout.
+    // The shared shutdown token, created up front so the in-process rule engine
+    // can tie its lifetime to it (dropped ⇒ engine stops) alongside axum's drain.
+    let shutdown_token = CancellationToken::new();
+
     #[allow(clippy::type_complexity)]
     let (
         runtime_handle,
@@ -76,6 +80,23 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         ));
         let store_close: Option<Box<dyn StoreClose>> =
             Some(Box::new(DatabaseStoreClose(build.database_store.clone())));
+
+        // Spawn the in-process automation rule engine over the far node's event
+        // bus (RFC-L2-scripting S5). The minter signs per-invocation hook tokens
+        // with the SAME macaroon root key the `/v1` perimeter verifies (resolved
+        // deterministically from the same secret store + state root that
+        // `build_app_state` uses below, so the keys match). Only spawned when
+        // `rules.toml` has enabled rules; the handle is dropped at shutdown.
+        let macaroon_root_key = token::resolve_root_key(build.secret_store.as_ref(), &roots.state_root);
+        let minter = Arc::new(MacaroonMinter::new(macaroon_root_key));
+        if let Some(engine) = build.spawn_rule_engine(Some(minter)) {
+            let engine_stop = shutdown_token.clone();
+            tokio::spawn(async move {
+                engine_stop.cancelled().await;
+                drop(engine);
+            });
+        }
+
         (
             build.handle,
             build.shutdown,
@@ -126,6 +147,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // far OpenAPI document (the lean near node serves the OAuth-free near doc).
     let v1_router = build_api_router(state.clone())
         .merge(build_oauth_router(oauth_state))
+        // The read-only automation-rules list (bundled-only; RFC-L2-scripting §7.18).
+        .merge(crate::rules_api::build_rules_router(state.clone()))
         .merge(crate::openapi::openapi_router(crate::openapi::document()));
 
     // Authority server role: serve the runtime↔authority-server link for a remote runtime, with
@@ -160,7 +183,15 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         config_root_display: roots.config_root.display().to_string(),
         log_guard,
         runtime_shutdown,
-        shutdown_token: { let t = CancellationToken::new(); let sweep = flow_sweep_cancel; let child = t.clone(); tokio::spawn(async move { child.cancelled().await; sweep.cancel(); }); t },
+        shutdown_token: {
+            let sweep = flow_sweep_cancel;
+            let child = shutdown_token.clone();
+            tokio::spawn(async move {
+                child.cancelled().await;
+                sweep.cancel();
+            });
+            shutdown_token
+        },
         supervisor_stop,
         store_close,
         tls: daemon.tls.clone(),
