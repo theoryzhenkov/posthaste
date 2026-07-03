@@ -20,8 +20,40 @@ loopback:
 - `posthastectl` reads that file automatically, so you pass **no `--url` and no
   `--token`**. If nothing is found it tells you to start the app.
 
-`posthastectl` ships with the `posthaste-mcp` package (bun). Run it with
-`bun apps/mcp/src/cli.ts …`, or via the packaged `posthastectl` bin.
+### Install `posthastectl`: run the wizard
+
+The fastest path — and the one this quickstart assumes — is
+`posthaste-wizard`, the same tool that sets up a Posthaste node:
+
+```sh
+posthaste-wizard ctl install
+```
+
+This locates a `posthastectl` binary (an explicit `--from` path, the desktop
+app's bundled sidecar if present, or a checksum-verified download from the
+matching GitHub release), installs it to `~/.local/bin/posthastectl`
+(`--to <dir>` overrides), and — only ever for a verified download, and only on
+macOS — clears the quarantine flag so Gatekeeper does not block the first run.
+It never escalates to `sudo`: a permission error explains itself instead.
+
+Right after installing, it runs the same checks `posthaste-wizard ctl status`
+re-runs any time, and prints a ✓/✗ table:
+
+```
+posthastectl setup:
+  ✓ binary       /home/you/.local/bin/posthastectl
+  ✗ PATH         /home/you/.local/bin is not on PATH — add to ~/.bashrc: export PATH="/home/you/.local/bin:$PATH"
+  ✓ app running  daemon.json found at ~/.local/share/posthaste/daemon.json
+  ✓ discovery    version 1, http://127.0.0.1:3001/v1
+  ✓ probe        http://127.0.0.1:3001/v1/openapi.json -> 200
+```
+
+The wizard only ever prints a PATH hint — it never edits your shell's rc file
+for you. If a row fails, fix it (start the app, add the directory to `PATH`)
+and re-run `posthaste-wizard ctl status`.
+
+If you'd rather install `posthastectl` by hand, see the
+[manual install appendix](#appendix-manual-posthastectl-install) below.
 
 ## 1. Mint a least-privilege token (30 seconds)
 
@@ -146,3 +178,20 @@ slice 2.
   `destroy`) — all accept the `Idempotency-Key` header.
 - Token mint: `posthastectl token mint` → `POST /v1/auth/tokens`.
 - Design: `docs/eph/RFC-L2-scripting.md`.
+
+## Appendix: manual `posthastectl` install
+
+`posthaste-wizard ctl install` (above) is the supported path. If you'd rather
+not run it — building from source, or working somewhere the wizard can't
+reach — `posthastectl` ships with the `posthaste-mcp` package (bun):
+
+- From a checkout: run it with `bun apps/mcp/src/cli.ts …`, or build the
+  standalone binary with `just mcp build-cli` (→ `apps/mcp/dist/posthastectl`).
+- From a release: download the `PosthasteCTL[Nightly]-<platform>` asset (and
+  `SHA256SUMS` to verify it) from the matching GitHub release, mark it
+  executable, and place it on your `PATH` yourself — this is exactly what
+  `posthaste-wizard ctl install` automates, including the checksum check and
+  (macOS) clearing the quarantine flag.
+
+Either way, `posthastectl` still auto-discovers `daemon.json` with no flags —
+only the install step differs.
