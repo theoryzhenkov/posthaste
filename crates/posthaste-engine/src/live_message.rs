@@ -3,8 +3,9 @@ use posthaste_domain_model::{
     synthesize_plain_text_raw_mime_with_recipients, BlobId, FetchedBody, GatewayError,
     MessageAttachment, MessageId, MessageRecord,
 };
+use posthaste_provider_call::{CallClass, HttpRequestSpec};
 
-use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
+use crate::live::{map_gateway_error, map_provider_error, required_method_response, LiveJmapGateway};
 
 /// Read a single message's authoritative metadata record via `Email/get` — the
 /// `get` half of a mutation's set+get. Returns the provider's current state of
@@ -140,11 +141,41 @@ pub(crate) async fn download_blob(
     gateway: &LiveJmapGateway,
     blob_id: &BlobId,
 ) -> Result<Vec<u8>, GatewayError> {
+    // Route blob downloads through the provider-call envelope as a *blob-class*
+    // call (M31): no total timeout, a between-chunks stall read-deadline instead,
+    // so a large-but-progressing attachment on a slow link completes rather than
+    // deterministically timing out at 10 s (F2). Falls back to jmap-client's own
+    // `download()` only if the shared executor failed to build.
+    if let Some(executor) = gateway.executor() {
+        let url = build_download_url(gateway, blob_id);
+        let mut headers = gateway.client().headers().clone();
+        headers.remove(reqwest::header::CONTENT_TYPE);
+        let spec = HttpRequestSpec::get(url, headers);
+        return executor
+            .execute(gateway.account_key(), CallClass::Blob, spec)
+            .await
+            .map(|response| response.body)
+            .map_err(map_provider_error);
+    }
     gateway
         .client()
         .download(blob_id.as_str())
         .await
         .map_err(map_gateway_error)
+}
+
+/// Build the JMAP blob download URL from the session's URI template, matching
+/// jmap-client's own substitution (`name`/`type` default to the same placeholder
+/// values its `download()` uses).
+fn build_download_url(gateway: &LiveJmapGateway, blob_id: &BlobId) -> String {
+    gateway
+        .client()
+        .session()
+        .download_url()
+        .replace("{accountId}", gateway.server_account_id())
+        .replace("{blobId}", blob_id.as_str())
+        .replace("{name}", "none")
+        .replace("{type}", "application/octet-stream")
 }
 
 fn attachment_from_part(index: usize, part: &email::EmailBodyPart) -> Option<MessageAttachment> {

@@ -1,7 +1,8 @@
 use posthaste_domain_model::{GatewayError, MailboxId, MessageId, SetKeywordsCommand};
+use posthaste_provider_call::{CallClass, HttpRequestSpec};
 use serde_json::{json, Map, Value};
 
-use crate::live::LiveJmapGateway;
+use crate::live::{map_provider_error, LiveJmapGateway};
 
 /// Build an `Email/set` request for keyword patches.
 ///
@@ -96,35 +97,54 @@ pub(crate) async fn send_json_request(
 > {
     // Serializing our own request is an internal codec fault, not a network
     // error — retrying the wire cannot fix a body we cannot encode.
-    let body = serde_json::to_string(&request)
-        .map_err(|error| GatewayError::Internal(error.to_string()))?;
-    let response = reqwest::Client::builder()
-        .timeout(gateway.client().timeout())
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| GatewayError::Network(error.to_string()))?
-        .post(gateway.client().session().api_url())
-        .headers(gateway.client().headers().clone())
-        .body(body)
-        .send()
-        .await
-        .map_err(|error| GatewayError::Network(error.to_string()))?;
+    let body =
+        serde_json::to_vec(&request).map_err(|error| GatewayError::Internal(error.to_string()))?;
 
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(GatewayError::Auth);
-    }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(GatewayError::Network(format!(
-            "JMAP request failed with HTTP {status}: {body}"
-        )));
-    }
+    // Route the raw JMAP POST through the provider-call envelope (M31): one
+    // shared connection pool (F4), a per-class total deadline (F2), the
+    // Retry-After-aware retry loop (F1), and the per-account circuit breaker
+    // (D83). This is a metadata-class mutation.
+    let bytes = if let Some(executor) = gateway.executor() {
+        let spec = HttpRequestSpec::post(
+            gateway.client().session().api_url(),
+            gateway.client().headers().clone(),
+            body,
+        );
+        executor
+            .execute(gateway.account_key(), CallClass::Metadata, spec)
+            .await
+            .map_err(map_provider_error)?
+            .body
+    } else {
+        // Fallback if the shared client failed to build: the prior direct path.
+        let response = reqwest::Client::builder()
+            .timeout(gateway.client().timeout())
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|error| GatewayError::Network(error.to_string()))?
+            .post(gateway.client().session().api_url())
+            .headers(gateway.client().headers().clone())
+            .body(body)
+            .send()
+            .await
+            .map_err(|error| GatewayError::Network(error.to_string()))?;
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(GatewayError::Auth);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GatewayError::Network(format!(
+                "JMAP request failed with HTTP {status}: {body}"
+            )));
+        }
+        response
+            .bytes()
+            .await
+            .map_err(|error| GatewayError::Network(error.to_string()))?
+            .to_vec()
+    };
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| GatewayError::Network(error.to_string()))?;
     // The bytes arrived; a decode failure is an internal/protocol codec fault,
     // not a transient network condition — classify it as such so it is not
     // retried as if the link had dropped.
