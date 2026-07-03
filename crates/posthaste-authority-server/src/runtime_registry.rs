@@ -27,9 +27,8 @@ use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationSettlementState, RuntimeAdapterError,
     RuntimeMutationId,
 };
-use posthaste_link_far_end::{
-    Accept, DedupStore, ReplayStore, Resume, SettlementSinkStore, TerminalClass,
-};
+use posthaste_link_far_end::down::{ReplayStore, Resume};
+use posthaste_link_far_end::up::{Accept, DedupStore, SettlementSinkStore, TerminalClass};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 
@@ -518,7 +517,7 @@ mod tests {
         registry.record_base(AuthorityServerFrame::Heartbeat);
         drop(ch); // subscriber gone
         // Drive the reaper past the sink TTL: departure purges everything.
-        let ttl = posthaste_link_far_end::DEFAULT_SINK_TTL;
+        let ttl = posthaste_link_far_end::up::DEFAULT_SINK_TTL;
         registry.reap(1); // starts the countdown
         registry.reap(ttl + 3); // past TTL → reaped + purged
         assert!(

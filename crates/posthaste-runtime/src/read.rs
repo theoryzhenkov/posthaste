@@ -35,6 +35,8 @@ use posthaste_contract_core::{
     AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
     RuntimeError, RuntimeResourceBytes,
 };
+use async_trait::async_trait;
+use posthaste_link_far_end::down::{FactLog, FactLogError, Sequenced};
 use tokio::sync::broadcast;
 
 /// A read-through cache over the [`AuthorityServerApi`], parameterized by policy.
@@ -382,6 +384,99 @@ fn down_assertion_to_event(assertion: &BaseAssertion, seq: i64) -> DomainEvent {
     }
 }
 
+/// The runtime's [`FactLog`] binding (RFC-L2-scripting D52 / S1): the
+/// fact-carrying tap's durable replay backed by the authority server's
+/// authoritative `event_log`, reached through this runtime's read-through
+/// [`ReadCache`]. Facts are [`DomainEvent`]s; the seam filter is [`EventFilter`]
+/// (topic / account / mailbox scope, composed with the resume cursor).
+///
+/// **Read-only** (D52 — the tap is a read-only far-end): events are authored by
+/// the authority server's write path (a mutation or a sync commits them into the
+/// `event_log`, seq AUTOINCREMENT); the runtime tap replays and tails them but
+/// never appends. The authority server's own `FactLog` binding — append included,
+/// over its store — is S3's. This is the machinery S2 mounts on `/v1/events`;
+/// until that mount lands the production caller is not wired (it is exercised by
+/// the unit tests below), so the constructor carries `allow(dead_code)` like the
+/// sibling half-wired `current_summary` fast-path.
+#[allow(dead_code)]
+pub(crate) struct EventLogFactLog {
+    reads: Arc<ReadCache>,
+}
+
+#[allow(dead_code)]
+impl EventLogFactLog {
+    pub(crate) fn new(reads: Arc<ReadCache>) -> Self {
+        Self { reads }
+    }
+
+    /// The whole-log filter resuming after `after` (no seam narrowing).
+    fn filter_after(after: u64) -> EventFilter {
+        EventFilter {
+            account_id: None,
+            topic: None,
+            mailbox_id: None,
+            after_seq: Some(after as i64),
+        }
+    }
+}
+
+#[async_trait]
+impl FactLog for EventLogFactLog {
+    type Fact = DomainEvent;
+    type Filter = EventFilter;
+
+    async fn append(&self, _fact: DomainEvent) -> Result<u64, FactLogError> {
+        // The runtime tap is a read-only view of the authority-authored log
+        // (D52). Appends belong to the authority server's write path (S3).
+        Err(FactLogError::ReadOnly)
+    }
+
+    async fn replay(
+        &self,
+        after_seq: u64,
+        filter: Option<EventFilter>,
+    ) -> Result<Vec<Sequenced<DomainEvent>>, FactLogError> {
+        // The subscriber's seam filter (topic/account/mailbox scope) composed
+        // with the resume cursor: the cursor always occupies the `after_seq` slot.
+        let mut filter = filter.unwrap_or_else(|| Self::filter_after(after_seq));
+        filter.after_seq = Some(after_seq as i64);
+        let events = self
+            .reads
+            .replay_events(filter)
+            .await
+            .map_err(|error| FactLogError::Backing(error.to_string()))?;
+        Ok(events
+            .into_iter()
+            .map(|event| Sequenced::new(event.seq.max(0) as u64, event))
+            .collect())
+    }
+
+    async fn highest_seq(&self) -> Result<u64, FactLogError> {
+        // `event_log` seqs are AUTOINCREMENT ascending and `list_events` returns
+        // them seq-ASC, so the last event is the head. The runtime reads only
+        // through `replay_events` (no dedicated MAX(seq) query exposed yet), so
+        // this scans; S2's mount can add a cheap head query when it lands.
+        let events = self
+            .reads
+            .replay_events(Self::filter_after(0))
+            .await
+            .map_err(|error| FactLogError::Backing(error.to_string()))?;
+        Ok(events.last().map(|event| event.seq.max(0) as u64).unwrap_or(0))
+    }
+
+    async fn truncation_point(&self) -> Result<u64, FactLogError> {
+        // The oldest retained seq. The `event_log` is append-only and not yet
+        // truncated, so this is the first event's seq (or 0 when empty); a resume
+        // from before it becomes the gap frame once truncation lands.
+        let events = self
+            .reads
+            .replay_events(Self::filter_after(0))
+            .await
+            .map_err(|error| FactLogError::Backing(error.to_string()))?;
+        Ok(events.first().map(|event| event.seq.max(0) as u64).unwrap_or(0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,5 +701,69 @@ mod tests {
         // And it evicted the cache: the next read re-fetches.
         cache.current_summary(&account, &message).await.unwrap();
         assert_eq!(authority_server.summary_calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// An authority server whose only surface is the authoritative event log —
+    /// the backing the runtime `FactLog` replays through the `ReadCache`.
+    struct EventLogStub {
+        events: Vec<DomainEvent>,
+    }
+
+    #[async_trait]
+    impl AuthorityServerApi for EventLogStub {
+        async fn replay_events(
+            &self,
+            filter: EventFilter,
+        ) -> Result<Vec<DomainEvent>, RuntimeError> {
+            let after = filter.after_seq.unwrap_or(0);
+            Ok(self
+                .events
+                .iter()
+                .filter(|event| event.seq > after)
+                .cloned()
+                .collect())
+        }
+    }
+
+    fn event(seq: i64) -> DomainEvent {
+        DomainEvent {
+            seq,
+            account_id: AccountId("acct".into()),
+            topic: EVENT_TOPIC_MESSAGE_UPDATED.to_string(),
+            occurred_at: "2026-07-03T00:00:00Z".into(),
+            mailbox_id: None,
+            message_id: None,
+            payload: json!({}),
+        }
+    }
+
+    // D52: the runtime FactLog replays durable facts after the cursor, and
+    // reports the head + truncation point the tap resolves the gap frame against.
+    #[tokio::test]
+    async fn fact_log_replays_events_after_the_cursor() {
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(EventLogStub {
+            events: vec![event(1), event(2), event(3)],
+        })));
+        let log = EventLogFactLog::new(reads);
+        assert_eq!(log.highest_seq().await.unwrap(), 3, "head is the newest seq");
+        assert_eq!(log.truncation_point().await.unwrap(), 1, "oldest retained seq");
+        let frames = log.replay(1, None).await.unwrap();
+        assert_eq!(
+            frames.iter().map(|f| f.seq()).collect::<Vec<_>>(),
+            vec![2, 3],
+            "replays facts after the cursor, seq-stamped"
+        );
+    }
+
+    // D52: the runtime binding is read-only — the tap tails the authority-authored
+    // log, appends are the authority server's write path (S3).
+    #[tokio::test]
+    async fn fact_log_is_read_only_on_the_runtime_side() {
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(EventLogStub {
+            events: vec![],
+        })));
+        let log = EventLogFactLog::new(reads);
+        assert!(matches!(log.append(event(1)).await, Err(FactLogError::ReadOnly)));
+        assert_eq!(log.highest_seq().await.unwrap(), 0, "empty log head is 0");
     }
 }
