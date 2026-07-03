@@ -17,11 +17,13 @@
 //! ```
 //! - `version` — schema version (currently [`DISCOVERY_FILE_VERSION`]).
 //! - `port` / `url` — where the `/v1` API is bound (loopback).
-//! - `token` — the **bootstrap capability**. TODAY this is the server's
-//!   full-scope local macaroon (the very credential injected into the webview).
-//!   **S4** (the token-mint UX rider) must NARROW this to a least-privilege,
-//!   expiring grant; until then the discovery token is full-scope — declared, not
-//!   forced.
+//! - `token` — the **bootstrap capability**: the server's full-scope local
+//!   macaroon (the very credential injected into the webview). It is deliberately
+//!   full-scope — a *bootstrap* credential, not a working one. Scripts do NOT use
+//!   it directly: `posthastectl token mint --grant <scopes> [--expiry <dur>]`
+//!   (the S4 token-mint UX rider) reads this token via discovery and attenuates it
+//!   (server-side, `POST /v1/auth/tokens`) into a least-privilege, expiring token
+//!   for the script. See `docs/scripting-quickstart.md`.
 //!
 //! The file carries a live credential, so it is written `0600` (state dir
 //! best-effort `0700`), overwriting any prior file, and removed on clean shutdown

@@ -40,6 +40,7 @@ use tokio::sync::broadcast;
 
 use posthaste_link_far_end::down::{Sequenced, Tap, TapResume};
 
+use crate::apply_ledger::{ApplyLedger, Reserved};
 use crate::near_node::{named_message_assertion, AuthorityServerPendingSet};
 use crate::read::{EventLogFactLog, ReadCache};
 use crate::far_end::links::{MutationAcceptance, LinkRegistry};
@@ -94,6 +95,11 @@ pub(crate) struct RuntimeCoreState {
     /// Allocator for opaque [`TapSubscriberId`]s — one per `/v1/events`
     /// subscription (§5.4). Monotonic; the value is never surfaced on the wire.
     pub(crate) tap_subscriber_seq: AtomicU64,
+    /// The apply-scoped idempotency ledger (RFC-L2-scripting D53 / P8 fix): makes
+    /// a script's at-least-once write-back through [`RuntimeMailWriteApi::apply`]
+    /// safe under redelivery when the caller supplies an idempotency key. Reuses
+    /// the far-end up-half `DedupStore`; dedicated to the direct-apply path.
+    pub(crate) apply_ledger: ApplyLedger,
     pub(crate) startup_status: RuntimeStatus,
     pub(crate) stopped: Arc<AtomicBool>,
 }
@@ -146,6 +152,23 @@ impl Drop for MutationCancelGuard {
 }
 
 impl RuntimeHandle {
+    /// The current event-log head seq — the **snapshot-attach** consistency token
+    /// (RFC-L2-scripting §5.3): the seq a fresh `/v1/events` subscriber attaches
+    /// at, so a read stamped with it can be followed by a gap-free tap tail from
+    /// exactly that point. Sourced from the S2 event-log bounds query
+    /// (`MAX(seq)`), the same value `subscribe_events` seeds a fresh cursor with.
+    /// Best-effort: `None` when the bounds query is unavailable (the read then
+    /// omits `asOfSeq` rather than failing).
+    pub async fn current_event_seq(&self) -> Option<u64> {
+        self.core
+            .reads
+            .event_log_bounds()
+            .await
+            .ok()
+            .flatten()
+            .map(|bounds| bounds.newest.max(0) as u64)
+    }
+
     /// The runtime's local status: lifecycle + the build-time store snapshot.
     /// The live account count is layered on in `runtime_status` via the link.
     fn current_status(&self) -> RuntimeStatus {
@@ -877,11 +900,26 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     /// flow through `forward_mutation`.
     async fn apply(
         &self,
-        _caller: RuntimeCaller,
+        caller: RuntimeCaller,
         op: MailOperation,
+        idempotency_key: Option<ClientMutationId>,
     ) -> Result<CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.apply(op).await
+        // Keyless direct-apply keeps the pre-existing behavior (idempotency is
+        // then only the operations' inherent set-semantics — P8's residual risk).
+        let Some(key) = idempotency_key else {
+            return self.core.authority_server_link.apply(op).await;
+        };
+        // Keyed direct-apply (D53 / P8 fix): dedupe at-least-once write-back so a
+        // redelivery re-observes the first outcome instead of re-executing.
+        match self.core.apply_ledger.reserve(&caller, &key, op.name()) {
+            Reserved::Return(result) => result,
+            Reserved::Execute => {
+                let result = self.core.authority_server_link.apply(op).await;
+                self.core.apply_ledger.settle(&caller, &key, &result);
+                result
+            }
+        }
     }
 }
 

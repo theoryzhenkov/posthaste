@@ -65,7 +65,8 @@ pub async fn list_source_messages(
         .await
         .map_err(ApiError::from_runtime_error)
         .and_then(expect_message_page)?;
-    Ok(Json(message_page_response(page)))
+    let as_of_seq = state.runtime.current_event_seq().await;
+    Ok(Json(message_page_response(page, as_of_seq)))
 }
 
 pub(super) fn validate_source_message_cursor(
@@ -115,7 +116,7 @@ pub async fn search_messages(
             "search query must not be empty",
         ));
     }
-    state
+    let page = state
         .runtime
         .query_mail_page(
             RuntimeCaller::api(),
@@ -132,9 +133,9 @@ pub async fn search_messages(
         )
         .await
         .map_err(ApiError::from_runtime_error)
-        .and_then(expect_message_page)
-        .map(message_page_response)
-        .map(Json)
+        .and_then(expect_message_page)?;
+    let as_of_seq = state.runtime.current_event_seq().await;
+    Ok(Json(message_page_response(page, as_of_seq)))
 }
 
 /// GET /v1/views/conversations
@@ -170,7 +171,7 @@ pub async fn list_conversations(
         (None, _) => None,
     };
     let query_text = join_query([base_query, optional_user_query(query.q.as_deref())]);
-    state
+    let page = state
         .runtime
         .query_mail_page(
             RuntimeCaller::api(),
@@ -187,7 +188,7 @@ pub async fn list_conversations(
         )
         .await
         .map_err(ApiError::from_runtime_error)
-        .and_then(expect_conversation_page)
-        .map(conversation_page_response)
-        .map(Json)
+        .and_then(expect_conversation_page)?;
+    let as_of_seq = state.runtime.current_event_seq().await;
+    Ok(Json(conversation_page_response(page, as_of_seq)))
 }

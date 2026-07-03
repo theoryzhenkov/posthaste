@@ -52,6 +52,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Scripting quickstart: scripting-quickstart.md
   - Architecture:
       - Crate topology (L2): architecture/L2-crate-topology.md
   - State:

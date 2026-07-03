@@ -9,6 +9,7 @@
 //! (store/engine/imap). The far-node crate composes a runtime over an in-process
 //! authority server via [`assemble_runtime`].
 
+mod apply_ledger;
 mod assembly;
 mod handle;
 mod link_near_end;

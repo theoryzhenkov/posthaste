@@ -20,7 +20,8 @@
 use async_trait::async_trait;
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
-    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
+    AutomationRulePreviewResult, ClientMutationId, CreateAccountMutation, CreateSmartMailboxMutation,
+    MailOperation,
     MailQueryPage, MailQueryRequest, MessageResourceKind, PatchAccountMutation,
     PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller,
     RuntimeError, RuntimeResourceBytes, RuntimeStatus,
@@ -292,20 +293,30 @@ pub trait RuntimeMailWriteApi: Send + Sync {
 
     /// Apply a mail operation authoritatively and return its command ack (D21/
     /// D34). This is the **direct-apply** command surface: REST callers are not
-    /// replicas and hold no pending set, so there is no optimistic fold or
-    /// `ClientMutationId` dedup here — the operation is applied at the authority
-    /// and the resulting events returned. The replica (optimistic) path forwards
-    /// the same [`MailOperation`] through `forward_mutation` on the link surface
-    /// instead.
+    /// replicas and hold no pending set, so there is no optimistic fold here —
+    /// the operation is applied at the authority and the resulting events
+    /// returned. The replica (optimistic) path forwards the same [`MailOperation`]
+    /// through `forward_mutation` on the link surface instead.
     ///
     /// Covers the typed command subset the REST surface exposes (set-keywords,
     /// add/remove-to-mailbox, replace-mailboxes, destroy); operations that only
     /// exist on the replica forward path (role moves, snooze, applyDiff, the
     /// `revCursor` control op) are rejected here with `InvalidMutation`.
+    ///
+    /// `idempotency_key` (RFC-L2-scripting D53, P8 fix) is a client-supplied key
+    /// making at-least-once script write-back safe: a redelivery under the same
+    /// key returns the first outcome instead of re-executing. `None` keeps the
+    /// pre-existing keyless direct-apply behavior (idempotency is then only the
+    /// operations' inherent set-semantics). Reusing a key with a *different*
+    /// operation is rejected (`Conflict`) — the replica path's rule. The dedup
+    /// ledger is the runtime-side, apply-scoped reuse of the far-end
+    /// [`DedupStore`](../posthaste_link_far_end/up/struct.DedupStore.html) with
+    /// D47/D48 retention (Confirmed/Rejected re-observed, transient Failed cleared).
     async fn apply(
         &self,
         caller: RuntimeCaller,
         op: MailOperation,
+        idempotency_key: Option<ClientMutationId>,
     ) -> Result<CommandAck, RuntimeError>;
 }
 
