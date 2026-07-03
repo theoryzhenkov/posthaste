@@ -24,12 +24,14 @@ use posthaste_domain_model::{
 use posthaste_observability::{events, ph_info, ph_warn};
 use posthaste_provider_call::{ExecutorConfig, ProviderCallExecutor};
 use posthaste_authority_server_link::AuthorityServerApi;
+use posthaste_link_far_end::down::FactLog;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::authority_server::AuthorityServer;
+use crate::fact_log::AuthorityServerFactLog;
 use crate::local_authority_server::LocalAuthorityServer;
 use crate::rules::SharedMinter;
-use posthaste_domain_service::MailService;
+use posthaste_domain_service::{MailService, MailStore};
 
 /// Bound on the in-flight rule-evaluation queue. A backlog beyond this drops the
 /// newest fact rather than back-pressuring the event bus (at-least-once means a
@@ -77,11 +79,18 @@ impl Drop for RuleEngineHandle {
 /// the writer swaps a pointer, and neither blocks on the other's real work.
 pub(crate) struct EngineContext {
     pub(crate) service: Arc<MailService>,
-    pub(crate) event_sender: broadcast::Sender<DomainEvent>,
     pub(crate) rules: RwLock<Arc<Vec<Rule>>>,
     pub(crate) minter: Option<SharedMinter>,
     pub(crate) executor: Arc<ProviderCallExecutor>,
     pub(crate) local: Arc<LocalAuthorityServer>,
+    /// The authority server's writable `FactLog` binding (RFC-L2-scripting
+    /// D52/S3): the durable authoring path meta-facts (`rule.fired`,
+    /// `rule.delivery.failed`) append through, so they land in the SAME
+    /// `event_log` the existing `/v1/events` tap already replays from — no
+    /// second tap, just the missing durable write path for AS-origin facts
+    /// that used to go straight to the live broadcast (`seq: 0`) and vanish on
+    /// reconnect.
+    pub(crate) fact_log: Arc<AuthorityServerFactLog>,
 }
 
 impl EngineContext {
@@ -238,6 +247,7 @@ impl ManagedRulesHandle {
 pub(crate) fn spawn(
     authority_server: Arc<AuthorityServer>,
     service: Arc<MailService>,
+    store: Arc<dyn MailStore>,
     event_sender: broadcast::Sender<DomainEvent>,
     config_root: PathBuf,
     rules: Vec<Rule>,
@@ -248,14 +258,15 @@ pub(crate) fn spawn(
             .expect("failed to build the rule webhook HTTP client"),
     );
     let local = Arc::new(LocalAuthorityServer::new(authority_server));
+    let fact_log = Arc::new(AuthorityServerFactLog::new(store, event_sender.clone()));
     let rule_count = rules.len();
     let ctx = Arc::new(EngineContext {
         service,
-        event_sender: event_sender.clone(),
         rules: RwLock::new(Arc::new(rules)),
         minter,
         executor,
         local,
+        fact_log,
     });
     let managed = ManagedRulesHandle::new(config_root, ctx.clone());
 
@@ -372,7 +383,8 @@ impl EngineContext {
                 self.run_hook(rule, event, summary).await
             }
         };
-        self.emit_rule_fired(rule, event.seq, rule.action.kind_str(), outcome, summary);
+        self.emit_rule_fired(rule, event.seq, rule.action.kind_str(), outcome, summary)
+            .await;
     }
 
     async fn apply_tag(&self, summary: &MessageSummary, tag: &str) -> RuleOutcome {
@@ -430,8 +442,14 @@ impl EngineContext {
     }
 
     /// Emit the `rule.fired` fact (RFC §8: a rule-action invocation is itself a
-    /// fact). Bus-only, like the other meta-facts (`seq: 0`, the tap stamps it).
-    fn emit_rule_fired(
+    /// fact — "scriptable and auditable through the same tap"). Durable (RFC-
+    /// L2-scripting D52/S3): appends through the authority server's own
+    /// [`FactLog`] binding, which assigns a real seq and persists into
+    /// `event_log` before broadcasting — the same durable path `/v1/events`
+    /// already replays from, so a subscriber that reconnects after this fires
+    /// still sees it (previously it was bus-only with `seq: 0` and simply
+    /// vanished on reconnect — no fact, no gap frame, silent data loss).
+    async fn emit_rule_fired(
         &self,
         rule: &Rule,
         event_seq: i64,
@@ -445,20 +463,33 @@ impl EngineContext {
             action_kind: action_kind.to_string(),
             outcome,
         };
-        let _ = self.event_sender.send(DomainEvent {
-            seq: 0,
-            account_id: summary.source_id.clone(),
-            topic: EVENT_TOPIC_RULE_FIRED.to_string(),
-            occurred_at: now_iso8601().unwrap_or_default(),
-            mailbox_id: None,
-            message_id: Some(summary.id.clone()),
-            payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
-        });
+        if let Err(error) = self
+            .fact_log
+            .append(DomainEvent {
+                seq: 0,
+                account_id: summary.source_id.clone(),
+                topic: EVENT_TOPIC_RULE_FIRED.to_string(),
+                occurred_at: now_iso8601().unwrap_or_default(),
+                mailbox_id: None,
+                message_id: Some(summary.id.clone()),
+                payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
+            })
+            .await
+        {
+            ph_warn!(
+                events::RULE_ACTION_APPLY_FAILED,
+                rule_id = %rule.id,
+                error = %error,
+                "failed to durably append the rule.fired fact; the action ran but is unobservable on the tap"
+            );
+        }
     }
 
     /// Emit the `rule.delivery.failed` dead-letter fact (ruling 5): a hook whose
-    /// bounded retries were exhausted (or that could not be attempted).
-    pub(crate) fn emit_delivery_failed(
+    /// bounded retries were exhausted (or that could not be attempted). Durable
+    /// for the same reason [`emit_rule_fired`](Self::emit_rule_fired) is: dead-
+    /// letter state must survive a reconnect, not just a live subscriber.
+    pub(crate) async fn emit_delivery_failed(
         &self,
         rule: &Rule,
         event_seq: i64,
@@ -479,15 +510,26 @@ impl EngineContext {
             reason,
             attempts,
         };
-        let _ = self.event_sender.send(DomainEvent {
-            seq: 0,
-            account_id: summary.source_id.clone(),
-            topic: EVENT_TOPIC_RULE_DELIVERY_FAILED.to_string(),
-            occurred_at: now_iso8601().unwrap_or_default(),
-            mailbox_id: None,
-            message_id: Some(summary.id.clone()),
-            payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
-        });
+        if let Err(error) = self
+            .fact_log
+            .append(DomainEvent {
+                seq: 0,
+                account_id: summary.source_id.clone(),
+                topic: EVENT_TOPIC_RULE_DELIVERY_FAILED.to_string(),
+                occurred_at: now_iso8601().unwrap_or_default(),
+                mailbox_id: None,
+                message_id: Some(summary.id.clone()),
+                payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
+            })
+            .await
+        {
+            ph_warn!(
+                events::RULE_DELIVERY_FAILED,
+                rule_id = %rule.id,
+                error = %error,
+                "failed to durably append the rule.delivery.failed fact"
+            );
+        }
     }
 }
 
