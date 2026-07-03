@@ -68,6 +68,60 @@ function runRequest<T>(request: IDBRequest<T>): Promise<T> {
   })
 }
 
+function isQuotaExceededError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'QuotaExceededError' ||
+      // Firefox's legacy DOMException code path.
+      (error as { code?: number }).code === 22)
+  )
+}
+
+/**
+ * Thrown when a durable pending-set write fails (W4 / N21). Distinguishes
+ * "the origin's IndexedDB storage is full" — the common, actionable case —
+ * from any other transaction failure, so a caller can surface a clear message
+ * ("storage full") instead of an opaque `DOMException`, and so the optimistic
+ * store fold that preceded the write can be reverted rather than left
+ * stranded (see `entityStoreAdapter.ts`'s `runMutation`). The underlying
+ * IndexedDB transaction is atomic — a failed write is rolled back by the
+ * browser itself, so the store is never left half-written; this type is about
+ * making the failure VISIBLE, not about repairing corruption that can't occur.
+ */
+export class PendingSetWriteError extends Error {
+  readonly quotaExceeded: boolean
+
+  constructor(cause: unknown) {
+    const quotaExceeded = isQuotaExceededError(cause)
+    super(
+      quotaExceeded
+        ? 'Local storage is full — free up space and try again.'
+        : `Pending-set write failed: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+    )
+    this.name = 'PendingSetWriteError'
+    this.quotaExceeded = quotaExceeded
+    if (cause instanceof Error) {
+      this.cause = cause
+    }
+  }
+}
+
+/**
+ * Normalize any `PendingSetStore` write failure to a {@link PendingSetWriteError}
+ * without double-wrapping one that's already classified. Used both inside
+ * `IndexedDbPendingSetStore` and by callers (e.g. `entityStoreAdapter.ts`)
+ * that want a uniform "storage full" message regardless of which
+ * `PendingSetStore` implementation raised it (real IndexedDB or a test
+ * double).
+ */
+export function toPendingSetWriteError(error: unknown): PendingSetWriteError {
+  return error instanceof PendingSetWriteError
+    ? error
+    : new PendingSetWriteError(error)
+}
+
 /**
  * IndexedDB-backed pending set. The connection opens lazily and is reused; a
  * fresh store is created on first open and migrated by version bump (records
@@ -83,13 +137,21 @@ export class IndexedDbPendingSetStore implements PendingSetStore {
 
   private async write(mutate: (store: IDBObjectStore) => void): Promise<void> {
     const connection = await this.db()
-    await new Promise<void>((resolve, reject) => {
-      const transaction = connection.transaction(STORE_NAME, 'readwrite')
-      transaction.oncomplete = () => resolve()
-      transaction.onerror = () => reject(transaction.error)
-      transaction.onabort = () => reject(transaction.error)
-      mutate(transaction.objectStore(STORE_NAME))
-    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = connection.transaction(STORE_NAME, 'readwrite')
+        transaction.oncomplete = () => resolve()
+        transaction.onerror = () => reject(transaction.error)
+        transaction.onabort = () => reject(transaction.error)
+        mutate(transaction.objectStore(STORE_NAME))
+      })
+    } catch (error) {
+      // W4 / N21: a QuotaExceededError here is otherwise an opaque
+      // DOMException that silently drops the durable write. Wrap it so
+      // callers can tell "storage full" apart from other failures and react
+      // (e.g. revert the optimistic fold that preceded this write).
+      throw new PendingSetWriteError(error)
+    }
   }
 
   async put(record: PendingSetRecord): Promise<void> {
@@ -102,27 +164,31 @@ export class IndexedDbPendingSetStore implements PendingSetStore {
     linkId?: string,
   ): Promise<void> {
     const connection = await this.db()
-    await new Promise<void>((resolve, reject) => {
-      const transaction = connection.transaction(STORE_NAME, 'readwrite')
-      transaction.onerror = () => reject(transaction.error)
-      transaction.onabort = () => reject(transaction.error)
-      const store = transaction.objectStore(STORE_NAME)
-      const get = store.get(clientMutationId)
-      get.onsuccess = () => {
-        const existing = get.result as PendingSetRecord | undefined
-        if (!existing) {
-          resolve()
-          return
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = connection.transaction(STORE_NAME, 'readwrite')
+        transaction.onerror = () => reject(transaction.error)
+        transaction.onabort = () => reject(transaction.error)
+        const store = transaction.objectStore(STORE_NAME)
+        const get = store.get(clientMutationId)
+        get.onsuccess = () => {
+          const existing = get.result as PendingSetRecord | undefined
+          if (!existing) {
+            resolve()
+            return
+          }
+          store.put({
+            ...existing,
+            runtimeMutationId,
+            ...(linkId ? { linkId } : {}),
+          })
+          transaction.oncomplete = () => resolve()
         }
-        store.put({
-          ...existing,
-          runtimeMutationId,
-          ...(linkId ? { linkId } : {}),
-        })
-        transaction.oncomplete = () => resolve()
-      }
-      get.onerror = () => reject(get.error)
-    })
+        get.onerror = () => reject(get.error)
+      })
+    } catch (error) {
+      throw new PendingSetWriteError(error)
+    }
   }
 
   async remove(clientMutationId: string): Promise<void> {

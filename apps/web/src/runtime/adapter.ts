@@ -10,6 +10,7 @@ import { defaultPendingSetStore } from './replica/pendingSetStore'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createWorkerStorePort } from './replica/workerStorePort'
 import { resolveStorePort } from './replica/storePortResolver'
+import { installUnloadDurabilityHooks } from './replica/unloadDurability'
 import type { RuntimeAdapter } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
@@ -198,3 +199,10 @@ void installEntityStoreAdapter().catch((error) => {
     'entity store failed to load — no REST fallback; the mail list will not update optimistically',
   )
 })
+
+// W3 / N18: flush any queued durable write on visibilitychange-hidden/pagehide
+// so a tab close can't strand it mid-flight. Installed unconditionally (a
+// no-op until `installEntityStoreAdapter` resolves, and a no-op outside a DOM
+// environment) rather than chained after the entity store install, so it's
+// also armed for the (rare, logged) case where the entity store never loads.
+installUnloadDurabilityHooks()

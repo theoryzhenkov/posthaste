@@ -137,6 +137,65 @@ describe('WorkerStorePort', () => {
     await expect(inflight).rejects.toThrow(/terminated/)
   })
 
+  it('a wedged worker (never replies) times out, restarts, and replays the request (W2 watchdog)', async () => {
+    let spawnCount = 0
+    const workers: LoopbackWorker[] = []
+    const spawnWorker = () => {
+      spawnCount += 1
+      const isFirst = spawnCount === 1
+      const worker = new LoopbackWorker((request) =>
+        isFirst
+          ? // The first worker never answers — wedged.
+            new Promise<StoreWorkerResponse>(() => {})
+          : { id: request.id, ok: true, result: 'recovered' },
+      )
+      workers.push(worker)
+      return worker
+    }
+    const port = new WorkerStorePort(spawnWorker(), {
+      spawnWorker,
+      callTimeoutMs: 20,
+      maxRestarts: 1,
+    })
+
+    const result = await port.projectViewJson('v1')
+
+    expect(result).toBe('recovered')
+    expect(spawnCount).toBe(2)
+    expect(workers[0]?.terminated).toBe(true)
+  })
+
+  it('fails (not hangs) once the restart budget is exhausted, and fails fast afterward', async () => {
+    let spawnCount = 0
+    const spawnWorker = () => {
+      spawnCount += 1
+      return new LoopbackWorker(
+        () => new Promise<StoreWorkerResponse>(() => {}),
+      )
+    }
+    const port = new WorkerStorePort(spawnWorker(), {
+      spawnWorker,
+      callTimeoutMs: 10,
+      maxRestarts: 2,
+    })
+
+    await expect(port.projectViewJson('v1')).rejects.toThrow(/timed out/)
+    // The initial worker + 2 restarts = 3 spawns total.
+    expect(spawnCount).toBe(3)
+    // The port gave up permanently; further calls fail immediately rather
+    // than hang or trigger more restarts.
+    await expect(port.drainDirtyJson()).rejects.toThrow(/no longer available/)
+  })
+
+  it('without a spawnWorker option, a call timeout fails the port instead of hanging forever', async () => {
+    const worker = new LoopbackWorker(
+      () => new Promise<StoreWorkerResponse>(() => {}),
+    )
+    const port = new WorkerStorePort(worker, { callTimeoutMs: 10 })
+
+    await expect(port.projectViewJson('v1')).rejects.toThrow(/timed out/)
+  })
+
   it('matches responses to calls by id even when they return out of order', async () => {
     const deferred: { id: number; settle: () => void }[] = []
     const worker = new LoopbackWorker(
