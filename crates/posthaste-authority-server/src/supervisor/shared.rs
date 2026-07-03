@@ -1,5 +1,8 @@
 use super::*;
 
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 impl SupervisorShared {
     pub(crate) async fn gateway(
         &self,
@@ -210,6 +213,76 @@ impl SupervisorShared {
             true
         })
         .await;
+    }
+
+    /// Record that a supervisor select!-loop arm's bounded call
+    /// (`tokio::time::timeout`, RFC-L2-lifecycle D66 / M26) elapsed before
+    /// completing. Marks the account `Degraded` — distinct from
+    /// `mark_sync_failure`'s auth/network-derived classes, since the
+    /// underlying operation may simply be hung rather than definitively
+    /// rejected or offline — and otherwise leaves the loop running: the M21
+    /// watchdog owns account lifecycle, not this per-arm backstop, so a
+    /// timeout here never breaks the caller's loop.
+    pub(crate) async fn mark_arm_timeout(
+        &self,
+        account_id: &AccountId,
+        generation: RuntimeGeneration,
+        arm: &'static str,
+        budget: Duration,
+    ) {
+        self.update_runtime_overview(account_id, Some(generation), |current| {
+            current.status = AccountStatus::Degraded;
+            current.last_sync_error = Some(format!(
+                "supervisor arm '{arm}' exceeded its {budget:?} budget (provider/store call hung)"
+            ));
+            current.last_sync_error_code = Some("arm_timeout".to_string());
+            current.sync_progress = None;
+            true
+        })
+        .await;
+    }
+
+    /// Snooze due-comparison clock (RFC-L2-lifecycle row 10 rider / D66).
+    ///
+    /// `until` in `message_snooze` is a wall-clock UNIX-epoch-seconds column
+    /// set by the API when a user picks a return time, so the due-check
+    /// genuinely needs wall-clock semantics — but sampling
+    /// `SystemTime::now()` fresh on every tick is not resilient to a
+    /// backward NTP correction: a jump back would make "now" look earlier
+    /// than it truly is, which either strands an actually-due snooze past
+    /// its return time (starving it — the RFC's named failure mode) or, on a
+    /// boundary case, could let an event that already fired be re-evaluated.
+    ///
+    /// This anchors one wall-clock sample (first call, process-lifetime
+    /// `OnceLock`) against `Instant::now()` taken at the same moment, then
+    /// advances that anchor by `Instant::now() - anchor_instant` on every
+    /// later call. `Instant` is documented monotonic — it never observes an
+    /// OS clock correction — so the computed "now" can only advance: a
+    /// snooze that is due now stays due on every later call (no starving),
+    /// and the value never regresses to re-open an already-passed boundary
+    /// (no double-firing), for the lifetime of this process. A restart
+    /// re-anchors from the `SystemTime` sampled at that moment, so this does
+    /// not (and cannot, from a single process) guard a jump that happens
+    /// *before* the anchor is first taken — only jumps during the anchored
+    /// process's run are covered, which is the realistic operational risk
+    /// (an NTP drift correction on a long-lived process), not initial boot
+    /// clock skew.
+    pub(crate) fn monotonic_now_secs() -> i64 {
+        static ANCHOR: OnceLock<(Instant, SystemTime)> = OnceLock::new();
+        let &(anchor_instant, anchor_wall) =
+            ANCHOR.get_or_init(|| (Instant::now(), SystemTime::now()));
+        let elapsed = Instant::now().saturating_duration_since(anchor_instant);
+        Self::anchored_now_secs(anchor_wall, elapsed)
+    }
+
+    /// Pure core of [`Self::monotonic_now_secs`], split out so a test can
+    /// drive the anchor/elapsed pair directly instead of manipulating the
+    /// real system clock (principle II: one declared seam a test can reach).
+    pub(crate) fn anchored_now_secs(anchor_wall: SystemTime, elapsed: Duration) -> i64 {
+        (anchor_wall + elapsed)
+            .duration_since(UNIX_EPOCH)
+            .map(|delta| delta.as_secs() as i64)
+            .unwrap_or(0)
     }
 
     /// Handle a push stream disconnect: emit event and set push status to Reconnecting.
