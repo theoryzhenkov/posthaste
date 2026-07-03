@@ -3,7 +3,6 @@ use super::*;
 #[tokio::test]
 async fn fetch_identity_uses_configured_sender_identity() {
     let gateway = LiveImapSmtpGateway {
-        config: test_config(),
         smtp_config: test_smtp_config(),
         discovery: DiscoveredImapAccount {
             capabilities: posthaste_domain_model::ImapCapabilities::default(),
@@ -11,6 +10,10 @@ async fn fetch_identity_uses_configured_sender_identity() {
         },
         store: None,
         secret_resolver: Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+        sessions: crate::session::ImapSessionManager::new(
+            test_config(),
+            Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+        ),
     };
 
     let identity = gateway
@@ -175,7 +178,6 @@ fn accumulator_builds_partial_delta_batch_from_explicit_deleted_uids() {
 #[tokio::test]
 async fn fetch_body_reports_clear_unsupported_error() {
     let gateway = LiveImapSmtpGateway {
-        config: test_config(),
         smtp_config: test_smtp_config(),
         discovery: DiscoveredImapAccount {
             capabilities: posthaste_domain_model::ImapCapabilities::default(),
@@ -183,6 +185,10 @@ async fn fetch_body_reports_clear_unsupported_error() {
         },
         store: None,
         secret_resolver: Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+        sessions: crate::session::ImapSessionManager::new(
+            test_config(),
+            Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+        ),
     };
 
     let error = gateway
@@ -301,10 +307,9 @@ impl posthaste_domain_service::SecretResolver for CountingResolver {
 }
 
 #[tokio::test]
-async fn gateway_resolves_fresh_secret_before_each_connection() {
+async fn gateway_resolves_fresh_secret_for_smtp_connections() {
     let resolver = Arc::new(CountingResolver::new("fresh-secret"));
     let gateway = LiveImapSmtpGateway {
-        config: test_config(),
         smtp_config: test_smtp_config(),
         discovery: DiscoveredImapAccount {
             capabilities: ImapCapabilities::default(),
@@ -312,13 +317,12 @@ async fn gateway_resolves_fresh_secret_before_each_connection() {
         },
         store: None,
         secret_resolver: resolver.clone(),
+        sessions: crate::session::ImapSessionManager::new(test_config(), resolver.clone()),
     };
 
-    let imap_config = gateway.resolve_imap_config().await.expect("resolve imap");
-    assert_eq!(imap_config.secret, "fresh-secret");
-    assert_eq!(resolver.call_count(), 1);
-
+    // The IMAP side resolves secrets inside the session manager at (re)connect
+    // time (see `session::tests`); the SMTP side still resolves per send.
     let smtp_config = gateway.resolve_smtp_config().await.expect("resolve smtp");
     assert_eq!(smtp_config.secret, "fresh-secret");
-    assert_eq!(resolver.call_count(), 2);
+    assert_eq!(resolver.call_count(), 1);
 }

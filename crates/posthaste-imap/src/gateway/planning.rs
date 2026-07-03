@@ -7,24 +7,38 @@ impl LiveImapSmtpGateway {
         store: Option<Arc<dyn MailStore>>,
         secret_resolver: Arc<dyn SecretResolver>,
     ) -> Result<Self, ImapAdapterError> {
-        let secret = secret_resolver
-            .resolve_secret()
-            .await
-            .map_err(|error| ImapAdapterError::Auth(error.to_string()))?;
-        let mut resolved_config = config.clone();
-        resolved_config.secret = secret;
-        let discovery = discover_imap_account(&resolved_config).await?;
+        // Discovery runs on the same managed session every later operation
+        // reuses — connecting an account costs exactly one IMAP connection.
+        let sessions = ImapSessionManager::new(config.clone(), Arc::clone(&secret_resolver));
+        let mut lease = sessions.acquire("discover").await?;
+        let result = crate::discovery::discover_authenticated_client(lease.client()).await;
+        let discovery = lease.finish(result)?;
         Ok(Self {
-            config,
             smtp_config,
             discovery,
             store,
             secret_resolver,
+            sessions,
         })
     }
 
     pub fn discovery(&self) -> &DiscoveredImapAccount {
         &self.discovery
+    }
+
+    /// Open the IMAP IDLE push-hint stream for `mailbox_name` on this
+    /// account's shared session (D92c: IDLE coordinates with the session
+    /// manager instead of opening a connection of its own).
+    pub fn idle_event_stream(
+        &self,
+        account_id: AccountId,
+        mailbox_name: String,
+    ) -> PushEventStream {
+        crate::idle::imap_idle_event_stream(
+            account_id,
+            Arc::clone(&self.sessions),
+            mailbox_name,
+        )
     }
 
     pub(crate) fn location_and_mailbox_name(

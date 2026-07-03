@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) async fn replace_message_mailboxes(
     gateway: &LiveImapSmtpGateway,
-    config: &ImapConnectionConfig,
+    client: &mut ImapClient,
     account_id: &AccountId,
     message_id: &MessageId,
     mailbox_ids: &[MailboxId],
@@ -30,7 +30,7 @@ pub(crate) async fn replace_message_mailboxes(
         let source_mailbox_name = gateway.mailbox_name_for_id(account_id, source_mailbox_id)?;
         let target_mailbox_name = gateway.mailbox_name_for_id(account_id, target_mailbox_id)?;
         move_imap_message_to_mailbox_by_location(
-            config,
+            client,
             &source_mailbox_name,
             source_location,
             &target_mailbox_name,
@@ -53,7 +53,7 @@ pub(crate) async fn replace_message_mailboxes(
     for mailbox_id in &delta.add {
         let target_mailbox_name = gateway.mailbox_name_for_id(account_id, mailbox_id)?;
         copy_imap_message_to_mailbox_by_location(
-            config,
+            client,
             &source_mailbox_name,
             &source_location,
             &target_mailbox_name,
@@ -72,7 +72,7 @@ pub(crate) async fn replace_message_mailboxes(
                 ))
             })?;
         let mailbox_name = gateway.mailbox_name_for_id(account_id, mailbox_id)?;
-        mark_imap_message_deleted_by_location(config, &mailbox_name, location)
+        mark_imap_message_deleted_by_location(client, &mailbox_name, location)
             .await
             .map_err(imap_error_to_gateway)?;
     }
@@ -85,7 +85,7 @@ pub(crate) async fn replace_message_mailboxes(
 
 pub(crate) async fn destroy_message_by_imap(
     gateway: &LiveImapSmtpGateway,
-    config: &ImapConnectionConfig,
+    client: &mut ImapClient,
     account_id: &AccountId,
     message_id: &MessageId,
 ) -> Result<MutationOutcome, GatewayError> {
@@ -102,11 +102,11 @@ pub(crate) async fn destroy_message_by_imap(
     for location in &locations {
         let mailbox_name = gateway.mailbox_name_for_id(account_id, &location.mailbox_id)?;
         if gateway.discovery.capabilities.supports_uidplus() {
-            expunge_imap_message_by_location(config, &mailbox_name, location)
+            expunge_imap_message_by_location(client, &mailbox_name, location)
                 .await
                 .map_err(imap_error_to_gateway)?;
         } else {
-            mark_imap_message_deleted_by_location(config, &mailbox_name, location)
+            mark_imap_message_deleted_by_location(client, &mailbox_name, location)
                 .await
                 .map_err(imap_error_to_gateway)?;
         }

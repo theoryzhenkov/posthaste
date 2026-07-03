@@ -33,8 +33,17 @@ use crate::ImapAdapterError;
 /// (principle II: one declared seam a test can reach).
 pub(crate) static IMAP_OP_TIMEOUT_MS: AtomicU64 = AtomicU64::new(60_000);
 
-fn op_timeout() -> Duration {
+pub(crate) fn op_timeout() -> Duration {
     Duration::from_millis(IMAP_OP_TIMEOUT_MS.load(Ordering::Relaxed))
+}
+
+/// Test-only: serialize tests that shrink the process-global deadline seams
+/// ([`IMAP_OP_TIMEOUT_MS`], `session::IMAP_IDLE_REISSUE_MS`) so parallel
+/// tests never observe each other's shrunken deadlines.
+#[cfg(test)]
+pub(crate) fn seam_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Test-only: shrink the per-op deadline so a stalling server triggers a

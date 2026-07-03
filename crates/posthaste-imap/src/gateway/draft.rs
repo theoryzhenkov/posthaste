@@ -37,7 +37,7 @@ fn drafts_mailbox(gateway: &LiveImapSmtpGateway) -> Result<&DiscoveredImapMailbo
 /// @spec docs/L1-outbox#operation-model
 pub(crate) async fn save_imap_draft(
     gateway: &LiveImapSmtpGateway,
-    config: &ImapConnectionConfig,
+    client: &mut ImapClient,
     account_id: &AccountId,
     request: &SendMessageRequest,
     replace: Option<&MessageId>,
@@ -66,33 +66,27 @@ pub(crate) async fn save_imap_draft(
         raw_message = prefixed;
     }
 
-    let mut client = connect_authenticated_client(config)
-        .await
-        .map_err(imap_error_to_gateway)?;
-    client
-        .refresh_capabilities()
-        .await
-        .map_err(|error| imap_error_to_gateway(ImapAdapterError::from(error)))?;
-
     // UIDVALIDITY of the Drafts mailbox, matching the source sync uses to encode
     // ids (`selected.uid_validity` in `imap_header_message_record`).
-    let selected = examine_selected_mailbox(&mut client, &drafts_name)
+    let selected = examine_selected_mailbox(client, &drafts_name)
         .await
         .map_err(imap_error_to_gateway)?;
     let uid_validity = selected.uid_validity;
 
-    let uid = client
-        .appenduid_or_fallback(drafts_name.as_str(), [Flag::Draft], &raw_message)
-        .await
-        .map_err(|error| imap_error_to_gateway(ImapAdapterError::from(error)))?
-        .ok_or_else(|| {
-            GatewayError::Rejected("IMAP APPEND did not yield a draft UID".to_string())
-        })?;
+    let uid = crate::timeout::with_deadline(
+        "append",
+        client.appenduid_or_fallback(drafts_name.as_str(), [Flag::Draft], &raw_message),
+    )
+    .await
+    .map_err(imap_error_to_gateway)?
+    .ok_or_else(|| {
+        GatewayError::Rejected("IMAP APPEND did not yield a draft UID".to_string())
+    })?;
 
     let new_message_id = imap_message_id(&drafts_id, uid_validity, ImapUid(uid.get()));
 
     if let Some(replace) = replace {
-        delete_imap_draft(gateway, config, account_id, replace).await?;
+        delete_imap_draft(gateway, client, account_id, replace).await?;
     }
 
     Ok(new_message_id)
@@ -108,7 +102,7 @@ pub(crate) async fn save_imap_draft(
 /// @spec docs/L1-outbox#operation-model
 pub(crate) async fn delete_imap_draft(
     gateway: &LiveImapSmtpGateway,
-    config: &ImapConnectionConfig,
+    client: &mut ImapClient,
     account_id: &AccountId,
     message_id: &MessageId,
 ) -> Result<(), GatewayError> {
@@ -119,7 +113,7 @@ pub(crate) async fn delete_imap_draft(
         if !locations.is_empty() {
             for location in &locations {
                 let mailbox_name = gateway.mailbox_name_for_id(account_id, &location.mailbox_id)?;
-                delete_draft_by_location(gateway, config, &mailbox_name, location).await?;
+                delete_draft_by_location(gateway, client, &mailbox_name, location).await?;
             }
             return Ok(());
         }
@@ -140,22 +134,22 @@ pub(crate) async fn delete_imap_draft(
                 "unknown IMAP mailbox for draft {message_id} deletion"
             ))
         })?;
-    delete_draft_by_location(gateway, config, &mailbox_name, &location).await
+    delete_draft_by_location(gateway, client, &mailbox_name, &location).await
 }
 
 /// Capability-aware deletion: UID EXPUNGE under UIDPLUS, otherwise mark `\Deleted`.
 async fn delete_draft_by_location(
     gateway: &LiveImapSmtpGateway,
-    config: &ImapConnectionConfig,
+    client: &mut ImapClient,
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<(), GatewayError> {
     if gateway.discovery.capabilities.supports_uidplus() {
-        expunge_imap_message_by_location(config, mailbox_name, location)
+        expunge_imap_message_by_location(client, mailbox_name, location)
             .await
             .map_err(imap_error_to_gateway)?;
     } else {
-        mark_imap_message_deleted_by_location(config, mailbox_name, location)
+        mark_imap_message_deleted_by_location(client, mailbox_name, location)
             .await
             .map_err(imap_error_to_gateway)?;
     }

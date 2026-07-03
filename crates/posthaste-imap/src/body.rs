@@ -5,19 +5,20 @@ use mail_parser::{MessageParser, MimeHeaders};
 use posthaste_domain_model::{FetchedBody, ImapMessageLocation, MessageAttachment};
 use posthaste_domain_model::{BlobId, MessageId};
 
-use crate::discovery::connect_authenticated_client;
-use crate::{selected_mailbox_from_examine, ImapAdapterError, ImapConnectionConfig};
+use imap_client::client::tokio::Client as ImapClient;
+
+use crate::{selected_mailbox_from_examine, ImapAdapterError};
 
 /// Fetch a full raw IMAP message without marking it read, then parse it into
 /// Posthaste's lazy body projection.
 ///
 /// @spec docs/L1-sync#body-lazy
-pub async fn fetch_message_body_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn fetch_message_body_by_location(
+    client: &mut ImapClient,
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<FetchedBody, ImapAdapterError> {
-    let raw_mime = fetch_raw_message_by_location(config, mailbox_name, location).await?;
+    let raw_mime = fetch_raw_message_by_location(client, mailbox_name, location).await?;
     imap_body_from_raw_mime(&location.message_id, raw_mime)
 }
 
@@ -28,12 +29,11 @@ pub async fn fetch_message_body_by_location(
 /// trusting `BODY.PEEK[]` bytes.
 ///
 /// @spec docs/L1-sync#body-lazy
-pub async fn fetch_raw_message_by_location(
-    config: &ImapConnectionConfig,
+pub(crate) async fn fetch_raw_message_by_location(
+    client: &mut ImapClient,
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<Vec<u8>, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
     let selected = selected_mailbox_from_examine(
         mailbox_name,
         crate::timeout::with_deadline("examine", client.examine(mailbox_name)).await?,

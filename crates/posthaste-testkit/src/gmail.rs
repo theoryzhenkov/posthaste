@@ -628,7 +628,7 @@ async fn send_select(
 /// ` MODSEQ (<v>)` inside the FETCH item list by hand.
 fn encode_fetch(seq: u32, message: &MockMessage) -> Vec<u8> {
     use imap_codec::encode::Encoder;
-    use imap_codec::imap_types::core::{IString, Literal, NString, Text, Vec1};
+    use imap_codec::imap_types::core::{IString, Literal, NString, Vec1};
     use imap_codec::imap_types::fetch::MessageDataItem;
     use imap_codec::imap_types::response::{Data, Response};
     use imap_codec::ResponseCodec;
@@ -647,9 +647,9 @@ fn encode_fetch(seq: u32, message: &MockMessage) -> Vec<u8> {
         MessageDataItem::GmailMessageId(message.gmail_msgid),
         MessageDataItem::GmailThreadId(message.gmail_thrid),
         MessageDataItem::GmailLabels(vec![
-            Text::try_from("\\Inbox").unwrap(),
-            Text::try_from("\\Starred").unwrap(),
-            Text::try_from("\"Project Alpha\"").unwrap(),
+            std::borrow::Cow::from("\\Inbox"),
+            std::borrow::Cow::from("\\Starred"),
+            std::borrow::Cow::from("Project Alpha"),
         ]),
     ])
     .expect("at least one fetch item");
