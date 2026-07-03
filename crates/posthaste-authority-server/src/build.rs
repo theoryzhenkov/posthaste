@@ -317,8 +317,11 @@ pub(crate) async fn build_authority_server_parts(
         event_sender.clone(),
         config.poll_interval,
     ));
+    // Boot path (D98(a) / Sc1): splay each account's initial Startup sync within
+    // the governor's window so N accounts started in this tight loop don't all
+    // open a provider sync at the same instant (the boot storm).
     for source in service.list_sources()? {
-        account_supervisor.start_account(&source).await;
+        account_supervisor.start_account_on_boot(&source).await;
     }
     let account_reads = Arc::new(AccountReadService::new(
         api_bridge.service.clone(),

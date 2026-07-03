@@ -2105,6 +2105,165 @@ async fn delete_account_removes_secret_config_and_publishes_event_through_runtim
     assert_eq!(subscription.replay.len(), 1);
 }
 
+// spec: docs/eph/RFC-L2-provider-reliability#d100
+#[tokio::test]
+async fn deleting_an_account_gcs_its_message_and_mailbox_rows() {
+    // D100(b) / D2: account deletion must GC the account's synced store rows,
+    // not just its config + secret — otherwise messages/mailboxes are orphaned
+    // in SQLite forever.
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_server(config)
+        .await
+        .expect("authority runtime should build");
+
+    let mut mutation = mock_account_mutation("gc-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+
+    // A sync seeds the mock provider's sample mailboxes/messages into the store.
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("sync should seed store rows");
+    assert!(
+        !build
+            .api_bridge
+            .service
+            .list_messages(&account.id, None)
+            .expect("messages should list")
+            .is_empty(),
+        "the account should have message rows before deletion"
+    );
+    assert!(
+        !build
+            .api_bridge
+            .service
+            .list_mailboxes(&account.id)
+            .expect("mailboxes should list")
+            .is_empty(),
+        "the account should have mailbox rows before deletion"
+    );
+
+    build
+        .handle
+        .delete_account(RuntimeCaller::test(), account.id.clone())
+        .await
+        .expect("runtime should delete account");
+
+    assert!(
+        build
+            .api_bridge
+            .service
+            .list_messages(&account.id, None)
+            .expect("messages should list")
+            .is_empty(),
+        "message rows must be GC'd when the account is deleted"
+    );
+    assert!(
+        build
+            .api_bridge
+            .service
+            .list_mailboxes(&account.id)
+            .expect("mailboxes should list")
+            .is_empty(),
+        "mailbox rows must be GC'd when the account is deleted"
+    );
+}
+
+// spec: docs/eph/RFC-L2-provider-reliability#d100
+#[tokio::test]
+async fn deleting_an_account_during_an_in_flight_sync_commits_no_rows() {
+    // D100(a) / D1: the runtime must be stopped-and-drained BEFORE the config +
+    // secret are removed and the store rows are GC'd, so an in-flight sync
+    // cannot commit NEW rows for the just-deleted account (undoing the purge).
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_server(config)
+        .await
+        .expect("authority runtime should build");
+
+    let mut mutation = mock_account_mutation("delete-midsync-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+
+    // Baseline sync establishes the connection and seeds rows.
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("baseline sync should run");
+    assert!(
+        !build
+            .api_bridge
+            .service
+            .list_messages(&account.id, None)
+            .expect("messages should list")
+            .is_empty(),
+        "the baseline sync should have seeded rows"
+    );
+
+    // Gate the next provider pull at entry, then fire a sync that blocks
+    // in-flight there.
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let _gate = MockJmapGateway::gate_sync_at_entry(&account.id, entered.clone(), release.clone());
+    build
+        .account_supervisor
+        .trigger_account_sync(&account.id, SyncTrigger::Manual)
+        .await
+        .expect("trigger should enqueue a cycle");
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("the sync should reach the gated provider pull and block in-flight");
+
+    // Delete while that sync is in flight. The fixed ordering stops-and-drains
+    // the runtime first (cancelling the gated sync), then purges — so the
+    // in-flight sync is cancelled before it can commit anything.
+    build
+        .handle
+        .delete_account(RuntimeCaller::test(), account.id.clone())
+        .await
+        .expect("delete during an in-flight sync should succeed");
+
+    // Release the (now-cancelled) gate. Under the wrong ordering the sync could
+    // still be live here and re-commit rows for the deleted account.
+    release.notify_one();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(
+        build
+            .api_bridge
+            .service
+            .list_messages(&account.id, None)
+            .expect("messages should list")
+            .is_empty(),
+        "a delete racing an in-flight sync must leave no message rows for the account"
+    );
+    assert!(
+        build
+            .api_bridge
+            .service
+            .list_mailboxes(&account.id)
+            .expect("mailboxes should list")
+            .is_empty(),
+        "a delete racing an in-flight sync must leave no mailbox rows for the account"
+    );
+}
+
 // spec: docs/authority-server/L3#account-mutations-runtime-backed
 // spec: docs/runtime/internals/L3#account-mutation-contract-pattern
 #[tokio::test]
@@ -2593,9 +2752,16 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
 
     seed_single_message_batch(&build, &account.id, "em-001", "mb-inbox");
 
-    // Slow down the mock provider sync so concurrent mutation triggers overlap
-    // with an in-flight sync and exercise the coalescing path.
-    MockJmapGateway::set_sync_delay_for_tests(50);
+    // Gate every subsequent provider pull at entry so the in-flight cycle is
+    // held open deterministically — the burst below cannot race past it. This is
+    // what turns the old probabilistic `<= 2` bound into an exact invariant: the
+    // first trigger to win the atomic idle→active claim holds `active` for the
+    // whole gated cycle, so every one of the other fourteen triggers provably
+    // coalesces (rather than some slipping through the idle window as their own
+    // cycle, the P5 flake).
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let _gate = MockJmapGateway::gate_sync_at_entry(&account.id, entered.clone(), release.clone());
 
     let link = build
         .handle
@@ -2604,8 +2770,8 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
         .expect("link should open");
 
     // Fire 15 rapid flag/unflag toggles concurrently. Under the old behavior
-    // each toggle would enqueue a full provider sync; with coalescing they
-    // collapse into at most one in-flight + one pending follow-up cycle.
+    // each toggle would enqueue a full provider sync; with the atomic claim they
+    // collapse into exactly one in-flight cycle plus one pending follow-up.
     let handle = build.handle.clone();
     let link_id = link.link_id.clone();
     let account_id = account.id.clone();
@@ -2646,15 +2812,29 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
         task.await.expect("burst task should not panic");
     }
 
-    // Release the delay so the settle wait is fast and other tests are unaffected.
-    MockJmapGateway::clear_sync_delay_for_tests();
+    // Every trigger has now been issued. Exactly one won the atomic claim and
+    // its cycle (cycle A) is entering the gated provider pull; the other
+    // fourteen coalesced into a single pending follow-up. Confirm cycle A
+    // reached the gate.
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("exactly one burst trigger should have claimed and entered a cycle");
+
+    // Release cycle A. On finishing it drains the single coalesced pending and
+    // runs exactly one follow-up (cycle B), which re-enters the gate.
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("the fourteen coalesced triggers should run exactly one follow-up cycle");
+    // Release cycle B; it finds nothing pending and settles.
+    release.notify_one();
 
     // Wait until no new sync cycle starts for a short interval, proving the
-    // burst has drained. Mock syncs are fast; cap total wait at 2 seconds.
-    let final_count = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    // burst has fully drained.
+    let final_count = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let count = build.account_supervisor.sync_cycle_count(&account.id).await;
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
             if build.account_supervisor.sync_cycle_count(&account.id).await == count {
                 return count;
             }
@@ -2664,9 +2844,15 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
     .expect("sync cycles should settle within timeout");
 
     let additional_cycles = final_count.saturating_sub(baseline);
-    assert!(
-        additional_cycles <= 2,
-        "15 rapid mutations should produce at most 2 additional provider sync cycles, got {additional_cycles}"
+    // D99: with the atomic idle-claim this is an INVARIANT, not a scheduling
+    // accident. The gate holds cycle A's `active` claim open across the whole
+    // burst, so all fifteen concurrent triggers resolve to exactly one claimed
+    // cycle (A) plus one coalesced follow-up (B) — never the per-mutation storm
+    // the old `<= 2` probabilistic bound was papering over.
+    assert_eq!(
+        additional_cycles, 2,
+        "15 rapid mutations must coalesce into exactly one in-flight cycle plus one \
+         pending follow-up (2 additional), got {additional_cycles}"
     );
 }
 
