@@ -5,8 +5,11 @@ fn raw_message_store_deduplicates_by_hash() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
-    let first = store.store_raw_message(&account, "same mime")?;
-    let second = store.store_raw_message(&account, "same mime")?;
+    let mut staged = crate::StagedBodyFiles::new();
+    let first = store.store_raw_message(&account, "same mime", &mut staged)?;
+    let second = store.store_raw_message(&account, "same mime", &mut staged)?;
+    // Keep the deduped body on disk (the guard would otherwise sweep it on drop).
+    staged.commit();
     assert_eq!(first.path, second.path);
     assert_eq!(first.sha256, second.sha256);
     Ok(())

@@ -49,9 +49,10 @@ impl SyncWriteStore for DatabaseStore {
             "applying sync batch to store"
         );
         let started = Instant::now();
-        let staged_bodies = stage_sync_bodies(self, account_id, batch)?;
-        let events = self
-            .write_transaction(|tx| apply_sync_batch_tx(tx, account_id, batch, &staged_bodies))?;
+        let events = self.staged_write(
+            |store, staged| stage_sync_bodies(store, account_id, batch, staged),
+            |tx, staged_bodies| apply_sync_batch_tx(tx, account_id, batch, staged_bodies),
+        )?;
         ph_info!(
             events::STORE_SYNC_BATCH_APPLIED,
             account_id = %account_id,
@@ -85,16 +86,18 @@ impl SyncWriteStore for DatabaseStore {
             "applying sync batch to store (protected)"
         );
         let started = Instant::now();
-        let staged_bodies = stage_sync_bodies(self, account_id, batch)?;
-        let events = self.write_transaction(|tx| {
-            apply_sync_batch_protected_tx(
-                tx,
-                account_id,
-                batch,
-                &staged_bodies,
-                protected_message_ids,
-            )
-        })?;
+        let events = self.staged_write(
+            |store, staged| stage_sync_bodies(store, account_id, batch, staged),
+            |tx, staged_bodies| {
+                apply_sync_batch_protected_tx(
+                    tx,
+                    account_id,
+                    batch,
+                    staged_bodies,
+                    protected_message_ids,
+                )
+            },
+        )?;
         ph_info!(
             events::STORE_SYNC_BATCH_APPLIED,
             account_id = %account_id,
@@ -184,14 +187,17 @@ impl SyncWriteStore for DatabaseStore {
         message_id: &MessageId,
         body: &FetchedBody,
     ) -> Result<CommandResult, StoreError> {
-        let raw_ref = body
-            .raw_mime
-            .as_deref()
-            .map(|raw_mime| self.store_raw_message(account_id, raw_mime))
-            .transpose()?;
-        self.write_transaction(|tx| {
-            apply_message_body_tx(tx, account_id, message_id, body, raw_ref.as_ref())
-        })
+        self.staged_write(
+            |store, staged| {
+                body.raw_mime
+                    .as_deref()
+                    .map(|raw_mime| store.store_raw_message(account_id, raw_mime, staged))
+                    .transpose()
+            },
+            |tx, raw_ref| {
+                apply_message_body_tx(tx, account_id, message_id, body, raw_ref.as_ref())
+            },
+        )
     }
 }
 
