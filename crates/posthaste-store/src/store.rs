@@ -29,7 +29,11 @@ pub struct RepairReport {
 pub struct DatabaseStore {
     db_path: PathBuf,
     data_root: PathBuf,
-    write_connection: Mutex<Connection>,
+    /// `None` once [`DatabaseStore::close`] has run: the write connection is
+    /// dropped on close so its file handle is released and any post-close write
+    /// fails cleanly (`StoreError::Failure`) instead of touching a checkpointed,
+    /// about-to-be-gone database.
+    write_connection: Mutex<Option<Connection>>,
     read_connections: Mutex<Vec<Connection>>,
 }
 
@@ -70,12 +74,70 @@ fn lock_read_pool(pool: &Mutex<Vec<Connection>>) -> MutexGuard<'_, Vec<Connectio
     }
 }
 
-fn lock_write_connection(connection: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
+fn lock_write_connection(
+    connection: &Mutex<Option<Connection>>,
+) -> MutexGuard<'_, Option<Connection>> {
     match connection.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
             warn!("write connection mutex was poisoned; recovering");
             poisoned.into_inner()
+        }
+    }
+}
+
+/// RAII guard over the content-addressed body (`.eml`) files staged to disk
+/// *before* the enclosing write transaction commits.
+///
+/// Raw MIME bodies are written to disk ahead of the txn (dedup by hash, and to
+/// keep large blobs off the write lock — see [`DatabaseStore::store_raw_message`]).
+/// A rolled-back txn would otherwise leave those files on disk with no
+/// referencing row — the N14 orphan-`.eml` leak. This guard records every
+/// *newly written* path and, unless [`Self::commit`] is called after the txn
+/// commits, removes them on drop. Deduped hits (the file already existed) are
+/// never registered, so a rollback only ever removes what this operation wrote.
+///
+/// @spec docs/eph/RFC-L2-lifecycle-and-errors#d62
+pub(crate) struct StagedBodyFiles {
+    paths: Vec<PathBuf>,
+    committed: bool,
+}
+
+impl StagedBodyFiles {
+    pub(crate) fn new() -> Self {
+        Self {
+            paths: Vec::new(),
+            committed: false,
+        }
+    }
+
+    /// Record a body file this operation just wrote, so it is removed if the
+    /// enclosing txn does not commit.
+    fn register(&mut self, path: PathBuf) {
+        self.paths.push(path);
+    }
+
+    /// Disarm the guard: the enclosing txn committed, so the staged files are
+    /// now referenced and must survive.
+    pub(crate) fn commit(mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for StagedBodyFiles {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        for path in &self.paths {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => warn!(
+                    "store: failed to remove orphaned staged body {}: {err}",
+                    path.display()
+                ),
+            }
         }
     }
 }
@@ -159,30 +221,47 @@ impl DatabaseStore {
         Ok(Self {
             db_path: db_path.to_path_buf(),
             data_root: data_root.to_path_buf(),
-            write_connection: Mutex::new(connection),
+            write_connection: Mutex::new(Some(connection)),
             read_connections: Mutex::new(Vec::new()),
         })
     }
 
     /// Close the store cleanly as the final teardown step (D62 / M20 phase (c)).
     ///
-    /// Drops every pooled read connection so their SQLite file handles are
-    /// released promptly rather than lingering until the last `Arc<DatabaseStore>`
-    /// is dropped. The single serialized write connection is released when that
-    /// last `Arc` drops (it is borrowed through a `Mutex`, not owned here).
+    /// Releases every pooled read connection, checkpoints the WAL back into the
+    /// main database file (`PRAGMA wal_checkpoint(TRUNCATE)`), then drops the
+    /// write connection so all SQLite file handles are released promptly and any
+    /// post-close write fails cleanly (`StoreError::Failure`).
     ///
-    /// Bounded by the sequence's store-close deadline; it does no I/O beyond
-    /// closing handles, so it returns well inside the budget.
+    /// **Idempotent:** once the write connection has been taken, a second call
+    /// is a no-op.
+    ///
+    /// **Deadline:** bounded by the sequence's ~2s store-close phase (RFC §7
+    /// ruling 1). It aims to complete, not to enforce — the phase owns the
+    /// deadline. A checkpoint that cannot acquire its locks (a straggling
+    /// reader) or otherwise fails is logged and skipped: a missed checkpoint
+    /// costs a WAL replay on next open, not data.
     ///
     /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d62
     pub fn close(&self) {
-        // M22 (D62): run `PRAGMA wal_checkpoint(TRUNCATE)` on the write
-        // connection here — before the connections drop — so a clean shutdown
-        // truncates the WAL instead of leaving it to be replayed on next open.
-        // A missed checkpoint costs a WAL replay, not data (RFC §7 ruling 1), so
-        // M20 only releases the pooled readers; the checkpoint lands in M22.
-        let mut pool = lock_read_pool(&self.read_connections);
-        pool.clear();
+        // Release pooled read connections first so the TRUNCATE checkpoint below
+        // is not blocked by an idle reader still holding the WAL open.
+        {
+            let mut pool = lock_read_pool(&self.read_connections);
+            pool.clear();
+        }
+
+        let mut guard = lock_write_connection(&self.write_connection);
+        if let Some(connection) = guard.as_ref() {
+            // Flush the WAL back into the main db file and truncate it to zero,
+            // so a clean shutdown leaves no WAL to replay on next open (N3).
+            if let Err(err) = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
+                warn!("store close: wal_checkpoint(TRUNCATE) failed: {err}");
+            }
+        }
+        // Drop the write connection: releases its file handle now and makes any
+        // subsequent write error cleanly rather than resurrecting the WAL.
+        *guard = None;
     }
 
     /// Checks out a read SQLite connection (WAL mode allows concurrent readers).
@@ -218,13 +297,39 @@ impl DatabaseStore {
         &self,
         operation: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut connection = lock_write_connection(&self.write_connection);
+        let mut guard = lock_write_connection(&self.write_connection);
+        let connection = guard
+            .as_mut()
+            .ok_or_else(|| StoreError::Failure("store is closed".to_string()))?;
         let tx = connection
             .transaction()
             .map_err(|err| StoreError::Failure(err.to_string()))?;
         let result = operation(&tx)?;
         tx.commit()
             .map_err(|err| StoreError::Failure(err.to_string()))?;
+        Ok(result)
+    }
+
+    /// Runs a write transaction whose content-addressed body files are staged to
+    /// disk *before* the transaction, under a [`StagedBodyFiles`] guard (N14).
+    ///
+    /// `stage` writes the `.eml` files (registering each newly written one on
+    /// the guard) and returns the staged refs; `apply` runs inside the txn using
+    /// them. The guard is disarmed only once the txn commits — a staging error
+    /// or a rolled-back txn drops it, removing the just-written files so no
+    /// orphan `.eml` is left on disk. This is the single seam every body-staging
+    /// mutation routes through.
+    ///
+    /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d62
+    pub(crate) fn staged_write<S, T>(
+        &self,
+        stage: impl FnOnce(&Self, &mut StagedBodyFiles) -> Result<S, StoreError>,
+        apply: impl FnOnce(&Transaction<'_>, &S) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let mut staged = StagedBodyFiles::new();
+        let staged_refs = stage(self, &mut staged)?;
+        let result = self.write_transaction(|tx| apply(tx, &staged_refs))?;
+        staged.commit();
         Ok(result)
     }
 
@@ -235,6 +340,7 @@ impl DatabaseStore {
         &self,
         account_id: &AccountId,
         raw_mime: &str,
+        staged: &mut StagedBodyFiles,
     ) -> Result<RawMessageRef, StoreError> {
         let mut hasher = Sha256::new();
         hasher.update(raw_mime.as_bytes());
@@ -250,6 +356,9 @@ impl DatabaseStore {
         let path = directory.join(format!("{sha256}.eml"));
         if !path.exists() {
             fs::write(&path, raw_mime).map_err(io_to_store_error)?;
+            // Register only newly written files: a dedup hit belongs to an
+            // already-committed row and must survive a rollback of *this* txn.
+            staged.register(path.clone());
         }
         Ok(RawMessageRef {
             path: path.to_string_lossy().to_string(),
