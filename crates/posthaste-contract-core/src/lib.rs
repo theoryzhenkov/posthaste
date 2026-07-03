@@ -20,6 +20,11 @@ use posthaste_domain_model::{
     Notifications, ProviderAuthKind, ProviderHint, ServiceError, ServiceErrorKind,
     SmartMailboxId, SmartMailboxRule, SmtpTransportSettings, TagAppearance, ValidationError,
 };
+
+// Re-exported so the shared retryability vocabulary is reachable as
+// `posthaste_contract_core::Terminality` by the wire's consumers (the near-end
+// engine, the runtime seam) without each taking a direct `domain-model` dep.
+pub use posthaste_domain_model::Terminality;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt;
@@ -804,7 +809,11 @@ impl MutationSettlementState {
 pub struct RuntimeAdapterError {
     pub code: RuntimeErrorCode,
     pub message: String,
-    pub retryable: bool,
+    /// The typed retryability verdict (RFC-L2 D70), replacing the write-only
+    /// `retryable: bool`. Paired with `code` (the reason) it is the one signal
+    /// the D47 settlement seam and the near-end engine agree on. `Degraded`
+    /// availability (D49) composes with this, orthogonally.
+    pub terminality: Terminality,
     pub correlation_id: Option<String>,
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
@@ -843,6 +852,49 @@ pub enum RuntimeErrorCode {
     Internal,
 }
 
+impl RuntimeErrorCode {
+    /// The inherent retryability of a code — the deliberate default every
+    /// constructor site inherits (fixing audit finding #5: the old
+    /// `From<ServiceError>` hard-coded `retryable: false`, marking transient
+    /// `NetworkError`/`ProviderUnavailable` terminal). Exhaustive so a new code
+    /// must classify itself before it compiles.
+    pub fn terminality(&self) -> Terminality {
+        match self {
+            // Reachable-again faults: the link/provider may recover, or a
+            // re-auth clears the block.
+            Self::RuntimeNotReady
+            | Self::ProviderUnavailable
+            | Self::NetworkError
+            | Self::TransportDisconnected
+            | Self::Unauthorized => Terminality::Transient,
+            // Everything else is a malformed/unsupported request, a diverged
+            // state, a validation failure, or an internal/storage fault —
+            // retrying the same call cannot change the outcome.
+            Self::InvalidDescriptor
+            | Self::InvalidMutation
+            | Self::InvalidSecret
+            | Self::InvalidAccount
+            | Self::AccountBaseUrlRequired
+            | Self::AccountSecretRequired
+            | Self::AccountUsernameRequired
+            | Self::AccountSenderRequired
+            | Self::NotFound
+            | Self::Conflict
+            | Self::StateMismatch
+            | Self::CannotCalculateChanges
+            | Self::GatewayRejected
+            | Self::SecretUnavailable
+            | Self::SecretUnsupported
+            | Self::StorageFailure
+            | Self::StorageCorrupted
+            | Self::ConfigValidation
+            | Self::ConfigIo
+            | Self::ConfigParse
+            | Self::Internal => Terminality::Permanent,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RuntimeError(pub RuntimeAdapterError);
 
@@ -864,10 +916,15 @@ impl RuntimeError {
         message: impl Into<String>,
         details: Value,
     ) -> Self {
+        // Deliberate-by-code: the terminality is the code's inherent verdict, so
+        // every `new`/`with_details` site classifies via the code it already
+        // chose rather than defaulting a bool. `retryable` overrides when a site
+        // knows better.
+        let terminality = code.terminality();
         Self(RuntimeAdapterError {
             code,
             message: message.into(),
-            retryable: false,
+            terminality,
             correlation_id: None,
             details,
         })
@@ -877,7 +934,7 @@ impl RuntimeError {
         Self(RuntimeAdapterError {
             code,
             message: message.into(),
-            retryable: true,
+            terminality: Terminality::Transient,
             correlation_id: None,
             details: Value::Null,
         })
@@ -887,7 +944,7 @@ impl RuntimeError {
         Self(RuntimeAdapterError {
             code: RuntimeErrorCode::Internal,
             message: message.into(),
-            retryable: false,
+            terminality: Terminality::Permanent,
             correlation_id,
             details: Value::Null,
         })
@@ -901,21 +958,21 @@ impl RuntimeError {
         let RuntimeAdapterError {
             code,
             message,
-            retryable,
+            terminality,
             correlation_id,
             details,
         } = original.0;
         let original_envelope = RuntimeAdapterError {
             code: code.clone(),
             message: message.clone(),
-            retryable,
+            terminality,
             correlation_id: correlation_id.clone(),
             details,
         };
         Self(RuntimeAdapterError {
             code,
             message,
-            retryable,
+            terminality,
             correlation_id,
             details: json!({
                 "compensation": {
@@ -987,7 +1044,12 @@ impl From<ValidationError> for RuntimeError {
 
 impl From<ServiceError> for RuntimeError {
     fn from(error: ServiceError) -> Self {
+        // `new` derives the terminality from `code` (below), so transient
+        // classes (NetworkError, ProviderUnavailable, Unauthorized) cross this
+        // seam retryable instead of the old hard-coded `retryable: false`
+        // (audit finding #5).
         let code = match error.kind() {
+            ServiceErrorKind::Internal => RuntimeErrorCode::Internal,
             ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
             ServiceErrorKind::Conflict => RuntimeErrorCode::Conflict,
             ServiceErrorKind::StateMismatch => RuntimeErrorCode::StateMismatch,
@@ -1042,12 +1104,28 @@ mod tests {
     }
 
     #[test]
-    fn retryable_constructor_marks_retryable_envelope() {
+    fn retryable_constructor_marks_transient_envelope() {
         let error =
             RuntimeError::retryable(RuntimeErrorCode::ProviderUnavailable, "gateway unavailable");
 
-        assert!(error.envelope().retryable);
+        assert!(error.envelope().terminality.is_transient());
         assert_eq!(error.envelope().code, RuntimeErrorCode::ProviderUnavailable);
+    }
+
+    #[test]
+    fn service_error_conversion_derives_terminality_from_code() {
+        // Audit finding #5: transient classes must not become terminal at this
+        // seam. A gateway-unavailable service error crosses as retryable.
+        use posthaste_domain_model::GatewayError;
+        let transient = RuntimeError::from(ServiceError::from(GatewayError::Unavailable(
+            "acct".to_string(),
+        )));
+        assert!(transient.envelope().terminality.is_transient());
+        // A rejected request stays permanent.
+        let permanent = RuntimeError::from(ServiceError::from(GatewayError::Rejected(
+            "bad".to_string(),
+        )));
+        assert!(permanent.envelope().terminality.is_permanent());
     }
 
     #[test]

@@ -95,31 +95,34 @@ impl MailService {
     }
 }
 
-/// Serialize an operation payload, mapping the JSON error to a rejected-gateway
-/// `ServiceError`. `context` names what was being serialized, e.g.
-/// `encode_payload(command, "keyword command")` -> `"failed to serialize keyword
-/// command: <err>"`.
+/// Serialize an operation payload, mapping the JSON error to an internal-codec
+/// `ServiceError`. A failure here is our own encode bug, not a provider
+/// rejection, so it carries `GatewayError::Internal` (permanent, 500-class)
+/// rather than the old `Rejected` mislabel (audit §2 serde-decode edge).
+/// `context` names what was being serialized, e.g. `encode_payload(command,
+/// "keyword command")` -> `"failed to serialize keyword command: <err>"`.
 pub(crate) fn encode_payload<T: serde::Serialize>(
     value: T,
     context: &str,
 ) -> Result<serde_json::Value, ServiceError> {
     serde_json::to_value(value).map_err(|error| {
-        ServiceError::from(GatewayError::Rejected(format!(
+        ServiceError::from(GatewayError::Internal(format!(
             "failed to serialize {context}: {error}"
         )))
     })
 }
 
-/// Deserialize an operation payload, mapping the JSON error to a rejected-gateway
-/// `ServiceError`. `context` names the payload, e.g.
-/// `decode_payload(payload, "setKeywords payload")` -> `"invalid setKeywords
-/// payload: <err>"`.
+/// Deserialize an operation payload, mapping the JSON error to an internal-codec
+/// `ServiceError`. An un-decodable stored payload is an internal fault, not a
+/// gateway rejection, so it carries `GatewayError::Internal` (audit §2
+/// serde-decode edge). `context` names the payload, e.g. `decode_payload(payload,
+/// "setKeywords payload")` -> `"invalid setKeywords payload: <err>"`.
 pub(crate) fn decode_payload<T: serde::de::DeserializeOwned>(
     value: serde_json::Value,
     context: &str,
 ) -> Result<T, ServiceError> {
     serde_json::from_value(value).map_err(|error| {
-        ServiceError::from(GatewayError::Rejected(format!(
+        ServiceError::from(GatewayError::Internal(format!(
             "invalid {context}: {error}"
         )))
     })

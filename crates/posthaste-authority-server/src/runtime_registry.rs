@@ -340,7 +340,7 @@ impl Default for RuntimeRegistry {
 mod tests {
     use super::*;
     use posthaste_authority_server_link::WireSettlementOutcome;
-    use posthaste_contract_core::RuntimeErrorCode;
+    use posthaste_contract_core::{RuntimeErrorCode, Terminality};
     use posthaste_replica_core::MutationId;
 
     fn rid(s: &str) -> AuthorityServerLinkId {
@@ -387,7 +387,7 @@ mod tests {
         RuntimeAdapterError {
             code: RuntimeErrorCode::InvalidMutation,
             message: "nope".into(),
-            retryable: false,
+            terminality: Terminality::Permanent,
             correlation_id: None,
             details: Value::Null,
         }
