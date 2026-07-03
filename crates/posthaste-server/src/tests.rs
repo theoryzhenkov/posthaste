@@ -79,9 +79,14 @@ async fn start_server_does_not_write_daemon_port_file() {
     .await;
 
     assert!(handle.require_auth, "bundled perimeter auth should be on");
+    // `start_server` stays a pure library entrypoint: it never writes daemon.json
+    // itself. Writing the discovery file is the caller's step — `main.rs` for the
+    // standalone daemon and the desktop `setup` hook for the embedded app
+    // (RFC-L2-scripting §7.7b, via `write_discovery_file`) — so this boundary test
+    // still holds.
     assert!(
         !state_root.join("daemon.json").exists(),
-        "embedded desktop startup uses injected runtime metadata, not daemon.json"
+        "start_server must not write daemon.json; the caller does"
     );
 
     handle.join_handle.abort();

@@ -11,6 +11,16 @@ impl MailService {
         self.events.list_events(filter).map_err(Into::into)
     }
 
+    /// The cheap seq bounds of `event_log` for the fact-carrying tap's
+    /// head/truncation queries (RFC-L2-scripting S2). `None` when empty.
+    ///
+    /// @spec docs/eph/RFC-L2-scripting#4-d52-the-tap
+    pub fn event_log_bounds(
+        &self,
+    ) -> Result<Option<posthaste_domain_model::EventLogBounds>, ServiceError> {
+        self.events.event_log_bounds().map_err(Into::into)
+    }
+
     /// Fetch the primary sender identity, falling back to the account's
     /// configured sender (address + display name) when the provider exposes no
     /// identity of its own (e.g. a Stalwart account whose `Identity/get` is

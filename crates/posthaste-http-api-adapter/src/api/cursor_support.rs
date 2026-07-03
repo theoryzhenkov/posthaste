@@ -53,6 +53,24 @@ pub(super) fn event_to_sse(event: DomainEvent) -> Result<Event, Infallible> {
         .unwrap_or_else(|_| Event::default().data("{}")))
 }
 
+/// Render the fact-carrying tap's **gap frame** (RFC-L2-scripting §3) as SSE: a
+/// distinguishable `event: gap` element carrying `{ "kind": "reset", "highestSeq":
+/// N }` — the same bytes the tap's `Sequenced::gap` serializes. Existing
+/// `DomainEvent` consumers read only default (`message`) frames / the `data`
+/// payload and ignore it; posthastectl surfaces it (a warning + cursor reset to
+/// `highestSeq`). Emitted once, ahead of the live tail, when a resume cursor fell
+/// before the log's oldest retained seq — never a silent drop (N8).
+///
+/// @spec docs/eph/RFC-L2-scripting#4-d52-the-tap
+pub(super) fn gap_to_sse(highest_seq: u64) -> Result<Event, Infallible> {
+    let data = serde_json::json!({ "kind": "reset", "highestSeq": highest_seq });
+    Ok(Event::default()
+        .event("gap")
+        .id(highest_seq.to_string())
+        .json_data(data)
+        .unwrap_or_else(|_| Event::default().event("gap").data("{}")))
+}
+
 /// Resolve and validate the conversation page limit, defaulting to 100.
 /// Returns 400 if `limit` is 0 or exceeds 250.
 ///

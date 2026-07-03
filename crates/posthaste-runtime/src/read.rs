@@ -24,7 +24,8 @@ use std::collections::BTreeMap;
 
 use posthaste_domain_model::{
     now_iso8601, AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId,
-    ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary,
+    ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity,
+    MailboxSummary,
     MessageDetail, MessageId, MessageSummary, Operation, ReplyContext, RevLogSnapshot,
     SmartMailbox, SmartMailboxId, SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
@@ -216,6 +217,16 @@ impl ReadCache {
         self.authority_server.replay_events(filter).await
     }
 
+    /// The cheap `event_log` seq bounds for the fact-carrying tap's
+    /// head/truncation queries (RFC-L2-scripting S2). Passthrough; `None` when the
+    /// log is empty. Errors (e.g. a transport without the read channel) are
+    /// surfaced so [`EventLogFactLog`] can fall back to a replay scan.
+    pub(crate) async fn event_log_bounds(
+        &self,
+    ) -> Result<Option<EventLogBounds>, RuntimeError> {
+        self.authority_server.event_log_bounds().await
+    }
+
     pub(crate) async fn get_draft_content(
         &self,
         account_id: AccountId,
@@ -394,16 +405,12 @@ fn down_assertion_to_event(assertion: &BaseAssertion, seq: i64) -> DomainEvent {
 /// the authority server's write path (a mutation or a sync commits them into the
 /// `event_log`, seq AUTOINCREMENT); the runtime tap replays and tails them but
 /// never appends. The authority server's own `FactLog` binding — append included,
-/// over its store — is S3's. This is the machinery S2 mounts on `/v1/events`;
-/// until that mount lands the production caller is not wired (it is exercised by
-/// the unit tests below), so the constructor carries `allow(dead_code)` like the
-/// sibling half-wired `current_summary` fast-path.
-#[allow(dead_code)]
+/// over its store — is S3's. This is the machinery S2 mounts on `/v1/events`
+/// (via the runtime's [`crate::handle`] `subscribe_events` → [`Tap`]).
 pub(crate) struct EventLogFactLog {
     reads: Arc<ReadCache>,
 }
 
-#[allow(dead_code)]
 impl EventLogFactLog {
     pub(crate) fn new(reads: Arc<ReadCache>) -> Self {
         Self { reads }
@@ -452,29 +459,41 @@ impl FactLog for EventLogFactLog {
     }
 
     async fn highest_seq(&self) -> Result<u64, FactLogError> {
-        // `event_log` seqs are AUTOINCREMENT ascending and `list_events` returns
-        // them seq-ASC, so the last event is the head. The runtime reads only
-        // through `replay_events` (no dedicated MAX(seq) query exposed yet), so
-        // this scans; S2's mount can add a cheap head query when it lands.
-        let events = self
-            .reads
-            .replay_events(Self::filter_after(0))
-            .await
-            .map_err(|error| FactLogError::Backing(error.to_string()))?;
-        Ok(events.last().map(|event| event.seq.max(0) as u64).unwrap_or(0))
+        // The live head: the newest assigned seq. Served by the cheap
+        // `MAX(seq)` bounds query (S2), not a full replay scan; on a transport
+        // that does not carry the bounds query the scan is the fallback.
+        match self.reads.event_log_bounds().await {
+            Ok(bounds) => Ok(bounds.map(|b| b.newest.max(0) as u64).unwrap_or(0)),
+            Err(_) => Ok(self.scan_events().await?.last().map(seq_of).unwrap_or(0)),
+        }
     }
 
     async fn truncation_point(&self) -> Result<u64, FactLogError> {
-        // The oldest retained seq. The `event_log` is append-only and not yet
-        // truncated, so this is the first event's seq (or 0 when empty); a resume
-        // from before it becomes the gap frame once truncation lands.
-        let events = self
-            .reads
+        // The oldest retained seq — the gap-frame threshold (a resume from before
+        // it cannot be served from durable history). Served by the cheap
+        // `MIN(seq)` bounds query (S2); the `event_log` is append-only and not yet
+        // truncated, so today this is the first event's seq (or 0 when empty).
+        match self.reads.event_log_bounds().await {
+            Ok(bounds) => Ok(bounds.map(|b| b.oldest.max(0) as u64).unwrap_or(0)),
+            Err(_) => Ok(self.scan_events().await?.first().map(seq_of).unwrap_or(0)),
+        }
+    }
+}
+
+/// The whole-log scan fallback for [`EventLogFactLog::highest_seq`]/
+/// [`truncation_point`] when the transport does not carry the cheap bounds query.
+impl EventLogFactLog {
+    async fn scan_events(&self) -> Result<Vec<DomainEvent>, FactLogError> {
+        self.reads
             .replay_events(Self::filter_after(0))
             .await
-            .map_err(|error| FactLogError::Backing(error.to_string()))?;
-        Ok(events.first().map(|event| event.seq.max(0) as u64).unwrap_or(0))
+            .map_err(|error| FactLogError::Backing(error.to_string()))
     }
+}
+
+/// The non-negative seq of an event as a `u64` (seqs are AUTOINCREMENT ≥ 1).
+fn seq_of(event: &DomainEvent) -> u64 {
+    event.seq.max(0) as u64
 }
 
 #[cfg(test)]
@@ -765,5 +784,69 @@ mod tests {
         let log = EventLogFactLog::new(reads);
         assert!(matches!(log.append(event(1)).await, Err(FactLogError::ReadOnly)));
         assert_eq!(log.highest_seq().await.unwrap(), 0, "empty log head is 0");
+    }
+
+    /// An authority server that answers the cheap `event_log` bounds query and
+    /// panics on `replay_events` — so a head/truncation read that touches it
+    /// proves it took the cheap path, not the replay scan (S2).
+    struct BoundsOnlyStub {
+        bounds: Option<EventLogBounds>,
+    }
+
+    #[async_trait]
+    impl AuthorityServerApi for BoundsOnlyStub {
+        async fn replay_events(
+            &self,
+            _filter: EventFilter,
+        ) -> Result<Vec<DomainEvent>, RuntimeError> {
+            panic!("head/truncation must use the cheap bounds query, not a replay scan");
+        }
+
+        async fn event_log_bounds(&self) -> Result<Option<EventLogBounds>, RuntimeError> {
+            Ok(self.bounds)
+        }
+    }
+
+    // S2: the cheap head query — `highest_seq`/`truncation_point` read the
+    // store-level `(MIN, MAX)` bounds, never scanning the whole log.
+    #[tokio::test]
+    async fn head_and_truncation_use_the_cheap_bounds_query() {
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(BoundsOnlyStub {
+            bounds: Some(EventLogBounds { oldest: 5, newest: 9 }),
+        })));
+        let log = EventLogFactLog::new(reads);
+        assert_eq!(log.highest_seq().await.unwrap(), 9, "MAX(seq) is the head");
+        assert_eq!(log.truncation_point().await.unwrap(), 5, "MIN(seq) is the oldest");
+    }
+
+    #[tokio::test]
+    async fn empty_bounds_report_zero() {
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(BoundsOnlyStub { bounds: None })));
+        let log = EventLogFactLog::new(reads);
+        assert_eq!(log.highest_seq().await.unwrap(), 0);
+        assert_eq!(log.truncation_point().await.unwrap(), 0);
+    }
+
+    // S2/D52: a Tap over the runtime FactLog opens the gap frame when the resume
+    // cursor fell before the log's oldest retained seq (a truncated backlog),
+    // carrying the live head as the re-attach cursor — never a silent drop (N8).
+    #[tokio::test]
+    async fn tap_over_the_runtime_fact_log_opens_the_gap_frame_past_truncation() {
+        use posthaste_link_far_end::down::Tap;
+        // Bounds say the oldest retained seq is 5 (seqs 1..=4 truncated).
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(BoundsOnlyStub {
+            bounds: Some(EventLogBounds { oldest: 5, newest: 9 }),
+        })));
+        let tap: Tap<EventLogFactLog, &'static str> =
+            Tap::new(Arc::new(EventLogFactLog::new(reads)));
+        // A cursor at seq 1 wants seq 2 next, which is truncated → gap at head 9.
+        let resume = tap.subscribe(&"s", Some(1), None, 0).await.unwrap();
+        assert!(resume.is_gap(), "a cursor before truncation opens a gap");
+        match resume {
+            posthaste_link_far_end::down::TapResume::Gap { highest_seq } => {
+                assert_eq!(highest_seq, 9, "the gap carries the live head as the re-attach cursor");
+            }
+            other => panic!("expected a gap, got {other:?}"),
+        }
     }
 }

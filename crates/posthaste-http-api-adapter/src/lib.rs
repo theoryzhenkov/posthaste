@@ -22,6 +22,7 @@ pub mod token;
 
 mod app_state;
 mod deadlines;
+mod discovery;
 mod router;
 mod secure_file;
 mod serve;
@@ -47,6 +48,9 @@ const SEND_MESSAGE_BODY_LIMIT_BYTES: usize = 40 * 1024 * 1024;
 
 pub use app_state::{AppState, ServerConfig, ServerHandle};
 pub use config::{resolve_roots, ResolvedRoots};
+pub use discovery::{
+    discovery_file_path, remove_discovery_file, write_discovery_file, DISCOVERY_FILE_VERSION,
+};
 pub use router::build_api_router;
 pub use secret::SystemSecretStore;
 pub use secure_file::write_secure_file;
