@@ -22,11 +22,49 @@ pub(crate) fn stage_sync_bodies(
         .collect()
 }
 
+/// Empty protected set shared by the unprotected `apply_sync_batch_tx`/
+/// `reconcile_sync_tx` entry points, so their prune passes behave exactly as
+/// before the S3 replace_all guard was added.
+fn no_protected_message_ids() -> HashSet<String> {
+    HashSet::new()
+}
+
 pub(crate) fn apply_sync_batch_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     batch: &SyncBatch,
     staged_bodies: &[Option<RawMessageRef>],
+) -> Result<Vec<DomainEvent>, StoreError> {
+    apply_sync_batch_tx_impl(
+        tx,
+        account_id,
+        batch,
+        staged_bodies,
+        &no_protected_message_ids(),
+    )
+}
+
+/// Like [`apply_sync_batch_tx`], but for a `replace_all_messages` snapshot:
+/// `protected_message_ids` (messages with an unsettled optimistic op) are
+/// excluded from the prune-by-absence pass even though the caller has already
+/// dropped them from `batch.messages` (S3 unsettled-guard) — otherwise that
+/// same drop would make this pass treat them as "deleted remotely".
+pub(crate) fn apply_sync_batch_protected_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    batch: &SyncBatch,
+    staged_bodies: &[Option<RawMessageRef>],
+    protected_message_ids: &HashSet<String>,
+) -> Result<Vec<DomainEvent>, StoreError> {
+    apply_sync_batch_tx_impl(tx, account_id, batch, staged_bodies, protected_message_ids)
+}
+
+fn apply_sync_batch_tx_impl(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    batch: &SyncBatch,
+    staged_bodies: &[Option<RawMessageRef>],
+    protected_message_ids: &HashSet<String>,
 ) -> Result<Vec<DomainEvent>, StoreError> {
     let mut events =
         EventRecorder::with_capacity(tx, account_id, estimate_sync_event_count(batch))?;
@@ -51,6 +89,7 @@ pub(crate) fn apply_sync_batch_tx(
             tx,
             account_id,
             &remote_message_ids,
+            protected_message_ids,
             &mut affected,
             &mut events,
         )?;
@@ -260,10 +299,16 @@ pub(crate) fn prune_mailboxes_absent_from_remote_tx(
 /// `replace_all_messages` snapshot path and the streamed final-reconciliation
 /// pass.
 ///
+/// `protected_message_ids` (messages with an unsettled optimistic op, S3
+/// unsettled-guard) are skipped even when absent from `remote_message_ids`:
+/// a not-yet-uploaded local message, or one the guard dropped from the
+/// snapshot to avoid clobbering its in-flight write, must survive this pass
+/// and instead reconcile once its op settles.
 pub(crate) fn prune_messages_absent_from_remote_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     remote_message_ids: &BTreeSet<MessageId>,
+    protected_message_ids: &HashSet<String>,
     affected: &mut ProjectionInputs,
     events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
@@ -280,6 +325,9 @@ pub(crate) fn prune_messages_absent_from_remote_tx(
         .collect::<BTreeSet<_>>();
 
     for message_id in local_message_ids.difference(remote_message_ids) {
+        if protected_message_ids.contains(message_id.as_str()) {
+            continue;
+        }
         delete_message_and_track_projection_inputs(tx, account_id, message_id, affected)?;
         events.record(
             EVENT_TOPIC_MESSAGE_UPDATED,
@@ -301,6 +349,29 @@ pub(crate) fn reconcile_sync_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     reconciliation: &SyncReconciliation,
+) -> Result<Vec<DomainEvent>, StoreError> {
+    reconcile_sync_tx_impl(tx, account_id, reconciliation, &no_protected_message_ids())
+}
+
+/// Like [`reconcile_sync_tx`], but excludes `protected_message_ids` from the
+/// prune-by-absence pass, for the same reason as
+/// [`apply_sync_batch_protected_tx`]. Covers the streamed full-snapshot
+/// fallback (e.g. JMAP `cannotCalculateChanges`), whose pruning happens here
+/// rather than in an in-batch `replace_all_messages` pass.
+pub(crate) fn reconcile_sync_protected_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    reconciliation: &SyncReconciliation,
+    protected_message_ids: &HashSet<String>,
+) -> Result<Vec<DomainEvent>, StoreError> {
+    reconcile_sync_tx_impl(tx, account_id, reconciliation, protected_message_ids)
+}
+
+fn reconcile_sync_tx_impl(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    reconciliation: &SyncReconciliation,
+    protected_message_ids: &HashSet<String>,
 ) -> Result<Vec<DomainEvent>, StoreError> {
     let estimated = reconciliation.cursors.len()
         + if reconciliation.prune_mailboxes {
@@ -328,6 +399,7 @@ pub(crate) fn reconcile_sync_tx(
             tx,
             account_id,
             &remote_message_ids,
+            protected_message_ids,
             &mut affected,
             &mut events,
         )?;

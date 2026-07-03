@@ -25,6 +25,10 @@ pub(super) struct TestStore {
     pub(super) rule_page: Mutex<Vec<MessageSummary>>,
     pub(super) conversation_view: Mutex<Option<ConversationView>>,
     pub(super) mutation_state: Mutex<MutationStoreState>,
+    /// Each `apply_sync_batch_protected`/`reconcile_sync_protected` call's
+    /// `protected_message_ids` argument, in order — lets tests assert the S3
+    /// unsettled-guard's ids reach the store boundary for full-snapshot syncs.
+    pub(super) protected_message_ids: Mutex<Vec<std::collections::HashSet<String>>>,
     pub(super) outbox_operations: Mutex<Vec<Operation>>,
     /// (account_id, draft_key, entity_id) alias rows.
     pub(super) draft_aliases: Mutex<Vec<(String, String, String)>>,
@@ -57,6 +61,7 @@ impl Default for TestStore {
             rule_page: Mutex::new(Vec::new()),
             conversation_view: Mutex::new(None),
             mutation_state: Mutex::new(MutationStoreState::default()),
+            protected_message_ids: Mutex::new(Vec::new()),
             outbox_operations: Mutex::new(Vec::new()),
             draft_aliases: Mutex::new(Vec::new()),
             snoozes: Mutex::new(Vec::new()),

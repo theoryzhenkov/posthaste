@@ -27,6 +27,22 @@ impl SyncWriteStore for TestStore {
         Ok(Vec::new())
     }
 
+    fn apply_sync_batch_protected(
+        &self,
+        account_id: &AccountId,
+        batch: &SyncBatch,
+        protected_message_ids: &std::collections::HashSet<String>,
+    ) -> Result<Vec<DomainEvent>, StoreError> {
+        // Record the protected set so tests can assert the guard's ids reached
+        // the store boundary; the real store also excludes them from the
+        // replace_all prune-by-absence pass (covered by store tests).
+        self.protected_message_ids
+            .lock()
+            .expect("protected message ids lock poisoned")
+            .push(protected_message_ids.clone());
+        self.apply_sync_batch(account_id, batch)
+    }
+
     fn reconcile_sync(
         &self,
         _account_id: &AccountId,
@@ -47,6 +63,22 @@ impl SyncWriteStore for TestStore {
             state.cursor = Some(cursor.clone());
         }
         Ok(Vec::new())
+    }
+
+    fn reconcile_sync_protected(
+        &self,
+        account_id: &AccountId,
+        reconciliation: &posthaste_domain_model::SyncReconciliation,
+        protected_message_ids: &std::collections::HashSet<String>,
+    ) -> Result<Vec<DomainEvent>, StoreError> {
+        // Record the protected set so tests can assert the streamed
+        // full-snapshot reconciliation pass also received the guard's ids; the
+        // real store excludes them from its prune-by-absence pass.
+        self.protected_message_ids
+            .lock()
+            .expect("protected message ids lock poisoned")
+            .push(protected_message_ids.clone());
+        self.reconcile_sync(account_id, reconciliation)
     }
 
     fn apply_message_body(

@@ -67,6 +67,49 @@ impl SyncWriteStore for DatabaseStore {
         Ok(events)
     }
 
+    /// Like [`apply_sync_batch`](Self::apply_sync_batch), but for a
+    /// `replace_all_messages` snapshot: excludes `protected_message_ids` from
+    /// the prune-by-absence pass (S3 unsettled-guard).
+    fn apply_sync_batch_protected(
+        &self,
+        account_id: &AccountId,
+        batch: &SyncBatch,
+        protected_message_ids: &HashSet<String>,
+    ) -> Result<Vec<DomainEvent>, StoreError> {
+        ph_debug!(
+            events::STORE_SYNC_BATCH_APPLYING,
+            account_id = %account_id,
+            mailboxes = batch.mailboxes.len(),
+            messages = batch.messages.len(),
+            protected_messages = protected_message_ids.len(),
+            "applying sync batch to store (protected)"
+        );
+        let started = Instant::now();
+        let staged_bodies = stage_sync_bodies(self, account_id, batch)?;
+        let events = self.write_transaction(|tx| {
+            apply_sync_batch_protected_tx(
+                tx,
+                account_id,
+                batch,
+                &staged_bodies,
+                protected_message_ids,
+            )
+        })?;
+        ph_info!(
+            events::STORE_SYNC_BATCH_APPLIED,
+            account_id = %account_id,
+            mailbox_count = batch.mailboxes.len(),
+            message_count = batch.messages.len(),
+            deleted_mailbox_count = batch.deleted_mailbox_ids.len(),
+            deleted_imap_location_count = batch.deleted_imap_message_locations.len(),
+            deleted_message_count = batch.deleted_message_ids.len(),
+            event_count = events.len(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "sync batch applied to store (protected)"
+        );
+        Ok(events)
+    }
+
     /// Runs the streamed final reconciliation pass within a single SQLite
     /// transaction: prunes locals absent from the complete remote id set and
     /// commits the cursors withheld until the full stream succeeded.
@@ -94,6 +137,39 @@ impl SyncWriteStore for DatabaseStore {
             event_count = events.len(),
             duration_ms = started.elapsed().as_millis() as u64,
             "streamed sync reconciled"
+        );
+        Ok(events)
+    }
+
+    /// Like [`reconcile_sync`](Self::reconcile_sync), but excludes
+    /// `protected_message_ids` from the prune-by-absence pass (S3
+    /// unsettled-guard).
+    fn reconcile_sync_protected(
+        &self,
+        account_id: &AccountId,
+        reconciliation: &SyncReconciliation,
+        protected_message_ids: &HashSet<String>,
+    ) -> Result<Vec<DomainEvent>, StoreError> {
+        ph_debug!(
+            events::STORE_SYNC_BATCH_APPLYING,
+            account_id = %account_id,
+            prune_mailboxes = reconciliation.prune_mailboxes,
+            prune_messages = reconciliation.prune_messages,
+            remote_mailbox_count = reconciliation.remote_mailbox_ids.len(),
+            remote_message_count = reconciliation.remote_message_ids.len(),
+            protected_messages = protected_message_ids.len(),
+            "reconciling streamed sync (protected)"
+        );
+        let started = Instant::now();
+        let events = self.write_transaction(|tx| {
+            reconcile_sync_protected_tx(tx, account_id, reconciliation, protected_message_ids)
+        })?;
+        ph_info!(
+            events::STORE_SYNC_BATCH_APPLIED,
+            account_id = %account_id,
+            event_count = events.len(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "streamed sync reconciled (protected)"
         );
         Ok(events)
     }

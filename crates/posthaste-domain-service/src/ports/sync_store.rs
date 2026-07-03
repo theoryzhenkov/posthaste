@@ -107,6 +107,24 @@ pub trait SyncWriteStore: Send + Sync {
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError>;
 
+    /// Like [`apply_sync_batch`](Self::apply_sync_batch), but for a
+    /// `replace_all_messages` snapshot: `protected_message_ids` (messages with
+    /// an unsettled optimistic op, per the S3 unsettled-guard) are excluded
+    /// from the prune-by-absence pass even though they are absent from
+    /// `batch.messages` — the caller has already dropped them from the batch
+    /// so the snapshot cannot clobber their canonical row via upsert; this
+    /// keeps that same drop from also pruning them as "deleted remotely" (a
+    /// not-yet-uploaded local message is *always* absent from any remote
+    /// snapshot, guard-filtered or not).
+    ///
+    /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
+    fn apply_sync_batch_protected(
+        &self,
+        account_id: &AccountId,
+        batch: &SyncBatch,
+        protected_message_ids: &std::collections::HashSet<String>,
+    ) -> Result<Vec<DomainEvent>, StoreError>;
+
     /// Run the final reconciliation pass for a streamed upsert-only sync:
     /// prune locals absent from the complete remote id set and commit the
     /// withheld cursors, atomically. Only invoked when the gateway streamed
@@ -117,6 +135,19 @@ pub trait SyncWriteStore: Send + Sync {
         &self,
         account_id: &AccountId,
         reconciliation: &SyncReconciliation,
+    ) -> Result<Vec<DomainEvent>, StoreError>;
+
+    /// Like [`reconcile_sync`](Self::reconcile_sync), but excludes
+    /// `protected_message_ids` from the prune-by-absence pass, for the same
+    /// reason as [`apply_sync_batch_protected`](Self::apply_sync_batch_protected).
+    /// Covers the streamed full-snapshot fallback (e.g. JMAP
+    /// `cannotCalculateChanges`), whose pruning happens here rather than in an
+    /// in-batch `replace_all_messages` pass.
+    fn reconcile_sync_protected(
+        &self,
+        account_id: &AccountId,
+        reconciliation: &SyncReconciliation,
+        protected_message_ids: &std::collections::HashSet<String>,
     ) -> Result<Vec<DomainEvent>, StoreError>;
 
     /// Persist a lazily-fetched message body.
