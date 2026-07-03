@@ -99,6 +99,29 @@ impl EngineContext {
     fn swap_rules(&self, rules: Vec<Rule>) {
         *self.rules.write().expect("rules lock poisoned") = Arc::new(rules);
     }
+
+    /// Evict a single rule id from the live snapshot without a full disk reload.
+    /// The delete-path fallback: guarantees a deleted rule stops firing even if
+    /// a concurrently-broken `rules.toml` makes the post-delete reload fail
+    /// (review finding, 2026-07-03 — a token-minting rule must always be
+    /// stoppable).
+    fn remove_rule(&self, id: &str) {
+        let mut guard = self.rules.write().expect("rules lock poisoned");
+        if let Some(kept) = rules_without(&guard, id) {
+            *guard = Arc::new(kept);
+        }
+    }
+}
+
+/// Return the rule set with `id` removed, or `None` if `id` isn't present (so
+/// the caller can skip a needless snapshot swap). Pure — unit-testable without
+/// an [`EngineContext`].
+fn rules_without(rules: &[Rule], id: &str) -> Option<Vec<Rule>> {
+    if rules.iter().any(|rule| rule.id == id) {
+        Some(rules.iter().filter(|rule| rule.id != id).cloned().collect())
+    } else {
+        None
+    }
 }
 
 /// A live controller for the GUI-managed rule store, handed to the REST write
@@ -168,18 +191,25 @@ impl ManagedRulesHandle {
     pub fn delete(&self, id: &str) -> Result<(), super::writer::RuleWriteError> {
         let _guard = self.inner.write_lock.lock().expect("write lock poisoned");
         super::writer::delete_managed_rule(&self.inner.config_root, id)?;
-        self.reload_locked();
+        // A delete must ALWAYS stop the rule. If the post-delete reload fails
+        // (e.g. rules.toml is concurrently parse-broken), evict the id from the
+        // live snapshot directly so a token-minting rule can never survive its
+        // own deletion (review finding, 2026-07-03).
+        if !self.reload_locked() {
+            self.inner.ctx.remove_rule(id);
+        }
         Ok(())
     }
 
     /// Re-load the merged ruleset from disk and hot-swap the evaluator's active
     /// rules. Called under the write lock. A load error is logged and leaves the
     /// prior (good) rules in place rather than blanking the engine.
-    fn reload_locked(&self) {
+    fn reload_locked(&self) -> bool {
         match super::config::load_rules(&self.inner.config_root) {
             Ok(rules) => {
                 let enabled = rules.into_iter().filter(|rule| rule.enabled).collect();
                 self.inner.ctx.swap_rules(enabled);
+                true
             }
             Err(error) => {
                 ph_warn!(
@@ -187,6 +217,7 @@ impl ManagedRulesHandle {
                     error = %error,
                     "rule reload failed; keeping the previously loaded rules"
                 );
+                false
             }
         }
     }
@@ -562,6 +593,28 @@ mod tests {
     /// The single-message match query ANDs the account, this message id, and the
     /// WHEN tree — the established predicate path — so the store query is scoped
     /// to exactly one candidate row.
+    fn rule_with_id(id: &str) -> Rule {
+        Rule {
+            id: id.into(),
+            name: id.into(),
+            when: when_subject_contains("subject:x"),
+            on: Vec::new(),
+            action: RuleAction::Notify { title: "t".into(), body: None },
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn rules_without_evicts_the_id_so_a_delete_always_stops_the_rule() {
+        // The delete-path fallback (review finding): when a post-delete reload
+        // fails, the deleted rule must still be evicted from the live snapshot.
+        let rules = vec![rule_with_id("a"), rule_with_id("b"), rule_with_id("c")];
+        let kept = rules_without(&rules, "b").expect("b was present");
+        assert_eq!(kept.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a", "c"]);
+        // Absent id → None (no needless swap).
+        assert!(rules_without(&rules, "missing").is_none());
+    }
+
     #[test]
     fn scoped_match_binds_account_and_single_message() {
         let when = when_subject_contains("subject:invoice");
