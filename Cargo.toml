@@ -14,6 +14,7 @@ default-members = [
   "crates/posthaste-lab",
   "crates/posthaste-authority-server-link",
   "crates/posthaste-call-policy",
+  "crates/posthaste-provider-call",
   "crates/posthaste-link-far-end",
   "crates/posthaste-replica-core",
   "crates/posthaste-link-near-end",
