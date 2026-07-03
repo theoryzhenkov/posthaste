@@ -94,8 +94,10 @@ pub(crate) async fn send_json_request(
     jmap_client::core::response::Response<jmap_client::core::response::TaggedMethodResponse>,
     GatewayError,
 > {
+    // Serializing our own request is an internal codec fault, not a network
+    // error — retrying the wire cannot fix a body we cannot encode.
     let body = serde_json::to_string(&request)
-        .map_err(|error| GatewayError::Network(error.to_string()))?;
+        .map_err(|error| GatewayError::Internal(error.to_string()))?;
     let response = reqwest::Client::builder()
         .timeout(gateway.client().timeout())
         .redirect(reqwest::redirect::Policy::none())
@@ -123,5 +125,8 @@ pub(crate) async fn send_json_request(
         .bytes()
         .await
         .map_err(|error| GatewayError::Network(error.to_string()))?;
-    serde_json::from_slice(&bytes).map_err(|error| GatewayError::Network(error.to_string()))
+    // The bytes arrived; a decode failure is an internal/protocol codec fault,
+    // not a transient network condition — classify it as such so it is not
+    // retried as if the link had dropped.
+    serde_json::from_slice(&bytes).map_err(|error| GatewayError::Internal(error.to_string()))
 }

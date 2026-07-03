@@ -1,5 +1,49 @@
 use super::*;
 
+/// The one typed retryability axis (RFC-L2 D70, tenet XIV "one shared fact, one
+/// type"): does retrying an operation stand any chance of a different outcome?
+///
+/// This is deliberately a two-value vocabulary — it answers *retryability* and
+/// nothing else:
+///
+/// * **Availability** — D49's `Degraded` — is an *orthogonal* state that
+///   composes with a `Terminality`, not a third variant here (RFC ruling 4). A
+///   degraded provider still produces `Transient` failures; degradation is
+///   tracked on the account/connection status, not folded into this enum.
+/// * **The reason** a failure earned its terminality (auth vs corruption vs an
+///   internal decode bug) is carried by the *paired* typed code at each site —
+///   the [`RuntimeErrorCode`](../../posthaste_contract_core) on a
+///   `RuntimeAdapterError`, or the [`GatewayError`] variant behind an outbox
+///   flush. `Terminality` is the shared verdict; the code alongside it is the
+///   shared reason. This keeps the axis small enough to be the single thing
+///   three consumers (outbox flush, near-end engine, D47 settlement) agree on.
+///
+/// Serde-only, no I/O deps: it rides the wasm frontier embedded in
+/// `RuntimeAdapterError`.
+///
+/// @spec docs/eph/RFC-L2-lifecycle-and-errors#3b-errors
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Terminality {
+    /// A retry — after backoff, reconnect, or re-auth — may succeed.
+    Transient,
+    /// Retrying the operation as written cannot succeed; it must change or fail.
+    Permanent,
+}
+
+impl Terminality {
+    /// Whether a retry may succeed (the reconnect/re-drain-eligible case).
+    pub fn is_transient(self) -> bool {
+        matches!(self, Self::Transient)
+    }
+
+    /// Whether retrying is futile (surface-and-stop).
+    pub fn is_permanent(self) -> bool {
+        matches!(self, Self::Permanent)
+    }
+}
+
 /// Errors from JMAP gateway operations.
 ///
 /// @spec docs/L1-jmap#error-model
@@ -17,6 +61,19 @@ pub enum GatewayError {
     CannotCalculateChanges,
     #[error("gateway rejected the request: {0}")]
     Rejected(String),
+    /// The local store hit corruption while serving a gateway op (e.g. an IMAP
+    /// mutation reading local UID state). Kept distinct from [`Self::Rejected`]
+    /// so the corrupt-store repair pathway (`storage_corrupted`, which the web
+    /// client handles specifically) survives the hop instead of masquerading as
+    /// a provider-side rejection (audit top-10 #4).
+    #[error("gateway hit a corrupt local store: {0}")]
+    Corruption(String),
+    /// An internal serialization/decode bug on our side of the exchange — not a
+    /// provider fault. Retrying the network cannot fix a payload our own code
+    /// cannot encode or decode, so it is classified permanent rather than
+    /// mislabeled `Network`/`Rejected` (audit §2 serde-decode edges).
+    #[error("internal gateway codec error: {0}")]
+    Internal(String),
     /// The provider rejected a message mutation, but a `set`+`get` still read the
     /// message's current (unchanged) state back. The readback drives optimistic
     /// settlement — writing it reverts the rejected change — while the typed
@@ -84,11 +141,16 @@ pub enum ServiceErrorKind {
     ConfigValidation,
     ConfigIo,
     ConfigParse,
+    /// An internal codec/logic fault surfaced through a gateway op (a serialize
+    /// or decode bug on our side). Distinct from `GatewayRejected` so it maps to
+    /// a 500 rather than a client-facing 400.
+    Internal,
 }
 
 impl ServiceErrorKind {
     pub fn code(self) -> &'static str {
         match self {
+            Self::Internal => "internal",
             Self::GatewayUnavailable => "gateway_unavailable",
             Self::AuthError => "auth_error",
             Self::NetworkError => "network_error",
@@ -125,6 +187,12 @@ impl ServiceError {
             | Self::Gateway(GatewayError::MutationRejected { .. }) => {
                 ServiceErrorKind::GatewayRejected
             }
+            // A corrupt local store surfaced through a gateway op keeps the
+            // storage-corruption class end-to-end (→ `storage_corrupted`).
+            Self::Gateway(GatewayError::Corruption(_)) => ServiceErrorKind::StorageCorrupted,
+            // An internal codec bug is a 500-class internal fault, not a
+            // provider rejection.
+            Self::Gateway(GatewayError::Internal(_)) => ServiceErrorKind::Internal,
             Self::Secret(SecretStoreError::Unavailable(_)) => ServiceErrorKind::SecretUnavailable,
             Self::Secret(SecretStoreError::Unsupported(_)) => ServiceErrorKind::SecretUnsupported,
             Self::Store(StoreError::NotFound(_)) | Self::Config(ConfigError::NotFound(_)) => {

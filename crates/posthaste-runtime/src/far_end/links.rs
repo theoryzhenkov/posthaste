@@ -966,11 +966,11 @@ fn now_secs() -> u64 {
 }
 
 /// Map a runtime settlement (state + error) to the D47 dedup terminal class.
-/// `Confirmed` is kept + bounded-evicted; a `Failed` splits by the error's
-/// `retryable` flag — a transient (retryable) failure is `Failed` (cleared, so a
-/// retry re-executes), a permanent rejection (non-retryable or no error) is
-/// `Rejected` (kept so a reconnecting client re-observes it). `Accepted` is
-/// non-terminal and never settled; treated as `Rejected` defensively.
+/// `Confirmed` is kept + bounded-evicted; a `Failed` splits by the error's typed
+/// [`Terminality`] — a transient failure is `Failed` (cleared, so a retry
+/// re-executes), a permanent rejection (or no error) is `Rejected` (kept so a
+/// reconnecting client re-observes it). `Accepted` is non-terminal and never
+/// settled; treated as `Rejected` defensively.
 fn terminal_class_for(
     state: &MutationSettlementState,
     error: Option<&RuntimeAdapterError>,
@@ -978,7 +978,7 @@ fn terminal_class_for(
     match state {
         MutationSettlementState::Confirmed => TerminalClass::Confirmed,
         MutationSettlementState::Failed => {
-            if error.map(|error| error.retryable).unwrap_or(false) {
+            if error.map(|error| error.terminality.is_transient()).unwrap_or(false) {
                 TerminalClass::Failed
             } else {
                 TerminalClass::Rejected

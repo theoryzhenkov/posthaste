@@ -10,15 +10,29 @@
 
 use super::message_queries::project_record;
 use super::*;
-use posthaste_domain_model::{MessageReadback, MessageRecord, MutationOutcome, SyncBatch};
+use posthaste_domain_model::{
+    MessageReadback, MessageRecord, MutationOutcome, SyncBatch, Terminality,
+};
 
-/// Outcome of attempting to push one operation to the provider.
-enum FlushError {
-    /// The provider is unreachable or transiently failing; keep the op pending
-    /// and stop draining (we are effectively offline).
-    Transient(String),
-    /// The op can never succeed as written (validation/unsupported); fail it.
-    Permanent(String),
+/// Outcome of attempting to push one operation to the provider: the typed
+/// retryability verdict ([`Terminality`], RFC-L2 D70) plus the human-readable
+/// message recorded on the operation / surfaced in the settlement. The verdict
+/// is data, not a string bucket — a `Transient` verdict keeps the op pending
+/// and stops draining (offline), a `Permanent` verdict fails it.
+struct FlushError {
+    terminality: Terminality,
+    message: String,
+}
+
+impl FlushError {
+    /// A local, provider-independent permanent failure (e.g. an un-decodable
+    /// stored payload) — there is no `GatewayError` to classify.
+    fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            terminality: Terminality::Permanent,
+            message: message.into(),
+        }
+    }
 }
 
 enum DependencyStatus {
@@ -27,16 +41,35 @@ enum DependencyStatus {
     Cancelled(String),
 }
 
+/// Classify a gateway failure into its typed retryability verdict plus the
+/// message recorded on the operation. Exhaustive over [`GatewayError`] by design
+/// (the M29 gate): a new variant fails to compile here until its terminality is
+/// decided — no `other => Permanent(to_string())` free-text catch-all.
 fn classify_gateway_error(error: GatewayError) -> FlushError {
-    match error {
+    let (terminality, message) = match error {
+        // Reachable-again: the network recovers on its own.
         GatewayError::Network(message) | GatewayError::Unavailable(message) => {
-            FlushError::Transient(message)
+            (Terminality::Transient, message)
         }
         // Auth failures are transient: they clear once the account re-authenticates.
-        GatewayError::Auth => FlushError::Transient("authentication required".to_string()),
-        GatewayError::StateMismatch => FlushError::Permanent("provider state diverged".to_string()),
-        GatewayError::Rejected(message) => FlushError::Permanent(message),
-        other => FlushError::Permanent(other.to_string()),
+        GatewayError::Auth => (Terminality::Transient, "authentication required".to_string()),
+        // Terminal as written — a diverged state, a provider rejection, a corrupt
+        // local store, or an internal codec bug — retrying the same push cannot
+        // change the outcome.
+        GatewayError::StateMismatch => {
+            (Terminality::Permanent, "provider state diverged".to_string())
+        }
+        GatewayError::CannotCalculateChanges => {
+            (Terminality::Permanent, "cannot calculate changes".to_string())
+        }
+        GatewayError::Rejected(message)
+        | GatewayError::Corruption(message)
+        | GatewayError::Internal(message) => (Terminality::Permanent, message),
+        GatewayError::MutationRejected { reason, .. } => (Terminality::Permanent, reason),
+    };
+    FlushError {
+        terminality,
+        message,
     }
 }
 
@@ -489,7 +522,10 @@ impl MailService {
                         self.settle_message_operation(account_id, &operation, readback, rejected)?,
                     );
                 }
-                Err(FlushError::Transient(message)) => {
+                Err(FlushError {
+                    terminality: Terminality::Transient,
+                    message,
+                }) => {
                     self.outbox.update_operation_state(
                         &operation.id,
                         OperationState::Pending,
@@ -499,7 +535,10 @@ impl MailService {
                     // Offline: stop draining; the rest retries next window.
                     break;
                 }
-                Err(FlushError::Permanent(message)) => {
+                Err(FlushError {
+                    terminality: Terminality::Permanent,
+                    message,
+                }) => {
                     self.outbox.update_operation_state(
                         &operation.id,
                         OperationState::Failed,
@@ -742,7 +781,7 @@ impl MailService {
 
 fn parse_payload<T: serde::de::DeserializeOwned>(operation: &Operation) -> Result<T, FlushError> {
     serde_json::from_value(operation.payload.clone()).map_err(|error| {
-        FlushError::Permanent(format!("invalid {:?} payload: {error}", operation.kind))
+        FlushError::permanent(format!("invalid {:?} payload: {error}", operation.kind))
     })
 }
 

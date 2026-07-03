@@ -339,7 +339,7 @@ fn forward_retries_transient_then_succeeds() {
 
 #[test]
 fn forward_4xx_is_permanent_with_envelope() {
-    let body = r#"{"code":"invalid_mutation","message":"nope","retryable":false,"correlationId":null,"details":null}"#;
+    let body = r#"{"code":"invalid_mutation","message":"nope","terminality":"permanent","correlationId":null,"details":null}"#;
     let transport = FakeTransport::new().with_mutation(ok_response(422, body));
     let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
 
@@ -362,6 +362,38 @@ fn forward_4xx_is_permanent_with_envelope() {
         .filter(|(u, _)| u.contains("/mutations"))
         .count();
     assert_eq!(mutation_posts, 1);
+}
+
+#[test]
+fn forward_respects_envelope_terminality_over_status_band() {
+    // M29/D70: when the response envelope carries a typed terminality, it is
+    // authoritative — a 4xx that the far end marked transient must be retried,
+    // not fatally stopped by the status band. Here a 422 stamped
+    // `terminality: transient` is retried and then succeeds.
+    let body = r#"{"code":"invalid_mutation","message":"transient-4xx","terminality":"transient","correlationId":null,"details":null}"#;
+    let transport = FakeTransport::new()
+        .with_mutation(ok_response(422, body))
+        .with_mutation(ok_response(200, &confirmed_receipt("op-tt")));
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+
+    let receipt = block_on(async {
+        h.engine.open().await.unwrap();
+        h.engine.forward(sample_request("op-tt")).await
+    })
+    .expect("transient 4xx is retried to success");
+
+    assert_eq!(
+        receipt.state,
+        posthaste_contract_core::MutationSettlementState::Confirmed
+    );
+    let mutation_posts = h
+        .transport
+        .posts
+        .borrow()
+        .iter()
+        .filter(|(u, _)| u.contains("/mutations"))
+        .count();
+    assert_eq!(mutation_posts, 2, "the transient-stamped 4xx was retried");
 }
 
 #[test]

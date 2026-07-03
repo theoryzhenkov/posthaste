@@ -545,7 +545,7 @@ export function mutationNotificationFrame(
             error: {
               code: 'conflict',
               message: 'rejected',
-              retryable: false,
+              terminality: 'permanent',
             },
           },
   }

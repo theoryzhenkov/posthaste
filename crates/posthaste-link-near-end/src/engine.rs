@@ -33,7 +33,7 @@ use posthaste_contract_core::{
 };
 
 use crate::config::NearEndConfig;
-use crate::error::{classify_status, Disposition};
+use crate::error::{classify_status, Terminality};
 use crate::pending_set::PendingSetHooks;
 use crate::scheduler::Scheduler;
 use crate::sink::{ConnectionStatus, FrameSink};
@@ -42,12 +42,12 @@ use crate::transport::{
 };
 use crate::wire::{ParsedFrame, Wire};
 
-/// A failure surfaced by an engine call, tagged with its [`Disposition`] so the
+/// A failure surfaced by an engine call, tagged with its [`Terminality`] so the
 /// caller (and the wasm boundary) can react. Mirrors the runtime error envelope
 /// when the failure carried one (a 4xx body).
 #[derive(Clone, Debug)]
 pub struct EngineError {
-    pub disposition: Disposition,
+    pub disposition: Terminality,
     pub message: String,
     pub status: Option<u16>,
     pub error: Option<RuntimeAdapterError>,
@@ -56,7 +56,7 @@ pub struct EngineError {
 impl EngineError {
     pub fn transient(message: impl Into<String>) -> Self {
         Self {
-            disposition: Disposition::Transient,
+            disposition: Terminality::Transient,
             message: message.into(),
             status: None,
             error: None,
@@ -65,7 +65,7 @@ impl EngineError {
 
     pub fn permanent(message: impl Into<String>) -> Self {
         Self {
-            disposition: Disposition::Permanent,
+            disposition: Terminality::Permanent,
             message: message.into(),
             status: None,
             error: None,
@@ -73,15 +73,24 @@ impl EngineError {
     }
 
     /// Build from a non-2xx response body, trying to recover the runtime error
-    /// envelope for a precise message.
+    /// envelope for a precise message *and its typed terminality*.
+    ///
+    /// The envelope's [`Terminality`], when the body carries one, is
+    /// authoritative — the status band is only the fallback when no typed
+    /// verdict is present (fixing the audit edge: `from_response` used to ignore
+    /// `envelope.retryable` and always re-derive from the status band).
     fn from_response(status: u16, body: &str) -> Self {
         let error = serde_json::from_str::<RuntimeAdapterError>(body).ok();
         let message = error
             .as_ref()
             .map(|e| e.message.clone())
             .unwrap_or_else(|| format!("runtime responded with status {status}"));
+        let disposition = error
+            .as_ref()
+            .map(|e| e.terminality)
+            .unwrap_or_else(|| classify_status(status));
         Self {
-            disposition: classify_status(status),
+            disposition,
             message,
             status: Some(status),
             error,
@@ -238,10 +247,16 @@ impl<W: Wire> NearEnd<W> {
                         .map_err(|e| EngineError::permanent(format!("parse receipt: {e}")));
                 }
                 Ok(resp) => {
-                    if classify_status(resp.status).is_permanent() {
-                        return Err(EngineError::from_response(resp.status, &resp.body));
+                    // Classify via `from_response` so the response envelope's
+                    // typed terminality (when present) is authoritative — the
+                    // status band is only the fallback (M29/D70). A permanent
+                    // verdict stops now; a transient one (a 5xx, or a 4xx the
+                    // far end explicitly marked transient) falls through to retry.
+                    let err = EngineError::from_response(resp.status, &resp.body);
+                    if err.is_permanent() {
+                        return Err(err);
                     }
-                    // transient status (5xx): fall through to retry
+                    // transient: fall through to retry
                 }
                 Err(_transient) => {
                     // network/deadline: fall through to retry
@@ -341,7 +356,7 @@ impl<W: Wire> NearEnd<W> {
                     },
                     StreamEvent::Closed => break,
                     StreamEvent::Error { status, message } => {
-                        if status.map(classify_status) == Some(Disposition::Permanent) {
+                        if status.map(classify_status) == Some(Terminality::Permanent) {
                             self.sink.on_status(ConnectionStatus::PermanentError(message));
                             permanent = true;
                         } else {

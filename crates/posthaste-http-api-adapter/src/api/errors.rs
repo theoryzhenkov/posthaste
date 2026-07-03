@@ -57,6 +57,10 @@ pub enum ApiErrorCode {
 impl From<ServiceErrorKind> for ApiErrorCode {
     fn from(kind: ServiceErrorKind) -> Self {
         match kind {
+            // An internal codec/logic fault surfaced through a gateway op.
+            // M30: this is where boundary sanitization/operator-logging of the
+            // 500 body will hook in; M29 only routes the class to the code.
+            ServiceErrorKind::Internal => Self::InternalError,
             ServiceErrorKind::GatewayUnavailable => Self::GatewayUnavailable,
             ServiceErrorKind::AuthError => Self::AuthError,
             ServiceErrorKind::NetworkError => Self::NetworkError,
@@ -120,6 +124,10 @@ impl ApiError {
     ///
     /// @spec docs/authority-server/L3#runtime-error-to-api
     pub fn from_runtime_error(error: RuntimeError) -> Self {
+        // M30: the envelope's typed `terminality` (D70) is not yet surfaced on
+        // the `/v1` `ApiErrorBody`; when the boundary codes land (D71/D72), emit
+        // it here so a browser near-end's `from_response` can respect it instead
+        // of falling back to the HTTP status band.
         let envelope = error.envelope();
         let (status, code) = runtime_error_status_code(&envelope.code);
         Self {
@@ -223,7 +231,8 @@ fn service_error_status(kind: ServiceErrorKind) -> StatusCode {
         | ServiceErrorKind::SecretUnsupported
         | ServiceErrorKind::ConfigValidation
         | ServiceErrorKind::ConfigParse => StatusCode::BAD_REQUEST,
-        ServiceErrorKind::CannotCalculateChanges
+        ServiceErrorKind::Internal
+        | ServiceErrorKind::CannotCalculateChanges
         | ServiceErrorKind::StorageFailure
         | ServiceErrorKind::StorageCorrupted
         | ServiceErrorKind::ConfigIo => StatusCode::INTERNAL_SERVER_ERROR,

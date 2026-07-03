@@ -25,7 +25,7 @@ use posthaste_authority_server_link::{
 };
 use posthaste_contract_core::{
     MailOperation, MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
-    RuntimeError, RuntimeErrorCode,
+    RuntimeAdapterError, RuntimeError, RuntimeErrorCode, Terminality,
 };
 use tokio::sync::mpsc;
 
@@ -116,12 +116,90 @@ impl RemoteAuthorityServer {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::GatewayRejected,
-                format!("remote authority server rejected link request ({status}): {body}"),
-            ));
+            return Err(link_error_from_body(status.as_u16(), &body));
         }
         response.json::<Ret>().await.map_err(transport_error)
+    }
+}
+
+/// The remote link error body (`LinkErrorBody` on the far side): the typed
+/// verdict travels here so the near side does not have to re-derive it from the
+/// status band. Deserialize-only mirror; unknown/extra fields are ignored.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkErrorEnvelope {
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    message: String,
+    terminality: Option<Terminality>,
+    #[serde(default)]
+    details: serde_json::Value,
+}
+
+/// Reconstruct a typed [`RuntimeError`] from a remote link error body, preserving
+/// the far node's **typed terminality** across the hop (audit top-10 #1: a
+/// transient far-node outage used to arrive as a non-retryable `GatewayRejected`
+/// string blob). The wire `code` is reverse-mapped to its [`RuntimeErrorCode`];
+/// the terminality the far node stamped is authoritative (it may have overridden
+/// the code default), falling back to the code's inherent verdict when the body
+/// predates the field.
+fn link_error_from_body(status: u16, body: &str) -> RuntimeError {
+    match serde_json::from_str::<LinkErrorEnvelope>(body) {
+        Ok(env) if !env.code.is_empty() => {
+            let code = runtime_error_code_from_wire(&env.code);
+            let terminality = env.terminality.unwrap_or_else(|| code.terminality());
+            RuntimeError(RuntimeAdapterError {
+                code,
+                message: env.message,
+                terminality,
+                correlation_id: None,
+                details: env.details,
+            })
+        }
+        // A body we cannot parse as the typed envelope: keep the raw text but do
+        // not claim a false permanence — an unparseable non-2xx from the far
+        // node is treated as a transient link fault (5xx-shaped) rather than a
+        // terminal rejection.
+        _ => RuntimeError(RuntimeAdapterError {
+            code: RuntimeErrorCode::GatewayRejected,
+            message: format!("remote authority server rejected link request ({status}): {body}"),
+            terminality: posthaste_link_near_end::classify_status(status),
+            correlation_id: None,
+            details: serde_json::Value::Null,
+        }),
+    }
+}
+
+/// Reverse of the far side's `runtime_error_status` wire-code mapping. Collapsed
+/// codes (`internal_error`, `invalid_query`) map to a canonical variant; an
+/// unknown string falls back to `GatewayRejected`.
+fn runtime_error_code_from_wire(code: &str) -> RuntimeErrorCode {
+    match code {
+        "internal_error" => RuntimeErrorCode::Internal,
+        "invalid_query" => RuntimeErrorCode::InvalidDescriptor,
+        "invalid_secret" => RuntimeErrorCode::InvalidSecret,
+        "invalid_account" => RuntimeErrorCode::InvalidAccount,
+        "account_base_url_required" => RuntimeErrorCode::AccountBaseUrlRequired,
+        "account_secret_required" => RuntimeErrorCode::AccountSecretRequired,
+        "account_username_required" => RuntimeErrorCode::AccountUsernameRequired,
+        "account_sender_required" => RuntimeErrorCode::AccountSenderRequired,
+        "unauthorized" => RuntimeErrorCode::Unauthorized,
+        "not_found" => RuntimeErrorCode::NotFound,
+        "gateway_unavailable" => RuntimeErrorCode::ProviderUnavailable,
+        "conflict" => RuntimeErrorCode::Conflict,
+        "network_error" => RuntimeErrorCode::NetworkError,
+        "state_mismatch" => RuntimeErrorCode::StateMismatch,
+        "cannot_calculate_changes" => RuntimeErrorCode::CannotCalculateChanges,
+        "gateway_rejected" => RuntimeErrorCode::GatewayRejected,
+        "secret_unavailable" => RuntimeErrorCode::SecretUnavailable,
+        "secret_unsupported" => RuntimeErrorCode::SecretUnsupported,
+        "storage_failure" => RuntimeErrorCode::StorageFailure,
+        "storage_corrupted" => RuntimeErrorCode::StorageCorrupted,
+        "config_validation" => RuntimeErrorCode::ConfigValidation,
+        "config_io" => RuntimeErrorCode::ConfigIo,
+        "config_parse" => RuntimeErrorCode::ConfigParse,
+        _ => RuntimeErrorCode::GatewayRejected,
     }
 }
 
