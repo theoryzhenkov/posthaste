@@ -97,6 +97,21 @@ pub trait MessageMailboxStore: Send + Sync {
 }
 
 /// Sync batch and lazy body write boundary.
+///
+/// Stays a plain synchronous `&self` trait (not `async`, D63/M23b design
+/// note): `posthaste-store`'s own unit test suite calls these methods
+/// directly on a bare `DatabaseStore` with no `Arc` and no tokio runtime
+/// (`store.rs`'s doc on `write_transaction`/`read_connection` preserves that
+/// exact invariant for the primitives these build on) — making the port
+/// `async` would force every one of those tests to acquire a runtime. Instead,
+/// the async offload lives at the call site: every production caller reaches
+/// these through `Arc<dyn SyncWriteStore>` (`Send + Sync + 'static`) and, when
+/// called from an async context, wraps the call in `tokio::task::spawn_blocking`
+/// (see `MailService`'s call sites, e.g. `ServiceSyncSink::emit`) so the SQLite
+/// work — the heaviest write on the sync path — never occupies a tokio worker
+/// thread, without forcing the port itself to be async.
+///
+/// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
 pub trait SyncWriteStore: Send + Sync {
     /// Apply a sync batch atomically within a single SQLite transaction.
     ///

@@ -148,14 +148,14 @@ impl MailGateway for MutationGateway {
     ) -> Result<posthaste_domain_model::SyncOutcome, GatewayError> {
         if let Some((chunks, reconciliation)) = &self.stream {
             for chunk in chunks {
-                sink.emit(chunk.clone())?;
+                sink.emit(chunk.clone()).await?;
             }
             return Ok(posthaste_domain_model::SyncOutcome {
                 reconciliation: Some(reconciliation.clone()),
             });
         }
         let batch = self.sync(account_id, cursors, progress).await?;
-        sink.emit(batch)?;
+        sink.emit(batch).await?;
         Ok(posthaste_domain_model::SyncOutcome::single_batch())
     }
 
