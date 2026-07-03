@@ -40,25 +40,52 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // the link, the down-channel drives views); otherwise the full bundled graph
     // is built in-process. Only an in-process authority server can serve the link or run
     // the OAuth holdout.
-    let (runtime_handle, runtime_shutdown, secret_store, link_serve_transport, oauth_mutations) =
-        if matches!(authority_server_transport, AuthorityServerTransportConfig::Remote { .. }) {
-            let build = build_remote_runtime(build_config).expect("failed to build remote runtime");
-            (build.handle, build.shutdown, build.secret_store, None, None)
-        } else {
-            let build = build_authority_server(build_config)
-                .await
-                .expect("failed to build authority runtime");
-            let link_transport = daemon
-                .link_serve
-                .then(|| build.authority_server_link.clone());
-            (
-                build.handle,
-                build.shutdown,
-                build.secret_store,
-                link_transport,
-                Some(build.account_mutations),
-            )
-        };
+    #[allow(clippy::type_complexity)]
+    let (
+        runtime_handle,
+        runtime_shutdown,
+        secret_store,
+        link_serve_transport,
+        oauth_mutations,
+        supervisor_stop,
+        store_close,
+    ) = if matches!(authority_server_transport, AuthorityServerTransportConfig::Remote { .. }) {
+        // A lean near node: no in-process supervisor or store to tear down (they
+        // live in the remote authority server), so those teardown seams are absent.
+        let build = build_remote_runtime(build_config).expect("failed to build remote runtime");
+        (
+            build.handle,
+            build.shutdown,
+            build.secret_store,
+            None,
+            None,
+            None,
+            None,
+        )
+    } else {
+        let build = build_authority_server(build_config)
+            .await
+            .expect("failed to build authority runtime");
+        let link_transport = daemon
+            .link_serve
+            .then(|| build.authority_server_link.clone());
+        // The bundled server owns the supervisor + store, so it wires both
+        // teardown seams into the shutdown sequence (D60 steps (b) and (c)).
+        let supervisor_stop: Option<Box<dyn SupervisorStop>> = Some(Box::new(
+            AccountSupervisorStop(build.account_supervisor.clone()),
+        ));
+        let store_close: Option<Box<dyn StoreClose>> =
+            Some(Box::new(DatabaseStoreClose(build.database_store.clone())));
+        (
+            build.handle,
+            build.shutdown,
+            build.secret_store,
+            link_transport,
+            Some(build.account_mutations),
+            supervisor_stop,
+            store_close,
+        )
+    };
 
     if config_was_empty {
         if let Some(bootstrap_path) = &roots.bootstrap_path {
@@ -128,6 +155,9 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         config_root_display: roots.config_root.display().to_string(),
         log_guard,
         runtime_shutdown,
+        shutdown_token: CancellationToken::new(),
+        supervisor_stop,
+        store_close,
         tls: daemon.tls.clone(),
     })
     .await

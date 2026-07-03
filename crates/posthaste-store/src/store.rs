@@ -164,6 +164,27 @@ impl DatabaseStore {
         })
     }
 
+    /// Close the store cleanly as the final teardown step (D62 / M20 phase (c)).
+    ///
+    /// Drops every pooled read connection so their SQLite file handles are
+    /// released promptly rather than lingering until the last `Arc<DatabaseStore>`
+    /// is dropped. The single serialized write connection is released when that
+    /// last `Arc` drops (it is borrowed through a `Mutex`, not owned here).
+    ///
+    /// Bounded by the sequence's store-close deadline; it does no I/O beyond
+    /// closing handles, so it returns well inside the budget.
+    ///
+    /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d62
+    pub fn close(&self) {
+        // M22 (D62): run `PRAGMA wal_checkpoint(TRUNCATE)` on the write
+        // connection here — before the connections drop — so a clean shutdown
+        // truncates the WAL instead of leaving it to be replayed on next open.
+        // A missed checkpoint costs a WAL replay, not data (RFC §7 ruling 1), so
+        // M20 only releases the pooled readers; the checkpoint lands in M22.
+        let mut pool = lock_read_pool(&self.read_connections);
+        pool.clear();
+    }
+
     /// Checks out a read SQLite connection (WAL mode allows concurrent readers).
     ///
     /// Read connections are pooled so hot read statements and SQLite page-cache

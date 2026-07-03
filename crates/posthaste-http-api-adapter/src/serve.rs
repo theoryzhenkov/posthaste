@@ -10,6 +10,7 @@ use axum::Router;
 use posthaste_domain_service::SecretStore;
 use posthaste_observability::{events, ph_info};
 use posthaste_runtime::{RuntimeBuildConfig, RuntimeHandle, RuntimeShutdownHandle};
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
@@ -17,6 +18,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::ResolvedRoots;
 use posthaste_config::DaemonSettings;
+use crate::shutdown::{StoreClose, SupervisorStop};
 use crate::{auth, logging, observability, token, AppState, ServerConfig, ServerHandle};
 
 /// The shared node-assembly preamble (RFC D27): resolve roots, read daemon
@@ -117,6 +119,14 @@ pub struct ServeOptions {
     pub config_root_display: String,
     pub log_guard: WorkerGuard,
     pub runtime_shutdown: RuntimeShutdownHandle,
+    /// The shared cancellation token: attached to axum's graceful shutdown here
+    /// and carried onto the [`ServerHandle`] for the composition root's
+    /// [`crate::ShutdownSequence`].
+    pub shutdown_token: CancellationToken,
+    /// Teardown step (b) supervisor seam; `None` for a lean near node.
+    pub supervisor_stop: Option<Box<dyn SupervisorStop>>,
+    /// Teardown step (c) store seam; `None` for a lean near node.
+    pub store_close: Option<Box<dyn StoreClose>>,
     /// Optional in-daemon TLS; present ⇒ serve HTTPS via `crate::tls`.
     pub tls: Option<posthaste_config::TlsConfig>,
 }
@@ -138,6 +148,9 @@ pub async fn serve(opts: ServeOptions) -> ServerHandle {
         config_root_display,
         log_guard,
         runtime_shutdown,
+        shutdown_token,
+        supervisor_stop,
+        store_close,
         tls,
     } = opts;
 
@@ -226,16 +239,23 @@ pub async fn serve(opts: ServeOptions) -> ServerHandle {
         "posthaste listening"
     );
 
+    // Graceful shutdown (D60 phase (a)): cancelling the shared token makes axum
+    // stop accepting and drain in-flight requests/SSE before the serve future
+    // returns. The `ShutdownSequence` owns the cancel; here we only wire the
+    // drain. One owned wait-future per arm (only one arm runs).
+    let drain_token = shutdown_token.clone();
     let join_handle = tokio::spawn(async move {
         match tls_acceptor {
             Some(acceptor) => {
                 let tls_listener = crate::tls::TlsListener::new(listener, acceptor);
                 axum::serve(tls_listener, app)
+                    .with_graceful_shutdown(drain_token.cancelled_owned())
                     .await
                     .expect("posthaste server failed");
             }
             None => {
                 axum::serve(listener, app)
+                    .with_graceful_shutdown(drain_token.cancelled_owned())
                     .await
                     .expect("posthaste server failed");
             }
@@ -247,6 +267,9 @@ pub async fn serve(opts: ServeOptions) -> ServerHandle {
         join_handle,
         log_guard,
         runtime_shutdown,
+        shutdown_token,
+        supervisor_stop,
+        store_close,
         auth_token,
         require_auth,
     }

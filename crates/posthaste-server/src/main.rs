@@ -67,10 +67,11 @@ async fn main() {
     if options.open {
         open_browser(&format!("http://{}", handle.addr));
     }
-    handle
-        .join_handle
-        .await
-        .expect("posthaste server task panicked");
+
+    // Serve until a shutdown signal (ctrl_c / SIGTERM), then run the ordered,
+    // deadline-bounded teardown (D60/M20) in place of the old bare
+    // `join_handle.await`.
+    handle.into_shutdown_sequence().run_until_signal().await;
 }
 
 fn parse_args(args: Vec<String>) -> Result<ServeOptions, String> {

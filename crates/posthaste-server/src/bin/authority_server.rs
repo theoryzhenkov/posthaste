@@ -32,10 +32,8 @@ async fn main() {
     })
     .await;
 
-    handle
-        .join_handle
-        .await
-        .expect("posthaste-authority-server task panicked");
+    // Serve until a shutdown signal, then run the ordered teardown (D60/M20).
+    handle.into_shutdown_sequence().run_until_signal().await;
 }
 
 /// Parse the optional `--bind <addr>` flag; any other argument is an error.
