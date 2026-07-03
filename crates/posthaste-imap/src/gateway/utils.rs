@@ -20,6 +20,11 @@ pub(crate) fn mailbox_status_proves_unchanged(
 
 pub(crate) fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
     match error {
+        // A UID-validity break means the provider's mailbox identity diverged
+        // from ours — the folder must be resynced, not "rejected". Kept distinct
+        // (audit top-10 #10) so it maps to `state_mismatch` and drives resync
+        // rather than looking like a malformed request a user must fix.
+        ImapAdapterError::UidValidityMismatch { .. } => GatewayError::StateMismatch,
         ImapAdapterError::MissingTransport
         | ImapAdapterError::MissingSmtpTransport
         | ImapAdapterError::MissingUsername
@@ -27,7 +32,6 @@ pub(crate) fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
         | ImapAdapterError::MissingSelectData(_)
-        | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
         | ImapAdapterError::InvalidModSeq(_)
@@ -50,5 +54,16 @@ pub(crate) fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
 }
 
 pub(crate) fn store_error_to_gateway(error: StoreError) -> GatewayError {
-    GatewayError::Rejected(format!("IMAP local state lookup failed: {error}"))
+    // Corruption keeps its own class so the corrupt-store repair pathway
+    // (`storage_corrupted`) survives the IMAP-op hop instead of masquerading as
+    // a provider rejection (audit top-10 #4). Exhaustive: a new `StoreError`
+    // variant must be classified here before it compiles.
+    match &error {
+        StoreError::Corruption(_) => {
+            GatewayError::Corruption(format!("IMAP local state lookup hit a corrupt store: {error}"))
+        }
+        StoreError::NotFound(_) | StoreError::Conflict(_) | StoreError::Failure(_) => {
+            GatewayError::Rejected(format!("IMAP local state lookup failed: {error}"))
+        }
+    }
 }

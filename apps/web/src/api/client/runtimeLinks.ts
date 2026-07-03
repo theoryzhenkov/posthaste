@@ -35,7 +35,8 @@ export type RuntimeMutationSettlementStatus =
 export interface RuntimeAdapterErrorResponse {
   code: string
   message: string
-  retryable: boolean
+  /** Typed retryability verdict (RFC-L2 D70); replaces the old `retryable` bool. */
+  terminality: 'transient' | 'permanent'
   correlationId?: string | null
   details?: unknown
 }

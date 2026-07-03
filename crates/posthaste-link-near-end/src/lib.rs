@@ -35,7 +35,7 @@ pub mod wire;
 
 pub use config::{BackoffPolicy, NearEndConfig};
 pub use engine::{EngineError, NearEnd};
-pub use error::{classify_status, Disposition};
+pub use error::{classify_status, Terminality};
 pub use pending_set::{PendingSetHooks, SentUnsettled};
 pub use scheduler::Scheduler;
 pub use sink::{ConnectionStatus, FrameSink};

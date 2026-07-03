@@ -253,7 +253,7 @@ describe('the near-end engine over fake IO', () => {
       body: JSON.stringify({
         code: 'invalid_mutation',
         message: 'nope',
-        retryable: false,
+        terminality: 'permanent',
         correlationId: null,
         details: null,
       }),

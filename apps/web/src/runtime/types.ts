@@ -158,10 +158,17 @@ export type RuntimeMutationSettlementStatus =
   | 'failed'
   | 'conflict'
 
+/**
+ * The typed retryability verdict (RFC-L2 D70), replacing the write-only
+ * `retryable: boolean`. `'transient'` = a retry may succeed; `'permanent'` =
+ * retrying is futile. The reason travels in the paired `code`.
+ */
+export type Terminality = 'transient' | 'permanent'
+
 export interface RuntimeAdapterError {
   code: string
   message: string
-  retryable: boolean
+  terminality: Terminality
   correlationId?: string | null
   details?: unknown
 }
