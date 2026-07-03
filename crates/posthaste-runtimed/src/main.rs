@@ -14,6 +14,7 @@ use posthaste_http_api_adapter::{
     ServeOptions, ServerConfig,
 };
 use posthaste_runtime::{build_remote_runtime, AuthorityServerTransportConfig};
+use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() {
@@ -70,12 +71,15 @@ async fn main() {
         config_root_display: roots.config_root.display().to_string(),
         log_guard,
         runtime_shutdown: build.shutdown,
+        shutdown_token: CancellationToken::new(),
+        // A lean near node: no in-process supervisor or store to close (they live
+        // in the remote authority server), so those teardown seams are absent.
+        supervisor_stop: None,
+        store_close: None,
         tls: daemon.tls.clone(),
     })
     .await;
 
-    handle
-        .join_handle
-        .await
-        .expect("posthaste-runtimed server task panicked");
+    // Serve until a shutdown signal, then run the ordered teardown (D60/M20).
+    handle.into_shutdown_sequence().run_until_signal().await;
 }

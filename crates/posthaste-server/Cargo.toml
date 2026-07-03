@@ -53,6 +53,7 @@ time = { workspace = true }
 toml = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
@@ -69,6 +70,7 @@ posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-replica-core = { path = "../posthaste-replica-core" }
 posthaste-testkit = { path = "../posthaste-testkit" }
+reqwest = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tower = { version = "0.5", features = ["util"] }
 

@@ -4157,6 +4157,7 @@ name = "posthaste-http-api-adapter"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "dirs",
@@ -4181,6 +4182,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-stream",
+ "tokio-util",
  "toml 0.8.23",
  "tower",
  "tower-http",
@@ -4315,6 +4317,7 @@ dependencies = [
  "posthaste-http-api-adapter",
  "posthaste-runtime",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -4350,12 +4353,14 @@ dependencies = [
  "posthaste-runtime-api",
  "posthaste-store",
  "posthaste-testkit",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml 0.8.23",
  "tower",
  "tower-http",

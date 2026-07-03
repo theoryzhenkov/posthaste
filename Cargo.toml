@@ -57,7 +57,8 @@ sha2 = "0.10"
 thiserror = "2"
 time = { version = "=0.3.36", features = ["formatting", "parsing", "serde"] }
 toml = "0.8"
-tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2"
 # default-features=false drops the aws-lc-rs C/cmake backend; we use ring to match

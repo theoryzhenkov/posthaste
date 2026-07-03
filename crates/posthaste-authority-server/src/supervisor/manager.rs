@@ -86,6 +86,23 @@ impl AccountSupervisor {
         );
     }
 
+    /// Stop every account runtime as teardown step (b) (D60/D61 / M20 seam).
+    ///
+    /// M21: this is a placeholder that hard-`abort()`s each account task (the only
+    /// stop mechanism that exists today, via [`stop_account`](Self::stop_account)).
+    /// M21 replaces the internals with cooperative cancellation (a per-account
+    /// token arm in the `select!` loop), a join under the shared deadline, and a
+    /// panic-surfacing watchdog — behind this same method so the composition
+    /// root's `ShutdownSequence` does not change. Bounded by the sequence's
+    /// supervisor-stop deadline.
+    pub async fn stop_all(&self) {
+        let account_ids: Vec<String> = self.runtimes.read().await.keys().cloned().collect();
+        for account_id in account_ids {
+            // M21: cooperative cancel + join replaces this bare abort.
+            self.stop_account(&AccountId::from(account_id.as_str())).await;
+        }
+    }
+
     /// Stop the runtime task and remove the gateway for an account.
     pub async fn stop_account(&self, account_id: &AccountId) {
         let removed = self.runtimes.write().await.remove(account_id.as_str());
