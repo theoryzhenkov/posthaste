@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use axum::Router;
 use posthaste_domain_service::SecretStore;
-use posthaste_observability::{events, ph_info};
+use posthaste_observability::{events, fail_closed, ph_error, ph_info};
 use posthaste_runtime::{RuntimeBuildConfig, RuntimeHandle, RuntimeShutdownHandle};
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -157,13 +157,22 @@ pub async fn serve(opts: ServeOptions) -> ServerHandle {
 
     // Build the TLS acceptor up front so an invalid [tls] config fails fast at
     // startup (before the listener is announced), not on the first connection.
-    let tls_acceptor = tls
-        .as_ref()
-        .map(|config| crate::tls::build_tls_acceptor(config).expect("invalid [tls] configuration"));
+    let tls_acceptor = tls.as_ref().map(|config| {
+        // Deliberate fail-closed (D73): refuse to serve rather than silently fall
+        // back to plaintext on an invalid [tls] config.
+        crate::tls::build_tls_acceptor(config)
+            .unwrap_or_else(|err| fail_closed!("invalid [tls] configuration: {err}"))
+    });
 
     let origins: Vec<axum::http::HeaderValue> = cors_origins
         .iter()
-        .map(|origin| origin.parse().expect("invalid CORS origin"))
+        .map(|origin| {
+            // Deliberate fail-closed (D73): a malformed CORS origin must abort
+            // startup, never widen the allowlist by silently dropping an entry.
+            origin
+                .parse()
+                .unwrap_or_else(|err| fail_closed!("invalid CORS origin {origin:?}: {err}"))
+        })
         .collect();
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
@@ -201,6 +210,25 @@ pub async fn serve(opts: ServeOptions) -> ServerHandle {
                     status = response.status().as_u16(),
                     latency_ms,
                     "http request completed"
+                );
+            },
+        )
+        // D72: no 5xx leaves the boundary operator-invisible. The default
+        // `ServerErrorsAsFailures` classifier fires this on every 5xx; the log
+        // inherits the span's `request_id`, and the sanitized construction-time
+        // `HTTP_INTERNAL_ERROR` log (in the same span) carries the real cause +
+        // the correlation id echoed to the client. Together they join a 500 body
+        // to its cause.
+        .on_failure(
+            |failure: tower_http::classify::ServerErrorsFailureClass,
+             latency: Duration,
+             span: &Span| {
+                ph_error!(
+                    parent: span,
+                    events::HTTP_INTERNAL_ERROR,
+                    failure = %failure,
+                    latency_ms = latency.as_millis() as u64,
+                    "http request failed at the /v1 boundary"
                 );
             },
         );

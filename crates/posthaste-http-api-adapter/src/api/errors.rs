@@ -1,4 +1,11 @@
 use super::*;
+use posthaste_observability::{events, ph_error};
+
+/// The stable, generic client-facing message for every sanitized 5xx body. The
+/// real cause (io/sql/runtime `Display` text) never appears here — it is logged
+/// server-side only (D72). The correlation id in `details.correlationId` joins
+/// this body to its `HTTP_INTERNAL_ERROR` operator log line.
+const INTERNAL_ERROR_MESSAGE: &str = "internal error";
 
 /// Stable machine-readable API error code.
 ///
@@ -110,10 +117,17 @@ impl ApiError {
     /// @spec docs/L1-api#error-code-mapping
     pub fn from_service_error(error: ServiceError) -> Self {
         let status = service_error_status(error.kind());
+        let code = ApiErrorCode::from(error.kind());
+        // D72 boundary line: an internal-class (5xx) `ServiceError` can carry
+        // io/sql `Display` text — it is logged, then replaced with the generic
+        // sanitized body. A 4xx message is caller-actionable validation and stays.
+        if status.is_server_error() {
+            return sanitized_internal_error(status, code, error);
+        }
         Self {
             status,
             body: ApiErrorBody {
-                code: ApiErrorCode::from(error.kind()),
+                code,
                 message: error.to_string(),
                 details: json!({}),
             },
@@ -130,6 +144,14 @@ impl ApiError {
         // of falling back to the HTTP status band.
         let envelope = error.envelope();
         let (status, code) = runtime_error_status_code(&envelope.code);
+        // D72 boundary line: a 5xx runtime envelope's `message`/`details` can
+        // carry server-internal detail (storage/transport/internal-fault text) —
+        // log it and return the generic body. 4xx runtime messages are
+        // caller-actionable (invalid descriptor/mutation, missing account field)
+        // and stay verbatim.
+        if status.is_server_error() {
+            return sanitized_internal_error(status, code, &envelope.message);
+        }
         Self {
             status,
             body: ApiErrorBody {
@@ -150,6 +172,39 @@ impl ApiError {
                 details: json!({}),
             },
         }
+    }
+}
+
+/// Build a sanitized 5xx `ApiError`, the single boundary chokepoint for
+/// internal-class errors (D72): mint a correlation id, log the real `cause` at
+/// `error!` joined by that id, and return a body carrying only the generic
+/// message + the correlation id. Server-internal detail (io/sql/runtime text) is
+/// logged, never surfaced to the client.
+pub(crate) fn sanitized_internal_error(
+    status: StatusCode,
+    code: ApiErrorCode,
+    cause: impl std::fmt::Display,
+) -> ApiError {
+    debug_assert!(
+        status.is_server_error(),
+        "sanitized_internal_error is for 5xx only"
+    );
+    let correlation_id = Id::generate().to_string();
+    ph_error!(
+        events::HTTP_INTERNAL_ERROR,
+        status = status.as_u16(),
+        code = ?code,
+        correlation_id = %correlation_id,
+        cause = %cause,
+        "internal error serving /v1 request"
+    );
+    ApiError {
+        status,
+        body: ApiErrorBody {
+            code,
+            message: INTERNAL_ERROR_MESSAGE.to_string(),
+            details: json!({ "correlationId": correlation_id }),
+        },
     }
 }
 

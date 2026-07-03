@@ -86,9 +86,15 @@ pub(crate) fn append_and_publish_account_event(
     Ok(())
 }
 
-/// Construct a 500 Internal Server Error from a message string.
+/// Construct a sanitized 500 Internal Server Error from a server-internal cause.
+///
+/// D72 boundary: `error` is the *server-side* cause (e.g. an `io::Error`
+/// `Display`) — it is logged with a correlation id and NEVER placed in the
+/// response body. The client receives the generic message + that correlation id.
+/// This is the chokepoint the `accounts/logos.rs` upload/read/delete sites flow
+/// through, so no `{err}` text reaches a 5xx body.
 pub(crate) fn internal_error(error: String) -> ApiError {
-    ApiError::new(
+    crate::api::errors::sanitized_internal_error(
         StatusCode::INTERNAL_SERVER_ERROR,
         ApiErrorCode::InternalError,
         error,
