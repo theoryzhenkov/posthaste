@@ -174,6 +174,7 @@ impl MailGateway for StaticGateway {
         &self,
         _account_id: &AccountId,
         _request: &SendMessageRequest,
+        _idempotency_key: &str,
     ) -> Result<(), GatewayError> {
         Err(GatewayError::Rejected("unused".to_string()))
     }

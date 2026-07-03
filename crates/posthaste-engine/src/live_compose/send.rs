@@ -1,21 +1,62 @@
 use jmap_client::mailbox;
 use posthaste_domain_model::{GatewayError, SendMessageRequest};
+use posthaste_provider_call::SEND_TOTAL;
 
 use crate::compose::{recipient_to_address, render_markdown};
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 use crate::live_compose::attachments::upload_send_attachments;
 use crate::live_compose::identity::fetch_send_identity;
 
+/// Derive the JMAP `EmailSubmission`/`Email` create-id and the RFC5322
+/// `Message-ID` from the outbox operation id, so every retry of the same send
+/// carries the *same* identity (D84/D85). Sanitized to the JMAP creation-id
+/// charset (a leading letter keeps it a valid id on strict servers).
+fn send_identity_token(idempotency_key: &str) -> String {
+    let sanitized: String = idempotency_key
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    format!("phsend-{sanitized}")
+}
+
+/// Map a send-dispatch failure to a typed [`GatewayError`]. A send-class
+/// timeout — or a response so short/reordered that the submission's fate is
+/// unknown (P3) — is **dispatch-uncertain**: the submission may already have
+/// committed, so the outbox must park it, never blind-resend (D86). A clean
+/// pre-commit transport error keeps its ordinary (retryable) classification.
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+fn dispatch_uncertain(reason: impl Into<String>) -> GatewayError {
+    GatewayError::DispatchUncertain(reason.into())
+}
+
 /// Send a message via `Email/set` + `EmailSubmission/set` in a single JMAP request.
 ///
 /// Renders the Markdown body to HTML and constructs a multipart/alternative
 /// MIME structure. The server handles Sent folder placement.
 ///
+/// The submission carries a **deterministic** create-id and a stable
+/// `Message-ID` derived from `idempotency_key` (the outbox op id), so a
+/// re-forward of a send that already committed is deduplicated rather than
+/// duplicated (D84/D85). The whole dispatch is bounded by the send-class
+/// deadline ([`SEND_TOTAL`]); its expiry is classified dispatch-uncertain
+/// (never a blind-retryable transient — the S1 fix), as is a truncated/reordered
+/// response (P3).
+///
+/// The jmap-client fork additionally exposes `if_in_state` for a submission-state
+/// precondition; a *meaningful* one requires persisting the pre-attempt
+/// submission state across retries, which the Option-A interim (park + surface)
+/// does not need — the park is the exactly-once guarantee, and the deterministic
+/// create-id + `Message-ID` are the field-proving foundation for the future
+/// bounded-auto-retry (D87/O1 Option B).
+///
 /// @spec docs/L1-compose#mime-structure
 /// @spec docs/L1-jmap#methods-used
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
 pub(crate) async fn send_message(
     gateway: &LiveJmapGateway,
     request_data: &SendMessageRequest,
+    idempotency_key: &str,
 ) -> Result<(), GatewayError> {
     let identity = fetch_send_identity(gateway, request_data.from.as_ref()).await?;
     let drafts_mailbox_id = gateway
@@ -27,8 +68,21 @@ pub(crate) async fn send_message(
     let html_body = render_markdown(&request_data.body);
     let uploaded_attachments = upload_send_attachments(gateway, &request_data.attachments).await?;
 
+    let token = send_identity_token(idempotency_key);
+    // A stable RFC5322 Message-ID so a de-duplicating MTA/server drops a second
+    // copy of the same send (D85; JMAP servers keying on it get the same).
+    let domain = identity
+        .email
+        .rsplit_once('@')
+        .map(|(_, domain)| domain)
+        .unwrap_or("posthaste.local");
+    let message_id = format!("{token}@{domain}");
+    let email_create_id = format!("{token}-email");
+    let submission_create_id = format!("{token}-sub");
+
     let mut request = gateway.client().build();
-    let email_obj = request.set_email().create();
+    let email_obj = request.set_email().create_with_id(email_create_id.as_str());
+    email_obj.message_id([message_id.as_str()]);
     email_obj.mailbox_ids([drafts_mailbox_id.as_str()]);
     // A message you sent is read by you (IMAP/JMAP convention: sent mail carries
     // \Seen). Without it the Sent copy syncs back as unread.
@@ -72,38 +126,48 @@ pub(crate) async fn send_message(
     }
 
     let submission_set = request.set_email_submission();
-    let submission = submission_set.create();
-    submission.email_id("#c0");
+    let submission = submission_set.create_with_id(submission_create_id.as_str());
+    submission.email_id(format!("#{email_create_id}"));
     submission.identity_id(identity.id.as_str());
     submission_set
         .arguments()
-        .on_success_update_email("c0")
+        .on_success_update_email(email_create_id.as_str())
         .mailbox_id(drafts_mailbox_id.as_str(), false)
         .mailbox_id(sent_mailbox_id.as_str(), true);
-    let response = gateway.send_request(request).await?;
+
+    // Bound the dispatch by the send-class deadline. A send that times out may
+    // already have committed server-side: classify it dispatch-uncertain so the
+    // outbox parks it rather than blind-resending (the S1 fix — F2's 10s
+    // total-request timeout was the trigger).
+    let response = match tokio::time::timeout(SEND_TOTAL, gateway.send_request(request)).await {
+        Ok(result) => result?,
+        Err(_elapsed) => return Err(dispatch_uncertain("send timed out; delivery uncertain")),
+    };
     let mut responses = response.unwrap_method_responses();
-    let mut email_set = required_method_response(
-        (!responses.is_empty()).then(|| responses.remove(0)),
-        "Email/set create",
-    )?
-    .unwrap_set_email()
-    .map_err(map_gateway_error)?;
-    email_set.created("c0").map_err(map_gateway_error)?;
+    // A submission whose response is missing/truncated (P3: a server that
+    // reorders or omits a method response) leaves the send's fate unknown — park
+    // it rather than let the truncation feed a blind resend.
+    let mut next_response = |label: &str| {
+        required_method_response((!responses.is_empty()).then(|| responses.remove(0)), label)
+            .map_err(|_| dispatch_uncertain(format!("send response truncated: missing {label}")))
+    };
+    let mut email_set = next_response("Email/set create")?
+        .unwrap_set_email()
+        .map_err(map_gateway_error)?;
+    email_set
+        .created(&email_create_id)
+        .map_err(map_gateway_error)?;
 
-    let mut submission_set = required_method_response(
-        (!responses.is_empty()).then(|| responses.remove(0)),
-        "EmailSubmission/set create",
-    )?
-    .unwrap_set_email_submission()
-    .map_err(map_gateway_error)?;
-    submission_set.created("c0").map_err(map_gateway_error)?;
+    let mut submission_set = next_response("EmailSubmission/set create")?
+        .unwrap_set_email_submission()
+        .map_err(map_gateway_error)?;
+    submission_set
+        .created(&submission_create_id)
+        .map_err(map_gateway_error)?;
 
-    let sent_update = required_method_response(
-        (!responses.is_empty()).then(|| responses.remove(0)),
-        "Email/set sent update",
-    )?
-    .unwrap_set_email()
-    .map_err(map_gateway_error)?;
+    let sent_update = next_response("Email/set sent update")?
+        .unwrap_set_email()
+        .map_err(map_gateway_error)?;
     sent_update
         .unwrap_update_errors()
         .map_err(map_gateway_error)?;

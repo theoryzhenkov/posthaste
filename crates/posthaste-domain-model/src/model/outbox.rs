@@ -43,8 +43,9 @@ pub enum OperationKind {
 ///
 /// ```text
 /// pending ─▶ inflight ─▶ applied ─▶ (retired/removed on convergence)
-///    ▲          │  └──▶ failed
-///    └──────────┘
+///    ▲          │  ├──▶ failed
+///    │          │  └──▶ dispatchUncertain (send only)
+///    └──────────┴────────────┘  (explicit user retry re-arms)
 /// ```
 ///
 /// @spec docs/L1-outbox#state-machine
@@ -65,17 +66,36 @@ pub enum OperationState {
     Applied,
     /// Permanently failed (e.g. validation); surfaced to the user.
     Failed,
+    /// A **send** whose delivery outcome is unknown: the request timed out or
+    /// the connection was lost after the submission may already have committed
+    /// server-side, or a prior flush was interrupted mid-send. Removed from the
+    /// auto-flush set (RFC-L2 D86) — a possibly-delivered message is **never**
+    /// blind-resent. It rests here, surfaced as needs-attention, until the user
+    /// explicitly retries (re-arms to `pending`, re-dispatched under the same
+    /// idempotency identity — D84/D85) or discards it.
+    ///
+    /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+    DispatchUncertain,
 }
 
 impl OperationState {
-    /// Whether the operation has reached a resting terminal state. Only
-    /// `Failed` is terminal: it stays until the user retries or dismisses it.
-    /// `Applied` is **not** terminal — it is awaiting confirmation and is
-    /// removed once a sync confirms its effect into the projection.
+    /// Whether the operation has reached a resting state that will not change
+    /// without an explicit user action. `Failed` and `DispatchUncertain` both
+    /// rest until the user retries or discards them. `Applied` is **not**
+    /// resting — it is awaiting confirmation and is removed once a sync confirms
+    /// its effect into the projection.
     ///
     /// @spec docs/replication/L1#retire-on-confirmation
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Failed)
+        matches!(self, Self::Failed | Self::DispatchUncertain)
+    }
+
+    /// Whether the operation is parked awaiting the user's confirm/discard
+    /// because its delivery outcome is unknown (a possibly-delivered send).
+    ///
+    /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+    pub fn is_dispatch_uncertain(self) -> bool {
+        matches!(self, Self::DispatchUncertain)
     }
 
     /// Whether the operation is eligible to be flushed to the provider.
@@ -98,6 +118,11 @@ impl OperationState {
             (Inflight, Applied | Failed) => true,
             // Transient failure returns the op to the queue.
             (Inflight, Pending) => true,
+            // A send whose outcome is unknown parks instead of failing (D86);
+            // a crashed-inflight send is likewise parked, not blind-resent.
+            (Inflight, DispatchUncertain) => true,
+            // Explicit user retry re-arms a failed or parked op to the queue.
+            (Failed | DispatchUncertain, Pending) => true,
             // Idempotent self-transition (re-applying the same state) is allowed.
             _ => self == next,
         }
@@ -199,6 +224,21 @@ pub enum OperationOutcome {
     Failed,
 }
 
+/// Emitted on `operation.dispatch_uncertain` when a send is parked because its
+/// delivery outcome is unknown (RFC-L2 D86/D87). Unlike a settlement, this is
+/// **not** terminal — it is a needs-attention signal: the send may or may not
+/// have reached the recipient, and the user must confirm (retry) or discard.
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OperationDispatchUncertain {
+    pub id: OperationId,
+    /// Why the delivery is uncertain (e.g. "send timed out; delivery uncertain").
+    pub reason: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,16 +249,22 @@ mod tests {
         assert!(OperationState::Inflight.is_flushable());
         assert!(!OperationState::Applied.is_flushable());
         assert!(!OperationState::Failed.is_flushable());
+        // A parked send is never auto-flushed (D86).
+        assert!(!OperationState::DispatchUncertain.is_flushable());
     }
 
     #[test]
-    fn only_failed_is_terminal_applied_is_awaiting_confirmation() {
+    fn failed_and_parked_rest_awaiting_the_user() {
         assert!(OperationState::Failed.is_terminal());
+        // A parked send rests until the user retries or discards it.
+        assert!(OperationState::DispatchUncertain.is_terminal());
+        assert!(OperationState::DispatchUncertain.is_dispatch_uncertain());
         // Applied rests folded, awaiting convergence, then is retired — not
         // terminal.
         assert!(!OperationState::Applied.is_terminal());
         assert!(!OperationState::Pending.is_terminal());
         assert!(!OperationState::Inflight.is_terminal());
+        assert!(!OperationState::Failed.is_dispatch_uncertain());
     }
 
     #[test]
@@ -229,10 +275,16 @@ mod tests {
         assert!(Inflight.can_transition_to(Applied));
         // Transient retry.
         assert!(Inflight.can_transition_to(Pending));
+        // A possibly-delivered send parks instead of failing (D86).
+        assert!(Inflight.can_transition_to(DispatchUncertain));
+        // Explicit user retry re-arms a parked or failed op.
+        assert!(DispatchUncertain.can_transition_to(Pending));
+        assert!(Failed.can_transition_to(Pending));
         // Disallowed shortcuts.
         assert!(!Pending.can_transition_to(Applied));
         assert!(!Applied.can_transition_to(Inflight));
         assert!(!Failed.can_transition_to(Inflight));
+        assert!(!DispatchUncertain.can_transition_to(Applied));
         // Idempotent self-transition.
         assert!(Applied.can_transition_to(Applied));
     }

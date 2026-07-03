@@ -12,15 +12,23 @@ use crate::ImapAdapterError;
 /// The MIME shape mirrors the JMAP send path: Markdown source is sent as the
 /// plain text alternative and rendered HTML is sent as the HTML alternative.
 ///
+/// `message_id` is the stable RFC5322 Message-ID value (no angle brackets;
+/// lettre adds them) derived from the send's idempotency key — constant across
+/// retries so a de-duplicating MTA drops a second copy of the same send (D85).
+/// `None` falls back to lettre generating a fresh id (the non-idempotent batch
+/// / draft-preview paths).
+///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
 pub fn build_smtp_message(
     config: &SmtpConnectionConfig,
     request: &SendMessageRequest,
+    message_id: Option<&str>,
 ) -> Result<Message, ImapAdapterError> {
     let mut builder = Message::builder()
         .from(smtp_sender_mailbox(config, request.from.as_ref())?)
         .subject(request.subject.clone())
-        .message_id(None);
+        .message_id(message_id.map(str::to_string));
 
     for recipient in &request.to {
         builder = builder.to(smtp_mailbox_for_recipient(recipient)?);
@@ -154,6 +162,27 @@ fn smtp_mailbox(name: Option<String>, email: &str) -> Result<Mailbox, ImapAdapte
     });
 
     Ok(Mailbox::new(name, address))
+}
+
+/// Stable RFC5322 Message-ID *value* (no angle brackets) derived from a send's
+/// idempotency key (the outbox op id), so every retry carries the same id and a
+/// de-duplicating MTA drops the duplicate (D85). Matches the JMAP send token
+/// (`phsend-<key>`) so one operation yields one identity across transports. The
+/// domain is the account's own sender domain.
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+pub fn smtp_stable_message_id(idempotency_key: &str, config: &SmtpConnectionConfig) -> String {
+    let sanitized: String = idempotency_key
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let domain = config
+        .sender_email
+        .rsplit_once('@')
+        .map(|(_, domain)| domain)
+        .filter(|domain| !domain.is_empty())
+        .unwrap_or("posthaste.local");
+    format!("phsend-{sanitized}@{domain}")
 }
 
 fn smtp_message_id_header_value(id: &str) -> String {

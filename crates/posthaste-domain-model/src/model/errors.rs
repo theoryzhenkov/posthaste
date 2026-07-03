@@ -55,6 +55,16 @@ pub enum GatewayError {
     Auth,
     #[error("network error: {0}")]
     Network(String),
+    /// A **send-class** call whose delivery outcome is unknown: the request
+    /// timed out or the transport was lost *after* the submission may already
+    /// have committed server-side. Distinct from [`Self::Network`] (a clear
+    /// pre-commit transport error, safe to retry) because a possibly-delivered
+    /// send must **never** be blind-resent — the outbox parks it in
+    /// `DispatchUncertain` (RFC-L2 D86) rather than looping it as `Transient`.
+    ///
+    /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+    #[error("send dispatch uncertain: {0}")]
+    DispatchUncertain(String),
     #[error("state mismatch")]
     StateMismatch,
     #[error("cannot calculate changes")]
@@ -179,6 +189,11 @@ impl ServiceError {
             Self::Gateway(GatewayError::Unavailable(_)) => ServiceErrorKind::GatewayUnavailable,
             Self::Gateway(GatewayError::Auth) => ServiceErrorKind::AuthError,
             Self::Gateway(GatewayError::Network(_)) => ServiceErrorKind::NetworkError,
+            // A dispatch-uncertain send is intercepted at the outbox flush layer
+            // (parked, never resent) and does not surface as a `ServiceError` to
+            // an API caller; it shares the network-class code should it ever be
+            // mapped, since it is a transport-condition on a possibly-live call.
+            Self::Gateway(GatewayError::DispatchUncertain(_)) => ServiceErrorKind::NetworkError,
             Self::Gateway(GatewayError::StateMismatch) => ServiceErrorKind::StateMismatch,
             Self::Gateway(GatewayError::CannotCalculateChanges) => {
                 ServiceErrorKind::CannotCalculateChanges

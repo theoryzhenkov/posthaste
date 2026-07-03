@@ -212,6 +212,15 @@ pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 /// @spec docs/L1-outbox#settlement
 pub const EVENT_TOPIC_OPERATION_SETTLED: &str = "operation.settled";
 
+/// Event topic emitted when a **send** is parked because its delivery outcome
+/// is unknown (timeout/transport-loss after the submission may have committed,
+/// or an interrupted flush). Payload is an [`OperationDispatchUncertain`]. It is
+/// a needs-attention fact, not a settlement: the message may or may not have
+/// been delivered, and the user must confirm (retry) or discard.
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+pub const EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN: &str = "operation.dispatch_uncertain";
+
 /// Every event topic the server emits, in declaration order.
 ///
 /// Single source of truth for the documented topic set: the committed
@@ -237,6 +246,7 @@ pub const ALL_EVENT_TOPICS: &[&str] = &[
     EVENT_TOPIC_PUSH_CONNECTED,
     EVENT_TOPIC_PUSH_DISCONNECTED,
     EVENT_TOPIC_OPERATION_SETTLED,
+    EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN,
 ];
 
 mod account_overview;

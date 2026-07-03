@@ -2056,15 +2056,16 @@ export interface components {
          *
          *     ```text
          *     pending ─▶ inflight ─▶ applied ─▶ (retired/removed on convergence)
-         *        ▲          │  └──▶ failed
-         *        └──────────┘
+         *        ▲          │  ├──▶ failed
+         *        │          │  └──▶ dispatchUncertain (send only)
+         *        └──────────┴────────────┘  (explicit user retry re-arms)
          *     ```
          *
          *     @spec docs/L1-outbox#state-machine
          *     @spec docs/replication/L1#retire-on-confirmation
          * @enum {string}
          */
-        OperationState: "pending" | "inflight" | "applied" | "failed";
+        OperationState: "pending" | "inflight" | "applied" | "failed" | "dispatchUncertain";
         /**
          * @description Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
          *

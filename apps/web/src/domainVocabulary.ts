@@ -83,6 +83,7 @@ export const EVENT_TOPICS = {
   PushConnected: 'push.connected',
   PushDisconnected: 'push.disconnected',
   OperationSettled: 'operation.settled',
+  OperationDispatchUncertain: 'operation.dispatch_uncertain',
 } as const
 
 export type DomainEventTopic = (typeof EVENT_TOPICS)[keyof typeof EVENT_TOPICS]
