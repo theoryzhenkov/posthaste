@@ -281,6 +281,11 @@ pub(crate) async fn refresh_oauth_access_token(
     secret_ref: &posthaste_domain_model::SecretRef,
     token_set: &OAuthTokenSet,
 ) -> Result<String, ServiceError> {
+    // M37: refresh single-flight + compare-and-swap rotation hook here. Provider-M37
+    // dedups concurrent refreshes of the same secret and guards the blind
+    // `secret_store.update` below against last-writer-wins token clobber (audit A1).
+    // M25 owns only the shared timed client (via `OAuthTokenService::new`) and the
+    // JWKS/discovery single-flight; refresh rotation semantics are NOT landed here.
     let token_service = OAuthTokenService::new()?;
     let access_token = token_service
         .access_token(token_set, time::OffsetDateTime::now_utc())
