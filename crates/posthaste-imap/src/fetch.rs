@@ -34,7 +34,10 @@ mod headers;
 mod items;
 mod types;
 
-pub(crate) use changed_since::fetch_mailbox_changed_since_snapshot_with_client;
+pub(crate) use changed_since::{
+    fetch_mailbox_changed_since_snapshot_with_client,
+    fetch_mailbox_condstore_delta_snapshot_with_client,
+};
 pub(crate) use headers::{
     fetch_mailbox_header_snapshot_with_client, fetch_mailbox_headers_after_uid_with_client,
     fetch_selected_mailbox_headers,
