@@ -5,6 +5,9 @@ use jmap_client::core::error::MethodErrorType;
 use jmap_client::mailbox;
 use posthaste_domain_model::{GatewayError, MailboxId};
 use posthaste_observability::{events, ph_debug, ph_info};
+use posthaste_provider_call::{
+    CallErrorReason, ExecutorConfig, ProviderCallError, ProviderCallExecutor, METADATA_TOTAL,
+};
 
 mod gateway;
 
@@ -29,6 +32,13 @@ pub async fn connect_jmap_client(
     let client = Client::new()
         .credentials(jmap_credentials(username, secret))
         .follow_redirects([host])
+        // Retire jmap-client's 10 s default (F2) for the calls that still route
+        // through its own internal reqwest client (the typed `send()` HTTP path,
+        // sync convenience calls, upload). The engine-controlled raw POST and
+        // blob download now bypass this via the provider-call executor, which
+        // applies the per-class deadline instead; this bump only governs the
+        // residual jmap-client-internal calls.
+        .timeout(METADATA_TOTAL)
         .connect(url)
         .await
         .map_err(map_gateway_error)?;
@@ -62,6 +72,14 @@ pub async fn connect_jmap_client(
 pub struct LiveJmapGateway {
     client: Arc<Client>,
     ws: Option<Arc<crate::ws_connection::SharedWsConnection>>,
+    /// The native outbound-call envelope (M31): the engine-controlled raw JMAP
+    /// POST and blob download route through this for per-class deadlines, the
+    /// `Retry-After` retry loop, and the per-account circuit breaker. `None` only
+    /// if the shared client failed to build, in which case those two call sites
+    /// fall back to their prior direct-reqwest / `client.download()` path.
+    executor: Option<Arc<ProviderCallExecutor>>,
+    /// The per-account breaker key (the server-side JMAP account id).
+    account_key: String,
 }
 
 impl LiveJmapGateway {
@@ -89,7 +107,14 @@ impl LiveJmapGateway {
             );
             None
         };
-        Self { client, ws }
+        let account_key = client.default_account_id().to_string();
+        let executor = build_executor(&client);
+        Self {
+            client,
+            ws,
+            executor,
+            account_key,
+        }
     }
 
     /// Discover, authenticate, and construct a gateway in one step.
@@ -166,6 +191,46 @@ impl LiveJmapGateway {
 
     pub(crate) fn ws(&self) -> Option<&Arc<crate::ws_connection::SharedWsConnection>> {
         self.ws.as_ref()
+    }
+
+    /// The provider-call envelope, if it built. Call sites route through it when
+    /// present and fall back to their direct path otherwise.
+    pub(crate) fn executor(&self) -> Option<&Arc<ProviderCallExecutor>> {
+        self.executor.as_ref()
+    }
+
+    /// The per-account circuit-breaker key (server-side JMAP account id).
+    pub(crate) fn account_key(&self) -> &str {
+        &self.account_key
+    }
+}
+
+/// Build the shared outbound-call executor for a connected client, trusting the
+/// session's API host for redirects (mirroring the connect-time follow-redirects
+/// scoping). Returns `None` if the shared client cannot be built.
+fn build_executor(client: &Client) -> Option<Arc<ProviderCallExecutor>> {
+    let trusted_hosts = url::Url::parse(client.session().api_url())
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(String::from))
+        .into_iter()
+        .collect();
+    let config = ExecutorConfig {
+        trusted_hosts,
+        ..ExecutorConfig::default()
+    };
+    ProviderCallExecutor::new(config).ok().map(Arc::new)
+}
+
+/// Map a provider-call envelope error into the engine's `GatewayError`,
+/// preserving the auth and circuit-open distinctions callers rely on.
+pub(crate) fn map_provider_error(error: ProviderCallError) -> GatewayError {
+    match error.reason {
+        // A 401 stays an auth failure (drives re-auth, not a network retry).
+        CallErrorReason::Http(401) => GatewayError::Auth,
+        // An open breaker surfaces as gateway-unavailable so status can show
+        // "provider circuit open" rather than a generic network error (D83).
+        CallErrorReason::CircuitOpen => GatewayError::Unavailable(error.detail),
+        _ => GatewayError::Network(error.detail),
     }
 }
 

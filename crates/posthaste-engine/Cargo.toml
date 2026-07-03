@@ -12,6 +12,7 @@ jmap-client = { workspace = true }
 posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-observability = { path = "../posthaste-observability" }
+posthaste-provider-call = { path = "../posthaste-provider-call" }
 pulldown-cmark = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
