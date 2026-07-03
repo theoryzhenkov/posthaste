@@ -57,8 +57,9 @@ If you'd rather install `posthastectl` by hand, see the
 
 ## 1. Mint a least-privilege token (30 seconds)
 
-Never hand a script the full-scope bootstrap token. Attenuate it down to exactly
-what the script needs — and give it an expiry:
+The discovery bootstrap itself can read and tail the tap, but it cannot write —
+every write goes through an explicitly minted token, so mint one scoped to
+exactly what the script needs, with an expiry:
 
 ```sh
 TOKEN=$(posthastectl token mint --grant tap:read,apply,read --expiry 1h)
@@ -74,8 +75,9 @@ TOKEN=$(posthastectl token mint --grant tap:read,apply,read --expiry 1h)
 
 The token is printed to **stdout** (so `TOKEN=$(…)` captures exactly the
 credential); a ready-to-paste `export POSTHASTE_TOKEN=…` line goes to stderr.
-Attenuation happens server-side and can only *narrow* authority — a minted token
-can never do more than the bootstrap token it came from.
+Minting happens server-side, scoped to exactly what you asked for — including
+write grants the bootstrap itself doesn't have, since minting is precisely how
+a script trades the read-only bootstrap for a working, least-privilege token.
 
 ## 2. Write a handler (2 minutes)
 

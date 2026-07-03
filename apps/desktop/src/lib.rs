@@ -190,8 +190,12 @@ pub fn run() {
             });
             // Discovery rider (RFC-L2-scripting §7.7b): write the well-known
             // `daemon.json` so posthastectl auto-discovers this embedded app
-            // (its port/token were webview-only before). Best-effort; removed on
-            // the RunEvent::Exit hook below.
+            // (its port/token were webview-only before). `write_discovery_file`
+            // attenuates `auth_token` (this process's full-scope credential,
+            // also injected into the webview below) down to the least-default
+            // bootstrap capability before writing — the full-scope token itself
+            // never touches disk (ruling 11). Best-effort; removed on the
+            // RunEvent::Exit hook below.
             if require_auth {
                 let _ = posthaste_http_api_adapter::write_discovery_file(addr, &auth_token);
             }

@@ -55,7 +55,11 @@ async fn main() {
     .await;
 
     // Write the daemon discovery file `daemon.json` (`{ version, port, url, token }`,
-    // 0600) so external clients (posthastectl) find the bound port + bearer token.
+    // 0600) so external clients (posthastectl) find the bound port + a bearer
+    // token — `write_discovery_file` attenuates `handle.auth_token` (the
+    // process's full-scope credential) down to the least-default bootstrap
+    // capability before writing it; the full-scope token itself never touches
+    // disk (RFC-L2-scripting §7 ruling 11).
     // Only written when auth is enabled — we never persist an unused credential.
     // Best-effort; removed on clean shutdown via the M20 sequence below.
     let discovery_file = if handle.require_auth {

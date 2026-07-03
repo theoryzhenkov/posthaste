@@ -11,7 +11,13 @@ import { UsageError } from "./args.js";
  * @spec docs/eph/RFC-L2-scripting#6-d53-the-action-path
  */
 
-/** The server `Action` verbs the mint route accepts (the wire vocabulary). */
+/**
+ * The server `Action` verbs grantable to a MINTED token (the wire vocabulary
+ * for `--grant`/`actions`). Deliberately excludes `mint` itself: that verb is
+ * the discovery bootstrap's own issuance right (RFC-L2-scripting §7 ruling
+ * 11) — a token this CLI mints should be a substantive-scope credential for a
+ * script, never another mint-capable bootstrap.
+ */
 const ACTION_VERBS = [
   "read",
   "send",

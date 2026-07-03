@@ -13,8 +13,13 @@
 //! (single spaces around `=`):
 //!
 //! - `action = <verb>[,<verb>...]` — verbs from
-//!   `{read, send, tag, move, delete, manage}`. Satisfied iff the route's
-//!   required action is in the set.
+//!   `{read, send, tag, move, delete, manage, mint}`. Satisfied iff the route's
+//!   required action is in the set. `mint` gates ONLY `POST /v1/auth/tokens`
+//!   (RFC-L2-scripting §7 ruling 11) and is treated as an ISSUANCE right, not a
+//!   substantive scope: see `derive_capability_token` in `api::auth_tokens` for
+//!   why a caller holding `mint` can obtain tokens WIDER than its own scope
+//!   (the discovery bootstrap is `{mint, tap:read}` yet can mint write-capable
+//!   tokens) while every other verb still only ever narrows.
 //! - `account = <source_id>` — satisfied iff the request's account == source_id.
 //! - `mailbox = <mailbox_id>` — satisfied iff the request's mailbox == mailbox_id.
 //! - `message = <message_id>` — satisfied iff the request's message == message_id.
@@ -55,6 +60,11 @@ pub enum Action {
     Move,
     Delete,
     Manage,
+    /// The right to call `POST /v1/auth/tokens` (mint/attenuate capability
+    /// tokens). Gates ONLY that route — see the module doc's caveat-format
+    /// section for why this verb is an issuance right rather than a
+    /// substantive scope.
+    Mint,
 }
 
 impl Action {
@@ -67,6 +77,7 @@ impl Action {
             Action::Move => "move",
             Action::Delete => "delete",
             Action::Manage => "manage",
+            Action::Mint => "mint",
         }
     }
 
@@ -79,6 +90,7 @@ impl Action {
             "move" => Some(Action::Move),
             "delete" => Some(Action::Delete),
             "manage" => Some(Action::Manage),
+            "mint" => Some(Action::Mint),
             _ => None,
         }
     }

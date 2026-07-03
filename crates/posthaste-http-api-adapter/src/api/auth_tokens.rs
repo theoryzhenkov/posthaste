@@ -99,20 +99,31 @@ pub(super) fn build_token_caveats(
     Ok((predicates, expires_at))
 }
 
-/// Mint a narrower capability token. The handler **attenuates the caller's own
-/// token** (adding the requested caveats), so the result can only narrow — never
-/// widen — the caller's authority, whatever scope is requested. The route is
-/// `Manage`-gated with no resource axis, so only a full-scope (or unscoped
-/// `manage`) token reaches here; resource-scoped tokens are rejected (403)
-/// before the handler runs.
+/// Mint a capability token. For most callers the handler **attenuates the
+/// caller's own token** (adding the requested caveats), so the result can only
+/// narrow — never widen — the caller's authority, whatever scope is requested.
+///
+/// The one exception is a caller whose OWN token holds the `mint` action (RFC-
+/// L2-scripting §7 ruling 11): `mint` is an issuance right, not a substantive
+/// scope, so such a caller mints FRESH from the server's root key instead —
+/// this is what lets the least-default discovery bootstrap (`{mint, tap:read}`,
+/// which has no write scope of its own to narrow FROM) transparently obtain
+/// write-capable tokens via `posthastectl token mint`. See
+/// `derive_capability_token`/`caller_grants_mint` below.
+///
+/// The route is `Mint`-gated with no resource axis, so only a full-scope (or
+/// unscoped, mint-carrying) token reaches here; resource-scoped tokens are
+/// rejected (403) before the handler runs.
 #[utoipa::path(
     post,
     path = "/v1/auth/tokens",
     tag = "auth",
     summary = "Mint a capability token",
-    description = "Derives a narrower capability token from the caller's token by appending the \
-requested caveats (attenuation). The minted token can only narrow the caller's authority, never \
-widen it. Requires a full-scope (or unscoped `manage`) token.",
+    description = "Derives a capability token from the caller's token. For most callers this \
+appends the requested caveats (attenuation) and can only narrow authority, never widen it. A \
+caller holding the `mint` action is the exception: it mints fresh from the root key, so it can \
+obtain a WIDER token (the discovery bootstrap trades this for a working token via `token mint`). \
+Requires a full-scope (or unscoped, mint-carrying) token.",
     request_body = CreateAuthTokenRequest,
     responses(
         (status = 200, description = "The minted capability token", body = CreateAuthTokenResponse),
@@ -132,6 +143,41 @@ pub async fn create_auth_token(
     Ok(Json(CreateAuthTokenResponse { token, expires_at }))
 }
 
+/// Whether `token`'s OWN first-party caveats grant the `mint` action — i.e.
+/// whether it is authorized to reach `POST /v1/auth/tokens` with no resource
+/// axis, the exact test the route's authz gate applies (built by simulating
+/// that gate: [`crate::authz::evaluate`] against an unrestricted `Mint`
+/// context). An inauthentic/malformed token or one that fails the check is
+/// treated as NOT mint-holding — fail closed. Redundant with the route's own
+/// authz gate (which already required this to reach the handler at all); kept
+/// as a real check, not assumed, so this function stays correct if ever called
+/// outside the route.
+///
+/// @spec docs/eph/RFC-L2-scripting#7-rulings
+fn caller_grants_mint(token: &str, root: &crate::token::RootKey) -> bool {
+    let Ok(caveats) = crate::token::verify_authenticity(token, root) else {
+        return false;
+    };
+    if caveats.is_empty() {
+        // Full-scope: unrestricted, but not a `mint`-CARRYING token — it takes
+        // the ordinary attenuation path below (equivalent in effect, since
+        // attenuating an empty-caveat token is the same restriction set as
+        // minting fresh with those same caveats).
+        return false;
+    }
+    let ctx = crate::authz::CaveatContext {
+        action: Action::Mint,
+        account: None,
+        mailbox: None,
+        message: None,
+        now: time::OffsetDateTime::now_utc(),
+    };
+    matches!(
+        crate::authz::evaluate(&caveats, &ctx),
+        crate::authz::Decision::Allow
+    )
+}
+
 /// Produce the minted token from the requested caveat predicates.
 ///
 /// With a `caller` token (the normal, authenticated case) this **attenuates the
@@ -139,12 +185,28 @@ pub async fn create_auth_token(
 /// so the result is always ≤ the caller's authority — never wider, whatever was
 /// requested. Without a caller (`require_auth` off, no token to preserve) it
 /// mints from the root key with the requested caveats.
+///
+/// **Exception**: a caller whose own token grants the `mint` action
+/// ([`caller_grants_mint`]) mints FRESH from the root key too, exactly like the
+/// no-caller case, INSTEAD of attenuating. `mint` is an issuance right, not a
+/// substantive scope — the discovery bootstrap is `{mint, tap:read}` and has no
+/// write scope of its own to narrow from, so attenuating it could only ever
+/// stack an unsatisfiable second `action` restriction (two `action = ...`
+/// caveats AND together, i.e. intersect). Treating `mint` as "authorized to
+/// call the token factory" rather than "a scope to narrow" is what lets
+/// `posthastectl token mint --grant apply,...` work transparently against the
+/// bootstrap (RFC-L2-scripting §7 ruling 11). A caller withOUT `mint` (e.g. a
+/// plain `action = manage` token) is unaffected and still only ever narrows.
 pub(super) fn derive_capability_token(
     caller: Option<String>,
     root: &crate::token::RootKey,
     predicates: &[String],
 ) -> Result<String, ApiError> {
     match caller {
+        Some(caller) if caller_grants_mint(&caller, root) => {
+            let refs: Vec<&str> = predicates.iter().map(String::as_str).collect();
+            Ok(crate::token::mint_with_caveats(root, &refs))
+        }
         Some(caller) => {
             let mut token = caller;
             for predicate in predicates {
