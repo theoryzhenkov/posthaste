@@ -50,3 +50,4 @@ mod smart_mailboxes;
 mod snooze;
 mod source_cleanup;
 mod sync_cache_candidates;
+mod sync_unsettled_guard;
