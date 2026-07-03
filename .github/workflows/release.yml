@@ -266,9 +266,96 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: posthaste-cli
+          # Intermediate: bare, unsigned cross-compiled binaries (build-cli
+          # runs on ubuntu-latest, cross-compiling all five targets — no
+          # macOS runner here, so codesign/notarization cannot happen in this
+          # job). The package-cli job below codesigns + notarizes the darwin
+          # binaries and repackages every platform as a .tar.gz; publish
+          # consumes its `posthaste-cli` artifact, not this one.
+          name: posthaste-cli-raw
           if-no-files-found: error
           path: target/distribute/PosthasteCTL*
+
+  package-cli:
+    name: Sign + notarize + package posthastectl CLI
+    needs: [resolve-channel, build-cli]
+    # macOS Gatekeeper hard-rejects an unsigned CLI binary as "damaged" on
+    # Apple Silicon (arm64 requires *some* valid signature to execute at
+    # all). codesign/notarytool are Darwin-only, so this needs a real macOS
+    # runner even though build-cli itself cross-compiles from Linux. See
+    # docs/eph/RFC-L2-scripting.md §7.10(a).
+    runs-on: macos-latest
+    env:
+      POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Resolve channel policy
+        shell: bash
+        run: |
+          bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
+          cat "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: posthaste-cli-raw
+          path: target/distribute/cli-raw
+
+      # Same identity resolution as the build-desktop job: Developer ID
+      # Application when the release signing secrets are configured, ad-hoc
+      # fallback otherwise. Applied on BOTH channels — enforce_macos_signing
+      # only controls whether ad-hoc is an acceptable fallback (see next
+      # step), not which identity a configured cert resolves to.
+      - name: Import Apple Developer certificate
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: tools/release/import-macos-certificate.sh
+
+      - name: Require Apple Developer ID for stable CLI signing
+        shell: bash
+        run: |
+          if [ "${POSTHASTE_ENFORCE_MACOS_SIGNING:-}" = "true" ] && [ "${POSTHASTE_MACOS_SIGNING:-}" != "developer-id" ]; then
+            echo "Stable macOS CLI binaries must use Apple Developer ID signing." >&2
+            echo "Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets." >&2
+            exit 1
+          fi
+
+      - name: Configure App Store Connect API key
+        shell: bash
+        env:
+          POSTHASTE_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          POSTHASTE_APPLE_API_KEY_PRIVATE_KEY: ${{ secrets.APPLE_API_KEY_PRIVATE_KEY }}
+        run: |
+          if [ -z "${POSTHASTE_APPLE_API_KEY:-}" ] || [ -z "${POSTHASTE_APPLE_API_KEY_PRIVATE_KEY:-}" ]; then
+            echo "App Store Connect API key is not configured; notarization can still use APPLE_ID credentials if present."
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/AuthKey_${POSTHASTE_APPLE_API_KEY}.p8"
+          printf '%s\n' "$POSTHASTE_APPLE_API_KEY_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          echo "POSTHASTE_APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Codesign, notarize, and package the CLI binaries
+        shell: bash
+        env:
+          POSTHASTE_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          POSTHASTE_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          POSTHASTE_APPLE_ID: ${{ secrets.APPLE_ID }}
+          POSTHASTE_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          POSTHASTE_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash tools/release/sign-and-package-cli.sh target/distribute/cli-raw target/distribute
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-cli
+          if-no-files-found: error
+          path: target/distribute/PosthasteCTL*.tar.gz
 
   build-desktop:
     name: Build desktop ${{ matrix.platform }}
@@ -624,7 +711,7 @@ jobs:
     needs:
       - build-daemon
       - build-web
-      - build-cli
+      - package-cli
       - build-desktop
       - resolve-channel
     runs-on: ubuntu-latest
@@ -689,6 +776,9 @@ jobs:
           cat > release-assets/MACOS-INSTALL.txt <<'RELEASE_EOF'
           macOS nightly builds are Apple Developer signed when the release signing secrets are configured. If notarization credentials are not configured, macOS may still require the first launch to be approved manually.
           Drag Posthaste.app to Applications. If macOS blocks the first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
+
+          CLI (posthastectl): download PosthasteCTL[Nightly]-darwin-<arch>.tar.gz and extract it from Terminal with `tar -xzf` (not Finder/Archive Utility, which can re-apply the quarantine flag to the extracted binary). The binary is Apple Developer ID signed and notarized when the release signing secrets are configured (ad-hoc signed otherwise), so Apple Silicon Macs will run it without the "is damaged and can't be opened" error. A notarized command-line tool cannot carry a stapled ticket, so the very first run needs network access for Gatekeeper to check it online. If Gatekeeper still blocks the first run, either Control-click the binary and choose Open, or run:
+              xattr -d com.apple.quarantine ./PosthasteCTL*-darwin-*
           RELEASE_EOF
 
       - name: Generate updater manifest
