@@ -25,6 +25,17 @@ impl MacaroonMinter {
 
 impl CapabilityMinter for MacaroonMinter {
     fn mint(&self, grant: &RuleTokenGrant) -> Result<String, String> {
+        // F1 (security review, 2026-07-03): an empty action set would mint a
+        // token with NO `action` caveat — and an absent caveat is unrestricted,
+        // so a grant-less hook could read/tag/move/DELETE the triggering
+        // message instead of doing nothing. Reject it (mirrors the REST mint
+        // guard in auth_tokens.rs), so the hook dead-letters rather than
+        // handing an over-broad credential to a possibly-hijacked agent.
+        if grant.actions.is_empty() {
+            return Err("rule token grant must name at least one action; \
+                        a webhook/exec rule with empty grants is rejected"
+                .to_string());
+        }
         // The caveat predicate format mirrors the mint route's
         // `build_token_caveats` (a single comma-joined `action` caveat, plus the
         // resource axes) so a hook token is indistinguishable from one minted via

@@ -86,6 +86,23 @@ impl RuleToml {
                 message,
             }
         })?;
+        // F1 (security review): a webhook/exec action with empty grants would
+        // mint an action-unrestricted token (see rule_minter). Reject at load
+        // so the misconfig never reaches the bus — defence-in-depth beside the
+        // minter guard.
+        let empty_grants = match &self.action {
+            RuleAction::Webhook { grants, .. } | RuleAction::Exec { grants, .. } => {
+                grants.is_empty()
+            }
+            _ => false,
+        };
+        if empty_grants {
+            return Err(RuleConfigError::Query {
+                rule_id: self.id.clone(),
+                message: "a webhook/exec rule must declare at least one grant"
+                    .to_string(),
+            });
+        }
         Ok(Rule {
             id: self.id,
             name: self.name,
@@ -104,6 +121,25 @@ mod tests {
 
     fn write_rules(dir: &Path, body: &str) {
         std::fs::write(dir.join("rules.toml"), body).expect("write rules.toml");
+    }
+
+    #[test]
+    fn a_webhook_rule_with_empty_grants_is_rejected() {
+        // F1 security-review regression: empty grants would mint an
+        // action-unrestricted token; the loader must reject it.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_rules(
+            dir.path(),
+            r#"
+[[rule]]
+id = "r"
+name = "n"
+when = "tag:x"
+action = { kind = "webhook", url = "http://127.0.0.1:9/h", grants = [] }
+"#,
+        );
+        let err = load_rules(dir.path()).expect_err("empty grants must be rejected");
+        assert!(matches!(err, RuleConfigError::Query { .. }));
     }
 
     #[test]
