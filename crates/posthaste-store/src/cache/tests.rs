@@ -64,5 +64,6 @@ fn set_last_scored_at(
 
 mod ledger;
 mod priority_materialization;
+mod repair;
 mod signals;
 mod stale_rescore;

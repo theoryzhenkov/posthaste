@@ -146,6 +146,12 @@ pub const STORE_CACHE_STRUCTURAL_BODY_REPAIRED: LogEvent =
     LogEvent::new("store.cache.structural_body_repaired");
 pub const STORE_SYNC_BATCH_APPLIED: LogEvent = LogEvent::new("store.sync.batch_applied");
 pub const STORE_SYNC_BATCH_APPLYING: LogEvent = LogEvent::new("store.sync.batch_applying");
+/// The deferred post-startup body-cache repair (RFC-L2-lifecycle N15 / M27
+/// sub-unit (b)) failed. Non-fatal — the store already opened and is serving
+/// real reads/writes; the repair is idempotent and simply did not run this
+/// time (a future retry or the next startup catches it up).
+pub const STORE_STARTUP_BODY_CACHE_REPAIR_FAILED: LogEvent =
+    LogEvent::new("store.startup.body_cache_repair_failed");
 
 pub const SUPERVISOR_ACCOUNT_DISABLED: LogEvent = LogEvent::new("supervisor.account.disabled");
 pub const SUPERVISOR_ACCOUNT_REMOVED: LogEvent = LogEvent::new("supervisor.account.removed");

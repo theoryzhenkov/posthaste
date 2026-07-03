@@ -81,3 +81,53 @@ async fn slow_write_does_not_block_concurrent_read() {
         .expect("write task should not panic")
         .expect("write should commit after release");
 }
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d67 (N16 / M27 sub-unit (c))
+//
+// `read_connection` is a plain blocking function (see `store.rs`), reachable
+// with no tokio runtime at all — so this is a genuine `#[test]`, not
+// `#[tokio::test]`, driving real OS threads to prove the bound holds under
+// true concurrent contention rather than cooperative task scheduling.
+#[test]
+fn read_connection_pool_bounds_peak_concurrency() {
+    use crate::store::MAX_READ_CONNECTIONS;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let root = crate::test_support::temp_root();
+    let store =
+        Arc::new(DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap());
+
+    // 3x the cap: enough concurrent contenders that, without the semaphore,
+    // every thread would open its own fresh SQLite connection at once (N16's
+    // failure mode — N concurrent readers, N uncapped connections).
+    let thread_count = MAX_READ_CONNECTIONS * 3;
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+
+    let handles: Vec<_> = (0..thread_count)
+        .map(|_| {
+            let store = Arc::clone(&store);
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            std::thread::spawn(move || {
+                // Blocks (queues) rather than opening an unbounded new
+                // connection once `MAX_READ_CONNECTIONS` are already open.
+                let _connection = store.read_connection().expect("read connection");
+                let now_active = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now_active, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                active.fetch_sub(1, Ordering::SeqCst);
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().expect("reader thread should not panic");
+    }
+
+    let observed_peak = peak.load(Ordering::SeqCst);
+    assert!(
+        observed_peak <= MAX_READ_CONNECTIONS,
+        "peak concurrent read connections ({observed_peak}) must not exceed the cap ({MAX_READ_CONNECTIONS})"
+    );
+}

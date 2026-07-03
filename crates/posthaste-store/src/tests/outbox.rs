@@ -212,3 +212,53 @@ fn remove_deletes_the_operation() -> Result<(), StoreError> {
     assert!(store.get_operation(&op.id)?.is_none());
     Ok(())
 }
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d67 (N15 / M27 sub-unit (b))
+#[test]
+fn flushable_operations_are_limited_and_drain_across_cycles() -> Result<(), StoreError> {
+    // Stand-in for a large stuck outbox (N15): more pending ops than one
+    // `list_flushable_operations` call should ever materialize at once.
+    use crate::outbox::OUTBOX_FLUSH_BATCH_LIMIT;
+
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    let total = OUTBOX_FLUSH_BATCH_LIMIT as usize + 50;
+
+    for index in 0..total {
+        store.enqueue_operation(&operation(
+            &format!("op-{index}"),
+            &format!("draft-{index}"),
+            OperationKind::DraftCreate,
+            OperationState::Pending,
+        ))?;
+    }
+
+    // First "cycle": the store returns at most the batch limit, not the
+    // whole backlog in one unbounded `Vec`.
+    let first_batch = store.list_flushable_operations(&account)?;
+    assert_eq!(first_batch.len(), OUTBOX_FLUSH_BATCH_LIMIT as usize);
+
+    // The flush loop processes a batch by moving each op out of the
+    // flushable state set (here: straight to `applied`, standing in for a
+    // successful push) before the next cycle's call — draining the backlog
+    // across repeated bounded calls instead of requiring one giant read.
+    for op in &first_batch {
+        store.update_operation_state(&op.id, OperationState::Applied, 0, None)?;
+    }
+
+    let second_batch = store.list_flushable_operations(&account)?;
+    assert_eq!(
+        second_batch.len(),
+        total - OUTBOX_FLUSH_BATCH_LIMIT as usize,
+        "the remainder should surface on the next bounded call"
+    );
+
+    // No overlap between the two cycles' batches.
+    let first_ids: std::collections::HashSet<&str> =
+        first_batch.iter().map(|op| op.id.as_str()).collect();
+    assert!(second_batch
+        .iter()
+        .all(|op| !first_ids.contains(op.id.as_str())));
+    Ok(())
+}

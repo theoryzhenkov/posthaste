@@ -143,8 +143,15 @@ fn deleted_mailbox_removes_memberships_and_imap_state() -> Result<(), StoreError
 }
 
 // spec: docs/L1-sync#cache-object-parity
+//
+// RFC-L2-lifecycle N15 / M27 sub-unit (b): this repair used to run
+// unconditionally inside `DatabaseStore::open` (blocking the store's return
+// behind an unbounded startup scan); it now only runs when
+// `repair_body_cache_objects` is called explicitly (the composition root's
+// deferred post-startup task). This test drives that call directly instead
+// of relying on `open` to trigger it.
 #[test]
-fn opening_store_repairs_missing_body_cache_objects() -> Result<(), StoreError> {
+fn explicit_repair_repairs_missing_body_cache_objects() -> Result<(), StoreError> {
     let root = temp_root();
     let db_path = root.join("mail.sqlite");
     let data_root = root.join("data");
@@ -164,6 +171,11 @@ fn opening_store_repairs_missing_body_cache_objects() -> Result<(), StoreError> 
     }
 
     let store = DatabaseStore::open(db_path, data_root)?;
+    assert!(
+        cache_object_row(&store, &account, &message_id)?.is_none(),
+        "opening the store alone must not run the repair anymore"
+    );
+    store.repair_body_cache_objects()?;
 
     let row = cache_object_row(&store, &account, &message_id)?.expect("cache object");
     assert_eq!(row.0, "wanted");
@@ -175,8 +187,12 @@ fn opening_store_repairs_missing_body_cache_objects() -> Result<(), StoreError> 
 }
 
 // spec: docs/L1-sync#cache-object-parity
+//
+// RFC-L2-lifecycle N15 / M27 sub-unit (b): see the comment on
+// `explicit_repair_repairs_missing_body_cache_objects` above — the repair no
+// longer runs implicitly on `open`.
 #[test]
-fn opening_store_prunes_orphan_cache_child_rows() -> Result<(), StoreError> {
+fn explicit_repair_prunes_orphan_cache_child_rows() -> Result<(), StoreError> {
     let root = temp_root();
     let db_path = root.join("mail.sqlite");
     let data_root = root.join("data");
@@ -218,6 +234,7 @@ fn opening_store_prunes_orphan_cache_child_rows() -> Result<(), StoreError> {
     }
 
     let store = DatabaseStore::open(db_path, data_root)?;
+    store.repair_body_cache_objects()?;
 
     assert_eq!(
         cache_child_count(&store, "cache_object", &account, &message_id)?,
