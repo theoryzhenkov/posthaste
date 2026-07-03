@@ -187,7 +187,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a capability token
-         * @description Derives a narrower capability token from the caller's token by appending the requested caveats (attenuation). The minted token can only narrow the caller's authority, never widen it. Requires a full-scope (or unscoped `manage`) token.
+         * @description Derives a capability token from the caller's token. For most callers this appends the requested caveats (attenuation) and can only narrow authority, never widen it. A caller holding the `mint` action is the exception: it mints fresh from the root key, so it can obtain a WIDER token (the discovery bootstrap trades this for a working token via `token mint`). Requires a full-scope (or unscoped, mint-carrying) token.
          */
         post: operations["create_auth_token"];
         delete?: never;
@@ -1272,7 +1272,7 @@ export interface components {
          *     source of truth for the action vocabulary.
          * @enum {string}
          */
-        Action: "read" | "send" | "tag" | "move" | "delete" | "manage";
+        Action: "read" | "send" | "tag" | "move" | "delete" | "manage" | "mint";
         /**
          * @description Command to add a message to a single additional mailbox.
          *
@@ -2056,15 +2056,16 @@ export interface components {
          *
          *     ```text
          *     pending ─▶ inflight ─▶ applied ─▶ (retired/removed on convergence)
-         *        ▲          │  └──▶ failed
-         *        └──────────┘
+         *        ▲          │  ├──▶ failed
+         *        │          │  └──▶ dispatchUncertain (send only)
+         *        └──────────┴────────────┘  (explicit user retry re-arms)
          *     ```
          *
          *     @spec docs/L1-outbox#state-machine
          *     @spec docs/replication/L1#retire-on-confirmation
          * @enum {string}
          */
-        OperationState: "pending" | "inflight" | "applied" | "failed";
+        OperationState: "pending" | "inflight" | "applied" | "failed" | "dispatchUncertain";
         /**
          * @description Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
          *

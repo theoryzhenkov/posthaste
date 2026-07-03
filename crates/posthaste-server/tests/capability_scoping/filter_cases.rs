@@ -257,4 +257,5 @@ async fn smart_mailbox_conversations_filter_on_source_id() {
     );
 }
 
-// -- Token mint route (POST /auth/tokens): Manage action, no resource axis. --
+// -- Token mint route (POST /auth/tokens): Mint action, no resource axis —
+//    see mint_cases.rs. --

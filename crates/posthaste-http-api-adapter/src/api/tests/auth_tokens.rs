@@ -164,3 +164,48 @@ fn derive_capability_token_mints_from_root_without_a_caller() {
         crate::authz::Decision::Deny(_)
     ));
 }
+
+#[test]
+fn derive_capability_token_escalates_from_a_mint_only_caller() {
+    // The discovery bootstrap shape (RFC-L2-scripting §7 ruling 11): a caller
+    // scoped to exactly `mint` + `read` has no write scope of its own to
+    // narrow FROM, so naive attenuation could never produce a write-capable
+    // token (two `action = ...` caveats AND together — an unsatisfiable
+    // intersection). Because the caller GRANTS `mint`, the route mints FRESH
+    // from the root key instead: the result carries ONLY the newly requested
+    // caveat, not the caller's own `action = mint,read` stacked underneath.
+    let root = mint_root();
+    let bootstrap = crate::token::mint_with_caveats(&root, &["action = mint,read"]);
+    let caveats = derived(Some(bootstrap), &["action = tag,move,delete"]);
+    assert_eq!(
+        caveats.len(),
+        1,
+        "fresh mint carries only the requested caveat, not the caller's own"
+    );
+    assert_eq!(
+        crate::authz::evaluate(&caveats, &ctx(Action::Tag)),
+        crate::authz::Decision::Allow
+    );
+    // The escalated token is NOT itself mint-carrying (it was never asked for
+    // `mint`) — it cannot chain-mint further.
+    assert!(matches!(
+        crate::authz::evaluate(&caveats, &ctx(Action::Mint)),
+        crate::authz::Decision::Deny(_)
+    ));
+}
+
+#[test]
+fn derive_capability_token_non_mint_caller_still_only_narrows() {
+    // A caller that does NOT hold `mint` (e.g. `action = manage` alone) is
+    // unaffected by the escalation path — same narrowing behavior as always.
+    // (This caller could never reach the real route post-ruling-11 either,
+    // since the route now gates on `Mint`; this exercises the function-level
+    // invariant directly, same as `derive_capability_token_cannot_widen_a_scoped_caller`.)
+    let manage_only = crate::token::mint_with_caveats(&mint_root(), &["action = manage"]);
+    let caveats = derived(Some(manage_only), &["action = tag"]);
+    assert_eq!(caveats.len(), 2, "attenuation stacks, it does not replace");
+    assert!(matches!(
+        crate::authz::evaluate(&caveats, &ctx(Action::Tag)),
+        crate::authz::Decision::Deny(_)
+    ));
+}
