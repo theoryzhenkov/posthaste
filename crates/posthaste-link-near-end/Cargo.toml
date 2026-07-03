@@ -19,6 +19,7 @@ name = "posthaste_link_near_end"
 path = "src/lib.rs"
 
 [dependencies]
+posthaste-call-policy = { path = "../posthaste-call-policy" }
 posthaste-contract-core = { path = "../posthaste-contract-core" }
 futures-util = { workspace = true }
 serde = { workspace = true }

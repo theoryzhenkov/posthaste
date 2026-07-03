@@ -520,7 +520,7 @@ pub(crate) async fn run_watchdog(
         shared
             .mark_account_faulted(&account_id, restarts, &reason)
             .await;
-        let delay = policy.backoff.sleep_for(restarts - 1, (policy.jitter)());
+        let delay = policy.backoff.delay_for(restarts - 1, (policy.jitter)());
         ph_warn!(
             events::SUPERVISOR_ACCOUNT_RESTARTING,
             account_id = %account_id,

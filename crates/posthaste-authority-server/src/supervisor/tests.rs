@@ -533,6 +533,7 @@ fn fast_watchdog_policy(max_restarts: u32) -> WatchdogPolicy {
             base: Duration::from_millis(1),
             factor: 2.0,
             cap: Duration::from_millis(5),
+            max_attempts: WATCHDOG_MAX_RESTARTS,
         },
         jitter: Arc::new(|| 0.0),
     }
@@ -734,6 +735,7 @@ async fn watchdog_backoff_prevents_restart_storm() {
         base: Duration::from_millis(500),
         factor: 2.0,
         cap: Duration::from_secs(30),
+        max_attempts: WATCHDOG_MAX_RESTARTS,
     };
     let policy = WatchdogPolicy {
         max_restarts: 3,
