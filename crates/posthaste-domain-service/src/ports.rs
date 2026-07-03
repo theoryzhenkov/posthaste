@@ -26,7 +26,9 @@ mod sync_store;
 mod write_store;
 
 pub use cache_store::CacheStore;
-pub use composite::{MailStore, SecretStore, ServiceResultExt, SharedGateway, SharedSecretStore};
+pub use composite::{
+    MailStore, SecretCasOutcome, SecretStore, ServiceResultExt, SharedGateway, SharedSecretStore,
+};
 pub use gateway::{MailGateway, SyncChunkSink};
 pub use progress::SyncProgressReporter;
 pub use read_store::{

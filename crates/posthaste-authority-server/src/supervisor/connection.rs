@@ -285,29 +285,62 @@ pub(crate) async fn resolve_account_secret(
 
     let secret = shared.secret_store.resolve(secret_ref)?;
     let token_set = OAuthTokenSet::decode(&secret)?;
-    refresh_oauth_access_token(shared, secret_ref, &token_set).await
+    refresh_oauth_access_token(shared, secret_ref, &token_set, &secret).await
 }
 
 /// Refresh the OAuth access token for `token_set`, persisting a rotated token
-/// set. Callers must hold the per-ref refresh flight (see
-/// [`resolve_account_secret`]) so concurrent refreshes cannot clobber each
+/// set under a compare-and-swap. Callers must hold the per-ref refresh flight
+/// (see [`resolve_account_secret`]) so concurrent refreshes cannot clobber each
 /// other's rotation.
+///
+/// `expected_current` is the raw stored secret string `token_set` was decoded
+/// from. The rotated set is written with
+/// [`SecretStore::update_if_unchanged`](posthaste_domain_service::SecretStore::update_if_unchanged)
+/// — the D101 compare-and-swap that completes A1: the write only lands if the
+/// stored token set is still the one this refresh read. If a concurrent refresh
+/// (e.g. a sibling process, or any writer that raced past the single-flight)
+/// already rotated the stored set, the CAS *misses* and this refresh adopts the
+/// winner's freshly-rotated access token instead of persisting its own — whose
+/// refresh token the provider may have already consumed. That avoids both the
+/// last-writer-wins token loss and a needless second refresh of a consumed
+/// grant.
 pub(crate) async fn refresh_oauth_access_token(
     shared: &Arc<SupervisorShared>,
     secret_ref: &posthaste_domain_model::SecretRef,
     token_set: &OAuthTokenSet,
+    expected_current: &str,
 ) -> Result<String, ServiceError> {
     let token_service = OAuthTokenService::new()?;
     let access_token = token_service
         .access_token(token_set, time::OffsetDateTime::now_utc())
         .await?;
-    if let Some(updated_token_set) = access_token.updated_token_set {
-        shared
-            .secret_store
-            .update(secret_ref, &updated_token_set.encode()?)?;
-    }
+    let Some(updated_token_set) = access_token.updated_token_set else {
+        // Token still valid; no network refresh happened and nothing to persist.
+        return Ok(access_token.token);
+    };
 
-    Ok(access_token.token)
+    match shared.secret_store.update_if_unchanged(
+        secret_ref,
+        expected_current,
+        &updated_token_set.encode()?,
+    )? {
+        SecretCasOutcome::Swapped => Ok(access_token.token),
+        SecretCasOutcome::Mismatch { current } => {
+            // CAS-miss (A1): another refresh rotated the stored set out from
+            // under us. Persisting `updated_token_set` now would overwrite the
+            // winner's rotated refresh token with ours — which the provider may
+            // have consumed — reintroducing the permanent-lockout race. Adopt
+            // the winner's already-persisted access token instead of
+            // re-refreshing a possibly-consumed grant.
+            ph_warn!(
+                events::SUPERVISOR_OAUTH_TOKEN_REFRESHED,
+                account_id = %secret_ref.key,
+                "OAuth refresh CAS-miss: stored token set was rotated concurrently; adopting the winner's token"
+            );
+            let winner = OAuthTokenSet::decode(&current)?;
+            Ok(winner.access_token)
+        }
+    }
 }
 
 pub(crate) fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {

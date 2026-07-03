@@ -232,6 +232,36 @@ impl SupervisorShared {
         .await;
     }
 
+    /// Flip the account to `AuthError` directly from the OAuth refresh tick
+    /// (A2 / D102). A proactive refresh that fails `invalid_grant` /
+    /// `unauthorized_client` — classified `GatewayError::Auth`, a Permanent
+    /// [`Terminality`](posthaste_domain_model::Terminality) — means the grant is
+    /// revoked or the refresh token consumed; no retry or reconnect recovers it.
+    /// Surfacing it here keeps status truthful *immediately* (XIII) rather than
+    /// swallowing the error as a warning and waiting for a later connection
+    /// rebuild to observe the failing resolve. Uses the same `auth_error` status
+    /// vocabulary [`mark_sync_failure`](Self::mark_sync_failure) derives for a
+    /// `GatewayError::Auth`, and is generation-guarded like the other status
+    /// writers so a stale incarnation cannot overwrite a live one.
+    pub(crate) async fn mark_account_auth_error(
+        &self,
+        account_id: &AccountId,
+        generation: RuntimeGeneration,
+        reason: &str,
+    ) {
+        self.update_runtime_overview(account_id, Some(generation), None, |current| {
+            current.status = AccountStatus::AuthError;
+            current.last_sync_error = Some(format!("OAuth token refresh failed: {reason}"));
+            current.last_sync_error_code = Some(ServiceErrorKind::AuthError.code().to_string());
+            current.sync_progress = None;
+            if !matches!(current.push, PushStatus::Unsupported | PushStatus::Disabled) {
+                current.push = PushStatus::Reconnecting;
+            }
+            true
+        })
+        .await;
+    }
+
     /// Mark an account impaired by an internal runtime fault (a panic or an
     /// unexpected exit) that the watchdog is about to retry. `Degraded` is the
     /// truthful state (D61 / XIII): the account is malfunctioning, but the cause
