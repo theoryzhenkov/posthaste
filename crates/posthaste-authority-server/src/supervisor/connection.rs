@@ -220,12 +220,10 @@ pub(crate) async fn build_connection(
                         mailbox_name,
                         "IMAP IDLE push hint enabled"
                     );
-                    Some(imap_idle_event_stream(
-                        account.id.clone(),
-                        imap_config,
-                        mailbox_name,
-                        Arc::clone(&secret_resolver),
-                    ))
+                    // IDLE rides the gateway's single managed session (D92c):
+                    // it recalls/re-issues around operations instead of
+                    // opening a connection of its own.
+                    Some(gateway.idle_event_stream(account.id.clone(), mailbox_name))
                 } else {
                     ph_warn!(
                         events::IMAP_IDLE_MAILBOX_MISSING,
@@ -267,25 +265,38 @@ pub(crate) async fn resolve_account_secret(
     shared: &Arc<SupervisorShared>,
     secret_ref: &posthaste_domain_model::SecretRef,
 ) -> Result<String, ServiceError> {
-    let secret = shared.secret_store.resolve(secret_ref)?;
     if account.transport.auth != ProviderAuthKind::OAuth2 {
-        return Ok(secret);
+        return Ok(shared.secret_store.resolve(secret_ref)?);
     }
 
+    // The minimal M37 piece (pulled into M34): single-flight the refresh per
+    // secret ref. Concurrent resolvers — an IMAP session reconnect, an SMTP
+    // send, the proactive refresh tick — serialize on the per-ref flight
+    // lock, and the stored token set is re-read *inside* the lock, so a
+    // flight always refreshes from the latest persisted set instead of racing
+    // a sibling and clobbering its rotated refresh token via the blind
+    // `secret_store.update` (audit A1). Full M37 (compare-and-swap rotation
+    // in the secret store itself) remains follow-up work.
+    let flight = {
+        let mut flights = shared.oauth_refresh_flights.lock().await;
+        Arc::clone(flights.entry(secret_ref.key.clone()).or_default())
+    };
+    let _flight_guard = flight.lock().await;
+
+    let secret = shared.secret_store.resolve(secret_ref)?;
     let token_set = OAuthTokenSet::decode(&secret)?;
     refresh_oauth_access_token(shared, secret_ref, &token_set).await
 }
 
+/// Refresh the OAuth access token for `token_set`, persisting a rotated token
+/// set. Callers must hold the per-ref refresh flight (see
+/// [`resolve_account_secret`]) so concurrent refreshes cannot clobber each
+/// other's rotation.
 pub(crate) async fn refresh_oauth_access_token(
     shared: &Arc<SupervisorShared>,
     secret_ref: &posthaste_domain_model::SecretRef,
     token_set: &OAuthTokenSet,
 ) -> Result<String, ServiceError> {
-    // M37: refresh single-flight + compare-and-swap rotation hook here. Provider-M37
-    // dedups concurrent refreshes of the same secret and guards the blind
-    // `secret_store.update` below against last-writer-wins token clobber (audit A1).
-    // M25 owns only the shared timed client (via `OAuthTokenService::new`) and the
-    // JWKS/discovery single-flight; refresh rotation semantics are NOT landed here.
     let token_service = OAuthTokenService::new()?;
     let access_token = token_service
         .access_token(token_set, time::OffsetDateTime::now_utc())

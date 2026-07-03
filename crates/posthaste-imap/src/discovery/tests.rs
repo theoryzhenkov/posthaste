@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use super::*;
 
 use std::num::NonZeroU32;
@@ -89,6 +90,7 @@ async fn spawn_stalling_imap() -> std::net::SocketAddr {
 // deadline).
 #[tokio::test]
 async fn a_hung_imap_server_surfaces_as_a_typed_timeout() {
+    let _seam = crate::timeout::seam_test_lock();
     let _restore = crate::timeout::set_op_timeout_ms_for_testing(150);
     let addr = spawn_stalling_imap().await;
 
@@ -322,7 +324,7 @@ async fn spawn_mock_gmail_imap() -> std::net::SocketAddr {
 /// round-trips through the real client. This is where the forked `imap-codec`
 /// earns its keep: the literal + label-list encoding is error-prone by hand.
 fn encode_gmail_fetch_response() -> Vec<u8> {
-    use imap_client::imap_types::core::{IString, Literal, NString, Text, Vec1};
+    use imap_client::imap_types::core::{IString, Literal, NString, Vec1};
     use imap_client::imap_types::fetch::MessageDataItem;
     use imap_client::imap_types::response::{Data, Response};
     use imap_codec::encode::Encoder;
@@ -344,11 +346,10 @@ fn encode_gmail_fetch_response() -> Vec<u8> {
         MessageDataItem::GmailMessageId(1278455344230334865),
         MessageDataItem::GmailThreadId(1266894439832287888),
         MessageDataItem::GmailLabels(vec![
-            Text::try_from("\\Inbox").unwrap(),
-            Text::try_from("\\Starred").unwrap(),
-            // Pre-quoted: the bytes include the `"` so the encoded form is a
-            // valid quoted astring.
-            Text::try_from("\"Project Alpha\"").unwrap(),
+            Cow::from("\\Inbox"),
+            Cow::from("\\Starred"),
+            // Unquoted: the encoder now quotes labels that need it.
+            Cow::from("Project Alpha"),
         ]),
     ])
     .expect("at least one fetch item");

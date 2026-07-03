@@ -20,5 +20,9 @@ pulldown-cmark = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
+[dev-dependencies]
+# `start_paused` virtual-time tests for the IDLE re-issue cycle.
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

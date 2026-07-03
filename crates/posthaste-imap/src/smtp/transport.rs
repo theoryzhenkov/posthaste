@@ -1,13 +1,21 @@
 use std::num::NonZeroU32;
+use std::time::Duration;
 
+use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::flag::Flag;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use posthaste_domain_model::{ProviderAuthKind, SendMessageRequest, TransportSecurity};
 
-use crate::discovery::connect_authenticated_client;
 use crate::smtp::{build_smtp_message, SmtpConnectionConfig, SubmittedSmtpMessage};
-use crate::{ImapAdapterError, ImapConnectionConfig};
+use crate::ImapAdapterError;
+
+/// Socket-level timeout on every SMTP exchange (connect, EHLO, AUTH, DATA,
+/// ...). Without it a stalled MTA hangs on lettre's internal defaults with no
+/// app-level bound (audit C5). The send path layers the call-policy
+/// `SEND_TOTAL` wall-clock deadline on top; this catches per-command stalls
+/// inside that window.
+pub(crate) const SMTP_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Send one message through the configured SMTP endpoint.
 ///
@@ -56,13 +64,11 @@ pub async fn submit_smtp_message(
 /// a server-side Sent copy. The message is appended with `\Seen`.
 ///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
-pub async fn append_smtp_sent_copy(
-    config: &ImapConnectionConfig,
+pub(crate) async fn append_smtp_sent_copy(
+    client: &mut ImapClient,
     sent_mailbox_name: &str,
     raw_message: &[u8],
 ) -> Result<Option<NonZeroU32>, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
-    crate::timeout::with_deadline("refresh_capabilities", client.refresh_capabilities()).await?;
     crate::timeout::with_deadline(
         "append",
         client.appenduid_or_fallback(sent_mailbox_name, [Flag::Seen], raw_message),
@@ -93,5 +99,8 @@ fn smtp_transport(
         .port(config.port)
         .credentials(credentials)
         .authentication(mechanisms)
+        // C5: bound every SMTP socket exchange; a stalled MTA must fail, not
+        // wedge the send path.
+        .timeout(Some(SMTP_COMMAND_TIMEOUT))
         .build())
 }

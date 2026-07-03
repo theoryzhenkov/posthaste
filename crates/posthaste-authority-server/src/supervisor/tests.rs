@@ -90,6 +90,7 @@ fn test_shared(account: &AccountSettings) -> (Arc<SupervisorShared>, TempDirGuar
             CacheResourcePolicy::default(),
         )),
         poll_interval: Duration::from_secs(60),
+        oauth_refresh_flights: Mutex::new(HashMap::new()),
     });
     (shared, root)
 }

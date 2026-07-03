@@ -1,25 +1,17 @@
 use super::*;
 
 pub struct LiveImapSmtpGateway {
-    pub(crate) config: ImapConnectionConfig,
     pub(crate) smtp_config: SmtpConnectionConfig,
     pub(crate) discovery: DiscoveredImapAccount,
     pub(crate) store: Option<Arc<dyn MailStore>>,
     pub(crate) secret_resolver: Arc<dyn SecretResolver>,
+    /// Owner of the single reused authenticated IMAP session (D92/O3). Every
+    /// IMAP operation borrows the session from here instead of opening its
+    /// own connection; secrets are resolved by the manager at (re)connect.
+    pub(crate) sessions: Arc<ImapSessionManager>,
 }
 
 impl LiveImapSmtpGateway {
-    /// Resolve the current IMAP secret immediately before opening a connection.
-    ///
-    /// For OAuth accounts this refreshes the short-lived access token; for
-    /// password accounts it returns the configured password unchanged.
-    pub(crate) async fn resolve_imap_config(&self) -> Result<ImapConnectionConfig, GatewayError> {
-        let secret = self.secret_resolver.resolve_secret().await?;
-        let mut config = self.config.clone();
-        config.secret = secret;
-        Ok(config)
-    }
-
     /// Resolve the current SMTP secret immediately before opening a connection.
     pub(crate) async fn resolve_smtp_config(&self) -> Result<SmtpConnectionConfig, GatewayError> {
         let secret = self.secret_resolver.resolve_secret().await?;

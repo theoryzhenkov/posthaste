@@ -11,8 +11,7 @@ use posthaste_domain_service::{CacheResourceGovernor, MailService, MailStore, Pu
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_call_policy::BackoffSchedule as BackoffPolicy;
 use posthaste_imap::{
-    imap_idle_event_stream, ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway,
-    SmtpConnectionConfig,
+    ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig,
 };
 use posthaste_observability::{events, ph_debug, ph_error, ph_info, ph_warn};
 use serde_json::json;
