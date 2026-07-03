@@ -5,7 +5,7 @@ modified: 2026-07-02
 reviewed: 2026-07-02
 lifecycle: ephemeral
 type: RFC
-state: draft-deferred
+state: ratified
 depends:
   - path: eph/RFC-L2-architecture-cleanup
   - path: architecture/L2-crate-topology
@@ -124,3 +124,14 @@ this RFC — it stays in the architecture-cleanup track as dead-code removal.
    reusable).
 5. Webhook delivery semantics: retry policy, dead-lettering, and whether
    delivery state is itself a fact stream.
+
+## 7. Rulings (owner, 2026-07-03 — un-deferred for beta)
+
+1. **Q1**: the name is **tap**.
+2. **Q2**: a component's tap carries inbound AND its own emitted facts, authz-filtered.
+3. **Q3**: unix-socket/local transport deferred past beta (SSE over loopback suffices; pure transport add-on later).
+4. **Q4**: ONE grammar for rule WHEN-clauses and smart mailboxes — AND the shared grammar extracts into its own crate (working name `posthaste-query-grammar`): D28's parser (`parse_query_with_scopes`/`ScopeToken` + the tokenizer) moves from domain-service into the new crate; domain-service and the rules engine both consume it. Wasm-purity preserved (it must stay frontier-compatible).
+5. **Q5**: webhook delivery = at-least-once, `posthaste-call-policy` BackoffSchedule, bounded attempts, dead-letter AS A FACT (`rule.delivery.failed` on the tap). Delivery state is itself observable.
+6. **Beta cut**: slice 1 = S1-S4 + two riders (one-command token-mint UX in posthastectl; a worked laptop-script example shipped as docs + integration test). Slice 2 = S5 levels 0-1 (rules + webhook/exec actions) + S6 minimal MCP trio (read/apply/send). Post-beta: unix socket, client tap, settings-UI rules, level-3 SDK polish.
+7. **Slice-1 milestone (owner-stated)**: on the bundled app, mint a token + `posthastectl watch --exec` a laptop script in <5 minutes without reading source; durable cursor across both restarts; gap frame on truncation; safe write-back via apply idempotency. Pinned by an e2e test.
+8. **Sequencing**: S1 absorbs lifecycle-M28 (the idle-reaper requirement rides the far-end factoring — one pass over that code).
