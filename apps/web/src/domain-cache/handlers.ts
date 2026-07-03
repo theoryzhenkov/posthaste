@@ -177,6 +177,22 @@ const eventHandlers = {
       dedupeKey: `operation.settled:${id}`,
     })
   },
+  [EVENT_TOPICS.OperationDispatchUncertain]: (queryClient, event) => {
+    // A send may or may not have reached the recipient — never silently retried
+    // (RFC-L2 D86/O1). Refresh the outbox so the parked send surfaces there, and
+    // raise a needs-attention notification pointing the user at it.
+    invalidateAccountRuntimeReadModels(queryClient, event.accountId)
+    const id = payloadString(event.payload, 'id') ?? event.accountId
+    const reason = payloadString(event.payload, 'reason')
+    pushNotification({
+      severity: 'warning',
+      title: 'A message may not have been sent',
+      message: reason
+        ? `${reason} — open the Outbox to retry or discard it.`
+        : 'Open the Outbox to retry or discard it.',
+      dedupeKey: `operation.dispatch_uncertain:${id}`,
+    })
+  },
 } satisfies Record<DomainEventTopic, EventHandler>
 
 function payloadChangeFlag(event: DomainEvent, key: string): boolean {

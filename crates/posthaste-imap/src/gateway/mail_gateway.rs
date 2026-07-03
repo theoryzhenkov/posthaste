@@ -136,10 +136,11 @@ impl MailGateway for LiveImapSmtpGateway {
         &self,
         _account_id: &AccountId,
         request: &SendMessageRequest,
+        idempotency_key: &str,
     ) -> Result<(), GatewayError> {
         let imap_config = self.resolve_imap_config().await?;
         let smtp_config = self.resolve_smtp_config().await?;
-        send_message_via_smtp(self, &imap_config, &smtp_config, request).await
+        send_message_via_smtp(self, &imap_config, &smtp_config, request, idempotency_key).await
     }
 
     async fn save_draft(

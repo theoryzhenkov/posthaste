@@ -517,14 +517,15 @@ async fn enqueue_send_queues_then_flushes_once() {
 }
 
 #[tokio::test]
-async fn interrupted_inflight_send_is_not_resent() {
+async fn interrupted_inflight_send_parks_dispatch_uncertain_not_resent() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
 
     // Simulate a send that began flushing and was interrupted by a crash: the
-    // op is durably `inflight` before the process restarts.
+    // op is durably `inflight` before the process restarts. It may already have
+    // left the provider, so it must park as dispatch-uncertain — never resent.
     let send = service
         .queue_operation(
             &account,
@@ -542,14 +543,97 @@ async fn interrupted_inflight_send_is_not_resent() {
         .await
         .expect("flush returns ok");
 
+    // The interrupted send is parked, never pushed to the gateway.
+    assert!(gateway.send_calls.lock().unwrap().is_empty());
     assert_eq!(events.len(), 1);
+    assert_eq!(events[0].topic, "operation.dispatch_uncertain");
     let pending = service.list_pending_operations(&account).expect("pending");
     assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].state, OperationState::Failed);
+    assert_eq!(pending[0].state, OperationState::DispatchUncertain);
     assert!(pending[0]
         .last_error
         .as_deref()
-        .is_some_and(|error| error.contains("not retried")));
+        .is_some_and(|error| error.contains("uncertain")));
+}
+
+/// The S1 regression (the M32 gate): a send that times out after the server
+/// already committed the submission must produce **exactly one** submission, and
+/// the op must sit `DispatchUncertain` — never blind-resent on the next flush.
+/// An explicit user retry re-dispatches under the same idempotency identity and
+/// still produces exactly one submission (the JMAP/SMTP dedup — D84/D85 —
+/// modeled at the gateway boundary).
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+#[tokio::test]
+async fn s1_dispatch_uncertain_send_never_duplicates_across_reflush_and_retry() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    // The first submission commits server-side, but the response is lost and the
+    // send times out: the gateway returns `DispatchUncertain`.
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::DispatchUncertain(
+            "send timed out; delivery uncertain".to_string(),
+        )));
+
+    let send = service
+        .enqueue_send(&account, draft_request("Outgoing"))
+        .expect("send queues");
+
+    // Flush 1: times out after commit -> parked; exactly one submission.
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush 1");
+    assert_eq!(
+        gateway.committed_send_keys.lock().unwrap().len(),
+        1,
+        "exactly one submission after the timeout"
+    );
+    assert!(events.iter().any(|e| e.topic == "operation.dispatch_uncertain"));
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, send.id);
+    assert_eq!(pending[0].state, OperationState::DispatchUncertain);
+
+    // Flush 2 (an ordinary auto-flush): the parked send is removed from the
+    // flush set, so it is NOT resent — still exactly one submission.
+    let events2 = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush 2");
+    assert!(events2.is_empty(), "parked send emits nothing on re-flush");
+    assert_eq!(
+        gateway.committed_send_keys.lock().unwrap().len(),
+        1,
+        "auto re-flush does not resend a parked send"
+    );
+
+    // Explicit user retry: re-dispatches under the same identity. The re-forward
+    // of an already-committed send is deduplicated -> still one submission, and
+    // the op settles Applied and is removed.
+    assert!(service.retry_operation(&send.id).expect("retry"));
+    let events3 = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush 3");
+    assert_eq!(
+        gateway.committed_send_keys.lock().unwrap().len(),
+        1,
+        "explicit retry under the same identity does not duplicate"
+    );
+    assert!(events3.iter().any(|e| e.topic == "operation.settled"));
+    assert!(
+        service
+            .list_pending_operations(&account)
+            .unwrap()
+            .is_empty(),
+        "the settled send is removed"
+    );
 }
 
 #[tokio::test]

@@ -76,8 +76,19 @@ export type OperationKind =
   | 'draftDelete'
   | 'send'
 
-/** @spec docs/L1-outbox#state-machine */
-export type OperationState = 'pending' | 'inflight' | 'applied' | 'failed'
+/**
+ * @spec docs/L1-outbox#state-machine
+ * @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+ *
+ * `dispatchUncertain` — a send whose delivery outcome is unknown (it may or may
+ * not have reached the recipient); parked as needs-attention, never auto-resent.
+ */
+export type OperationState =
+  | 'pending'
+  | 'inflight'
+  | 'applied'
+  | 'failed'
+  | 'dispatchUncertain'
 
 /** @spec docs/L1-outbox#operation-model */
 export type OperationEntityKind = 'message' | 'draft'
@@ -115,4 +126,15 @@ export interface OperationSettlement {
   outcome: 'applied' | 'failed'
   assignedEntityId: string | null
   error: string | null
+}
+
+/**
+ * Payload carried by the `operation.dispatch_uncertain` event: a parked send
+ * whose delivery outcome is unknown.
+ *
+ * @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+ */
+export interface OperationDispatchUncertain {
+  id: string
+  reason: string
 }
