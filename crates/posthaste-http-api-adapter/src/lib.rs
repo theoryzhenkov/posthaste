@@ -24,6 +24,7 @@ mod app_state;
 mod router;
 mod secure_file;
 mod serve;
+mod shutdown;
 mod spa;
 
 // Crate-root prelude: items the moved modules reach through `use super::*`
@@ -49,6 +50,10 @@ pub use router::build_api_router;
 pub use secret::SystemSecretStore;
 pub use secure_file::write_secure_file;
 pub use serve::{assemble_daemon_preamble, build_app_state, serve, DaemonPreamble, ServeOptions};
+pub use shutdown::{
+    wait_for_shutdown_signal, ShutdownSequence, StoreClose, SupervisorStop,
+    HTTP_DRAIN_DEADLINE, STORE_CLOSE_DEADLINE, SUPERVISOR_STOP_DEADLINE, TOTAL_SHUTDOWN_BUDGET,
+};
 
 pub(crate) use spa::spa_fallback_service;
 

@@ -12,6 +12,7 @@ pub mod openapi;
 
 pub mod oauth_routes;
 
+mod shutdown_seams;
 mod startup;
 mod startup_authority_server;
 
@@ -32,14 +33,17 @@ use std::sync::Arc;
 use dotenvy::dotenv;
 use posthaste_http_api_adapter::{
     assemble_daemon_preamble, build_api_router, build_app_state, serve, DaemonPreamble,
-    ServeOptions, ServerConfig, ServerHandle,
+    ServeOptions, ServerConfig, ServerHandle, ShutdownSequence, StoreClose, SupervisorStop,
 };
 use posthaste_authority_server::{build_authority_server, build_authority_server_node};
 use posthaste_observability::{events, ph_info};
 use posthaste_runtime::{build_remote_runtime, AuthorityServerTransportConfig};
+use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
 use tracing_appender::non_blocking::WorkerGuard;
+
+use shutdown_seams::{AccountSupervisorStop, DatabaseStoreClose};
 
 #[cfg(test)]
 mod tests;

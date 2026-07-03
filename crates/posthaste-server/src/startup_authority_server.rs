@@ -4,11 +4,28 @@ use std::time::Duration;
 use super::*;
 
 /// Handle returned by [`start_authority_server`]: the bound address, the server task, and
-/// the log guard (must outlive the process).
+/// the log guard (must outlive the process). Also carries the teardown pieces so
+/// the role binary can run the ordered [`ShutdownSequence`] (D60/M20): the shared
+/// cancellation token (wired into axum's graceful shutdown) and the supervisor +
+/// store seams. There is no runtime near node here, so no `RuntimeShutdownHandle`.
 pub struct AuthorityServerHandle {
     pub addr: SocketAddr,
     pub join_handle: tokio::task::JoinHandle<()>,
     pub log_guard: WorkerGuard,
+    shutdown_token: CancellationToken,
+    supervisor_stop: Box<dyn SupervisorStop>,
+    store_close: Box<dyn StoreClose>,
+}
+
+impl AuthorityServerHandle {
+    /// Consume the handle into the ordered [`ShutdownSequence`] (D60). The role
+    /// binary reads `addr` up front, then `.run_until_signal()`.
+    pub fn into_shutdown_sequence(self) -> ShutdownSequence {
+        ShutdownSequence::new(self.shutdown_token, self.join_handle)
+            .with_supervisor_stop(self.supervisor_stop)
+            .with_store_close(self.store_close)
+            .with_log_guard(self.log_guard)
+    }
 }
 
 /// Start the standalone `posthaste-authority-server` role: build the authority server far node and
@@ -63,6 +80,12 @@ pub async fn start_authority_server(server_config: ServerConfig) -> AuthoritySer
 
     let app = link_router(node.transport(), link_auth).layer(trace_layer);
 
+    // Teardown seams (D60 steps (b)/(c)): the standalone authority server owns the
+    // supervisor + store, so it wires both into its shutdown sequence.
+    let supervisor_stop: Box<dyn SupervisorStop> =
+        Box::new(AccountSupervisorStop(node.account_supervisor()));
+    let store_close: Box<dyn StoreClose> = Box::new(DatabaseStoreClose(node.database_store()));
+
     let bind_address = server_config
         .bind_address_override
         .clone()
@@ -80,8 +103,13 @@ pub async fn start_authority_server(server_config: ServerConfig) -> AuthoritySer
         "posthaste-authority-server serving the runtime↔authority-server link surface"
     );
 
+    // Graceful shutdown (D60 phase (a)): cancelling the token drains in-flight
+    // link requests before the serve future returns.
+    let shutdown_token = CancellationToken::new();
+    let drain_token = shutdown_token.clone();
     let join_handle = tokio::spawn(async move {
         axum::serve(listener, app)
+            .with_graceful_shutdown(drain_token.cancelled_owned())
             .await
             .expect("posthaste-authority-server server failed");
     });
@@ -90,5 +118,8 @@ pub async fn start_authority_server(server_config: ServerConfig) -> AuthoritySer
         addr,
         join_handle,
         log_guard,
+        shutdown_token,
+        supervisor_stop,
+        store_close,
     }
 }
