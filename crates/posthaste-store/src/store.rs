@@ -2,6 +2,7 @@ use super::*;
 use crate::sql_cache::CachedSql;
 use std::ops::Deref;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
@@ -308,6 +309,70 @@ impl DatabaseStore {
         tx.commit()
             .map_err(|err| StoreError::Failure(err.to_string()))?;
         Ok(result)
+    }
+
+    /// Async offload of [`Self::write_transaction`]: runs the blocking rusqlite
+    /// write transaction on the tokio **blocking pool** via
+    /// [`tokio::task::spawn_blocking`], so SQLite work — the lock acquire, the
+    /// txn, `serde`/param building inside `operation` — never occupies an async
+    /// worker thread (D63 / audit N4). This is the write choke point every
+    /// runtime write should offload through.
+    ///
+    /// The write `Mutex` is `std::sync` and is acquired *inside* the blocking
+    /// closure (by `write_transaction`), never held across an `.await` — the
+    /// guard lives and dies on one blocking thread. `rusqlite::Connection` is
+    /// `Send`, and the store is moved in as `Arc<Self>` (`Send + Sync +
+    /// 'static`), so the guard travels into the closure by the standard pattern.
+    /// A panic inside `operation` is caught by `spawn_blocking` and surfaced as
+    /// a `StoreError::Failure` (the [`StagedBodyFiles`] guard, if any, still runs
+    /// its `Drop` during the unwind on the blocking thread — panic-safe across
+    /// the pool boundary).
+    ///
+    /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
+    pub async fn write_transaction_async<T>(
+        self: Arc<Self>,
+        operation: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError> + Send + 'static,
+    ) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || self.write_transaction(operation))
+            .await
+            .unwrap_or_else(|join_err| {
+                Err(StoreError::Failure(format!(
+                    "store write task failed: {join_err}"
+                )))
+            })
+    }
+
+    /// Async offload of a pooled read: acquires a read connection and runs
+    /// `query` on the tokio **blocking pool** via
+    /// [`tokio::task::spawn_blocking`] (D63 / audit N4). WAL mode lets this run
+    /// concurrently with an in-flight write transaction, so a slow write no
+    /// longer blocks a concurrent read on the async runtime.
+    ///
+    /// The read connection is checked out and returned to the pool entirely
+    /// within the blocking closure; a panic is caught and surfaced as a
+    /// `StoreError::Failure`.
+    ///
+    /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
+    pub async fn read_async<T>(
+        self: Arc<Self>,
+        query: impl FnOnce(&Connection) -> Result<T, StoreError> + Send + 'static,
+    ) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || {
+            let connection = self.read_connection()?;
+            query(&connection)
+        })
+        .await
+        .unwrap_or_else(|join_err| {
+            Err(StoreError::Failure(format!(
+                "store read task failed: {join_err}"
+            )))
+        })
     }
 
     /// Runs a write transaction whose content-addressed body files are staged to
