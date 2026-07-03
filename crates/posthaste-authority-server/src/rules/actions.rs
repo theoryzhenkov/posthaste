@@ -47,7 +47,7 @@ impl EngineContext {
         let token = match self.mint_token(summary, grants, expiry_seconds) {
             Ok(token) => token,
             Err(reason) => {
-                self.emit_delivery_failed(rule, event.seq, reason, 0, summary);
+                self.emit_delivery_failed(rule, event.seq, reason, 0, summary).await;
                 return RuleOutcome::Failed;
             }
         };
@@ -122,7 +122,8 @@ impl EngineContext {
                     format!("serializing webhook payload: {error}"),
                     0,
                     summary,
-                );
+                )
+                .await;
                 return RuleOutcome::Failed;
             }
         };
@@ -154,7 +155,8 @@ impl EngineContext {
                     // The executor drove its full schedule before giving up.
                     posthaste_provider_call::BackoffSchedule::default().max_attempts,
                     summary,
-                );
+                )
+                .await;
                 RuleOutcome::Failed
             }
         }
@@ -198,7 +200,8 @@ impl EngineContext {
                     format!("spawning `{command}`: {error}"),
                     0,
                     summary,
-                );
+                )
+                .await;
                 return RuleOutcome::Failed;
             }
         };
@@ -227,7 +230,8 @@ impl EngineContext {
                     format!("`{command}` exited {}: {}", output.status, stderr.trim()),
                     1,
                     summary,
-                );
+                )
+                .await;
                 RuleOutcome::Failed
             }
             Ok(Err(error)) => {
@@ -237,7 +241,8 @@ impl EngineContext {
                     format!("`{command}` failed: {error}"),
                     1,
                     summary,
-                );
+                )
+                .await;
                 RuleOutcome::Failed
             }
             Err(_elapsed) => {
@@ -249,7 +254,8 @@ impl EngineContext {
                     format!("`{command}` timed out after {}s", EXEC_TIMEOUT.as_secs()),
                     1,
                     summary,
-                );
+                )
+                .await;
                 RuleOutcome::Failed
             }
         }

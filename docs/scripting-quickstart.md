@@ -197,6 +197,15 @@ posthastectl watch --exec 'sh ./write_back.sh' --cursor ./cursor
 If the tap's durable history is truncated past your cursor, `watch` receives an
 explicit **gap frame** (never a silent drop) and resumes from the live head.
 
+> **One tap, not two** (RFC-L2-scripting D52/S3): `/v1/events` already carries
+> everything the authority server itself originates — rule outcomes included.
+> The bundled app's runtime shares the AS's own event bus and durable log
+> in-process, so a second "AS tap" mount would just duplicate this one. That
+> includes `rule.fired`/`rule.delivery.failed`: they append through the same
+> durable log this section describes, so a `--rule`/`--topic rule.fired` watch
+> that reconnects after a rule fired still sees it (or the gap frame, never a
+> silent drop) exactly like any other fact.
+
 ## Snapshot-attach: read state, then tail from that point
 
 For a level-triggered script (reconcile current state, then follow changes),
