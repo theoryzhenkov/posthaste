@@ -207,6 +207,14 @@ export interface ApiFetchOptions {
   query?: Record<string, string | number | undefined | null>;
   /** JSON request body for POST operations. */
   body?: unknown;
+  /**
+   * Extra request headers (merged in after `accept`/`authorization`/
+   * `content-type`, so a caller cannot accidentally clobber those). Used by
+   * the write verbs (`tag`/`move`/`reply`/`send`/`apply`) to set
+   * `Idempotency-Key` (RFC-L2-scripting D53) without every call site
+   * reimplementing header merging.
+   */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -241,6 +249,9 @@ export async function apiFetch<T>(
   if (opts.body !== undefined) {
     headers["content-type"] = "application/json";
     bodyText = JSON.stringify(opts.body);
+  }
+  if (opts.headers) {
+    Object.assign(headers, opts.headers);
   }
 
   const doFetch = conn.fetch ?? fetch;

@@ -42,6 +42,15 @@ export function topLevelHelp(operations: Operation[]): string {
   lines.push(
     `  ${"token mint".padEnd(width)}  Mint a least-privilege capability token (attenuated)`,
   );
+  lines.push(`  ${"tag".padEnd(width)}  Add/remove keywords on a message`);
+  lines.push(
+    `  ${"move".padEnd(width)}  Move a message to a mailbox (role or id)`,
+  );
+  lines.push(`  ${"reply".padEnd(width)}  Reply in-thread to a message`);
+  lines.push(`  ${"send".padEnd(width)}  Send a new message`);
+  lines.push(
+    `  ${"apply".padEnd(width)}  Escape hatch: any message-command route by name`,
+  );
   lines.push("");
   lines.push(`Run '${PROG} <command> --help' for command details.`);
   return lines.join("\n");
