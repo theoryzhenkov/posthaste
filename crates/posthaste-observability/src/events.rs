@@ -182,6 +182,11 @@ pub const SUPERVISOR_OAUTH_REFRESH_FAILED: LogEvent =
     LogEvent::new("supervisor.oauth.refresh_failed");
 pub const SUPERVISOR_OAUTH_TOKEN_REFRESHED: LogEvent =
     LogEvent::new("supervisor.oauth.token_refreshed");
+/// A select!-loop arm's bounded call (RFC-L2-lifecycle D66 / M26) exceeded
+/// its `tokio::time::timeout` budget — the account is marked `Degraded` and
+/// the loop moves on to its next tick/command (the M21 watchdog owns
+/// lifecycle, not this per-arm backstop).
+pub const SUPERVISOR_ARM_TIMEOUT: LogEvent = LogEvent::new("supervisor.arm.timeout");
 
 pub const DOMAIN_AUTOMATION_POST_SYNC_FAILED: LogEvent =
     LogEvent::new("domain.automation.post_sync_failed");

@@ -25,6 +25,50 @@ pub(crate) const WATCHDOG_HEALTHY_RESET_AFTER: Duration = Duration::from_secs(60
 /// phase budget so a per-account stop cannot outlast the whole-supervisor one.
 pub(crate) const PER_ACCOUNT_STOP_DEADLINE: Duration = Duration::from_secs(3);
 
+// ---------------------------------------------------------------------------
+// Select-loop arm budgets (RFC-L2-lifecycle D66 / M26). Every inline await
+// inside an account runtime's `select!` arm (`runtime.rs`) is wrapped in
+// `tokio::time::timeout` at its call site, so a hung provider/oauth/store
+// call cannot wedge the whole account loop undetectably (audit row 5 / N17).
+//
+// These are a BACKSTOP, not the primary control. Individual provider calls
+// already carry their own tighter "envelope" deadline: `IMAP_OP_TIMEOUT_MS`
+// (60s, `posthaste-imap/src/timeout.rs`) bounds a single IMAP round trip;
+// `OAUTH_HTTP_TOTAL_TIMEOUT` (30s, `oauth/service.rs`) bounds a single IdP
+// HTTP call. Under normal operation a genuinely hung call trips its own
+// envelope deadline well before the arm budget below is reached — the arm
+// budget only fires when either (a) many bounded-but-slow envelope calls
+// chain inside one cycle (a large mailbox sync issuing hundreds of sub-60s
+// round trips) or (b) some call path the envelope layer does not cover hangs
+// outright. Each budget here is set comfortably above its arm's worst
+// normal-case envelope total — belt over braces (principle VI). All are
+// **Review** (picked sane, not measured; named for owner review per D66,
+// matching `WATCHDOG_HEALTHY_RESET_AFTER`'s review posture).
+// ---------------------------------------------------------------------------
+
+/// Budget for a full sync cycle: the poll tick, a manual/API-triggered
+/// command, and a push-notification-driven sync all route through
+/// `process_sync_trigger_with_state`, which may loop to drain a coalesced
+/// follow-up trigger. The longest budget — a real sync can issue many IMAP
+/// round trips (each individually capped at `IMAP_OP_TIMEOUT_MS`), so this
+/// must clear a large-but-progressing mailbox, not just one op.
+pub(crate) const ARM_BUDGET_SYNC: Duration = Duration::from_secs(300);
+/// Budget for one automation-backfill batch
+/// (`AUTOMATION_BACKFILL_BATCH_SIZE` = 10 provider round trips per tick).
+pub(crate) const ARM_BUDGET_BACKFILL: Duration = Duration::from_secs(120);
+/// Budget for one cache-maintenance batch (a bounded fetch/rescore batch
+/// under the cache resource governor's lease).
+pub(crate) const ARM_BUDGET_CACHE: Duration = Duration::from_secs(120);
+/// Budget for one snooze-scheduler tick. Local-store-only — it reads
+/// `message_snooze` and enqueues a mailbox-move outbox op rather than
+/// sending one inline — so this is the tightest budget: a backstop against a
+/// wedged store lock, not a provider network call.
+pub(crate) const ARM_BUDGET_SNOOZE: Duration = Duration::from_secs(30);
+/// Budget for one OAuth-refresh tick: `resolve_secret` (bounded by
+/// `OAUTH_HTTP_TOTAL_TIMEOUT` when it round-trips the IdP) plus, on a token
+/// rotation, a full `ensure_connection` gateway rebuild.
+pub(crate) const ARM_BUDGET_OAUTH_REFRESH: Duration = Duration::from_secs(90);
+
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
 ///
