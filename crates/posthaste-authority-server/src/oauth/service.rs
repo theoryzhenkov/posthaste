@@ -1,4 +1,27 @@
 use super::*;
+use std::time::Duration as StdDuration;
+
+/// Total wall-clock deadline for a single IdP HTTP request. Token exchange,
+/// refresh, OIDC discovery, and JWKS all inherit it from the one shared client
+/// below, so a hung IdP can never wedge a callback handler or the supervisor
+/// refresh path (D65, audit N11). REVIEW: 30s total, flagged for owner review.
+pub(crate) const OAUTH_HTTP_TOTAL_TIMEOUT: StdDuration = StdDuration::from_secs(30);
+/// TCP + TLS connect deadline for the same shared client.
+/// REVIEW: 10s connect, flagged for owner review.
+const OAUTH_HTTP_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(10);
+
+/// The one process-wide OAuth HTTP client. Built exactly once with the timeouts
+/// above and shared by every IdP call via a cheap `Arc` clone, replacing the
+/// per-request client rebuilds at the `/v1/oauth/*` handlers and the supervisor
+/// refresh path. Redirects stay disabled (loopback-only redirect URIs).
+static SHARED_OAUTH_HTTP_CLIENT: LazyLock<oauth2::reqwest::Client> = LazyLock::new(|| {
+    oauth2::reqwest::ClientBuilder::new()
+        .redirect(oauth2::reqwest::redirect::Policy::none())
+        .timeout(OAUTH_HTTP_TOTAL_TIMEOUT)
+        .connect_timeout(OAUTH_HTTP_CONNECT_TIMEOUT)
+        .build()
+        .expect("shared OAuth HTTP client (rustls-tls) must build")
+});
 
 #[derive(Clone)]
 pub struct OAuthTokenService {
@@ -18,11 +41,11 @@ pub struct OAuthAuthorizationCodeExchange<'a> {
 
 impl OAuthTokenService {
     pub fn new() -> Result<Self, GatewayError> {
-        let http_client = oauth2::reqwest::ClientBuilder::new()
-            .redirect(oauth2::reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|error| GatewayError::Rejected(format!("OAuth HTTP client: {error}")))?;
-        Ok(Self { http_client })
+        // Clones the process-wide timed client (Arc-backed, cheap); no per-request
+        // client is ever rebuilt. `Result` is retained for call-site compatibility.
+        Ok(Self {
+            http_client: SHARED_OAUTH_HTTP_CLIENT.clone(),
+        })
     }
 
     pub fn authorization_session(
