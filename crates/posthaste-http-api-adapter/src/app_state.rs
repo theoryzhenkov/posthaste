@@ -1,5 +1,9 @@
 use super::*;
 
+use tokio_util::sync::CancellationToken;
+
+use crate::shutdown::{ShutdownSequence, StoreClose, SupervisorStop};
+
 pub struct AppState {
     /// Target runtime boundary for `/v1` mail behavior.
     ///
@@ -48,6 +52,18 @@ pub struct ServerHandle {
     ///
     /// @spec docs/runtime/internals/L2#runtime-shutdown-handle
     pub runtime_shutdown: RuntimeShutdownHandle,
+    /// The shared cancellation token that drives graceful shutdown. Already wired
+    /// into axum's `.with_graceful_shutdown`; cancelling it (via the
+    /// [`ShutdownSequence`] or an embedding host) begins the HTTP drain.
+    ///
+    /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d60
+    pub shutdown_token: CancellationToken,
+    /// Teardown step (b), supervisor half. `Some` for the bundled in-process
+    /// server; `None` for a lean near node (no in-process supervisor).
+    pub supervisor_stop: Option<Box<dyn SupervisorStop>>,
+    /// Teardown step (c). `Some` for the bundled in-process server; `None` for a
+    /// lean near node (no local store).
+    pub store_close: Option<Box<dyn StoreClose>>,
     /// Per-process bearer token, exposed so the embedded host can inject it
     /// into the webview as `window.__POSTHASTE_TOKEN__`.
     ///
@@ -59,6 +75,25 @@ pub struct ServerHandle {
     ///
     /// @spec docs/eph/DESIGN-L1-trust-model
     pub require_auth: bool,
+}
+
+impl ServerHandle {
+    /// Consume the handle into the ordered [`ShutdownSequence`] (D60). The role
+    /// binaries call this after reading the fields they need up front (`addr`,
+    /// `auth_token`, `require_auth`) and then `.run_until_signal()`. The log guard
+    /// rides along so log output survives to the end of teardown.
+    pub fn into_shutdown_sequence(self) -> ShutdownSequence {
+        let mut sequence = ShutdownSequence::new(self.shutdown_token, self.join_handle)
+            .with_runtime_shutdown(self.runtime_shutdown)
+            .with_log_guard(self.log_guard);
+        if let Some(supervisor_stop) = self.supervisor_stop {
+            sequence = sequence.with_supervisor_stop(supervisor_stop);
+        }
+        if let Some(store_close) = self.store_close {
+            sequence = sequence.with_store_close(store_close);
+        }
+        sequence
+    }
 }
 
 /// Additional origins to allow in CORS beyond the configured default.

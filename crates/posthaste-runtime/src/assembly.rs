@@ -278,8 +278,12 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     // absorption-gated on the down-channel base assertion, not the receipt.
     // Co-located: retire on receipt (`colocated-unchanged`). See
     // [`AuthorityServerPendingSet`].
-    let pending_set = Arc::new(AuthorityServerPendingSet::new(down_channel.is_some()));
-    if let Some(frames) = down_channel {
+    let has_down_channel = down_channel.is_some();
+    let pending_set = Arc::new(AuthorityServerPendingSet::new(has_down_channel));
+    // N7: retain the bridge task's `JoinHandle` (it used to be dropped at spawn,
+    // detaching the task from shutdown) so the `RuntimeShutdownHandle` owns it and
+    // teardown step (b) can stop it.
+    let down_channel_task = down_channel.map(|frames| {
         // The connection lifecycle (subscribe, reconnect, `afterSeq` resume)
         // lives in the near-end engine that feeds `frames`; this task holds the
         // frame SEMANTICS only (evict/absorb/republish).
@@ -288,8 +292,8 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
             reads.clone(),
             event_sender.clone(),
             pending_set.clone(),
-        ));
-    }
+        ))
+    });
     let views = Arc::new(ViewRegistry::new(
         event_sender.clone(),
         pending_set.clone(),
@@ -308,6 +312,9 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
 
     ComposedRuntime {
         handle: RuntimeHandle { core },
-        shutdown: RuntimeShutdownHandle { stopped },
+        shutdown: RuntimeShutdownHandle {
+            stopped,
+            down_channel_task,
+        },
     }
 }

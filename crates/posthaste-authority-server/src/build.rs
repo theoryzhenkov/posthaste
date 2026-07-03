@@ -56,6 +56,10 @@ pub struct AuthorityServerBuild {
     ///
     /// @spec docs/replication/authority-server-link/L1#3-the-backendapi-contract
     pub authority_server_link: AuthorityServerLinkHandle,
+    /// The concrete SQLite store, for teardown step (c) — the composition root
+    /// closes it as the final phase of the [`ShutdownSequence`](posthaste_http_api_adapter)
+    /// (D62/M20).
+    pub database_store: Arc<DatabaseStore>,
 }
 
 /// The authority server's service-graph handle: the `MailService`, `MailStore`, secret
@@ -110,8 +114,11 @@ pub async fn build_authority_server(
 pub struct AuthorityServerNode {
     transport: AuthorityServerLinkHandle,
     /// Held so the supervisor's account tasks keep running for the node's life
-    /// (also reachable through the transport's far node).
-    _account_supervisor: Arc<AccountSupervisor>,
+    /// (also reachable through the transport's far node); surfaced for teardown
+    /// step (b) via [`AuthorityServerNode::account_supervisor`].
+    account_supervisor: Arc<AccountSupervisor>,
+    /// The concrete store, surfaced for teardown step (c).
+    database_store: Arc<DatabaseStore>,
     runtime_status: RuntimeStatus,
 }
 
@@ -120,6 +127,18 @@ impl AuthorityServerNode {
     /// this authority server — hand to `link_router`.
     pub fn transport(&self) -> AuthorityServerLinkHandle {
         self.transport.clone()
+    }
+
+    /// The account supervisor, for teardown step (b) (D60/D61). The standalone
+    /// authority server binary wires it into its `ShutdownSequence`.
+    pub fn account_supervisor(&self) -> Arc<AccountSupervisor> {
+        self.account_supervisor.clone()
+    }
+
+    /// The concrete store, for teardown step (c) (D62). Wired into the standalone
+    /// authority server binary's `ShutdownSequence`.
+    pub fn database_store(&self) -> Arc<DatabaseStore> {
+        self.database_store.clone()
     }
 
     /// The authority server's startup status (store readiness + account count).
@@ -140,7 +159,8 @@ pub async fn build_authority_server_node(
     )));
     Ok(AuthorityServerNode {
         transport,
-        _account_supervisor: authority_server.account_supervisor.clone(),
+        account_supervisor: authority_server.account_supervisor.clone(),
+        database_store: authority_server.database_store.clone(),
         runtime_status: authority_server.runtime_status,
     })
 }
@@ -158,6 +178,10 @@ pub(crate) struct AuthorityServerParts {
     authority_server: Arc<AuthorityServer>,
     api_bridge: AuthorityServerApiMigrationBridge,
     runtime_status: RuntimeStatus,
+    /// The concrete SQLite store, retained so the composition root can close it
+    /// as teardown step (c) (D62/M20). The `api_bridge` holds the same store as
+    /// `Arc<dyn MailStore>`; the concrete handle is what carries `close()`.
+    database_store: Arc<DatabaseStore>,
 }
 
 /// Build the authority server far node alone (no runtime). Used directly by a
@@ -189,7 +213,7 @@ pub(crate) async fn build_authority_server_parts(
     )?);
     let store: Arc<dyn MailStore> = database_store.clone();
     let config_repo: Arc<dyn ConfigRepository> = Arc::new(config_repo);
-    let service = Arc::new(MailService::new(database_store, config_repo.clone()));
+    let service = Arc::new(MailService::new(database_store.clone(), config_repo.clone()));
 
     service.sync_source_projections()?;
     let account_count = service.list_sources()?.len();
@@ -264,6 +288,7 @@ pub(crate) async fn build_authority_server_parts(
         authority_server,
         api_bridge,
         runtime_status,
+        database_store,
     })
 }
 
@@ -284,6 +309,7 @@ pub(crate) fn build_runtime(
         authority_server,
         api_bridge,
         runtime_status,
+        database_store,
     } = authority_server;
     // Take the transport selection out of the config (the override decorator is
     // `FnOnce`, so it is moved, not cloned); the rest of the config was consumed
@@ -323,6 +349,7 @@ pub(crate) fn build_runtime(
         secret_store,
         api_bridge,
         authority_server_link,
+        database_store,
     }
 }
 
