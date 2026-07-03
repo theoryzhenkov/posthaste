@@ -93,6 +93,118 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     })
 }
 
+/// Fetch a CONDSTORE-only (no QRESYNC) header delta plus an authoritative
+/// current UID listing for one mailbox.
+///
+/// RFC 7162 forbids the `VANISHED` fetch modifier unless QRESYNC is enabled,
+/// and a CONDSTORE-only server (real Gmail advertises CONDSTORE but not
+/// QRESYNC) rejects it — so this issues a bare
+/// `UID FETCH 1:* (<items>) (CHANGEDSINCE <since_modseq>)`. New arrivals carry
+/// fresh MODSEQs, so the CHANGEDSINCE fetch covers them too; any UID above
+/// `after_uid` the server nevertheless failed to return is fetched explicitly
+/// (a guard for non-conforming servers — empty on conforming ones). Deletions
+/// are not observable through CHANGEDSINCE at all, so one header-free
+/// `UID SEARCH UNDELETED` provides `current_uids` and the caller reconciles
+/// known local locations absent from it into explicit deleted-UID identities.
+///
+/// @spec docs/L0-providers#imap-delta-fallback
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
+pub(crate) async fn fetch_mailbox_condstore_delta_snapshot_with_client(
+    client: &mut ImapClient,
+    mailbox_name: &str,
+    since_modseq: ImapModSeq,
+    after_uid: Option<ImapUid>,
+    fetch_gmail_metadata: bool,
+    updated_at: String,
+) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
+    let since_modseq =
+        NonZeroU64::new(since_modseq.0).ok_or(ImapAdapterError::InvalidModSeq(since_modseq.0))?;
+    let selected = examine_selected_mailbox(client, mailbox_name).await?;
+
+    // Deletion detection: a header-free UNDELETED search yields the
+    // authoritative current UID set (the same absence source the full-snapshot
+    // path reconciles against), at zero header bytes.
+    let mut uids =
+        crate::timeout::with_deadline("uid_search", client.uid_search([SearchKey::Undeleted]))
+            .await?;
+    uids.sort_unstable();
+    uids.dedup();
+    let current_uids = uids
+        .iter()
+        .map(|uid| ImapUid(uid.get()))
+        .collect::<Vec<_>>();
+    ph_info!(
+        events::IMAP_MAILBOX_UID_SEARCH_COMPLETED,
+        mailbox_id = %selected.mailbox_id,
+        uid_count = current_uids.len(),
+        fetch_modseq = true,
+        reason = "condstore_delta",
+        "IMAP mailbox UID search completed"
+    );
+
+    let sequence_set = SequenceSet::try_from("1:*")
+        .map_err(|error| ImapAdapterError::InvalidUidSequence(error.to_string()))?;
+    let snapshot = crate::timeout::with_deadline_resolve(
+        "changed_since_fetch",
+        client.resolve(ChangedSinceFetchTask::new(
+            sequence_set,
+            fetch_item_names(true, fetch_gmail_metadata),
+            since_modseq,
+            false,
+        )),
+    )
+    .await?;
+
+    let mut headers = Vec::with_capacity(snapshot.headers.len());
+    for items in snapshot.headers.into_values() {
+        let fetched =
+            fetched_header_from_items_with_metadata(&selected, items, updated_at.clone())?;
+        if imap_flags_include_deleted(&fetched.header.flags) {
+            // A \Deleted message is absent from the UNDELETED search above, so
+            // the caller's UID reconciliation records its removal.
+            continue;
+        }
+        headers.push(imap_header_message_record_with_gmail_metadata(
+            &selected,
+            fetched.header,
+            fetched.gmail,
+        )?);
+    }
+
+    // Belt-and-braces new-UID sweep: conforming servers already reported new
+    // arrivals through CHANGEDSINCE (fresh MODSEQs), so this set is empty for
+    // them; it only pays for servers whose CHANGEDSINCE misses new UIDs.
+    let changed_uids = headers
+        .iter()
+        .map(|record| record.location.uid.0)
+        .collect::<std::collections::BTreeSet<_>>();
+    let uid_watermark = after_uid.map_or(0, |uid| uid.0);
+    let missed_new_uids = uids
+        .into_iter()
+        .filter(|uid| uid.get() > uid_watermark && !changed_uids.contains(&uid.get()))
+        .collect::<Vec<_>>();
+    if !missed_new_uids.is_empty() {
+        headers.extend(
+            fetch_selected_mailbox_headers(
+                client,
+                &selected,
+                &missed_new_uids,
+                true,
+                fetch_gmail_metadata,
+                updated_at,
+            )
+            .await?,
+        );
+    }
+    headers.sort_by_key(|record| record.location.uid);
+
+    Ok(ImapMailboxUidDeltaSnapshot {
+        selected,
+        headers,
+        current_uids,
+    })
+}
+
 async fn enable_qresync(client: &mut ImapClient) -> Result<bool, ImapAdapterError> {
     let capability = CapabilityEnable::try_from("QRESYNC")
         .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
