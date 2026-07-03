@@ -8,7 +8,9 @@ import {
   resolveConnection,
   type Connection,
 } from "./client.js";
+import { mintConnectionToken } from "./connect.js";
 import { operations } from "./operations/index.js";
+import { subscribeEvents } from "./subscription.js";
 
 /**
  * Render an operation's result (or error) as an MCP tool result. JSON text
@@ -46,7 +48,9 @@ async function runAsTool(
 function buildServer(conn: Connection): McpServer {
   const server = new McpServer(
     { name: "posthaste-mcp", version: "0.0.0" },
-    { capabilities: { tools: {} } },
+    // `logging` enables the standard `notifications/message` server→client push
+    // the subscription rides on (ruling 22, half b); `tools` is the action half.
+    { capabilities: { tools: {}, logging: {} } },
   );
   for (const op of operations) {
     server.registerTool(
@@ -64,10 +68,17 @@ function buildServer(conn: Connection): McpServer {
   return server;
 }
 
+/** Parse the resume cursor env (`POSTHASTE_MCP_AFTER_SEQ`) into a seq, or none. */
+function parseAfterSeq(raw: string | undefined): number | undefined {
+  if (!raw || raw.trim().length === 0) return undefined;
+  const seq = Number(raw);
+  return Number.isFinite(seq) && seq >= 0 ? seq : undefined;
+}
+
 async function main(): Promise<void> {
-  let conn: Connection;
+  let discovered: Connection;
   try {
-    conn = resolveConnection();
+    discovered = resolveConnection();
   } catch (error) {
     const message =
       error instanceof ConnectionError ? error.message : String(error);
@@ -76,13 +87,47 @@ async function main(): Promise<void> {
   }
 
   process.stderr.write(
-    `posthaste-mcp: connected to ${conn.baseUrl} (via ${conn.source}, ` +
-      `${conn.token ? "with token" : "no token"})\n`,
+    `posthaste-mcp: connected to ${discovered.baseUrl} (via ${discovered.source}, ` +
+      `${discovered.token ? "with token" : "no token"})\n`,
   );
+
+  // Connect-time, per-connection mint: attenuate the discovered bootstrap into a
+  // token scoped to exactly the declared grants (default read-only + subscribe;
+  // write verbs are an explicit opt-in). Non-fatal on failure (see connect.ts).
+  const mint = await mintConnectionToken(discovered, {
+    grants: process.env.POSTHASTE_MCP_GRANTS,
+    expiry: process.env.POSTHASTE_MCP_TOKEN_EXPIRY,
+    account: process.env.POSTHASTE_MCP_ACCOUNT,
+  });
+  const conn = mint.conn;
+  process.stderr.write(`posthaste-mcp: ${mint.detail}\n`);
 
   const server = buildServer(conn);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Half (b): open the event tap and push each fact to the agent as an MCP
+  // `notifications/message`. Runs for the life of the connection; a failure ends
+  // the subscription (the tools stay usable) rather than tearing down the server.
+  const afterSeq = parseAfterSeq(process.env.POSTHASTE_MCP_AFTER_SEQ);
+  void subscribeEvents(
+    conn,
+    { afterSeq },
+    {
+      fetch: conn.fetch ?? fetch,
+      send: (n) =>
+        server.server.sendLoggingMessage({
+          level: n.level,
+          logger: n.logger,
+          data: n.data,
+        }),
+      log: (line) => process.stderr.write(`posthaste-mcp: ${line}\n`),
+    },
+  ).catch((error) => {
+    process.stderr.write(
+      `posthaste-mcp: event subscription ended: ${String(error)}\n`,
+    );
+  });
 }
 
 // Only start the stdio server when run as the entry module, so importing this

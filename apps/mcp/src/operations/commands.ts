@@ -133,6 +133,52 @@ export const commandOperations: Operation[] = [
   }),
 
   defineOperation({
+    mcpName: "reply",
+    title: "Reply to a message",
+    description:
+      "Reply in-thread to a message: given the message id, looks up the " +
+      "gateway-computed reply context (recipient, subject, In-Reply-To/" +
+      "References) and sends 'body' through it — so an agent replies without " +
+      "knowing the compose plumbing. Optionally pass 'idempotencyKey' so a " +
+      "redelivery of the same trigger does not double-send.",
+    mutates: true,
+    cli: { path: ["messages", "reply"] },
+    argSchema: {
+      sourceId: z.string(),
+      messageId: z.string(),
+      body: z.string(),
+      idempotencyKey: z.string().optional(),
+    },
+    handler: async (conn, args) => {
+      const context = await apiFetch<Schemas["ReplyContext"]>(
+        conn,
+        `/sources/${encodeURIComponent(args.sourceId)}/messages/${encodeURIComponent(args.messageId)}/reply-context`,
+      );
+      const body: Schemas["SendMessageRequest"] = {
+        to: context.to,
+        cc: [],
+        bcc: [],
+        subject: context.replySubject,
+        body: args.body,
+        inReplyTo: context.inReplyTo ?? undefined,
+        references: context.references ?? undefined,
+        attachments: [],
+      };
+      return apiFetch<Schemas["OkResponse"]>(
+        conn,
+        `/sources/${encodeURIComponent(args.sourceId)}/commands/send`,
+        {
+          method: "POST",
+          body,
+          headers: args.idempotencyKey
+            ? { "Idempotency-Key": args.idempotencyKey }
+            : undefined,
+        },
+      );
+    },
+  }),
+
+  defineOperation({
     mcpName: "trigger_sync",
     title: "Trigger sync",
     description:
