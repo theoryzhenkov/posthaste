@@ -89,6 +89,39 @@ fn test_shared(account: &AccountSettings) -> (Arc<SupervisorShared>, TempDirGuar
             Instant::now(),
             CacheResourcePolicy::default(),
         )),
+        sync_governor: SyncGovernor::production(),
+        poll_interval: Duration::from_secs(60),
+        oauth_refresh_flights: Mutex::new(HashMap::new()),
+    });
+    (shared, root)
+}
+
+// A shared context with an explicit scheduling governor (D98) — used by the
+// boot-storm test to pin a tiny concurrent-sync cap and zero startup splay so
+// the global cap (not the splay) is what bounds the observed peak.
+fn test_shared_with_governor(
+    account: &AccountSettings,
+    governor: SyncGovernor,
+) -> (Arc<SupervisorShared>, TempDirGuard) {
+    let (shared, root) = test_shared(account);
+    // `SupervisorShared` is not mutable behind the `Arc`; rebuild it with the
+    // requested governor, reusing the already-constructed collaborators.
+    let shared = Arc::new(SupervisorShared {
+        service: shared.service.clone(),
+        store: shared.store.clone(),
+        secret_store: shared.secret_store.clone(),
+        event_sender: shared.event_sender.clone(),
+        gateways: RwLock::new(HashMap::new()),
+        runtime_overviews: RwLock::new(HashMap::new()),
+        runtime_generations: RwLock::new(HashMap::new()),
+        sync_cycle_generations: RwLock::new(HashMap::new()),
+        known_accounts: RwLock::new(HashSet::new()),
+        account_count: AtomicUsize::new(0),
+        cache_resources: Mutex::new(CacheResourceGovernor::new(
+            Instant::now(),
+            CacheResourcePolicy::default(),
+        )),
+        sync_governor: governor,
         poll_interval: Duration::from_secs(60),
         oauth_refresh_flights: Mutex::new(HashMap::new()),
     });
@@ -886,6 +919,7 @@ async fn hung_provider_sync_degrades_the_account_but_the_loop_stays_responsive()
         command_rx,
         sync_state,
         cancel.clone(),
+        false,
     ));
 
     // Wait for the (fast, un-delayed) startup sync to settle the account out
@@ -1248,4 +1282,104 @@ async fn snooze_tick_still_returns_a_due_message_on_the_monotonic_anchored_clock
         returned.iter().any(|summary| summary.id == message.id),
         "a due snooze must still be returned to the inbox on the monotonic-anchored clock"
     );
+}
+
+// ---------------------------------------------------------------------------
+// M36 / D98 (Sc1 / R4): startup splay + the global concurrent-sync cap.
+// ---------------------------------------------------------------------------
+
+// spec: docs/eph/RFC-L2-provider-reliability#d98
+#[tokio::test]
+async fn boot_storm_never_exceeds_the_global_concurrent_sync_cap() {
+    // A boot storm: N accounts started in a tight loop each fire an immediate
+    // Startup sync. With the global cap, at most CAP provider syncs run at once;
+    // the rest queue on the governor's semaphore. Splay is pinned to ZERO so the
+    // CAP — not the splay — is the binding constraint under test.
+    const CAP: usize = 3;
+    const ACCOUNTS: usize = 12;
+
+    let seed = test_account("bootstorm-seed");
+    let (shared, _root) =
+        test_shared_with_governor(&seed, SyncGovernor::for_test(CAP, Duration::ZERO));
+    let supervisor = AccountSupervisor::from_shared_for_test(shared.clone());
+
+    // Gate every account's provider pull at entry: an admitted sync (one that
+    // has acquired a global slot) blocks there, so exactly CAP syncs sit
+    // in-flight at once and the rest wait on the semaphore — a deterministic
+    // stand-in for a slow provider, with no reliance on the process-wide sync
+    // delay (which another test in this binary also drives).
+    let _probe = MockJmapGateway::install_sync_concurrency_probe_for_tests("bootstorm-");
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut gates = Vec::new();
+    let mut ids = Vec::new();
+    for i in 0..ACCOUNTS {
+        let account = test_account(&format!("bootstorm-{i}"));
+        shared
+            .service
+            .save_source(&account)
+            .expect("account should save");
+        gates.push(MockJmapGateway::gate_sync_at_entry(
+            &account.id,
+            Arc::new(tokio::sync::Notify::new()),
+            release.clone(),
+        ));
+        ids.push(account.id.clone());
+        // Immediate start (no splay), the boot-loop shape.
+        supervisor.start_account(&account).await;
+    }
+
+    // Wait until the cap is saturated (proves the cap actually binds), bounded.
+    let saturated = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if MockJmapGateway::observed_peak_concurrent_syncs_for_tests() >= CAP {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+
+    // Give any (incorrectly) over-cap sync a chance to slip through before we
+    // sample the peak, so the assertion is not merely observing an early moment.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let peak = MockJmapGateway::observed_peak_concurrent_syncs_for_tests();
+
+    // Teardown: cancel the gate-blocked syncs and drain the runtimes.
+    drop(gates);
+    supervisor.stop_all(Duration::from_secs(2)).await;
+
+    assert!(
+        saturated.is_ok(),
+        "the {ACCOUNTS} startup syncs should saturate the cap of {CAP} within the bound"
+    );
+    assert!(
+        peak <= CAP,
+        "at most {CAP} provider syncs may run concurrently across accounts, observed peak {peak}"
+    );
+    assert_eq!(
+        peak, CAP,
+        "the global cap must be the binding constraint under a boot storm of {ACCOUNTS} accounts"
+    );
+}
+
+// spec: docs/eph/RFC-L2-provider-reliability#d98
+#[test]
+fn startup_splay_delay_stays_within_the_configured_window() {
+    // (a) A zero window disables the splay entirely (the interactive path).
+    let seed = test_account("splay");
+    let (immediate, _root0) =
+        test_shared_with_governor(&seed, SyncGovernor::for_test(GLOBAL_CONCURRENT_SYNC_LIMIT, Duration::ZERO));
+    assert_eq!(immediate.startup_splay_delay(), Duration::ZERO);
+
+    // (b) A non-zero window yields a jittered delay strictly inside it, so N
+    // accounts do not all splay to the same instant.
+    let window = Duration::from_secs(4);
+    let (splayed, _root1) =
+        test_shared_with_governor(&seed, SyncGovernor::for_test(GLOBAL_CONCURRENT_SYNC_LIMIT, window));
+    for _ in 0..64 {
+        assert!(
+            splayed.startup_splay_delay() < window,
+            "the startup splay must fall within [0, window)"
+        );
+    }
 }

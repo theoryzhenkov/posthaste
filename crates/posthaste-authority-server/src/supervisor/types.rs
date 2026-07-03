@@ -26,6 +26,61 @@ pub(crate) const WATCHDOG_HEALTHY_RESET_AFTER: Duration = Duration::from_secs(60
 pub(crate) const PER_ACCOUNT_STOP_DEADLINE: Duration = Duration::from_secs(3);
 
 // ---------------------------------------------------------------------------
+// Scheduling governor (RFC-L2-provider-reliability D98 / Sc1 / R4, ruling O7).
+// A DISTINCT governor from `CacheResourceGovernor` (which throttles cache
+// fetches only — the sync path never consulted it, R4): this one bounds the
+// provider-sync fan-out across ALL accounts and decorrelates the boot herd.
+// Both values are **Review** (picked sane, not measured; named for owner
+// review, matching `WATCHDOG_HEALTHY_RESET_AFTER`'s posture).
+// ---------------------------------------------------------------------------
+
+/// Global ceiling on concurrent provider sync cycles across every account
+/// (D98(b) / R4). Without it, N accounts syncing at boot open N simultaneous
+/// provider connections; with it, the sync path holds one of these slots for
+/// the duration of a cycle, so at most this many run at once and the rest queue.
+pub(crate) const GLOBAL_CONCURRENT_SYNC_LIMIT: usize = 8;
+
+/// Upper bound on the random startup-sync splay (D98(a) / Sc1). Each account's
+/// *initial* `Startup` sync is delayed by a uniform draw in
+/// `[0, STARTUP_SYNC_SPLAY_MAX)` so N accounts started in a tight boot loop do
+/// not all fire their first provider sync at the same instant (the boot storm).
+/// Only the boot path splays; interactive create/patch/enable start immediately.
+pub(crate) const STARTUP_SYNC_SPLAY_MAX: Duration = Duration::from_secs(5);
+
+/// The supervisor's scheduling governor: the global concurrent-sync limiter plus
+/// the startup-splay ceiling (D98). Held on [`SupervisorShared`]; injectable so a
+/// test can pin a tiny cap / zero splay. Explicitly NOT the
+/// [`CacheResourceGovernor`](posthaste_domain_service::CacheResourceGovernor),
+/// which governs cache fetches only (ruling O7).
+pub(crate) struct SyncGovernor {
+    /// One permit per allowed concurrent provider sync (see
+    /// [`GLOBAL_CONCURRENT_SYNC_LIMIT`]). `Arc` so a cycle can hold an owned
+    /// permit across its `.await` points.
+    pub(crate) slots: Arc<Semaphore>,
+    /// See [`STARTUP_SYNC_SPLAY_MAX`]. Zero disables the splay entirely.
+    pub(crate) startup_splay_max: Duration,
+}
+
+impl SyncGovernor {
+    /// Production governor: the ratified global cap + startup-splay ceiling.
+    pub(crate) fn production() -> Self {
+        Self {
+            slots: Arc::new(Semaphore::new(GLOBAL_CONCURRENT_SYNC_LIMIT)),
+            startup_splay_max: STARTUP_SYNC_SPLAY_MAX,
+        }
+    }
+
+    /// Test governor with an explicit cap and splay (unit tests only).
+    #[cfg(test)]
+    pub(crate) fn for_test(concurrent_sync_limit: usize, startup_splay_max: Duration) -> Self {
+        Self {
+            slots: Arc::new(Semaphore::new(concurrent_sync_limit)),
+            startup_splay_max,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Select-loop arm budgets (RFC-L2-lifecycle D66 / M26). Every inline await
 // inside an account runtime's `select!` arm (`runtime.rs`) is wrapped in
 // `tokio::time::timeout` at its call site, so a hung provider/oauth/store
@@ -97,6 +152,9 @@ pub(crate) struct SupervisorShared {
     pub(crate) known_accounts: RwLock<HashSet<String>>,
     pub(crate) account_count: AtomicUsize,
     pub(crate) cache_resources: Mutex<CacheResourceGovernor>,
+    /// Scheduling governor (D98 / R4 / O7): the global concurrent-sync limiter
+    /// and the startup-splay ceiling. Distinct from `cache_resources` above.
+    pub(crate) sync_governor: SyncGovernor,
     pub(crate) poll_interval: Duration,
     /// Per-secret-ref OAuth refresh single-flight (the minimal M37 piece
     /// pulled into M34): concurrent resolvers of the same secret — IMAP
@@ -171,13 +229,13 @@ pub(crate) const SYNC_PROGRESS_CHANNEL_CAPACITY: usize = 8;
 /// local-first operations, so coalescing preserves correctness while avoiding
 /// serial sync storms.
 pub(crate) struct SyncTriggerState {
-    /// The `syncing` flag and coalesced `pending` trigger guarded together so
-    /// the trigger source and the runtime drain loop make one atomic decision.
-    /// Splitting these across an `AtomicBool` + separate `Mutex` allowed a
-    /// lost-wakeup race: a trigger observed `syncing == true`, then the drain
-    /// loop cleared `syncing` and took an (empty) pending before the trigger
-    /// stored its own — stranding it so its sync never ran and open views went
-    /// stale until the next poll.
+    /// The `active` claim flag and coalesced `pending` trigger guarded together
+    /// so the trigger source and the runtime drain loop make one atomic
+    /// decision. Splitting these across an `AtomicBool` + separate `Mutex`
+    /// allowed a lost-wakeup race: a trigger observed the cycle running, then
+    /// the drain loop cleared the flag and took an (empty) pending before the
+    /// trigger stored its own — stranding it so its sync never ran and open
+    /// views went stale until the next poll.
     inner: Mutex<SyncCoalesceState>,
     /// Number of sync cycles executed by this account runtime. Used as an
     /// observability/test seam to verify that bursts of mutations do not
@@ -187,9 +245,24 @@ pub(crate) struct SyncTriggerState {
 
 #[derive(Default)]
 struct SyncCoalesceState {
-    /// True while the account runtime task is inside a sync cycle.
-    syncing: bool,
-    /// A coalesced follow-up trigger that arrived while a sync was in progress.
+    /// True from the instant a cycle is ADMITTED until it — and any coalesced
+    /// follow-up drained from `pending` — fully finishes. Admission is either:
+    /// (a) the first fire-and-forget trigger winning the atomic claim in
+    /// [`SyncTriggerState::claim_or_coalesce`], which sets this flag under the
+    /// lock *before* the trigger is enqueued onto the runtime's command
+    /// channel; or (b) a directly-driven cycle (poll / push / manual / startup)
+    /// calling [`SyncTriggerState::begin_cycle`].
+    ///
+    /// Case (a) is the D99 fix. The old design only set the flag at
+    /// `begin_cycle`, i.e. when the runtime task *dequeued* the first trigger —
+    /// so between a trigger's enqueue and that dequeue the coalescer still read
+    /// idle, and N concurrent idle-window triggers each enqueued their own
+    /// redundant cycle (the P5 flake). Setting the flag at claim time makes the
+    /// idle→active transition a single atomic compare-and-set: exactly one
+    /// concurrent trigger claims the cycle, every other coalesces into
+    /// `pending`, and the coalesced count is now an invariant, not a race.
+    active: bool,
+    /// A coalesced follow-up trigger that arrived while a cycle was admitted.
     /// Only the most recent trigger is kept; `SyncTrigger::Manual` is the
     /// expected value for mutation-driven flushes.
     pending: Option<SyncTrigger>,
@@ -203,39 +276,52 @@ impl SyncTriggerState {
         })
     }
 
-    /// Trigger-source entry point (the supervisor manager). If a sync is already
-    /// running, coalesce this trigger into the pending follow-up and return
-    /// `true` (the caller must not enqueue a new cycle). Otherwise return `false`
-    /// (the caller enqueues a cycle, which calls [`begin_cycle`] on entry).
+    /// Trigger-source entry point (the supervisor manager) and the D99 atomic
+    /// claim. Under one lock: if a cycle is already admitted (`active`), coalesce
+    /// this trigger into the pending follow-up and return `true` (the caller must
+    /// not enqueue a new cycle). Otherwise atomically CLAIM the cycle — set
+    /// `active` here, before the caller enqueues — and return `false` (the caller
+    /// enqueues exactly one cycle, whose [`begin_cycle`] finds `active` already
+    /// set).
+    ///
+    /// Setting `active` at claim time (not at `begin_cycle`) is the fix for the
+    /// P5 idle-boundary race: N concurrent idle-window triggers now serialize on
+    /// this lock, the first flips idle→active and claims, and every other sees
+    /// `active` and coalesces — so a burst can never enqueue more than one cycle
+    /// plus one pending follow-up.
     ///
     /// The check and the store happen under one lock, so a trigger can never be
-    /// stranded between the drain loop clearing `syncing` and taking `pending`.
-    pub(crate) async fn coalesce_if_syncing(&self, trigger: SyncTrigger) -> bool {
+    /// stranded between the drain loop clearing `active` and taking `pending`.
+    pub(crate) async fn claim_or_coalesce(&self, trigger: SyncTrigger) -> bool {
         let mut inner = self.inner.lock().await;
-        if inner.syncing {
+        if inner.active {
             inner.pending = Some(trigger);
             true
         } else {
+            inner.active = true;
             false
         }
     }
 
     /// Mark the runtime as entering a sync cycle and bump the cycle counter.
+    /// Idempotent on `active` for the claim path (the claim already set it); the
+    /// atomic set for the directly-driven paths (poll / push / manual / startup)
+    /// that do not go through [`claim_or_coalesce`].
     pub(crate) async fn begin_cycle(&self) {
-        self.inner.lock().await.syncing = true;
+        self.inner.lock().await.active = true;
         self.sync_cycle_count.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Finish the current cycle. If a trigger was coalesced while it ran, take it
-    /// (keeping `syncing` set so the caller runs a follow-up cycle); otherwise
-    /// clear `syncing` and return `None`. The take-or-clear is atomic with
-    /// [`coalesce_if_syncing`], which is what closes the lost-wakeup race.
+    /// (keeping `active` set so the caller runs a follow-up cycle); otherwise
+    /// clear `active` and return `None`. The take-or-clear is atomic with
+    /// [`claim_or_coalesce`], which is what closes the lost-wakeup race.
     pub(crate) async fn finish_cycle_take_pending(&self) -> Option<SyncTrigger> {
         let mut inner = self.inner.lock().await;
         match inner.pending.take() {
             Some(trigger) => Some(trigger),
             None => {
-                inner.syncing = false;
+                inner.active = false;
                 None
             }
         }
@@ -246,19 +332,19 @@ impl SyncTriggerState {
     }
 
     /// Clear the coalescing state for a fresh incarnation after a watchdog
-    /// restart. Without this a panic mid-cycle would leave `syncing == true`, so
+    /// restart. Without this a panic mid-cycle would leave `active == true`, so
     /// the restarted runtime would coalesce every trigger forever instead of
     /// enqueueing a cycle. The cycle counter is intentionally preserved as an
     /// account-lifetime observability signal.
     pub(crate) async fn reset(&self) {
         let mut inner = self.inner.lock().await;
-        inner.syncing = false;
+        inner.active = false;
         inner.pending = None;
     }
 
     #[cfg(test)]
     pub(crate) async fn is_syncing(&self) -> bool {
-        self.inner.lock().await.syncing
+        self.inner.lock().await.active
     }
 }
 
@@ -418,11 +504,46 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn sync_trigger_state_starts_idle() {
+    async fn sync_trigger_state_idle_trigger_claims_and_is_not_coalesced() {
         let state = SyncTriggerState::new();
         assert!(!state.is_syncing().await);
-        // Idle: a trigger is not coalesced; the caller enqueues a cycle.
-        assert!(!state.coalesce_if_syncing(SyncTrigger::Manual).await);
+        // Idle: the first trigger CLAIMS the cycle (returns false → the caller
+        // enqueues) and atomically marks the state active, before any
+        // `begin_cycle`.
+        assert!(!state.claim_or_coalesce(SyncTrigger::Manual).await);
+        assert!(
+            state.is_syncing().await,
+            "the claim marks the state active immediately, before begin_cycle"
+        );
+        // A second trigger now coalesces rather than claiming its own cycle.
+        assert!(state.claim_or_coalesce(SyncTrigger::Manual).await);
+    }
+
+    #[tokio::test]
+    async fn sync_trigger_state_concurrent_idle_triggers_yield_exactly_one_claim() {
+        // The headline D99 invariant: N triggers racing the idle→active boundary
+        // produce exactly ONE claim (one enqueued cycle); every other coalesces.
+        // Before the atomic claim this was probabilistic (each could observe
+        // idle and enqueue its own cycle) — the root of the P5 flake.
+        let state = SyncTriggerState::new();
+        let mut tasks = Vec::new();
+        for _ in 0..64 {
+            let state = state.clone();
+            tasks.push(tokio::spawn(async move {
+                // `false` means this task WON the claim.
+                !state.claim_or_coalesce(SyncTrigger::Manual).await
+            }));
+        }
+        let mut claims = 0;
+        for task in tasks {
+            if task.await.expect("claim task should not panic") {
+                claims += 1;
+            }
+        }
+        assert_eq!(
+            claims, 1,
+            "exactly one concurrent idle-window trigger may claim the cycle; the rest coalesce"
+        );
     }
 
     #[tokio::test]
@@ -434,7 +555,7 @@ mod tests {
         assert!(state.is_syncing().await);
 
         // A mutation arrives while the sync is running and is coalesced.
-        assert!(state.coalesce_if_syncing(SyncTrigger::Manual).await);
+        assert!(state.claim_or_coalesce(SyncTrigger::Manual).await);
         assert!(state.is_syncing().await);
 
         // Finishing the cycle takes the coalesced follow-up (and keeps syncing
@@ -453,9 +574,9 @@ mod tests {
         let state = SyncTriggerState::new();
         state.begin_cycle().await;
 
-        assert!(state.coalesce_if_syncing(SyncTrigger::Manual).await);
-        assert!(state.coalesce_if_syncing(SyncTrigger::Push).await);
-        assert!(state.coalesce_if_syncing(SyncTrigger::Manual).await);
+        assert!(state.claim_or_coalesce(SyncTrigger::Manual).await);
+        assert!(state.claim_or_coalesce(SyncTrigger::Push).await);
+        assert!(state.claim_or_coalesce(SyncTrigger::Manual).await);
 
         let pending = state.finish_cycle_take_pending().await;
         assert_eq!(pending, Some(SyncTrigger::Manual));
@@ -475,8 +596,8 @@ mod tests {
         assert_eq!(state.finish_cycle_take_pending().await, None);
         assert!(!state.is_syncing().await);
 
-        // A trigger that arrives now is not swallowed into pending; the caller is
-        // told to enqueue a cycle (returns false).
-        assert!(!state.coalesce_if_syncing(SyncTrigger::Manual).await);
+        // A trigger that arrives now is not swallowed into pending; it claims a
+        // fresh cycle (returns false → the caller enqueues one).
+        assert!(!state.claim_or_coalesce(SyncTrigger::Manual).await);
     }
 }

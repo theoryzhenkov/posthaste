@@ -15,7 +15,7 @@ use posthaste_imap::{
 };
 use posthaste_observability::{events, ph_debug, ph_error, ph_info, ph_warn};
 use serde_json::json;
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock, Semaphore};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{info_span, Instrument};
@@ -35,6 +35,7 @@ pub use types::{AccountSupervisor, AccountVerification};
 
 use cache::process_cache_maintenance_batch;
 use connection::{build_connection, ensure_connection};
+use manager::jitter_unit;
 use runtime::run_account_runtime;
 use sync_flow::{process_automation_backfill_batch, process_sync_trigger, sync_poll_interval};
 use types::*;

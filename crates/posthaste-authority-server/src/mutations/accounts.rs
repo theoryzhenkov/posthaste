@@ -150,8 +150,18 @@ impl AccountMutationService {
 
     pub async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
         let account = self.load_account(&account_id)?;
-        self.account_repository.delete(&account)?;
+        // Deletion ordering (D100(a) / D1): stop and drain the runtime BEFORE
+        // deleting its config + secret and GC'ing its store rows. The previous
+        // order (delete, then stop) let an in-flight sync run on with its secret
+        // gone (OAuth refresh fails) AND — worse — commit NEW rows for the
+        // just-deleted account, undoing the row purge inside
+        // `account_repository.delete` → `MailService::delete_source` →
+        // `delete_source_data` (D2/D100(b)). `remove_account` cancels the
+        // account's token and joins its watchdog under `PER_ACCOUNT_STOP_DEADLINE`
+        // (escalating to abort), so no sync task is live once it returns; the
+        // subsequent row GC is therefore final.
         self.supervisor.remove_account(&account_id).await;
+        self.account_repository.delete(&account)?;
         self.append_and_publish_event(
             &account_id,
             EVENT_TOPIC_ACCOUNT_DELETED,

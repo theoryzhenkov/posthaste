@@ -4,6 +4,7 @@ use super::*;
 /// manual sync commands. Runs until the task is aborted.
 ///
 /// @spec docs/L1-sync#sync-loop
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_account_runtime(
     shared: Arc<SupervisorShared>,
     account: AccountSettings,
@@ -11,6 +12,7 @@ pub(crate) async fn run_account_runtime(
     mut command_rx: mpsc::Receiver<RuntimeCommand>,
     sync_state: Arc<SyncTriggerState>,
     cancel: CancellationToken,
+    splay_startup: bool,
 ) {
     let account_id = account.id.clone();
     let mut connection = AccountRuntimeConnectionState::default();
@@ -42,6 +44,29 @@ pub(crate) async fn run_account_runtime(
             },
         )
         .await;
+
+    // Startup splay (D98(a) / Sc1): on the boot path, delay the initial Startup
+    // sync by a random draw in `[0, startup_splay_max)` so N accounts started in
+    // a tight loop do not all open a provider sync at the same instant (the boot
+    // storm). The overview above is already set, so the account shows
+    // Offline/Reconnecting during the wait. Cancellable: a stop during the splay
+    // exits promptly rather than blocking teardown on the delay.
+    if splay_startup {
+        let splay = shared.startup_splay_delay();
+        if !splay.is_zero() {
+            tokio::select! {
+                () = cancel.cancelled() => {
+                    ph_info!(
+                        events::SUPERVISOR_ACCOUNT_RUNTIME_STOPPED,
+                        account_id = %account_id,
+                        "account runtime cancelled during startup splay; exiting before initial sync"
+                    );
+                    return;
+                }
+                () = tokio::time::sleep(splay) => {}
+            }
+        }
+    }
 
     // Initial sync + gateway setup. Bounded the same as an in-loop sync arm
     // (D66): a hung provider here would otherwise wedge the task before the
