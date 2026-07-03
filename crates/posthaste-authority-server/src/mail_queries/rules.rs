@@ -4,7 +4,8 @@ use posthaste_domain_model::{
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue,
 };
-use posthaste_domain_service::{search::parse_query_with_scopes, MailService};
+use posthaste_domain_service::MailService;
+use posthaste_query_grammar::parse_query_with_scopes;
 
 /// Prefixes that name a mailbox *scope* rather than a searchable field —
 /// resolved service-side by [`resolve_in`] instead of becoming a rule node.

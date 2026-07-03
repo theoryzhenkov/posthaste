@@ -7,7 +7,8 @@
 //! fully synthetic and require no network or external services.
 
 use posthaste_domain_model::{AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid, ImapUidValidity, MailboxId, MailboxRecord, MessageId, MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId};
-use posthaste_domain_service::{search, MessageCommandStore, MessageDetailStore, MessageListStore, SmartMailboxStore, SourceProjectionStore, SyncWriteStore};
+use posthaste_domain_service::{MessageCommandStore, MessageDetailStore, MessageListStore, SmartMailboxStore, SourceProjectionStore, SyncWriteStore};
+use posthaste_query_grammar::parse_query;
 use posthaste_store::DatabaseStore;
 use tempfile::TempDir;
 
@@ -223,7 +224,7 @@ pub fn list_inbox(fixture: &Fixture) -> MessagePage {
 
 /// Search path: a parsed smart-mailbox rule over the inbox.
 pub fn search(fixture: &Fixture) -> MessagePage {
-    let rule = search::parse_query("in:inbox subject:invoice").expect("parse query");
+    let rule = parse_query("in:inbox subject:invoice").expect("parse query");
     fixture
         .store
         .query_message_page_by_rule(&rule, 50, None, MessageSortField::Date, SortDirection::Desc)
