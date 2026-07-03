@@ -744,6 +744,16 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Drop raw unsigned CLI intermediates
+        shell: bash
+        run: |
+          # merge-multiple flattens the posthaste-cli-raw intermediate next to
+          # package-cli's signed tarballs; publishing the bare unsigned
+          # binaries would re-create the Gatekeeper trap. Only *.tar.gz CLI
+          # assets ship.
+          find release-assets -maxdepth 1 -type f -name 'PosthasteCTL*' \
+            ! -name '*.tar.gz' -print -delete
+
       - name: Promote nested desktop bundles
         shell: bash
         run: |
