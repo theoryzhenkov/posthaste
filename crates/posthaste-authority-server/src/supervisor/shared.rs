@@ -27,6 +27,34 @@ impl SupervisorShared {
         self.gateways.write().await.remove(account_id.as_str());
     }
 
+    /// A random startup-sync splay in `[0, sync_governor.startup_splay_max)`
+    /// (D98(a) / Sc1). Returns `Duration::ZERO` when the splay window is zero.
+    /// Uses the same dependency-free "Review"-grade jitter as the watchdog
+    /// backoff — each account runtime starts at a slightly different instant, so
+    /// the `SystemTime`-nanos draws differ enough to decorrelate the boot herd.
+    pub(crate) fn startup_splay_delay(&self) -> Duration {
+        let max = self.sync_governor.startup_splay_max;
+        if max.is_zero() {
+            return Duration::ZERO;
+        }
+        max.mul_f64(jitter_unit())
+    }
+
+    /// Acquire one global concurrent-sync slot (D98(b) / R4 / O7). The returned
+    /// permit is held for the whole sync cycle, so at most
+    /// [`GLOBAL_CONCURRENT_SYNC_LIMIT`] provider syncs run at once across every
+    /// account. This governor is DISTINCT from `cache_resources`
+    /// ([`CacheResourceGovernor`](posthaste_domain_service::CacheResourceGovernor)),
+    /// which throttles cache fetches only.
+    pub(crate) async fn acquire_sync_slot(&self) -> tokio::sync::OwnedSemaphorePermit {
+        self.sync_governor
+            .slots
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the sync governor semaphore is never closed")
+    }
+
     pub(crate) async fn register_account(&self, account_id: &AccountId) {
         let count = {
             let mut known_accounts = self.known_accounts.write().await;

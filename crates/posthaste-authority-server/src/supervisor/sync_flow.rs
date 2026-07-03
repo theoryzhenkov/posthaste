@@ -152,6 +152,15 @@ pub(crate) async fn process_sync_trigger_inner(
     sync_id: String,
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
+    // Global concurrent-sync cap (D98(b) / R4 / O7): hold one slot from the
+    // supervisor's dedicated sync governor for the whole cycle, so N accounts
+    // syncing at boot open at most `GLOBAL_CONCURRENT_SYNC_LIMIT` provider syncs
+    // at once rather than one per account. Every sync cycle — startup, poll,
+    // push, manual, and coalesced follow-up — funnels through here, so this is
+    // the single chokepoint. Distinct from the `CacheResourceGovernor` (cache
+    // fetches only). Acquired before the connect/pull work below; released when
+    // this future returns (or is dropped by an arm-budget timeout).
+    let _sync_slot = shared.acquire_sync_slot().await;
     let started = Instant::now();
     let started_at = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
