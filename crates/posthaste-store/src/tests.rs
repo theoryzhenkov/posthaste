@@ -5,8 +5,6 @@ use posthaste_domain_model::{
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue, SyncCursor,
 };
-use posthaste_domain_service::search;
-
 use super::*;
 
 use crate::test_support::temp_root;

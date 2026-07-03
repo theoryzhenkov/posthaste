@@ -21,6 +21,7 @@ default-members = [
   "crates/posthaste-replica-projector",
   "crates/posthaste-observability",
   "crates/posthaste-http-api-adapter",
+  "crates/posthaste-query-grammar",
   "crates/posthaste-runtime",
   "crates/posthaste-client-link",
   "crates/posthaste-runtime-api",

@@ -1,3 +1,5 @@
+use posthaste_query_grammar::parse_query;
+
 use super::*;
 
 #[test]
@@ -229,7 +231,7 @@ fn parsed_message_query_executes_richer_filters() -> Result<(), StoreError> {
         "state",
     )?;
 
-    let rule = search::parse_query(
+    let rule = parse_query(
             "source: Primary Account in:Archive is:unread subject:account created id:match thread:thread-match",
         )
         .map_err(StoreError::Failure)?;

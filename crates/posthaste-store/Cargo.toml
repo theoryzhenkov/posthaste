@@ -15,6 +15,10 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# Test-only: `#[cfg(test)] mod tests;` (src/lib.rs) parses queries against the
+# grammar to exercise `query_message_page_by_rule`; the store itself never
+# parses raw query strings — callers hand it an already-parsed rule.
+posthaste-query-grammar = { path = "../posthaste-query-grammar" }
 tempfile = { workspace = true }
 
 [lints]

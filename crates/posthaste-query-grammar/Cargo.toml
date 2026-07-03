@@ -1,0 +1,16 @@
+[package]
+name = "posthaste-query-grammar"
+version = "0.1.0"
+edition = "2021"
+
+# The one query grammar: tokenizer + parser shared by smart mailboxes
+# (posthaste-domain-service) and the rules engine WHEN-clause grammar
+# (RFC-L2-scripting §7 ruling 4 / D28). Wasm-pure (no tokio/http) so it stays
+# frontier-capable even though nothing mounts it at the wasm boundary in
+# slice 2.
+[dependencies]
+posthaste-domain-model = { path = "../posthaste-domain-model" }
+time = { workspace = true }
+
+[lints]
+workspace = true
