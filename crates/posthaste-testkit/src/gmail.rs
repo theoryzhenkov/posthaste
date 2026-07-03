@@ -16,9 +16,16 @@
 //! QRESYNC delta path: `ENABLE QRESYNC` -> `UID FETCH 1:* (CHANGEDSINCE <modseq>
 //! VANISHED)` -> changed `FETCH`es + `* VANISHED (EARLIER) <uids>`.
 //!
-//! Scope: the fixture advertises `X-GM-EXT-1` + `CONDSTORE` + `QRESYNC` but
-//! **not** `IDLE`, so the gateway does not start a background IMAP IDLE push
-//! stream and the explicit `sync_account` trigger drives a deterministic sync.
+//! Scope: [`GmailImapFixture::start`] advertises `X-GM-EXT-1` + `CONDSTORE` +
+//! `QRESYNC`, while [`GmailImapFixture::start_condstore_only`] is
+//! Gmail-faithful — real Gmail advertises **only** `CONDSTORE` — so it drives
+//! the executor's CONDSTORE-only delta path (`UID FETCH ... (CHANGEDSINCE ...)`
+//! without `VANISHED`, plus a header-free `UID SEARCH UNDELETED` for deletion
+//! reconciliation). Per RFC 7162 the mock only emits `* VANISHED` when the
+//! client used the `VANISHED` fetch modifier, and rejects that modifier with
+//! `BAD` when QRESYNC is not advertised. Neither variant advertises `IDLE`, so
+//! the gateway does not start a background IMAP IDLE push stream and the
+//! explicit `sync_account` trigger drives a deterministic sync.
 //! Per-message MODSEQ is omitted from FETCH responses (the parse defaults it;
 //! the mailbox's new HIGHESTMODSEQ comes from the `EXAMINE`/`STATUS` response).
 
@@ -37,10 +44,22 @@ use tokio::task::JoinHandle;
 
 use crate::RuntimeHarness;
 
-/// Capabilities the mock advertises. Deliberately omits `IDLE` (see module
-/// docs): with no IDLE the gateway skips the background push stream and syncs
-/// only on the explicit trigger.
-const CAPS: &str = "IMAP4rev1 CONDSTORE QRESYNC X-GM-EXT-1 UIDPLUS ENABLE";
+/// Capabilities the QRESYNC-capable mock advertises. Deliberately omits `IDLE`
+/// (see module docs): with no IDLE the gateway skips the background push
+/// stream and syncs only on the explicit trigger.
+const QRESYNC_CAPS: &str = "IMAP4rev1 CONDSTORE QRESYNC X-GM-EXT-1 UIDPLUS ENABLE";
+
+/// Gmail-faithful capabilities: real Gmail advertises `CONDSTORE` but NOT
+/// `QRESYNC`, so syncs must take the CONDSTORE-only delta path.
+const CONDSTORE_ONLY_CAPS: &str = "IMAP4rev1 CONDSTORE X-GM-EXT-1 UIDPLUS ENABLE";
+
+fn caps(qresync: bool) -> &'static str {
+    if qresync {
+        QRESYNC_CAPS
+    } else {
+        CONDSTORE_ONLY_CAPS
+    }
+}
 
 /// The mailbox's stable UIDVALIDITY (never changes within a fixture's life).
 const UID_VALIDITY: u32 = 7;
@@ -73,9 +92,13 @@ struct InboxModel {
     /// vanished (so a `CHANGEDSINCE` delta returns only the relevant removals).
     vanished: Vec<(u64, u32)>,
     /// How many `UID FETCH ... (CHANGEDSINCE ...)` commands the server has
-    /// answered — lets a test prove the QRESYNC delta path was taken rather
-    /// than a full re-snapshot.
+    /// answered — lets a test prove the CONDSTORE/QRESYNC delta path was taken
+    /// rather than a full re-snapshot.
     changedsince_fetches: usize,
+    /// How many header-bearing FETCH responses the server has served (one per
+    /// message) — lets a test prove a delta sync fetched exactly the changed
+    /// messages' headers and nothing else.
+    header_fetches: usize,
 }
 
 impl InboxModel {
@@ -93,6 +116,7 @@ impl InboxModel {
             }],
             vanished: Vec::new(),
             changedsince_fetches: 0,
+            header_fetches: 0,
         }
     }
 
@@ -133,6 +157,17 @@ impl InboxModel {
         uid
     }
 
+    /// Expunge every live message (advancing the mailbox MODSEQ) without
+    /// delivering anything — the pure-removal case a CONDSTORE-only delta must
+    /// detect through UID reconciliation (zero header bytes).
+    fn expunge_all(&mut self) {
+        self.highest_modseq += 1;
+        let modseq = self.highest_modseq;
+        for message in self.live.drain(..) {
+            self.vanished.push((modseq, message.uid));
+        }
+    }
+
     /// Messages and vanished UIDs changed strictly after `since_modseq` (the
     /// `CHANGEDSINCE` delta set).
     fn changed_since(&self, since_modseq: u64) -> (Vec<MockMessage>, Vec<u32>) {
@@ -166,8 +201,20 @@ pub struct GmailImapFixture {
 
 impl GmailImapFixture {
     /// Bind a loopback port and start the mock server's accept loop with the
-    /// baseline INBOX (one Gmail-labeled message).
+    /// baseline INBOX (one Gmail-labeled message), advertising CONDSTORE +
+    /// QRESYNC (the QRESYNC-delta coverage variant).
     pub async fn start() -> Self {
+        Self::start_with_capabilities(true).await
+    }
+
+    /// Like [`GmailImapFixture::start`], but Gmail-faithful: advertises
+    /// CONDSTORE **without** QRESYNC (real Gmail never advertises QRESYNC), so
+    /// re-syncs must take the executor's CONDSTORE-only delta path.
+    pub async fn start_condstore_only() -> Self {
+        Self::start_with_capabilities(false).await
+    }
+
+    async fn start_with_capabilities(qresync: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind mock gmail imap");
@@ -177,7 +224,7 @@ impl GmailImapFixture {
             let state = Arc::clone(&state);
             tokio::spawn(async move {
                 while let Ok((stream, _)) = listener.accept().await {
-                    tokio::spawn(handle_connection(stream, Arc::clone(&state)));
+                    tokio::spawn(handle_connection(stream, Arc::clone(&state), qresync));
                 }
             })
         };
@@ -213,14 +260,29 @@ impl GmailImapFixture {
             .deliver(subject)
     }
 
-    /// How many `CHANGEDSINCE` (QRESYNC-delta) fetches the server has answered.
-    /// A test asserts this advanced to prove the delta path — not a full
-    /// re-snapshot — drove a re-sync.
+    /// Expunge every live INBOX message (advancing MODSEQ) without delivering
+    /// anything — the next CONDSTORE-only sync must observe the removal through
+    /// UID reconciliation while fetching zero headers.
+    pub fn expunge_inbox(&self) {
+        self.state.lock().expect("inbox model mutex").expunge_all();
+    }
+
+    /// How many `CHANGEDSINCE` (CONDSTORE/QRESYNC-delta) fetches the server has
+    /// answered. A test asserts this advanced to prove the delta path — not a
+    /// full re-snapshot — drove a re-sync.
     pub fn changedsince_fetch_count(&self) -> usize {
         self.state
             .lock()
             .expect("inbox model mutex")
             .changedsince_fetches
+    }
+
+    /// How many header-bearing FETCH responses (one per message) the server has
+    /// served across all syncs. The zero-refetch gate: a no-change re-sync must
+    /// leave this untouched, and a delta must advance it by exactly the number
+    /// of changed messages.
+    pub fn header_fetch_count(&self) -> usize {
+        self.state.lock().expect("inbox model mutex").header_fetches
     }
 
     /// The `ImapSmtp` account transport pointed at this mock. SMTP settings are
@@ -307,7 +369,7 @@ pub async fn serve(imap_port: u16, control_port: u16) -> std::io::Result<()> {
     let imap_state = Arc::clone(&state);
     let imap_loop = tokio::spawn(async move {
         while let Ok((stream, _)) = imap.accept().await {
-            tokio::spawn(handle_connection(stream, Arc::clone(&imap_state)));
+            tokio::spawn(handle_connection(stream, Arc::clone(&imap_state), true));
         }
     });
     let control_loop = tokio::spawn(async move {
@@ -354,15 +416,20 @@ async fn handle_control(stream: tokio::net::TcpStream, state: Arc<Mutex<InboxMod
     let _ = writer.write_all(response.as_bytes()).await;
 }
 
-async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<Mutex<InboxModel>>) {
+async fn handle_connection(
+    stream: tokio::net::TcpStream,
+    state: Arc<Mutex<InboxModel>>,
+    qresync: bool,
+) {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
     let mut selected_inbox = false;
+    let caps = caps(qresync);
 
     if !send(
         &mut writer,
-        &format!("* OK [CAPABILITY {CAPS}] mock-gmail ready\r\n"),
+        &format!("* OK [CAPABILITY {caps}] mock-gmail ready\r\n"),
     )
     .await
     {
@@ -383,7 +450,7 @@ async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<Mutex<Inbox
 
         let ok = match verb.as_str() {
             "CAPABILITY" => {
-                send(&mut writer, &format!("* CAPABILITY {CAPS}\r\n")).await
+                send(&mut writer, &format!("* CAPABILITY {caps}\r\n")).await
                     && send(&mut writer, &format!("{tag} OK CAPABILITY completed\r\n")).await
             }
             "AUTHENTICATE" => {
@@ -404,10 +471,12 @@ async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<Mutex<Inbox
             }
             "LOGIN" => send(&mut writer, &format!("{tag} OK LOGIN completed\r\n")).await,
             "ENABLE" => {
-                // RFC 7162: acknowledge QRESYNC so the gateway uses the VANISHED
-                // delta path. Echo any requested capability the mock supports.
+                // RFC 7162/5161: acknowledge QRESYNC (so the gateway uses the
+                // VANISHED delta path) only when this server variant supports
+                // it; an unsupported capability is silently absent from the
+                // ENABLED response.
                 let mut ok = true;
-                if upper.contains("QRESYNC") {
+                if qresync && upper.contains("QRESYNC") {
                     ok = send(&mut writer, "* ENABLED QRESYNC\r\n").await;
                 }
                 ok && send(&mut writer, &format!("{tag} OK ENABLE completed\r\n")).await
@@ -472,7 +541,10 @@ async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<Mutex<Inbox
                         send(&mut writer, &format!("* SEARCH {hits}\r\n")).await
                             && send(&mut writer, &format!("{tag} OK SEARCH completed\r\n")).await
                     }
-                    "FETCH" => send_fetch(&mut writer, &tag, &upper, selected_inbox, &state).await,
+                    "FETCH" => {
+                        send_fetch(&mut writer, &tag, &upper, selected_inbox, &state, qresync)
+                            .await
+                    }
                     other => {
                         send(
                             &mut writer,
@@ -495,29 +567,48 @@ async fn handle_connection(stream: tokio::net::TcpStream, state: Arc<Mutex<Inbox
     }
 }
 
-/// Answer a `UID FETCH`. A `CHANGEDSINCE` modifier (QRESYNC delta) returns the
-/// messages changed after that MODSEQ plus a `* VANISHED (EARLIER)` line for
-/// removals; otherwise (full-snapshot fetch after a SEARCH) it returns every
-/// live message.
+/// Answer a `UID FETCH`. A `CHANGEDSINCE` modifier (CONDSTORE/QRESYNC delta)
+/// returns the messages changed after that MODSEQ; otherwise (full-snapshot
+/// fetch after a SEARCH) it returns every live message.
+///
+/// VANISHED fidelity (RFC 7162): `* VANISHED (EARLIER)` responses are emitted
+/// ONLY when the client used the `VANISHED` fetch modifier — a plain
+/// CONDSTORE `CHANGEDSINCE` fetch never carries unsolicited VANISHED data —
+/// and the modifier itself is rejected with `BAD` when the server variant does
+/// not advertise QRESYNC.
 async fn send_fetch(
     writer: &mut (impl AsyncWriteExt + Unpin),
     tag: &str,
     upper_cmd: &str,
     selected_inbox: bool,
     state: &Arc<Mutex<InboxModel>>,
+    qresync: bool,
 ) -> bool {
+    let wants_vanished = upper_cmd.contains("VANISHED");
+    if wants_vanished && !qresync {
+        // RFC 7162: the VANISHED fetch modifier requires QRESYNC to be
+        // enabled; a CONDSTORE-only server rejects it.
+        return send(
+            writer,
+            &format!("{tag} BAD VANISHED requires QRESYNC\r\n"),
+        )
+        .await;
+    }
     let (messages, vanished): (Vec<MockMessage>, Vec<u32>) = if !selected_inbox {
         (Vec::new(), Vec::new())
     } else if let Some(since) = parse_changedsince(upper_cmd) {
         let mut model = state.lock().expect("inbox model mutex");
         model.changedsince_fetches += 1;
-        model.changed_since(since)
+        let (changed, vanished) = model.changed_since(since);
+        model.header_fetches += changed.len();
+        (changed, vanished)
     } else {
-        let model = state.lock().expect("inbox model mutex");
+        let mut model = state.lock().expect("inbox model mutex");
+        model.header_fetches += model.live.len();
         (model.live.clone(), Vec::new())
     };
 
-    if !vanished.is_empty() {
+    if wants_vanished && !vanished.is_empty() {
         let uids = vanished
             .iter()
             .map(u32::to_string)

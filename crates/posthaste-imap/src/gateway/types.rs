@@ -36,10 +36,15 @@ pub(crate) enum PlannedImapMailboxSync {
 
 impl PlannedImapMailboxSync {
     pub(crate) fn requires_partial_delta_batch(&self) -> bool {
+        // CondstoreDelta headers are partial (only CHANGEDSINCE results), so
+        // the batch must use the explicit-deletion path — the absence-based
+        // deletion of `imap_delta_sync_batch` would prune every unchanged
+        // message.
         matches!(
             self,
             Self::SkipUnchanged
                 | Self::Sync(ImapMailboxSyncPlan::QresyncDelta { .. })
+                | Self::Sync(ImapMailboxSyncPlan::CondstoreDelta { .. })
                 | Self::Sync(ImapMailboxSyncPlan::FetchNewByUid { .. })
         )
     }

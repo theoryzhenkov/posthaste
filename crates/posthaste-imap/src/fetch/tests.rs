@@ -210,6 +210,34 @@ fn changed_since_fetch_task_uses_uid_fetch_modifiers() {
     assert_eq!(macro_or_item_names, fetch_item_names(true, true));
 }
 
+/// RFC 7162 forbids the `VANISHED` fetch modifier without QRESYNC being
+/// enabled; a CONDSTORE-only server (real Gmail) rejects it with BAD. The
+/// CONDSTORE delta path therefore drives the changed-since task with
+/// `include_vanished: false`, and the wire command must carry ONLY the
+/// `CHANGEDSINCE` modifier.
+#[test]
+fn condstore_only_changed_since_fetch_omits_the_vanished_modifier() {
+    let task = ChangedSinceFetchTask::new(
+        SequenceSet::try_from("1:*").expect("sequence set"),
+        fetch_item_names(true, true),
+        NonZeroU64::new(777).expect("modseq"),
+        false,
+    );
+
+    let CommandBody::Fetch { uid, modifiers, .. } = task.command_body() else {
+        panic!("expected FETCH");
+    };
+
+    assert!(uid);
+    assert_eq!(
+        modifiers,
+        vec![FetchModifier::ChangedSince(
+            NonZeroU64::new(777).expect("modseq")
+        )],
+        "a CONDSTORE-only CHANGEDSINCE fetch must not carry the VANISHED modifier"
+    );
+}
+
 #[test]
 fn changed_since_fetch_task_collects_fetch_rows_and_vanished_uids() {
     let mut task = ChangedSinceFetchTask::new(

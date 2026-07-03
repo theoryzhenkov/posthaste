@@ -9,7 +9,8 @@ use posthaste_domain_service::{MailGateway, MailStore, PushEventStream, PushTran
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
 use crate::fetch::{
-    fetch_mailbox_changed_since_snapshot_with_client, fetch_mailbox_header_snapshot_with_client,
+    fetch_mailbox_changed_since_snapshot_with_client,
+    fetch_mailbox_condstore_delta_snapshot_with_client, fetch_mailbox_header_snapshot_with_client,
     fetch_mailbox_headers_after_uid_with_client,
 };
 use crate::mailbox::{examine_selected_mailbox, status_imap_mailbox, ImapMailboxStatus};
