@@ -12,6 +12,19 @@ pub(crate) const OAUTH_TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(5 
 pub(crate) const SNOOZE_INITIAL_DELAY: Duration = Duration::from_secs(30);
 pub(crate) const SNOOZE_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Watchdog restart cap (RFC-L2-lifecycle §7 ruling 2 / D61): a faulting account
+/// runtime is restarted at most this many times under bounded backoff; the
+/// failure that would require one more restart halts it with a truthful status.
+pub(crate) const WATCHDOG_MAX_RESTARTS: u32 = 3;
+/// A single incarnation that stays healthy for at least this long resets the
+/// restart budget — a fault after a sustained-healthy run is a fresh incident,
+/// not part of a restart storm. **Review** (named for owner review per D61).
+pub(crate) const WATCHDOG_HEALTHY_RESET_AFTER: Duration = Duration::from_secs(60);
+/// Deadline for a single cooperative per-account stop (`stop_account`) before the
+/// escalation aborts the incarnation + its watchdog. Mirrors the M20 supervisor
+/// phase budget so a per-account stop cannot outlast the whole-supervisor one.
+pub(crate) const PER_ACCOUNT_STOP_DEADLINE: Duration = Duration::from_secs(3);
+
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
 ///
@@ -20,6 +33,11 @@ pub(crate) const SNOOZE_INTERVAL: Duration = Duration::from_secs(60);
 pub struct AccountSupervisor {
     pub(crate) shared: Arc<SupervisorShared>,
     pub(crate) runtimes: RwLock<HashMap<String, ManagedRuntime>>,
+    /// Supervisor-level cancellation token. Each account runtime's token is a
+    /// child of this one, so `stop_all` cancels every account cooperatively with
+    /// a single `cancel()` (D61). Per-account `stop_account` cancels only that
+    /// account's child, leaving siblings running.
+    pub(crate) root_cancel: CancellationToken,
 }
 
 /// Shared state across all account runtimes: services, event bus, and runtime overviews.
@@ -137,17 +155,39 @@ impl SyncTriggerState {
         self.sync_cycle_count.load(Ordering::SeqCst)
     }
 
+    /// Clear the coalescing state for a fresh incarnation after a watchdog
+    /// restart. Without this a panic mid-cycle would leave `syncing == true`, so
+    /// the restarted runtime would coalesce every trigger forever instead of
+    /// enqueueing a cycle. The cycle counter is intentionally preserved as an
+    /// account-lifetime observability signal.
+    pub(crate) async fn reset(&self) {
+        let mut inner = self.inner.lock().await;
+        inner.syncing = false;
+        inner.pending = None;
+    }
+
     #[cfg(test)]
     pub(crate) async fn is_syncing(&self) -> bool {
         self.inner.lock().await.syncing
     }
 }
 
-/// A running account task and its command channel.
+/// A supervised account: the watchdog task plus the swappable handles the
+/// watchdog rewires each time it restarts the underlying incarnation.
+///
+/// The command channel's receiver is consumed by each incarnation task, so a
+/// restart must mint a fresh channel; `command_tx` therefore lives behind a slot
+/// the watchdog swaps (callers always reach the live incarnation, or get `None`
+/// during the restart gap). `incarnation_abort` targets the *current* incarnation
+/// for the post-deadline escalation (NOT the primary stop path). `monitor` is the
+/// supervisor-owned watchdog that observes the incarnation JoinHandle (surfacing
+/// panics) and restarts under the ratified policy.
 pub(crate) struct ManagedRuntime {
-    pub(crate) command_tx: mpsc::Sender<RuntimeCommand>,
-    pub(crate) handle: JoinHandle<()>,
+    pub(crate) command_tx: Arc<StdMutex<Option<mpsc::Sender<RuntimeCommand>>>>,
     pub(crate) sync_state: Arc<SyncTriggerState>,
+    pub(crate) cancel: CancellationToken,
+    pub(crate) incarnation_abort: Arc<StdMutex<Option<AbortHandle>>>,
+    pub(crate) monitor: JoinHandle<()>,
 }
 
 /// Commands sent to a running account runtime via the mpsc channel.

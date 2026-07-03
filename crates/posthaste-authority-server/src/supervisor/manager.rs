@@ -27,6 +27,7 @@ impl AccountSupervisor {
                 poll_interval,
             }),
             runtimes: RwLock::new(HashMap::new()),
+            root_cancel: CancellationToken::new(),
         }
     }
 
@@ -36,13 +37,15 @@ impl AccountSupervisor {
     pub async fn start_account(&self, account: &AccountSettings) {
         self.stop_account(&account.id).await;
         self.shared.register_account(&account.id).await;
-        let generation = self.shared.next_runtime_generation(&account.id).await;
         if !account.enabled {
             ph_info!(
                 events::SUPERVISOR_ACCOUNT_DISABLED,
                 account_id = %account.id,
                 "account disabled, skipping runtime"
             );
+            // Advance the generation so a late write from the just-stopped task
+            // cannot revive a status over the Disabled overview set below.
+            self.shared.next_runtime_generation(&account.id).await;
             self.shared
                 .set_runtime_overview(
                     &account.id,
@@ -62,48 +65,83 @@ impl AccountSupervisor {
             driver = ?account.driver,
             "starting account runtime"
         );
-        let (command_tx, command_rx) = mpsc::channel(32);
+
+        // Each account gets a cancellation token that is a child of the supervisor
+        // root, so `stop_all` cancels every account with one call while
+        // `stop_account` cancels only this one (D61).
+        let cancel = self.root_cancel.child_token();
         let sync_state = SyncTriggerState::new();
-        let shared = self.shared.clone();
-        let account = account.clone();
-        let account_id = account.id.clone();
-        let runtime_sync_state = sync_state.clone();
-        let span = info_span!("supervisor.runtime", account_id = %account_id);
-        let handle = tokio::spawn(
-            async move {
-                run_account_runtime(shared, account, generation, command_rx, runtime_sync_state)
-                    .await;
-            }
-            .instrument(span),
+        // The command channel's receiver is consumed by each incarnation, so a
+        // watchdog restart mints a fresh channel; the live sender lives in this
+        // slot, swapped by the (re)spawn factory. `incarnation_abort` targets the
+        // current incarnation for the post-deadline stop escalation only.
+        let command_slot: Arc<StdMutex<Option<mpsc::Sender<RuntimeCommand>>>> =
+            Arc::new(StdMutex::new(None));
+        let incarnation_abort: Arc<StdMutex<Option<AbortHandle>>> = Arc::new(StdMutex::new(None));
+
+        let spawn = build_incarnation_spawner(
+            self.shared.clone(),
+            account.clone(),
+            sync_state.clone(),
+            command_slot.clone(),
+            incarnation_abort.clone(),
         );
+
+        let first = spawn(cancel.clone());
+        let monitor = tokio::spawn(run_watchdog(
+            account.id.clone(),
+            self.shared.clone(),
+            cancel.clone(),
+            spawn,
+            WatchdogPolicy::production(),
+            first,
+        ));
+
         self.runtimes.write().await.insert(
-            account_id.to_string(),
+            account.id.to_string(),
             ManagedRuntime {
-                command_tx,
-                handle,
+                command_tx: command_slot,
                 sync_state,
+                cancel,
+                incarnation_abort,
+                monitor,
             },
         );
     }
 
-    /// Stop every account runtime as teardown step (b) (D60/D61 / M20 seam).
+    /// Stop every account runtime as teardown step (b) (D60/D61 / M20 seam),
+    /// bounded by `deadline` (the M20 `SUPERVISOR_STOP_DEADLINE` phase budget).
     ///
-    /// M21: this is a placeholder that hard-`abort()`s each account task (the only
-    /// stop mechanism that exists today, via [`stop_account`](Self::stop_account)).
-    /// M21 replaces the internals with cooperative cancellation (a per-account
-    /// token arm in the `select!` loop), a join under the shared deadline, and a
-    /// panic-surfacing watchdog — behind this same method so the composition
-    /// root's `ShutdownSequence` does not change. Bounded by the sequence's
-    /// supervisor-stop deadline.
-    pub async fn stop_all(&self) {
-        let account_ids: Vec<String> = self.runtimes.read().await.keys().cloned().collect();
-        for account_id in account_ids {
-            // M21: cooperative cancel + join replaces this bare abort.
-            self.stop_account(&AccountId::from(account_id.as_str())).await;
+    /// Cooperative-first: cancelling the root token trips every account's
+    /// `select!` cancelled arm at once; then each watchdog is joined under the
+    /// shared deadline. Only a straggler that overruns is escalated to `abort()`
+    /// (of its incarnation + watchdog) — the escalation, not the primary path.
+    pub async fn stop_all(&self, deadline: Duration) {
+        self.root_cancel.cancel();
+        let entries: Vec<(String, ManagedRuntime)> =
+            self.runtimes.write().await.drain().collect();
+        let deadline_at = tokio::time::Instant::now() + deadline;
+        for (account_id, runtime) in entries {
+            let ManagedRuntime {
+                cancel,
+                incarnation_abort,
+                monitor,
+                ..
+            } = runtime;
+            // Redundant with the root cancel, but explicit about the contract.
+            cancel.cancel();
+            let remaining = deadline_at.saturating_duration_since(tokio::time::Instant::now());
+            join_or_escalate(&account_id, monitor, &incarnation_abort, remaining).await;
+            self.shared
+                .remove_gateway(&AccountId::from(account_id.as_str()))
+                .await;
         }
     }
 
-    /// Stop the runtime task and remove the gateway for an account.
+    /// Stop one account's runtime cooperatively and remove its gateway: cancel the
+    /// account's token, join its watchdog under [`PER_ACCOUNT_STOP_DEADLINE`], and
+    /// escalate to `abort()` only if it overruns (the same cancel→join→abort shape
+    /// as [`stop_all`](Self::stop_all)).
     pub async fn stop_account(&self, account_id: &AccountId) {
         let removed = self.runtimes.write().await.remove(account_id.as_str());
         if let Some(runtime) = removed {
@@ -112,7 +150,20 @@ impl AccountSupervisor {
                 account_id = %account_id,
                 "stopping account runtime"
             );
-            runtime.handle.abort();
+            let ManagedRuntime {
+                cancel,
+                incarnation_abort,
+                monitor,
+                ..
+            } = runtime;
+            cancel.cancel();
+            join_or_escalate(
+                account_id.as_str(),
+                monitor,
+                &incarnation_abort,
+                PER_ACCOUNT_STOP_DEADLINE,
+            )
+            .await;
         }
         self.shared.remove_gateway(account_id).await;
     }
@@ -150,13 +201,9 @@ impl AccountSupervisor {
         account_id: &AccountId,
         mode: SyncMode,
     ) -> Result<usize, ServiceError> {
-        let runtimes = self.runtimes.read().await;
-        let runtime = runtimes
-            .get(account_id.as_str())
-            .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
+        let command_tx = self.live_command_tx(account_id).await?;
         let (reply_tx, reply_rx) = oneshot::channel();
-        runtime
-            .command_tx
+        command_tx
             .send(RuntimeCommand::Trigger {
                 trigger: SyncTrigger::Manual,
                 mode,
@@ -180,17 +227,28 @@ impl AccountSupervisor {
         account_id: &AccountId,
         trigger: SyncTrigger,
     ) -> Result<(), ServiceError> {
-        let runtimes = self.runtimes.read().await;
-        let runtime = runtimes
-            .get(account_id.as_str())
-            .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
+        // Clone the live command sender + sync-state handle, then release the
+        // runtimes read lock before awaiting so a slow send cannot block the map.
+        let (command_tx, sync_state) = {
+            let runtimes = self.runtimes.read().await;
+            let runtime = runtimes
+                .get(account_id.as_str())
+                .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
+            let command_tx = runtime
+                .command_tx
+                .lock()
+                .expect("command slot poisoned")
+                .clone();
+            (command_tx, runtime.sync_state.clone())
+        };
+        let command_tx =
+            command_tx.ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
 
         // Reserve a command-slot before checking sync state. This guarantees
         // that a trigger is never dropped if the runtime stops between our check
         // and the send, and prevents spurious channel-pressure from coalesced
         // triggers (the reserved slot is released when coalescing).
-        let permit = runtime
-            .command_tx
+        let permit = command_tx
             .reserve()
             .await
             .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
@@ -201,11 +259,7 @@ impl AccountSupervisor {
         // the pending-store under one lock (inside `coalesce_if_syncing`) closes
         // the lost-wakeup race that previously stranded a trigger between the
         // drain loop clearing `syncing` and taking `pending`.
-        if runtime
-            .sync_state
-            .coalesce_if_syncing(trigger.clone())
-            .await
-        {
+        if sync_state.coalesce_if_syncing(trigger.clone()).await {
             ph_debug!(
                 events::SUPERVISOR_SYNC_TRIGGER_COALESCED,
                 account_id = %account_id,
@@ -225,12 +279,8 @@ impl AccountSupervisor {
         account_id: &AccountId,
         operation_id: Option<String>,
     ) -> Result<(), ServiceError> {
-        let runtimes = self.runtimes.read().await;
-        let runtime = runtimes
-            .get(account_id.as_str())
-            .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
-        runtime
-            .command_tx
+        let command_tx = self.live_command_tx(account_id).await?;
+        command_tx
             .send(RuntimeCommand::CacheMaintenance {
                 interactive_pressure: CACHE_INTERACTIVE_PRESSURE,
                 operation_id,
@@ -281,5 +331,288 @@ impl AccountSupervisor {
             identity,
             push_supported: account.driver.capabilities().supports_push,
         })
+    }
+
+    /// Clone the live command sender for an account, releasing the runtimes read
+    /// lock before returning. `Unavailable` if the account has no runtime, or is
+    /// momentarily between watchdog restarts (the slot is empty while a fresh
+    /// incarnation is being spawned).
+    async fn live_command_tx(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<mpsc::Sender<RuntimeCommand>, ServiceError> {
+        let slot = {
+            let runtimes = self.runtimes.read().await;
+            runtimes
+                .get(account_id.as_str())
+                .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?
+                .command_tx
+                .clone()
+        };
+        let sender = slot.lock().expect("command slot poisoned").clone();
+        sender.ok_or_else(|| GatewayError::Unavailable(account_id.to_string()).into())
+    }
+}
+
+/// The (re)spawn factory the watchdog calls to (re)start an account incarnation.
+/// Given the account's cancellation token, it mints a fresh command channel,
+/// publishes the live sender + abort handle into the shared slots, spawns the
+/// runtime task, and returns its `JoinHandle`.
+pub(crate) type SpawnIncarnation = Box<dyn Fn(CancellationToken) -> JoinHandle<()> + Send + Sync>;
+
+/// Build the production incarnation spawner for an account (D61). Every restart
+/// mints a fresh command channel + generation and resets the coalescing state.
+fn build_incarnation_spawner(
+    shared: Arc<SupervisorShared>,
+    account: AccountSettings,
+    sync_state: Arc<SyncTriggerState>,
+    command_slot: Arc<StdMutex<Option<mpsc::Sender<RuntimeCommand>>>>,
+    incarnation_abort: Arc<StdMutex<Option<AbortHandle>>>,
+) -> SpawnIncarnation {
+    Box::new(move |cancel: CancellationToken| {
+        let (command_tx, command_rx) = mpsc::channel(32);
+        *command_slot.lock().expect("command slot poisoned") = Some(command_tx);
+        let shared = shared.clone();
+        let account = account.clone();
+        let sync_state = sync_state.clone();
+        let span = info_span!("supervisor.runtime", account_id = %account.id);
+        let handle = tokio::spawn(
+            async move {
+                // Fresh incarnation: clear coalescing state a panicked cycle may
+                // have left, and take a new generation so a late write from the
+                // prior incarnation is dropped by the generation guard.
+                sync_state.reset().await;
+                let generation = shared.next_runtime_generation(&account.id).await;
+                run_account_runtime(shared, account, generation, command_rx, sync_state, cancel)
+                    .await;
+            }
+            .instrument(span),
+        );
+        *incarnation_abort.lock().expect("abort slot poisoned") = Some(handle.abort_handle());
+        handle
+    })
+}
+
+/// The ratified watchdog policy (RFC-L2-lifecycle §7 ruling 2 / D61). Fields are
+/// injectable so tests can pin the jitter and shrink the timings.
+pub(crate) struct WatchdogPolicy {
+    pub(crate) max_restarts: u32,
+    pub(crate) healthy_reset_after: Duration,
+    pub(crate) backoff: BackoffPolicy,
+    /// Full-jitter source in `[0,1)`. The backoff *shape* is the one vocabulary
+    /// the M9 near-end engine owns ([`BackoffPolicy`]); the watchdog supplies its
+    /// own jitter because, unlike the engine, it has no host `Scheduler`.
+    pub(crate) jitter: Arc<dyn Fn() -> f64 + Send + Sync>,
+}
+
+impl WatchdogPolicy {
+    /// Production policy: cap 3 restarts, 60s healthy-reset window, and the M9
+    /// engine's default jittered-capped backoff (base 500ms, ×2, cap 30s).
+    pub(crate) fn production() -> Self {
+        Self {
+            max_restarts: WATCHDOG_MAX_RESTARTS,
+            healthy_reset_after: WATCHDOG_HEALTHY_RESET_AFTER,
+            backoff: BackoffPolicy::default(),
+            jitter: Arc::new(jitter_unit),
+        }
+    }
+}
+
+/// A cheap, dependency-free uniform-ish value in `[0,1)` for full-jitter
+/// decorrelation of restart backoff. Not cryptographic; jitter quality is
+/// "Review" (D61), matching the near-end engine's own review posture.
+fn jitter_unit() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos())
+        .unwrap_or(0);
+    f64::from(nanos % 1_000_000) / 1_000_000.0
+}
+
+/// Extract a human-readable message from a captured panic payload.
+fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+/// The supervisor-owned watchdog for one account (D61 / audit Part C). It
+/// observes the incarnation `JoinHandle` so a panic or unexpected exit is
+/// surfaced (`error!`/status) instead of silently swallowed, restarts under
+/// [`WatchdogPolicy`] up to the cap, then halts the account with a truthful
+/// status. Returns when the account is cooperatively cancelled or halted.
+pub(crate) async fn run_watchdog(
+    account_id: AccountId,
+    shared: Arc<SupervisorShared>,
+    cancel: CancellationToken,
+    spawn: SpawnIncarnation,
+    policy: WatchdogPolicy,
+    mut current: JoinHandle<()>,
+) {
+    let mut restarts: u32 = 0;
+    loop {
+        let started = tokio::time::Instant::now();
+        let outcome = tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                // Cooperative stop: let the incarnation finish its own graceful
+                // exit (its `select!` cancelled arm), then we are done.
+                let _ = current.await;
+                return;
+            }
+            result = &mut current => result,
+        };
+
+        let reason = match outcome {
+            Ok(()) => {
+                // The task returned on its own. A cancel makes this a graceful
+                // stop; otherwise the loop exited unexpectedly (a fault).
+                if cancel.is_cancelled() {
+                    return;
+                }
+                ph_warn!(
+                    events::SUPERVISOR_ACCOUNT_EXITED_UNEXPECTEDLY,
+                    account_id = %account_id,
+                    "account runtime exited unexpectedly"
+                );
+                "runtime exited unexpectedly".to_string()
+            }
+            Err(join_error) if join_error.is_panic() => {
+                let message = panic_payload_message(join_error.into_panic());
+                ph_error!(
+                    events::SUPERVISOR_ACCOUNT_PANICKED,
+                    account_id = %account_id,
+                    payload = %message,
+                    "account runtime panicked"
+                );
+                message
+            }
+            Err(_join_error) => {
+                // A cancelled/aborted JoinError only arises from the stop
+                // escalation (which cancels first) — treat as a cooperative stop.
+                return;
+            }
+        };
+
+        // A sustained-healthy incarnation resets the restart budget: a fault after
+        // a long run is a fresh incident, not part of a storm.
+        if started.elapsed() >= policy.healthy_reset_after {
+            restarts = 0;
+        }
+        restarts += 1;
+
+        if restarts > policy.max_restarts {
+            shared.mark_account_halted(&account_id, &reason).await;
+            ph_error!(
+                events::SUPERVISOR_ACCOUNT_HALTED,
+                account_id = %account_id,
+                max_restarts = policy.max_restarts,
+                "account runtime halted after exhausting its restart budget"
+            );
+            return;
+        }
+
+        shared
+            .mark_account_faulted(&account_id, restarts, &reason)
+            .await;
+        let delay = policy.backoff.sleep_for(restarts - 1, (policy.jitter)());
+        ph_warn!(
+            events::SUPERVISOR_ACCOUNT_RESTARTING,
+            account_id = %account_id,
+            attempt = restarts,
+            max_restarts = policy.max_restarts,
+            delay_ms = delay.as_millis() as u64,
+            "restarting account runtime after backoff"
+        );
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            () = tokio::time::sleep(delay) => {}
+        }
+        current = spawn(cancel.clone());
+    }
+}
+
+#[cfg(test)]
+impl AccountSupervisor {
+    /// Build a supervisor around an existing shared context (tests only).
+    pub(crate) fn from_shared_for_test(shared: Arc<SupervisorShared>) -> Self {
+        Self {
+            shared,
+            runtimes: RwLock::new(HashMap::new()),
+            root_cancel: CancellationToken::new(),
+        }
+    }
+
+    /// Install a supervised account whose incarnation body is supplied by the
+    /// test (so it can panic, hang, or exit at will), wired to the real watchdog
+    /// + the real stop path — used to exercise `stop_all`/`stop_account`.
+    pub(crate) async fn spawn_supervised_for_test(
+        &self,
+        account_id: AccountId,
+        policy: WatchdogPolicy,
+        incarnation: Arc<dyn Fn(CancellationToken) -> JoinHandle<()> + Send + Sync>,
+    ) {
+        let cancel = self.root_cancel.child_token();
+        let sync_state = SyncTriggerState::new();
+        let command_slot = Arc::new(StdMutex::new(None));
+        let incarnation_abort: Arc<StdMutex<Option<AbortHandle>>> = Arc::new(StdMutex::new(None));
+        let spawn: SpawnIncarnation = {
+            let incarnation = incarnation.clone();
+            let abort_slot = incarnation_abort.clone();
+            Box::new(move |cancel| {
+                let handle = incarnation(cancel);
+                *abort_slot.lock().expect("abort slot poisoned") = Some(handle.abort_handle());
+                handle
+            })
+        };
+        let first = spawn(cancel.clone());
+        let monitor = tokio::spawn(run_watchdog(
+            account_id.clone(),
+            self.shared.clone(),
+            cancel.clone(),
+            spawn,
+            policy,
+            first,
+        ));
+        self.runtimes.write().await.insert(
+            account_id.to_string(),
+            ManagedRuntime {
+                command_tx: command_slot,
+                sync_state,
+                cancel,
+                incarnation_abort,
+                monitor,
+            },
+        );
+    }
+}
+
+/// Join the account's watchdog under `deadline`; only if it overruns do we
+/// ESCALATE (not the primary path) to aborting the current incarnation and then
+/// the watchdog. Shared by [`AccountSupervisor::stop_all`] and
+/// [`AccountSupervisor::stop_account`].
+async fn join_or_escalate(
+    account_id: &str,
+    monitor: JoinHandle<()>,
+    incarnation_abort: &Arc<StdMutex<Option<AbortHandle>>>,
+    deadline: Duration,
+) {
+    let monitor_abort = monitor.abort_handle();
+    if tokio::time::timeout(deadline, monitor).await.is_err() {
+        if let Some(abort) = incarnation_abort.lock().expect("abort slot poisoned").as_ref() {
+            abort.abort();
+        }
+        monitor_abort.abort();
+        ph_warn!(
+            events::SUPERVISOR_ACCOUNT_STOP_ESCALATED,
+            account_id = %account_id,
+            deadline_ms = deadline.as_millis() as u64,
+            "account did not stop cooperatively within the deadline; escalated to abort"
+        );
     }
 }

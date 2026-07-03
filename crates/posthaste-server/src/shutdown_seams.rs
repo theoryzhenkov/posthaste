@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use posthaste_authority_server::AccountSupervisor;
-use posthaste_http_api_adapter::{StoreClose, SupervisorStop};
+use posthaste_http_api_adapter::{StoreClose, SupervisorStop, SUPERVISOR_STOP_DEADLINE};
 use posthaste_store::DatabaseStore;
 
 /// Teardown step (b): stop the in-process account supervisor. M21 replaces the
@@ -19,7 +19,10 @@ pub(crate) struct AccountSupervisorStop(pub Arc<AccountSupervisor>);
 #[async_trait]
 impl SupervisorStop for AccountSupervisorStop {
     async fn stop_all(&self) {
-        self.0.stop_all().await;
+        // The sequence bounds this phase too, but pass the phase budget so the
+        // supervisor's own cooperative-join / abort-escalation runs inside it
+        // (M21): stragglers are aborted rather than abandoned by an outer cut.
+        self.0.stop_all(SUPERVISOR_STOP_DEADLINE).await;
     }
 }
 
