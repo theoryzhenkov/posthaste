@@ -762,7 +762,7 @@ class EntityStoreController {
               event: LOG_EVENTS.runtimeMutationRejected,
               clientMutationId: frame.clientMutationId,
               errorCode: frame.notification.error.code,
-              retryable: frame.notification.error.retryable,
+              terminality: frame.notification.error.terminality,
             },
             'runtime mutation rejected; reverting optimism',
           )

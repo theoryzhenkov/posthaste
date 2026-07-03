@@ -473,13 +473,13 @@ impl AuthorityServer {
                     Ok(ack) => ack,
                     Err(error) => {
                         // The mutation did not apply (atomic). Split by D47
-                        // terminal class from the error's `retryable` flag: a
+                        // terminal class from the error's typed terminality: a
                         // transient failure CLEARS the entry so a retry
                         // re-executes; a permanent rejection is KEPT so a retry
                         // re-observes it. No Settlement either way — the near node
                         // learns of the failure from the up-channel error and
                         // cannot match a Settlement it never received a receipt for.
-                        if error.envelope().retryable {
+                        if error.envelope().terminality.is_transient() {
                             self.runtimes
                                 .settle_failed(runtime_id, &mutation.client_mutation_id);
                         } else {

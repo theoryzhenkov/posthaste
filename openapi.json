@@ -6787,7 +6787,7 @@
         "required": [
           "code",
           "message",
-          "retryable"
+          "terminality"
         ],
         "properties": {
           "code": {
@@ -6805,8 +6805,9 @@
           "message": {
             "type": "string"
           },
-          "retryable": {
-            "type": "boolean"
+          "terminality": {
+            "$ref": "#/components/schemas/Terminality",
+            "description": "The typed retryability verdict (RFC-L2 D70), replacing the write-only\n`retryable: bool`. Paired with `code` (the reason) it is the one signal\nthe D47 settlement seam and the near-end engine agree on. `Degraded`\navailability (D49) composes with this, orthogonally."
           }
         }
       },
@@ -7877,6 +7878,14 @@
             "format": "int64"
           }
         }
+      },
+      "Terminality": {
+        "type": "string",
+        "description": "The one typed retryability axis (RFC-L2 D70, tenet XIV \"one shared fact, one\ntype\"): does retrying an operation stand any chance of a different outcome?\n\nThis is deliberately a two-value vocabulary — it answers *retryability* and\nnothing else:\n\n* **Availability** — D49's `Degraded` — is an *orthogonal* state that\n  composes with a `Terminality`, not a third variant here (RFC ruling 4). A\n  degraded provider still produces `Transient` failures; degradation is\n  tracked on the account/connection status, not folded into this enum.\n* **The reason** a failure earned its terminality (auth vs corruption vs an\n  internal decode bug) is carried by the *paired* typed code at each site —\n  the [`RuntimeErrorCode`](../../posthaste_contract_core) on a\n  `RuntimeAdapterError`, or the [`GatewayError`] variant behind an outbox\n  flush. `Terminality` is the shared verdict; the code alongside it is the\n  shared reason. This keeps the axis small enough to be the single thing\n  three consumers (outbox flush, near-end engine, D47 settlement) agree on.\n\nSerde-only, no I/O deps: it rides the wasm frontier embedded in\n`RuntimeAdapterError`.\n\n@spec docs/eph/RFC-L2-lifecycle-and-errors#3b-errors",
+        "enum": [
+          "transient",
+          "permanent"
+        ]
       },
       "ThemeColors": {
         "type": "object",

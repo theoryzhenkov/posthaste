@@ -48,7 +48,7 @@ use posthaste_authority_server_link::{
 };
 use posthaste_contract_core::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeAdapterError,
-    RuntimeError, RuntimeErrorCode,
+    RuntimeError, RuntimeErrorCode, Terminality,
 };
 use serde::Serialize;
 use serde::Deserialize;
@@ -132,6 +132,11 @@ pub(crate) struct LinkError {
 struct LinkErrorBody {
     code: &'static str,
     message: String,
+    /// The typed retryability verdict, carried across the remote hop so a
+    /// far-node transient outage (e.g. a 503 mid-move) is not stringified into a
+    /// terminal rejection on the near side (audit top-10 #1). The remote runtime
+    /// client (`RemoteAuthorityServer::post_link`) reads it back.
+    terminality: Terminality,
     details: serde_json::Value,
 }
 
@@ -141,6 +146,7 @@ impl LinkError {
         let RuntimeAdapterError {
             code,
             message,
+            terminality,
             details,
             ..
         } = error.envelope();
@@ -150,6 +156,7 @@ impl LinkError {
             body: LinkErrorBody {
                 code: wire_code,
                 message: message.clone(),
+                terminality: *terminality,
                 details: details.clone(),
             },
         }
@@ -162,6 +169,7 @@ impl LinkError {
             body: LinkErrorBody {
                 code: "unauthorized",
                 message: "missing or invalid bearer token".to_string(),
+                terminality: Terminality::Permanent,
                 details: serde_json::json!({}),
             },
         }

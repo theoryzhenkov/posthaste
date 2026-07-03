@@ -312,7 +312,7 @@ describe('entityStoreAdapter', () => {
         error: {
           code: 'conflict',
           message: 'rejected by the authority',
-          retryable: false,
+          terminality: 'permanent',
         },
       },
     })

@@ -222,6 +222,7 @@ use utoipa::OpenApi;
         posthaste_contract_core::ReadWatermark,
         posthaste_contract_core::RuntimeAdapterError,
         posthaste_contract_core::RuntimeErrorCode,
+        posthaste_contract_core::Terminality,
     )),
     tags(
         (name = "system", description = "Health and service status"),

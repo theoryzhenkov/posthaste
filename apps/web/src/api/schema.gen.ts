@@ -2264,7 +2264,13 @@ export interface components {
             correlationId?: string | null;
             details?: Record<string, never>;
             message: string;
-            retryable: boolean;
+            /**
+             * @description The typed retryability verdict (RFC-L2 D70), replacing the write-only
+             *     `retryable: bool`. Paired with `code` (the reason) it is the one signal
+             *     the D47 settlement seam and the near-end engine agree on. `Degraded`
+             *     availability (D49) composes with this, orthogonally.
+             */
+            terminality: components["schemas"]["Terminality"];
         };
         RuntimeCoverage: {
             /**
@@ -2700,6 +2706,32 @@ export interface components {
             /** Format: int64 */
             unreadMessages: number;
         };
+        /**
+         * @description The one typed retryability axis (RFC-L2 D70, tenet XIV "one shared fact, one
+         *     type"): does retrying an operation stand any chance of a different outcome?
+         *
+         *     This is deliberately a two-value vocabulary — it answers *retryability* and
+         *     nothing else:
+         *
+         *     * **Availability** — D49's `Degraded` — is an *orthogonal* state that
+         *       composes with a `Terminality`, not a third variant here (RFC ruling 4). A
+         *       degraded provider still produces `Transient` failures; degradation is
+         *       tracked on the account/connection status, not folded into this enum.
+         *     * **The reason** a failure earned its terminality (auth vs corruption vs an
+         *       internal decode bug) is carried by the *paired* typed code at each site —
+         *       the [`RuntimeErrorCode`](../../posthaste_contract_core) on a
+         *       `RuntimeAdapterError`, or the [`GatewayError`] variant behind an outbox
+         *       flush. `Terminality` is the shared verdict; the code alongside it is the
+         *       shared reason. This keeps the axis small enough to be the single thing
+         *       three consumers (outbox flush, near-end engine, D47 settlement) agree on.
+         *
+         *     Serde-only, no I/O deps: it rides the wasm frontier embedded in
+         *     `RuntimeAdapterError`.
+         *
+         *     @spec docs/eph/RFC-L2-lifecycle-and-errors#3b-errors
+         * @enum {string}
+         */
+        Terminality: "transient" | "permanent";
         /**
          * @description Per-mode color overrides for a theme. The named knobs (`accent_hue`,
          *     `surface_hue`) are the curated UX; `tokens` is the open escape hatch.
