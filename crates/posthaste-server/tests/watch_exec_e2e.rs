@@ -3,7 +3,9 @@
 //! `posthastectl` (bun) auto-discovers the local app, mints a least-privilege
 //! token, and `watch --exec`s a script that (a) receives a seeded fact, (b) writes
 //! back via `apply` WITH a client-supplied idempotency key, and (c) survives a
-//! simulated redelivery without re-executing.
+//! simulated redelivery without re-executing. Also pins ruling 11 (the
+//! least-default bootstrap): the discovered `daemon.json` token can mint but
+//! cannot itself apply a write.
 //!
 //! **Desktop-embed equivalence.** This test boots [`posthaste_server::start_server`]
 //! — the exact bundled assembly the desktop app embeds in-process
@@ -156,12 +158,28 @@ async fn milestone_watch_exec_write_back_survives_redelivery() {
     assert!(handle.require_auth, "bundled perimeter auth should be on");
     let port = handle.addr.port();
     let base = format!("http://127.0.0.1:{port}/v1");
-    let bootstrap_token = handle.auth_token.clone();
+    let full_scope_token = handle.auth_token.clone();
 
     // The discovery rider: the embedded/daemon server writes `daemon.json`;
     // posthastectl auto-discovers it (zero flags). Same call the desktop makes.
+    // `write_discovery_file` attenuates `full_scope_token` down to the
+    // least-default bootstrap (RFC-L2-scripting §7 ruling 11) BEFORE writing —
+    // read it back so this test exercises the SAME narrow credential a real
+    // discovering client would see.
     let discovery_path =
-        write_discovery_file(handle.addr, &bootstrap_token).expect("discovery file should write");
+        write_discovery_file(handle.addr, &full_scope_token).expect("discovery file should write");
+    let discovered: Value = serde_json::from_str(
+        &std::fs::read_to_string(&discovery_path).expect("daemon.json should read"),
+    )
+    .expect("daemon.json is JSON");
+    let bootstrap_token = discovered["token"]
+        .as_str()
+        .expect("daemon.json carries a token")
+        .to_string();
+    assert_ne!(
+        bootstrap_token, full_scope_token,
+        "the discovery bootstrap must never be the full-scope credential"
+    );
 
     let client = reqwest::Client::new();
 
@@ -170,7 +188,7 @@ async fn milestone_watch_exec_write_back_survives_redelivery() {
     let (status, _) = post_json(
         &client,
         &format!("{base}/accounts"),
-        &bootstrap_token,
+        &full_scope_token,
         None,
         json!({ "id": account_id, "name": "E2E", "driver": "mock", "enabled": true }),
     )
@@ -181,7 +199,7 @@ async fn milestone_watch_exec_write_back_survives_redelivery() {
     let (status, _) = post_json(
         &client,
         &format!("{base}/sources/{account_id}/commands/sync"),
-        &bootstrap_token,
+        &full_scope_token,
         None,
         json!({}),
     )
@@ -193,7 +211,7 @@ async fn milestone_watch_exec_write_back_survives_redelivery() {
     let messages = get_json(
         &client,
         &format!("{base}/sources/{account_id}/messages"),
-        &bootstrap_token,
+        &full_scope_token,
     )
     .await;
     let as_of_seq = messages.get("asOfSeq");
@@ -228,8 +246,30 @@ async fn milestone_watch_exec_write_back_survives_redelivery() {
     let minted_token = String::from_utf8_lossy(&mint.stdout).trim().to_string();
     assert!(!minted_token.is_empty(), "mint printed a token to stdout");
     assert_ne!(
+        minted_token, full_scope_token,
+        "the minted token is derived from the bootstrap, not the full-scope credential"
+    );
+    assert_ne!(
         minted_token, bootstrap_token,
-        "the minted token is an attenuation, not the bootstrap token"
+        "minting must produce a NEW token, not just hand back the discovery bootstrap"
+    );
+
+    // --- Negative (RFC-L2-scripting §7 ruling 11): the discovered bootstrap
+    // itself — {mint, tap:read} — can mint (just proved above, via the CLI's
+    // discovery-driven `token mint`) but must NOT be able to apply ANY write.
+    // The positive write-back path (a minted, apply-granted token succeeding at
+    // exactly this route) is exercised later in this same test.
+    let (status, _) = post_json(
+        &client,
+        &format!("{base}/sources/{account_id}/commands/messages/{message_id}/set-keywords"),
+        &bootstrap_token,
+        Some("rule:e2e:bootstrap-write-denied"),
+        json!({ "add": ["$should-not-apply"], "remove": [] }),
+    )
+    .await;
+    assert!(
+        status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN,
+        "the discovery bootstrap must not be able to apply a write: got {status}"
     );
 
     // --- The handler: a script that writes back via apply + idempotency key ---
@@ -281,7 +321,7 @@ printf '%s' "$resp" > "$MARKER"
         let (status, _) = post_json(
             &client,
             &format!("{base}/sources/{account_id}/commands/messages/{message_id}/set-keywords"),
-            &bootstrap_token,
+            &full_scope_token,
             None,
             json!({ "add": [format!("$probe-{i}")], "remove": [] }),
         )
@@ -333,7 +373,7 @@ printf '%s' "$resp" > "$MARKER"
     let (status, ack3) = post_json(
         &client,
         &format!("{base}/sources/{account_id}/commands/messages/{message_id}/set-keywords"),
-        &bootstrap_token,
+        &full_scope_token,
         None,
         json!({ "add": ["$processed"], "remove": [] }),
     )
@@ -350,7 +390,7 @@ printf '%s' "$resp" > "$MARKER"
     let (status, _) = post_json(
         &client,
         &format!("{base}/sources/{account_id}/commands/messages/{message_id}/destroy"),
-        &bootstrap_token,
+        &full_scope_token,
         Some(&idempotency_key),
         json!({}),
     )

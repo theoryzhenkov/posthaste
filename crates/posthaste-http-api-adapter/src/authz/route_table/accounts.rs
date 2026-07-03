@@ -29,14 +29,21 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/accounts",
         authz: gate(Action::Manage, ResourceShape::empty()),
     },
-    // Token mint: derives a narrower capability token. `Manage` + no resource
-    // axis means only a full-scope (or `action = manage`, unscoped) caller may
-    // mint; the handler attenuates the CALLER's token, so a minted token can
-    // only narrow — never widen — the caller's authority.
+    // Token mint: derives a capability token. `Mint` + no resource axis means
+    // only a full-scope (or unscoped `action = ...,mint,...`) caller may reach
+    // the handler — a resource-scoped caller is rejected here regardless of
+    // action, since `ResourceShape::empty` cannot satisfy an account/mailbox/
+    // message caveat. Unlike every other verb, `mint` is an ISSUANCE right, not
+    // a substantive scope: `derive_capability_token` mints FRESH from the root
+    // key for a caller that holds `mint` (rather than attenuating the caller's
+    // own token), so a `mint`-only caller — e.g. the discovery bootstrap
+    // ({mint, tap:read}, RFC-L2-scripting §7 ruling 11) — can obtain tokens
+    // WIDER than its own scope. A caller withOUT `mint` (e.g. a plain
+    // `action = manage` token) still only ever narrows, same as before.
     Entry {
         method: "POST",
         template: "/auth/tokens",
-        authz: gate(Action::Manage, ResourceShape::empty()),
+        authz: gate(Action::Mint, ResourceShape::empty()),
     },
     // Single-account routes: account axis from the `account_id` path param.
     Entry {
