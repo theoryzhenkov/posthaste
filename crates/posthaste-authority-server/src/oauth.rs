@@ -12,7 +12,7 @@ use oauth2::{
 };
 use posthaste_domain_model::{
     GatewayError, ImapTransportSettings, ProviderHint, ProviderKind, ProviderProfile,
-    SmtpTransportSettings,
+    SmtpTransportSettings, Terminality,
 };
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
@@ -75,7 +75,8 @@ pub(crate) use openid::{
     OPENID_NBF_LEEWAY_SECONDS,
 };
 pub(crate) use support::{
-    expires_at_from_duration, invalid_openid_token, oauth_client, oauth_request_error,
+    expires_at_from_duration, invalid_openid_token, oauth_client, oauth_refresh_terminality,
+    oauth_request_error,
 };
 pub(crate) use token_set::oauth_secret_type;
 

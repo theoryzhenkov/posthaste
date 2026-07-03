@@ -80,3 +80,31 @@ fn authorization_session_uses_pkce_and_state() {
     assert!(!session.pkce_verifier.is_empty());
     assert!(!session.nonce.is_empty());
 }
+
+/// D102 / A2: the refresh-failure classifier types the `invalid_grant` /
+/// `unauthorized_client` class (which `oauth_request_error` maps to
+/// `GatewayError::Auth`) as a Permanent `Terminality`, and every other failure
+/// as Transient — the verdict the refresh tick uses to decide whether to flip
+/// `AuthError` immediately.
+#[test]
+fn oauth_refresh_terminality_marks_auth_permanent() {
+    use posthaste_domain_model::Terminality;
+
+    assert_eq!(
+        oauth_refresh_terminality(&oauth_request_error("token error: invalid_grant")),
+        Terminality::Permanent,
+    );
+    assert_eq!(
+        oauth_refresh_terminality(&oauth_request_error("error: unauthorized_client")),
+        Terminality::Permanent,
+    );
+    assert_eq!(oauth_refresh_terminality(&GatewayError::Auth), Terminality::Permanent);
+    assert_eq!(
+        oauth_refresh_terminality(&GatewayError::Network("connection reset".to_string())),
+        Terminality::Transient,
+    );
+    assert_eq!(
+        oauth_refresh_terminality(&GatewayError::Rejected("bad".to_string())),
+        Terminality::Transient,
+    );
+}

@@ -50,6 +50,24 @@ where
     }
 }
 
+/// Terminality of an OAuth refresh failure (D102 / A2, reusing the M29
+/// [`Terminality`] taxonomy).
+///
+/// The `invalid_grant` / `unauthorized_client` class that [`oauth_request_error`]
+/// types as [`GatewayError::Auth`] is **Permanent**: the grant is revoked or the
+/// refresh token has been consumed, so no retry, reconnect, or later tick can
+/// recover it — only re-authentication can. Every other refresh failure (a
+/// network blip, a 5xx at the IdP) is **Transient** and left for the next tick to
+/// retry. The refresh tick uses the Permanent verdict to flip the account to
+/// `AuthError` immediately, instead of swallowing the error as a warning and
+/// waiting for a later connection rebuild to surface it.
+pub(crate) fn oauth_refresh_terminality(error: &GatewayError) -> Terminality {
+    match error {
+        GatewayError::Auth => Terminality::Permanent,
+        _ => Terminality::Transient,
+    }
+}
+
 pub(crate) fn invalid_openid_token<E>(error: E) -> GatewayError
 where
     E: std::fmt::Display,

@@ -1383,3 +1383,301 @@ fn startup_splay_delay_stays_within_the_configured_window() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// M37 / D101-D102: OAuth refresh CAS rotation (A1) + invalid_grant → AuthError
+// propagation from the refresh tick (A2).
+// ---------------------------------------------------------------------------
+
+/// A secret resolver whose refresh always fails — `auth` chooses between the
+/// terminal `invalid_grant`/`unauthorized_client` class (`GatewayError::Auth`)
+/// and a transient network blip. Stands in for the OAuth token endpoint so the
+/// refresh tick's classification path can be driven without a live IdP.
+#[derive(Debug)]
+struct RefreshFailResolver {
+    auth: bool,
+}
+
+#[async_trait::async_trait]
+impl SecretResolver for RefreshFailResolver {
+    async fn resolve_secret(&self) -> Result<String, GatewayError> {
+        if self.auth {
+            Err(GatewayError::Auth)
+        } else {
+            Err(GatewayError::Network("transient refresh blip".to_string()))
+        }
+    }
+}
+
+/// In-memory `SecretStore` counting `resolve` calls, so a test can exercise the
+/// default compare-and-swap (`update_if_unchanged`) rotation semantics that the
+/// real refresh path depends on (D101 / A1).
+struct CountingSecretStore {
+    values: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    resolves: AtomicUsize,
+}
+
+impl CountingSecretStore {
+    fn seeded(key: &str, value: &str) -> Self {
+        let mut values = std::collections::HashMap::new();
+        values.insert(key.to_string(), value.to_string());
+        Self {
+            values: std::sync::Mutex::new(values),
+            resolves: AtomicUsize::new(0),
+        }
+    }
+
+    fn current(&self, key: &str) -> String {
+        self.values.lock().unwrap().get(key).cloned().unwrap_or_default()
+    }
+}
+
+impl SecretStore for CountingSecretStore {
+    fn resolve(&self, secret_ref: &SecretRef) -> Result<String, SecretStoreError> {
+        self.resolves.fetch_add(1, Ordering::SeqCst);
+        self.values
+            .lock()
+            .unwrap()
+            .get(&secret_ref.key)
+            .cloned()
+            .ok_or_else(|| SecretStoreError::Unavailable(secret_ref.key.clone()))
+    }
+
+    fn save(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError> {
+        self.values
+            .lock()
+            .unwrap()
+            .insert(secret_ref.key.clone(), value.to_string());
+        Ok(())
+    }
+
+    fn update(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError> {
+        self.save(secret_ref, value)
+    }
+
+    fn delete(&self, secret_ref: &SecretRef) -> Result<(), SecretStoreError> {
+        self.values.lock().unwrap().remove(&secret_ref.key);
+        Ok(())
+    }
+}
+
+fn oauth_account(id: &str) -> AccountSettings {
+    let mut account = test_account(id);
+    account.transport.auth = ProviderAuthKind::OAuth2;
+    account
+}
+
+/// A2 / D102: a proactive refresh that fails `invalid_grant` (classified
+/// `GatewayError::Auth`, a Permanent `Terminality`) flips the account to
+/// `AuthError` *from the tick* — not on some later connection rebuild.
+#[tokio::test]
+async fn oauth_refresh_tick_flips_autherror_on_invalid_grant() {
+    let account = oauth_account("oauth-revoked");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    shared
+        .set_runtime_overview_for_generation(
+            &account.id,
+            generation,
+            AccountRuntimeOverview {
+                status: AccountStatus::Ready,
+                push: PushStatus::Connected,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    let mut connection = AccountRuntimeConnectionState::default();
+    connection.set_connected(AccountConnection {
+        gateway: Arc::new(MockJmapGateway::default()),
+        push_events: None,
+        remote_observation: RemoteObservationPolicy::disabled(),
+        secret_resolver: Arc::new(RefreshFailResolver { auth: true }),
+    });
+    let mut state = OAuthRefreshState::new(&account);
+
+    handle_oauth_refresh_tick(
+        &shared,
+        &account,
+        generation,
+        &account.id,
+        &mut connection,
+        &mut state,
+    )
+    .await;
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(
+        overview.status,
+        AccountStatus::AuthError,
+        "a revoked grant must surface as AuthError immediately from the refresh tick",
+    );
+    assert_eq!(
+        overview.last_sync_error_code.as_deref(),
+        Some("auth_error"),
+    );
+}
+
+/// A2 negative: a *transient* refresh failure (a network blip) must NOT flip
+/// `AuthError` — it is logged and retried on the next tick, leaving status
+/// untouched so a momentary IdP hiccup never masquerades as "needs re-auth".
+#[tokio::test]
+async fn oauth_refresh_tick_keeps_status_on_transient_error() {
+    let account = oauth_account("oauth-blip");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    shared
+        .set_runtime_overview_for_generation(
+            &account.id,
+            generation,
+            AccountRuntimeOverview {
+                status: AccountStatus::Ready,
+                push: PushStatus::Connected,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    let mut connection = AccountRuntimeConnectionState::default();
+    connection.set_connected(AccountConnection {
+        gateway: Arc::new(MockJmapGateway::default()),
+        push_events: None,
+        remote_observation: RemoteObservationPolicy::disabled(),
+        secret_resolver: Arc::new(RefreshFailResolver { auth: false }),
+    });
+    let mut state = OAuthRefreshState::new(&account);
+
+    handle_oauth_refresh_tick(
+        &shared,
+        &account,
+        generation,
+        &account.id,
+        &mut connection,
+        &mut state,
+    )
+    .await;
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(
+        overview.status,
+        AccountStatus::Ready,
+        "a transient refresh error must not flip the account to AuthError",
+    );
+}
+
+/// A1 / D101: two refreshes both read the same stored token set (`gen0`), both
+/// rotate and try to persist. The compare-and-swap lets exactly ONE land; the
+/// loser's stale write is rejected and it re-reads the winner's token rather
+/// than clobbering the freshly-rotated refresh token (the permanent-lockout
+/// race). This models `refresh_oauth_access_token`'s CAS-write / CAS-miss arms
+/// at the store seam.
+#[tokio::test]
+async fn oauth_refresh_cas_rejects_losing_writer_and_keeps_winner_token() {
+    fn token_set(access: &str, refresh: &str) -> String {
+        OAuthTokenSet {
+            r#type: crate::oauth::oauth_secret_type(),
+            provider: ProviderHint::Gmail,
+            client_id: "client".to_string(),
+            client_secret: Some("secret".to_string()),
+            access_token: access.to_string(),
+            refresh_token: Some(refresh.to_string()),
+            expires_at: Some("2026-04-27T10:00:00Z".to_string()),
+            scopes: vec!["https://mail.google.com/".to_string()],
+        }
+        .encode()
+        .expect("encode token set")
+    }
+
+    let secret_ref = SecretRef {
+        kind: posthaste_domain_model::SecretKind::Os,
+        key: "acct-oauth".to_string(),
+    };
+    let gen0 = token_set("access-0", "refresh-0");
+    let store = CountingSecretStore::seeded(&secret_ref.key, &gen0);
+
+    // Both racers read gen0.
+    let seen_by_a = store.resolve(&secret_ref).expect("resolve a");
+    let seen_by_b = store.resolve(&secret_ref).expect("resolve b");
+    assert_eq!(seen_by_a, gen0);
+    assert_eq!(seen_by_b, gen0);
+
+    // Winner (A) rotates gen0 -> gen1 and its CAS lands.
+    let gen1 = token_set("access-1", "refresh-1");
+    let outcome_a = store
+        .update_if_unchanged(&secret_ref, &seen_by_a, &gen1)
+        .expect("cas a");
+    assert_eq!(outcome_a, SecretCasOutcome::Swapped);
+
+    // Loser (B) rotated gen0 -> gen2, but its CAS expects the now-stale gen0.
+    let gen2 = token_set("access-2", "refresh-2");
+    let outcome_b = store
+        .update_if_unchanged(&secret_ref, &seen_by_b, &gen2)
+        .expect("cas b");
+    // The stale write is REJECTED, and the CAS returns the winner's set so the
+    // loser adopts it instead of re-refreshing a consumed grant.
+    let SecretCasOutcome::Mismatch { current } = outcome_b else {
+        panic!("losing writer's stale CAS must miss, got {outcome_b:?}");
+    };
+    assert_eq!(current, gen1, "CAS-miss must carry the winner's token set");
+
+    // The store still holds the winner's token — no last-writer-wins loss.
+    assert_eq!(store.current(&secret_ref.key), gen1);
+    let winner = OAuthTokenSet::decode(&current).expect("decode winner");
+    assert_eq!(winner.access_token, "access-1");
+    assert_eq!(winner.refresh_token.as_deref(), Some("refresh-1"));
+}
+
+/// M34 single-flight (verify unregressed): the per-secret-ref refresh flight on
+/// `SupervisorShared` serializes concurrent refreshes of the same ref. Two tasks
+/// acquiring the same ref's flight never overlap; distinct refs get distinct
+/// locks and run freely.
+#[tokio::test]
+async fn oauth_refresh_single_flight_serializes_same_ref() {
+    let account = oauth_account("oauth-flight");
+    let (shared, _root) = test_shared(&account);
+    let key = "acct-flight".to_string();
+
+    // Same key hands back the same flight lock (one in-flight refresh per ref).
+    let flight_a = {
+        let mut flights = shared.oauth_refresh_flights.lock().await;
+        Arc::clone(flights.entry(key.clone()).or_default())
+    };
+    let flight_b = {
+        let mut flights = shared.oauth_refresh_flights.lock().await;
+        Arc::clone(flights.entry(key.clone()).or_default())
+    };
+    assert!(
+        Arc::ptr_eq(&flight_a, &flight_b),
+        "the same secret ref must share one refresh flight",
+    );
+
+    // Mutual exclusion: while one task holds the flight, a second cannot enter.
+    let concurrency = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let mut handles = Vec::new();
+    for _ in 0..2 {
+        let shared = shared.clone();
+        let key = key.clone();
+        let concurrency = concurrency.clone();
+        let peak = peak.clone();
+        handles.push(tokio::spawn(async move {
+            let flight = {
+                let mut flights = shared.oauth_refresh_flights.lock().await;
+                Arc::clone(flights.entry(key).or_default())
+            };
+            let _guard = flight.lock().await;
+            let now = concurrency.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            concurrency.fetch_sub(1, Ordering::SeqCst);
+        }));
+    }
+    for handle in handles {
+        handle.await.expect("flight task should not panic");
+    }
+    assert_eq!(
+        peak.load(Ordering::SeqCst),
+        1,
+        "the single-flight must admit at most one refresh of a ref at a time",
+    );
+}
