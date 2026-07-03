@@ -33,7 +33,9 @@ export function invalidateMailNavigationBootstrapReadModels(
   void queryClient.invalidateQueries({ queryKey: queryKeys.tags })
 }
 
-export async function invalidateSyncStartedReadModels(queryClient: QueryClient) {
+export async function invalidateSyncStartedReadModels(
+  queryClient: QueryClient,
+) {
   // `messagesRoot` (the mail list) + `mailboxes` (counts) are owned by the
   // entity store — it drives them via SSE-fed frames + `setQueryData`, so they
   // are not REST-invalidated here. The rest are not store-owned.
