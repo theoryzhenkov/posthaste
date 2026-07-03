@@ -23,6 +23,7 @@ import { isDeveloperToolsEnabled } from './developerTools'
 import { useAccountsView } from './hooks/useAccountsView'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import { useDesktopUpdates } from './hooks/useDesktopUpdates'
+import { useReplicaDatabaseReloadPrompt } from './hooks/useReplicaDatabaseReloadPrompt'
 import { AppearanceSettingsSync } from './hooks/useAppearanceSettingsSync'
 import { useSurfaceRouteState } from './hooks/useSurfaceRouting'
 
@@ -79,6 +80,7 @@ export default function App() {
 
   useDeveloperToolsShortcut()
   useDesktopUpdates()
+  useReplicaDatabaseReloadPrompt()
 
   return (
     <QueryClientProvider client={queryClient}>
