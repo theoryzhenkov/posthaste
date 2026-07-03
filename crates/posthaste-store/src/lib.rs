@@ -23,6 +23,7 @@ mod store;
 mod sync_state;
 
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
+pub(crate) use crate::store::StagedBodyFiles;
 pub use rev_log::MAX_REV_LOG_HISTORY;
 
 use std::collections::{BTreeSet, HashSet};

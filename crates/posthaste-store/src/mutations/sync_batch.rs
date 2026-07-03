@@ -5,6 +5,7 @@ pub(crate) fn stage_sync_bodies(
     store: &DatabaseStore,
     account_id: &AccountId,
     batch: &SyncBatch,
+    staged: &mut StagedBodyFiles,
 ) -> Result<Vec<Option<RawMessageRef>>, StoreError> {
     batch
         .messages
@@ -16,7 +17,7 @@ pub(crate) fn stage_sync_bodies(
                 .or_else(|| synthesize_raw_mime(message));
             raw_mime
                 .as_deref()
-                .map(|raw_mime| store.store_raw_message(account_id, raw_mime))
+                .map(|raw_mime| store.store_raw_message(account_id, raw_mime, staged))
                 .transpose()
         })
         .collect()
