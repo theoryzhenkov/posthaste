@@ -11,8 +11,21 @@ use async_trait::async_trait;
 /// as they arrive. The service supplies the implementation; the gateway only
 /// emits.
 ///
+/// `async` (D63/M23b): the service-side implementation
+/// ([`ServiceSyncSink`](../service/sync_ops/struct.ServiceSyncSink.html))
+/// applies the chunk to the store — the heaviest store write on the sync path
+/// — via `tokio::task::spawn_blocking` (the store's `SyncWriteStore` port
+/// stays a plain sync trait; see its doc comment), so `emit` must be awaitable
+/// rather than a blocking synchronous call made from a tokio worker. Transport
+/// streaming loops that page results into `emit` (e.g. the JMAP page fetcher
+/// in `posthaste-engine`) call it with `.await` per page/chunk — they are
+/// already `async fn`s driving other awaited requests, so this is a
+/// same-shape addition, not a new async boundary.
+///
+/// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
+#[async_trait]
 pub trait SyncChunkSink: Send {
-    fn emit(&mut self, batch: SyncBatch) -> Result<(), GatewayError>;
+    async fn emit(&mut self, batch: SyncBatch) -> Result<(), GatewayError>;
 }
 
 #[async_trait]
@@ -45,7 +58,7 @@ pub trait MailGateway: Send + Sync {
         sink: &mut dyn SyncChunkSink,
     ) -> Result<SyncOutcome, GatewayError> {
         let batch = self.sync(account_id, cursors, progress).await?;
-        sink.emit(batch)?;
+        sink.emit(batch).await?;
         Ok(SyncOutcome::single_batch())
     }
 

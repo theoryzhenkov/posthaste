@@ -95,6 +95,33 @@ impl MailService {
     }
 }
 
+/// Runs a synchronous `SyncWriteStore`/`MessageCommandStore` call on the tokio
+/// **blocking pool** via [`tokio::task::spawn_blocking`] (D63/M23b): those
+/// ports stay plain `&self` sync traits (so `posthaste-store`'s own unit
+/// tests keep calling them with no `Arc`/runtime — see the ports' doc
+/// comments), so every *async* call site that drives one of the store's hot
+/// write paths — `ServiceSyncSink::emit` (the snapshot/delta apply),
+/// `apply_assertion_to_canonical`, the outbox settle write, lazy body caching
+/// — wraps the call here rather than running the SQLite work inline on the
+/// tokio worker thread. `f` typically closes over an `Arc::clone`d port
+/// handle plus owned copies of its arguments (the port call borrows `&self`
+/// and `&args`, both cheap to hand to the closure once cloned).
+///
+/// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
+pub(crate) async fn offload<T, F>(f: F) -> Result<T, StoreError>
+where
+    F: FnOnce() -> Result<T, StoreError> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .unwrap_or_else(|join_err| {
+            Err(StoreError::Failure(format!(
+                "store write task failed: {join_err}"
+            )))
+        })
+}
+
 /// Serialize an operation payload, mapping the JSON error to an internal-codec
 /// `ServiceError`. A failure here is our own encode bug, not a provider
 /// rejection, so it carries `GatewayError::Internal` (permanent, 500-class)

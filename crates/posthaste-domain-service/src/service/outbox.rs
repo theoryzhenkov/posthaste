@@ -541,7 +541,8 @@ impl MailService {
                     //
                     // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
                     events.extend(
-                        self.settle_message_operation(account_id, &operation, readback, rejected)?,
+                        self.settle_message_operation(account_id, &operation, readback, rejected)
+                            .await?,
                     );
                 }
                 Err(FlushError {
@@ -711,7 +712,7 @@ impl MailService {
     /// sync to reconcile.
     ///
     /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
-    fn settle_message_operation(
+    async fn settle_message_operation(
         &self,
         account_id: &AccountId,
         operation: &Operation,
@@ -742,7 +743,11 @@ impl MailService {
             None => None,
         };
         if let Some(batch) = batch {
-            events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
+            let sync_writer = self.sync_writer.clone();
+            let owned_account_id = account_id.clone();
+            events.extend(
+                offload(move || sync_writer.apply_sync_batch(&owned_account_id, &batch)).await?,
+            );
         }
         let settlement = OperationSettlement {
             id: operation.id.clone(),

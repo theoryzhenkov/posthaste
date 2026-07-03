@@ -1,4 +1,5 @@
 use super::*;
+use crate::service::offload;
 
 impl MailService {
     /// Fetch one bounded batch of wanted message-body cache candidates.
@@ -182,26 +183,29 @@ impl MailService {
                 }
             };
 
-            let result =
-                match self
-                    .sync_writer
-                    .apply_message_body(account_id, &message_id, &fetched)
-                {
-                    Ok(result) => result,
-                    Err(error) => {
-                        let service_error = ServiceError::from(error);
-                        let error_code = service_error.code().to_string();
-                        self.cache_store.mark_cache_object_state(
-                            account_id,
-                            &message_id,
-                            candidate.layer,
-                            candidate.object_id.as_deref(),
-                            CacheObjectState::Failed,
-                            Some(error_code.as_str()),
-                        )?;
-                        return Err(service_error);
-                    }
-                };
+            let sync_writer = self.sync_writer.clone();
+            let owned_account_id = account_id.clone();
+            let owned_message_id = message_id.clone();
+            let result = match offload(move || {
+                sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched)
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    let service_error = ServiceError::from(error);
+                    let error_code = service_error.code().to_string();
+                    self.cache_store.mark_cache_object_state(
+                        account_id,
+                        &message_id,
+                        candidate.layer,
+                        candidate.object_id.as_deref(),
+                        CacheObjectState::Failed,
+                        Some(error_code.as_str()),
+                    )?;
+                    return Err(service_error);
+                }
+            };
             self.cache_store.mark_cache_object_state(
                 account_id,
                 &message_id,

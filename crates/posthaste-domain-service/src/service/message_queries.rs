@@ -151,8 +151,11 @@ impl MailService {
         };
 
         let fetched = gateway.fetch_message_body(account_id, message_id).await?;
-        self.sync_writer
-            .apply_message_body(account_id, message_id, &fetched)
+        let sync_writer = self.sync_writer.clone();
+        let owned_account_id = account_id.clone();
+        let owned_message_id = message_id.clone();
+        offload(move || sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched))
+            .await
             .map_err(Into::into)
     }
 
@@ -193,9 +196,13 @@ impl MailService {
 
         if let Some(gateway) = gateway {
             let fetched = gateway.fetch_message_body(account_id, message_id).await?;
-            let cache_result = self
-                .sync_writer
-                .apply_message_body(account_id, message_id, &fetched)?;
+            let sync_writer = self.sync_writer.clone();
+            let owned_account_id = account_id.clone();
+            let owned_message_id = message_id.clone();
+            let cache_result = offload(move || {
+                sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched)
+            })
+            .await?;
             events.extend(cache_result.events);
             if let Some(raw) = self
                 .message_detail_reader

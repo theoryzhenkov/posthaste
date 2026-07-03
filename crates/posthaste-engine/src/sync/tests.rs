@@ -99,8 +99,9 @@ struct RecordingSink {
     chunks: Vec<posthaste_domain_model::SyncBatch>,
 }
 
+#[async_trait::async_trait]
 impl posthaste_domain_service::SyncChunkSink for RecordingSink {
-    fn emit(
+    async fn emit(
         &mut self,
         batch: posthaste_domain_model::SyncBatch,
     ) -> Result<(), posthaste_domain_model::GatewayError> {
