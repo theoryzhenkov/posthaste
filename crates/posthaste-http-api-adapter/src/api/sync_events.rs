@@ -119,11 +119,18 @@ pub async fn stream_events(
         mailbox_id: query.mailbox_id.map(MailboxId),
         after_seq: query.after_seq,
     };
-    let subscription = state
-        .runtime
-        .subscribe_events(RuntimeCaller::api(), filter)
-        .await
-        .map_err(ApiError::from_runtime_error)?;
+    // D64/M24: excluded from the blanket `TimeoutLayer`; the SETUP await (the
+    // runtime call that produces the subscription + backlog replay) instead
+    // takes its own explicit deadline. The streaming phase after this point is
+    // unbounded.
+    let subscription = crate::deadlines::with_stream_setup_deadline("event subscription", async {
+        state
+            .runtime
+            .subscribe_events(RuntimeCaller::api(), filter)
+            .await
+            .map_err(ApiError::from_runtime_error)
+    })
+    .await?;
     let backlog_stream = tokio_stream::iter(subscription.replay.into_iter().map(event_to_sse));
     let live_stream = subscription.live.map(event_to_sse);
     Ok(Sse::new(backlog_stream.chain(live_stream)).keep_alive(KeepAlive::default()))
