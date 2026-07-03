@@ -8,6 +8,7 @@ import {
   Send,
   Settings as SettingsIcon,
   Tags,
+  Workflow,
   Wrench,
 } from 'lucide-react'
 
@@ -68,6 +69,13 @@ const SETTINGS_CATEGORIES = [
     label: 'Mailboxes & Rules',
     description: 'Smart mailboxes and rules that shape your views.',
     icon: FolderSearch,
+    accent: brandAccents.violet,
+  },
+  {
+    id: 'automations',
+    label: 'Automations',
+    description: 'Rules that react to your mail — tag, move, notify, webhook.',
+    icon: Workflow,
     accent: brandAccents.violet,
   },
   {

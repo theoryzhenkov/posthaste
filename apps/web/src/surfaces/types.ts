@@ -12,6 +12,7 @@ export const SETTINGS_SURFACE_CATEGORIES = [
   'accounts',
   'outbox',
   'mailboxes',
+  'automations',
   'tags',
   'storage',
   'notifications',

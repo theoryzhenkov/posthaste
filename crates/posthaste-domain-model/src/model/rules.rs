@@ -131,6 +131,76 @@ pub enum RuleAction {
     },
 }
 
+/// The **write-surface** projection of [`RuleAction`]: every variant EXCEPT
+/// [`RuleAction::Exec`] (RFC-L2-scripting ruling 23).
+///
+/// This is the body type the REST rule-write routes (`POST`/`PUT` `/v1/rules`)
+/// deserialize into. Because `Exec` is *not a variant here*, a request body of
+/// `{"kind":"exec", …}` is **unrepresentable**: it fails at the serde boundary
+/// (a 422 deserialize error), never reaching a handler. The
+/// exec-is-config-file-only invariant (a REST-settable exec = RCE, threat 3) is
+/// therefore **structural** — the GUI/REST path cannot create an exec rule
+/// because the type it parses into has no exec case. This replaces a fragile
+/// runtime `if kind == "exec" { reject }` guard with a type the compiler and
+/// serde enforce for us.
+///
+/// A [`From<WritableRuleAction>`] lifts a validated write action back into the
+/// full [`RuleAction`] the engine and persistence layer speak.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum WritableRuleAction {
+    /// See [`RuleAction::Tag`].
+    Tag { tag: String },
+    /// See [`RuleAction::Move`].
+    Move {
+        #[cfg_attr(feature = "openapi", schema(rename = "mailboxId"))]
+        mailbox_id: MailboxId,
+    },
+    /// See [`RuleAction::Notify`].
+    Notify {
+        title: String,
+        #[serde(default)]
+        body: Option<String>,
+    },
+    /// See [`RuleAction::Emit`].
+    Emit,
+    /// See [`RuleAction::Webhook`].
+    Webhook {
+        url: String,
+        #[serde(default)]
+        grants: Vec<RuleGrant>,
+        #[serde(default = "default_hook_expiry_seconds")]
+        expiry_seconds: u64,
+    },
+    // NOTE: there is deliberately NO `Exec` variant — that is the whole point of
+    // this type. Do not add one; exec stays config-file-only (ruling 23).
+}
+
+impl From<WritableRuleAction> for RuleAction {
+    fn from(action: WritableRuleAction) -> Self {
+        match action {
+            WritableRuleAction::Tag { tag } => RuleAction::Tag { tag },
+            WritableRuleAction::Move { mailbox_id } => RuleAction::Move { mailbox_id },
+            WritableRuleAction::Notify { title, body } => RuleAction::Notify { title, body },
+            WritableRuleAction::Emit => RuleAction::Emit,
+            WritableRuleAction::Webhook {
+                url,
+                grants,
+                expiry_seconds,
+            } => RuleAction::Webhook {
+                url,
+                grants,
+                expiry_seconds,
+            },
+        }
+    }
+}
+
 /// The default per-invocation token lifetime for a hook action when the rule
 /// omits `expirySeconds`: one hour (the worked-example grant in RFC §9).
 pub fn default_hook_expiry_seconds() -> u64 {
@@ -250,6 +320,59 @@ mod tests {
             enabled: true,
         };
         assert_eq!(rule.trigger_topics(), vec![EVENT_TOPIC_MESSAGE_UPDATED.to_string()]);
+    }
+
+    /// The security gate (ruling 23): a `{"kind":"exec",…}` body is
+    /// UNREPRESENTABLE as a [`WritableRuleAction`] — it fails at the serde
+    /// boundary, so a REST/GUI write can never carry an exec action. This is the
+    /// structural form of the exec-is-config-file-only invariant.
+    #[test]
+    fn writable_action_rejects_exec_at_the_serde_boundary() {
+        let exec = serde_json::json!({
+            "kind": "exec",
+            "command": "/bin/rm",
+            "grants": ["read"],
+        });
+        let result: Result<WritableRuleAction, _> = serde_json::from_value(exec);
+        assert!(
+            result.is_err(),
+            "an exec action must not deserialize into WritableRuleAction"
+        );
+    }
+
+    /// Every safe variant round-trips into the full [`RuleAction`] via `From`,
+    /// so the write surface loses nothing but exec.
+    #[test]
+    fn writable_action_lifts_into_rule_action() {
+        let writable = WritableRuleAction::Webhook {
+            url: "https://vm/agent".into(),
+            grants: vec![RuleGrant::Read],
+            expiry_seconds: 900,
+        };
+        let lifted: RuleAction = writable.into();
+        assert_eq!(lifted.kind_str(), "webhook");
+        assert!(lifted.is_hook());
+
+        let tag: RuleAction = WritableRuleAction::Tag { tag: "x".into() }.into();
+        assert_eq!(tag, RuleAction::Tag { tag: "x".into() });
+        let emit: RuleAction = WritableRuleAction::Emit.into();
+        assert_eq!(emit, RuleAction::Emit);
+    }
+
+    /// A safe action deserializes into `WritableRuleAction` exactly as it would
+    /// into `RuleAction` — the two share the wire shape for the four safe kinds.
+    #[test]
+    fn writable_action_accepts_safe_kinds() {
+        for body in [
+            serde_json::json!({"kind": "tag", "tag": "x"}),
+            serde_json::json!({"kind": "move", "mailboxId": "inbox"}),
+            serde_json::json!({"kind": "notify", "title": "hi"}),
+            serde_json::json!({"kind": "emit"}),
+            serde_json::json!({"kind": "webhook", "url": "http://127.0.0.1/h", "grants": ["read"]}),
+        ] {
+            let parsed: Result<WritableRuleAction, _> = serde_json::from_value(body.clone());
+            assert!(parsed.is_ok(), "safe action {body} must deserialize");
+        }
     }
 
     #[test]

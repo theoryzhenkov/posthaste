@@ -23,6 +23,7 @@ import type {
   ReadRequest,
   ReplyContext,
   ReadResponse,
+  Rule,
   SaveDraftInput,
   SendMessageInput,
   SmartMailbox,
@@ -35,6 +36,7 @@ import type {
   UpdateAccountInput,
   UpdateSmartMailboxInput,
   VerificationResponse,
+  WritableRuleInput,
 } from '../api/types'
 import type { OperationContext } from '../observability'
 
@@ -438,6 +440,10 @@ export interface RuntimeAdapter {
     input: AutomationRulePreviewInput,
   ): Promise<AutomationRulePreviewResponse>
   read(request: ReadRequest): Promise<ReadResponse>
+  fetchRules(): Promise<Rule[]>
+  createRule(input: WritableRuleInput): Promise<Rule>
+  updateRule(id: string, input: WritableRuleInput): Promise<Rule>
+  deleteRule(id: string): Promise<void>
   resetDefaultSmartMailboxes(): Promise<SmartMailboxSummary[]>
   runMessageCommand(
     request: RuntimeMessageCommandRequest,
