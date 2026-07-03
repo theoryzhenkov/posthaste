@@ -5,20 +5,36 @@ pub(crate) async fn sync_imap_account(
     account_id: &AccountId,
     progress: Option<SyncProgressReporter>,
 ) -> Result<SyncBatch, GatewayError> {
+    // One lease for the whole cycle: the sync borrows the account's single
+    // reused session (D92/O3) instead of opening its own connection. An
+    // in-flight IDLE hold is recalled by the acquire; a connection-fatal
+    // failure inside the cycle drops the session so the next use reconnects.
+    let mut lease = gateway
+        .sessions
+        .acquire("sync")
+        .await
+        .map_err(imap_error_to_gateway)?;
+    let result = sync_imap_account_with_client(gateway, lease.client(), account_id, progress).await;
+    lease.finish_gateway(result)
+}
+
+async fn sync_imap_account_with_client(
+    gateway: &LiveImapSmtpGateway,
+    client: &mut ImapClient,
+    account_id: &AccountId,
+    progress: Option<SyncProgressReporter>,
+) -> Result<SyncBatch, GatewayError> {
     let sync_started = Instant::now();
     report_sync_progress(
         &progress,
         ImapSyncProgressUpdate::new(SyncProgressStage::Discovering, "Checking IMAP capabilities"),
     );
     let mut discovery = gateway.discovery.clone();
-    let imap_config = gateway.resolve_imap_config().await?;
-    let mut client = connect_authenticated_client(&imap_config)
+    // Re-read capabilities on the live session for planning: CONDSTORE/QRESYNC
+    // may only appear post-auth, and advertisements can change between
+    // discovery and sync. Deadline-bounded (C1) unlike the pre-M34 call.
+    crate::timeout::with_deadline("refresh_capabilities", client.refresh_capabilities())
         .await
-        .map_err(imap_error_to_gateway)?;
-    client
-        .refresh_capabilities()
-        .await
-        .map_err(ImapAdapterError::from)
         .map_err(imap_error_to_gateway)?;
 
     // Use the capabilities advertised on this connection for planning, not the
@@ -53,7 +69,7 @@ pub(crate) async fn sync_imap_account(
     let store = gateway.store.as_deref();
     let account_full_message_snapshot = store.is_none();
     let planned_mailboxes = plan_mailboxes(
-        &mut client,
+        client,
         account_id,
         &discovery,
         store,
@@ -83,7 +99,7 @@ pub(crate) async fn sync_imap_account(
     );
 
     let accumulator = execute_mailbox_plans(
-        &mut client,
+        client,
         planned_mailboxes,
         MailboxPlanExecutionContext {
             account_id,

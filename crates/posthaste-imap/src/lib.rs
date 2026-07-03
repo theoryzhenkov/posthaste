@@ -18,16 +18,16 @@ mod mailbox;
 mod message;
 mod mutation;
 mod provider;
+mod session;
 mod smtp;
 mod sync;
 mod timeout;
 
 pub use body::{
-    fetch_message_body_by_location, fetch_raw_message_by_location, fetched_body_from_items,
-    imap_attachment_bytes_from_raw_mime, imap_body_from_raw_mime, parse_imap_attachment_blob_id,
-    raw_mime_from_items,
+    fetched_body_from_items, imap_attachment_bytes_from_raw_mime, imap_body_from_raw_mime,
+    parse_imap_attachment_blob_id, raw_mime_from_items,
 };
-pub use compose::{fetch_imap_reply_context_by_location, imap_reply_context_from_raw_mime};
+pub use compose::imap_reply_context_from_raw_mime;
 pub use discovery::{
     discover_imap_account, imap_mailbox_id, map_imap_mailbox, map_imap_mailbox_with_provider,
     normalize_imap_capabilities, DiscoveredImapAccount, DiscoveredImapMailbox,
@@ -39,21 +39,18 @@ pub use fetch::{
     ImapFetchedHeaderWithMetadata, ImapMailboxHeaderSnapshot, ImapMailboxUidDeltaSnapshot,
 };
 pub use gateway::LiveImapSmtpGateway;
-pub use idle::imap_idle_event_stream;
 pub use mailbox::selected_mailbox_from_examine;
 pub use message::{
     imap_flag_keywords, imap_header_message_record, imap_header_message_record_with_gmail_metadata,
     ImapFetchedHeader, ImapMailboxMembershipSource, ImapMappedHeader,
 };
 pub use mutation::{
-    apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
-    expunge_imap_message_by_location, imap_flags_for_keywords, imap_mailbox_replacement_delta,
-    mark_imap_message_deleted_by_location, move_imap_message_to_mailbox_by_location,
-    ImapMailboxReplacementDelta,
+    imap_flags_for_keywords, imap_mailbox_replacement_delta, ImapMailboxReplacementDelta,
 };
+pub use session::{ImapSessionManager, IMAP_MAX_SESSIONS_PER_ACCOUNT};
 pub use smtp::{
-    append_smtp_sent_copy, build_smtp_message, render_smtp_markdown, send_smtp_message,
-    send_smtp_messages, smtp_mailbox_for_recipient, smtp_sent_copy_strategy, submit_smtp_message,
+    build_smtp_message, render_smtp_markdown, send_smtp_message, send_smtp_messages,
+    smtp_mailbox_for_recipient, smtp_sent_copy_strategy, submit_smtp_message,
     SmtpConnectionConfig, SmtpSentCopyStrategy, SubmittedSmtpMessage,
 };
 pub use sync::{

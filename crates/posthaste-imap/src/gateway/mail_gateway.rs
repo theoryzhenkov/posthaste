@@ -17,11 +17,13 @@ impl MailGateway for LiveImapSmtpGateway {
         message_id: &MessageId,
     ) -> Result<FetchedBody, GatewayError> {
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
-        let config = self.resolve_imap_config().await?;
-
-        fetch_message_body_by_location(&config, &mailbox_name, &location)
+        let mut lease = self
+            .sessions
+            .acquire("fetch_message_body")
             .await
-            .map_err(imap_error_to_gateway)
+            .map_err(imap_error_to_gateway)?;
+        let result = fetch_message_body_by_location(lease.client(), &mailbox_name, &location).await;
+        lease.finish(result).map_err(imap_error_to_gateway)
     }
 
     async fn download_blob(
@@ -32,10 +34,13 @@ impl MailGateway for LiveImapSmtpGateway {
         let (message_id, _attachment_index) =
             parse_imap_attachment_blob_id(blob_id).map_err(imap_error_to_gateway)?;
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, &message_id)?;
-        let config = self.resolve_imap_config().await?;
-        let raw_mime = fetch_raw_message_by_location(&config, &mailbox_name, &location)
+        let mut lease = self
+            .sessions
+            .acquire("download_blob")
             .await
             .map_err(imap_error_to_gateway)?;
+        let result = fetch_raw_message_by_location(lease.client(), &mailbox_name, &location).await;
+        let raw_mime = lease.finish(result).map_err(imap_error_to_gateway)?;
 
         imap_attachment_bytes_from_raw_mime(blob_id, raw_mime).map_err(imap_error_to_gateway)
     }
@@ -58,11 +63,15 @@ impl MailGateway for LiveImapSmtpGateway {
         command: &SetKeywordsCommand,
     ) -> Result<MutationOutcome, GatewayError> {
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
-        let config = self.resolve_imap_config().await?;
-
-        apply_imap_keyword_delta_by_location(&config, &mailbox_name, &location, command)
+        let mut lease = self
+            .sessions
+            .acquire("set_keywords")
             .await
-            .map_err(imap_error_to_gateway)
+            .map_err(imap_error_to_gateway)?;
+        let result =
+            apply_imap_keyword_delta_by_location(lease.client(), &mailbox_name, &location, command)
+                .await;
+        lease.finish(result).map_err(imap_error_to_gateway)
     }
 
     async fn replace_mailboxes(
@@ -72,8 +81,15 @@ impl MailGateway for LiveImapSmtpGateway {
         _expected_state: Option<&str>,
         mailbox_ids: &[MailboxId],
     ) -> Result<MutationOutcome, GatewayError> {
-        let config = self.resolve_imap_config().await?;
-        replace_message_mailboxes(self, &config, account_id, message_id, mailbox_ids).await
+        let mut lease = self
+            .sessions
+            .acquire("replace_mailboxes")
+            .await
+            .map_err(imap_error_to_gateway)?;
+        let result =
+            replace_message_mailboxes(self, lease.client(), account_id, message_id, mailbox_ids)
+                .await;
+        lease.finish_gateway(result)
     }
 
     async fn destroy_message(
@@ -82,8 +98,13 @@ impl MailGateway for LiveImapSmtpGateway {
         message_id: &MessageId,
         _expected_state: Option<&str>,
     ) -> Result<MutationOutcome, GatewayError> {
-        let config = self.resolve_imap_config().await?;
-        destroy_message_by_imap(self, &config, account_id, message_id).await
+        let mut lease = self
+            .sessions
+            .acquire("destroy_message")
+            .await
+            .map_err(imap_error_to_gateway)?;
+        let result = destroy_message_by_imap(self, lease.client(), account_id, message_id).await;
+        lease.finish_gateway(result)
     }
 
     async fn set_mailbox_role(
@@ -125,11 +146,14 @@ impl MailGateway for LiveImapSmtpGateway {
         message_id: &MessageId,
     ) -> Result<ReplyContext, GatewayError> {
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
-        let config = self.resolve_imap_config().await?;
-
-        fetch_imap_reply_context_by_location(&config, &mailbox_name, &location)
+        let mut lease = self
+            .sessions
+            .acquire("fetch_reply_context")
             .await
-            .map_err(imap_error_to_gateway)
+            .map_err(imap_error_to_gateway)?;
+        let result =
+            fetch_imap_reply_context_by_location(lease.client(), &mailbox_name, &location).await;
+        lease.finish(result).map_err(imap_error_to_gateway)
     }
 
     async fn send_message(
@@ -138,9 +162,8 @@ impl MailGateway for LiveImapSmtpGateway {
         request: &SendMessageRequest,
         idempotency_key: &str,
     ) -> Result<(), GatewayError> {
-        let imap_config = self.resolve_imap_config().await?;
         let smtp_config = self.resolve_smtp_config().await?;
-        send_message_via_smtp(self, &imap_config, &smtp_config, request, idempotency_key).await
+        send_message_via_smtp(self, &smtp_config, request, idempotency_key).await
     }
 
     async fn save_draft(
@@ -149,8 +172,13 @@ impl MailGateway for LiveImapSmtpGateway {
         request: &SendMessageRequest,
         replace: Option<&MessageId>,
     ) -> Result<MessageId, GatewayError> {
-        let config = self.resolve_imap_config().await?;
-        save_imap_draft(self, &config, account_id, request, replace).await
+        let mut lease = self
+            .sessions
+            .acquire("save_draft")
+            .await
+            .map_err(imap_error_to_gateway)?;
+        let result = save_imap_draft(self, lease.client(), account_id, request, replace).await;
+        lease.finish_gateway(result)
     }
 
     async fn delete_draft(
@@ -158,8 +186,13 @@ impl MailGateway for LiveImapSmtpGateway {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<(), GatewayError> {
-        let config = self.resolve_imap_config().await?;
-        delete_imap_draft(self, &config, account_id, message_id).await
+        let mut lease = self
+            .sessions
+            .acquire("delete_draft")
+            .await
+            .map_err(imap_error_to_gateway)?;
+        let result = delete_imap_draft(self, lease.client(), account_id, message_id).await;
+        lease.finish_gateway(result)
     }
 
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
