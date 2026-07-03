@@ -1,6 +1,18 @@
 use super::*;
 
 /// Local message mutation persistence boundary.
+///
+/// Stays plain synchronous `&self` (not `async`, D63/M23b design note): like
+/// [`SyncWriteStore`](super::SyncWriteStore), `posthaste-store`'s own unit
+/// tests call these directly on a bare `DatabaseStore` with no runtime — an
+/// `async` port would force every one of those tests to acquire one. The
+/// async offload lives at the call site instead: `MailService` reaches these
+/// through `Arc<dyn MessageCommandStore>` and, from its async methods, wraps
+/// the call in `tokio::task::spawn_blocking` (`apply_assertion_to_canonical`)
+/// so the per-message-action write — invoked directly from the HTTP request
+/// path — never occupies a tokio worker thread.
+///
+/// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
 pub trait MessageCommandStore: Send + Sync {
     /// Apply a keyword mutation locally, updating the sync cursor.
     ///

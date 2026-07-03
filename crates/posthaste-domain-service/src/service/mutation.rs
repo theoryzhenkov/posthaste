@@ -4,7 +4,7 @@ use posthaste_domain_model::{
     ServiceError, SetKeywordsCommand, StoreError, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 
-use super::{decode_payload, encode_payload, MailService};
+use super::{decode_payload, encode_payload, offload, MailService};
 
 impl MailService {
     fn queue_message_operation(
@@ -34,7 +34,7 @@ impl MailService {
         error
     }
 
-    fn queue_then_emit_message_operation(
+    async fn queue_then_emit_message_operation(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
@@ -66,7 +66,10 @@ impl MailService {
         // append failure) so the outbox and canonical do not diverge.
         //
         // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
-        if let Err(error) = self.apply_assertion_to_canonical(account_id, message_id, &operation) {
+        if let Err(error) = self
+            .apply_assertion_to_canonical(account_id, message_id, &operation)
+            .await
+        {
             return Err(self.remove_operation_after_local_failure(&operation, error));
         }
         let event = match self.events.append_event(
@@ -92,7 +95,7 @@ impl MailService {
     /// `MessageCommandStore` local-write methods.
     ///
     /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
-    fn apply_assertion_to_canonical(
+    async fn apply_assertion_to_canonical(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
@@ -102,18 +105,38 @@ impl MailService {
             OperationKind::SetKeywords => {
                 let command: SetKeywordsCommand =
                     decode_payload(operation.payload.clone(), "setKeywords payload")?;
-                self.message_commands
-                    .set_keywords(account_id, message_id, None, &command)?;
+                let message_commands = self.message_commands.clone();
+                let owned_account_id = account_id.clone();
+                let owned_message_id = message_id.clone();
+                offload(move || {
+                    message_commands.set_keywords(&owned_account_id, &owned_message_id, None, &command)
+                })
+                .await?;
             }
             OperationKind::ReplaceMailboxes => {
                 let command: ReplaceMailboxesCommand =
                     decode_payload(operation.payload.clone(), "replaceMailboxes payload")?;
-                self.message_commands
-                    .replace_mailboxes(account_id, message_id, None, &command)?;
+                let message_commands = self.message_commands.clone();
+                let owned_account_id = account_id.clone();
+                let owned_message_id = message_id.clone();
+                offload(move || {
+                    message_commands.replace_mailboxes(
+                        &owned_account_id,
+                        &owned_message_id,
+                        None,
+                        &command,
+                    )
+                })
+                .await?;
             }
             OperationKind::Destroy => {
-                self.message_commands
-                    .destroy_message(account_id, message_id, None)?;
+                let message_commands = self.message_commands.clone();
+                let owned_account_id = account_id.clone();
+                let owned_message_id = message_id.clone();
+                offload(move || {
+                    message_commands.destroy_message(&owned_account_id, &owned_message_id, None)
+                })
+                .await?;
             }
             _ => {}
         }
@@ -127,7 +150,6 @@ impl MailService {
     ///
     /// @spec docs/L1-api#message-commands
     /// @spec docs/L1-outbox#operation-model
-    #[allow(clippy::unused_async)]
     pub async fn set_keywords(
         &self,
         account_id: &AccountId,
@@ -145,6 +167,7 @@ impl MailService {
                 "changes": { "keywords": true },
             }),
         )
+        .await
     }
 
     /// Snooze scheduler: return every due snoozed message to the Inbox.
@@ -196,7 +219,6 @@ impl MailService {
     ///
     /// @spec docs/L1-api#message-commands
     /// @spec docs/L1-outbox#operation-model
-    #[allow(clippy::unused_async)]
     pub async fn replace_mailboxes(
         &self,
         account_id: &AccountId,
@@ -224,6 +246,7 @@ impl MailService {
                     .collect::<Vec<_>>(),
             }),
         )
+        .await
     }
 
     /// Add a message to a mailbox (idempotent: no-op if already present).
@@ -273,7 +296,6 @@ impl MailService {
     ///
     /// @spec docs/L1-api#message-commands
     /// @spec docs/L1-outbox#operation-model
-    #[allow(clippy::unused_async)]
     pub async fn destroy_message(
         &self,
         account_id: &AccountId,
@@ -286,6 +308,7 @@ impl MailService {
             serde_json::json!({}),
             serde_json::json!({ "messageId": message_id.as_str(), "deleted": true }),
         )
+        .await
     }
 
     fn list_message_mailboxes_with_overlay(
