@@ -164,12 +164,130 @@ posthastectl events --after-seq "$seq"
 `GET /v1/sources/{id}/messages`, `/v1/messages/search`, `/v1/views/conversations`
 and their smart-mailbox variants).
 
+## Zero-code rules (levels 0-1)
+
+Levels 0 and 1 of the ladder need **no script at all**: a declarative rule,
+authored in a `rules.toml` file in your config root, runs *inside* the
+always-on authority server. It subscribes to the fact stream itself, matches
+each triggering message against a WHEN-clause (the same query grammar smart
+mailboxes use), and runs an action.
+
+> **Read [scripting-security.md](scripting-security.md) first.** A rule turns
+> untrusted email into an action. Two habits keep that safe and appear in every
+> example below: **scope the WHEN-clause by sender** (`from:`) so attacker mail
+> cannot trigger your rule, and **grant the least capability** the handler needs.
+
+Create `<config-root>/rules.toml` (the config root is `daemon.json`'s directory,
+e.g. `~/.config/mail`) and restart the server to load it:
+
+```toml
+# Level 0 — a built-in action, applied through the server's own apply surface.
+# Scoped by sender: space-separated terms are ANDed (one grammar, shared with
+# smart mailboxes), so this fires only on invoices FROM the known vendor.
+[[rule]]
+id = "tag-invoices"
+name = "Tag billing mail"
+when = "subject:invoice from:billing@myvendor.com"
+enabled = true
+action = { kind = "tag", tag = "$billing" }
+# Other level-0 actions: { kind = "move", mailboxId = "archive" }
+#                        { kind = "notify", title = "Heads up" }
+
+# Level 1 — the RFC §9 worked example: when a message you tagged `instruct`
+# arrives FROM YOU, POST it to your agent's webhook with a per-invocation,
+# attenuated token. The `from:` scope is load-bearing: an unscoped
+# content→agent rule lets any sender drive your agent (a prompt-injection
+# surface). See scripting-security.md.
+[[rule]]
+id = "instruct-agent"
+name = "Send instruct-tagged mail to the agent"
+when = "tag:instruct from:me@mydomain.com"
+enabled = true
+# Least-grant: this handler writes a reply tag, so it needs `tag` on TOP of
+# `read`. If your handler only reads, grant `["read"]` alone. Every added verb
+# widens what a successful prompt-injection could do with the token.
+action = { kind = "webhook", url = "https://vm.example/agent", grants = ["read", "tag"], expirySeconds = 3600 }
+```
+
+When the rule fires, the engine mints a **fresh capability token** scoped to
+exactly `grants` (here `read` + `tag`), confined to **that one message**, and
+expiring after `expirySeconds`. It POSTs the webhook:
+
+```json
+{
+  "ruleId": "instruct-agent",
+  "idempotencyKey": "rule:instruct-agent:<eventSeq>",
+  "event":   { "seq": 91, "topic": "message.updated", "accountId": "...", "messageId": "..." },
+  "message": { /* the MessageSummary */ },
+  "token":   "<the attenuated macaroon>"
+}
+```
+
+Your handler reads the thread and writes back via `apply`/`send` under `token`
+— its authority can never exceed the grant (a `[read, tag]` token cannot
+`config:reload`, cannot mint, cannot touch another message). Because delivery is
+**at-least-once**, pass the payload's `idempotencyKey` as the `Idempotency-Key`
+header on every write-back, exactly as in the [idempotency section](#safe-write-back-the-idempotency-key)
+above — a redelivery is then deduped, never double-applied. Localhost/loopback
+URLs are first-class webhook targets.
+
+Delivery is observable: every firing emits a `rule.fired` fact, and a webhook
+whose bounded retries are exhausted dead-letters as a `rule.delivery.failed`
+fact — both on the tap.
+
+### Central evaluate, edge execute (`emit`)
+
+The `emit` action does nothing but fire the `rule.fired` fact:
+
+```toml
+[[rule]]
+id = "flag-for-edge"
+name = "Evaluate centrally, execute at the edge"
+when = "tag:instruct from:me@mydomain.com"
+enabled = true
+action = { kind = "emit" }
+```
+
+Pair it with a client-side, rule-filtered `watch` on your laptop: the
+always-on authority server evaluates the WHEN-clause **once, centrally**, and
+your edge machine handles the resulting `rule.fired` fact and decides *how* to
+act. The WHEN logic lives in one place; execution happens wherever you want it.
+(The `watch --rule` filter is part of the CLI surface.)
+
+### The exec action is file-only (load-bearing security rule)
+
+A rule can also run a **local script** on the authority-server host:
+
+```toml
+[[rule]]
+id = "run-local"
+name = "Hand off to a local handler"
+when = "tag:instruct from:me@mydomain.com"
+enabled = true
+action = { kind = "exec", command = "/opt/posthaste/handler.sh", grants = ["read"], expirySeconds = 3600 }
+```
+
+`exec` runs `command` — a **fixed host binary** — with the JSON payload on
+**stdin** and the scoped token in `POSTHASTE_TOKEN` (plus `PH_IDEMPOTENCY_KEY`,
+`PH_ACCOUNT_ID`, `PH_MESSAGE_ID`).
+
+**Payload-is-data (RFC §7.20).** There is deliberately **no argument template**:
+event/message data reaches your script only as the JSON stdin document, never
+interpolated into a command string or argv. A malicious sender therefore cannot
+inject a command. Parse stdin as JSON; treat every field as untrusted input.
+
+**`exec` is settable ONLY by editing `rules.toml` on the host — never over
+REST.** This is a hard, load-bearing invariant (RFC-L2-scripting §7.16): a
+REST-settable exec action would be remote code execution. The REST surface for
+rules is **read-only** (list + preview); creating or editing a rule — especially
+an `exec` rule — is a deliberate, file-system-level act by the host operator.
+
 ## The ladder
 
-This quickstart is level 2 of the scripting ladder (`watch --exec` — the CLI
-owns the cursor, reconnect, and auth). Lower-code options (declarative rules,
-webhook/exec rule actions) and the agent-native MCP tool surface land in
-slice 2.
+This quickstart's `watch --exec` flow is level 2 of the scripting ladder (the
+CLI owns the cursor, reconnect, and auth). Levels 0-1 (the declarative rules
+above) run in the authority server with no client at all; the agent-native MCP
+tool surface (level "agent-native") lands alongside.
 
 ## Reference
 
