@@ -347,6 +347,36 @@ impl SupervisorShared {
             .await;
     }
 
+    /// Mark push terminally unavailable for this account (PP6/D91): a
+    /// structurally-broken transport (e.g. a 404 eventsource URL) that repeated
+    /// reconnects cannot fix. Push status → `Unsupported` — the truthful terminal
+    /// state, not `Reconnecting`, which would lie that recovery is imminent
+    /// (XIII) — carrying the reason and an explicit "polling instead" detail. The
+    /// account's *sync* status is deliberately left untouched: the 60 s
+    /// safety-net poll keeps mail fresh, so the account is degraded in realtime
+    /// only, not offline, and the sync path owns `AccountStatus`.
+    pub(crate) async fn mark_push_terminal(
+        &self,
+        account_id: &AccountId,
+        generation: RuntimeGeneration,
+        transport: &str,
+        reason: &str,
+    ) {
+        let poll_secs = self.poll_interval.as_secs();
+        self.update_runtime_overview(account_id, Some(generation), None, move |current| {
+            if current.push == PushStatus::Unsupported {
+                return false;
+            }
+            current.push = PushStatus::Unsupported;
+            current.last_sync_error = Some(format!(
+                "push unavailable via {transport}: {reason}; polling every {poll_secs}s instead"
+            ));
+            current.last_sync_error_code = Some("push_terminal".to_string());
+            true
+        })
+        .await;
+    }
+
     /// Persist a runtime overview and emit status/push change events when transitions occur.
     ///
     /// @spec docs/L1-sync#event-propagation

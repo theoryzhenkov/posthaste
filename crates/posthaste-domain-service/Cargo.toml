@@ -7,6 +7,7 @@ edition = "2021"
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 mail-parser = { workspace = true }
+posthaste-call-policy = { path = "../posthaste-call-policy" }
 posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-replica-core = { path = "../posthaste-replica-core" }
 serde = { workspace = true }
