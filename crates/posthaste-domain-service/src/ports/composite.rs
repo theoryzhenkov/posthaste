@@ -71,6 +71,52 @@ pub trait SecretStore: Send + Sync {
     fn update(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError>;
     /// Delete a stored secret.
     fn delete(&self, secret_ref: &SecretRef) -> Result<(), SecretStoreError>;
+
+    /// Compare-and-swap an existing secret's value (D101 / A1): replace the
+    /// stored value with `new_value` **only if** it currently equals
+    /// `expected_current`. When the stored value has drifted — a concurrent
+    /// writer rotated it out from under this caller — nothing is written and
+    /// [`SecretCasOutcome::Mismatch`] is returned carrying the *current* stored
+    /// value so the caller can adopt the winner instead of clobbering it with a
+    /// stale (potentially already-consumed) token set.
+    ///
+    /// This is the rotation-safe replacement for a blind [`Self::update`] on the
+    /// OAuth refresh path: two racing refreshes that both read token set `A`,
+    /// POST it, and get back rotated sets `B`/`B'` can no longer last-writer-wins
+    /// one over the other — the loser's CAS misses and it re-reads the winner's
+    /// token rather than persisting a consumed refresh token (permanent
+    /// `invalid_grant` lockout).
+    ///
+    /// The default implementation is a plain read-compare-write and is therefore
+    /// only as atomic as the backing store plus whatever external serialization
+    /// the caller holds. An implementation over a backing without a native CAS
+    /// primitive (keyring, env) should guard the read-compare-write in a
+    /// process-local critical section and document the residual cross-process
+    /// window (see `SystemSecretStore`).
+    fn update_if_unchanged(
+        &self,
+        secret_ref: &SecretRef,
+        expected_current: &str,
+        new_value: &str,
+    ) -> Result<SecretCasOutcome, SecretStoreError> {
+        let current = self.resolve(secret_ref)?;
+        if current != expected_current {
+            return Ok(SecretCasOutcome::Mismatch { current });
+        }
+        self.update(secret_ref, new_value)?;
+        Ok(SecretCasOutcome::Swapped)
+    }
+}
+
+/// Outcome of a [`SecretStore::update_if_unchanged`] compare-and-swap.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SecretCasOutcome {
+    /// The stored value equalled `expected_current` and was replaced.
+    Swapped,
+    /// The stored value had drifted from `expected_current`; nothing was
+    /// written. Carries the *current* stored value (the winning writer's) so the
+    /// caller can adopt it rather than re-deriving or clobbering it.
+    Mismatch { current: String },
 }
 
 /// Thread-safe handle to a [`MailGateway`] implementation.
