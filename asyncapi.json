@@ -143,7 +143,9 @@
           "push.connected",
           "push.disconnected",
           "operation.settled",
-          "operation.dispatch_uncertain"
+          "operation.dispatch_uncertain",
+          "rule.fired",
+          "rule.delivery.failed"
         ]
       }
     }

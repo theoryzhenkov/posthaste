@@ -19,6 +19,7 @@ mod mail_queries;
 mod mutations;
 pub mod oauth;
 mod push;
+pub mod rules;
 mod runtime_registry;
 pub mod supervisor;
 #[cfg(test)]
@@ -34,4 +35,7 @@ pub use build::{
 pub use link_wire::{link_router, LinkAuth};
 pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
 pub use mutations::AccountMutationService;
+pub use rules::{
+    load_rules, CapabilityMinter, RuleConfigError, RuleEngineHandle, RuleTokenGrant, SharedMinter,
+};
 pub use supervisor::AccountSupervisor;

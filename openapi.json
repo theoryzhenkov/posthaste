@@ -1052,6 +1052,38 @@
         }
       }
     },
+    "/v1/rules": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "List automation rules",
+        "description": "Lists the automation rules loaded from the host's rules.toml. Read-only: rules are config-file-only (there is no REST write path — a REST-settable exec action would be remote code execution). Draft WHEN-clauses are previewed via POST /v1/automation-rules:preview.",
+        "operationId": "list_rules",
+        "responses": {
+          "200": {
+            "description": "The configured rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulesListResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "rules.toml could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runtime/sessions": {
       "post": {
         "tags": [
@@ -6859,6 +6891,212 @@
             "items": {
               "$ref": "#/components/schemas/Recipient"
             }
+          }
+        }
+      },
+      "Rule": {
+        "type": "object",
+        "description": "An automation rule evaluated at the authority server against facts on the tap\n(RFC-L2-scripting §8). The rule owns *what it reacts to* ([`on`](Rule::on))\nand *what it matches* ([`when`](Rule::when)); a hook target is a pure handler\nand never self-registers (ruling 13).\n\nRules are authored in a config-root `rules.toml` file (beta cut, ruling 6);\nthe REST surface is read-only list + preview. See the crate docs for the\n**exec trust model**: [`RuleAction::Exec`] is config-file-only and can never\nbe set over REST — a REST-settable exec would be remote code execution.",
+        "required": [
+          "id",
+          "name",
+          "when",
+          "action",
+          "enabled"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/RuleAction"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The event topics whose facts trigger evaluation. Empty ⇒\n[`DEFAULT_RULE_TRIGGER_TOPICS`] (the message-update family)."
+          },
+          "when": {
+            "$ref": "#/components/schemas/SmartMailboxRule",
+            "description": "The WHEN-clause: the shared query grammar's [`SmartMailboxRule`] output,\nreused (not wrapped). Evaluated against the message a triggering fact\nnames — a match means the action runs."
+          }
+        }
+      },
+      "RuleAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Level 0: add a user tag to the matched message (through `apply`).",
+            "required": [
+              "tag",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tag"
+                ]
+              },
+              "tag": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 0: move the matched message to a single mailbox (through `apply`).",
+            "required": [
+              "mailboxId",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "move"
+                ]
+              },
+              "mailboxId": {
+                "$ref": "#/components/schemas/MailboxId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 0: raise a notification fact for the matched message. The notice\nsurfaces on the tap (`rule.fired`); no external side effect.",
+            "required": [
+              "title",
+              "kind"
+            ],
+            "properties": {
+              "body": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "notify"
+                ]
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 0: emit ONLY the `rule.fired` fact and take no other action — the\n**central-evaluate / edge-execute** primitive (RFC §7.19). Pair an `emit`\nrule at the always-on authority server with a client-side, rule-filtered\n`watch` on the edge: the AS decides *whether* to act (the WHEN-clause runs\nonce, centrally), and the client machine decides *how* (it handles the\n`rule.fired` fact filtered to this rule). No token is minted — the fact is\nthe whole output.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "emit"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 1: POST the fact + a message summary + a scoped token to a URL. The\nhandler acts back through `apply`/`send` under that token — its authority\ncannot exceed [`grants`](RuleAction::Webhook::grants). At-least-once with\nbounded retry; an exhausted delivery dead-letters as a `rule.delivery.failed`\nfact (ruling 5).",
+            "required": [
+              "url",
+              "kind"
+            ],
+            "properties": {
+              "expiry_seconds": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "grants": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RuleGrant"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "webhook"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 1: run a LOCAL script on the authority-server host with the payload\ndelivered as JSON **on stdin** and the scoped token in the environment.\n\nPAYLOAD-IS-DATA (RFC-L2-scripting §7.20) — there is deliberately **no\nargument template**. Event/message data reaches the script only as the\nJSON stdin document, never interpolated into a command string or argv, so\na malicious sender cannot inject a command. `command` names a fixed host\nbinary; the payload is pure data.\n\nTRUST MODEL — exec is **config-file-only**. It is set only by editing\n`rules.toml` on the host; it is NEVER settable over REST. A REST-settable\nexec action would be remote code execution: anyone who could write a rule\ncould run arbitrary commands on the server. The read-only REST surface\nlists exec rules but cannot create or edit them.",
+            "required": [
+              "command",
+              "kind"
+            ],
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "expiry_seconds": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "grants": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RuleGrant"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "exec"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a matched [`Rule`] does. Level 0 (`Tag`/`Move`/`Notify`) acts through the\nauthority server's own Api surface in-process. Level 1 (`Webhook`/`Exec`)\nreaches outside the process under a per-invocation attenuated token minted to\nexactly the rule's [`grants`](RuleAction::Webhook::grants) and expiry (D53)."
+      },
+      "RuleGrant": {
+        "type": "string",
+        "description": "A single capability a hook action's per-invocation token carries. These are\nthe substantive authz verbs (never `mint`/`manage`): a hook token is a\nleast-privilege credential scoped to exactly what the handler needs, over\nexactly the matched message.",
+        "enum": [
+          "read",
+          "send",
+          "tag",
+          "move",
+          "delete"
+        ]
+      },
+      "RulesListResponse": {
+        "type": "object",
+        "description": "The read-only automation-rules listing.",
+        "required": [
+          "rules"
+        ],
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "description": "The rules loaded from `rules.toml`, in file order."
           }
         }
       },

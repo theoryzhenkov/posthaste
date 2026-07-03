@@ -201,3 +201,13 @@ pub const DOMAIN_AUTOMATION_POST_SYNC_FAILED: LogEvent =
 pub const DOMAIN_CACHE_CANDIDATE_POST_SYNC_FAILED: LogEvent =
     LogEvent::new("domain.cache_candidate.post_sync_failed");
 pub const REV_LOG_APPEND_FAILED: LogEvent = LogEvent::new("rev_log.append_failed");
+
+// Automation rule engine (RFC-L2-scripting S5).
+pub const RULE_ENGINE_STARTED: LogEvent = LogEvent::new("rule.engine.started");
+pub const RULE_EVALUATION_FAILED: LogEvent = LogEvent::new("rule.evaluation_failed");
+pub const RULE_ACTION_APPLY_FAILED: LogEvent = LogEvent::new("rule.action.apply_failed");
+pub const RULE_NOTIFY: LogEvent = LogEvent::new("rule.notify");
+pub const RULE_FIRED: LogEvent = LogEvent::new("rule.fired");
+pub const RULE_WEBHOOK_DELIVERED: LogEvent = LogEvent::new("rule.webhook.delivered");
+pub const RULE_EXEC_COMPLETED: LogEvent = LogEvent::new("rule.exec.completed");
+pub const RULE_DELIVERY_FAILED: LogEvent = LogEvent::new("rule.delivery_failed");

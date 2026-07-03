@@ -29,10 +29,27 @@ pub use posthaste_http_api_adapter::openapi::{asyncapi_json, openapi_router};
 )]
 struct OAuthApiDoc;
 
+/// The read-only automation-rules list route the bundled server layers on top of
+/// the near platform (config-file-only rules; RFC-L2-scripting §7.18).
+#[derive(OpenApi)]
+#[openapi(
+    paths(crate::rules_api::list_rules),
+    components(schemas(
+        crate::rules_api::RulesListResponse,
+        posthaste_domain_model::Rule,
+        posthaste_domain_model::RuleAction,
+        posthaste_domain_model::RuleGrant,
+    )),
+    tags((name = "settings", description = "Application settings and automation rules")),
+)]
+struct RulesApiDoc;
+
 /// The full bundled-server OpenAPI document: the near `/v1` platform plus the
-/// OAuth-flow routes. This is the committed `openapi.json` contract artifact.
+/// OAuth-flow routes and the read-only rules list. This is the committed
+/// `openapi.json` contract artifact.
 pub fn document() -> utoipa::openapi::OpenApi {
     let mut doc = posthaste_http_api_adapter::openapi::document();
     doc.merge(OAuthApiDoc::openapi());
+    doc.merge(RulesApiDoc::openapi());
     doc
 }

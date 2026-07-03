@@ -91,6 +91,7 @@ impl PreviewHarness {
                         supervisor,
                     ),
                 account_logo_root: state_root.join("account-assets/logos"),
+                config_root: state_root.to_path_buf(),
                 auth_token: "test-token".to_string(),
                 macaroon_root_key: posthaste_http_api_adapter::token::RootKey::from_test_bytes([0u8; 32]),
                 require_auth: false,

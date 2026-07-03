@@ -19,6 +19,13 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/automation-rules:preview",
         authz: gate(Action::Read, ResourceShape::empty()),
     },
+    // The read-only automation-rules list (config-file-only rules; no write
+    // path). No resource axis a scoped token can narrow — like `/settings`.
+    Entry {
+        method: "GET",
+        template: "/rules",
+        authz: gate(Action::Read, ResourceShape::empty()),
+    },
     Entry {
         method: "GET",
         template: "/accounts",

@@ -10,6 +10,10 @@ pub struct AppState {
     /// @spec docs/eph/RFC-L2-architecture-cleanup#d20
     pub runtime: RuntimeHandle,
     pub account_logo_root: PathBuf,
+    /// The config root, for the read-only automation-rules list surface
+    /// (`GET /v1/rules` re-reads `rules.toml`). Rules are config-file-only for
+    /// beta (RFC-L2-scripting §7.18); there is no REST write path.
+    pub config_root: PathBuf,
     /// Per-process bearer token enforced by the auth middleware when
     /// `require_auth` is on. The serialized **full-scope macaroon** (V2 base64
     /// ASCII) — opaque to the desktop shell / web client / MCP adapter, which
