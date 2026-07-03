@@ -173,6 +173,7 @@ fn all_rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
 
 mod body_cache_objects;
 mod cache_cleanup;
+mod concurrency;
 mod conversation_queries;
 mod conversation_threads_events;
 mod fts_search;
