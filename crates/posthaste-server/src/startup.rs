@@ -112,9 +112,14 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
 
     // The `/v1` router = the near API router merged with the far OAuth router
     // (its own state + the same macaroon perimeter).
+    let oauth_flows = Arc::new(OAuthFlowStore::default());
+    // M27(a): the periodic pending-flow sweep (defense-in-depth beside
+    // prune-on-insert); stops with the shutdown token.
+    let flow_sweep_cancel = CancellationToken::new();
+    oauth_flows.clone().spawn_sweep_task(flow_sweep_cancel.clone());
     let oauth_state = Arc::new(OAuthState {
         app: state.clone(),
-        oauth_flows: Arc::new(OAuthFlowStore::default()),
+        oauth_flows,
         oauth_mutations,
     });
     // The bundled server documents + serves its OAuth routes, so it serves the
@@ -155,7 +160,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         config_root_display: roots.config_root.display().to_string(),
         log_guard,
         runtime_shutdown,
-        shutdown_token: CancellationToken::new(),
+        shutdown_token: { let t = CancellationToken::new(); let sweep = flow_sweep_cancel; let child = t.clone(); tokio::spawn(async move { child.cancelled().await; sweep.cancel(); }); t },
         supervisor_stop,
         store_close,
         tls: daemon.tls.clone(),

@@ -7,23 +7,57 @@ pub(crate) fn sync_poll_interval(poll_interval: Duration) -> tokio::time::Interv
     interval
 }
 
+/// Builds a [`SyncProgressReporter`] whose callback forwards progress updates
+/// to a *single* per-cycle writer task over a bounded channel, rather than
+/// spawning a fresh detached `tokio::spawn` per progress event (N5 / M27
+/// sub-unit (d)). Two problems this fixes together:
+///
+/// - **Unbounded spawns**: a chatty sync previously spawned one orphaned task
+///   per progress callback, with no retained handle and no bound. Now there
+///   is exactly one forwarder task per cycle, and the callback itself never
+///   spawns.
+/// - **Ordering** (a side effect of the above): concurrent per-callback tasks
+///   could race and let an earlier progress value land after a later one.
+///   The single forwarder drains its channel and awaits each
+///   `set_sync_progress` call before the next, so writes for one cycle are
+///   strictly ordered.
+///
+/// `tx` is captured by the returned `SyncProgressReporter`'s callback and
+/// dropped along with it when the cycle ends (normally, or because the arm
+/// budget abandoned it) — closing the channel and letting the forwarder task
+/// drain whatever is left and exit on its own, rather than living forever.
+/// The remaining race (a write already dequeued when the cycle is abandoned)
+/// is closed by `cycle`: `shared.set_sync_progress` rejects it once
+/// `record_arm_timeout` invalidates the account's current cycle token (the
+/// M26 flag).
 pub(crate) fn sync_progress_reporter(
     shared: &Arc<SupervisorShared>,
     account_id: AccountId,
     generation: RuntimeGeneration,
+    cycle: SyncCycleGeneration,
     sync_id: String,
     trigger: SyncTrigger,
     started_at: String,
 ) -> SyncProgressReporter {
-    let shared = shared.clone();
-    SyncProgressReporter::new(sync_id, trigger, started_at, move |progress| {
-        let shared = shared.clone();
-        let account_id = account_id.clone();
-        tokio::spawn(async move {
-            shared
-                .set_sync_progress(&account_id, generation, Some(progress))
+    let (tx, mut rx) = mpsc::channel::<SyncProgress>(SYNC_PROGRESS_CHANNEL_CAPACITY);
+
+    let forwarder_shared = shared.clone();
+    let forwarder_account_id = account_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            forwarder_shared
+                .set_sync_progress(&forwarder_account_id, generation, cycle, Some(progress))
                 .await;
-        });
+        }
+    });
+
+    SyncProgressReporter::new(sync_id, trigger, started_at, move |progress| {
+        // A full channel means the forwarder is momentarily behind a burst;
+        // dropping the newest update (rather than blocking this synchronous
+        // callback, or growing unboundedly) is fine — progress is
+        // display-only and monotonically superseded by whatever arrives
+        // next.
+        let _ = tx.try_send(progress);
     })
 }
 
@@ -122,6 +156,13 @@ pub(crate) async fn process_sync_trigger_inner(
     let started_at = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(|error| GatewayError::Rejected(error.to_string()))?;
+    // Mint this cycle's token (N5 + the M26 flag / M27 sub-unit (d)): every
+    // progress write for this cycle — the one below and every one the
+    // forwarder task below writes on this cycle's behalf — carries it, so
+    // `record_arm_timeout` can invalidate exactly this cycle if a
+    // select!-loop arm abandons it before it reaches `mark_sync_success`/
+    // `mark_sync_failure`.
+    let cycle = shared.next_sync_cycle_generation(&account_id).await;
     ph_info!(
         events::SUPERVISOR_SYNC_STARTED,
         account_id = %account_id,
@@ -133,6 +174,7 @@ pub(crate) async fn process_sync_trigger_inner(
         .set_sync_progress(
             &account_id,
             generation,
+            cycle,
             Some(SyncProgress {
                 sync_id: sync_id.clone(),
                 trigger: trigger.clone(),
@@ -160,6 +202,7 @@ pub(crate) async fn process_sync_trigger_inner(
                     shared,
                     account_id.clone(),
                     generation,
+                    cycle,
                     sync_id.clone(),
                     trigger.clone(),
                     started_at.clone(),

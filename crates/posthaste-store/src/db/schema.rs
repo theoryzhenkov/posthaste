@@ -37,6 +37,13 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
             [],
         )
         .map_err(sql_to_store_error)?;
-    crate::cache::repair_missing_body_cache_objects(connection)?;
+    // The body-cache-object repair (three correlated `NOT EXISTS` full-table
+    // scans against `message`) used to run right here, unconditionally, on
+    // every open — blocking `DatabaseStore::open`'s return (and therefore
+    // every first read/write) behind an unbounded startup scan (N15 / M27
+    // sub-unit (b)). It is no longer called from schema init: the
+    // composition root now runs [`crate::store::DatabaseStore::repair_body_cache_objects`]
+    // as a deferred post-startup task instead, off this path and its
+    // (pre-`write_connection`-`Mutex`) init-time lock.
     Ok(())
 }

@@ -8,6 +8,16 @@ use super::*;
 
 use crate::sql_cache::CachedSql;
 
+/// Bound on `list_due_snoozes` per scheduler tick. The snooze scheduler
+/// (`handle_snooze_tick`) already re-invokes this every `SNOOZE_INTERVAL` and
+/// each returned message's row is deleted (`clear_snooze_on_mailbox_replace_tx`)
+/// as it is processed, so a bounded batch per tick drains a mass-snooze
+/// backlog across ticks instead of materializing it all into one unbounded
+/// `Vec` (N15 / RFC-L2-lifecycle D67(b) / M27 sub-unit (b)). Local-store-only
+/// writes (no provider round trip), so this can be generous relative to
+/// `ARM_BUDGET_SNOOZE`'s tight 30s budget. **Review**.
+pub(crate) const SNOOZE_DUE_BATCH_LIMIT: i64 = 500;
+
 impl DatabaseStore {
     /// Insert (or replace) a snooze row. Called by `message.snooze` after the
     /// move to the Snoozed mailbox.
@@ -126,13 +136,16 @@ fn list_due_snoozes(
     let mut statement = connection
         .prepare(
             "SELECT message_id, until FROM message_snooze
-             WHERE account_id = ?1 AND until <= ?2",
+             WHERE account_id = ?1 AND until <= ?2
+             ORDER BY until ASC
+             LIMIT ?3",
         )
         .map_err(sql_to_store_error)?;
     let rows = statement
-        .query_map(params![account_id.as_str(), now], |row| {
-            Ok((MessageId(row.get::<_, String>(0)?), row.get::<_, i64>(1)?))
-        })
+        .query_map(
+            params![account_id.as_str(), now, SNOOZE_DUE_BATCH_LIMIT],
+            |row| Ok((MessageId(row.get::<_, String>(0)?), row.get::<_, i64>(1)?)),
+        )
         .map_err(sql_to_store_error)?;
     let mut out = Vec::new();
     for row in rows {

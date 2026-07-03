@@ -82,6 +82,7 @@ fn test_shared(account: &AccountSettings) -> (Arc<SupervisorShared>, TempDirGuar
         gateways: RwLock::new(HashMap::new()),
         runtime_overviews: RwLock::new(HashMap::new()),
         runtime_generations: RwLock::new(HashMap::new()),
+        sync_cycle_generations: RwLock::new(HashMap::new()),
         known_accounts: RwLock::new(HashSet::new()),
         account_count: AtomicUsize::new(0),
         cache_resources: Mutex::new(CacheResourceGovernor::new(
@@ -258,11 +259,13 @@ async fn late_sync_progress_does_not_revive_syncing_after_success() {
     let account = test_account("primary");
     let (shared, _root) = test_shared(&account);
     let generation = shared.next_runtime_generation(&account.id).await;
+    let cycle = shared.next_sync_cycle_generation(&account.id).await;
 
     shared
         .set_sync_progress(
             &account.id,
             generation,
+            cycle,
             Some(sync_progress(SyncProgressStage::Connecting)),
         )
         .await;
@@ -272,6 +275,7 @@ async fn late_sync_progress_does_not_revive_syncing_after_success() {
         .set_sync_progress(
             &account.id,
             generation,
+            cycle,
             Some(sync_progress(SyncProgressStage::Storing)),
         )
         .await;
@@ -307,10 +311,12 @@ async fn concurrent_progress_writes_cannot_clobber_sync_success() {
     let account = test_account("primary");
     let (shared, _root) = test_shared(&account);
     let generation = shared.next_runtime_generation(&account.id).await;
+    let cycle = shared.next_sync_cycle_generation(&account.id).await;
     shared
         .set_sync_progress(
             &account.id,
             generation,
+            cycle,
             Some(sync_progress(SyncProgressStage::Connecting)),
         )
         .await;
@@ -324,6 +330,7 @@ async fn concurrent_progress_writes_cannot_clobber_sync_success() {
                 .set_sync_progress(
                     &account_id,
                     generation,
+                    cycle,
                     Some(sync_progress(SyncProgressStage::Storing)),
                 )
                 .await;
@@ -863,6 +870,201 @@ async fn hung_provider_sync_degrades_the_account_but_the_loop_stays_responsive()
     cancel.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(3600), runtime_handle).await;
     MockJmapGateway::clear_sync_delay_for_tests();
+}
+
+// ---------------------------------------------------------------------------
+// M27 sub-unit (d): bounded progress-forwarding + the sync-cycle generation
+// gate (RFC-L2-lifecycle N5 + the M26 flag). Extends the M26 hung-provider
+// scenario above: that test proves the arm-timeout backstop degrades the
+// account and keeps the loop responsive; this one proves the *other* half —
+// once a cycle is abandoned, a progress write still in flight for it cannot
+// undo the resulting `Degraded` status.
+// ---------------------------------------------------------------------------
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d67
+#[tokio::test]
+async fn stale_sync_cycle_write_after_arm_abandonment_cannot_revive_syncing_over_degraded() {
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+
+    fn connecting_progress(sync_id: &str) -> SyncProgress {
+        SyncProgress {
+            sync_id: sync_id.to_string(),
+            trigger: SyncTrigger::Manual,
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            stage: SyncProgressStage::Connecting,
+            detail: "Connecting account".to_string(),
+            mailbox_name: None,
+            mailbox_index: None,
+            mailbox_count: None,
+            message_count: None,
+            total_count: None,
+        }
+    }
+
+    // Cycle 1 starts (mirrors `process_sync_trigger_inner` minting its own
+    // token) and writes its initial `Connecting` progress, settling status
+    // to `Syncing` — same as the real synchronous call this stands in for.
+    let abandoned_cycle = shared.next_sync_cycle_generation(&account.id).await;
+    shared
+        .set_sync_progress(
+            &account.id,
+            generation,
+            abandoned_cycle,
+            Some(connecting_progress("sync-1")),
+        )
+        .await;
+    assert_eq!(
+        shared.runtime_overview(&account.id).await.status,
+        AccountStatus::Syncing
+    );
+
+    // A select!-loop arm abandons cycle 1 (mirrors `record_arm_timeout`):
+    // bump the account's cycle token first, then mark it Degraded.
+    shared.next_sync_cycle_generation(&account.id).await;
+    shared
+        .mark_arm_timeout(
+            &account.id,
+            generation,
+            "poll_sync",
+            Duration::from_secs(300),
+        )
+        .await;
+    assert_eq!(
+        shared.runtime_overview(&account.id).await.status,
+        AccountStatus::Degraded
+    );
+
+    // A progress write still carrying cycle 1's now-stale token — standing in
+    // for the detached forwarder task's in-flight write racing in after
+    // abandonment — must be rejected outright, not flip status back to
+    // `Syncing` (the M26 flag / the flap this sub-unit closes). `Connecting`
+    // is deliberately used here: it is the one progress stage that already
+    // bypasses the older "current status must be Syncing" guard in
+    // `set_sync_progress`, so it is the write the *cycle* gate — not any
+    // pre-existing status check — must be the thing that stops.
+    shared
+        .set_sync_progress(
+            &account.id,
+            generation,
+            abandoned_cycle,
+            Some(connecting_progress("sync-1")),
+        )
+        .await;
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(
+        overview.status,
+        AccountStatus::Degraded,
+        "a stale-cycle write from an abandoned cycle must not revive Syncing over Degraded"
+    );
+
+    // A fresh cycle's own write (the next legitimate retry) is unaffected —
+    // the gate only rejects the *stale* token, not sync progress in general.
+    let fresh_cycle = shared.next_sync_cycle_generation(&account.id).await;
+    shared
+        .set_sync_progress(
+            &account.id,
+            generation,
+            fresh_cycle,
+            Some(connecting_progress("sync-2")),
+        )
+        .await;
+    assert_eq!(
+        shared.runtime_overview(&account.id).await.status,
+        AccountStatus::Syncing,
+        "a fresh cycle's own progress write must still take effect"
+    );
+}
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d67
+#[tokio::test]
+async fn sync_progress_reporter_forwards_a_burst_in_order_from_a_single_task() {
+    // N5: previously every progress callback did its own `tokio::spawn`, with
+    // no retained handle and no bound — concurrent tasks could race, so an
+    // earlier progress value could land after a later one. Now there is one
+    // forwarder task per cycle draining a bounded channel in order.
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    let cycle = shared.next_sync_cycle_generation(&account.id).await;
+
+    // Seed status to `Syncing` first, the way `process_sync_trigger_inner`'s
+    // own synchronous `Connecting` write always does before the reporter
+    // (and therefore the forwarder) is even created — a `Fetching`-stage
+    // write only takes effect while status is already `Syncing`.
+    shared
+        .set_sync_progress(
+            &account.id,
+            generation,
+            cycle,
+            Some(SyncProgress {
+                sync_id: "sync-1".to_string(),
+                trigger: SyncTrigger::Manual,
+                started_at: "2026-01-01T00:00:00Z".to_string(),
+                stage: SyncProgressStage::Connecting,
+                detail: "Connecting account".to_string(),
+                mailbox_name: None,
+                mailbox_index: None,
+                mailbox_count: None,
+                message_count: None,
+                total_count: None,
+            }),
+        )
+        .await;
+
+    let reporter = crate::supervisor::sync_flow::sync_progress_reporter(
+        &shared,
+        account.id.clone(),
+        generation,
+        cycle,
+        "sync-1".to_string(),
+        SyncTrigger::Manual,
+        "2026-01-01T00:00:00Z".to_string(),
+    );
+
+    // A burst of progress events, standing in for a chatty sync. Yielding
+    // between reports lets the single forwarder task drain each one before
+    // the next arrives, so every update — not just a lucky subset — is
+    // expected to land, strictly in order.
+    for index in 0..50usize {
+        reporter.report(SyncProgress {
+            sync_id: String::new(), // overwritten by `report`
+            trigger: SyncTrigger::Manual,
+            started_at: String::new(),
+            stage: SyncProgressStage::Fetching,
+            detail: format!("batch {index}"),
+            mailbox_name: None,
+            mailbox_index: Some(index),
+            mailbox_count: Some(50),
+            message_count: None,
+            total_count: None,
+        });
+        // Give the single forwarder task a real scheduling chance to drain
+        // this update (including its store write) before the next one is
+        // sent, so the channel's small capacity is never the bottleneck.
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+
+    let mut settled = false;
+    for _ in 0..200 {
+        let overview = shared.runtime_overview(&account.id).await;
+        if overview
+            .sync_progress
+            .as_ref()
+            .and_then(|progress| progress.mailbox_index)
+            == Some(49)
+        {
+            settled = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        settled,
+        "the forwarder should deliver every progress update in order, ending on the last one reported"
+    );
 }
 
 // spec: docs/eph/RFC-L2-lifecycle-and-errors#d66

@@ -2,11 +2,89 @@ use super::*;
 use crate::sql_cache::CachedSql;
 use std::ops::Deref;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 const MAX_IDLE_READ_CONNECTIONS: usize = 4;
+
+/// Hard cap on *concurrently open* read connections (idle-pooled + checked
+/// out), enforced by [`ConnectionSemaphore`]. Previously only the idle pool
+/// was bounded (`MAX_IDLE_READ_CONNECTIONS`): once it was empty, every
+/// additional concurrent reader opened a brand-new `Connection` with no limit
+/// at all — N concurrent readers meant N simultaneous SQLite file handles,
+/// uncapped (N16 / RFC-L2-lifecycle D67(c) / M27 sub-unit (c)). Must be `>=
+/// MAX_IDLE_READ_CONNECTIONS` (an idle-pooled connection holds its permit for
+/// as long as it stays in the pool). **Review** (picked sane, not measured).
+pub(crate) const MAX_READ_CONNECTIONS: usize = 16;
+
+/// Minimal blocking counting semaphore gating SQLite read-connection
+/// creation (N16). `DatabaseStore::read_connection` is a plain synchronous
+/// function reachable both from the tokio blocking pool (`read_async`,
+/// `write_transaction_async`) and from ordinary `#[test]` functions with no
+/// tokio runtime at all — so an async `tokio::sync::Semaphore::acquire()` is
+/// not usable here. This blocks the calling *thread* (not a task) until a
+/// permit is available: fine on the blocking pool (that's what it's for) and
+/// fine in a plain sync test (no runtime to starve).
+struct ConnectionSemaphore {
+    available: Mutex<usize>,
+    condvar: Condvar,
+}
+
+impl ConnectionSemaphore {
+    fn new(permits: usize) -> Self {
+        Self {
+            available: Mutex::new(permits),
+            condvar: Condvar::new(),
+        }
+    }
+
+    /// Blocks the calling thread until a permit is free, then takes it.
+    /// Waiters queue: every [`ConnectionPermit`] release wakes exactly one
+    /// waiter, so nobody spins and nobody starves.
+    ///
+    /// Takes `&Arc<Self>` (rather than `self: &Arc<Self>`, an unstable
+    /// receiver type on stable Rust) so the returned [`ConnectionPermit`] can
+    /// hold its own owned `Arc` clone and release independently of `self`'s
+    /// borrow.
+    fn acquire(semaphore: &Arc<Self>) -> ConnectionPermit {
+        let mut available = match semaphore.available.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        while *available == 0 {
+            available = match semaphore.condvar.wait(available) {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+        }
+        *available -= 1;
+        ConnectionPermit {
+            semaphore: semaphore.clone(),
+        }
+    }
+}
+
+/// RAII permit from [`ConnectionSemaphore::acquire`]. Releasing (drop) is
+/// what lets the next waiter — if any — proceed, so this must be held for the
+/// full lifetime of the connection it was acquired for, including while that
+/// connection sits idle in the pool (see [`ReadConnection`]), not just while
+/// checked out.
+struct ConnectionPermit {
+    semaphore: Arc<ConnectionSemaphore>,
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        let mut available = match self.semaphore.available.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *available += 1;
+        drop(available);
+        self.semaphore.condvar.notify_one();
+    }
+}
 
 /// Marker file (under the data root) that forces a database rebuild on the next
 /// open, used by the manual "repair local database" action.
@@ -35,12 +113,20 @@ pub struct DatabaseStore {
     /// fails cleanly (`StoreError::Failure`) instead of touching a checkpointed,
     /// about-to-be-gone database.
     write_connection: Mutex<Option<Connection>>,
-    read_connections: Mutex<Vec<Connection>>,
+    /// Idle-pooled read connections, each paired with the [`ConnectionPermit`]
+    /// it was created under. The permit travels with the connection while it
+    /// sits idle in this pool — it is only released when the connection is
+    /// actually closed (evicted here, or on [`DatabaseStore::close`]), which
+    /// is what makes [`MAX_READ_CONNECTIONS`] a true peak-concurrency bound
+    /// rather than just a bound on the idle pool (N16).
+    read_connections: Mutex<Vec<(Connection, ConnectionPermit)>>,
+    read_connection_limiter: Arc<ConnectionSemaphore>,
 }
 
 pub(crate) struct ReadConnection<'store> {
-    pool: &'store Mutex<Vec<Connection>>,
+    pool: &'store Mutex<Vec<(Connection, ConnectionPermit)>>,
     connection: Option<Connection>,
+    permit: Option<ConnectionPermit>,
 }
 
 impl Deref for ReadConnection<'_> {
@@ -55,17 +141,22 @@ impl Deref for ReadConnection<'_> {
 
 impl Drop for ReadConnection<'_> {
     fn drop(&mut self) {
-        let Some(connection) = self.connection.take() else {
+        let (Some(connection), Some(permit)) = (self.connection.take(), self.permit.take())
+        else {
             return;
         };
         let mut pool = lock_read_pool(self.pool);
         if pool.len() < MAX_IDLE_READ_CONNECTIONS {
-            pool.push(connection);
+            pool.push((connection, permit));
         }
+        // Else: `connection` and `permit` are dropped here — the file handle
+        // closes and the concurrency slot frees for the next waiter.
     }
 }
 
-fn lock_read_pool(pool: &Mutex<Vec<Connection>>) -> MutexGuard<'_, Vec<Connection>> {
+fn lock_read_pool(
+    pool: &Mutex<Vec<(Connection, ConnectionPermit)>>,
+) -> MutexGuard<'_, Vec<(Connection, ConnectionPermit)>> {
     match pool.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
@@ -224,6 +315,7 @@ impl DatabaseStore {
             data_root: data_root.to_path_buf(),
             write_connection: Mutex::new(Some(connection)),
             read_connections: Mutex::new(Vec::new()),
+            read_connection_limiter: Arc::new(ConnectionSemaphore::new(MAX_READ_CONNECTIONS)),
         })
     }
 
@@ -270,23 +362,33 @@ impl DatabaseStore {
     /// Read connections are pooled so hot read statements and SQLite page-cache
     /// state survive across UI queries. The connection is returned to the idle
     /// pool when the guard is dropped.
+    ///
+    /// The *peak* number of simultaneously open read connections — idle-pooled
+    /// plus checked-out — is bounded by [`MAX_READ_CONNECTIONS`]
+    /// (`read_connection_limiter`), not just the idle pool
+    /// (`MAX_IDLE_READ_CONNECTIONS`): when the idle pool is empty and the
+    /// limiter is already at capacity, this call blocks the calling thread
+    /// until an existing connection is released, rather than opening an
+    /// unbounded new one (N16).
     pub(crate) fn read_connection(&self) -> Result<ReadConnection<'_>, StoreError> {
-        let connection = {
+        let pooled = {
             let mut pool = lock_read_pool(&self.read_connections);
             pool.pop()
         };
-        let connection = match connection {
-            Some(connection) => connection,
+        let (connection, permit) = match pooled {
+            Some(pooled) => pooled,
             None => {
+                let permit = ConnectionSemaphore::acquire(&self.read_connection_limiter);
                 let connection = Connection::open(&self.db_path)
                     .map_err(|err| StoreError::Failure(err.to_string()))?;
                 configure_connection(&connection)?;
-                connection
+                (connection, permit)
             }
         };
         Ok(ReadConnection {
             pool: &self.read_connections,
             connection: Some(connection),
+            permit: Some(permit),
         })
     }
 
@@ -309,6 +411,32 @@ impl DatabaseStore {
         tx.commit()
             .map_err(|err| StoreError::Failure(err.to_string()))?;
         Ok(result)
+    }
+
+    /// Repairs missing/orphaned body-cache bookkeeping rows (`cache_object`,
+    /// `cache_rescore_queue`, `cache_message_signal`) via three correlated
+    /// `NOT EXISTS` scans against `message`, catching up any rows a prior
+    /// interrupted write left inconsistent.
+    ///
+    /// This used to run unconditionally inside `init_schema`, on every open,
+    /// blocking `DatabaseStore::open`'s return — and therefore every first
+    /// read/write — behind an unbounded full-table scan (N15 /
+    /// RFC-L2-lifecycle D67(b) / M27 sub-unit (b)). It no longer runs on that
+    /// path: the composition root (`build_authority_server_parts`) now calls
+    /// this once, as a deferred post-startup task, after the store is already
+    /// open and serving real reads/writes. A store that is never repaired
+    /// (this call never runs, or runs after the process exits mid-way) is
+    /// self-healing: the next call — on the next startup, or a future retry
+    /// — repairs whatever is still missing, since the scans are idempotent
+    /// (`NOT EXISTS`, not "since last repair").
+    ///
+    /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d67
+    pub fn repair_body_cache_objects(&self) -> Result<(), StoreError> {
+        let mut guard = lock_write_connection(&self.write_connection);
+        let connection = guard
+            .as_mut()
+            .ok_or_else(|| StoreError::Failure("store is closed".to_string()))?;
+        crate::cache::repair_missing_body_cache_objects(connection)
     }
 
     /// Async offload of [`Self::write_transaction`]: runs the blocking rusqlite
