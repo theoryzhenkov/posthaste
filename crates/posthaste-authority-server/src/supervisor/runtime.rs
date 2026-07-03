@@ -12,6 +12,7 @@ pub(crate) async fn run_account_runtime(
     generation: RuntimeGeneration,
     mut command_rx: mpsc::Receiver<RuntimeCommand>,
     sync_state: Arc<SyncTriggerState>,
+    cancel: CancellationToken,
 ) {
     let account_id = account.id.clone();
     let mut connection = AccountRuntimeConnectionState::default();
@@ -65,6 +66,18 @@ pub(crate) async fn run_account_runtime(
         };
 
         tokio::select! {
+            // Cooperative stop (D61): the supervisor cancels this account's token
+            // to signal a graceful loop exit. In-flight work at the current await
+            // point is dropped — store writes are transactional, so a dropped
+            // cycle simply re-runs on the next start (no per-operation draining).
+            () = cancel.cancelled() => {
+                ph_info!(
+                    events::SUPERVISOR_ACCOUNT_RUNTIME_STOPPED,
+                    account_id = %account_id,
+                    "account runtime cancelled; exiting loop"
+                );
+                break;
+            }
             _ = interval.tick() => {
                 handle_poll_tick(&sync_state, &shared, &account, generation, &mut connection).await;
                 interval = sync_poll_interval(shared.poll_interval);
