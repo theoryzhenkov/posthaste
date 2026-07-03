@@ -102,7 +102,10 @@ impl Channel {
 }
 
 impl Version {
-    fn tag(&self) -> String {
+    /// The release tag to fetch: the channel's rolling tag, or the pinned tag
+    /// itself. `pub(crate)` so `ctl` (fetching the `posthastectl` CLI artifact,
+    /// not a role binary) can resolve the same tag this module uses.
+    pub(crate) fn tag(&self) -> String {
         match self {
             Version::Channel(c) => c.rolling_tag().to_string(),
             Version::Pinned(tag) => tag.clone(),
@@ -111,7 +114,7 @@ impl Version {
 
     /// The channel this version belongs to, used to build the channel-aware
     /// artifact name (`PosthasteAuthorityServerNightly` vs `PosthasteAuthorityServer`).
-    fn channel(&self) -> Channel {
+    pub(crate) fn channel(&self) -> Channel {
         match self {
             Version::Channel(c) => *c,
             Version::Pinned(tag) => Channel::infer(tag),
@@ -157,8 +160,11 @@ fn artifact_base_name(role: Role, channel: Channel) -> String {
 }
 
 /// Verify `tarball` against the line for `tarball_name` in a `SHA256SUMS` file
-/// (`<hex>  <name>` per line, as produced by `sha256sum`).
-fn verify_checksum(tarball: &[u8], tarball_name: &str, sums: &[u8]) -> Result<(), FetchError> {
+/// (`<hex>  <name>` per line, as produced by `sha256sum`). `pub(crate)`: `ctl`
+/// reuses this to verify the (non-tarball) `posthastectl` binary asset against
+/// the very same release's `SHA256SUMS` — the release publish job checksums
+/// every flat asset uniformly, tarball or not.
+pub(crate) fn verify_checksum(tarball: &[u8], tarball_name: &str, sums: &[u8]) -> Result<(), FetchError> {
     let sums = String::from_utf8_lossy(sums);
     let expected = sums
         .lines()
@@ -180,7 +186,7 @@ fn verify_checksum(tarball: &[u8], tarball_name: &str, sums: &[u8]) -> Result<()
 }
 
 /// Extract `bin/<binary>` (or its `.exe`) from a gzip-compressed tar.
-fn extract_binary(tarball: &[u8], binary: &str) -> Result<Vec<u8>, FetchError> {
+pub(crate) fn extract_binary(tarball: &[u8], binary: &str) -> Result<Vec<u8>, FetchError> {
     let decoder = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(decoder);
     let wanted_unix = format!("bin/{binary}");
@@ -203,8 +209,10 @@ fn extract_binary(tarball: &[u8], binary: &str) -> Result<Vec<u8>, FetchError> {
 }
 
 /// Write `bytes` to `dest`, creating parent dirs, with the executable bit set on
-/// Unix.
-fn write_executable(dest: &Path, bytes: &[u8]) -> Result<(), FetchError> {
+/// Unix. `pub(crate)`: `ctl` places the downloaded `posthastectl` binary
+/// through the same helper (no tar/gzip layer to unwrap — the release asset
+/// already IS the binary).
+pub(crate) fn write_executable(dest: &Path, bytes: &[u8]) -> Result<(), FetchError> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|e| FetchError::Io(parent.to_path_buf(), e))?;
     }

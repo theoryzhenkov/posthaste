@@ -1,9 +1,12 @@
-//! `posthaste-wizard` CLI: provision or install a node for a role.
+//! `posthaste-wizard` CLI: provision or install a node for a role, or install
+//! the `posthastectl` scripting CLI.
 //!
 //! `provision` writes config + TLS for a binary you already have. `install` is
 //! the one-button path — it fetches the role binary from the release, verifies
 //! it, installs it, provisions the node, and registers a `systemd --user`
-//! service that keeps it running.
+//! service that keeps it running. `ctl install`/`register`/`status` is the
+//! same one-button treatment for `posthastectl` itself (RFC-L2-scripting §7
+//! ruling 10b) — see `posthaste_wizard::ctl`.
 //!
 //! Example — install a TLS authority server node, then a runtime node that joins it:
 //!
@@ -26,8 +29,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use posthaste_wizard::{
-    apply_join, guided_install, install, provision, Channel, GithubSource, InstallOptions, Plan,
-    Role, ServiceScope, Version,
+    apply_join, guided_install, install, install_ctl, provision, register, Channel,
+    CtlInstallOptions, CtlSource, GithubSource, InstallOptions, Plan, Role, ServiceScope, Version,
 };
 
 fn main() -> ExitCode {
@@ -35,6 +38,7 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some("provision") => run_provision(&args[1..]),
         Some("install") => run_install(&args[1..]),
+        Some("ctl") => run_ctl(&args[1..]),
         Some("--help") | Some("-h") | None => {
             print!("{}", usage());
             ExitCode::SUCCESS
@@ -206,6 +210,152 @@ fn execute_install(
     }
 }
 
+/// `ctl install|register|status`: the wizard as the `posthastectl` installer
+/// (RFC-L2-scripting §7 ruling 10b).
+fn run_ctl(args: &[String]) -> ExitCode {
+    match args.first().map(String::as_str) {
+        Some("install") => run_ctl_install(&args[1..]),
+        Some("register") => run_ctl_register(&args[1..]),
+        Some("status") => run_ctl_status(&args[1..]),
+        Some(other) => {
+            eprintln!("unknown ctl subcommand '{other}'\n\n{}", usage());
+            ExitCode::from(2)
+        }
+        None => {
+            eprintln!("usage: posthaste-wizard ctl <install|register|status>\n\n{}", usage());
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run_ctl_install(args: &[String]) -> ExitCode {
+    let raw = match CtlArgs::parse(args) {
+        Ok(raw) => raw,
+        Err(e) => return arg_error(&e),
+    };
+    let to_dir = match raw.bin_dir.clone() {
+        Some(dir) => dir,
+        None => match default_bin_dir() {
+            Ok(dir) => dir,
+            Err(e) => return arg_error(&e),
+        },
+    };
+    let version = match &raw.version {
+        Some(tag) => Version::Pinned(tag.clone()),
+        None => Version::Channel(Channel::Nightly),
+    };
+    let opts = CtlInstallOptions {
+        from: raw.from.clone(),
+        to_dir: to_dir.clone(),
+        version,
+        platform: raw.platform.clone(),
+    };
+    let source = GithubSource::posthaste();
+
+    match install_ctl(&opts, &source) {
+        Ok(installed) => {
+            let source_desc = match installed.source {
+                CtlSource::Explicit => "the path you gave (--from)",
+                CtlSource::Sidecar => "the desktop app's bundled sidecar",
+                CtlSource::Downloaded => "a verified GitHub release download",
+            };
+            println!(
+                "installed {} ({source_desc})",
+                installed.binary_path.display()
+            );
+            for w in &installed.warnings {
+                eprintln!("warning: {w}");
+            }
+            // ctl register: runs automatically, informational — a fresh
+            // install commonly has no app running yet, so this never fails
+            // the install itself.
+            let report = register(&to_dir);
+            print!("\n{}", report.format());
+            if !report.all_ok() {
+                println!(
+                    "\nrun `posthaste-wizard ctl status` again once the app is running to \
+                     re-check."
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("ctl install failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_ctl_register(args: &[String]) -> ExitCode {
+    run_ctl_checks(args)
+}
+
+fn run_ctl_status(args: &[String]) -> ExitCode {
+    run_ctl_checks(args)
+}
+
+/// Shared by `ctl register` and `ctl status`: both run the identical
+/// binary/PATH/app/discovery/probe sequence and are re-runnable; `register`
+/// is just the name used right after an install.
+fn run_ctl_checks(args: &[String]) -> ExitCode {
+    let raw = match CtlArgs::parse(args) {
+        Ok(raw) => raw,
+        Err(e) => return arg_error(&e),
+    };
+    let bin_dir = match raw.bin_dir.clone() {
+        Some(dir) => dir,
+        None => match default_bin_dir() {
+            Ok(dir) => dir,
+            Err(e) => return arg_error(&e),
+        },
+    };
+    let report = register(&bin_dir);
+    print!("{}", report.format());
+    if report.all_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Flags shared by the `ctl` subcommands.
+struct CtlArgs {
+    from: Option<PathBuf>,
+    bin_dir: Option<PathBuf>,
+    version: Option<String>,
+    platform: Option<String>,
+}
+
+impl CtlArgs {
+    fn parse(args: &[String]) -> Result<CtlArgs, String> {
+        let mut raw = CtlArgs {
+            from: None,
+            bin_dir: None,
+            version: None,
+            platform: None,
+        };
+        let mut i = 0;
+        while i < args.len() {
+            let flag = args[i].as_str();
+            let mut value = || -> Result<String, String> {
+                i += 1;
+                args.get(i)
+                    .cloned()
+                    .ok_or_else(|| format!("{flag} requires a value"))
+            };
+            match flag {
+                "--from" => raw.from = Some(PathBuf::from(value()?)),
+                "--to" => raw.bin_dir = Some(PathBuf::from(value()?)),
+                "--version" => raw.version = Some(value()?),
+                "--platform" => raw.platform = Some(value()?),
+                other => return Err(format!("unknown flag '{other}'")),
+            }
+            i += 1;
+        }
+        Ok(raw)
+    }
+}
+
 fn arg_error(msg: &str) -> ExitCode {
     eprintln!("error: {msg}\n\n{}", usage());
     ExitCode::from(2)
@@ -354,7 +504,19 @@ fn usage() -> &'static str {
      \x20   [--host <name>]... [--link-authority-server-url <url>] [--link-token <secret>]\n\
      \x20   [--exec <binary-path>] [--systemd <unit-path>]\n\
      \n\
+     \x20 posthaste-wizard ctl install [--from <path>] [--to <dir>] [--version <tag>] [--platform <p>]\n\
+     \x20 posthaste-wizard ctl register [--to <dir>]\n\
+     \x20 posthaste-wizard ctl status [--to <dir>]\n\
+     \n\
      install fetches + verifies the role binary from the release, installs it to\n\
      ~/.local/bin, provisions the node, and registers a service: systemctl --user on Linux, launchd on macOS (--system for a root systemd unit, --no-service to skip).\n\
-     install with no flags (or -i) runs a guided, interactive setup. provision only writes config + TLS for a binary you already have.\n"
+     install with no flags (or -i) runs a guided, interactive setup. provision only writes config + TLS for a binary you already have.\n\
+     \n\
+     ctl install locates a posthastectl binary — an explicit --from path, the desktop\n\
+     app's bundled sidecar, or a checksum-verified GitHub release download — and installs\n\
+     it to ~/.local/bin/posthastectl (--to overrides); never sudos, refuses and explains on\n\
+     a permission error. It then runs the same checks as `ctl register`/`ctl status`:\n\
+     binary placed, PATH resolves it, an app is running, its daemon.json parses, and a\n\
+     live authenticated probe succeeds — printed as a \u{2713}/\u{2717} table. `ctl status` re-runs\n\
+     that table any time.\n"
 }
