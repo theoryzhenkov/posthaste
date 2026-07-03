@@ -7,7 +7,8 @@
 //! the queue in order. One evaluator ⇒ rules never race each other; the bounded
 //! queue ⇒ a slow webhook cannot grow memory without bound.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 
 use posthaste_contract_core::mutation_args::{
     MessageReplaceMailboxesArgs, MessageSetUserTagsArgs,
@@ -38,8 +39,23 @@ const RULE_EVENT_QUEUE_CAPACITY: usize = 1024;
 
 /// A running rule engine. Dropping it aborts the forwarder + evaluator tasks
 /// (they also end on their own when the event bus closes at shutdown).
+///
+/// Holds a [`ManagedRulesHandle`] so the composition root can hand the REST
+/// write surface a live controller: a created/edited/deleted rule re-loads the
+/// merged ruleset and hot-swaps the evaluator's active rules WITHOUT a restart
+/// (the reload path, prerequisite 2) — the forwarder's bus subscription is never
+/// touched, so no event is missed across a reload.
 pub struct RuleEngineHandle {
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    managed: ManagedRulesHandle,
+}
+
+impl RuleEngineHandle {
+    /// A clone of the live managed-rules controller (create/update/delete +
+    /// reload), for wiring into the REST write routes.
+    pub fn managed_rules(&self) -> ManagedRulesHandle {
+        self.managed.clone()
+    }
 }
 
 impl Drop for RuleEngineHandle {
@@ -51,21 +67,148 @@ impl Drop for RuleEngineHandle {
 }
 
 /// Everything the evaluator needs, shared across the tasks.
+///
+/// `rules` is an [`RwLock`] over an [`Arc`] snapshot (an ArcSwap-shaped design
+/// without the dependency): the evaluator reads a cheap `Arc` clone at the top
+/// of each event and iterates THAT immutable snapshot, so an in-flight
+/// evaluation is never disturbed by a concurrent reload; a reload takes the
+/// write lock for the microseconds it needs to store a fresh `Arc` and releases
+/// it. This is the race-safety argument: readers hold a consistent snapshot,
+/// the writer swaps a pointer, and neither blocks on the other's real work.
 pub(crate) struct EngineContext {
     pub(crate) service: Arc<MailService>,
     pub(crate) event_sender: broadcast::Sender<DomainEvent>,
-    pub(crate) rules: Vec<Rule>,
+    pub(crate) rules: RwLock<Arc<Vec<Rule>>>,
     pub(crate) minter: Option<SharedMinter>,
     pub(crate) executor: Arc<ProviderCallExecutor>,
     pub(crate) local: Arc<LocalAuthorityServer>,
 }
 
-/// Spawn the engine over the authority server's event bus. Returns `None`-free:
-/// the caller only spawns when there is at least one enabled rule.
+impl EngineContext {
+    /// A cheap `Arc`-clone snapshot of the active rules — the evaluator's
+    /// consistent view for one event.
+    fn rules_snapshot(&self) -> Arc<Vec<Rule>> {
+        self.rules
+            .read()
+            .expect("rules lock poisoned")
+            .clone()
+    }
+
+    /// Atomically replace the active rules (the reload swap). Only the pointer
+    /// swap holds the lock; in-flight evaluations keep their prior snapshot.
+    fn swap_rules(&self, rules: Vec<Rule>) {
+        *self.rules.write().expect("rules lock poisoned") = Arc::new(rules);
+    }
+}
+
+/// A live controller for the GUI-managed rule store, handed to the REST write
+/// routes (RFC-L2-scripting ruling 23). Every write persists a `rules.d/<id>.toml`
+/// file AND hot-swaps the running evaluator's rules, so a created rule fires on
+/// the next matching event without a restart. Cloneable and cheap (an `Arc`).
+///
+/// A process-local mutex serialises the write→reload critical section so
+/// concurrent CRUD calls can never interleave a file write with another's reload
+/// and leave the in-memory rules disagreeing with disk.
+#[derive(Clone)]
+pub struct ManagedRulesHandle {
+    inner: Arc<ManagedRulesInner>,
+}
+
+struct ManagedRulesInner {
+    config_root: PathBuf,
+    ctx: Arc<EngineContext>,
+    write_lock: Mutex<()>,
+}
+
+impl ManagedRulesHandle {
+    fn new(config_root: PathBuf, ctx: Arc<EngineContext>) -> Self {
+        Self {
+            inner: Arc::new(ManagedRulesInner {
+                config_root,
+                ctx,
+                write_lock: Mutex::new(()),
+            }),
+        }
+    }
+
+    /// The config root, for the read route (which lists straight off disk).
+    pub fn config_root(&self) -> &std::path::Path {
+        &self.inner.config_root
+    }
+
+    /// Create a NEW managed rule. Fails [`RuleWriteError::Conflict`] if the id is
+    /// already used by a managed rule OR a hand-authored `rules.toml` rule (the
+    /// GUI must not shadow an authored rule). Persists then reloads.
+    pub fn create(&self, rule: Rule) -> Result<Rule, super::writer::RuleWriteError> {
+        let _guard = self.inner.write_lock.lock().expect("write lock poisoned");
+        // Conflict if the id is already used ANYWHERE in the merged ruleset — a
+        // managed file or a hand-authored `rules.toml` rule (no shadowing).
+        if self.existing_rule_ids().contains(&rule.id) {
+            return Err(super::writer::RuleWriteError::Conflict(rule.id.clone()));
+        }
+        super::writer::write_managed_rule(&self.inner.config_root, &rule)?;
+        self.reload_locked();
+        Ok(rule)
+    }
+
+    /// Update an EXISTING managed rule (matched by id). Fails
+    /// [`RuleWriteError::NotFound`] if no managed file has that id (a
+    /// hand-authored rule is not editable here). Persists then reloads.
+    pub fn update(&self, rule: Rule) -> Result<Rule, super::writer::RuleWriteError> {
+        let _guard = self.inner.write_lock.lock().expect("write lock poisoned");
+        if !super::writer::managed_rule_exists(&self.inner.config_root, &rule.id) {
+            return Err(super::writer::RuleWriteError::NotFound(rule.id.clone()));
+        }
+        super::writer::write_managed_rule(&self.inner.config_root, &rule)?;
+        self.reload_locked();
+        Ok(rule)
+    }
+
+    /// Delete a managed rule by id. Persists then reloads.
+    pub fn delete(&self, id: &str) -> Result<(), super::writer::RuleWriteError> {
+        let _guard = self.inner.write_lock.lock().expect("write lock poisoned");
+        super::writer::delete_managed_rule(&self.inner.config_root, id)?;
+        self.reload_locked();
+        Ok(())
+    }
+
+    /// Re-load the merged ruleset from disk and hot-swap the evaluator's active
+    /// rules. Called under the write lock. A load error is logged and leaves the
+    /// prior (good) rules in place rather than blanking the engine.
+    fn reload_locked(&self) {
+        match super::config::load_rules(&self.inner.config_root) {
+            Ok(rules) => {
+                let enabled = rules.into_iter().filter(|rule| rule.enabled).collect();
+                self.inner.ctx.swap_rules(enabled);
+            }
+            Err(error) => {
+                ph_warn!(
+                    events::RULE_ENGINE_STARTED,
+                    error = %error,
+                    "rule reload failed; keeping the previously loaded rules"
+                );
+            }
+        }
+    }
+
+    /// Every rule id in the merged ruleset on disk (for create collision checks).
+    fn existing_rule_ids(&self) -> std::collections::HashSet<String> {
+        super::config::load_rules(&self.inner.config_root)
+            .map(|rules| rules.into_iter().map(|rule| rule.id).collect())
+            .unwrap_or_default()
+    }
+}
+
+/// Spawn the engine over the authority server's event bus. Always spawns (even
+/// with zero enabled rules) so the returned [`ManagedRulesHandle`] can populate
+/// the evaluator via the reload path when the GUI creates the FIRST rule — the
+/// bus subscription must already be live, or a just-created rule would not fire
+/// until the next restart.
 pub(crate) fn spawn(
     authority_server: Arc<AuthorityServer>,
     service: Arc<MailService>,
     event_sender: broadcast::Sender<DomainEvent>,
+    config_root: PathBuf,
     rules: Vec<Rule>,
     minter: Option<SharedMinter>,
 ) -> RuleEngineHandle {
@@ -78,11 +221,12 @@ pub(crate) fn spawn(
     let ctx = Arc::new(EngineContext {
         service,
         event_sender: event_sender.clone(),
-        rules,
+        rules: RwLock::new(Arc::new(rules)),
         minter,
         executor,
         local,
     });
+    let managed = ManagedRulesHandle::new(config_root, ctx.clone());
 
     let (tx, mut rx) = mpsc::channel::<DomainEvent>(RULE_EVENT_QUEUE_CAPACITY);
 
@@ -117,6 +261,7 @@ pub(crate) fn spawn(
 
     RuleEngineHandle {
         tasks: vec![forwarder, evaluator],
+        managed,
     }
 }
 
@@ -127,10 +272,11 @@ impl EngineContext {
         let Some(message_id) = event.message_id.clone() else {
             return;
         };
-        // Snapshot which rules trigger on this topic before any async work, so we
-        // do not borrow `self.rules` across an await.
-        for index in 0..self.rules.len() {
-            let rule = &self.rules[index];
+        // Take one consistent Arc snapshot of the active rules for this event: a
+        // concurrent reload swaps the pointer but never mutates the snapshot this
+        // evaluation holds (the race-safety argument on `EngineContext.rules`).
+        let rules = self.rules_snapshot();
+        for rule in rules.iter() {
             if !rule
                 .trigger_topics()
                 .iter()
@@ -153,10 +299,7 @@ impl EngineContext {
                     continue;
                 }
             };
-            // Clone what the async action needs so no borrow of `self.rules`
-            // crosses the await.
-            let rule = self.rules[index].clone();
-            self.execute(&rule, &event, &summary).await;
+            self.execute(rule, &event, &summary).await;
         }
     }
 

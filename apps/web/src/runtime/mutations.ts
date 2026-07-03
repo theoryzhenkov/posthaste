@@ -11,6 +11,7 @@ import type {
   Operation,
   PatchMailboxInput,
   PatchSettingsInput,
+  Rule,
   SaveDraftInput,
   SendMessageInput,
   SmartMailbox,
@@ -20,6 +21,7 @@ import type {
   UpdateAccountInput,
   UpdateSmartMailboxInput,
   VerificationResponse,
+  WritableRuleInput,
 } from '../api/types'
 import { getRuntimeAdapter } from './adapter'
 import { runtimeLinkClient } from './linkClient'
@@ -240,6 +242,17 @@ export const runtimeMutations = {
       input: AutomationRulePreviewInput,
     ): Promise<AutomationRulePreviewResponse> {
       return getRuntimeAdapter().previewAutomationRule(input)
+    },
+  },
+  rules: {
+    create(input: WritableRuleInput): Promise<Rule> {
+      return getRuntimeAdapter().createRule(input)
+    },
+    update(id: string, input: WritableRuleInput): Promise<Rule> {
+      return getRuntimeAdapter().updateRule(id, input)
+    },
+    delete(id: string): Promise<void> {
+      return getRuntimeAdapter().deleteRule(id)
     },
   },
   smartMailboxes: {

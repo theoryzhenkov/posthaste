@@ -29,9 +29,11 @@ use std::sync::Arc;
 mod actions;
 mod config;
 mod engine;
+mod writer;
 
 pub use config::{load_rules, RuleConfigError};
-pub use engine::RuleEngineHandle;
+pub use engine::{ManagedRulesHandle, RuleEngineHandle};
+pub use writer::RuleWriteError;
 
 pub(crate) use engine::spawn as spawn_engine;
 
