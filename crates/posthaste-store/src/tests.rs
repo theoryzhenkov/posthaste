@@ -193,6 +193,7 @@ mod smart_mailboxes;
 mod snooze;
 mod source_visibility;
 mod tags_and_locations;
+mod unsettled_guard;
 
 #[test]
 fn write_transaction_recovers_from_poisoned_mutex() {
