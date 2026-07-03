@@ -72,3 +72,39 @@ fn replace_mailboxes_clears_the_snooze_row_invariant() -> Result<(), StoreError>
     );
     Ok(())
 }
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d67 (N15 / M27 sub-unit (b))
+#[test]
+fn due_snoozes_are_limited_and_drain_across_ticks() -> Result<(), StoreError> {
+    // Stand-in for a mass-snooze backlog (N15): more due rows than one
+    // `list_due_snoozes` call should ever materialize at once.
+    use crate::snooze::SNOOZE_DUE_BATCH_LIMIT;
+
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    let total = SNOOZE_DUE_BATCH_LIMIT as usize + 25;
+
+    for index in 0..total {
+        store.insert_snooze(&account, &MessageId::from(format!("m-{index}")), 1_000)?;
+    }
+
+    // First "tick": the store returns at most the batch limit.
+    let first_batch = store.list_due_snoozes(&account, 2_000)?;
+    assert_eq!(first_batch.len(), SNOOZE_DUE_BATCH_LIMIT as usize);
+
+    // The scheduler tick processes a batch by deleting each returned row
+    // (standing in for `clear_snooze_on_mailbox_replace_tx` after the
+    // auto-return move) before the next tick's call.
+    for (message_id, _until) in &first_batch {
+        store.delete_snooze(&account, message_id)?;
+    }
+
+    let second_batch = store.list_due_snoozes(&account, 2_000)?;
+    assert_eq!(
+        second_batch.len(),
+        total - SNOOZE_DUE_BATCH_LIMIT as usize,
+        "the remainder should surface on the next bounded tick"
+    );
+    Ok(())
+}

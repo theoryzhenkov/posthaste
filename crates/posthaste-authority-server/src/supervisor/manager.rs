@@ -18,6 +18,7 @@ impl AccountSupervisor {
                 gateways: RwLock::new(HashMap::new()),
                 runtime_overviews: RwLock::new(HashMap::new()),
                 runtime_generations: RwLock::new(HashMap::new()),
+                sync_cycle_generations: RwLock::new(HashMap::new()),
                 known_accounts: RwLock::new(HashSet::new()),
                 account_count: AtomicUsize::new(0),
                 cache_resources: Mutex::new(CacheResourceGovernor::new(

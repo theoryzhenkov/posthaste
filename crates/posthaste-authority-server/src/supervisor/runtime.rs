@@ -193,6 +193,18 @@ pub(crate) async fn run_account_runtime(
 /// Logs and marks the account `Degraded` when a select!-loop arm's bounded
 /// call (`tokio::time::timeout`, D66) elapses. Called at every wrapped
 /// call-site above; never breaks the caller's loop.
+///
+/// Also invalidates the account's current sync-cycle token (N5 + the M26
+/// flag / M27 sub-unit (d)) *before* writing `Degraded`: a `tokio::time::
+/// timeout` cancels the timed-out arm's own future, but the sync cycle's
+/// progress-forwarder task (`sync_flow::sync_progress_reporter`) is spawned
+/// separately and is NOT owned by that future, so it can still be mid-write
+/// when this fires. Bumping the token first — and `set_sync_progress`
+/// checking it inside the same critical section it commits under — means any
+/// such write from the abandoned cycle is rejected instead of landing after
+/// (and silently undoing) the `Degraded` write below. Safe to call
+/// unconditionally: an arm that never ran a sync cycle simply advances an
+/// unused counter.
 async fn record_arm_timeout(
     shared: &Arc<SupervisorShared>,
     account_id: &AccountId,
@@ -200,6 +212,7 @@ async fn record_arm_timeout(
     arm: &'static str,
     budget: Duration,
 ) {
+    shared.next_sync_cycle_generation(account_id).await;
     ph_warn!(
         events::SUPERVISOR_ARM_TIMEOUT,
         account_id = %account_id,
