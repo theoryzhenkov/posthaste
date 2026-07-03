@@ -62,6 +62,18 @@ impl<Frame> Sequenced<Frame> {
         Self::Reset { highest_seq }
     }
 
+    /// The **gap frame** (RFC-L2-scripting §3): the same `Reset` wire element,
+    /// *reinterpreted* for a fact-carrying tap. On a log-/state-carrying seam a
+    /// `Reset` means "collapse to current state"; for facts, history IS the
+    /// payload, so a collapse is data loss — the identical element instead tells
+    /// the consumer an explicit gap opened (its cursor fell before the log's
+    /// truncation point) and it must decide, never silently drop (N8). Same
+    /// bytes on the wire (`{ "kind": "reset", "highestSeq": N }`); the meaning is
+    /// the channel kind's, resolved by the consumer.
+    pub fn gap(highest_seq: u64) -> Self {
+        Self::reset(highest_seq)
+    }
+
     /// The resume cursor this element advances the subscriber to: a frame's seq,
     /// or a reset's `highest_seq` — both name "the seq the subscriber is now at".
     pub fn seq(&self) -> u64 {
