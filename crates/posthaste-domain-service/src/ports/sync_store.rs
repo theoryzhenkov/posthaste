@@ -109,13 +109,14 @@ pub trait SyncWriteStore: Send + Sync {
 
     /// Like [`apply_sync_batch`](Self::apply_sync_batch), but for a
     /// `replace_all_messages` snapshot: `protected_message_ids` (messages with
-    /// an unsettled optimistic op, per the S3 unsettled-guard) are excluded
-    /// from the prune-by-absence pass even though they are absent from
-    /// `batch.messages` — the caller has already dropped them from the batch
-    /// so the snapshot cannot clobber their canonical row via upsert; this
-    /// keeps that same drop from also pruning them as "deleted remotely" (a
-    /// not-yet-uploaded local message is *always* absent from any remote
-    /// snapshot, guard-filtered or not).
+    /// an un-acked optimistic op, per the M35 durable snapshot guard) are
+    /// excluded from the prune-by-absence pass. The caller folds an un-acked
+    /// op's effect over any snapshot row it *is* present in (so that row upserts
+    /// server-truth-plus-pending); this exemption covers only the rows a full
+    /// snapshot *omits* — a not-yet-uploaded local create is *always* absent
+    /// from any remote snapshot, and a row that folded to removed (pending
+    /// Destroy) is deliberately left out — which the prune would otherwise
+    /// treat as "deleted remotely".
     ///
     /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
     fn apply_sync_batch_protected(

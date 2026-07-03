@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::collections::HashSet;
 
 use mail_parser::{Address, MessageParser};
@@ -274,13 +275,15 @@ impl MailService {
             })
     }
 
-    /// The ids of messages with an unsettled state-assertion op — the messages a
-    /// provider sync must not overwrite (their canonical row holds an in-flight
-    /// optimistic write that the sync's view may predate). The settle write is
-    /// unaffected: it removes its op first, then writes through `apply_sync_batch`
-    /// unfiltered.
+    /// The ids of messages with an unsettled state-assertion op — the messages
+    /// whose un-acked optimistic effect the M35 durable snapshot guard re-layers
+    /// over provider truth (their canonical row holds an in-flight write the
+    /// snapshot's view may predate). The sync path itself uses
+    /// [`Self::overlay_operations`] directly (it needs the ops to fold, not just
+    /// the ids); this id projection is retained for tests asserting the set.
     ///
     /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    #[cfg(test)]
     pub(crate) fn unsettled_message_ids(
         &self,
         account_id: &AccountId,
