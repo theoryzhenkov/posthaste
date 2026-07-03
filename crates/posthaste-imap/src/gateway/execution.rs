@@ -194,7 +194,10 @@ pub(crate) async fn execute_mailbox_plan(
                 "IMAP mailbox header fetch completed"
             );
         }
-        PlannedImapMailboxSync::Sync(ImapMailboxSyncPlan::CondstoreDelta { .. }) => {
+        PlannedImapMailboxSync::Sync(ImapMailboxSyncPlan::CondstoreDelta {
+            since_modseq,
+            after_uid,
+        }) => {
             let started = Instant::now();
             report_sync_progress(
                 execution.progress,
@@ -215,22 +218,25 @@ pub(crate) async fn execute_mailbox_plan(
                 mailbox_index = execution.mailbox_ordinal,
                 mailbox_count = execution.mailbox_count,
                 mode = plan_name,
+                since_modseq = since_modseq.0,
+                after_uid = after_uid.map(|uid| uid.0),
                 "IMAP mailbox header fetch started"
             );
-            let snapshot = fetch_mailbox_header_snapshot_with_client(
+            // CONDSTORE without QRESYNC (real Gmail): fetch only headers
+            // changed since the stored MODSEQ — never a full re-snapshot — and
+            // reconcile deletions against a header-free UNDELETED UID search.
+            let snapshot = fetch_mailbox_condstore_delta_snapshot_with_client(
                 client,
                 &mailbox.name,
-                execution.fetch_modseq,
+                *since_modseq,
+                *after_uid,
                 execution.fetch_gmail_metadata,
                 execution.updated_at.to_string(),
             )
             .await
             .map_err(imap_error_to_gateway)?;
-            accumulator.add_deleted_uid_identities(missing_location_identities(
-                &mailbox.local_locations,
-                &snapshot.headers,
-            ));
-            let header_count = accumulator.record_header_snapshot(snapshot, execution.updated_at);
+            let summary =
+                accumulator.record_uid_delta_snapshot(&mailbox, snapshot, execution.updated_at);
             ph_info!(
                 events::IMAP_MAILBOX_HEADER_FETCH_COMPLETED,
                 account_id = %execution.account_id,
@@ -238,7 +244,8 @@ pub(crate) async fn execute_mailbox_plan(
                 mailbox_index = execution.mailbox_ordinal,
                 mailbox_count = execution.mailbox_count,
                 mode = plan_name,
-                message_count = header_count,
+                message_count = summary.header_count,
+                deleted_uid_count = summary.deleted_uid_count,
                 duration_ms = started.elapsed().as_millis() as u64,
                 "IMAP mailbox header fetch completed"
             );

@@ -132,6 +132,8 @@ async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
         "baseline view should show the seeded subject"
     );
 
+    let baseline_headers = gmail.header_fetch_count();
+
     // Mutate the mailbox: expunge the seeded message and deliver a new one,
     // advancing HIGHESTMODSEQ. The next sync must take the QRESYNC delta path
     // (the gateway's STATUS preflight sees a changed MODSEQ, then issues
@@ -144,6 +146,13 @@ async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
     assert!(
         gmail.changedsince_fetch_count() >= 1,
         "the re-sync should have issued a CHANGEDSINCE (QRESYNC delta) fetch"
+    );
+    // Incrementality proof: the delta fetched exactly the one replacement
+    // message's header — nothing was re-fetched.
+    assert_eq!(
+        gmail.header_fetch_count(),
+        baseline_headers + 1,
+        "the QRESYNC delta should fetch exactly the replacement message's header"
     );
 
     let after = open_inbox_view(&harness, &account).await;
@@ -160,5 +169,125 @@ async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
     assert!(
         !projections.contains(SEEDED_SUBJECT),
         "the vanished seeded message should be gone after the delta, got: {projections}"
+    );
+}
+
+/// The M35a zero-refetch gate, against the Gmail-faithful CONDSTORE-only
+/// server (real Gmail advertises CONDSTORE but never QRESYNC): a second sync
+/// with no mailbox changes must not re-fetch a single header. Before the fix
+/// the executor's CondstoreDelta arm ran a full header snapshot, re-fetching
+/// every message on every sync.
+#[tokio::test]
+async fn condstore_only_second_sync_with_no_changes_fetches_zero_headers() {
+    let gmail = GmailImapFixture::start_condstore_only().await;
+    let harness = Harness::new().with_runtime().await;
+
+    let account = harness
+        .create_gmail_account("gmail-condstore-nochange", &gmail)
+        .await;
+    let baseline_headers = gmail.header_fetch_count();
+    assert!(
+        baseline_headers >= 1,
+        "the initial full-snapshot sync should have fetched the seeded header"
+    );
+
+    harness.sync_account(&account).await;
+
+    assert_eq!(
+        gmail.header_fetch_count(),
+        baseline_headers,
+        "a no-change CONDSTORE-only re-sync must fetch zero headers"
+    );
+    let state = open_inbox_view(&harness, &account).await;
+    assert_eq!(
+        state.rows.len(),
+        1,
+        "the seeded message should still be in the view after the no-op re-sync"
+    );
+}
+
+/// CONDSTORE-only incrementality: delivering one message into a two-message
+/// mailbox must fetch exactly the one new header — the two unchanged messages
+/// are not re-fetched (the pre-fix executor re-fetched all three).
+#[tokio::test]
+async fn condstore_only_delta_fetches_only_the_changed_messages() {
+    const SECOND_SUBJECT: &str = "Roadmap review";
+    const NEW_SUBJECT: &str = "Standup notes";
+
+    let gmail = GmailImapFixture::start_condstore_only().await;
+    // Two messages in INBOX before the account exists, so the initial snapshot
+    // lands both and the later delta has unchanged messages to NOT re-fetch.
+    gmail.deliver_additional(SECOND_SUBJECT);
+    let harness = Harness::new().with_runtime().await;
+
+    let account = harness
+        .create_gmail_account("gmail-condstore-delta", &gmail)
+        .await;
+    let baseline_headers = gmail.header_fetch_count();
+    assert_eq!(
+        baseline_headers, 2,
+        "the initial snapshot should have fetched both seeded headers"
+    );
+
+    gmail.deliver_additional(NEW_SUBJECT);
+    harness.sync_account(&account).await;
+
+    assert!(
+        gmail.changedsince_fetch_count() >= 1,
+        "the re-sync should have issued a CHANGEDSINCE (CONDSTORE delta) fetch"
+    );
+    assert_eq!(
+        gmail.header_fetch_count(),
+        baseline_headers + 1,
+        "the CONDSTORE delta should fetch exactly the one delivered message's header"
+    );
+
+    let state = open_inbox_view(&harness, &account).await;
+    let projections = row_projections(&state);
+    assert_eq!(
+        state.rows.len(),
+        3,
+        "all three messages should be in the view after the delta, got: {projections}"
+    );
+    assert!(
+        projections.contains(NEW_SUBJECT),
+        "the delivered {NEW_SUBJECT:?} should appear after the delta, got: {projections}"
+    );
+    assert!(
+        projections.contains(SEEDED_SUBJECT) && projections.contains(SECOND_SUBJECT),
+        "the unchanged messages should survive the partial-delta batch, got: {projections}"
+    );
+}
+
+/// CONDSTORE-only deletion detection: CHANGEDSINCE cannot report expunges
+/// without QRESYNC, so the delta reconciles a header-free `UID SEARCH
+/// UNDELETED` against known local locations — the expunged message leaves the
+/// view while zero headers are fetched.
+#[tokio::test]
+async fn condstore_only_delta_detects_an_expunged_message_as_deleted() {
+    let gmail = GmailImapFixture::start_condstore_only().await;
+    let harness = Harness::new().with_runtime().await;
+
+    let account = harness
+        .create_gmail_account("gmail-condstore-expunge", &gmail)
+        .await;
+    let baseline = open_inbox_view(&harness, &account).await;
+    assert_eq!(baseline.rows.len(), 1, "baseline should hold one message");
+    let baseline_headers = gmail.header_fetch_count();
+
+    gmail.expunge_inbox();
+    harness.sync_account(&account).await;
+
+    assert_eq!(
+        gmail.header_fetch_count(),
+        baseline_headers,
+        "a pure-expunge CONDSTORE-only re-sync must fetch zero headers"
+    );
+    let after = open_inbox_view(&harness, &account).await;
+    let projections = row_projections(&after);
+    assert_eq!(
+        after.rows.len(),
+        0,
+        "the expunged message should be removed from the view, got: {projections}"
     );
 }
