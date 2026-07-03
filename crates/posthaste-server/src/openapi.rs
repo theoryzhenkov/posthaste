@@ -33,11 +33,19 @@ struct OAuthApiDoc;
 /// the near platform (config-file-only rules; RFC-L2-scripting §7.18).
 #[derive(OpenApi)]
 #[openapi(
-    paths(crate::rules_api::list_rules),
+    paths(
+        crate::rules_api::list_rules,
+        crate::rules_api::create_rule,
+        crate::rules_api::update_rule,
+        crate::rules_api::delete_rule,
+    ),
     components(schemas(
         crate::rules_api::RulesListResponse,
+        crate::rules_api::WritableRuleInput,
+        posthaste_http_api_adapter::api::OkResponse,
         posthaste_domain_model::Rule,
         posthaste_domain_model::RuleAction,
+        posthaste_domain_model::WritableRuleAction,
         posthaste_domain_model::RuleGrant,
     )),
     tags((name = "settings", description = "Application settings and automation rules")),

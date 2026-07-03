@@ -275,6 +275,18 @@ export function createFakeRuntimeAdapter(
         input?.defaultReadResponse ?? defaultReadResponse,
       )
     },
+    fetchRules() {
+      return Promise.resolve([])
+    },
+    createRule() {
+      return unsupported('rule create result')
+    },
+    updateRule() {
+      return unsupported('rule update result')
+    },
+    deleteRule() {
+      return Promise.resolve()
+    },
     runMessageCommand(request) {
       calls.messageCommandCalls.push({ ...request })
       return resolveQueued(

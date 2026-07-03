@@ -19,12 +19,30 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/automation-rules:preview",
         authz: gate(Action::Read, ResourceShape::empty()),
     },
-    // The read-only automation-rules list (config-file-only rules; no write
-    // path). No resource axis a scoped token can narrow — like `/settings`.
+    // Automation rules (RFC-L2-scripting ruling 23). Listing is a global Read;
+    // creating/editing/deleting is a privileged Manage (a read-scoped token must
+    // NOT create rules) with no resource axis a scoped token can narrow — like
+    // `/settings`. exec is unrepresentable in the write body (WritableRuleAction),
+    // so no GUI/REST path can ever create the one dangerous action.
     Entry {
         method: "GET",
         template: "/rules",
         authz: gate(Action::Read, ResourceShape::empty()),
+    },
+    Entry {
+        method: "POST",
+        template: "/rules",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    Entry {
+        method: "PUT",
+        template: "/rules/{rule_id}",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    Entry {
+        method: "DELETE",
+        template: "/rules/{rule_id}",
+        authz: gate(Action::Manage, ResourceShape::empty()),
     },
     Entry {
         method: "GET",

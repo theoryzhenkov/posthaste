@@ -7,8 +7,10 @@ import {
   closeRuntimeLink,
   closeRuntimeLinkView,
   createAccount,
+  createRule,
   createSmartMailbox,
   deleteAccount,
+  deleteRule,
   deleteSmartMailbox,
   disableAccount,
   enableAccount,
@@ -21,6 +23,7 @@ import {
   fetchMessage,
   fetchDraftContent,
   fetchReplyContext,
+  fetchRules,
   fetchSearchMessages,
   fetchSenderAddresses,
   fetchSettings,
@@ -45,6 +48,7 @@ import {
   startProviderOAuth,
   triggerSync,
   updateAccount,
+  updateRule,
   updateSmartMailbox,
   uploadAccountLogo,
   verifyAccount,
@@ -340,6 +344,18 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   read(request) {
     return read(request)
+  },
+  fetchRules() {
+    return fetchRules()
+  },
+  createRule(input) {
+    return createRule(input)
+  },
+  updateRule(id, input) {
+    return updateRule(id, input)
+  },
+  deleteRule(id) {
+    return deleteRule(id)
   },
   runMessageCommand({ command, messageId, sourceId }) {
     return performMessageCommand(messageId, command, sourceId)

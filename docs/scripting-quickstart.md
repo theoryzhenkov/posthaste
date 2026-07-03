@@ -219,6 +219,20 @@ mailboxes use), and runs an action.
 > example below: **scope the WHEN-clause by sender** (`from:`) so attacker mail
 > cannot trigger your rule, and **grant the least capability** the handler needs.
 
+### Create a rule in the app (no file, no restart)
+
+For the safe actions — **tag / move / notify / emit / webhook** — you don't need
+`rules.toml` at all: open **Settings → Automations** and create the rule in the
+app. It builds the WHEN-clause with the same grammar shown here, defaults the
+webhook grant to least-privilege (`read`), and surfaces the sender-scope /
+prompt-injection guidance inline. The rule persists to a GUI-owned
+`rules.d/<id>.toml` and **starts firing immediately** — no restart. The app
+**cannot** create an `exec` rule (that action isn't representable on the write
+surface, by design — a GUI-settable exec would be remote code execution); exec
+stays `rules.toml`-only, below.
+
+### Author a rule in `rules.toml`
+
 Create `<config-root>/rules.toml` (the config root is `daemon.json`'s directory,
 e.g. `~/.config/mail`) and restart the server to load it:
 
