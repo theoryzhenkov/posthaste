@@ -87,8 +87,43 @@ with the full `MessageDetail` JSON on **stdin** and these env vars set:
 `PH_ACCOUNT_ID`, `PH_MESSAGE_ID`, `PH_SEQ`, `PH_TOPIC`, `PH_KEYWORDS`,
 `PH_MAILBOX_IDS`.
 
-Here is a handler that tags every matched message `$processed` — writing back
-through `apply`, **idempotently**:
+### Writing a handler: the two-line form
+
+**`posthastectl` IS the SDK** (RFC-L2-scripting ruling 21): its write verbs —
+`tag`, `move`, `reply`, `send`, `apply` — construct the typed request body,
+attach auth, and derive a safe `Idempotency-Key` for you. A handler that tags
+every matched message `reviewed` is two lines, with **no JSON parsing, no
+REST, and no idempotency math**:
+
+```sh
+#!/bin/sh
+# write_back.sh — the env vars above are already in scope; nothing else needed.
+posthastectl tag --message "$PH_MESSAGE_ID" --add reviewed
+```
+
+`--account` is optional here too — it falls back to `$PH_ACCOUNT_ID` /
+`$PH_ACCOUNT` when omitted, so the common "act on the message that triggered
+this handler" case never needs it spelled out. The other verbs follow the same
+shape:
+
+```sh
+posthastectl move --message "$PH_MESSAGE_ID" --to-mailbox archive
+posthastectl reply --message "$PH_MESSAGE_ID" --body "Got it, thanks!"
+posthastectl send --to a@example.com --subject "Heads up" --body "..."
+```
+
+Every write verb sets `Idempotency-Key` for you automatically, derived from
+the triggering event's seq (`$PH_EVENT_SEQ`/`$PH_SEQ`) so a redelivery of the
+*same* event reproduces the *same* key — see
+[the idempotency key](#safe-write-back-the-idempotency-key) below for exactly
+how, and `--idempotency-key` / `posthastectl <verb> --help` to override it.
+
+### Advanced: the raw JSON-on-stdin path
+
+For custom logic beyond the five verbs (or another language's HTTP client),
+skip `posthastectl` entirely and drive `/v1` yourself — the same env vars and
+the full `MessageDetail` JSON on stdin are still all you get, no wrapper
+required:
 
 ```sh
 #!/bin/sh
@@ -100,6 +135,9 @@ curl -sS -X POST \
   -H "content-type: application/json" \
   -d '{"add":["$processed"],"remove":[]}'
 ```
+
+This is exactly what `posthastectl tag` does internally — reach for it only
+when the sugar doesn't fit (custom body shape, a non-`sh` handler, etc.).
 
 ### Safe write-back: the idempotency key
 
@@ -115,7 +153,11 @@ command) request:
   `rule:<name>:<messageId>`) so a redelivery reproduces it exactly.
 
 This is the runtime-side dedup ledger (RFC-L2-scripting D53, resolving P8); no
-setup is required beyond sending the header.
+setup is required beyond sending the header. **`posthastectl`'s write verbs do
+this for you** — they read `PH_IDEMPOTENCY_KEY` / `PH_EVENT_SEQ` / `PH_SEQ`
+from the environment and derive a key deterministic in the triggering event
+(suffixed per-verb, so calling `tag` then `move` for one event never collides).
+Only the raw-REST path above needs to compute it by hand.
 
 ## 3. Watch and act (30 seconds)
 
@@ -264,17 +306,30 @@ id = "run-local"
 name = "Hand off to a local handler"
 when = "tag:instruct from:me@mydomain.com"
 enabled = true
-action = { kind = "exec", command = "/opt/posthaste/handler.sh", grants = ["read"], expirySeconds = 3600 }
+action = { kind = "exec", command = "/opt/posthaste/handler.sh", grants = ["read", "tag"], expirySeconds = 3600 }
 ```
 
-`exec` runs `command` — a **fixed host binary** — with the JSON payload on
-**stdin** and the scoped token in `POSTHASTE_TOKEN` (plus `PH_IDEMPOTENCY_KEY`,
-`PH_ACCOUNT_ID`, `PH_MESSAGE_ID`).
+`exec` runs `command` — a **fixed host binary** — with the full event+message
+JSON payload on **stdin**, the scoped token in `POSTHASTE_TOKEN`, and these
+convenience env vars (RFC-L2-scripting ruling 21 — "posthastectl IS the SDK"):
+
+`PH_IDEMPOTENCY_KEY`, `PH_ACCOUNT` (source id), `PH_MESSAGE_ID`, `PH_FROM`,
+`PH_SUBJECT`, `PH_KEYWORDS` (comma-separated), `PH_EVENT_SEQ`, `PH_TOPIC`.
+
+Since `posthastectl`'s write verbs already read these, `/opt/posthaste/handler.sh`
+can be the two-line form with no JSON parsing at all:
+
+```sh
+#!/bin/sh
+# handler.sh — PH_MESSAGE_ID, POSTHASTE_TOKEN, etc. are already in the environment.
+posthastectl tag --message "$PH_MESSAGE_ID" --add reviewed
+```
 
 **Payload-is-data (RFC §7.20).** There is deliberately **no argument template**:
-event/message data reaches your script only as the JSON stdin document, never
-interpolated into a command string or argv. A malicious sender therefore cannot
-inject a command. Parse stdin as JSON; treat every field as untrusted input.
+event/message data reaches your script only as the JSON stdin document (or the
+`PH_*` env vars above), never interpolated into a command string or argv. A
+malicious sender therefore cannot inject a command. For anything beyond the
+env vars, parse stdin as JSON and treat every field as untrusted input.
 
 **`exec` is settable ONLY by editing `rules.toml` on the host — never over
 REST.** This is a hard, load-bearing invariant (RFC-L2-scripting §7.16): a
@@ -295,7 +350,26 @@ tool surface (level "agent-native") lands alongside.
   `--mailbox`.
 - Apply (write-back) commands: `POST /v1/sources/{id}/commands/messages/{mid}/…`
   (`set-keywords`, `add-to-mailbox`, `remove-from-mailbox`, `replace-mailboxes`,
-  `destroy`) — all accept the `Idempotency-Key` header.
+  `destroy`) — all accept the `Idempotency-Key` header. `POST
+  /v1/sources/{id}/commands/send` does not (yet).
+- Write verbs (the SDK surface, RFC-L2-scripting ruling 21) — each resolves
+  `--account`/`--message` from `$PH_ACCOUNT`/`$PH_ACCOUNT_ID`/`$PH_MESSAGE_ID`
+  when omitted, and auto-derives `Idempotency-Key`; `<verb> --help` for the
+  full flag list:
+  - `posthastectl tag --message <id> [--account <id>] --add <kw>... --remove <kw>...`
+  - `posthastectl move --message <id> [--account <id>] --to-mailbox <role|id>`
+  - `posthastectl reply --message <id> [--account <id>] --body <text|-|@file>`
+  - `posthastectl send --to <addr>... --subject <s> --body <text|-|@file> [--account <id>]`
+  - `posthastectl apply --kind <set-keywords|add-to-mailbox|remove-from-mailbox|replace-mailboxes|destroy> --message <id> [--account <id>] [--body <json|-|@file>]`
+    — the escape hatch: any message-command route by name and raw wire shape.
+  - All accept `--idempotency-key <key>` to override the auto-derived one.
+- `exec` action env vars (Level 1, rule-driven): `PH_IDEMPOTENCY_KEY`,
+  `PH_ACCOUNT`, `PH_MESSAGE_ID`, `PH_FROM`, `PH_SUBJECT`, `PH_KEYWORDS`,
+  `PH_EVENT_SEQ`, `PH_TOPIC` (plus `POSTHASTE_TOKEN`); full event+message JSON
+  on stdin.
+- `watch --exec` env vars (Level 2, CLI-driven): `PH_ACCOUNT_ID`,
+  `PH_MESSAGE_ID`, `PH_SEQ`, `PH_TOPIC`, `PH_KEYWORDS`, `PH_MAILBOX_IDS`; full
+  `MessageDetail` JSON on stdin.
 - Token mint: `posthastectl token mint` → `POST /v1/auth/tokens`.
 - Design: `docs/eph/RFC-L2-scripting.md`.
 
