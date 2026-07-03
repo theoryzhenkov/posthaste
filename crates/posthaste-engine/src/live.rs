@@ -261,8 +261,38 @@ pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
             _ => GatewayError::Rejected(method.to_string()),
         },
         jmap_client::Error::Set(error) => GatewayError::Rejected(error.to_string()),
+        // A non-2xx HTTP response with no `application/problem+json` body — e.g. a
+        // 404 on a stale/misconfigured eventsource or API URL (PP6). The fork
+        // surfaces it as `Server("<status> <reason>")`. Classify a *permanent*
+        // client-error status (4xx, excluding the transient/recoverable 401 → Auth
+        // above, 408 request-timeout, and 429 rate-limit) as `Rejected` so a
+        // structurally-broken push URL trips the terminal path instead of being
+        // retried forever as a generic `Network` blip. Everything else (5xx,
+        // transport) stays transient.
+        jmap_client::Error::Server(ref message) => match parse_leading_status(message) {
+            Some(status) if is_permanent_http_status(status) => {
+                GatewayError::Rejected(message.clone())
+            }
+            _ => GatewayError::Network(message.clone()),
+        },
         other => GatewayError::Network(other.to_string()),
     }
+}
+
+/// Parse a leading 3-digit HTTP status from a `reqwest::StatusCode` Display
+/// string such as `"404 Not Found"`.
+fn parse_leading_status(message: &str) -> Option<u16> {
+    message
+        .split_whitespace()
+        .next()
+        .and_then(|token| token.parse::<u16>().ok())
+        .filter(|status| (100..=599).contains(status))
+}
+
+/// A 4xx client error that a retry cannot fix, excluding the recoverable
+/// 401 (re-auth), 408 (request timeout), and 429 (rate limit).
+fn is_permanent_http_status(status: u16) -> bool {
+    (400..=499).contains(&status) && !matches!(status, 401 | 408 | 429)
 }
 
 fn jmap_credentials(username: Option<&str>, secret: &str) -> Credentials {

@@ -395,6 +395,105 @@ async fn checkpoint_only_push_notification_triggers_sync() {
         .is_empty());
 }
 
+// PP3/D90 (ruling O6): a push (re)connect must trigger an unconditional catch-up
+// incremental sync — otherwise anything that changed during the outage surfaces
+// only at the next 60 s poll. The `Connected` event both flips push status and
+// runs a coalesced sync cycle.
+// spec: docs/L2-transport#resilientpushstream
+#[tokio::test]
+async fn push_connected_triggers_catch_up_sync() {
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
+    let mut connection = AccountRuntimeConnectionState::default();
+    connection.set_connected(AccountConnection {
+        gateway,
+        push_events: None,
+        remote_observation: account
+            .transport
+            .provider_profile()
+            .jmap()
+            .remote_observation(),
+        secret_resolver: Arc::new(StaticSecretResolver::new("")),
+    });
+
+    let sync_state = SyncTriggerState::new();
+    let generation = shared.next_runtime_generation(&account.id).await;
+    let triggered = handle_push_event(
+        &sync_state,
+        &shared,
+        &account,
+        &account.id,
+        generation,
+        &mut connection,
+        PushStreamEvent::Connected { transport: "ws" },
+    )
+    .await;
+
+    assert!(triggered, "a reconnect resets the poll interval");
+    // The catch-up sync ran (a cycle was begun) and pulled messages ...
+    assert_eq!(sync_state.sync_cycle_count(), 1);
+    assert!(!shared
+        .service
+        .list_messages(&account.id, None)
+        .expect("messages should list")
+        .is_empty());
+    // ... and push status is truthful.
+    assert_eq!(
+        shared.runtime_overview(&account.id).await.push,
+        PushStatus::Connected
+    );
+}
+
+// PP6/D91: a terminal push failure marks push `Unsupported` with a truthful
+// reason and leaves the account poll-only (no infinite Reconnecting cycle).
+// spec: docs/L2-transport#resilientpushstream
+#[tokio::test]
+async fn push_terminal_event_marks_push_unsupported_with_reason() {
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
+    let mut connection = AccountRuntimeConnectionState::default();
+    connection.set_connected(AccountConnection {
+        gateway,
+        push_events: None,
+        remote_observation: account
+            .transport
+            .provider_profile()
+            .jmap()
+            .remote_observation(),
+        secret_resolver: Arc::new(StaticSecretResolver::new("")),
+    });
+
+    let sync_state = SyncTriggerState::new();
+    let generation = shared.next_runtime_generation(&account.id).await;
+    handle_push_event(
+        &sync_state,
+        &shared,
+        &account,
+        &account.id,
+        generation,
+        &mut connection,
+        PushStreamEvent::Terminal {
+            transport: "sse",
+            reason: "sse permanently unavailable after 3 attempts".to_string(),
+        },
+    )
+    .await;
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(overview.push, PushStatus::Unsupported);
+    assert_eq!(
+        overview.last_sync_error_code.as_deref(),
+        Some("push_terminal")
+    );
+    assert!(overview
+        .last_sync_error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("polling every"));
+}
+
 // spec: docs/L1-sync#sync-loop
 #[tokio::test]
 async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync() {
