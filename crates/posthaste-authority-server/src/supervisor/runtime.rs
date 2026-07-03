@@ -87,6 +87,7 @@ pub(crate) async fn run_account_runtime(
     .is_err()
     {
         record_arm_timeout(
+            &sync_state,
             &shared,
             &account_id,
             generation,
@@ -129,7 +130,7 @@ pub(crate) async fn run_account_runtime(
                     ARM_BUDGET_SYNC,
                     handle_poll_tick(&sync_state, &shared, &account, generation, &mut connection),
                 ).await.is_err() {
-                    record_arm_timeout(&shared, &account_id, generation, "poll_sync", ARM_BUDGET_SYNC).await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "poll_sync", ARM_BUDGET_SYNC).await;
                 }
                 interval = sync_poll_interval(shared.poll_interval);
             }
@@ -138,7 +139,7 @@ pub(crate) async fn run_account_runtime(
                     ARM_BUDGET_BACKFILL,
                     handle_backfill_tick(&shared, &account_id, connection.gateway()),
                 ).await.is_err() {
-                    record_arm_timeout(&shared, &account_id, generation, "backfill", ARM_BUDGET_BACKFILL).await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "backfill", ARM_BUDGET_BACKFILL).await;
                 }
             }
             _ = cache_interval.tick() => {
@@ -152,7 +153,7 @@ pub(crate) async fn run_account_runtime(
                         None,
                     ),
                 ).await.is_err() {
-                    record_arm_timeout(&shared, &account_id, generation, "cache_maintenance", ARM_BUDGET_CACHE).await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "cache_maintenance", ARM_BUDGET_CACHE).await;
                 }
             }
             _ = snooze_interval.tick() => {
@@ -160,7 +161,7 @@ pub(crate) async fn run_account_runtime(
                     ARM_BUDGET_SNOOZE,
                     handle_snooze_tick(&shared, &account_id),
                 ).await.is_err() {
-                    record_arm_timeout(&shared, &account_id, generation, "snooze", ARM_BUDGET_SNOOZE).await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "snooze", ARM_BUDGET_SNOOZE).await;
                 }
             }
             _ = async {
@@ -180,7 +181,7 @@ pub(crate) async fn run_account_runtime(
                         &mut oauth_refresh_state,
                     ),
                 ).await.is_err() {
-                    record_arm_timeout(&shared, &account_id, generation, "oauth_refresh", ARM_BUDGET_OAUTH_REFRESH).await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "oauth_refresh", ARM_BUDGET_OAUTH_REFRESH).await;
                 }
             }
             Some(command) = command_rx.recv() => {
@@ -198,7 +199,7 @@ pub(crate) async fn run_account_runtime(
                 ).await {
                     Ok(true) => interval = sync_poll_interval(shared.poll_interval),
                     Ok(false) => {}
-                    Err(_) => record_arm_timeout(&shared, &account_id, generation, "command", ARM_BUDGET_SYNC).await,
+                    Err(_) => record_arm_timeout(&sync_state, &shared, &account_id, generation, "command", ARM_BUDGET_SYNC).await,
                 }
             }
             Some(event) = next_push => {
@@ -208,7 +209,7 @@ pub(crate) async fn run_account_runtime(
                 ).await {
                     Ok(true) => interval = sync_poll_interval(shared.poll_interval),
                     Ok(false) => {}
-                    Err(_) => record_arm_timeout(&shared, &account_id, generation, "push_event", ARM_BUDGET_SYNC).await,
+                    Err(_) => record_arm_timeout(&sync_state, &shared, &account_id, generation, "push_event", ARM_BUDGET_SYNC).await,
                 }
             }
         }
@@ -231,12 +232,21 @@ pub(crate) async fn run_account_runtime(
 /// unconditionally: an arm that never ran a sync cycle simply advances an
 /// unused counter.
 async fn record_arm_timeout(
+    sync_state: &Arc<SyncTriggerState>,
     shared: &Arc<SupervisorShared>,
     account_id: &AccountId,
     generation: RuntimeGeneration,
     arm: &'static str,
     budget: Duration,
 ) {
+    // Review finding #1: an arm-budget timeout DROPS the sync-cycle future
+    // mid-flight, so finish_cycle_take_pending never runs and the coalescer's
+    // `active` flag is left stuck true — every later trigger then coalesces
+    // without enqueuing until the next poll tick. Clearing it here (same
+    // recovery as a watchdog restart) lets the next trigger claim immediately.
+    // Safe on non-sync arms: the select loop serializes arms, so no sync cycle
+    // is active when a non-sync arm times out — reset is then a no-op.
+    sync_state.reset().await;
     shared.next_sync_cycle_generation(account_id).await;
     ph_warn!(
         events::SUPERVISOR_ARM_TIMEOUT,
