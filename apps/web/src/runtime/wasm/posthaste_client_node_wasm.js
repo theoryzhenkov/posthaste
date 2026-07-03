@@ -599,7 +599,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [String, String, F64], shim_idx: 137, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
@@ -643,12 +643,12 @@ function wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d(arg0, arg
     wasm.wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d(arg0, arg1, arg2, arg3);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7(arg0, arg1, arg2, arg3, arg4) {
+function wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea(arg0, arg1, arg2, arg3, arg4) {
     const ptr0 = passStringToWasm0(arg2, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(arg3, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    wasm.wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7(arg0, arg1, ptr0, len0, ptr1, len1, arg4);
+    wasm.wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea(arg0, arg1, ptr0, len0, ptr1, len1, arg4);
 }
 
 const EntityStoreHandleFinalization = (typeof FinalizationRegistry === 'undefined')

@@ -3963,6 +3963,7 @@ dependencies = [
  "jsonwebtoken",
  "oauth2",
  "posthaste-authority-server-link",
+ "posthaste-call-policy",
  "posthaste-client-link",
  "posthaste-config",
  "posthaste-contract-core",
@@ -3971,7 +3972,6 @@ dependencies = [
  "posthaste-engine",
  "posthaste-imap",
  "posthaste-link-far-end",
- "posthaste-link-near-end",
  "posthaste-observability",
  "posthaste-replica-core",
  "posthaste-runtime",
@@ -4025,6 +4025,13 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "posthaste-call-policy"
+version = "0.1.0"
+dependencies = [
+ "posthaste-domain-model",
 ]
 
 [[package]]
@@ -4245,6 +4252,7 @@ name = "posthaste-link-near-end"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "posthaste-call-policy",
  "posthaste-contract-core",
  "serde",
  "serde_json",

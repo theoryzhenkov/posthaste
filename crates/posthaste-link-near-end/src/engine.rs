@@ -85,10 +85,11 @@ impl EngineError {
             .as_ref()
             .map(|e| e.message.clone())
             .unwrap_or_else(|| format!("runtime responded with status {status}"));
-        let disposition = error
-            .as_ref()
-            .map(|e| e.terminality)
-            .unwrap_or_else(|| classify_status(status));
+        // The envelope-over-status precedence rule (D82) is the shared policy
+        // core's `resolve_terminality`: the typed envelope verdict wins when
+        // present, the status band is the fallback.
+        let disposition =
+            posthaste_call_policy::resolve_terminality(error.as_ref().map(|e| e.terminality), status);
         Self {
             disposition,
             message,
@@ -271,7 +272,7 @@ impl<W: Wire> NearEnd<W> {
             let dur = self
                 .config
                 .backoff
-                .sleep_for(attempt, self.scheduler.jitter());
+                .delay_for(attempt, self.scheduler.jitter());
             self.scheduler.sleep(dur).await;
         }
     }
@@ -455,7 +456,7 @@ impl<W: Wire> NearEnd<W> {
             state.reconnect_attempt = state.reconnect_attempt.saturating_add(1);
             a
         };
-        let dur = self.config.backoff.sleep_for(attempt, self.scheduler.jitter());
+        let dur = self.config.backoff.delay_for(attempt, self.scheduler.jitter());
         self.scheduler.sleep(dur).await;
     }
 

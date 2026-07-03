@@ -1,0 +1,28 @@
+[package]
+name = "posthaste-call-policy"
+version = "0.1.0"
+edition = "2021"
+
+# The shared outbound-call **policy core** (RFC-L2-provider-reliability D80/D81/D82):
+# the wasm-pure arithmetic + types that decide *how* an outbound provider or link
+# call retries, backs off, deadlines, and classifies — extracted from
+# `posthaste-link-near-end` so the link engine and the (M31) native provider
+# executor consume one shared fact rather than forking it (tenet XIV).
+#
+# Deliberately dependency-thin: pure `std::time::Duration` arithmetic + the shared
+# `Terminality` taxonomy (O2: owned by `posthaste-domain-model`, consumed here,
+# never re-minted). No tokio, no reqwest, no serde, no ambient clock, no RNG —
+# every function takes explicit `now`/`attempt`/`rand_unit` inputs so it is
+# deterministic, unit-testable, and compiles to `wasm32-unknown-unknown`. That is
+# what keeps it on the D15 wasm frontier and lets it ride into the browser via
+# `posthaste-link-near-end` → `posthaste-client-node-wasm`.
+
+[lib]
+name = "posthaste_call_policy"
+path = "src/lib.rs"
+
+[dependencies]
+posthaste-domain-model = { path = "../posthaste-domain-model" }
+
+[lints]
+workspace = true
