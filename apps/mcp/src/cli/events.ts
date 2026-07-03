@@ -76,23 +76,61 @@ export async function openEventStream(
   return res.body ?? undefined;
 }
 
-/** One parsed SSE frame: the joined `data:` payload and the optional `id:`. */
+/**
+ * One parsed SSE frame: the joined `data:` payload, the optional `id:`, and the
+ * optional `event:` type (absent → the default `message` type).
+ */
 interface SseFrame {
   data: string;
   id?: string;
+  event?: string;
 }
 
-/** Parse a single SSE frame into its data payload + id (comments ignored). */
+/** Parse a single SSE frame into its data payload + id + event type (comments ignored). */
 function parseFrame(frame: string): SseFrame | undefined {
   const dataLines: string[] = [];
   let id: string | undefined;
+  let event: string | undefined;
   for (const line of frame.split("\n")) {
     if (line.startsWith(":")) continue; // comment / keep-alive
     if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
     else if (line.startsWith("id:")) id = line.slice(3).trim();
+    else if (line.startsWith("event:")) event = line.slice(6).trim();
   }
   if (dataLines.length === 0) return undefined;
-  return { data: dataLines.join("\n"), id };
+  return { data: dataLines.join("\n"), id, event };
+}
+
+/**
+ * Decide whether a frame is a **gap frame** — the tap's signal that the resume
+ * cursor fell before the durable log's oldest retained seq, so the missed range
+ * is gone and cannot be replayed. A frame is a gap when its SSE `event:` type is
+ * `"gap"` or its JSON `data` carries `kind === "reset"`. Returns the log's
+ * current `highestSeq` (the position the consumer must adopt), or `undefined`
+ * for an ordinary `DomainEvent` frame. Parses defensively: a non-JSON or
+ * seq-less gap payload still yields a gap with `highestSeq` of `0`.
+ */
+export function gapFrame(
+  data: string,
+  event?: string,
+): { highestSeq: number } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    parsed = undefined;
+  }
+  const isReset =
+    typeof parsed === "object" &&
+    parsed !== null &&
+    (parsed as { kind?: unknown }).kind === "reset";
+  if (event !== "gap" && !isReset) return undefined;
+  const raw =
+    typeof parsed === "object" && parsed !== null
+      ? (parsed as { highestSeq?: unknown }).highestSeq
+      : undefined;
+  const highestSeq = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+  return { highestSeq };
 }
 
 /**
@@ -103,7 +141,7 @@ function parseFrame(frame: string): SseFrame | undefined {
  */
 export async function consumeSse(
   body: ReadableStream<Uint8Array>,
-  onData: (data: string, id?: string) => Promise<void> | void,
+  onData: (data: string, id?: string, event?: string) => Promise<void> | void,
 ): Promise<void> {
   const decoder = new TextDecoder();
   const reader = body.getReader();
@@ -120,7 +158,7 @@ export async function consumeSse(
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
         const parsed = parseFrame(frame);
-        if (parsed) await onData(parsed.data, parsed.id);
+        if (parsed) await onData(parsed.data, parsed.id, parsed.event);
       }
     }
   } finally {
@@ -153,7 +191,14 @@ export async function streamEvents(
     signal: deps.signal,
   });
   if (!body) return;
-  await consumeSse(body, (data, id) => {
+  await consumeSse(body, (data, id, event) => {
+    const gap = gapFrame(data, event);
+    if (gap) {
+      deps.log?.(
+        `gap: missed events before seq ${gap.highestSeq} were truncated; resuming from ${gap.highestSeq}`,
+      );
+      return;
+    }
     deps.emit(data);
     if (id && deps.log) deps.log(`seq=${id}`);
   });

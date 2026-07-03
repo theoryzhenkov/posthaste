@@ -182,6 +182,22 @@ pub struct EventFilter {
     pub after_seq: Option<i64>,
 }
 
+/// The seq bounds of the durable `event_log` — the oldest still-retained seq and
+/// the highest assigned seq. Answers "where does replay start, and where is the
+/// live head" in one cheap query (`MIN(seq)`/`MAX(seq)`), so the fact-carrying
+/// tap resolves its gap frame and fresh-attach cursor without scanning the log
+/// (RFC-L2-scripting D52 / S2: the cheap head query behind
+/// `FactLog::highest_seq`/`truncation_point`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventLogBounds {
+    /// The oldest seq still retained (the truncation point). A resume from before
+    /// it cannot be served from durable history.
+    pub oldest: i64,
+    /// The highest seq assigned (the live head a fresh subscriber attaches at).
+    pub newest: i64,
+}
+
 /// What caused a sync cycle to run.
 ///
 /// @spec docs/L1-sync#sync-loop

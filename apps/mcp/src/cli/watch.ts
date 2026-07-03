@@ -1,5 +1,5 @@
 import { apiFetch, ApiError, type Connection } from "../client.js";
-import { consumeSse, openEventStream } from "./events.js";
+import { consumeSse, gapFrame, openEventStream } from "./events.js";
 
 /**
  * `watch` only ever subscribes to `message.updated` (the topic that covers both
@@ -98,16 +98,41 @@ export async function watchEvents(
   );
   if (!body) return;
 
-  await consumeSse(body, (data) => handleEvent(data, conn, opts, deps));
+  await consumeSse(body, (data, _id, event) =>
+    handleEvent(data, event, conn, opts, deps),
+  );
 }
 
-/** Handle one raw SSE event frame; always advances the cursor in `finally`. */
+/**
+ * Handle one raw SSE frame; always advances the cursor in `finally`.
+ *
+ * A **gap frame** (see [`gapFrame`]) is handled up front and out-of-band: the
+ * missed range is gone, so we log a warning and — if resuming from a cursor —
+ * reset that cursor to the log's `highestSeq` (never re-request the lost range).
+ * A gap never reaches the arrival gate or the message-detail fetch.
+ */
 async function handleEvent(
   data: string,
+  eventType: string | undefined,
   conn: Connection,
   opts: WatchOptions,
   deps: WatchDeps,
 ): Promise<void> {
+  const gap = gapFrame(data, eventType);
+  if (gap) {
+    deps.log(
+      `gap: missed events before seq ${gap.highestSeq} were truncated; resuming from ${gap.highestSeq}`,
+    );
+    if (opts.cursorFile) {
+      try {
+        await deps.writeFile(opts.cursorFile, `${gap.highestSeq}\n`);
+      } catch (error) {
+        deps.log(`failed to persist cursor: ${String(error)}`);
+      }
+    }
+    return;
+  }
+
   let event: DomainEventish;
   try {
     event = JSON.parse(data) as DomainEventish;

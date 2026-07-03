@@ -42,7 +42,8 @@ use std::collections::BTreeMap;
 
 use posthaste_domain_model::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
-    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
+    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds,
+    Identity, MailboxId,
     MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
     RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot,
     SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
@@ -483,6 +484,16 @@ pub trait AuthorityServerApi: Send + Sync {
     /// Read channel: replay the authoritative event log for a filter.
     async fn replay_events(&self, filter: EventFilter) -> Result<Vec<DomainEvent>, RuntimeError> {
         let _ = filter;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the cheap `event_log` seq bounds (`MIN`/`MAX(seq)`) for the
+    /// fact-carrying tap's head/truncation queries (RFC-L2-scripting D52 / S2),
+    /// avoiding a full replay scan. `None` when the log is empty. The default
+    /// errors like every other read-channel op: a transport that does not carry
+    /// the read channel is not a bounds source (the runtime binding falls back to
+    /// a replay scan on this error).
+    async fn event_log_bounds(&self) -> Result<Option<EventLogBounds>, RuntimeError> {
         Err(read_channel_unsupported())
     }
 

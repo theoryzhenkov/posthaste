@@ -76,6 +76,10 @@ pub struct ShutdownSequence {
     runtime_shutdown: Option<RuntimeShutdownHandle>,
     supervisor_stop: Option<Box<dyn SupervisorStop>>,
     store_close: Option<Box<dyn StoreClose>>,
+    /// The discovery file (`daemon.json`) to remove as the final teardown step,
+    /// so a stopped daemon leaves no stale port/credential behind
+    /// (RFC-L2-scripting §7.7b). Absent when none was written (auth disabled).
+    discovery_file: Option<std::path::PathBuf>,
     /// Held so log output survives until the very end of teardown.
     log_guard: Option<WorkerGuard>,
 }
@@ -91,8 +95,17 @@ impl ShutdownSequence {
             runtime_shutdown: None,
             supervisor_stop: None,
             store_close: None,
+            discovery_file: None,
             log_guard: None,
         }
+    }
+
+    /// Wire the discovery file (`daemon.json`) to remove on clean shutdown
+    /// (RFC-L2-scripting §7.7b). Absent when none was written (auth disabled).
+    #[must_use]
+    pub fn with_discovery_file(mut self, path: std::path::PathBuf) -> Self {
+        self.discovery_file = Some(path);
+        self
     }
 
     /// Wire the runtime shutdown handle (teardown step (b): stops the runtime's
@@ -147,6 +160,7 @@ impl ShutdownSequence {
             runtime_shutdown,
             supervisor_stop,
             store_close,
+            discovery_file,
             log_guard,
         } = self;
 
@@ -199,6 +213,12 @@ impl ShutdownSequence {
                     "store close exceeded its deadline; proceeding"
                 ),
             }
+        }
+
+        // Final step: remove the discovery file so a stopped daemon leaves no
+        // stale port/credential for a client to find (RFC-L2-scripting §7.7b).
+        if let Some(path) = discovery_file {
+            crate::discovery::remove_discovery_file(&path);
         }
 
         info!("teardown complete");

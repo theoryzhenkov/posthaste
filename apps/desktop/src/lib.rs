@@ -174,7 +174,9 @@ pub fn run() {
                 frontend_dist: None,
             };
             let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
+            let addr = handle.addr;
             let port = handle.addr.port();
+            let require_auth = handle.require_auth;
             let auth_token = handle.auth_token.clone();
             ph_info!(
                 events::DESKTOP_BACKEND_STARTED,
@@ -186,6 +188,13 @@ pub fn run() {
                 port,
                 auth_token: auth_token.clone(),
             });
+            // Discovery rider (RFC-L2-scripting §7.7b): write the well-known
+            // `daemon.json` so posthastectl auto-discovers this embedded app
+            // (its port/token were webview-only before). Best-effort; removed on
+            // the RunEvent::Exit hook below.
+            if require_auth {
+                let _ = posthaste_http_api_adapter::write_discovery_file(addr, &auth_token);
+            }
             BackendInjection { port, auth_token }
         };
         // Client-only build: no embedded server, so nothing is injected. The
@@ -217,9 +226,19 @@ pub fn run() {
         Ok(())
     });
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running Posthaste");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building Posthaste");
+    // Remove the embedded server's discovery file on clean exit (RFC-L2-scripting
+    // §7.7b) so a closed app leaves no stale port/credential behind.
+    app.run(move |_app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            #[cfg(feature = "embedded-server")]
+            posthaste_http_api_adapter::remove_discovery_file(
+                &posthaste_http_api_adapter::discovery_file_path(),
+            );
+        }
+    });
 }
 
 #[cfg(test)]

@@ -187,6 +187,42 @@ describe("watch — cursor (resume)", () => {
   });
 });
 
+describe("watch — gap frame", () => {
+  const GAP_SSE =
+    'event: gap\nid: 9\ndata: {"kind":"reset","highestSeq":9}\n\n';
+
+  test("resets the cursor to highestSeq, warns, and fetches no detail", async () => {
+    const h = harness({ sse: GAP_SSE, cursorContent: "4\n" });
+    await watch(h, { cursorFile: "/tmp/cur" });
+    expect(h.cap.details).toHaveLength(0); // gap never reaches detail fetch
+    expect(h.cap.out).toHaveLength(0);
+    expect(h.cap.cursorWrites).toEqual(["9\n"]); // reset to highestSeq
+    expect(h.cap.err.join("\n")).toContain("resuming from 9");
+  });
+
+  test("a gap without a cursor file only warns (nothing to persist)", async () => {
+    const h = harness({ sse: GAP_SSE });
+    await watch(h, {});
+    expect(h.cap.details).toHaveLength(0);
+    expect(h.cap.cursorWrites).toHaveLength(0);
+    expect(h.cap.err.join("\n")).toContain("resuming from 9");
+  });
+
+  test("live events after a gap still flow and advance the cursor", async () => {
+    const h = harness({
+      sse:
+        GAP_SSE +
+        'id: 10\ndata: {"seq":10,"accountId":"acct","messageId":"m10","topic":"message.updated","payload":{"messageId":"m10","arrivedMailboxIds":["inbox"]}}\n\n',
+      cursorContent: "4\n",
+    });
+    await watch(h, { cursorFile: "/tmp/cur" });
+    expect(h.cap.details).toEqual([
+      "http://daemon/v1/sources/acct/messages/m10",
+    ]);
+    expect(h.cap.cursorWrites).toEqual(["9\n", "10\n"]);
+  });
+});
+
 describe("watch — resilience", () => {
   test("a failed detail fetch is logged and skipped, cursor still advances", async () => {
     const h = harness({

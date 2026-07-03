@@ -39,7 +39,7 @@ use posthaste_domain_model::{
     CacheFetchUnit, CacheLayer, CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate,
     CacheSearchSignals, CacheSignalUpdate, CachedSenderAddress, CommandResult, ConversationCursor,
     ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, FetchedBody, ImapMailboxSyncState, ImapMessageLocation,
+    DomainEvent, EventFilter, EventLogBounds, FetchedBody, ImapMailboxSyncState, ImapMessageLocation,
     ImapMessageLocationKey, ImapModSeq, ImapUid, ImapUidValidity, MailboxId, MailboxRole,
     MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
     MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
@@ -70,8 +70,9 @@ use crate::db::{
 };
 use crate::mutations::{
     apply_message_body_tx, apply_sync_batch_protected_tx, apply_sync_batch_tx, destroy_message_tx,
-    list_events as list_events_for_filter, reconcile_sync_protected_tx, reconcile_sync_tx,
-    replace_mailboxes_tx, set_keywords_tx, stage_sync_bodies,
+    event_log_bounds as event_log_bounds_query, list_events as list_events_for_filter,
+    reconcile_sync_protected_tx, reconcile_sync_tx, replace_mailboxes_tx, set_keywords_tx,
+    stage_sync_bodies,
 };
 use crate::projections::{cleanup_orphan_conversations_tx, insert_event_tx, synthesize_raw_mime};
 use crate::query::{

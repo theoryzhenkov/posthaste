@@ -53,6 +53,17 @@ pub trait EventStore: Send + Sync {
         message_id: Option<&MessageId>,
         payload: serde_json::Value,
     ) -> Result<DomainEvent, StoreError>;
+
+    /// The cheap seq bounds of `event_log` — `(MIN(seq), MAX(seq))` — for the
+    /// fact-carrying tap's head/truncation queries, without scanning the log
+    /// (RFC-L2-scripting D52 / S2). `Ok(None)` when the log is empty. The default
+    /// returns `Ok(None)` so a store that does not implement it degrades to the
+    /// tap's replay-scan fallback rather than failing.
+    ///
+    /// @spec docs/eph/RFC-L2-scripting#4-d52-the-tap
+    fn event_log_bounds(&self) -> Result<Option<EventLogBounds>, StoreError> {
+        Ok(None)
+    }
 }
 
 /// Durable local-first command outbox boundary (Tier 2: runtime <-> provider).

@@ -118,7 +118,7 @@ use account_support::{
 };
 use account_support::{internal_error, validate_logo_image_id};
 use cursor_support::{
-    conversation_limit, conversation_page_response, event_to_sse, message_limit,
+    conversation_limit, conversation_page_response, event_to_sse, gap_to_sse, message_limit,
     message_page_response, parse_conversation_cursor, parse_message_cursor,
 };
 use search_support::{
