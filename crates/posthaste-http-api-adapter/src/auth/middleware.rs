@@ -126,6 +126,55 @@ pub async fn require_auth_layer(
     //    of scope), distinct from the 401 above.
     match authz::evaluate(&caveats, &ctx) {
         Decision::Allow => next.run(req).await,
-        Decision::Deny(_) => forbidden_scope().into_response(),
+        Decision::Deny(reason) => {
+            // D72: the deny reason (non-sensitive: which caveat/axis was out of
+            // scope) is why authz refused — log it instead of discarding it.
+            log_authz_denied(&format!("{method} {matched}"), &reason);
+            forbidden_scope().into_response()
+        }
+    }
+}
+
+/// Log an authz caveat denial at the `/v1` boundary (D72). The reason is a
+/// non-sensitive scope description (e.g. "mailbox out of scope", "token
+/// expired") — operators need it to diagnose an over-attenuated token.
+pub(crate) fn log_authz_denied(route: &str, reason: &str) {
+    posthaste_observability::ph_warn!(
+        posthaste_observability::events::HTTP_AUTHZ_DENIED,
+        route = %route,
+        reason = %reason,
+        "authz denied /v1 request"
+    );
+}
+
+/// The shared token→status + deny→status mapping for handler-side caveat checks.
+///
+/// Routes that authorize *after* the middleware — the runtime-stream SSE and
+/// mutation handlers, which evaluate caveats against a route-specific
+/// [`authz::CaveatContext`] the middleware cannot build — call this instead of
+/// hand-duplicating the mapping. It mirrors [`require_auth_layer`] exactly so the
+/// two never drift: an absent or forged token is 401 ([`unauthorized`]); a
+/// full-scope token (no caveats) passes; an out-of-scope caveat is 403
+/// ([`forbidden_scope`]) with the deny reason logged (D72).
+pub(crate) fn authorize_presented_caveats(
+    presented: Option<&PresentedToken>,
+    macaroon_root_key: &token::RootKey,
+    ctx: &authz::CaveatContext,
+    route: &str,
+) -> Result<(), crate::api::ApiError> {
+    let Some(presented) = presented else {
+        return Err(unauthorized());
+    };
+    let caveats = token::verify_authenticity(&presented.0, macaroon_root_key)
+        .map_err(|_| unauthorized())?;
+    if caveats.is_empty() {
+        return Ok(());
+    }
+    match authz::evaluate(&caveats, ctx) {
+        Decision::Allow => Ok(()),
+        Decision::Deny(reason) => {
+            log_authz_denied(route, &reason);
+            Err(forbidden_scope())
+        }
     }
 }

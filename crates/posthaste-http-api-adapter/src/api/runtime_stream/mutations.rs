@@ -100,24 +100,9 @@ fn require_read_for_link_mutation(
     if !state.require_auth {
         return Ok(());
     }
-    let Some(presented) = presented else {
-        return Err(ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            ApiErrorCode::Unauthorized,
-            "missing or invalid bearer token",
-        ));
-    };
-    let caveats = crate::token::verify_authenticity(&presented.0, &state.macaroon_root_key)
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::UNAUTHORIZED,
-                ApiErrorCode::Unauthorized,
-                "missing or invalid bearer token",
-            )
-        })?;
-    if caveats.is_empty() {
-        return Ok(());
-    }
+    // Delegate the token→status + deny→status mapping to the one shared helper
+    // the middleware also owns, so a handler-side check can never drift from the
+    // perimeter's (D72). The deny reason is logged inside the helper.
     let ctx = crate::authz::CaveatContext {
         action: Action::Read,
         account: source_id.map(str::to_owned),
@@ -125,12 +110,10 @@ fn require_read_for_link_mutation(
         message: None,
         now: time::OffsetDateTime::now_utc(),
     };
-    match crate::authz::evaluate(&caveats, &ctx) {
-        crate::authz::Decision::Allow => Ok(()),
-        crate::authz::Decision::Deny(_) => Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            ApiErrorCode::Forbidden,
-            "token is not authorized for this request",
-        )),
-    }
+    crate::auth::authorize_presented_caveats(
+        presented,
+        &state.macaroon_root_key,
+        &ctx,
+        "runtime link mutation",
+    )
 }

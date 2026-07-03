@@ -57,6 +57,18 @@ pub const DESKTOP_BACKEND_STARTED: LogEvent = LogEvent::new("desktop.backend.sta
 pub const DESKTOP_RELEASE_CHANNEL: LogEvent = LogEvent::new("desktop.release_channel");
 pub const DESKTOP_FACTORY_RESET: LogEvent = LogEvent::new("desktop.factory_reset");
 pub const HTTP_REQUEST_COMPLETED: LogEvent = LogEvent::new("http.request.completed");
+/// A 5xx left the `/v1` boundary. Carries the correlation id echoed to the
+/// client and the server-internal cause (io/sql/runtime detail) that is kept
+/// off the wire (RFC-L2-lifecycle D72 / M30). The correlation id joins this log
+/// line to the sanitized response body.
+pub const HTTP_INTERNAL_ERROR: LogEvent = LogEvent::new("http.internal_error");
+/// An authz caveat check denied a request at the `/v1` boundary. Carries the
+/// (non-sensitive) deny reason operators need — previously discarded (D72 / M30).
+pub const HTTP_AUTHZ_DENIED: LogEvent = LogEvent::new("http.authz.denied");
+/// A deliberate fail-closed abort fired via [`fail_closed!`]. The reason is
+/// logged here before the process panics so the abort is diagnosable in the
+/// operator log (RFC-L2-lifecycle D73 / M30).
+pub const FAIL_CLOSED: LogEvent = LogEvent::new("fail_closed");
 pub const LOGGING_INITIALIZED: LogEvent = LogEvent::new("logging.initialized");
 pub const SERVER_LISTENING: LogEvent = LogEvent::new("server.listening");
 pub const LINK_SURFACE_SERVED: LogEvent = LogEvent::new("link.surface_served");
