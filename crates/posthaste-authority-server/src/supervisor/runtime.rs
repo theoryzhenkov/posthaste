@@ -573,12 +573,33 @@ pub(crate) async fn handle_oauth_refresh_tick(
     let current_secret = match resolver.resolve_secret().await {
         Ok(secret) => secret,
         Err(error) => {
-            ph_warn!(
-                events::SUPERVISOR_OAUTH_REFRESH_FAILED,
-                account_id = %account_id,
-                error = %error,
-                "OAuth token refresh check failed"
-            );
+            // A2 / D102: classify the refresh failure (reusing the M29
+            // Terminality taxonomy). A Permanent verdict is the
+            // `invalid_grant` / `unauthorized_client` class — a revoked or
+            // consumed grant that `oauth_request_error` types as
+            // `GatewayError::Auth`. Propagate it *from the tick* by flipping the
+            // account to `AuthError` immediately, so the user sees "needs
+            // re-auth" now instead of only when a later connection rebuild
+            // happens to observe the failing resolve. A Transient failure (a
+            // network blip) is still just logged and retried next tick.
+            if oauth_refresh_terminality(&error).is_permanent() {
+                ph_warn!(
+                    events::SUPERVISOR_OAUTH_REFRESH_FAILED,
+                    account_id = %account_id,
+                    error = %error,
+                    "OAuth token refresh rejected (invalid_grant/unauthorized_client); marking account AuthError"
+                );
+                shared
+                    .mark_account_auth_error(account_id, generation, &error.to_string())
+                    .await;
+            } else {
+                ph_warn!(
+                    events::SUPERVISOR_OAUTH_REFRESH_FAILED,
+                    account_id = %account_id,
+                    error = %error,
+                    "OAuth token refresh check failed"
+                );
+            }
             return;
         }
     };
