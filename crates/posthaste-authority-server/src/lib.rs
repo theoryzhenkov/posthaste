@@ -36,6 +36,7 @@ pub use link_wire::{link_router, LinkAuth};
 pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
 pub use mutations::AccountMutationService;
 pub use rules::{
-    load_rules, CapabilityMinter, RuleConfigError, RuleEngineHandle, RuleTokenGrant, SharedMinter,
+    load_rules, CapabilityMinter, ManagedRulesHandle, RuleConfigError, RuleEngineHandle,
+    RuleTokenGrant, RuleWriteError, SharedMinter,
 };
 pub use supervisor::AccountSupervisor;

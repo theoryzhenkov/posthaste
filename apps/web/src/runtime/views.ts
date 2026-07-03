@@ -12,6 +12,7 @@ import type {
   ReadRequest,
   ReadResponse,
   ReplyContext,
+  Rule,
   SmartMailbox,
   SmartMailboxSummary,
 } from '../api/types'
@@ -70,6 +71,11 @@ export const runtimeViews = {
   oauth: {
     redirectUri(): string {
       return getRuntimeAdapter().fetchOAuthRedirectUri()
+    },
+  },
+  rules: {
+    list(): Promise<Rule[]> {
+      return getRuntimeAdapter().fetchRules()
     },
   },
   settings: {

@@ -11,6 +11,7 @@ import type {
 import type { SettingsSurfaceDescriptor } from '../../surfaces'
 import { AccountsPane } from './AccountsPane'
 import { AppearancePane } from './AppearancePane'
+import { AutomationsPane } from './AutomationsPane'
 import { GeneralPane } from './GeneralPane'
 import { NotificationsPane } from './NotificationsPane'
 import { OutboxPane } from './OutboxPane'
@@ -193,6 +194,12 @@ export function SettingsPanelContent({
             onAutomationSettingsSaved={onAutomationSettingsSaved}
             onDeleted={onDeletedSmartMailbox}
           />
+        )}
+
+        {activeCategory === 'automations' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <AutomationsPane />
+          </div>
         )}
 
         {activeCategory === 'tags' && (

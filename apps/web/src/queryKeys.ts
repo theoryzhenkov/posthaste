@@ -41,6 +41,7 @@ export const queryKeys = {
       query?.trim() || null,
       sort ? { columnId: sort.columnId, direction: sort.direction } : null,
     ] as const,
+  rules: ['rules'] as const,
   smartMailboxes: ['smart-mailboxes'] as const,
   smartMailboxRoot: ['smart-mailbox'] as const,
   smartMailbox: (smartMailboxId: string | null) =>

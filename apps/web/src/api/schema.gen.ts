@@ -365,12 +365,40 @@ export interface paths {
         };
         /**
          * List automation rules
-         * @description Lists the automation rules loaded from the host's rules.toml. Read-only: rules are config-file-only (there is no REST write path — a REST-settable exec action would be remote code execution). Draft WHEN-clauses are previewed via POST /v1/automation-rules:preview.
+         * @description Lists the merged automation ruleset: the hand-authored rules.toml plus the GUI-managed rules.d/*.toml. Read-only.
          */
         get: operations["list_rules"];
         put?: never;
-        post?: never;
+        /**
+         * Create an automation rule
+         * @description Creates a GUI-managed automation rule in rules.d/. The body's action cannot be exec — that variant is not representable in WritableRuleAction (a REST-settable exec would be remote code execution). The new rule hot-reloads into the live engine. Manage-scoped.
+         */
+        post: operations["create_rule"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace an automation rule
+         * @description Replaces a GUI-managed rule (matched by the path id). Only rules.d rules are editable — a hand-authored rules.toml rule is not. exec is unrepresentable in the body. Manage-scoped.
+         */
+        put: operations["update_rule"];
+        post?: never;
+        /**
+         * Delete an automation rule
+         * @description Deletes a GUI-managed rule (rules.d only). Manage-scoped.
+         */
+        delete: operations["delete_rule"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2371,7 +2399,7 @@ export interface components {
         RuleGrant: "read" | "send" | "tag" | "move" | "delete";
         /** @description The read-only automation-rules listing. */
         RulesListResponse: {
-            /** @description The rules loaded from `rules.toml`, in file order. */
+            /** @description The merged ruleset (`rules.toml` + `rules.d/*.toml`). */
             rules: components["schemas"]["Rule"][];
         };
         RuntimeAdapterError: {
@@ -2958,6 +2986,68 @@ export interface components {
             readWatermark?: null | components["schemas"]["ReadWatermark"];
             revision: components["schemas"]["ViewRevision"];
             viewId: components["schemas"]["ViewId"];
+        };
+        /**
+         * @description The **write-surface** projection of [`RuleAction`]: every variant EXCEPT
+         *     [`RuleAction::Exec`] (RFC-L2-scripting ruling 23).
+         *
+         *     This is the body type the REST rule-write routes (`POST`/`PUT` `/v1/rules`)
+         *     deserialize into. Because `Exec` is *not a variant here*, a request body of
+         *     `{"kind":"exec", …}` is **unrepresentable**: it fails at the serde boundary
+         *     (a 422 deserialize error), never reaching a handler. The
+         *     exec-is-config-file-only invariant (a REST-settable exec = RCE, threat 3) is
+         *     therefore **structural** — the GUI/REST path cannot create an exec rule
+         *     because the type it parses into has no exec case. This replaces a fragile
+         *     runtime `if kind == "exec" { reject }` guard with a type the compiler and
+         *     serde enforce for us.
+         *
+         *     A [`From<WritableRuleAction>`] lifts a validated write action back into the
+         *     full [`RuleAction`] the engine and persistence layer speak.
+         */
+        WritableRuleAction: {
+            /** @enum {string} */
+            kind: "tag";
+            tag: string;
+        } | {
+            /** @enum {string} */
+            kind: "move";
+            mailboxId: components["schemas"]["MailboxId"];
+        } | {
+            body?: string | null;
+            /** @enum {string} */
+            kind: "notify";
+            title: string;
+        } | {
+            /** @enum {string} */
+            kind: "emit";
+        } | {
+            /** Format: int64 */
+            expiry_seconds?: number;
+            grants?: components["schemas"]["RuleGrant"][];
+            /** @enum {string} */
+            kind: "webhook";
+            url: string;
+        };
+        /**
+         * @description The write body for create/replace. Its `action` is a
+         *     [`WritableRuleAction`], which has NO exec variant — that is the structural
+         *     exec-exclusion gate (ruling 23). `when` is the shared query grammar's
+         *     [`SmartMailboxRule`] tree (the same the WHEN-clause builder emits).
+         */
+        WritableRuleInput: {
+            /** @description The action — exec is unrepresentable here (structural gate). */
+            action: components["schemas"]["WritableRuleAction"];
+            enabled?: boolean;
+            /**
+             * @description Optional id on create (a UUID is minted when absent). Ignored on
+             *     `PUT` — the path `{rule_id}` is authoritative there.
+             */
+            id?: string | null;
+            name: string;
+            /** @description Trigger topics; empty ⇒ the message-update default family. */
+            on?: string[];
+            /** @description The WHEN-clause tree. */
+            when: components["schemas"]["SmartMailboxRule"];
         };
     };
     responses: never;
@@ -3705,8 +3795,154 @@ export interface operations {
                     "application/json": components["schemas"]["RulesListResponse"];
                 };
             };
-            /** @description rules.toml could not be read */
+            /** @description rules could not be read */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    create_rule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WritableRuleInput"];
+            };
+        };
+        responses: {
+            /** @description The created rule */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Rule"];
+                };
+            };
+            /** @description Invalid rule */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description A rule with that id already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description No local rule engine (remote near node) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    update_rule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The managed rule id */
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WritableRuleInput"];
+            };
+        };
+        responses: {
+            /** @description The updated rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Rule"];
+                };
+            };
+            /** @description Invalid rule */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description No managed rule with that id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description No local rule engine (remote near node) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    delete_rule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The managed rule id */
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description No managed rule with that id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description No local rule engine (remote near node) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -53,14 +53,17 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         oauth_mutations,
         supervisor_stop,
         store_close,
+        rules_managed,
     ) = if matches!(authority_server_transport, AuthorityServerTransportConfig::Remote { .. }) {
         // A lean near node: no in-process supervisor or store to tear down (they
         // live in the remote authority server), so those teardown seams are absent.
+        // No local authority server ⇒ no rule engine and no rule write surface.
         let build = build_remote_runtime(build_config).expect("failed to build remote runtime");
         (
             build.handle,
             build.shutdown,
             build.secret_store,
+            None,
             None,
             None,
             None,
@@ -89,13 +92,16 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         // `rules.toml` has enabled rules; the handle is dropped at shutdown.
         let macaroon_root_key = token::resolve_root_key(build.secret_store.as_ref(), &roots.state_root);
         let minter = Arc::new(MacaroonMinter::new(macaroon_root_key));
-        if let Some(engine) = build.spawn_rule_engine(Some(minter)) {
-            let engine_stop = shutdown_token.clone();
-            tokio::spawn(async move {
-                engine_stop.cancelled().await;
-                drop(engine);
-            });
-        }
+        // Always spawns (even with zero rules) so the REST write surface's
+        // ManagedRulesHandle can hot-reload a GUI-created rule into the live
+        // evaluator without a restart (RFC-L2-scripting ruling 23).
+        let engine = build.spawn_rule_engine(Some(minter));
+        let rules_managed = Some(engine.managed_rules());
+        let engine_stop = shutdown_token.clone();
+        tokio::spawn(async move {
+            engine_stop.cancelled().await;
+            drop(engine);
+        });
 
         (
             build.handle,
@@ -105,6 +111,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             Some(build.account_mutations),
             supervisor_stop,
             store_close,
+            rules_managed,
         )
     };
 
@@ -147,8 +154,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // far OpenAPI document (the lean near node serves the OAuth-free near doc).
     let v1_router = build_api_router(state.clone())
         .merge(build_oauth_router(oauth_state))
-        // The read-only automation-rules list (bundled-only; RFC-L2-scripting §7.18).
-        .merge(crate::rules_api::build_rules_router(state.clone()))
+        // The automation-rules surface (bundled-only): read-only list of the
+        // merged ruleset, plus the safe write routes (create/update/delete) when
+        // a local rule engine exists (RFC-L2-scripting ruling 23).
+        .merge(crate::rules_api::build_rules_router(state.clone(), rules_managed))
         .merge(crate::openapi::openapi_router(crate::openapi::document()));
 
     // Authority server role: serve the runtime↔authority-server link for a remote runtime, with

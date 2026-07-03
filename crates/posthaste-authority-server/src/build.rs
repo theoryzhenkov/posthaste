@@ -79,32 +79,36 @@ impl AuthorityServerBuild {
     /// actions (webhook/exec). Pass `None` for a deployment without the macaroon
     /// root key (Level-0 tag/move/notify still run; hook actions dead-letter).
     /// The returned handle keeps the engine alive; drop it to stop.
+    ///
+    /// ALWAYS spawns, even with zero enabled rules: the engine's bus subscription
+    /// must be live from the start so a GUI-created rule (via the returned
+    /// handle's [`ManagedRulesHandle`](crate::rules::ManagedRulesHandle)) hot-swaps
+    /// into a running evaluator and fires without a restart (reload path,
+    /// prerequisite 2). A `rules.toml`/`rules.d` load failure logs and starts
+    /// empty rather than skipping the engine, so a later write still reloads.
     pub fn spawn_rule_engine(
         &self,
         minter: Option<crate::rules::SharedMinter>,
-    ) -> Option<crate::rules::RuleEngineHandle> {
-        let rules = match crate::rules::load_rules(&self.config_root) {
-            Ok(rules) => rules,
+    ) -> crate::rules::RuleEngineHandle {
+        let enabled = match crate::rules::load_rules(&self.config_root) {
+            Ok(rules) => rules.into_iter().filter(|rule| rule.enabled).collect(),
             Err(error) => {
                 ph_warn!(
                     events::RULE_ENGINE_STARTED,
                     error = %error,
-                    "failed to load rules.toml; rule engine not started"
+                    "failed to load rules; rule engine starting empty (writes will reload)"
                 );
-                return None;
+                Vec::new()
             }
         };
-        let enabled: Vec<_> = rules.into_iter().filter(|rule| rule.enabled).collect();
-        if enabled.is_empty() {
-            return None;
-        }
-        Some(crate::rules::spawn_engine(
+        crate::rules::spawn_engine(
             self.authority_server.clone(),
             self.api_bridge.service.clone(),
             self.api_bridge.event_sender.clone(),
+            self.config_root.clone(),
             enabled,
             minter,
-        ))
+        )
     }
 }
 
