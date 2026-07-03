@@ -7,7 +7,10 @@ import { QueryClient } from '@tanstack/react-query'
 import type { OkResponse } from '../src/api/types'
 import type { Mailbox } from '../src/api/types'
 import { queryKeys } from '../src/queryKeys'
-import { createEntityStoreAdapter } from '../src/runtime/replica/entityStoreAdapter'
+import {
+  createEntityStoreAdapter,
+  flushActiveEntityStore,
+} from '../src/runtime/replica/entityStoreAdapter'
 import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 import { MemoryPendingSetStore } from '../src/runtime/replica/pendingSetStore'
 import {
@@ -322,6 +325,41 @@ describe('entityStoreAdapter', () => {
     expect(keywordsOf(frames, 'm1')).not.toContain('$flagged')
   })
 
+  it('surfaces a clear error + reverts the optimistic fold when the durable write fails (W4 quota)', async () => {
+    const built = build()
+    const { adapter, pendingSet, frames } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+
+    const originalPut = pendingSet.put.bind(pendingSet)
+    // Simulate IndexedDB's QuotaExceededError: the browser's storage quota is
+    // exhausted, so the durable pending-set write rejects.
+    pendingSet.put = () => {
+      throw new DOMException(
+        'The quota has been exceeded.',
+        'QuotaExceededError',
+      )
+    }
+
+    await expect(
+      adapter.runRuntimeMutation(setFlagged('m1', 'c1')),
+    ).rejects.toThrow(/storage is full/i)
+
+    // Nothing durable was left stranded: the fold was reverted before it was
+    // ever persisted, so there's no orphaned pending-set record.
+    expect(await pendingSet.all()).toHaveLength(0)
+
+    // The store must not be left corrupted with an un-settleable optimistic
+    // fold, either: it accepts + folds + persists a normal follow-up mutation
+    // on the SAME message cleanly.
+    pendingSet.put = originalPut
+    const receipt = await adapter.runRuntimeMutation(setFlagged('m1', 'c2'))
+    expect(receipt.clientMutationId).toBe('c2')
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+    expect((await pendingSet.all()).map((r) => r.clientMutationId)).toEqual([
+      'c2',
+    ])
+  })
+
   it('confirmed before the base update does not revert (flicker fix)', async () => {
     const built = build()
     const { adapter, pendingSet, frames } = built
@@ -438,6 +476,42 @@ describe('entityStoreAdapter', () => {
     )
     await tick()
 
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+  })
+
+  it('flush() awaits a fire-and-forget queued store op (W3 unload durability)', async () => {
+    const built = build()
+    const { adapter, frames } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+
+    // A notification frame enqueues its store op fire-and-forget (`void
+    // this.enqueue(...)`) — nothing in the caller awaits it.
+    built.harness.push(
+      messageUpdated(
+        'm1',
+        {
+          id: 'm1',
+          sourceId: 's',
+          receivedAt: '2026-04-29T10:00:00Z',
+          keywords: ['$flagged'],
+          mailboxIds: ['inbox'],
+          isRead: false,
+          isFlagged: true,
+          subject: 'm1',
+        },
+        [{ mailboxId: 'inbox', unreadCount: 2, totalCount: 2 }],
+      ),
+    )
+    // Immediately after the push, the queued re-projection hasn't run yet
+    // (nothing emitted to the frame sink) — this is the race a bare
+    // page-close could land in without a flush.
+    expect(frames).toHaveLength(0)
+
+    await flushActiveEntityStore()
+
+    // flush() guarantees the queued op (and any durable write inside it) has
+    // completed before it returns.
+    expect(frames.length).toBeGreaterThan(0)
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
   })
 

@@ -14,6 +14,8 @@
  *
  * @spec docs/eph/DESIGN-L2-replica-worker-isolation
  */
+import { LOG_EVENTS, syncLogger } from '../../logger'
+
 import type { SettlementVerdict } from './handle'
 import type { StorePort } from './storePort'
 
@@ -55,25 +57,65 @@ export interface ReplicaWorkerLike {
   terminate?(): void
 }
 
+/**
+ * How long a single `call()` round trip may take before the worker is
+ * considered wedged (W2 / N20). The store's ops are CPU-bound JSON-in/JSON-out
+ * (see the module doc) — no network/IO waits inside them — so a real reply
+ * arrives in low milliseconds; this is a liveness deadline, not a perf budget.
+ */
+export const WORKER_CALL_TIMEOUT_MS = 10_000
+
+/**
+ * How many times a wedged worker is terminated + respawned + the timed-out
+ * call replayed before giving up and failing the port outright (bounded, so a
+ * worker that is wedged for a structural reason — e.g. its module asset can't
+ * load — doesn't respawn forever).
+ */
+export const WORKER_CALL_MAX_RESTARTS = 2
+
+interface PendingCall {
+  method: StoreMethod
+  args: unknown[]
+  resolve: (value: unknown) => void
+  reject: (error: unknown) => void
+  timer: ReturnType<typeof setTimeout>
+  attempt: number
+}
+
+export interface WorkerStorePortOptions {
+  /** Spawn a fresh worker to replace one that timed out. Omitted (e.g. the
+   *  unit tests that don't exercise the watchdog) disables restart-on-timeout:
+   *  a timeout then just fails the port, same as a reported `error` event. */
+  spawnWorker?: () => ReplicaWorkerLike
+  /** Override the per-call round-trip deadline (tests). */
+  callTimeoutMs?: number
+  /** Override the bounded restart-attempt budget (tests). */
+  maxRestarts?: number
+}
+
 export class WorkerStorePort implements StorePort {
-  private readonly worker: ReplicaWorkerLike
+  private worker: ReplicaWorkerLike
+  private readonly spawnWorker: (() => ReplicaWorkerLike) | undefined
+  private readonly callTimeoutMs: number
+  private readonly maxRestarts: number
   private nextId = 1
-  private readonly pending = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (error: unknown) => void }
-  >()
+  private readonly pending = new Map<number, PendingCall>()
 
   /** Resolves when the worker has loaded its WASM store; rejects if init fails.
    *  The host awaits this (with a timeout) to decide worker-vs-in-process. */
   readonly ready: Promise<void>
   private resolveReady!: () => void
   private rejectReady!: (error: unknown) => void
-  /** Set once the worker is unusable (crashed or terminated). Further calls
-   *  reject immediately instead of hanging the controller's store queue. */
+  /** Set once the worker is unusable (crashed, terminated, or exhausted its
+   *  restart budget). Further calls reject immediately instead of hanging the
+   *  controller's store queue. */
   private dead = false
 
-  constructor(worker: ReplicaWorkerLike) {
+  constructor(worker: ReplicaWorkerLike, options: WorkerStorePortOptions = {}) {
     this.worker = worker
+    this.spawnWorker = options.spawnWorker
+    this.callTimeoutMs = options.callTimeoutMs ?? WORKER_CALL_TIMEOUT_MS
+    this.maxRestarts = options.maxRestarts ?? WORKER_CALL_MAX_RESTARTS
     this.ready = new Promise<void>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
@@ -81,14 +123,17 @@ export class WorkerStorePort implements StorePort {
     // A rejected `ready` that nobody is awaiting yet must not crash as an
     // unhandled rejection; the host attaches its own handler.
     this.ready.catch(() => {})
-    this.worker.addEventListener('message', (event) =>
-      this.onMessage(event.data),
-    )
+    this.attach(this.worker)
+  }
+
+  /** Wire message/error listeners onto (a possibly just-respawned) worker. */
+  private attach(worker: ReplicaWorkerLike): void {
+    worker.addEventListener('message', (event) => this.onMessage(event.data))
     // A worker that dies AFTER init would otherwise leave every in-flight call
     // unsettled — and since the controller chains store ops, that hangs the
     // whole store. Fail fast instead: reject pending + future calls so the
     // failure surfaces as an error rather than a silent freeze.
-    this.worker.addEventListener('error', (event) =>
+    worker.addEventListener('error', (event) =>
       this.fail(
         new Error(`replica worker error: ${event.message ?? 'unknown'}`),
       ),
@@ -103,6 +148,7 @@ export class WorkerStorePort implements StorePort {
     this.dead = true
     this.rejectReady(error)
     for (const entry of this.pending.values()) {
+      clearTimeout(entry.timer)
       entry.reject(error)
     }
     this.pending.clear()
@@ -132,6 +178,7 @@ export class WorkerStorePort implements StorePort {
     if (!entry) {
       return
     }
+    clearTimeout(entry.timer)
     this.pending.delete(response.id)
     if (response.ok) {
       entry.resolve(response.result)
@@ -140,17 +187,83 @@ export class WorkerStorePort implements StorePort {
     }
   }
 
+  /**
+   * A `call()`'s round trip missed {@link WorkerStorePort.callTimeoutMs}: the
+   * worker is presumed wedged (panicked into an unresponsive state without
+   * firing the `error` event — e.g. an infinite loop in the WASM store).
+   * Terminate it, spawn a replacement, and replay the SAME request on the
+   * fresh worker (bounded by `maxRestarts`) so the caller sees a slow-but-
+   * eventually-answered call instead of an unhandled hang or a spurious
+   * failure. Exhausting the budget fails the port outright — a worker wedged
+   * this persistently is not going to recover.
+   */
+  private onTimeout(id: number): void {
+    const entry = this.pending.get(id)
+    if (!entry) {
+      return
+    }
+    this.pending.delete(id)
+    if (!this.spawnWorker || entry.attempt >= this.maxRestarts) {
+      const error = new Error(
+        `replica worker call timed out (method=${entry.method}, attempt=${entry.attempt + 1})`,
+      )
+      entry.reject(error)
+      // The rest of the pending queue (in practice at most this one call —
+      // the controller serializes store ops) can't be trusted behind a worker
+      // this unresponsive either.
+      this.fail(error)
+      return
+    }
+    this.worker.terminate?.()
+    const fresh = this.spawnWorker()
+    this.worker = fresh
+    this.attach(fresh)
+    syncLogger.warn(
+      {
+        event: LOG_EVENTS.replicaWorkerRestarted,
+        method: entry.method,
+        attempt: entry.attempt + 1,
+        maxRestarts: this.maxRestarts,
+      },
+      'replica worker call timed out; terminated + respawned the worker and replayed the request',
+    )
+    this.send(
+      id,
+      entry.method,
+      entry.args,
+      entry.resolve,
+      entry.reject,
+      entry.attempt + 1,
+    )
+  }
+
+  private send(
+    id: number,
+    method: StoreMethod,
+    args: unknown[],
+    resolve: (value: unknown) => void,
+    reject: (error: unknown) => void,
+    attempt: number,
+  ): void {
+    const timer = setTimeout(() => this.onTimeout(id), this.callTimeoutMs)
+    this.pending.set(id, { method, args, resolve, reject, timer, attempt })
+    this.worker.postMessage({ id, method, args })
+  }
+
   private call<T>(method: StoreMethod, args: unknown[]): Promise<T> {
     if (this.dead) {
       return Promise.reject(new Error('replica worker is no longer available'))
     }
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, {
-        resolve: resolve as (value: unknown) => void,
+      this.send(
+        id,
+        method,
+        args,
+        resolve as (value: unknown) => void,
         reject,
-      })
-      this.worker.postMessage({ id, method, args })
+        0,
+      )
     })
   }
 
@@ -202,10 +315,18 @@ export class WorkerStorePort implements StorePort {
  * WASM) are emitted as a separate chunk. Only called behind the worker flag;
  * never imported by the unit tests (which drive {@link WorkerStorePort} with a
  * loopback fake).
+ *
+ * Passes itself as `spawnWorker` so the port's timeout watchdog (W2) can
+ * terminate + respawn a wedged worker instead of just failing outright.
  */
-export function createWorkerStorePort(): WorkerStorePort {
-  const worker = new Worker(new URL('./storeWorker.ts', import.meta.url), {
+function spawnReplicaWorker(): Worker {
+  return new Worker(new URL('./storeWorker.ts', import.meta.url), {
     type: 'module',
   })
-  return new WorkerStorePort(worker)
+}
+
+export function createWorkerStorePort(): WorkerStorePort {
+  return new WorkerStorePort(spawnReplicaWorker(), {
+    spawnWorker: spawnReplicaWorker,
+  })
 }

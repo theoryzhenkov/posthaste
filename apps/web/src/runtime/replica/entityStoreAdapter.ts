@@ -60,6 +60,7 @@ import {
   resolveMailListPredicate,
   type MailListPredicate,
 } from '../mailListSelfMaintained'
+import { toPendingSetWriteError } from './pendingSetStore'
 import type { PendingSetStore } from './pendingSetStore'
 import { getUndoHistoryStore, makeRevStep } from './undoHistoryStore'
 import { parseMailOperation } from './wasmUtil'
@@ -343,6 +344,20 @@ class EntityStoreController {
       () => undefined,
     )
     return result
+  }
+
+  /**
+   * Await everything currently queued/running on the store — including the
+   * fire-and-forget `void this.enqueue(...)` ops kicked off by incoming base
+   * frames (settle, re-projection) — so a caller can be sure any durable
+   * IndexedDB write already issued (the pending-set `put` inside
+   * `runMutation`, a `settle`'s pending-set `remove`, ...) has actually
+   * completed. Used on `visibilitychange`/`pagehide` so a tab close can't
+   * strand an in-flight write mid-flight (W3 / N18). Never rejects —
+   * `storeQueue`'s tail already swallows failures (see `enqueue`).
+   */
+  async flush(): Promise<void> {
+    await this.storeQueue
   }
 
   async openMailListView(
@@ -646,16 +661,45 @@ class EntityStoreController {
           assertion: translated.assertion,
         }),
       )
-      await this.deps.pendingSet.put({
-        clientMutationId,
-        messageId: translated.messageId,
-        assertion: translated.assertion as ReplicaAssertion,
-        runtimeMutationId: null,
-        acceptedAt: this.now(),
-        // Store the original send so a never-dispatched record can be replayed
-        // verbatim on rehydration (pending-set-rehydrate-resend).
-        request,
-      })
+      try {
+        await this.deps.pendingSet.put({
+          clientMutationId,
+          messageId: translated.messageId,
+          assertion: translated.assertion as ReplicaAssertion,
+          runtimeMutationId: null,
+          acceptedAt: this.now(),
+          // Store the original send so a never-dispatched record can be
+          // replayed verbatim on rehydration (pending-set-rehydrate-resend).
+          request,
+        })
+      } catch (error) {
+        // W4 / N21: the optimistic fold above already changed store state,
+        // but the durable write (e.g. a QuotaExceededError) failed — that
+        // combination is the "opaque error, silent loss" failure mode: the
+        // UI would show an optimistic change with no durable record to
+        // survive a reload or to ever dispatch to the runtime. Revert the
+        // fold inline (we're already inside the serialized store queue;
+        // `settleAll` would re-enter `enqueue` and deadlock) so the store
+        // never carries an un-settleable mutation, then surface a clear
+        // error instead of letting the DOMException propagate opaquely.
+        await this.store.settle(clientMutationId, 'failed')
+        await this.clearRetired()
+        await this.drainAndEmit()
+        // Normalize to a clear, uniform message ("storage full" vs an opaque
+        // DOMException) regardless of which `PendingSetStore` impl raised it.
+        const writeError = toPendingSetWriteError(error)
+        syncLogger.error(
+          {
+            event: LOG_EVENTS.outboxWriteFailed,
+            clientMutationId,
+            messageId: translated.messageId,
+            quotaExceeded: writeError.quotaExceeded,
+            error: writeError.message,
+          },
+          'durable pending-set write failed; reverted the optimistic fold',
+        )
+        throw writeError
+      }
       await this.drainAndEmit()
       return diff
     })
@@ -972,6 +1016,28 @@ class EntityStoreController {
   }
 }
 
+// The active controller's flush, for the unload-durability hook (W3). Module-
+// level rather than returned on the `RuntimeAdapter` object because the
+// adapter's return type is exact (`RuntimeAdapter`) — an extra property there
+// would be an excess-property error at the call site, and callers of
+// `getRuntimeAdapter()` shouldn't need to know this method exists at all.
+let activeFlush: (() => Promise<void>) | undefined
+
+/** Await any store op the active entity-store adapter has queued/running.
+ *  A no-op before the adapter installs (nothing durable is in flight yet). */
+export function flushActiveEntityStore(): Promise<void> {
+  return activeFlush ? activeFlush() : Promise.resolve()
+}
+
+/** Test-only: override/clear the active flush without constructing a full
+ *  adapter (used to unit-test `unloadDurability.ts`'s DOM wiring in
+ *  isolation from the real controller). */
+export function __setActiveFlushForTesting(
+  flush: (() => Promise<void>) | undefined,
+): void {
+  activeFlush = flush
+}
+
 /**
  * Build an entity-store adapter over a base adapter. Every method not concerned
  * with the mail-list store delegates to the base unchanged.
@@ -980,6 +1046,7 @@ export function createEntityStoreAdapter(
   deps: EntityStoreAdapterDeps,
 ): RuntimeAdapter {
   const controller = new EntityStoreController(deps)
+  activeFlush = () => controller.flush()
   return {
     ...deps.base,
     openRuntimeLinkMessageListView: (request) =>
