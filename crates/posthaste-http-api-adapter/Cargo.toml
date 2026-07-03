@@ -53,6 +53,9 @@ uuid = { workspace = true }
 # Test-only: `account_support` unit tests drive their logic against a real store
 # fixture. Dev-deps don't affect the lean binary (it links only `[dependencies]`).
 posthaste-store = { path = "../posthaste-store" }
+# Test-only: `parse_optional_search_rule` (search_support.rs) is `#[cfg(test)]`
+# — the production request path never parses a raw query string itself.
+posthaste-query-grammar = { path = "../posthaste-query-grammar" }
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 reqwest = { workspace = true }

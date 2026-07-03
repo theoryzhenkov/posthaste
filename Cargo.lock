@@ -3973,6 +3973,7 @@ dependencies = [
  "posthaste-imap",
  "posthaste-link-far-end",
  "posthaste-observability",
+ "posthaste-query-grammar",
  "posthaste-replica-core",
  "posthaste-runtime",
  "posthaste-runtime-api",
@@ -4021,6 +4022,7 @@ dependencies = [
  "posthaste-contract-core",
  "posthaste-domain-model",
  "posthaste-domain-service",
+ "posthaste-query-grammar",
  "posthaste-runtime",
  "posthaste-runtime-api",
  "posthaste-store",
@@ -4185,6 +4187,7 @@ dependencies = [
  "posthaste-domain-model",
  "posthaste-domain-service",
  "posthaste-observability",
+ "posthaste-query-grammar",
  "posthaste-runtime",
  "posthaste-runtime-api",
  "posthaste-store",
@@ -4287,6 +4290,14 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
+]
+
+[[package]]
+name = "posthaste-query-grammar"
+version = "0.1.0"
+dependencies = [
+ "posthaste-domain-model",
+ "time",
 ]
 
 [[package]]
@@ -4415,6 +4426,7 @@ dependencies = [
  "posthaste-domain-model",
  "posthaste-domain-service",
  "posthaste-observability",
+ "posthaste-query-grammar",
  "rusqlite",
  "serde_json",
  "sha2",

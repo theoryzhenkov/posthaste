@@ -1,11 +1,19 @@
-//! Query text parser that compiles human-readable search strings into
-//! [`SmartMailboxRule`] trees.
+//! The one query grammar: a text parser that compiles human-readable search
+//! strings into [`SmartMailboxRule`] trees.
 //!
 //! Syntax: `prefix:value` tokens separated by whitespace. Quoted values
 //! (`"hello world"`), negation (`-prefix:value`), and aliases such as `f:` for
 //! `from:` are supported. [`parse_query_with_scopes`] peels a caller-chosen
 //! set of prefixes (e.g. `in:`) out of the tree for service-side resolution
-//! using the one tokenizer this module owns — there is no second tokenizer.
+//! using the one tokenizer this crate owns — there is no second tokenizer
+//! (D28).
+//!
+//! Extracted out of `posthaste-domain-service` (RFC-L2-scripting §7 ruling 4)
+//! so both smart mailboxes (domain-service) and the rules engine's WHEN-clause
+//! grammar (a later unit) consume the same parser without the rules engine
+//! dragging in domain-service. Depends on `posthaste-domain-model` only (the
+//! `SmartMailboxRule`/node output types live there) and is wasm-pure: no
+//! tokio, no http, nothing that would break a wasm32 target build.
 
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
