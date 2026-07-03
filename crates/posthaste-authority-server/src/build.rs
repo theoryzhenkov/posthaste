@@ -104,6 +104,7 @@ impl AuthorityServerBuild {
         crate::rules::spawn_engine(
             self.authority_server.clone(),
             self.api_bridge.service.clone(),
+            self.api_bridge.store.clone(),
             self.api_bridge.event_sender.clone(),
             self.config_root.clone(),
             enabled,
