@@ -1,7 +1,5 @@
 use super::*;
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 /// Main event loop for an account: polls on timer, push notifications, and
 /// manual sync commands. Runs until the task is aborted.
 ///
@@ -45,16 +43,33 @@ pub(crate) async fn run_account_runtime(
         )
         .await;
 
-    // Initial sync + gateway setup
-    let _ = process_sync_trigger_with_state(
-        &sync_state,
-        &shared,
-        &account,
-        generation,
-        SyncTriggerRequest::new(SyncTrigger::Startup, SyncMode::Incremental),
-        &mut connection,
+    // Initial sync + gateway setup. Bounded the same as an in-loop sync arm
+    // (D66): a hung provider here would otherwise wedge the task before the
+    // select! loop — and therefore this account's command/push handling —
+    // ever starts.
+    if tokio::time::timeout(
+        ARM_BUDGET_SYNC,
+        process_sync_trigger_with_state(
+            &sync_state,
+            &shared,
+            &account,
+            generation,
+            SyncTriggerRequest::new(SyncTrigger::Startup, SyncMode::Incremental),
+            &mut connection,
+        ),
     )
-    .await;
+    .await
+    .is_err()
+    {
+        record_arm_timeout(
+            &shared,
+            &account_id,
+            generation,
+            "startup_sync",
+            ARM_BUDGET_SYNC,
+        )
+        .await;
+    }
     let mut interval = sync_poll_interval(shared.poll_interval);
 
     loop {
@@ -78,24 +93,50 @@ pub(crate) async fn run_account_runtime(
                 );
                 break;
             }
+            // D66: every inline await below is bounded by `tokio::time::timeout`
+            // (a BACKSTOP over each provider call's own tighter "envelope"
+            // deadline — see the ARM_BUDGET_* doc comments in types.rs). A
+            // timeout logs, degrades the account, and falls through to the next
+            // loop iteration — it never `break`s: the M21 watchdog owns
+            // lifecycle, not this per-arm guard.
             _ = interval.tick() => {
-                handle_poll_tick(&sync_state, &shared, &account, generation, &mut connection).await;
+                if tokio::time::timeout(
+                    ARM_BUDGET_SYNC,
+                    handle_poll_tick(&sync_state, &shared, &account, generation, &mut connection),
+                ).await.is_err() {
+                    record_arm_timeout(&shared, &account_id, generation, "poll_sync", ARM_BUDGET_SYNC).await;
+                }
                 interval = sync_poll_interval(shared.poll_interval);
             }
             _ = backfill_interval.tick() => {
-                handle_backfill_tick(&shared, &account_id, connection.gateway()).await;
+                if tokio::time::timeout(
+                    ARM_BUDGET_BACKFILL,
+                    handle_backfill_tick(&shared, &account_id, connection.gateway()),
+                ).await.is_err() {
+                    record_arm_timeout(&shared, &account_id, generation, "backfill", ARM_BUDGET_BACKFILL).await;
+                }
             }
             _ = cache_interval.tick() => {
-                handle_cache_tick(
-                    &shared,
-                    &account_id,
-                    connection.gateway(),
-                    CACHE_BACKGROUND_PRESSURE,
-                    None,
-                ).await;
+                if tokio::time::timeout(
+                    ARM_BUDGET_CACHE,
+                    handle_cache_tick(
+                        &shared,
+                        &account_id,
+                        connection.gateway(),
+                        CACHE_BACKGROUND_PRESSURE,
+                        None,
+                    ),
+                ).await.is_err() {
+                    record_arm_timeout(&shared, &account_id, generation, "cache_maintenance", ARM_BUDGET_CACHE).await;
+                }
             }
             _ = snooze_interval.tick() => {
-                handle_snooze_tick(&shared, &account_id).await;
+                if tokio::time::timeout(
+                    ARM_BUDGET_SNOOZE,
+                    handle_snooze_tick(&shared, &account_id),
+                ).await.is_err() {
+                    record_arm_timeout(&shared, &account_id, generation, "snooze", ARM_BUDGET_SNOOZE).await;
+                }
             }
             _ = async {
                 match oauth_refresh_interval.as_mut() {
@@ -103,36 +144,72 @@ pub(crate) async fn run_account_runtime(
                     None => std::future::pending().await,
                 }
             } => {
-                handle_oauth_refresh_tick(
-                    &shared,
-                    &account,
-                    generation,
-                    &account_id,
-                    &mut connection,
-                    &mut oauth_refresh_state,
-                )
-                .await;
+                if tokio::time::timeout(
+                    ARM_BUDGET_OAUTH_REFRESH,
+                    handle_oauth_refresh_tick(
+                        &shared,
+                        &account,
+                        generation,
+                        &account_id,
+                        &mut connection,
+                        &mut oauth_refresh_state,
+                    ),
+                ).await.is_err() {
+                    record_arm_timeout(&shared, &account_id, generation, "oauth_refresh", ARM_BUDGET_OAUTH_REFRESH).await;
+                }
             }
             Some(command) = command_rx.recv() => {
-                if handle_runtime_command(
-                    &sync_state,
-                    &shared,
-                    &account,
-                    &account_id,
-                    &mut connection,
-                    generation,
-                    command,
+                match tokio::time::timeout(
+                    ARM_BUDGET_SYNC,
+                    handle_runtime_command(
+                        &sync_state,
+                        &shared,
+                        &account,
+                        &account_id,
+                        &mut connection,
+                        generation,
+                        command,
+                    ),
                 ).await {
-                    interval = sync_poll_interval(shared.poll_interval);
+                    Ok(true) => interval = sync_poll_interval(shared.poll_interval),
+                    Ok(false) => {}
+                    Err(_) => record_arm_timeout(&shared, &account_id, generation, "command", ARM_BUDGET_SYNC).await,
                 }
             }
             Some(event) = next_push => {
-                if handle_push_event(&sync_state, &shared, &account, &account_id, generation, &mut connection, event).await {
-                    interval = sync_poll_interval(shared.poll_interval);
+                match tokio::time::timeout(
+                    ARM_BUDGET_SYNC,
+                    handle_push_event(&sync_state, &shared, &account, &account_id, generation, &mut connection, event),
+                ).await {
+                    Ok(true) => interval = sync_poll_interval(shared.poll_interval),
+                    Ok(false) => {}
+                    Err(_) => record_arm_timeout(&shared, &account_id, generation, "push_event", ARM_BUDGET_SYNC).await,
                 }
             }
         }
     }
+}
+
+/// Logs and marks the account `Degraded` when a select!-loop arm's bounded
+/// call (`tokio::time::timeout`, D66) elapses. Called at every wrapped
+/// call-site above; never breaks the caller's loop.
+async fn record_arm_timeout(
+    shared: &Arc<SupervisorShared>,
+    account_id: &AccountId,
+    generation: RuntimeGeneration,
+    arm: &'static str,
+    budget: Duration,
+) {
+    ph_warn!(
+        events::SUPERVISOR_ARM_TIMEOUT,
+        account_id = %account_id,
+        arm,
+        budget_ms = budget.as_millis() as u64,
+        "supervisor select-loop arm exceeded its bounded budget; account degraded, loop continues"
+    );
+    shared
+        .mark_arm_timeout(account_id, generation, arm, budget)
+        .await;
 }
 
 /// A single sync request bundled to avoid a multi-argument explosion in
@@ -249,12 +326,14 @@ pub(crate) async fn handle_cache_tick(
 /// provider move is enqueued (flushed on the next sync) + the store invariant
 /// clears the snooze row immediately. Not user-initiated → no undo step.
 ///
+/// The due-comparison clock is monotonic-anchored, not a raw
+/// `SystemTime::now()` sample (RFC-L2-lifecycle row 10 rider / D66,
+/// [`SupervisorShared::monotonic_now_secs`]): a backward NTP correction
+/// cannot make an already-due snooze look not-yet-due.
+///
 /// @spec docs/eph/DESIGN-L2-snooze
 pub(crate) async fn handle_snooze_tick(shared: &Arc<SupervisorShared>, account_id: &AccountId) {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now = SupervisorShared::monotonic_now_secs();
     match shared
         .service
         .auto_return_snoozed_messages(account_id, now)

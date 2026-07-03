@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::{
@@ -754,4 +755,195 @@ async fn watchdog_backoff_prevents_restart_storm() {
     assert!(gaps[0] >= backoff.ceiling(0), "attempt 1 waits >= base");
     assert!(gaps[1] >= backoff.ceiling(1), "attempt 2 waits >= 2x base");
     assert!(gaps[2] >= backoff.ceiling(2), "attempt 3 waits >= 4x base");
+}
+
+// ---------------------------------------------------------------------------
+// M26: select-loop arm budgets + monotonic snooze clock (RFC-L2-lifecycle
+// D66, row 5/N17 + row 10 rider).
+// ---------------------------------------------------------------------------
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d66
+#[tokio::test(start_paused = true)]
+async fn hung_provider_sync_degrades_the_account_but_the_loop_stays_responsive() {
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    let (command_tx, command_rx) = mpsc::channel(8);
+    let sync_state = SyncTriggerState::new();
+    let cancel = CancellationToken::new();
+
+    let runtime_handle = tokio::spawn(run_account_runtime(
+        shared.clone(),
+        account.clone(),
+        generation,
+        command_rx,
+        sync_state,
+        cancel.clone(),
+    ));
+
+    // Wait for the (fast, un-delayed) startup sync to settle the account out
+    // of its initial Offline placeholder before hanging the provider.
+    let mut started = false;
+    for _ in 0..200 {
+        if shared.runtime_overview(&account.id).await.status != AccountStatus::Offline {
+            started = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        started,
+        "the startup sync should complete before the hang is introduced"
+    );
+
+    // Hang every subsequent mock sync past the sync arm's budget
+    // (ARM_BUDGET_SYNC = 300s) — a stand-in for a hung provider (mock future
+    // pending in spirit: it never completes inside the test's bound). Kept
+    // finite (not effectively-infinite) because `SYNC_DELAY_MILLIS` is a
+    // process-wide static (`posthaste-engine`'s test hook, not scoped to this
+    // test): with `start_paused` this test's own wall-clock exposure is
+    // sub-second, but a finite cap bounds the worst case for any other test
+    // in this binary that happens to race a real (unpaused) mock sync during
+    // that window.
+    MockJmapGateway::set_sync_delay_for_tests(600_000);
+    command_tx
+        .send(RuntimeCommand::TriggerOnly {
+            trigger: SyncTrigger::Manual,
+        })
+        .await
+        .expect("command channel should accept the hung trigger");
+
+    // The command arm's `tokio::time::timeout` must fire and degrade the
+    // account. Time is paused: the runtime auto-advances the virtual clock to
+    // the next pending timer once every task is stalled, so this resolves
+    // without a real 300s wait. (The account is still hung — the poll tick
+    // keeps retrying and re-hanging every ARM_BUDGET_SYNC, so `status` itself
+    // flaps back to `Syncing` between samples; the error code left behind by
+    // `mark_arm_timeout` is the stable signal that the timeout fired.)
+    let mut degraded = false;
+    for _ in 0..120 {
+        let overview = shared.runtime_overview(&account.id).await;
+        if overview.last_sync_error_code.as_deref() == Some("arm_timeout") {
+            degraded = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+    assert!(
+        degraded,
+        "a hung provider sync must degrade the account once the arm budget elapses, not hang forever"
+    );
+
+    // The loop itself must still be alive and responsive: a follow-up command
+    // on the SAME account, once the provider is no longer hung, is picked up
+    // and completes — proving the timed-out arm did not wedge the select!
+    // loop for later ticks/commands.
+    MockJmapGateway::clear_sync_delay_for_tests();
+    let (reply_tx, reply_rx) = oneshot::channel();
+    command_tx
+        .send(RuntimeCommand::Trigger {
+            trigger: SyncTrigger::Manual,
+            mode: SyncMode::Incremental,
+            reply: reply_tx,
+        })
+        .await
+        .expect("command channel should accept the follow-up trigger");
+    let result = tokio::time::timeout(Duration::from_secs(3600), reply_rx)
+        .await
+        .expect(
+            "a subsequent command on the same account must process, not hang behind the \
+             timed-out one",
+        )
+        .expect("the reply channel must not be dropped");
+    assert!(
+        result.is_ok(),
+        "the follow-up sync must succeed once the provider is responsive again: {result:?}"
+    );
+
+    cancel.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(3600), runtime_handle).await;
+    MockJmapGateway::clear_sync_delay_for_tests();
+}
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d66
+#[test]
+fn anchored_wall_clock_never_regresses_as_the_monotonic_elapsed_grows() {
+    // The anchor's wall-clock sample is taken exactly once; every later call
+    // only adds a monotonic `Instant`-derived elapsed on top. A hypothetical
+    // backward jump in the *real* system clock after the anchor was taken
+    // cannot be observed here — this pure function never re-samples
+    // `SystemTime` — so feeding it a strictly increasing `elapsed` sequence
+    // must produce a strictly increasing result. That is the guarantee row 10
+    // needs: a due snooze cannot become un-due (no starving), and an
+    // already-passed boundary cannot re-open (no double-firing), for as long
+    // as this process runs.
+    let anchor_wall = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let t0 = SupervisorShared::anchored_now_secs(anchor_wall, Duration::from_secs(0));
+    let t1 = SupervisorShared::anchored_now_secs(anchor_wall, Duration::from_secs(30));
+    let t2 = SupervisorShared::anchored_now_secs(anchor_wall, Duration::from_secs(31));
+
+    assert_eq!(t0, 1_700_000_000);
+    assert_eq!(t1, 1_700_000_030);
+    assert_eq!(t2, 1_700_000_031);
+    assert!(
+        t1 > t0 && t2 > t1,
+        "now must strictly advance as elapsed grows, never regress"
+    );
+}
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d66
+#[tokio::test]
+async fn snooze_tick_still_returns_a_due_message_on_the_monotonic_anchored_clock() {
+    // Regression coverage for moving handle_snooze_tick off a raw
+    // SystemTime::now() sample (row 10 rider): the monotonic-anchored clock
+    // must still recognize a genuinely-due snooze as due and return it.
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    let sync_state = SyncTriggerState::new();
+    let mut connection = AccountRuntimeConnectionState::default();
+
+    // Seed the local store from the mock provider's sample mailboxes/messages.
+    process_sync_trigger_with_state(
+        &sync_state,
+        &shared,
+        &account,
+        generation,
+        SyncTriggerRequest::new(SyncTrigger::Startup, SyncMode::Incremental),
+        &mut connection,
+    )
+    .await;
+
+    let messages = shared
+        .service
+        .list_messages(&account.id, None)
+        .expect("messages should list");
+    let message = messages
+        .first()
+        .expect("the mock gateway seeds at least one message");
+
+    // Due five seconds ago on the monotonic-anchored clock.
+    let due_at = SupervisorShared::monotonic_now_secs() - 5;
+    shared
+        .store
+        .insert_snooze(&account.id, &message.id, due_at)
+        .expect("snooze insert should succeed");
+
+    handle_snooze_tick(&shared, &account.id).await;
+
+    let inbox = shared
+        .service
+        .list_mailboxes(&account.id)
+        .expect("mailboxes should list")
+        .into_iter()
+        .find(|mailbox| mailbox.role.as_deref() == Some("inbox"))
+        .expect("the mock gateway seeds an inbox mailbox");
+    let returned = shared
+        .service
+        .list_messages(&account.id, Some(&inbox.id))
+        .expect("messages should list");
+    assert!(
+        returned.iter().any(|summary| summary.id == message.id),
+        "a due snooze must still be returned to the inbox on the monotonic-anchored clock"
+    );
 }

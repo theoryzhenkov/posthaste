@@ -43,7 +43,9 @@ use types::*;
 #[cfg(test)]
 use manager::{run_watchdog, SpawnIncarnation, WatchdogPolicy};
 #[cfg(test)]
-use runtime::handle_push_event;
+use runtime::{
+    handle_push_event, handle_snooze_tick, process_sync_trigger_with_state, SyncTriggerRequest,
+};
 #[cfg(test)]
 use sync_flow::sync_failure_stage;
 
