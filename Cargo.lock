@@ -4223,6 +4223,7 @@ dependencies = [
  "imap-codec",
  "lettre",
  "mail-parser",
+ "posthaste-call-policy",
  "posthaste-domain-model",
  "posthaste-domain-service",
  "posthaste-observability",

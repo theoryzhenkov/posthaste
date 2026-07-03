@@ -47,7 +47,7 @@ pub(crate) async fn save_imap_draft(
     let drafts_id = drafts.id.clone();
 
     let smtp_config = &gateway.smtp_config;
-    let mut raw_message = build_smtp_message(smtp_config, request)
+    let mut raw_message = build_smtp_message(smtp_config, request, None)
         .map_err(imap_error_to_gateway)?
         .formatted();
     // Stamp the stable draft identity as a top-level header so a resumed edit

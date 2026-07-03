@@ -17,8 +17,19 @@ pub(super) struct MutationGateway {
     /// Records the `replace` argument of each `save_draft` call.
     pub(super) save_draft_calls: Mutex<Vec<Option<MessageId>>>,
     pub(super) delete_draft_calls: Mutex<Vec<MessageId>>,
-    /// Subjects of each `send_message` call, in order.
+    /// Subjects of each `send_message` call, in order (includes deduplicated
+    /// re-forwards of an already-committed send).
     pub(super) send_calls: Mutex<Vec<String>>,
+    /// Idempotency keys that have committed a submission server-side. A second
+    /// `send_message` under a key already present is a re-forward that does
+    /// **not** create a second submission (models JMAP `ifInState` / the stable
+    /// `Message-ID` dedup — D84/D85).
+    pub(super) committed_send_keys: Mutex<Vec<String>>,
+    /// Outcomes for the *first* (committing) attempt of each new send key,
+    /// popped front-first; empty falls back to `Ok`. An `Err` here models a send
+    /// that committed but whose response was lost (e.g.
+    /// `GatewayError::DispatchUncertain`).
+    pub(super) send_results: Mutex<Vec<Result<(), GatewayError>>>,
     /// Results returned by `set_keywords`, popped front-first; empty falls back
     /// to the revision-based success path.
     pub(super) set_keywords_results: Mutex<Vec<Result<MutationOutcome, GatewayError>>>,
@@ -53,6 +64,8 @@ impl MutationGateway {
             save_draft_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
+            committed_send_keys: Mutex::new(Vec::new()),
+            send_results: Mutex::new(Vec::new()),
             set_keywords_results: Mutex::new(Vec::new()),
             readbacks: Mutex::new(Vec::new()),
             reject_next: Mutex::new(None),
@@ -238,12 +251,31 @@ impl MailGateway for MutationGateway {
         &self,
         _account_id: &AccountId,
         request: &SendMessageRequest,
+        idempotency_key: &str,
     ) -> Result<(), GatewayError> {
         self.send_calls
             .lock()
             .expect("send calls poisoned")
             .push(request.subject.clone());
-        Ok(())
+        let mut committed = self
+            .committed_send_keys
+            .lock()
+            .expect("committed send keys poisoned");
+        if committed.iter().any(|key| key == idempotency_key) {
+            // The prior attempt already committed under this identity; a
+            // re-forward is deduplicated — no second submission (D84/D85).
+            return Ok(());
+        }
+        // Record the commit *before* applying the configured outcome, so an
+        // `Err` outcome models "committed server-side but the response was lost."
+        committed.push(idempotency_key.to_string());
+        drop(committed);
+        let mut results = self.send_results.lock().expect("send results poisoned");
+        if results.is_empty() {
+            Ok(())
+        } else {
+            results.remove(0)
+        }
     }
 
     async fn save_draft(

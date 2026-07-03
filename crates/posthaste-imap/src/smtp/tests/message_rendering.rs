@@ -30,7 +30,7 @@ fn builds_multipart_message_with_threading_headers_and_hidden_bcc() {
         ..Default::default()
     };
 
-    let message = build_smtp_message(&config, &request).expect("SMTP message");
+    let message = build_smtp_message(&config, &request, None).expect("SMTP message");
     let formatted = String::from_utf8(message.formatted()).expect("message is UTF-8");
 
     assert!(formatted.contains("From: alice <alice@example.test>"));
@@ -70,7 +70,7 @@ fn builds_multipart_mixed_message_with_attachments() {
         ..Default::default()
     };
 
-    let message = build_smtp_message(&config, &request).expect("SMTP message");
+    let message = build_smtp_message(&config, &request, None).expect("SMTP message");
     let formatted = String::from_utf8(message.formatted()).expect("message is UTF-8");
 
     assert!(formatted.contains("Content-Type: multipart/mixed;"));
@@ -104,7 +104,7 @@ fn builds_message_with_requested_from_identity() {
         ..Default::default()
     };
 
-    let message = build_smtp_message(&config, &request).expect("SMTP message");
+    let message = build_smtp_message(&config, &request, None).expect("SMTP message");
     let formatted = String::from_utf8(message.formatted()).expect("message is UTF-8");
 
     assert!(formatted.contains("From:"));

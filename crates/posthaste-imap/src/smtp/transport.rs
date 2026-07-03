@@ -16,7 +16,7 @@ pub async fn send_smtp_message(
     config: &SmtpConnectionConfig,
     request: &SendMessageRequest,
 ) -> Result<(), ImapAdapterError> {
-    submit_smtp_message(config, request).await?;
+    submit_smtp_message(config, request, None).await?;
     Ok(())
 }
 
@@ -28,18 +28,22 @@ pub async fn send_smtp_messages(
 ) -> Result<(), ImapAdapterError> {
     let transport = smtp_transport(config)?;
     for request in requests {
-        let message = build_smtp_message(config, request)?;
+        let message = build_smtp_message(config, request, None)?;
         transport.send(message).await?;
     }
     Ok(())
 }
 
 /// Submit one message and return the exact RFC 5322 bytes accepted by SMTP.
+///
+/// `message_id` carries the stable, retry-constant Message-ID (D85) when the
+/// caller is the idempotent outbox send path; `None` lets lettre generate one.
 pub async fn submit_smtp_message(
     config: &SmtpConnectionConfig,
     request: &SendMessageRequest,
+    message_id: Option<&str>,
 ) -> Result<SubmittedSmtpMessage, ImapAdapterError> {
-    let message = build_smtp_message(config, request)?;
+    let message = build_smtp_message(config, request, message_id)?;
     let raw_message = message.formatted();
     smtp_transport(config)?.send(message).await?;
 

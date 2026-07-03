@@ -232,6 +232,7 @@ impl MailGateway for ScriptedGateway {
         &self,
         _account_id: &AccountId,
         _request: &SendMessageRequest,
+        _idempotency_key: &str,
     ) -> Result<(), GatewayError> {
         Err(GatewayError::Rejected(
             "unused in automation tests".to_string(),

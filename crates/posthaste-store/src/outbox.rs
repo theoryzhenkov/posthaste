@@ -14,6 +14,7 @@ fn parse_operation_state(value: &str) -> Result<OperationState, StoreError> {
         // drain under the assertion-based flush model.
         "conflicted" => Ok(OperationState::Pending),
         "failed" => Ok(OperationState::Failed),
+        "dispatchUncertain" => Ok(OperationState::DispatchUncertain),
         other => Err(StoreError::Failure(format!(
             "unknown outbox operation state: {other}"
         ))),
@@ -26,6 +27,9 @@ fn operation_state_str(state: OperationState) -> &'static str {
         OperationState::Inflight => "inflight",
         OperationState::Applied => "applied",
         OperationState::Failed => "failed",
+        // Parked sends are excluded from `list_flushable_operations` by omission
+        // from its state set — a possibly-delivered send is never auto-resent.
+        OperationState::DispatchUncertain => "dispatchUncertain",
     }
 }
 
