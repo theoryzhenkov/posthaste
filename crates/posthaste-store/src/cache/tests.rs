@@ -1,19 +1,6 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use super::*;
 
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-store-cache-test-{now}-{seq}"))
-}
+use crate::test_support::temp_root;
 
 fn candidate(message_id: &str, priority: f64, fetch_bytes: u64) -> CacheCandidate {
     CacheCandidate {

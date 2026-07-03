@@ -1,13 +1,11 @@
 use super::*;
+use crate::test_support::TempDirGuard;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::SecretStoreError;
 use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_store::DatabaseStore;
-use std::fs;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
-use uuid::Uuid;
 
 fn expect_decision<'a>(
     result: Result<SecretInstructionDecision<'a>, ApiError>,
@@ -70,17 +68,15 @@ struct TestAppState {
     store: Arc<dyn MailStore>,
     event_sender: broadcast::Sender<DomainEvent>,
     secret_store: Arc<RecordingSecretStore>,
-    _root: TestRoot,
+    _root: TempDirGuard,
 }
 
 fn test_app_state() -> TestAppState {
-    let root = TestRoot(
-        std::env::temp_dir().join(format!("posthaste-account-support-{}", Uuid::new_v4())),
-    );
+    let root = crate::test_support::temp_root("account-support");
     let config: Arc<dyn ConfigRepository> =
-        Arc::new(TomlConfigRepository::open(root.0.join("config")).expect("open config repo"));
+        Arc::new(TomlConfigRepository::open(root.join("config")).expect("open config repo"));
     let database_store = Arc::new(
-        DatabaseStore::open(root.0.join("mail.sqlite"), root.0.join("data"))
+        DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))
             .expect("open database store"),
     );
     let store: Arc<dyn MailStore> = database_store.clone();
@@ -93,14 +89,6 @@ fn test_app_state() -> TestAppState {
         event_sender,
         secret_store,
         _root: root,
-    }
-}
-
-struct TestRoot(PathBuf);
-
-impl Drop for TestRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
     }
 }
 

@@ -17,9 +17,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use posthaste_authority_server::{build_authority_server, build_authority_server_node};
 use posthaste_domain_model::{
@@ -77,19 +76,6 @@ impl SecretStore for TestSecretStore {
 
 fn secret_key(secret_ref: &SecretRef) -> String {
     format!("{:?}:{}", secret_ref.kind, secret_ref.key)
-}
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("ph-link-split-{nanos}-{counter}"));
-    std::fs::create_dir_all(&path).unwrap();
-    path
 }
 
 fn account_mutation(id: &str) -> CreateAccountMutation {
@@ -165,7 +151,8 @@ async fn serve_link(authority_server: &posthaste_authority_server::AuthorityServ
 async fn remote_transport_reads_a_real_query_over_the_link() {
     // The authority server computes the query (the authority owns the query engine); a
     // near node reads through over the link and gets the computed page.
-    let authority_server = build_authority_server(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let authority_server = build_authority_server(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server runtime builds");
     let account = authority_server
@@ -225,7 +212,8 @@ fn mail_list_descriptor(query: &str) -> ViewDescriptor {
 #[tokio::test]
 async fn remote_runtime_serves_a_mail_list_view_from_the_authority_server() {
     // The authority server holds the data; a Remote runtime holds none of it locally.
-    let authority_server = build_authority_server(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let authority_server = build_authority_server(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server runtime builds");
     let account = authority_server
@@ -236,7 +224,8 @@ async fn remote_runtime_serves_a_mail_list_view_from_the_authority_server() {
     seed_inbox_message(&authority_server, &account.id, "m-view");
     let base_url = serve_link(&authority_server).await;
 
-    let remote = build_authority_server(build_config(temp_root()).with_authority_server_transport(
+    let _root_b = posthaste_testkit::temp_root("ph-link-split");
+    let remote = build_authority_server(build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
         AuthorityServerTransportConfig::Remote {
             base_url: base_url.clone(),
             token: None,
@@ -275,7 +264,8 @@ async fn remote_runtime_serves_a_mail_list_view_from_the_authority_server() {
 #[tokio::test]
 async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
     // The authority server runtime: a real store, one seeded message (unflagged).
-    let authority_server = build_authority_server(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let authority_server = build_authority_server(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server runtime builds");
     let account = authority_server
@@ -324,7 +314,8 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
     });
 
     // A separate runtime configured to reach that authority server remotely.
-    let remote = build_authority_server(build_config(temp_root()).with_authority_server_transport(
+    let _root_b = posthaste_testkit::temp_root("ph-link-split");
+    let remote = build_authority_server(build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
         AuthorityServerTransportConfig::Remote {
             base_url: format!("http://{addr}"),
             token: None,
@@ -403,7 +394,8 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
 // spec: docs/replication/authority-server-link/L2#2-backendapi-implementations-localbackend-remotebackend
 #[tokio::test]
 async fn generated_wire_round_trips_a_read_and_a_write() {
-    let authority_server = build_authority_server(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let authority_server = build_authority_server(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server runtime builds");
     let account = authority_server
@@ -460,7 +452,8 @@ async fn generated_wire_round_trips_a_read_and_a_write() {
 // spec: docs/eph/DESIGN-L1-trust-model
 #[tokio::test]
 async fn link_auth_requires_a_matching_bearer_token() {
-    let authority_server = build_authority_server(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let authority_server = build_authority_server(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server runtime builds");
     let account = authority_server
@@ -517,7 +510,8 @@ async fn link_auth_requires_a_matching_bearer_token() {
 // spec: docs/replication/authority-server-link/L2#7-the-build-seam-and-role-binaries
 #[tokio::test]
 async fn standalone_authority_server_node_serves_the_link() {
-    let node = build_authority_server_node(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let node = build_authority_server_node(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server node builds standalone");
 
@@ -556,7 +550,8 @@ async fn standalone_authority_server_node_serves_the_link() {
 #[tokio::test]
 async fn lean_remote_runtime_drives_the_authority_server_over_the_link() {
     // A standalone authority server served over the link.
-    let authority_server = build_authority_server_node(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let authority_server = build_authority_server_node(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server node builds");
     let router = link_router(authority_server.transport(), LinkAuth::Disabled);
@@ -567,7 +562,8 @@ async fn lean_remote_runtime_drives_the_authority_server_over_the_link() {
     });
 
     // An authority-server-less runtime pointed at it.
-    let runtime = build_remote_runtime(build_config(temp_root()).with_authority_server_transport(
+    let _root_b = posthaste_testkit::temp_root("ph-link-split");
+    let runtime = build_remote_runtime(build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
         AuthorityServerTransportConfig::Remote {
             base_url: format!("http://{addr}"),
             token: None,
@@ -602,7 +598,8 @@ async fn lean_remote_runtime_drives_the_authority_server_over_the_link() {
 // mutation, and its down-stream delivers a Settlement naming it.
 #[tokio::test]
 async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream() {
-    let authority_server = build_authority_server(build_config(temp_root()))
+    let _root_a = posthaste_testkit::temp_root("ph-link-split");
+    let authority_server = build_authority_server(build_config(_root_a.path().to_path_buf()))
         .await
         .expect("authority_server runtime builds");
     let account = authority_server

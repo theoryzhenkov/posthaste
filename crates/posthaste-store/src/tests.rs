@@ -1,6 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_domain_model::{
     MessageRecord, Recipient, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
@@ -11,16 +9,7 @@ use posthaste_domain_service::search;
 
 use super::*;
 
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-store-test-{now}-{seq}"))
-}
+use crate::test_support::temp_root;
 
 fn sample_message(
     message_id: &str,

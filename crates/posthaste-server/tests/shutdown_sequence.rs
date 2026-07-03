@@ -5,22 +5,12 @@
 //! `start_server` installs a global tracing subscriber that can be set only once
 //! per process — the crate's lib unit tests already claim one.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use posthaste_http_api_adapter::{ServerConfig, TOTAL_SHUTDOWN_BUDGET};
 use posthaste_server::start_server;
-
-fn unique_temp_dir(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "posthaste-{label}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ))
-}
+use posthaste_testkit::temp_root;
 
 struct EnvVarGuard {
     key: &'static str,
@@ -58,7 +48,7 @@ impl Drop for EnvVarGuard {
 /// (the process would exit cleanly here).
 #[tokio::test]
 async fn shutdown_sequence_drains_and_completes_under_budget() {
-    let root = unique_temp_dir("shutdown-sequence-test");
+    let root = temp_root("shutdown-sequence-test");
     let config_root = root.join("config");
     let state_root = root.join("state");
     let xdg_config_root = root.join("xdg-config");
@@ -133,6 +123,4 @@ async fn shutdown_sequence_drains_and_completes_under_budget() {
         after.is_err(),
         "the server no longer accepts connections after teardown"
     );
-
-    let _ = std::fs::remove_dir_all(&root);
 }

@@ -1,21 +1,17 @@
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+use crate::guard::TempDirGuard;
 
-/// A unique per-process temp directory under the system temp root.
+/// A disposable per-process temp directory under the system temp root (P6).
 ///
-/// Combines a monotonic counter with a nanosecond timestamp so concurrent
-/// tests in the same process never collide.
-pub fn temp_root(prefix: &str) -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("{prefix}-{now}-{seq}"))
+/// Returns a [`TempDirGuard`] — removed on drop, including during a
+/// panicking unwind, so a failing test never leaves a `{prefix}-*` directory
+/// behind in `$TMPDIR`. Keep the guard bound for as long as the directory
+/// needs to exist; it derefs to `Path`, so `root.join(...)` and `&root` work
+/// exactly like the `PathBuf` this used to return.
+pub fn temp_root(prefix: &str) -> TempDirGuard {
+    TempDirGuard::new(prefix)
 }
 
 /// Claims a free loopback TCP port by binding to `127.0.0.1:0` and reading

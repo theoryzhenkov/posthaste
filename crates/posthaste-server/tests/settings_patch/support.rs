@@ -1,7 +1,6 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::response::IntoResponse;
 use axum::Json;
@@ -17,18 +16,8 @@ use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretS
 use posthaste_authority_server::AccountSupervisor;
 use posthaste_http_api_adapter::AppState;
 use posthaste_store::DatabaseStore;
+use posthaste_testkit::temp_root;
 use tokio::sync::broadcast;
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-settings-patch-test-{now}-{seq}"))
-}
 
 struct TestSecretStore;
 
@@ -51,6 +40,9 @@ impl SecretStore for TestSecretStore {
 }
 
 pub(super) struct SettingsHarness {
+    // Held only to keep the temp directory alive for the harness's lifetime;
+    // removed on drop.
+    _root: posthaste_testkit::TempDirGuard,
     pub(super) state: Arc<AppState>,
     pub(super) config_root: PathBuf,
     pub(super) service: Arc<MailService>,
@@ -59,7 +51,7 @@ pub(super) struct SettingsHarness {
 
 impl SettingsHarness {
     pub(super) fn new() -> Self {
-        let root = temp_root();
+        let root = temp_root("posthaste-settings-patch-test");
         let config_root = root.join("config");
         let state_root = root.join("state");
         let config_repo =
@@ -84,6 +76,7 @@ impl SettingsHarness {
             Duration::from_secs(60),
         ));
         Self {
+            _root: root,
             state: Arc::new(AppState {
                 runtime:
                     posthaste_testkit::runtime_handle_with_account_runtime_provider_for_migration(

@@ -1,7 +1,4 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::{
@@ -9,28 +6,21 @@ use posthaste_domain_model::{
 };
 use posthaste_domain_service::{ConfigRepository, MailService};
 use posthaste_store::DatabaseStore;
+use posthaste_testkit::temp_root;
 
 use crate::builders::account;
 use crate::gateway::ScriptedGateway;
 
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-automation-test-{now}-{seq}"))
-}
-
 pub(super) struct RuleHarness {
+    // Held only to keep the temp directory alive for the harness's lifetime;
+    // removed on drop.
+    _root: posthaste_testkit::TempDirGuard,
     service: Arc<MailService>,
 }
 
 impl RuleHarness {
     pub(super) fn new() -> Self {
-        let root = temp_root();
+        let root = temp_root("posthaste-automation-test");
         let config_root = root.join("config");
         let state_root = root.join("state");
         let config_repo =
@@ -44,7 +34,7 @@ impl RuleHarness {
         );
         let config: Arc<dyn ConfigRepository> = Arc::new(config_repo);
         let service = Arc::new(MailService::new(store, config));
-        Self { service }
+        Self { _root: root, service }
     }
 
     pub(super) fn save_account(&self, id: &str, name: &str) {
