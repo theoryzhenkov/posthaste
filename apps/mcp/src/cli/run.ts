@@ -10,6 +10,19 @@ import { streamEvents, type EventsOptions } from "./events.js";
 import { commandHelp, topLevelHelp } from "./help.js";
 import { mintToken, parseTokenMintOptions } from "./token.js";
 import { watchEvents, type WatchOptions } from "./watch.js";
+import {
+  parseApplyOptions,
+  parseMoveOptions,
+  parseReplyOptions,
+  parseSendOptions,
+  parseTagOptions,
+  runApply,
+  runMove,
+  runReply,
+  runSend,
+  runTag,
+  type WriteVerbDeps,
+} from "./writeVerbs.js";
 
 /**
  * Exit codes (the scriptable contract). `0` success; everything else carries
@@ -89,6 +102,104 @@ Narrowing (optional):
 
 Example:
   TOKEN=$(posthastectl token mint --grant tap:read,apply,read --expiry 1h)`;
+
+const TAG_HELP = `Usage: posthastectl tag [--message <id>] [--account <id>] [--add <kw>]... [--remove <kw>]... [--idempotency-key <key>]
+
+Add and/or remove JMAP keywords on a message (POST .../set-keywords). At
+least one --add or --remove is required. The typed op, auth, and a
+deterministic Idempotency-Key are all handled here — a handler never touches
+REST directly.
+
+  --message <id>            Message id (falls back to $PH_MESSAGE_ID)
+  --account <id>             Source/account id (falls back to $PH_ACCOUNT / $PH_ACCOUNT_ID)
+  --add <kw>                  Repeatable: keyword to add
+  --remove <kw>                Repeatable: keyword to remove
+  --idempotency-key <key>       Override the auto-derived key (see docs/scripting-quickstart.md)`;
+
+const MOVE_HELP = `Usage: posthastectl move [--message <id>] [--account <id>] --to-mailbox <role|id> [--idempotency-key <key>]
+
+Move a message to a single mailbox (POST .../replace-mailboxes), replacing
+its current mailbox memberships. --to-mailbox accepts either a mailbox role
+(e.g. 'archive') or a raw mailbox id — roles are resolved via the account's
+mailbox list.
+
+  --message <id>            Message id (falls back to $PH_MESSAGE_ID)
+  --account <id>             Source/account id (falls back to $PH_ACCOUNT / $PH_ACCOUNT_ID)
+  --to-mailbox <role|id>       Destination mailbox
+  --idempotency-key <key>       Override the auto-derived key`;
+
+const REPLY_HELP = `Usage: posthastectl reply [--message <id>] [--account <id>] --body <text|-|@file> [--idempotency-key <key>]
+
+Reply in-thread to a message: fetches the gateway's reply-context (recipient,
+subject, In-Reply-To/References) and sends --body through it.
+
+  --message <id>            Message id (falls back to $PH_MESSAGE_ID)
+  --account <id>             Source/account id (falls back to $PH_ACCOUNT / $PH_ACCOUNT_ID)
+  --body <text|-|@file>        The reply body; '-' reads stdin, '@file' reads a file
+  --idempotency-key <key>       Override the auto-derived key`;
+
+const SEND_HELP = `Usage: posthastectl send --to <addr>... --subject <s> --body <text|-|@file> [--account <id>] [--cc <addr>]... [--bcc <addr>]... [--from <addr>] [--idempotency-key <key>]
+
+Send a new message (not in reply to anything — see 'reply' for in-thread).
+
+  --account <id>             Source/account id (falls back to $PH_ACCOUNT / $PH_ACCOUNT_ID)
+  --to <addr>                 Repeatable: To recipient (required, at least one)
+  --cc <addr>                  Repeatable: Cc recipient
+  --bcc <addr>                  Repeatable: Bcc recipient
+  --from <addr>                  Sender address (defaults to the account's identity)
+  --subject <s>                    Subject (required)
+  --body <text|-|@file>              Message body; '-' reads stdin, '@file' reads a file
+  --idempotency-key <key>              Override the auto-derived key
+
+NOTE: the send route does not yet honor Idempotency-Key server-side (only the
+five message-command routes do) — see docs/scripting-quickstart.md.`;
+
+const APPLY_HELP = `Usage: posthastectl apply --kind <kind> [--message <id>] [--account <id>] [--body <json|-|@file>] [--idempotency-key <key>]
+
+Escape hatch: call any of the five typed message-command routes by name, with
+a raw JSON body — for verbs without dedicated sugar (destroy,
+add-to-mailbox, remove-from-mailbox) or when you want the exact wire shape.
+
+  --kind <kind>              One of: set-keywords, add-to-mailbox, remove-from-mailbox, replace-mailboxes, destroy
+  --message <id>              Message id (falls back to $PH_MESSAGE_ID)
+  --account <id>                Source/account id (falls back to $PH_ACCOUNT / $PH_ACCOUNT_ID)
+  --body <json|-|@file>            The command body (not used by --kind destroy)
+  --idempotency-key <key>            Override the auto-derived key`;
+
+/** One write verb: its help text and a parse-then-run entry point. */
+interface WriteVerb {
+  help: string;
+  run: (
+    tokens: string[],
+    conn: Connection,
+    deps: WriteVerbDeps,
+  ) => Promise<unknown>;
+}
+
+const WRITE_VERBS: Record<string, WriteVerb> = {
+  tag: {
+    help: TAG_HELP,
+    run: (tokens, conn, deps) => runTag(conn, parseTagOptions(tokens), deps),
+  },
+  move: {
+    help: MOVE_HELP,
+    run: (tokens, conn, deps) => runMove(conn, parseMoveOptions(tokens), deps),
+  },
+  reply: {
+    help: REPLY_HELP,
+    run: (tokens, conn, deps) =>
+      runReply(conn, parseReplyOptions(tokens), deps),
+  },
+  send: {
+    help: SEND_HELP,
+    run: (tokens, conn, deps) => runSend(conn, parseSendOptions(tokens), deps),
+  },
+  apply: {
+    help: APPLY_HELP,
+    run: (tokens, conn, deps) =>
+      runApply(conn, parseApplyOptions(tokens), deps),
+  },
+};
 
 const WATCH_HELP = `Usage: posthastectl watch [filters] [--exec <command>]
 
@@ -344,6 +455,31 @@ export async function run(argv: string[], deps: RunDeps): Promise<number> {
         log: (line) => deps.stderr(`posthastectl: ${line}\n`),
         signal: deps.signal,
       });
+      return ExitCode.Ok;
+    } catch (error) {
+      return failRuntime(error, deps);
+    }
+  }
+
+  // The write verbs (RFC-L2-scripting ruling 21: "posthastectl IS the SDK")
+  // are bespoke, like `token`/`watch`/`events` above: they need `deps.env` for
+  // the PH_*-derived defaults and auto idempotency key, which the registry
+  // `Operation.handler(conn, args)` shape does not thread through.
+  const writeVerb = WRITE_VERBS[rest[0] ?? ""];
+  if (writeVerb) {
+    if (globals.help) {
+      deps.stdout(`${writeVerb.help}\n`);
+      return ExitCode.Ok;
+    }
+    try {
+      const conn = connect(deps, globals);
+      const result = await writeVerb.run(rest.slice(1), conn, {
+        env: deps.env,
+        readStdin: deps.readStdin,
+        readFile: deps.readFile,
+        warn: (line) => deps.stderr(`posthastectl: ${line}\n`),
+      });
+      deps.stdout(`${render(result, globals, deps)}\n`);
       return ExitCode.Ok;
     } catch (error) {
       return failRuntime(error, deps);

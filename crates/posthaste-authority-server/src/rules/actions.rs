@@ -184,10 +184,7 @@ impl EngineContext {
             // the child) is dropped; `kill_on_drop` turns that into a real kill.
             .kill_on_drop(true)
             .env("POSTHASTE_TOKEN", token)
-            .env("PH_IDEMPOTENCY_KEY", key)
-            .env("PH_ACCOUNT_ID", summary.source_id.as_str())
-            .env("PH_MESSAGE_ID", summary.id.as_str())
-            .env("PH_TOPIC", &event.topic)
+            .envs(exec_env_vars(event, summary, key))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -256,5 +253,132 @@ impl EngineContext {
                 RuleOutcome::Failed
             }
         }
+    }
+}
+
+/// The `PH_*` convenience env vars exported to a Level-1 `exec` script
+/// (RFC-L2-scripting ruling 21: "posthastectl IS the SDK" — a handler is
+/// type-free bash; these dissolve the "manual JSON parsing" problem for the
+/// common fields, while the full event+message JSON stays on stdin for
+/// anything not covered here). Pure and independently testable — kept out of
+/// `deliver_exec` so a test doesn't need a live `EngineContext`/process spawn
+/// to assert on the exported set.
+///
+/// `PH_FROM` prefers the sender's email; falls back to the display name when
+/// the email is absent (rare — providers without a parsed address); empty
+/// when neither is known. `PH_SUBJECT` and `PH_KEYWORDS` (comma-separated)
+/// default to empty/none when absent.
+fn exec_env_vars(
+    event: &DomainEvent,
+    summary: &MessageSummary,
+    idempotency_key: &str,
+) -> Vec<(&'static str, String)> {
+    let from = summary
+        .from_email
+        .as_deref()
+        .or(summary.from_name.as_deref())
+        .unwrap_or("")
+        .to_string();
+    vec![
+        ("PH_IDEMPOTENCY_KEY", idempotency_key.to_string()),
+        ("PH_ACCOUNT", summary.source_id.to_string()),
+        ("PH_MESSAGE_ID", summary.id.to_string()),
+        ("PH_FROM", from),
+        (
+            "PH_SUBJECT",
+            summary.subject.clone().unwrap_or_default(),
+        ),
+        ("PH_KEYWORDS", summary.keywords.join(",")),
+        ("PH_EVENT_SEQ", event.seq.to_string()),
+        ("PH_TOPIC", event.topic.clone()),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(source_id: &str, id: &str) -> MessageSummary {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "sourceId": source_id, "sourceName": "Acct", "sourceThreadId": "t1",
+            "conversationId": "c1", "subject": "Re: invoice", "fromName": "Ada Lovelace",
+            "fromEmail": "ada@example.com", "to": [], "preview": null,
+            "receivedAt": "2026-06-24T00:00:00Z", "hasAttachment": false, "isRead": false,
+            "isFlagged": false, "mailboxIds": ["inbox"], "keywords": ["instruct", "urgent"]
+        }))
+        .expect("valid MessageSummary fixture")
+    }
+
+    fn event(seq: i64, topic: &str) -> DomainEvent {
+        DomainEvent {
+            seq,
+            account_id: "acct-1".into(),
+            topic: topic.to_string(),
+            occurred_at: "2026-06-24T00:00:00Z".to_string(),
+            mailbox_id: None,
+            message_id: Some("msg-1".into()),
+            payload: serde_json::Value::Null,
+        }
+    }
+
+    /// The documented minimum set (RFC-L2-scripting ruling 21) is present with
+    /// the expected values, keyed off the message summary + triggering event.
+    #[test]
+    fn exec_env_vars_covers_the_documented_minimum_set() {
+        let vars = exec_env_vars(
+            &event(91, "message.updated"),
+            &summary("acct-1", "msg-1"),
+            "rule:tagger:91",
+        );
+        let map: std::collections::HashMap<_, _> = vars.into_iter().collect();
+        assert_eq!(map["PH_IDEMPOTENCY_KEY"], "rule:tagger:91");
+        assert_eq!(map["PH_ACCOUNT"], "acct-1");
+        assert_eq!(map["PH_MESSAGE_ID"], "msg-1");
+        assert_eq!(map["PH_FROM"], "ada@example.com");
+        assert_eq!(map["PH_SUBJECT"], "Re: invoice");
+        assert_eq!(map["PH_KEYWORDS"], "instruct,urgent");
+        assert_eq!(map["PH_EVENT_SEQ"], "91");
+        assert_eq!(map["PH_TOPIC"], "message.updated");
+    }
+
+    /// `PH_FROM` falls back to the display name when no email is parsed, and is
+    /// empty (never a literal "null") when neither is known.
+    #[test]
+    fn exec_env_vars_from_falls_back_then_empties() {
+        let mut with_name_only = summary("acct-1", "msg-1");
+        with_name_only.from_email = None;
+        with_name_only.from_name = Some("Ada".to_string());
+        let vars = exec_env_vars(&event(1, "message.updated"), &with_name_only, "k");
+        let map: std::collections::HashMap<_, _> = vars.into_iter().collect();
+        assert_eq!(map["PH_FROM"], "Ada");
+
+        let mut with_neither = summary("acct-1", "msg-1");
+        with_neither.from_email = None;
+        with_neither.from_name = None;
+        with_neither.subject = None;
+        with_neither.keywords = Vec::new();
+        let vars = exec_env_vars(&event(1, "message.updated"), &with_neither, "k");
+        let map: std::collections::HashMap<_, _> = vars.into_iter().collect();
+        assert_eq!(map["PH_FROM"], "");
+        assert_eq!(map["PH_SUBJECT"], "");
+        assert_eq!(map["PH_KEYWORDS"], "");
+    }
+
+    /// Two different triggering events for the same message produce two
+    /// different `PH_EVENT_SEQ` values — the deterministic-idempotency-key
+    /// building block a handler composes with (redelivery of the *same* event
+    /// reproduces the same seq; a distinct event does not).
+    #[test]
+    fn exec_env_vars_event_seq_tracks_the_triggering_event() {
+        let s = summary("acct-1", "msg-1");
+        let a = exec_env_vars(&event(5, "message.updated"), &s, "k")
+            .into_iter()
+            .collect::<std::collections::HashMap<_, _>>();
+        let b = exec_env_vars(&event(6, "message.updated"), &s, "k")
+            .into_iter()
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(a["PH_EVENT_SEQ"], "5");
+        assert_eq!(b["PH_EVENT_SEQ"], "6");
+        assert_ne!(a["PH_EVENT_SEQ"], b["PH_EVENT_SEQ"]);
     }
 }
