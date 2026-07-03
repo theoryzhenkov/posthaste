@@ -68,6 +68,16 @@ function grantToActions(grant: string): string[] {
   }
 }
 
+/**
+ * Resolve a list of `--grant` scopes to the deduped underlying server `Action`
+ * verbs. Shared by `token mint` (the CLI) and the MCP server's connect-time
+ * mint (`connect.ts`), so both front-ends map the conceptual grant vocabulary
+ * (`tap:read`/`read`/`apply` + raw verbs) to the wire verbs identically.
+ */
+export function grantsToActions(grants: string[]): string[] {
+  return [...new Set(grants.flatMap(grantToActions))];
+}
+
 const DURATION = /^(\d+)\s*([smhd]?)$/;
 const UNIT_SECONDS: Record<string, number> = {
   "": 1,
@@ -125,7 +135,7 @@ export function parseTokenMintOptions(tokens: string[]): TokenMintOptions {
       "token mint requires at least one --grant (e.g. --grant tap:read,apply,read)",
     );
   }
-  const actions = [...new Set(grants.flatMap(grantToActions))];
+  const actions = grantsToActions(grants);
   return { actions, expiresInSeconds, account, mailbox, message };
 }
 
