@@ -114,6 +114,96 @@ impl MockJmapGateway {
 static SYNC_GATES: LazyLock<Mutex<HashMap<String, SyncGate>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Prefix-scoped probe that records the peak number of concurrent `sync` calls
+/// whose account id starts with `prefix`. Used by the boot-storm test to assert
+/// the supervisor's global concurrent-sync cap holds. Scoping by prefix keeps
+/// the (process-wide) probe isolated from other tests' mock syncs running in
+/// parallel in the same binary.
+struct SyncConcurrencyProbe {
+    prefix: String,
+    current: usize,
+    peak: usize,
+}
+
+static SYNC_CONCURRENCY_PROBE: LazyLock<Mutex<Option<SyncConcurrencyProbe>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+impl MockJmapGateway {
+    /// Install a peak-concurrency probe for `sync` calls on accounts whose id
+    /// starts with `prefix`. The returned guard uninstalls it on drop.
+    pub fn install_sync_concurrency_probe_for_tests(prefix: &str) -> SyncConcurrencyProbeGuard {
+        *SYNC_CONCURRENCY_PROBE
+            .lock()
+            .expect("sync concurrency probe mutex poisoned") = Some(SyncConcurrencyProbe {
+            prefix: prefix.to_string(),
+            current: 0,
+            peak: 0,
+        });
+        SyncConcurrencyProbeGuard
+    }
+
+    /// The peak concurrent `sync` count observed by the installed probe.
+    pub fn observed_peak_concurrent_syncs_for_tests() -> usize {
+        SYNC_CONCURRENCY_PROBE
+            .lock()
+            .expect("sync concurrency probe mutex poisoned")
+            .as_ref()
+            .map(|probe| probe.peak)
+            .unwrap_or(0)
+    }
+}
+
+/// RAII guard returned by [`MockJmapGateway::install_sync_concurrency_probe_for_tests`].
+pub struct SyncConcurrencyProbeGuard;
+
+impl Drop for SyncConcurrencyProbeGuard {
+    fn drop(&mut self) {
+        *SYNC_CONCURRENCY_PROBE
+            .lock()
+            .expect("sync concurrency probe mutex poisoned") = None;
+    }
+}
+
+/// RAII counter: on construction it increments the installed probe's in-flight
+/// count (and updates the peak) if `account_id` matches the probed prefix; on
+/// drop it decrements. Holding it for the whole `sync` body means an in-flight
+/// sync counts across its `.await` points, and a sync future dropped mid-flight
+/// (e.g. cancelled by the supervisor stop) still releases its count.
+struct SyncProbeCount {
+    counted: bool,
+}
+
+impl SyncProbeCount {
+    fn enter(account_id: &AccountId) -> Self {
+        let mut probe = SYNC_CONCURRENCY_PROBE
+            .lock()
+            .expect("sync concurrency probe mutex poisoned");
+        let counted = match probe.as_mut() {
+            Some(probe) if account_id.as_str().starts_with(&probe.prefix) => {
+                probe.current += 1;
+                probe.peak = probe.peak.max(probe.current);
+                true
+            }
+            _ => false,
+        };
+        Self { counted }
+    }
+}
+
+impl Drop for SyncProbeCount {
+    fn drop(&mut self) {
+        if !self.counted {
+            return;
+        }
+        let mut probe = SYNC_CONCURRENCY_PROBE
+            .lock()
+            .expect("sync concurrency probe mutex poisoned");
+        if let Some(probe) = probe.as_mut() {
+            probe.current = probe.current.saturating_sub(1);
+        }
+    }
+}
+
 #[derive(Clone)]
 struct SyncGate {
     entered: Arc<Notify>,
@@ -142,6 +232,12 @@ impl MailGateway for MockJmapGateway {
         _cursors: &[SyncCursor],
         _progress: Option<posthaste_domain_service::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
+        // Boot-storm test seam: count concurrent syncs for the probed prefix for
+        // the whole `sync` body (held across the gate + delay below), so a test
+        // can assert the supervisor's global concurrent-sync cap holds. Placed
+        // before the gate so a sync that is admitted (has acquired its global
+        // slot) but then blocks at the gate still counts as concurrent.
+        let _probe = SyncProbeCount::enter(account_id);
         // Account-scoped gate: lets a test block the pull phase until the test
         // has enqueued more local mutations, deterministically reproducing the
         // case where a mutation's provider flush is delayed by sync coalescing.

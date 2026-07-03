@@ -25,6 +25,7 @@ impl AccountSupervisor {
                     Instant::now(),
                     CacheResourcePolicy::default(),
                 )),
+                sync_governor: SyncGovernor::production(),
                 poll_interval,
                 oauth_refresh_flights: Mutex::new(HashMap::new()),
             }),
@@ -33,10 +34,21 @@ impl AccountSupervisor {
         }
     }
 
-    /// Start (or restart) the async runtime for an account. Stops any
-    /// existing runtime first. Disabled accounts get a `Disabled` status
-    /// without spawning a task.
+    /// Start (or restart) the async runtime for an account. Stops any existing
+    /// runtime first. Disabled accounts get a `Disabled` status without spawning
+    /// a task. Interactive path: the initial sync fires immediately (no splay).
     pub async fn start_account(&self, account: &AccountSettings) {
+        self.start_account_inner(account, false).await;
+    }
+
+    /// Boot-loop entry (D98(a) / Sc1): like [`start_account`], but the initial
+    /// `Startup` sync is randomly splayed within the governor's window so N
+    /// accounts started in a tight loop do not all sync at the same instant.
+    pub async fn start_account_on_boot(&self, account: &AccountSettings) {
+        self.start_account_inner(account, true).await;
+    }
+
+    async fn start_account_inner(&self, account: &AccountSettings, splay_startup: bool) {
         self.stop_account(&account.id).await;
         self.shared.register_account(&account.id).await;
         if !account.enabled {
@@ -87,6 +99,7 @@ impl AccountSupervisor {
             sync_state.clone(),
             command_slot.clone(),
             incarnation_abort.clone(),
+            splay_startup,
         );
 
         let first = spawn(cancel.clone());
@@ -255,13 +268,16 @@ impl AccountSupervisor {
             .await
             .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
 
-        // Coalesce-or-claim atomically: if a sync is in flight the trigger is
-        // folded into the pending follow-up (drained when that sync finishes);
-        // otherwise the reserved slot enqueues a fresh cycle. Doing the check and
-        // the pending-store under one lock (inside `coalesce_if_syncing`) closes
-        // the lost-wakeup race that previously stranded a trigger between the
-        // drain loop clearing `syncing` and taking `pending`.
-        if sync_state.coalesce_if_syncing(trigger.clone()).await {
+        // Claim-or-coalesce atomically: the first trigger to observe the idle
+        // window CLAIMS the cycle (marks the state active under the lock, before
+        // this reserved slot enqueues it); a trigger that arrives once a cycle is
+        // admitted folds into the pending follow-up (drained when that sync
+        // finishes) instead of enqueueing its own. Doing the claim/coalesce and
+        // the pending-store under one lock (inside `claim_or_coalesce`) both
+        // closes the lost-wakeup race (a trigger stranded between the drain loop
+        // clearing the flag and taking `pending`) and the P5 idle-boundary race
+        // (N concurrent idle-window triggers each enqueuing a redundant cycle).
+        if sync_state.claim_or_coalesce(trigger.clone()).await {
             ph_debug!(
                 events::SUPERVISOR_SYNC_TRIGGER_COALESCED,
                 account_id = %account_id,
@@ -370,6 +386,7 @@ fn build_incarnation_spawner(
     sync_state: Arc<SyncTriggerState>,
     command_slot: Arc<StdMutex<Option<mpsc::Sender<RuntimeCommand>>>>,
     incarnation_abort: Arc<StdMutex<Option<AbortHandle>>>,
+    splay_startup: bool,
 ) -> SpawnIncarnation {
     Box::new(move |cancel: CancellationToken| {
         let (command_tx, command_rx) = mpsc::channel(32);
@@ -385,8 +402,16 @@ fn build_incarnation_spawner(
                 // prior incarnation is dropped by the generation guard.
                 sync_state.reset().await;
                 let generation = shared.next_runtime_generation(&account.id).await;
-                run_account_runtime(shared, account, generation, command_rx, sync_state, cancel)
-                    .await;
+                run_account_runtime(
+                    shared,
+                    account,
+                    generation,
+                    command_rx,
+                    sync_state,
+                    cancel,
+                    splay_startup,
+                )
+                .await;
             }
             .instrument(span),
         );
@@ -423,7 +448,7 @@ impl WatchdogPolicy {
 /// A cheap, dependency-free uniform-ish value in `[0,1)` for full-jitter
 /// decorrelation of restart backoff. Not cryptographic; jitter quality is
 /// "Review" (D61), matching the near-end engine's own review posture.
-fn jitter_unit() -> f64 {
+pub(crate) fn jitter_unit() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
