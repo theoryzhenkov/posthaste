@@ -11,10 +11,8 @@
 
 #![allow(dead_code)]
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
@@ -37,6 +35,7 @@ use posthaste_authority_server::AccountSupervisor;
 use posthaste_http_api_adapter::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
 use posthaste_http_api_adapter::{build_api_router, AppState};
 use posthaste_store::DatabaseStore;
+use posthaste_testkit::temp_root;
 use tokio::sync::broadcast;
 
 const CORS_ORIGIN: &str = "http://localhost:5173";
@@ -44,17 +43,6 @@ const CORS_ORIGIN: &str = "http://localhost:5173";
 /// A deterministic 32-byte root key so minted/attenuated tokens verify.
 fn test_root_key() -> RootKey {
     RootKey::from_test_bytes([42u8; 32])
-}
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-full-stack-test-{now}-{seq}"))
 }
 
 /// A no-op secret store; the full-stack reads exercised here need no secrets.
@@ -77,6 +65,9 @@ impl SecretStore for TestSecretStore {
 
 /// A full-stack test server: real state + real `/v1` router.
 pub struct Harness {
+    // Held only to keep the temp directory alive for the harness's lifetime;
+    // removed on drop.
+    _root_dir: posthaste_testkit::TempDirGuard,
     db: Arc<DatabaseStore>,
     router: Router,
     root: RootKey,
@@ -89,7 +80,7 @@ pub struct Harness {
 impl Harness {
     /// Build a fresh harness with `require_auth` ON and an empty store.
     pub fn new() -> Self {
-        let root_dir = temp_root();
+        let root_dir = temp_root("posthaste-full-stack-test");
         let config_root = root_dir.join("config");
         let state_root = root_dir.join("state");
         let config_repo =
@@ -131,6 +122,7 @@ impl Harness {
         });
         let router = Router::new().nest("/v1", build_api_router(state.clone()));
         Self {
+            _root_dir: root_dir,
             db,
             router,
             root,

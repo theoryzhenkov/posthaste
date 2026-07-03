@@ -5,10 +5,9 @@ fn writes_manifest_and_summary_under_disposable_run_root() {
     // spec: docs/L1-lab#disposable-run-roots
     // spec: docs/L1-lab#artifact-manifest
     let registry = SuiteRegistry::from_toml_str(sample_registry_toml()).unwrap();
-    let temp_root =
-        std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+    let temp_root = crate::test_support::temp_root();
     let options = VerifyOptions {
-        run_root: temp_root.clone(),
+        run_root: temp_root.path().to_path_buf(),
         registry_path: PathBuf::from("tools/lab/suites.toml"),
         argv: vec![
             "posthaste-lab".to_string(),
@@ -87,8 +86,6 @@ fn writes_manifest_and_summary_under_disposable_run_root() {
         fs::read_to_string(stderr_path).unwrap(),
         "settings stderr\n"
     );
-
-    fs::remove_dir_all(temp_root).ok();
 }
 
 #[test]
@@ -116,13 +113,12 @@ timeout_seconds = 5
 "#,
     )
     .unwrap();
-    let temp_root =
-        std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+    let temp_root = crate::test_support::temp_root();
 
     let output = write_verify_run_with_env(
         &registry,
         VerifyOptions {
-            run_root: temp_root.clone(),
+            run_root: temp_root.path().to_path_buf(),
             registry_path: PathBuf::from("tools/lab/suites.toml"),
             argv: vec!["posthaste-lab".to_string(), "verify".to_string()],
             criteria: SelectionCriteria::default(),
@@ -211,6 +207,4 @@ timeout_seconds = 5
         .collect::<Vec<_>>();
     assert!(manifest_artifacts.contains(&summary_path.as_str()));
     assert!(manifest_artifacts.contains(&log_path.as_str()));
-
-    fs::remove_dir_all(temp_root).ok();
 }

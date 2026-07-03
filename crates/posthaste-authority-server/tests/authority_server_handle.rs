@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::ops::Deref;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use posthaste_authority_server::oauth::OAuthTokenSet;
@@ -26,17 +26,42 @@ use posthaste_contract_core::{
     MutationSettlementState, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle, RuntimeLinkSeq,
     SecretWriteMode, SecretWriteMutation, ViewDescriptor,
 };
+use tempfile::TempDir;
 use tokio::sync::Notify;
 
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+// This integration-test binary is a separate compilation unit from the crate's
+// `src/`, so it cannot see the private `posthaste_authority_server::test_support`
+// module — it carries its own small copy of the same RAII tempdir guard (P6).
+// See `crates/posthaste-authority-server/src/test_support.rs` for the shared
+// version used by the crate's own `#[cfg(test)]` modules.
 
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-authority-server-test-{now}-{seq}"))
+/// RAII guard for a disposable temp directory. Removed on drop, including a
+/// panicking unwind — keep the guard bound for as long as the directory needs
+/// to exist. `Deref`/`AsRef` let it stand in for the `PathBuf` the call sites
+/// used to bind.
+struct TempDirGuard(TempDir);
+
+impl Deref for TempDirGuard {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        self.0.path()
+    }
+}
+
+impl AsRef<Path> for TempDirGuard {
+    fn as_ref(&self) -> &Path {
+        self.0.path()
+    }
+}
+
+fn temp_root() -> TempDirGuard {
+    TempDirGuard(
+        tempfile::Builder::new()
+            .prefix("posthaste-authority-server-test-")
+            .tempdir()
+            .expect("temp dir should be created"),
+    )
 }
 
 #[derive(Default)]

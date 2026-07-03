@@ -1,17 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::*;
-
-fn unique_temp_dir(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "posthaste-{label}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ))
-}
+use posthaste_testkit::temp_root;
 
 struct EnvVarGuard {
     key: &'static str,
@@ -44,7 +34,7 @@ impl Drop for EnvVarGuard {
 
 #[tokio::test]
 async fn start_server_does_not_write_daemon_port_file() {
-    let root = unique_temp_dir("embedded-startup-test");
+    let root = temp_root("embedded-startup-test");
     let config_root = root.join("config");
     let state_root = root.join("state");
     let xdg_config_root = root.join("xdg-config");
@@ -95,5 +85,4 @@ async fn start_server_does_not_write_daemon_port_file() {
         .shutdown()
         .await
         .expect("runtime shutdown should succeed");
-    let _ = std::fs::remove_dir_all(&root);
 }

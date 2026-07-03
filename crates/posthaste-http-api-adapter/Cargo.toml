@@ -59,6 +59,7 @@ reqwest = { workspace = true }
 # `test-util` gives the shutdown-sequence tests a paused clock so a bounded
 # hanging phase is verified without a real wall-clock wait.
 tokio = { workspace = true, features = ["test-util"] }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

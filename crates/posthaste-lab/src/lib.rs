@@ -61,4 +61,6 @@ use cli::{parse_config_validate_options, parse_list_options, run_config_validate
 use cli_support::{usage_kind_for_args, UsageKind};
 
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;

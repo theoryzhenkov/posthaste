@@ -264,15 +264,7 @@ mod lossless_write_tests {
 
     #[test]
     fn write_app_toml_preserves_comments_and_unknown_sections() {
-        let dir = std::env::temp_dir().join(format!(
-            "ph-cfg-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::temp_root();
         let path = dir.join("app.toml");
         fs::write(
             &path,
@@ -306,21 +298,11 @@ mod lossless_write_tests {
             !after.contains("acct-a"),
             "stale managed value lingered:\n{after}"
         );
-
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn write_app_toml_preserves_appearance_and_glass_blooms() {
-        let dir = std::env::temp_dir().join(format!(
-            "ph-cfg-appearance-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::temp_root();
         let path = dir.join("app.toml");
         std::fs::write(
             &path,
@@ -388,21 +370,11 @@ radius = 45
             "blooms array dropped:\n{after}"
         );
         assert!(after.contains("bloom-1"), "bloom id dropped:\n{after}");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn write_app_toml_round_trips_mailbox_colors() {
-        let dir = std::env::temp_dir().join(format!(
-            "ph-cfg-mboxcolor-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::temp_root();
         let path = dir.join("app.toml");
         std::fs::write(
             &path,
@@ -441,21 +413,11 @@ k = 1
             after.contains("[custom]"),
             "unknown section dropped:\n{after}"
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn write_app_toml_removes_a_cleared_managed_key() {
-        let dir = std::env::temp_dir().join(format!(
-            "ph-cfg-clear-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::temp_root();
         let path = dir.join("app.toml");
         fs::write(&path, "default_source_id = \"acct-a\"\n[custom]\nk = 1\n").unwrap();
 
@@ -472,7 +434,5 @@ k = 1
             after.contains("[custom]"),
             "unknown section dropped on clear:\n{after}"
         );
-
-        fs::remove_dir_all(&dir).ok();
     }
 }

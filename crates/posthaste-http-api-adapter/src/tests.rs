@@ -1,23 +1,12 @@
 use super::*;
-
-fn unique_temp_dir(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "posthaste-{label}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ))
-}
+use crate::test_support::{temp_root, TempDirGuard};
 
 #[cfg(unix)]
 #[test]
 fn write_secure_file_creates_0600() {
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = unique_temp_dir("secure-file-test");
-    std::fs::create_dir_all(&dir).expect("temp dir should create");
+    let dir = temp_root("secure-file-test");
     let path = dir.join("daemon.json");
 
     write_secure_file(&path, b"{\"port\":1}").expect("secure write should succeed");
@@ -29,15 +18,13 @@ fn write_secure_file_creates_0600() {
     write_secure_file(&path, b"{\"port\":2}").expect("secure overwrite should succeed");
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "overwrite must tighten back to 0600");
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Build a temp frontend dist dir with an `index.html` (carrying a
-/// `</head>`) and a static `app.js`, returning the dir for cleanup.
-fn write_frontend_dist() -> PathBuf {
-    let dir = unique_temp_dir("spa-fallback-test");
-    std::fs::create_dir_all(&dir).expect("temp dist dir should create");
+/// `</head>`) and a static `app.js`, returning the guard (keep it bound —
+/// the directory is removed when it drops).
+fn write_frontend_dist() -> TempDirGuard {
+    let dir = temp_root("spa-fallback-test");
     std::fs::write(
         dir.join("index.html"),
         "<!doctype html><html><head><title>Posthaste</title></head><body>app</body></html>",
@@ -108,8 +95,6 @@ async fn root_serves_index_with_injected_token() {
         .expect("token script present");
     let head_idx = body.find("</head>").expect("</head> preserved");
     assert!(script_idx < head_idx, "token script must precede </head>");
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A real static asset is served verbatim by ServeDir, with no token
@@ -143,6 +128,4 @@ async fn static_asset_served_verbatim() {
         !body.contains("__POSTHASTE_TOKEN__"),
         "static assets must never carry the injected token"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -5,13 +5,6 @@ use super::*;
 
 /// Removes the test's tempdir on drop so a panicking or early-returning test
 /// still leaves no state behind (P6).
-struct TempDirGuard(PathBuf);
-
-impl Drop for TempDirGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 fn fetched_body(raw_mime: Option<&str>) -> FetchedBody {
     FetchedBody {
@@ -23,7 +16,7 @@ fn fetched_body(raw_mime: Option<&str>) -> FetchedBody {
 }
 
 /// Counts `.eml` body files anywhere under `root`.
-fn count_eml_files(root: &PathBuf) -> usize {
+fn count_eml_files(root: &std::path::Path) -> usize {
     fn walk(dir: &std::path::Path, count: &mut usize) {
         let Ok(entries) = fs::read_dir(dir) else {
             return;
@@ -45,8 +38,7 @@ fn count_eml_files(root: &PathBuf) -> usize {
 /// The WAL is checkpointed (truncated to zero, or removed) by `close`.
 #[test]
 fn close_truncates_the_wal() -> Result<(), StoreError> {
-    let root = temp_root();
-    let _guard = TempDirGuard(root.clone());
+    let root = crate::test_support::temp_root();
     let db_path = root.join("mail.sqlite");
     let store = DatabaseStore::open(&db_path, root.join("data"))?;
     let account = AccountId::from("primary");
@@ -75,8 +67,7 @@ fn close_truncates_the_wal() -> Result<(), StoreError> {
 /// for a message that then fails to apply removes the `.eml`.
 #[test]
 fn rolled_back_txn_leaves_no_orphan_body() -> Result<(), StoreError> {
-    let root = temp_root();
-    let _guard = TempDirGuard(root.clone());
+    let root = crate::test_support::temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
     setup_source(&store, &account, "Primary")?;
@@ -103,8 +94,7 @@ fn rolled_back_txn_leaves_no_orphan_body() -> Result<(), StoreError> {
 /// A staged body that commits with its transaction survives on disk.
 #[test]
 fn committed_body_survives() -> Result<(), StoreError> {
-    let root = temp_root();
-    let _guard = TempDirGuard(root.clone());
+    let root = crate::test_support::temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
     setup_source(&store, &account, "Primary")?;
@@ -138,8 +128,7 @@ fn committed_body_survives() -> Result<(), StoreError> {
 /// `close` is idempotent: a second call is a harmless no-op.
 #[test]
 fn double_close_is_idempotent() -> Result<(), StoreError> {
-    let root = temp_root();
-    let _guard = TempDirGuard(root.clone());
+    let root = crate::test_support::temp_root();
     let db_path = root.join("mail.sqlite");
     let store = DatabaseStore::open(&db_path, root.join("data"))?;
     let account = AccountId::from("primary");
@@ -164,8 +153,7 @@ fn double_close_is_idempotent() -> Result<(), StoreError> {
 /// store) rather than panicking.
 #[test]
 fn post_close_write_errors_cleanly() -> Result<(), StoreError> {
-    let root = temp_root();
-    let _guard = TempDirGuard(root.clone());
+    let root = crate::test_support::temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
     setup_source(&store, &account, "Primary")?;

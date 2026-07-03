@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -15,6 +13,7 @@ use posthaste_authority_server::AccountSupervisor;
 use posthaste_http_api_adapter::token::{mint_full_scope_token, RootKey};
 use posthaste_http_api_adapter::AppState;
 use posthaste_store::DatabaseStore;
+use posthaste_testkit::temp_root;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
 
@@ -29,17 +28,6 @@ pub(super) fn test_root_key() -> RootKey {
 /// A valid full-scope macaroon minted under the test root key.
 pub(super) fn valid_token() -> String {
     mint_full_scope_token(&test_root_key())
-}
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-auth-middleware-test-{now}-{seq}"))
 }
 
 struct TestSecretStore;
@@ -71,7 +59,7 @@ async fn health() -> StatusCode {
 
 /// Build the app state with the auth flag toggled, mirroring `start_server`.
 pub(super) fn build_state(require_auth: bool) -> Arc<AppState> {
-    let root = temp_root();
+    let root = temp_root("posthaste-auth-middleware-test");
     let config_root = root.join("config");
     let state_root = root.join("state");
     let config_repo =

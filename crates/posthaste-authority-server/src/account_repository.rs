@@ -281,26 +281,14 @@ fn account_secret_ref(account_id: &AccountId) -> SecretRef {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
+    use crate::test_support::{temp_root, TempDirGuard};
     use posthaste_domain_model::{AccountDriver, AccountTransportSettings, AppSettings, ConfigError, SecretStoreError, SmartMailbox, SmartMailboxId, RFC3339_EPOCH};
 use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
     use posthaste_contract_core::RuntimeErrorCode;
     use posthaste_store::DatabaseStore;
-
-    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn temp_root() -> PathBuf {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after epoch")
-            .as_nanos();
-        let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("posthaste-account-repository-test-{now}-{seq}"))
-    }
 
     #[derive(Default)]
     struct TestConfig {
@@ -506,7 +494,17 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
         format!("{:?}:{}", secret_ref.kind, secret_ref.key)
     }
 
-    fn repository() -> (AccountRepository, Arc<TestConfig>, Arc<TestSecretStore>) {
+    // Returns the `TempDirGuard` alongside the repository: the database store
+    // it wraps is backed by a sqlite file under this directory, so the guard
+    // must outlive the caller's use of the returned repository, not just this
+    // function body (P6 — dropping it here would delete the directory out
+    // from under the still-open store).
+    fn repository() -> (
+        AccountRepository,
+        Arc<TestConfig>,
+        Arc<TestSecretStore>,
+        TempDirGuard,
+    ) {
         let root = temp_root();
         let state_root = root.join("state");
         let store = Arc::new(
@@ -520,6 +518,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
             AccountRepository::new(service, secret_store.clone()),
             config,
             secret_store,
+            root,
         )
     }
 
@@ -555,7 +554,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn create_rolls_back_source_when_secret_write_fails() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         secret_store.fail_next_save();
         let secret = replace_secret("new-password");
         let mut account = test_account("create-fails");
@@ -576,7 +575,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn create_reports_structured_error_when_compensation_fails() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         secret_store.fail_next_save();
         config.fail_next_delete();
         let secret = replace_secret("new-password");
@@ -607,7 +606,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn update_replace_aborts_before_source_save_when_secret_write_fails() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         let original_secret_ref = account_secret_ref(&AccountId::from("replace-fails"));
         secret_store
             .save(&original_secret_ref, "old-password")
@@ -640,7 +639,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn update_replace_leaves_source_unchanged_when_source_save_fails_after_secret_write() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         let original = test_account("save-fails");
         repo.service
             .insert_source(&original)
@@ -668,7 +667,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn update_clear_saves_record_before_deleting_managed_secret() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         let secret_ref = account_secret_ref(&AccountId::from("clear-secret"));
         secret_store
             .save(&secret_ref, "old-password")
@@ -698,7 +697,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn update_clear_keeps_saved_record_when_secret_delete_fails() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         let secret_ref = account_secret_ref(&AccountId::from("clear-delete-fails"));
         secret_store
             .save(&secret_ref, "old-password")
@@ -732,7 +731,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn delete_removes_source_then_managed_secret() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         let secret_ref = account_secret_ref(&AccountId::from("delete-account"));
         secret_store
             .save(&secret_ref, "old-password")
@@ -752,7 +751,7 @@ use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
 
     #[test]
     fn delete_keeps_source_removed_when_secret_delete_fails() {
-        let (repo, config, secret_store) = repository();
+        let (repo, config, secret_store, _root) = repository();
         let secret_ref = account_secret_ref(&AccountId::from("delete-secret-fails"));
         secret_store
             .save(&secret_ref, "old-password")
