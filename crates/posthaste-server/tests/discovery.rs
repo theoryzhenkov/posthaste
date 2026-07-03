@@ -53,8 +53,12 @@ impl Drop for EnvVarGuard {
 
 /// Start the bundled server, write the discovery file, then (as a client would)
 /// read the port + token back out of it and make an authenticated request —
-/// proving zero-flag auto-discovery works. Finally, run the ordered teardown with
-/// the discovery file wired in and assert it is removed.
+/// proving zero-flag auto-discovery works. Also proves the least-default
+/// bootstrap (RFC-L2-scripting §7 ruling 11): the written token is NOT the
+/// server's full-scope credential, but that credential attenuated down to
+/// `{mint, tap:read}` — it can mint and read, but any write is 401/403.
+/// Finally, run the ordered teardown with the discovery file wired in and
+/// assert it is removed.
 #[tokio::test]
 async fn discovery_file_is_written_read_and_connects_then_removed_on_shutdown() {
     let root = unique_temp_dir("discovery-test");
@@ -104,7 +108,13 @@ async fn discovery_file_is_written_read_and_connects_then_removed_on_shutdown() 
         parsed["url"],
         format!("http://127.0.0.1:{}/v1", handle.addr.port())
     );
-    assert_eq!(parsed["token"], handle.auth_token);
+    // Least-default bootstrap (RFC-L2-scripting §7 ruling 11): the written
+    // token is an ATTENUATION of the process's full-scope credential, never
+    // that credential itself.
+    assert_ne!(
+        parsed["token"], handle.auth_token,
+        "daemon.json must never carry the full-scope credential"
+    );
 
     // The credential is owner-only on unix.
     #[cfg(unix)]
@@ -134,6 +144,56 @@ async fn discovery_file_is_written_read_and_connects_then_removed_on_shutdown() 
             response.status()
         );
     }
+
+    // The scope wall (RFC-L2-scripting §7 ruling 11): the discovered bootstrap
+    // reads and mints, but cannot perform ANY write.
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{discovered_port}/v1");
+
+    // (a) GET /v1/events streams (the tap read surface).
+    let events_status = client
+        .get(format!("{base}/events"))
+        .bearer_auth(discovered_token)
+        .send()
+        .await
+        .expect("events request should send")
+        .status();
+    assert!(
+        events_status.is_success(),
+        "the bootstrap must be able to tail the tap: got {events_status}"
+    );
+
+    // (b) POST /v1/auth/tokens mints.
+    let mint_status = client
+        .post(format!("{base}/auth/tokens"))
+        .bearer_auth(discovered_token)
+        .header("content-type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .expect("mint request should send")
+        .status();
+    assert!(
+        mint_status.is_success(),
+        "the bootstrap must be able to mint: got {mint_status}"
+    );
+
+    // (c) ANY write is 401/403 — probed here with a resource-less write route
+    // (`POST /v1/config:reload`, `Manage`) so no account fixture is needed; the
+    // richer write-path negative (a real message command, with an
+    // Idempotency-Key) lives in `watch_exec_e2e.rs`.
+    let write_status = client
+        .post(format!("{base}/config:reload"))
+        .bearer_auth(discovered_token)
+        .send()
+        .await
+        .expect("write request should send")
+        .status();
+    assert!(
+        write_status == reqwest::StatusCode::UNAUTHORIZED
+            || write_status == reqwest::StatusCode::FORBIDDEN,
+        "the bootstrap must not be able to write: got {write_status}"
+    );
 
     // Clean teardown removes the discovery file (final M20 step).
     handle
