@@ -193,6 +193,15 @@ const eventHandlers = {
       dedupeKey: `operation.dispatch_uncertain:${id}`,
     })
   },
+  [EVENT_TOPICS.RuleFired]: () => {
+    // An automation rule fired at the authority server. Its Level-0 effects
+    // (tag/move) reach the web through the message.updated fact they emit, so
+    // this audit fact needs no additional cache reaction.
+  },
+  [EVENT_TOPICS.RuleDeliveryFailed]: () => {
+    // A rule's webhook/exec delivery was abandoned (dead-letter). Audit-only on
+    // the web side; no cache reaction.
+  },
 } satisfies Record<DomainEventTopic, EventHandler>
 
 function payloadChangeFlag(event: DomainEvent, key: string): boolean {

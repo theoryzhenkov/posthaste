@@ -61,6 +61,51 @@ pub struct AuthorityServerBuild {
     /// closes it as the final phase of the [`ShutdownSequence`](posthaste_http_api_adapter)
     /// (D62/M20).
     pub database_store: Arc<DatabaseStore>,
+    /// The far node itself, retained so the composition root can spawn the
+    /// in-process rule engine over its event bus + apply surface
+    /// ([`spawn_rule_engine`](AuthorityServerBuild::spawn_rule_engine)). Private:
+    /// `AuthorityServer` is a crate-internal type.
+    authority_server: Arc<AuthorityServer>,
+    /// The config root, for loading `rules.toml` at rule-engine spawn.
+    config_root: std::path::PathBuf,
+}
+
+impl AuthorityServerBuild {
+    /// Spawn the in-process automation rule engine over this node's event bus
+    /// (RFC-L2-scripting S5). Loads `rules.toml` from the config root; if there
+    /// are no enabled rules, spawns nothing and returns `None`.
+    ///
+    /// `minter` supplies per-invocation capability tokens for Level-1 hook
+    /// actions (webhook/exec). Pass `None` for a deployment without the macaroon
+    /// root key (Level-0 tag/move/notify still run; hook actions dead-letter).
+    /// The returned handle keeps the engine alive; drop it to stop.
+    pub fn spawn_rule_engine(
+        &self,
+        minter: Option<crate::rules::SharedMinter>,
+    ) -> Option<crate::rules::RuleEngineHandle> {
+        let rules = match crate::rules::load_rules(&self.config_root) {
+            Ok(rules) => rules,
+            Err(error) => {
+                ph_warn!(
+                    events::RULE_ENGINE_STARTED,
+                    error = %error,
+                    "failed to load rules.toml; rule engine not started"
+                );
+                return None;
+            }
+        };
+        let enabled: Vec<_> = rules.into_iter().filter(|rule| rule.enabled).collect();
+        if enabled.is_empty() {
+            return None;
+        }
+        Some(crate::rules::spawn_engine(
+            self.authority_server.clone(),
+            self.api_bridge.service.clone(),
+            self.api_bridge.event_sender.clone(),
+            enabled,
+            minter,
+        ))
+    }
 }
 
 /// The authority server's service-graph handle: the `MailService`, `MailStore`, secret
@@ -332,6 +377,10 @@ pub(crate) fn build_runtime(
         runtime_status,
         database_store,
     } = authority_server;
+    // Retain the config root for the rule engine (loads `rules.toml`) before the
+    // config is destructured.
+    let config_root = config.config_root.clone();
+    let rule_engine_far_node = authority_server.clone();
     // Take the transport selection out of the config (the override decorator is
     // `FnOnce`, so it is moved, not cloned); the rest of the config was consumed
     // by `build_authority_server_parts`.
@@ -371,6 +420,8 @@ pub(crate) fn build_runtime(
         api_bridge,
         authority_server_link,
         database_store,
+        authority_server: rule_engine_far_node,
+        config_root,
     }
 }
 

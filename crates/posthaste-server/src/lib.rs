@@ -12,6 +12,8 @@ pub mod openapi;
 
 pub mod oauth_routes;
 
+mod rule_minter;
+mod rules_api;
 mod shutdown_seams;
 mod startup;
 mod startup_authority_server;
@@ -32,10 +34,11 @@ use std::sync::Arc;
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
 use posthaste_http_api_adapter::{
-    assemble_daemon_preamble, build_api_router, build_app_state, serve, DaemonPreamble,
+    assemble_daemon_preamble, build_api_router, build_app_state, serve, token, DaemonPreamble,
     ServeOptions, ServerConfig, ServerHandle, ShutdownSequence, StoreClose, SupervisorStop,
 };
 use posthaste_authority_server::{build_authority_server, build_authority_server_node};
+use rule_minter::MacaroonMinter;
 use posthaste_observability::{events, ph_info};
 use posthaste_runtime::{build_remote_runtime, AuthorityServerTransportConfig};
 use tokio_util::sync::CancellationToken;
