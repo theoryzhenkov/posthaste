@@ -10,6 +10,7 @@ import { streamEvents, type EventsOptions } from "./events.js";
 import { commandHelp, topLevelHelp } from "./help.js";
 import { mintToken, parseTokenMintOptions } from "./token.js";
 import { watchEvents, type WatchOptions } from "./watch.js";
+import { startHookServer, type HookServeOptions } from "./hook.js";
 import {
   parseApplyOptions,
   parseMoveOptions,
@@ -203,24 +204,75 @@ const WRITE_VERBS: Record<string, WriteVerb> = {
 
 const WATCH_HELP = `Usage: posthastectl watch [filters] [--exec <command>]
 
-Watch for new mail and run a command (or emit JSON) per matching message. For
-each genuine arrival it fetches the full message, applies the filters, then runs
---exec with the MessageDetail JSON on stdin and PH_* env vars set
-(PH_ACCOUNT_ID, PH_MESSAGE_ID, PH_SEQ, PH_TOPIC, PH_KEYWORDS, PH_MAILBOX_IDS).
-Without --exec it prints the matching MessageDetail as one JSON line.
+Watch the tap and run a command (or emit JSON) per matching event. Defaults to
+--topic message.updated: for each genuine arrival it fetches the full message,
+applies the filters, then runs --exec with the MessageDetail JSON on stdin and
+PH_* env vars set (PH_ACCOUNT_ID, PH_MESSAGE_ID, PH_SEQ, PH_TOPIC, PH_RULE,
+PH_KEYWORDS, PH_MAILBOX_IDS). Without --exec it prints the matching
+MessageDetail as one JSON line.
+
+Client-machine execution (RFC-L2-scripting ruling 19): pair an 'emit' rule
+with 'watch --topic rule.fired --rule <name> --exec <script>' to evaluate the
+WHEN-clause once, centrally, at the authority server, and execute at the edge.
+A rule.fired watch skips the arrival gate (there is no mailbox arrival to gate
+on) and dispatches every matching rule.fired event.
 
 Filters:
   --account <id>     Only this account (server-side)
+  --topic <topic>    Subscribe to this topic instead of message.updated
+                      (server-side; e.g. rule.fired)
   --mailbox <id>     Only messages in this mailbox
   --keyword <tag>    Only messages carrying this tag (JMAP keyword)
+  --rule <name>      Only rule.fired events for this rule id (pair with
+                      --topic rule.fired)
   --all-updates      Fire on any message change, not just genuine arrivals
 
 Dispatch & resume:
   --exec <command>   Shell command to run per match (detail JSON on stdin)
   --cursor <file>    Persist the last-processed seq here; resume on restart
 
-The --exec command runs on attacker-influenced input (email). The --keyword gate
-is convenience, not an auth boundary — treat the payload as untrusted.`;
+The --exec command runs on attacker-influenced input (email). The --keyword
+and --rule gates are convenience, not an auth boundary (RFC-L2-scripting
+ruling 20e) — the server evaluates and emits regardless of these client-side
+filters; treat the payload as untrusted.`;
+
+const HOOK_SERVE_HELP = `Usage: posthastectl hook serve --exec <script> [--port <n>] [--path </path>] [--token <token>]
+
+The built-in localhost webhook receiver (RFC-L2-scripting ruling 17): the easy
+listener for a GUI/rules.toml 'webhook' action, so you don't have to stand up
+your own HTTP server. Binds 127.0.0.1 only. Each accepted POST to --path runs
+--exec once, with the raw delivery body on stdin (never shell-interpolated —
+payload-is-data, RFC-L2-scripting ruling 20a) and PH_* env vars derived from
+it: PH_RULE, PH_IDEMPOTENCY_KEY, PH_ACCOUNT, PH_MESSAGE_ID, PH_FROM,
+PH_SUBJECT, PH_KEYWORDS, PH_EVENT_SEQ, PH_TOPIC — plus POSTHASTE_TOKEN (the
+delivery's own per-invocation capability token) and, when a daemon is
+discoverable, POSTHASTE_API_URL, so the write verbs (tag/move/reply/send/
+apply) work with no further setup.
+
+  --exec <script>    Required. Shell command to run per delivery.
+  --port <n>         Listen port. Default 8787; 0 lets the OS assign one.
+  --path </path>     URL path deliveries must POST to. Default /hook.
+  --token <token>    Require 'Authorization: Bearer <token>' on every
+                      delivery (401 without it) — gates who may invoke this
+                      receiver; it is not a substitute for the payload's own
+                      capability token.
+
+Pairs with 'register-watch' (posthaste-wizard) for an always-on receiver, and
+with an 'emit' rule + 'watch --rule' for the no-listener, pull-based path.`;
+
+/**
+ * Resolve when `signal` aborts (SIGINT), for a command like `hook serve` with
+ * no stream of its own to end on abort. With no signal at all, never resolves
+ * — matching `watch`/`events`, which likewise only end on an abort their
+ * caller supplies.
+ */
+function waitForAbort(signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise(() => {});
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
 
 /** Pull the known global flags out of argv, leaving the command tokens. */
 function extractGlobals(argv: string[]): { globals: Globals; rest: string[] } {
@@ -355,14 +407,47 @@ function parseWatchOptions(tokens: string[]): WatchOptions {
       return next;
     };
     if (name === "--account") opts.account = value();
+    else if (name === "--topic") opts.topic = value();
     else if (name === "--mailbox") opts.mailbox = value();
     else if (name === "--keyword") opts.keyword = value();
+    else if (name === "--rule") opts.rule = value();
     else if (name === "--exec") opts.exec = value();
     else if (name === "--cursor") opts.cursorFile = value();
     else if (name === "--all-updates") opts.allUpdates = true;
     else throw new UsageError(`unknown flag ${name} for 'watch'`);
   }
   return opts;
+}
+
+/** Parse the `hook serve` subcommand's flags. */
+function parseHookServeOptions(tokens: string[]): HookServeOptions {
+  const opts: Partial<HookServeOptions> = {};
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i] ?? "";
+    const eq = token.indexOf("=");
+    const name = eq >= 0 ? token.slice(0, eq) : token;
+    const value = (): string => {
+      if (eq >= 0) return token.slice(eq + 1);
+      const next = tokens[++i];
+      if (next === undefined) throw new UsageError(`${name} requires a value`);
+      return next;
+    };
+    if (name === "--exec") opts.exec = value();
+    else if (name === "--port") {
+      const raw = value();
+      const port = Number(raw);
+      if (!Number.isInteger(port) || port < 0 || port > 65535) {
+        throw new UsageError(`--port must be an integer 0-65535, got '${raw}'`);
+      }
+      opts.port = port;
+    } else if (name === "--path") opts.path = value();
+    else if (name === "--token") opts.token = value();
+    else throw new UsageError(`unknown flag ${name} for 'hook serve'`);
+  }
+  if (!opts.exec) {
+    throw new UsageError("hook serve requires --exec <script>");
+  }
+  return opts as HookServeOptions;
 }
 
 /**
@@ -455,6 +540,47 @@ export async function run(argv: string[], deps: RunDeps): Promise<number> {
         log: (line) => deps.stderr(`posthastectl: ${line}\n`),
         signal: deps.signal,
       });
+      return ExitCode.Ok;
+    } catch (error) {
+      return failRuntime(error, deps);
+    }
+  }
+
+  // `hook serve` — the built-in localhost webhook receiver (ruling 17). Also a
+  // long-running command, not a registry operation.
+  if (rest[0] === "hook") {
+    if (globals.help || rest[1] !== "serve") {
+      if (globals.help) {
+        deps.stdout(`${HOOK_SERVE_HELP}\n`);
+        return ExitCode.Ok;
+      }
+      deps.stderr(`posthastectl: usage: ${HOOK_SERVE_HELP}\n`);
+      return ExitCode.Usage;
+    }
+    try {
+      const opts = parseHookServeOptions(rest.slice(2));
+      if (!deps.runCommand) {
+        throw new UsageError(
+          "no command runner available; cannot honor hook serve --exec",
+        );
+      }
+      // Best-effort daemon discovery, purely to export POSTHASTE_API_URL to the
+      // handler's environment — a hook receiver must still work with no daemon
+      // reachable (it never calls the API itself; the per-delivery token in the
+      // payload is what the handler needs to write back).
+      let apiUrl: string | undefined;
+      try {
+        apiUrl = connect(deps, globals).baseUrl;
+      } catch {
+        apiUrl = undefined;
+      }
+      const server = startHookServer(opts, {
+        runCommand: deps.runCommand,
+        log: (line) => deps.stderr(`posthastectl: ${line}\n`),
+        apiUrl,
+      });
+      await waitForAbort(deps.signal);
+      server.stop();
       return ExitCode.Ok;
     } catch (error) {
       return failRuntime(error, deps);

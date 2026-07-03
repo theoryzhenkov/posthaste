@@ -84,8 +84,10 @@ a script trades the read-only bootstrap for a working, least-privilege token.
 A handler is any program. `watch --exec` runs it **once per matching message**,
 with the full `MessageDetail` JSON on **stdin** and these env vars set:
 
-`PH_ACCOUNT_ID`, `PH_MESSAGE_ID`, `PH_SEQ`, `PH_TOPIC`, `PH_KEYWORDS`,
-`PH_MAILBOX_IDS`.
+`PH_ACCOUNT_ID`, `PH_MESSAGE_ID`, `PH_SEQ`, `PH_TOPIC`, `PH_RULE`,
+`PH_KEYWORDS`, `PH_MAILBOX_IDS` (`PH_RULE` is empty except on a `--topic
+rule.fired` watch — see [Central evaluate, edge
+execute](#central-evaluate-edge-execute-emit) below).
 
 ### Writing a handler: the two-line form
 
@@ -180,9 +182,17 @@ posthastectl watch --exec 'sh ./write_back.sh' --cursor ./cursor
   app restarts.
 - Filters: `--account <id>`, `--mailbox <id>`, `--keyword <tag>`, or
   `--all-updates` to fire on every change (not just genuine arrivals).
+- `--topic <topic>` — subscribe to a topic other than the default
+  `message.updated` (server-side). Pairs with `--rule <name>` below for the
+  client-machine-execution pattern (RFC-L2-scripting ruling 19).
+- `--rule <name>` — with `--topic rule.fired`, dispatch only the named rule's
+  `rule.fired` events. See [Central evaluate, edge
+  execute](#central-evaluate-edge-execute-emit) below for the full flow.
 
 > The `--exec` handler runs on attacker-influenced input (email). Treat stdin as
-> untrusted; `--keyword` is convenience, not an auth boundary.
+> untrusted; `--keyword` and `--rule` are convenience, not an auth boundary —
+> the server evaluates and emits regardless of what a client-side filter
+> selects (RFC-L2-scripting ruling 20e).
 
 If the tap's durable history is truncated past your cursor, `watch` receives an
 explicit **gap frame** (never a silent drop) and resumes from the live head.
@@ -291,6 +301,58 @@ Delivery is observable: every firing emits a `rule.fired` fact, and a webhook
 whose bounded retries are exhausted dead-letters as a `rule.delivery.failed`
 fact — both on the tap.
 
+### The easy listener: `posthastectl hook serve`
+
+A `webhook` action needs *something* listening at its URL. For a
+GUI-created rule (or any `rules.toml` webhook pointed at your own machine),
+`posthastectl hook serve` **is** that listener — a tiny built-in localhost
+receiver (RFC-L2-scripting ruling 17), so you never write an HTTP server just
+to catch a delivery:
+
+```sh
+posthastectl hook serve --exec ./handler.sh --port 8787 --path /hook
+```
+
+Point a `webhook` rule's `url` at `http://127.0.0.1:8787/hook` (in place of
+the [worked example](#author-a-rule-in-rulestoml) above's
+`https://vm.example/agent`), and every delivery runs `./handler.sh` once,
+with the **exact same contract** as the Level-1 `exec` action: the full
+`{ ruleId, idempotencyKey, event, message, token }` delivery JSON on stdin,
+and these env vars derived from it —
+
+`PH_RULE`, `PH_IDEMPOTENCY_KEY`, `PH_ACCOUNT`, `PH_MESSAGE_ID`, `PH_FROM`,
+`PH_SUBJECT`, `PH_KEYWORDS`, `PH_EVENT_SEQ`, `PH_TOPIC`, plus
+`POSTHASTE_TOKEN` (the delivery's own per-invocation attenuated token) and,
+when a daemon is discoverable on this machine, `POSTHASTE_API_URL` — so the
+same two-line handler from [Writing a handler](#writing-a-handler-the-two-line-form)
+works unmodified:
+
+```sh
+#!/bin/sh
+# handler.sh — PH_MESSAGE_ID, POSTHASTE_TOKEN, POSTHASTE_API_URL are already set.
+posthastectl tag --message "$PH_MESSAGE_ID" --add reviewed
+```
+
+**Payload-is-data, same invariant as `exec`.** The delivery body reaches your
+script only as the JSON stdin document (or the `PH_*` env vars) — never
+interpolated into a command string or argv, so a malicious sender cannot
+inject a command through the webhook body.
+
+- `--port <n>` — default `8787`; `0` lets the OS assign a port (check the
+  startup log line for the resolved one).
+- `--path </path>` — default `/hook`; must match the rule's `url` path.
+- `--token <token>` — require `Authorization: Bearer <token>` on every
+  delivery (`401` without it), so only a rule that knows the token can invoke
+  this receiver. It gates *who may call the listener*, not a substitute for
+  the per-delivery capability token already inside the payload.
+- Binds `127.0.0.1` only (RFC-L2-scripting ruling 15) — there is no `--host`
+  flag; this command is not meant to be reachable off the box.
+- `Ctrl-C` (`SIGINT`) shuts it down cleanly.
+
+Pair `hook serve` with `posthaste-wizard ctl register-watch` (ruling 12) to
+wrap it in a user service unit for an always-on receiver, exactly as you would
+`watch --exec`.
+
 ### Central evaluate, edge execute (`emit`)
 
 The `emit` action does nothing but fire the `rule.fired` fact:
@@ -304,11 +366,31 @@ enabled = true
 action = { kind = "emit" }
 ```
 
-Pair it with a client-side, rule-filtered `watch` on your laptop: the
-always-on authority server evaluates the WHEN-clause **once, centrally**, and
-your edge machine handles the resulting `rule.fired` fact and decides *how* to
-act. The WHEN logic lives in one place; execution happens wherever you want it.
-(The `watch --rule` filter is part of the CLI surface.)
+Pair it with a client-side, rule-filtered `watch` on your laptop — the
+no-listener counterpart to `hook serve` above, pull-based so nothing needs an
+inbound port:
+
+```sh
+posthastectl watch --topic rule.fired --rule flag-for-edge --exec ./handler.sh --cursor ./cursor
+```
+
+The always-on authority server evaluates the WHEN-clause **once, centrally**,
+and emits `rule.fired`; `--topic rule.fired` subscribes to that fact stream
+instead of the default `message.updated`, and `--rule flag-for-edge` narrows
+dispatch to just this rule's firings (`./handler.sh` gets the usual `PH_*` env,
+now including `PH_RULE=flag-for-edge` and the matched message's detail on
+stdin — a `rule.fired` watch skips the arrival gate, since a fact isn't a
+mailbox arrival). The WHEN logic lives in one place; execution happens
+wherever you want it — this is the "emit rule → `watch --rule`" half of the
+north-star client-machine-execution pattern (`hook serve` above is the other
+half, for `webhook` rules).
+
+**`--rule` (like `--keyword`) is convenience, not a security boundary**
+(RFC-L2-scripting ruling 20e): it only filters what your local script *sees* —
+the server evaluates the WHEN-clause and emits `rule.fired` regardless of any
+client-side filter, so the sender-scoping and least-grant guidance in
+[scripting-security.md](scripting-security.md) still applies to the rule
+itself, not to `--rule`.
 
 ### The exec action is file-only (load-bearing security rule)
 
@@ -463,6 +545,13 @@ rung — trigger + capability over one connection.
 
 - Tap: `GET /v1/events` (SSE) — `--after-seq`, `--topic`, `--account`,
   `--mailbox`.
+- `watch` filters (client-side, convenience — not an auth boundary, ruling
+  20e): `--account`, `--topic` (default `message.updated`), `--mailbox`,
+  `--keyword`, `--rule` (pair with `--topic rule.fired`), `--all-updates`.
+- `hook serve`: `posthastectl hook serve --exec <script> [--port <n>]
+  [--path </path>] [--token <token>]` — the built-in localhost webhook
+  receiver (ruling 17), for GUI/`rules.toml` `webhook` actions. `127.0.0.1`
+  only; default `--port 8787`, `--path /hook`.
 - Apply (write-back) commands: `POST /v1/sources/{id}/commands/messages/{mid}/…`
   (`set-keywords`, `add-to-mailbox`, `remove-from-mailbox`, `replace-mailboxes`,
   `destroy`) — all accept the `Idempotency-Key` header. `POST
@@ -483,10 +572,17 @@ rung — trigger + capability over one connection.
   `PH_EVENT_SEQ`, `PH_TOPIC` (plus `POSTHASTE_TOKEN`); full event+message JSON
   on stdin.
 - `watch --exec` env vars (Level 2, CLI-driven): `PH_ACCOUNT_ID`,
-  `PH_MESSAGE_ID`, `PH_SEQ`, `PH_TOPIC`, `PH_KEYWORDS`, `PH_MAILBOX_IDS`; full
+  `PH_MESSAGE_ID`, `PH_SEQ`, `PH_TOPIC`, `PH_RULE` (empty unless a `--rule`-
+  matched `rule.fired` event), `PH_KEYWORDS`, `PH_MAILBOX_IDS`; full
   `MessageDetail` JSON on stdin.
+- `hook serve` env vars (client-side receiver, mirrors the `exec` action's
+  set above): `PH_RULE`, `PH_IDEMPOTENCY_KEY`, `PH_ACCOUNT`, `PH_MESSAGE_ID`,
+  `PH_FROM`, `PH_SUBJECT`, `PH_KEYWORDS`, `PH_EVENT_SEQ`, `PH_TOPIC`, plus
+  `POSTHASTE_TOKEN` (the delivery's token) and `POSTHASTE_API_URL` (when a
+  daemon is discoverable); the raw delivery body on stdin.
 - Token mint: `posthastectl token mint` → `POST /v1/auth/tokens`.
-- Design: `docs/eph/RFC-L2-scripting.md`.
+- Design: `docs/eph/RFC-L2-scripting.md`. Security/threat model:
+  [scripting-security.md](scripting-security.md).
 
 ## Appendix: manual `posthastectl` install
 
