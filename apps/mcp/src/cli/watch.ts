@@ -2,9 +2,14 @@ import { apiFetch, ApiError, type Connection } from "../client.js";
 import { consumeSse, gapFrame, openEventStream } from "./events.js";
 
 /**
- * `watch` only ever subscribes to `message.updated` (the topic that covers both
- * arrivals and metadata changes); the arrival-vs-update distinction is a
- * client-side gate on the payload's `arrivedMailboxIds`.
+ * `watch` defaults to subscribing to `message.updated` (the topic that covers
+ * both arrivals and metadata changes); the arrival-vs-update distinction is a
+ * client-side gate on the payload's `arrivedMailboxIds` and only applies while
+ * subscribed to that default topic. `--topic` overrides the subscription — the
+ * client-machine-execution pattern (RFC-L2-scripting ruling 19: "evaluate
+ * centrally, execute at the edge") pairs an `emit` rule with
+ * `watch --topic rule.fired --rule <name> --exec <script>`, which skips the
+ * arrival gate entirely (a `rule.fired` fact has no `arrivedMailboxIds`).
  */
 const WATCH_TOPIC = "message.updated";
 
@@ -12,10 +17,20 @@ const WATCH_TOPIC = "message.updated";
 export interface WatchOptions {
   /** Server-side account filter. */
   account?: string;
+  /** Server-side topic filter; defaults to `message.updated`. */
+  topic?: string;
   /** Client-side mailbox filter (the message must be in this mailbox). */
   mailbox?: string;
   /** Client-side tag filter: the message must carry this JMAP keyword. */
   keyword?: string;
+  /**
+   * Client-side rule filter (ruling 19): only dispatch `rule.fired` events
+   * whose payload `ruleId` matches. CONVENIENCE, NOT A SECURITY BOUNDARY
+   * (ruling 20e) — like `--keyword`, this filters what the local script sees,
+   * it does not restrict what the server evaluates or emits. Pair with
+   * `--topic rule.fired`.
+   */
+  rule?: string;
   /** Fire on every `message.updated`, not just genuine arrivals. */
   allUpdates?: boolean;
   /** Shell command run per matching message (detail JSON on stdin + env). */
@@ -54,6 +69,8 @@ interface DomainEventish {
   payload?: {
     messageId?: string;
     arrivedMailboxIds?: unknown;
+    /** The firing rule's id, present on `rule.fired` payloads (ruling 19). */
+    ruleId?: string;
   };
 }
 
@@ -91,9 +108,10 @@ export async function watchEvents(
     ? await readCursor(opts.cursorFile, deps)
     : undefined;
 
+  const topic = opts.topic ?? WATCH_TOPIC;
   const body = await openEventStream(
     conn,
-    { account: opts.account, topic: WATCH_TOPIC, afterSeq },
+    { account: opts.account, topic, afterSeq },
     { fetch: deps.fetch, signal: deps.signal },
   );
   if (!body) return;
@@ -143,8 +161,18 @@ async function handleEvent(
 
   const seq = typeof event.seq === "number" ? event.seq : undefined;
   try {
-    const arrived = asStringArray(event.payload?.arrivedMailboxIds);
-    if (!opts.allUpdates && arrived.length === 0) return; // not a genuine arrival
+    // The arrival-vs-update gate only applies to the default `message.updated`
+    // subscription — a `--topic rule.fired` (or any other) watch has no
+    // `arrivedMailboxIds` to gate on, so every matching event is a "hit".
+    const subscribedTopic = opts.topic ?? WATCH_TOPIC;
+    if (subscribedTopic === WATCH_TOPIC) {
+      const arrived = asStringArray(event.payload?.arrivedMailboxIds);
+      if (!opts.allUpdates && arrived.length === 0) return; // not a genuine arrival
+    }
+
+    // `--rule` (ruling 19): dispatch only the named rule's `rule.fired` events.
+    // CONVENIENCE, NOT A SECURITY BOUNDARY (ruling 20e) — see WatchOptions.rule.
+    if (opts.rule && event.payload?.ruleId !== opts.rule) return;
 
     const accountId = event.accountId;
     const messageId = event.messageId ?? event.payload?.messageId;
@@ -174,7 +202,15 @@ async function handleEvent(
 
     await dispatch(
       detail,
-      { seq, accountId, messageId, topic: event.topic, keywords, mailboxIds },
+      {
+        seq,
+        accountId,
+        messageId,
+        topic: event.topic,
+        ruleId: event.payload?.ruleId,
+        keywords,
+        mailboxIds,
+      },
       opts,
       deps,
     );
@@ -194,6 +230,8 @@ interface DispatchMeta {
   accountId: string;
   messageId: string;
   topic?: string;
+  /** The firing rule's id, when the event was a `rule.fired` fact. */
+  ruleId?: string;
   keywords: string[];
   mailboxIds: string[];
 }
@@ -218,6 +256,7 @@ async function dispatch(
     PH_MESSAGE_ID: meta.messageId,
     PH_SEQ: meta.seq !== undefined ? String(meta.seq) : "",
     PH_TOPIC: meta.topic ?? "",
+    PH_RULE: meta.ruleId ?? "",
     PH_KEYWORDS: meta.keywords.join(","),
     PH_MAILBOX_IDS: meta.mailboxIds.join(","),
   };

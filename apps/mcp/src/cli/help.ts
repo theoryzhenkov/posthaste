@@ -42,6 +42,9 @@ export function topLevelHelp(operations: Operation[]): string {
   lines.push(
     `  ${"token mint".padEnd(width)}  Mint a least-privilege capability token (attenuated)`,
   );
+  lines.push(
+    `  ${"hook serve".padEnd(width)}  Run a localhost webhook receiver (a script per delivery)`,
+  );
   lines.push(`  ${"tag".padEnd(width)}  Add/remove keywords on a message`);
   lines.push(
     `  ${"move".padEnd(width)}  Move a message to a mailbox (role or id)`,

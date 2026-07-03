@@ -242,3 +242,109 @@ describe("run — events tap", () => {
     expect(cap.err).toContain("GET /v1/events");
   });
 });
+
+describe("run — dispatcher wiring: watch --topic/--rule, hook serve", () => {
+  test("top-level help lists 'hook serve'", async () => {
+    const { deps, cap } = harness();
+    expect(await run([], deps)).toBe(ExitCode.Ok);
+    expect(cap.out).toContain("hook serve");
+  });
+
+  test("watch --help documents --topic and --rule as convenience filters", async () => {
+    const { deps, cap } = harness();
+    expect(await run(["watch", "--help"], deps)).toBe(ExitCode.Ok);
+    expect(cap.out).toContain("--topic <topic>");
+    expect(cap.out).toContain("--rule <name>");
+    expect(cap.out).toContain("convenience, not an auth boundary");
+  });
+
+  test("watch --rule without --exec/--topic is still accepted (parses cleanly)", async () => {
+    const sse =
+      'id: 1\ndata: {"seq":1,"topic":"rule.fired","accountId":"a","messageId":"m","payload":{"ruleId":"r1"}}\n\n';
+    const fetch: typeof globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/events")) {
+        expect(url).toContain("topic=rule.fired");
+        return new Response(sse, {
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return Response.json({ keywords: [], mailboxIds: [] });
+    };
+    const { deps } = harness({ fetch });
+    expect(
+      await run(["watch", "--topic", "rule.fired", "--rule", "r1"], deps),
+    ).toBe(ExitCode.Ok);
+  });
+
+  test("hook serve --help prints usage, exit 0", async () => {
+    const { deps, cap } = harness();
+    expect(await run(["hook", "serve", "--help"], deps)).toBe(ExitCode.Ok);
+    expect(cap.out).toContain("Usage: posthastectl hook serve");
+    expect(cap.out).toContain("payload-is-data");
+  });
+
+  test("'hook' with no/unknown subcommand → usage error, exit 2", async () => {
+    const { deps, cap } = harness();
+    expect(await run(["hook"], deps)).toBe(ExitCode.Usage);
+    expect(cap.err).toContain("hook serve");
+    expect(await run(["hook", "bogus"], deps)).toBe(ExitCode.Usage);
+  });
+
+  test("hook serve without --exec → usage error, exit 2, no server started", async () => {
+    const { deps, cap } = harness();
+    expect(await run(["hook", "serve"], deps)).toBe(ExitCode.Usage);
+    expect(cap.err).toContain("--exec");
+  });
+
+  test("hook serve --port not-a-number → usage error, exit 2", async () => {
+    const { deps, cap } = harness();
+    expect(
+      await run(["hook", "serve", "--exec", "./h.sh", "--port", "nope"], deps),
+    ).toBe(ExitCode.Usage);
+    expect(cap.err).toContain("--port");
+  });
+
+  test("hook serve starts, accepts a delivery, and stops cleanly on abort", async () => {
+    const controller = new AbortController();
+    const { deps, cap } = harness();
+    const deliveries: { input: string; env: Record<string, string> }[] = [];
+    deps.runCommand = async (_command, input, env) => {
+      deliveries.push({ input, env });
+      return 0;
+    };
+    deps.signal = controller.signal;
+
+    const runPromise = run(
+      ["hook", "serve", "--exec", "./h.sh", "--port", "0"],
+      deps,
+    );
+
+    // Wait for the "listening on <url>" diagnostic to land on stderr, then
+    // pull the OS-assigned port back out of it.
+    const deadline = Date.now() + 2000;
+    let url: string | undefined;
+    while (Date.now() < deadline) {
+      const match = /listening on (http:\/\/127\.0\.0\.1:\d+\/hook)/.exec(
+        cap.err,
+      );
+      if (match) {
+        url = match[1];
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(url).toBeDefined();
+
+    const res = await fetch(url as string, {
+      method: "POST",
+      body: JSON.stringify({ ruleId: "r1", event: {}, message: {} }),
+    });
+    expect(res.status).toBe(200);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]!.env.PH_RULE).toBe("r1");
+
+    controller.abort();
+    expect(await runPromise).toBe(ExitCode.Ok);
+  });
+});
