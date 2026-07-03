@@ -5,7 +5,7 @@ modified: 2026-07-03
 reviewed: 2026-07-03
 lifecycle: ephemeral
 type: RFC
-state: draft
+state: ratified
 depends:
   - path: eph/AUDIT-L2-jmap-push
   - path: eph/AUDIT-L2-imap-sync-scheduling
@@ -284,3 +284,13 @@ A1 lockout is field-observed.
 - **O7 — Global sync concurrency limiter (D98).** Extend the existing
   `CacheResourceGovernor` (which today throttles cache fetches only) to cover the
   sync path, or add a distinct sync governor? And what is the global cap value?
+
+## 7. Rulings (owner, 2026-07-03)
+
+- **O1 (the S1 ruling): Option A — park + surface.** `DispatchUncertain` sends are parked, never auto-resent; JMAP may graduate to bounded auto-retry (B) only after D84's idempotent create-id is field-proven. **Owner rider: this requires a proper frontend surface** — parked sends become a first-class needs-attention state in the UI (outbox pane: the parked message with its uncertainty reason + explicit retry/discard actions + a notification on entry). Added to M32's scope as its user-facing half; M32 is not done until the surface ships (a parked send with no UI is data loss with extra steps).
+- **O2**: the failure taxonomy lives in `posthaste-domain-model` (ruled jointly with the lifecycle RFC §7.3).
+- **O3**: single reused authenticated IMAP session per account; revisit only on latency evidence.
+- **O4**: circuit breaker defaults accepted — 5 consecutive failures / 30-60s cooldown / single half-open probe; tagged for tuning under real traffic.
+- **O5**: at-most-once-on-uncertainty is the accepted SMTP send contract (park, never resend) — the SMTP face of O1's ruling.
+- **O6**: skip the WS pushState checkpoint; always run the incremental delta on reconnect (catch-up is unconditional; the resume mechanism can come later on evidence).
+- **O7**: a distinct sync governor, not an extension of CacheResourceGovernor — different pressure signals, don't couple unrelated budgets.
