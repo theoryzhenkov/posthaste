@@ -13,6 +13,7 @@
 
 mod fixture;
 mod gmail;
+mod guard;
 mod harness;
 mod migration;
 mod paths;
@@ -23,6 +24,7 @@ pub use fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureM
 pub use gmail::{
     serve as serve_mock_gmail, GmailImapFixture, SEEDED_FROM_EMAIL, SEEDED_LABELS, SEEDED_SUBJECT,
 };
+pub use guard::TempDirGuard;
 pub use harness::Harness;
 pub use migration::runtime_handle_with_account_runtime_provider_for_migration;
 pub use paths::{free_loopback_port, stalwart_bin, temp_root, workspace_root};

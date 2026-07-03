@@ -25,6 +25,7 @@ posthaste-store = { path = "../posthaste-store" }
 imap-codec = "2.0.0-alpha.7"
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }

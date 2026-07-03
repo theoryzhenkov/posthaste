@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,14 +9,16 @@ use posthaste_domain_model::{
 use posthaste_runtime::RuntimeBuildConfig;
 use posthaste_store::DatabaseStore;
 
+use crate::guard::TempDirGuard;
 use crate::paths::temp_root;
 
 /// Disposable integration harness: a config repository, a SQLite store, and a
 /// `MailService` bound to them, all rooted under a fresh temp directory.
 ///
 /// The store and service are exposed so tests can drive mutations, flush, sync,
-/// and read projections directly. The temp root is cleaned up by the OS; tests
-/// should not rely on it surviving the process.
+/// and read projections directly. The temp root is a [`TempDirGuard`] guard (P6):
+/// it is removed on drop, including a panicking unwind, so a failing test
+/// leaves nothing behind in `$TMPDIR`.
 ///
 /// `with_runtime()` consumes this harness and stands up an in-process
 /// `RuntimeApi` against the same config root (see `docs/testing/L1.md`),
@@ -27,7 +28,7 @@ use crate::paths::temp_root;
 pub struct Harness {
     pub service: posthaste_domain_service::MailService,
     pub store: Arc<DatabaseStore>,
-    root: PathBuf,
+    root: TempDirGuard,
 }
 
 impl Harness {
@@ -58,21 +59,30 @@ impl Harness {
     ///
     /// The harness's `MailService`/`store` are dropped (their connection closed
     /// first) so the runtime opens a fresh store; the runtime owns the store
-    /// exposed by [`RuntimeHarness::store`]. Async — the caller owns the tokio
-    /// runtime (`#[tokio::test]`).
+    /// exposed by [`RuntimeHarness::store`]. The temp-root guard is handed to
+    /// the returned [`RuntimeHarness`] rather than dropped here — dropping it
+    /// early would delete the config/state directories out from under the
+    /// runtime `build_authority_server` is about to open. Async — the caller
+    /// owns the tokio runtime (`#[tokio::test]`).
     pub async fn with_runtime(self) -> crate::runtime::RuntimeHarness {
+        let Harness {
+            service,
+            store,
+            root,
+        } = self;
         let config = RuntimeBuildConfig::new(
-            self.root.join("config"),
-            self.root.join("runtime-state"),
-            self.root.join("runtime-cache"),
+            root.join("config"),
+            root.join("runtime-state"),
+            root.join("runtime-cache"),
         )
         .with_secret_store(Arc::new(crate::runtime::TestSecretStore::default()))
         .with_poll_interval(Duration::from_millis(500));
-        drop(self);
+        drop(service);
+        drop(store);
         let build = build_authority_server(config)
             .await
             .expect("authority runtime should build");
-        crate::runtime::RuntimeHarness::new(build)
+        crate::runtime::RuntimeHarness::new(build, root)
     }
 
     /// Saves a source account with the given driver and transport settings.

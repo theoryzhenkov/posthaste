@@ -7,6 +7,8 @@ pub mod daemon;
 mod defaults;
 mod repository;
 mod schema;
+#[cfg(test)]
+mod test_support;
 
 pub use daemon::{load_daemon_settings, read_daemon_settings, DaemonSettings, TlsConfig};
 pub use defaults::default_smart_mailboxes;

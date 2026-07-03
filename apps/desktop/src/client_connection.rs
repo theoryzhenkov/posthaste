@@ -553,17 +553,37 @@ pub fn client_local_daemon_read() -> Result<Option<LocalDaemon>, String> {
 #[cfg(test)]
 mod factory_reset_tests {
     use super::*;
+    use std::ops::Deref;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    struct TempDirGuard(TempDir);
+
+    impl Deref for TempDirGuard {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            self.0.path()
+        }
+    }
+
+    impl AsRef<Path> for TempDirGuard {
+        fn as_ref(&self) -> &Path {
+            self.0.path()
+        }
+    }
+
+    fn temp_root() -> TempDirGuard {
+        TempDirGuard(
+            tempfile::Builder::new()
+                .prefix("posthaste-desktop-factory-reset-test-")
+                .tempdir()
+                .expect("temp dir should be created"),
+        )
+    }
 
     #[test]
     fn wipe_clears_state_config_and_connections_and_is_idempotent() {
-        let base = std::env::temp_dir().join(format!(
-            "ph-factory-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let base = temp_root();
         let state = base.join("state");
         let config = base.join("config");
         let connections = base.join("connections.json");
@@ -581,7 +601,5 @@ mod factory_reset_tests {
 
         // A second wipe over now-clean targets must not error.
         wipe_factory_reset_targets(&state, Some(&config), Some(&connections)).unwrap();
-
-        std::fs::remove_dir_all(&base).ok();
     }
 }

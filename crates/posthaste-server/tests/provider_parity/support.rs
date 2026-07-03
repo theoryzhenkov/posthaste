@@ -1,8 +1,5 @@
 use std::collections::VecDeque;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use posthaste_config::TomlConfigRepository;
@@ -13,26 +10,19 @@ use posthaste_domain_model::{
 };
 use posthaste_domain_service::{ImapMessageLocationStore, MailGateway, MailService, PushTransport};
 use posthaste_store::DatabaseStore;
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-provider-parity-test-{now}-{seq}"))
-}
+use posthaste_testkit::temp_root;
 
 pub(super) struct Harness {
+    // Held only to keep the temp directory alive for the harness's lifetime;
+    // removed on drop.
+    _root: posthaste_testkit::TempDirGuard,
     pub(super) service: MailService,
     pub(super) store: Arc<DatabaseStore>,
 }
 
 impl Harness {
     pub(super) fn new() -> Self {
-        let root = temp_root();
+        let root = temp_root("posthaste-provider-parity-test");
         let config_root = root.join("config");
         let state_root = root.join("state");
         let config_repo =
@@ -46,6 +36,7 @@ impl Harness {
         );
         let config = Arc::new(config_repo);
         Self {
+            _root: root,
             service: MailService::new(database_store.clone(), config),
             store: database_store,
         }

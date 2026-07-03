@@ -1,24 +1,10 @@
 use super::*;
-use std::{fs, path::PathBuf};
+use std::fs;
 
 use posthaste_domain_model::{AccountId, AccountSettings, AppSettings};
 use posthaste_domain_service::ConfigRepository;
 
-fn temp_root() -> PathBuf {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!(
-        "posthaste-config-test-{}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        n
-    ));
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
+use crate::test_support::temp_root;
 
 fn mock_source(id: &str, name: &str) -> AccountSettings {
     AccountSettings {
@@ -39,7 +25,7 @@ fn mock_source(id: &str, name: &str) -> AccountSettings {
 #[test]
 fn empty_config_root_creates_empty_snapshot() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
     let snapshot = repo.load_snapshot().unwrap();
 
     assert!(snapshot.sources.is_empty());
@@ -50,7 +36,7 @@ fn empty_config_root_creates_empty_snapshot() {
 #[test]
 fn initialize_defaults_creates_smart_mailbox_files() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
     repo.initialize_defaults().unwrap();
 
     assert!(root.join("app.toml").exists());
@@ -64,7 +50,7 @@ fn initialize_defaults_creates_smart_mailbox_files() {
 #[test]
 fn source_crud_round_trips() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
 
     let source = AccountSettings {
         id: AccountId::from("test"),
@@ -94,7 +80,7 @@ fn source_crud_round_trips() {
 #[test]
 fn insert_source_rejects_duplicate_without_overwriting() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
 
     let source = AccountSettings {
         id: AccountId::from("test"),
@@ -126,7 +112,7 @@ fn insert_source_rejects_duplicate_without_overwriting() {
 #[test]
 fn reload_rejects_semantic_validation_errors_and_preserves_snapshot() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
     repo.save_source(&mock_source("primary", "Primary"))
         .unwrap();
 
@@ -167,7 +153,7 @@ enabled = true
 #[test]
 fn unsafe_file_id_is_rejected() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
 
     let bad_content = r#"
 id = "bad..id"
@@ -190,7 +176,7 @@ enabled = true
 #[test]
 fn filename_id_mismatch_is_rejected() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
 
     // Write a source file with mismatched filename/id
     let bad_content = r#"
@@ -214,7 +200,7 @@ enabled = true
 #[test]
 fn reload_detects_added_source() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
 
     // Externally write a source file
     let content = r#"
@@ -236,7 +222,7 @@ fn malformed_app_toml_is_rejected() {
     let root = temp_root();
     fs::write(root.join("app.toml"), "not = [valid").unwrap();
 
-    let err = match TomlConfigRepository::open(&root) {
+    let err = match TomlConfigRepository::open(&*root) {
         Ok(_) => panic!("repository open should fail for malformed app.toml"),
         Err(err) => err.to_string(),
     };
@@ -247,7 +233,7 @@ fn malformed_app_toml_is_rejected() {
 #[test]
 fn smart_mailbox_crud_round_trips() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
 
     let mailbox = default_smart_mailboxes().into_iter().next().unwrap();
     repo.save_smart_mailbox(&mailbox).unwrap();
@@ -263,7 +249,7 @@ fn smart_mailbox_crud_round_trips() {
 #[test]
 fn save_source_preserves_user_comments_across_a_resave() {
     let root = temp_root();
-    let repo = TomlConfigRepository::open(&root).unwrap();
+    let repo = TomlConfigRepository::open(&*root).unwrap();
     repo.save_source(&mock_source("acct", "First")).unwrap();
 
     // A user (or an LLM) hand-edits the source file with a comment.

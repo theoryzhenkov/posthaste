@@ -21,6 +21,8 @@ mod source;
 mod sql_cache;
 mod store;
 mod sync_state;
+#[cfg(test)]
+mod test_support;
 
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 pub(crate) use crate::store::StagedBodyFiles;

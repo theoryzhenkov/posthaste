@@ -21,6 +21,8 @@ pub mod oauth;
 mod push;
 mod runtime_registry;
 pub mod supervisor;
+#[cfg(test)]
+mod test_support;
 
 // The far-node crate's own assembly surface.
 pub use account_reads::AccountRuntimeOverviewProvider;

@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::{
@@ -10,9 +8,9 @@ use posthaste_domain_model::{
 };
 use posthaste_store::DatabaseStore;
 
-use super::*;
+use crate::test_support::{temp_root, TempDirGuard};
 
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+use super::*;
 
 struct TestSecretStore;
 
@@ -34,15 +32,6 @@ impl SecretStore for TestSecretStore {
     }
 }
 
-fn temp_root() -> PathBuf {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-supervisor-test-{now}-{seq}"))
-}
-
 fn test_account(id: &str) -> AccountSettings {
     AccountSettings {
         id: AccountId::from(id),
@@ -59,7 +48,12 @@ fn test_account(id: &str) -> AccountSettings {
     }
 }
 
-fn test_shared(account: &AccountSettings) -> Arc<SupervisorShared> {
+// Returns the `TempDirGuard` alongside the shared state: both the sqlite
+// mail store and the TOML config repository re-open files under this
+// directory on every call, so the guard must outlive the caller's use of the
+// returned `SupervisorShared`, not just this function body (P6 — dropping it
+// here would delete the directory out from under still-live config I/O).
+fn test_shared(account: &AccountSettings) -> (Arc<SupervisorShared>, TempDirGuard) {
     let root = temp_root();
     let config_root = root.join("config");
     let state_root = root.join("state");
@@ -79,7 +73,7 @@ fn test_shared(account: &AccountSettings) -> Arc<SupervisorShared> {
         .expect("test account should save");
     let (event_sender, _) = broadcast::channel(16);
 
-    Arc::new(SupervisorShared {
+    let shared = Arc::new(SupervisorShared {
         service,
         store,
         secret_store: Arc::new(TestSecretStore),
@@ -94,7 +88,8 @@ fn test_shared(account: &AccountSettings) -> Arc<SupervisorShared> {
             CacheResourcePolicy::default(),
         )),
         poll_interval: Duration::from_secs(60),
-    })
+    });
+    (shared, root)
 }
 
 #[test]
@@ -145,7 +140,7 @@ fn sync_failure_stage_classifies_non_connection_failures_as_sync() {
 #[tokio::test]
 async fn stale_runtime_generation_cannot_overwrite_current_runtime_status() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let stale_generation = shared.next_runtime_generation(&account.id).await;
     let current_generation = shared.next_runtime_generation(&account.id).await;
 
@@ -183,7 +178,7 @@ async fn stale_runtime_generation_cannot_overwrite_current_runtime_status() {
 #[tokio::test]
 async fn supervisor_account_count_tracks_known_accounts() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
 
     assert_eq!(shared.account_count.load(Ordering::SeqCst), 0);
     shared.register_account(&account.id).await;
@@ -198,7 +193,7 @@ async fn supervisor_account_count_tracks_known_accounts() {
 #[tokio::test]
 async fn push_only_runtime_transition_emits_account_status_changed() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let generation = shared.next_runtime_generation(&account.id).await;
 
     shared
@@ -260,7 +255,7 @@ async fn late_sync_progress_does_not_revive_syncing_after_success() {
     // `Ready`. The guard runs against committed state under the lock, so the
     // late Storing write is dropped.
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let generation = shared.next_runtime_generation(&account.id).await;
 
     shared
@@ -309,7 +304,7 @@ async fn concurrent_progress_writes_cannot_clobber_sync_success() {
     // by the guard. The previous non-atomic RMW could let a stale-read progress
     // write clobber `Ready` with `Syncing`.
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let generation = shared.next_runtime_generation(&account.id).await;
     shared
         .set_sync_progress(
@@ -351,7 +346,7 @@ async fn concurrent_progress_writes_cannot_clobber_sync_success() {
 #[tokio::test]
 async fn checkpoint_only_push_notification_triggers_sync() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
     let mut connection = AccountRuntimeConnectionState::default();
     connection.set_connected(AccountConnection {
@@ -398,7 +393,7 @@ async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync
     let mut account = test_account("gmail");
     account.driver = AccountDriver::ImapSmtp;
     account.transport.provider = ProviderHint::Gmail;
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
     let mut connection = AccountRuntimeConnectionState::default();
     connection.set_connected(AccountConnection {
@@ -450,7 +445,7 @@ async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync
 async fn jmap_empty_push_notification_without_checkpoint_is_ignored() {
     let mut account = test_account("jmap");
     account.driver = AccountDriver::Jmap;
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
     let mut connection = AccountRuntimeConnectionState::default();
     connection.set_connected(AccountConnection {
@@ -543,7 +538,7 @@ fn fast_watchdog_policy(max_restarts: u32) -> WatchdogPolicy {
 #[tokio::test]
 async fn stop_all_joins_cooperative_accounts_and_escalates_a_straggler() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let supervisor = AccountSupervisor::from_shared_for_test(shared);
 
     // A cooperative account: its incarnation exits promptly on cancel.
@@ -610,7 +605,7 @@ async fn stop_all_joins_cooperative_accounts_and_escalates_a_straggler() {
 #[tokio::test]
 async fn watchdog_surfaces_panic_and_restarts_with_degraded_status() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let account_id = account.id.clone();
 
     // First incarnation panics; the second stays healthy until cancelled.
@@ -664,7 +659,7 @@ async fn watchdog_surfaces_panic_and_restarts_with_degraded_status() {
 #[tokio::test]
 async fn watchdog_halts_account_with_offline_status_after_restart_cap() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let account_id = account.id.clone();
 
     // Every incarnation panics — the watchdog must give up at the cap.
@@ -714,7 +709,7 @@ async fn watchdog_halts_account_with_offline_status_after_restart_cap() {
 #[tokio::test(start_paused = true)]
 async fn watchdog_backoff_prevents_restart_storm() {
     let account = test_account("primary");
-    let shared = test_shared(&account);
+    let (shared, _root) = test_shared(&account);
     let account_id = account.id.clone();
 
     // Record the virtual-clock instant of every (re)spawn.

@@ -41,25 +41,9 @@ fn parses_config_validate_config_dir() {
     );
 }
 
-fn temp_root() -> PathBuf {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!(
-        "posthaste-lab-config-validate-test-{}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        n
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
 #[test]
 fn config_validate_command_accepts_valid_config_dir() {
-    let root = temp_root();
+    let root = crate::test_support::temp_root();
 
     run_config_validate_command(
         "posthaste-lab",
@@ -75,7 +59,7 @@ fn config_validate_command_accepts_valid_config_dir() {
 
 #[test]
 fn config_validate_command_reports_semantic_errors() {
-    let root = temp_root();
+    let root = crate::test_support::temp_root();
     std::fs::write(
         root.join("app.toml"),
         "schema_version = 1\ndefault_source_id = \"missing\"\n",

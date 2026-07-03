@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 use posthaste_domain_model::{
@@ -6,6 +5,7 @@ use posthaste_domain_model::{
     SecretRef, SmtpTransportSettings, TransportSecurity,
 };
 
+use crate::guard::TempDirGuard;
 use crate::paths::{free_loopback_port, stalwart_bin, temp_root, workspace_root};
 
 /// A disposable real Stalwart mail server bound to loopback ports.
@@ -20,7 +20,9 @@ use crate::paths::{free_loopback_port, stalwart_bin, temp_root, workspace_root};
 /// Stalwart is an environment failure, not a test failure.
 pub struct StalwartFixture {
     child: Child,
-    root: PathBuf,
+    /// Kept alive only for its Drop side effect (recursive removal, P6);
+    /// never read directly.
+    _root: TempDirGuard,
     pub http_url: String,
     pub imap_port: u16,
     pub smtp_port: u16,
@@ -87,7 +89,7 @@ impl StalwartFixture {
 
         Self {
             child,
-            root,
+            _root: root,
             http_url,
             imap_port,
             smtp_port,
@@ -185,8 +187,9 @@ impl StalwartFixture {
 
 impl Drop for StalwartFixture {
     fn drop(&mut self) {
+        // Kill the server before its temp root (`self._root`, a `TempDirGuard`) is
+        // removed by its own drop immediately after this method returns.
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
