@@ -31,8 +31,55 @@ export const UNDO_HISTORY_STORE = 'undoHistory'
 const openConnections = new Set<IDBDatabase>()
 
 /**
+ * Multi-tab schema-version notices (W1 / N19):
+ *
+ * - `'blocked'`: this tab's `open()` is waiting on another connection (this
+ *   tab or another tab) that hasn't closed for the upgrade yet. The open
+ *   request is NOT rejected — the browser still resolves it once the blocker
+ *   closes (normally via its own `'outdated'`-triggering `onversionchange`
+ *   below) — but a stuck blocker (e.g. a background tab with no handler, or a
+ *   long-running transaction) can leave this pending far longer than a user
+ *   would tolerate, so callers use this to nudge them (e.g. "reload other
+ *   tabs").
+ * - `'outdated'`: this tab's own connection was just closed because another
+ *   tab/context is upgrading to a newer schema version. Every store built on
+ *   {@link openReplicaDatabase} stops working after this fires (its cached
+ *   connection is closed) — callers use this to prompt a reload.
+ *
+ * Kept UI-agnostic on purpose (no `sonner`/toast import here): the app shell
+ * subscribes and decides how to surface it.
+ */
+export type ReplicaDatabaseNotice = 'blocked' | 'outdated'
+type ReplicaDatabaseNoticeListener = (notice: ReplicaDatabaseNotice) => void
+
+const noticeListeners = new Set<ReplicaDatabaseNoticeListener>()
+
+export function onReplicaDatabaseNotice(
+  listener: ReplicaDatabaseNoticeListener,
+): () => void {
+  noticeListeners.add(listener)
+  return () => noticeListeners.delete(listener)
+}
+
+function emitReplicaDatabaseNotice(notice: ReplicaDatabaseNotice): void {
+  for (const listener of noticeListeners) {
+    listener(notice)
+  }
+}
+
+/**
  * Open the shared replica database at the current schema version, creating both
  * object stores on first open / upgrade. Callers cache + reuse the connection.
+ *
+ * Multi-tab safe (W1 / N19): without the handlers below, a second tab opening
+ * a newer schema version (e.g. after a deploy) deadlocks BOTH tabs — the
+ * older tab never releases its connection, so the newer tab's `open()` blocks
+ * forever and its views spin loading indefinitely. `onversionchange` makes
+ * every connection close itself proactively the moment another context wants
+ * to upgrade past it, which is what lets the newer tab's `open()` proceed;
+ * `onblocked` is the backstop notice for the (rarer) case where a blocker
+ * hasn't closed yet — e.g. mid-transaction, or a stale tab that predates this
+ * fix.
  */
 export function openReplicaDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -48,6 +95,7 @@ export function openReplicaDatabase(): Promise<IDBDatabase> {
         connection.createObjectStore(UNDO_HISTORY_STORE, { keyPath: 'key' })
       }
     }
+    request.onblocked = () => emitReplicaDatabaseNotice('blocked')
     request.onsuccess = () => {
       const connection = request.result
       openConnections.add(connection)
@@ -56,6 +104,14 @@ export function openReplicaDatabase(): Promise<IDBDatabase> {
       connection.addEventListener('close', () =>
         openConnections.delete(connection),
       )
+      // THE deadlock fix: a newer tab/context wants to upgrade past this
+      // connection's version. Close proactively instead of holding the DB
+      // open indefinitely — without this, the newer tab's `open()` blocks
+      // forever (the deploy-time "views stuck loading" regression).
+      connection.onversionchange = () => {
+        connection.close()
+        emitReplicaDatabaseNotice('outdated')
+      }
       resolve(connection)
     }
     request.onerror = () => reject(request.error)
