@@ -34,9 +34,23 @@ use posthaste_domain_model::{DomainEvent, EventFilter};
 /// Live runtime event stream returned by authority runtimes.
 pub type RuntimeEventStream = BoxStream<'static, DomainEvent>;
 
-/// Runtime-owned event subscription: optional replayed backlog followed by live events.
+/// Runtime-owned event subscription (RFC-L2-scripting D52 — the fact-carrying
+/// tap on `/v1/events`): the durable prelude followed by the live tail. The
+/// prelude is, in order, an optional **gap frame** (`gap`) then the replayed
+/// facts (`replay`), then `live` streams onward. A gap and a replay can BOTH be
+/// present: when the cursor fell before the log's oldest retained seq the gap
+/// signals the (possibly-lossy) truncation, but any facts that survive after the
+/// cursor are still replayed — a purge must never silently drop a surviving fact.
 pub struct RuntimeEventSubscription {
+    /// The durable facts replayed after the resume cursor (empty for a fresh
+    /// attach).
     pub replay: Vec<DomainEvent>,
+    /// `Some(highest_seq)` when the resume opened a **gap frame** (§3): the
+    /// consumer's cursor is before the log's oldest retained seq; it adopts
+    /// `highest_seq` and continues (deduping the retained `replay` that follows).
+    /// The mount emits this as a distinguishable wire element ahead of `replay`.
+    pub gap: Option<u64>,
+    /// The live tail, resuming durably from the cursor on a broadcast overflow.
     pub live: RuntimeEventStream,
 }
 

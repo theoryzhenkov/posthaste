@@ -124,3 +124,37 @@ async fn events_stream_opens_as_sse() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(content_type.as_deref(), Some("text/event-stream"));
 }
+
+/// Wire-compatibility proof for the D52 tap remount (RFC-L2-scripting S2): the
+/// `/v1/events` stream now flows through `Tap<EventLogFactLog, _>`, but a resume
+/// (`afterSeq`) still replays the durable backlog as the SAME NDJSON/SSE
+/// `DomainEvent` frames posthastectl parses — an `id:` = seq plus a `data:`
+/// carrying the event JSON — and NOT the new gap frame. The backlog frame is
+/// emitted first, so the harness's first-data-frame read pins the wire shape.
+#[tokio::test]
+async fn events_replay_preserves_the_domain_event_wire_shape() {
+    let harness = Harness::new();
+    harness.save_account("acct-a", "Account A", true);
+    harness.seed_source("acct-a", "Account A");
+    // A mock sync appends `message.*` events to the durable `event_log`.
+    harness.start_account_runtime("acct-a").await;
+
+    // Resume from the very start: the tap replays the durable backlog before the
+    // live tail, so the first SSE data frame is the oldest replayed event.
+    let (status, frame) = harness
+        .get_text_frame(&harness.full_scope(), "/v1/events?afterSeq=0")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The unchanged DomainEvent wire shape: an `id:` (the seq) and a `data:`
+    // carrying the event JSON with its `seq`/`topic`. Crucially NOT the new gap
+    // frame (`event: gap` / `{"kind":"reset"}`), which a replay never emits.
+    assert!(frame.contains("id:"), "a replayed event carries its seq as the SSE id: {frame}");
+    assert!(frame.contains("data:"), "a replayed event carries a data payload: {frame}");
+    assert!(frame.contains("\"seq\""), "the data payload is a DomainEvent: {frame}");
+    assert!(frame.contains("\"topic\""), "the data payload is a DomainEvent: {frame}");
+    assert!(
+        !frame.contains("event: gap") && !frame.contains("\"kind\":\"reset\""),
+        "a replay must not emit the gap frame: {frame}"
+    );
+}

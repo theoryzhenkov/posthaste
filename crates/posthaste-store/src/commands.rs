@@ -339,4 +339,11 @@ impl EventStore for DatabaseStore {
             insert_event_tx(tx, account_id, topic, mailbox_id, message_id, payload)
         })
     }
+
+    /// The cheap `(MIN(seq), MAX(seq))` head/oldest query for the fact-carrying
+    /// tap (RFC-L2-scripting S2), replacing the full replay scan.
+    fn event_log_bounds(&self) -> Result<Option<EventLogBounds>, StoreError> {
+        let connection = self.read_connection()?;
+        event_log_bounds_query(&connection)
+    }
 }

@@ -8,8 +8,9 @@
 //! from the public surface (zero production consumers); the runtime builds its
 //! subscription backlog internally via `ReadCache::replay_events`.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -37,9 +38,24 @@ use posthaste_runtime_api::{
 };
 use tokio::sync::broadcast;
 
+use posthaste_link_far_end::down::{Sequenced, Tap, TapResume};
+
 use crate::near_node::{named_message_assertion, AuthorityServerPendingSet};
-use crate::read::ReadCache;
+use crate::read::{EventLogFactLog, ReadCache};
 use crate::far_end::links::{MutationAcceptance, LinkRegistry};
+
+/// One tap subscriber's opaque server-side identity (RFC-L2-scripting §5.4): the
+/// key of its reaper-managed registry entry. Each `/v1/events` (re)subscription
+/// is allocated a fresh id from the runtime's monotonic counter; the entry is
+/// registered on subscribe and dropped when the SSE stream ends (or reaped on
+/// idle). Opaque — never surfaced on the wire.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct TapSubscriberId(u64);
+
+/// The runtime's fact-carrying event tap (RFC-L2-scripting D52): the down-channel
+/// half over the durable `event_log` via [`EventLogFactLog`], mounted on
+/// `/v1/events` by [`RuntimeHandle::subscribe_events`].
+pub(crate) type EventTap = Tap<EventLogFactLog, TapSubscriberId>;
 
 /// The shared runtime core behind the cloneable handle: the authority server link, the
 /// pending set, the read cache, the event bus, and the view/link registries.
@@ -69,6 +85,15 @@ pub(crate) struct RuntimeCoreState {
     // `links` (`LinkRegistry` holds its own `Arc<ViewRegistry>`, the same
     // instance — see `assemble_runtime`).
     pub(crate) links: Arc<LinkRegistry>,
+    /// The fact-carrying event tap mounted on `/v1/events` (RFC-L2-scripting D52):
+    /// the durable-replay + gap-frame + subscriber-registry machinery behind
+    /// [`RuntimeHandle::subscribe_events`]. Shares the same `event_log` (through
+    /// `reads`) the live broadcast records into, so replay seqs and live seqs are
+    /// one sequence.
+    pub(crate) event_tap: Arc<EventTap>,
+    /// Allocator for opaque [`TapSubscriberId`]s — one per `/v1/events`
+    /// subscription (§5.4). Monotonic; the value is never surfaced on the wire.
+    pub(crate) tap_subscriber_seq: AtomicU64,
     pub(crate) startup_status: RuntimeStatus,
     pub(crate) stopped: Arc<AtomicBool>,
 }
@@ -248,22 +273,69 @@ impl RuntimeHandle {
         true
     }
 
+    /// The tap's live half (RFC-L2-scripting D52): the `event_log`-recording
+    /// broadcast feed, tailed behind the durable prelude. A single `cursor` (the
+    /// highest seq the consumer has been advanced to, seeded from the prelude)
+    /// gates delivery and anchors durable recovery.
+    ///
+    /// **N8 closed** (§3): a broadcast overflow (`Lagged`) is *not* silently
+    /// swallowed. Facts recover by durable replay — the missed range is re-read
+    /// from the `event_log` after the cursor and re-delivered, then the live tail
+    /// resumes. A fact stream never drops a fact on the floor.
     fn live_event_stream(
         mut receiver: broadcast::Receiver<DomainEvent>,
         filter: EventFilter,
+        reads: Arc<ReadCache>,
+        unsubscribe: TapUnsubscribeGuard,
         replayed_through: Option<i64>,
     ) -> RuntimeEventStream {
         let stream = async_stream::stream! {
+            // Held for the stream's lifetime: drops the tap's subscriber-registry
+            // entry when the SSE stream ends (§5.4 — deterministic teardown, the
+            // idle reaper is the backstop).
+            let _unsubscribe = unsubscribe;
+            let mut cursor = replayed_through;
             loop {
                 match receiver.recv().await {
                     Ok(event)
-                        if replayed_through.is_none_or(|seq| event.seq > seq)
+                        if cursor.is_none_or(|seq| event.seq > seq)
                             && Self::event_matches_filter(&event, &filter) =>
                     {
+                        cursor = Some(event.seq);
                         yield event;
                     }
-                    Ok(_) => {}
-                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Ok(event) => {
+                        // Covered by the prelude or filtered out — not delivered,
+                        // but still advance the durable-replay anchor past it so a
+                        // later `Lagged` re-replay does not rescan it.
+                        if cursor.is_none_or(|seq| event.seq > seq) {
+                            cursor = Some(event.seq);
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        // The durable resume the tap exists for: re-read the facts
+                        // the overflow dropped and re-deliver them (at-least-once,
+                        // deduped by id downstream), then continue live.
+                        let mut replay_filter = filter.clone();
+                        replay_filter.after_seq = cursor;
+                        match reads.replay_events(replay_filter).await {
+                            Ok(events) => {
+                                for event in events {
+                                    if cursor.is_none_or(|seq| event.seq > seq)
+                                        && Self::event_matches_filter(&event, &filter)
+                                    {
+                                        cursor = Some(event.seq);
+                                        yield event;
+                                    }
+                                }
+                            }
+                            Err(error) => tracing::warn!(
+                                %error,
+                                "event tap durable re-replay after a broadcast lag failed; \
+                                 the live tail continues from the current cursor"
+                            ),
+                        }
+                    }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
@@ -912,30 +984,125 @@ impl RuntimeLink for RuntimeHandle {
             .mutation_settlement(caller, &link_id, &client_mutation_id)
     }
 
+    /// Mount `/v1/events` on the fact-carrying tap (RFC-L2-scripting D52 / S2):
+    /// `subscribe(after_seq, filter)` → the durable **prelude** (a replay of the
+    /// facts after the cursor, or the **gap frame** when the cursor fell before the
+    /// log's oldest retained seq) → the **live** tail. The wire shape existing
+    /// consumers parse is preserved (replay frames + live frames are `DomainEvent`s
+    /// exactly as before); the gap frame is the one new element, surfaced through
+    /// [`RuntimeEventSubscription::gap`].
     async fn subscribe_events(
         &self,
         _caller: RuntimeCaller,
         filter: EventFilter,
     ) -> Result<RuntimeEventSubscription, RuntimeError> {
         self.ensure_runtime_active()?;
+        // Subscribe to the live broadcast BEFORE resolving the prelude so nothing
+        // emitted during the prelude read is lost — the live half's cursor drops
+        // anything the prelude already covered.
         let receiver = self.core.event_sender.subscribe();
-        let replay = if filter.after_seq.is_some() {
-            // `replay_events` was dropped from the public trait (zero production
-            // consumers); the runtime builds its subscription backlog internally
-            // via `ReadCache::replay_events` (the private fn that stays).
-            self.core
-                .reads
-                .replay_events(filter.clone())
-                .await?
-                .into_iter()
-                .filter(|event| Self::event_matches_filter(event, &filter))
-                .collect()
-        } else {
-            Vec::new()
+
+        // One opaque subscriber id + a `now` tick drive the tap's reaper-managed
+        // registry entry (§5.4). The cursor rides the `after_seq` slot.
+        let id = TapSubscriberId(self.core.tap_subscriber_seq.fetch_add(1, Ordering::Relaxed));
+        let after = filter.after_seq.filter(|seq| *seq >= 0).map(|seq| seq as u64);
+        let resume = self
+            .core
+            .event_tap
+            .subscribe(&id, after, Some(filter.clone()), now_tick())
+            .await
+            .map_err(fact_log_error_to_runtime)?;
+
+        let (replay, gap, replayed_through) = match resume {
+            // Fresh attach: no replay. The live tail resumes strictly after the
+            // head at attach (§5.3 snapshot-attach), so it never re-serves the
+            // history the consumer reads via the Api as-of that seq.
+            TapResume::Fresh => {
+                let head = self
+                    .core
+                    .event_tap
+                    .highest_seq()
+                    .await
+                    .map_err(fact_log_error_to_runtime)?;
+                (Vec::new(), None, Some(head as i64))
+            }
+            // Durable replay: the facts after the cursor, seq-ordered.
+            TapResume::Replay(frames) => {
+                let last = frames.last().map(Sequenced::seq).map(|seq| seq as i64);
+                let replay: Vec<DomainEvent> =
+                    frames.into_iter().filter_map(sequenced_into_event).collect();
+                (replay, None, last.or(filter.after_seq))
+            }
+            // The cursor fell before the log's oldest retained seq (§3, N8):
+            // signal the gap — never a silent drop — but STILL serve the facts
+            // that ARE retained after the cursor. In practice the only thing that
+            // shortens `event_log` is a purge (an account deletion drops that
+            // account's rows), which can move the global oldest seq without
+            // touching a surviving fact like the trailing `account.deleted`;
+            // dropping it would be data loss. The consumer sees the gap, then the
+            // retained tail, and dedupes by id.
+            TapResume::Gap { highest_seq } => {
+                let mut replay_filter = filter.clone();
+                replay_filter.after_seq = after.map(|seq| seq as i64).or(filter.after_seq);
+                let retained = self.core.reads.replay_events(replay_filter).await?;
+                let last = retained.last().map(|event| event.seq);
+                (retained, Some(highest_seq), last.or(Some(highest_seq as i64)))
+            }
         };
-        let replayed_through = replay.last().map(|event| event.seq).or(filter.after_seq);
-        let live = Self::live_event_stream(receiver, filter, replayed_through);
-        Ok(RuntimeEventSubscription { replay, live })
+
+        let unsubscribe = TapUnsubscribeGuard {
+            tap: self.core.event_tap.clone(),
+            id,
+        };
+        let live = Self::live_event_stream(
+            receiver,
+            filter,
+            self.core.reads.clone(),
+            unsubscribe,
+            replayed_through,
+        );
+        Ok(RuntimeEventSubscription { replay, gap, live })
+    }
+}
+
+/// A coarse monotonic `now` tick (unix seconds) driving the tap's TTL registry.
+/// The reaper compares ticks, so second-granularity is ample; the mount owns the
+/// tick (the tap never reads ambient time itself).
+fn now_tick() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|delta| delta.as_secs())
+        .unwrap_or(0)
+}
+
+/// Map a [`FactLogError`] surfaced by the tap into a runtime error for the Api
+/// boundary. `ReadOnly` cannot arise on a subscribe (read path), so both map to
+/// an internal error carrying the backing message.
+fn fact_log_error_to_runtime(error: posthaste_link_far_end::down::FactLogError) -> RuntimeError {
+    RuntimeError::internal(format!("event tap: {error}"), None)
+}
+
+/// Lift one durable prelude frame to its `DomainEvent`; a gap/reset control
+/// element carries no fact (it never appears inside a [`TapResume::Replay`], so
+/// this only ever yields `Some`).
+fn sequenced_into_event(frame: Sequenced<DomainEvent>) -> Option<DomainEvent> {
+    match frame {
+        Sequenced::Frame { frame, .. } => Some(frame),
+        Sequenced::Reset { .. } => None,
+    }
+}
+
+/// Drops a tap subscriber's registry entry when its SSE stream ends (§5.4). The
+/// deterministic teardown the mount owns; the tap's idle reaper is the backstop
+/// for a consumer that vanishes without a clean close.
+struct TapUnsubscribeGuard {
+    tap: Arc<EventTap>,
+    id: TapSubscriberId,
+}
+
+impl Drop for TapUnsubscribeGuard {
+    fn drop(&mut self) {
+        self.tap.unsubscribe(&self.id);
     }
 }
 

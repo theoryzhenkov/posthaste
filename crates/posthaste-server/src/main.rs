@@ -1,8 +1,6 @@
-use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use posthaste_http_api_adapter::config::resolve_roots;
-use posthaste_http_api_adapter::{write_secure_file, ServerConfig};
+use posthaste_http_api_adapter::{write_discovery_file, ServerConfig};
 use posthaste_server::start_server;
 
 mod token_cli;
@@ -56,13 +54,15 @@ async fn main() {
     })
     .await;
 
-    // Write the daemon discovery port-file `{ port, token }` (0600) so external
-    // clients can find the bound port and bearer token. Only written when auth
-    // is enabled — we never persist an unused credential to disk. Best-effort:
-    // a failure here must not bring the daemon down.
-    if handle.require_auth {
-        write_port_file(handle.addr, &handle.auth_token);
-    }
+    // Write the daemon discovery file `daemon.json` (`{ version, port, url, token }`,
+    // 0600) so external clients (posthastectl) find the bound port + bearer token.
+    // Only written when auth is enabled — we never persist an unused credential.
+    // Best-effort; removed on clean shutdown via the M20 sequence below.
+    let discovery_file = if handle.require_auth {
+        write_discovery_file(handle.addr, &handle.auth_token)
+    } else {
+        None
+    };
 
     if options.open {
         open_browser(&format!("http://{}", handle.addr));
@@ -70,8 +70,13 @@ async fn main() {
 
     // Serve until a shutdown signal (ctrl_c / SIGTERM), then run the ordered,
     // deadline-bounded teardown (D60/M20) in place of the old bare
-    // `join_handle.await`.
-    handle.into_shutdown_sequence().run_until_signal().await;
+    // `join_handle.await`. The discovery file (if any) is removed as the final
+    // teardown step.
+    let mut sequence = handle.into_shutdown_sequence();
+    if let Some(path) = discovery_file {
+        sequence = sequence.with_discovery_file(path);
+    }
+    sequence.run_until_signal().await;
 }
 
 fn parse_args(args: Vec<String>) -> Result<ServeOptions, String> {
@@ -117,45 +122,6 @@ fn parse_args(args: Vec<String>) -> Result<ServeOptions, String> {
         api_only,
         open,
     })
-}
-
-/// Write `<state_root>/daemon.json` = `{ version, port, token }`, the documented
-/// discovery mechanism for external clients. `version` is the schema version
-/// (currently `1`); readers tolerate unknown fields so the schema can grow
-/// (e.g. a macaroon id or tailnet hostname) without breaking older clients.
-/// The file carries a live
-/// credential, so it is created with mode `0600` on unix (and the state dir
-/// best-effort `0700`). `fs::write` would NOT tighten an already
-/// world-readable file, so we open with explicit restrictive permissions and
-/// truncate. Overwrites any prior file. Best-effort: logs on failure, never
-/// panics.
-///
-/// @spec docs/eph/DESIGN-L1-trust-model
-fn write_port_file(addr: SocketAddr, token: &str) {
-    let roots = resolve_roots();
-    let path = roots.state_root.join("daemon.json");
-    let body = serde_json::json!({ "version": 1, "port": addr.port(), "token": token });
-    let contents = match serde_json::to_string_pretty(&body) {
-        Ok(contents) => contents,
-        Err(error) => {
-            eprintln!("failed to serialize daemon.json: {error}");
-            return;
-        }
-    };
-    if let Err(error) = std::fs::create_dir_all(&roots.state_root) {
-        eprintln!("failed to create state root for daemon.json: {error}");
-        return;
-    }
-    // Best-effort tighten the state dir to 0700 on unix.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&roots.state_root, std::fs::Permissions::from_mode(0o700));
-    }
-
-    if let Err(error) = write_secure_file(&path, contents.as_bytes()) {
-        eprintln!("failed to write daemon.json at {}: {error}", path.display());
-    }
 }
 
 fn resolve_frontend_dist(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
