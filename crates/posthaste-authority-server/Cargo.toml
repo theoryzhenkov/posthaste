@@ -21,7 +21,7 @@ posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
-posthaste-link-near-end = { path = "../posthaste-link-near-end" }
+posthaste-call-policy = { path = "../posthaste-call-policy" }
 posthaste-authority-server-link = { path = "../posthaste-authority-server-link" }
 posthaste-link-far-end = { path = "../posthaste-link-far-end" }
 posthaste-replica-core = { path = "../posthaste-replica-core" }
