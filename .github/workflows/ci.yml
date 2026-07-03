@@ -35,7 +35,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-client-node-wasm -- -D warnings
       - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-client-node-wasm
 
-  # The four-crate frontier set is extended by later refactor steps (RFC-L2-architecture-cleanup D15/M8).
+  # The frontier set grows as wasm-pure policy is extracted (RFC-L2-architecture-cleanup D15/M8;
+  # RFC-L2-provider-reliability M30 adds posthaste-call-policy — seven crates).
   wasm-frontier:
     runs-on: ubuntu-latest
     steps:
@@ -47,7 +48,7 @@ jobs:
         with:
           shared-key: ci-wasm-frontier
           cache-on-failure: true
-      - run: cargo check --target wasm32-unknown-unknown -p posthaste-replica-core -p posthaste-replica-projector -p posthaste-contract-core -p posthaste-domain-model -p posthaste-link-near-end -p posthaste-client-node-wasm
+      - run: cargo check --target wasm32-unknown-unknown -p posthaste-replica-core -p posthaste-replica-projector -p posthaste-contract-core -p posthaste-domain-model -p posthaste-call-policy -p posthaste-link-near-end -p posthaste-client-node-wasm
 
   frontend:
     runs-on: ubuntu-latest

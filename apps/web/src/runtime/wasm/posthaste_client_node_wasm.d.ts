@@ -219,7 +219,7 @@ export interface InitOutput {
     readonly entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
     readonly invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
     readonly parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__h6b4453b1714b2cf7: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__ha35c10aed9720f95: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h690adb9d64021208: (a: number, b: number) => void;
