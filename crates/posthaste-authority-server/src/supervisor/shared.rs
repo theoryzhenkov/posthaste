@@ -166,6 +166,52 @@ impl SupervisorShared {
         .await;
     }
 
+    /// Mark an account impaired by an internal runtime fault (a panic or an
+    /// unexpected exit) that the watchdog is about to retry. `Degraded` is the
+    /// truthful state (D61 / XIII): the account is malfunctioning, but the cause
+    /// is neither an auth failure (`AuthError`) nor a network/secret failure
+    /// (`Offline`) — the two classes `mark_sync_failure` already distinguishes.
+    /// Written unconditionally (no generation guard): the faulted incarnation is
+    /// already dead, and the next incarnation's own startup writes supersede this.
+    pub(crate) async fn mark_account_faulted(
+        &self,
+        account_id: &AccountId,
+        attempt: u32,
+        reason: &str,
+    ) {
+        self.update_runtime_overview(account_id, None, |current| {
+            current.status = AccountStatus::Degraded;
+            current.last_sync_error = Some(format!(
+                "account runtime fault (restart {attempt}/{WATCHDOG_MAX_RESTARTS}): {reason}"
+            ));
+            current.last_sync_error_code = Some("runtime_fault".to_string());
+            current.sync_progress = None;
+            if !matches!(current.push, PushStatus::Unsupported | PushStatus::Disabled) {
+                current.push = PushStatus::Reconnecting;
+            }
+            true
+        })
+        .await;
+    }
+
+    /// Mark an account halted after the watchdog exhausted its restart budget. The
+    /// runtime is no longer running, so `Offline` is the truthful state — it will
+    /// not serve until an operator restarts it (D61 / XIII). Push is `Disabled`
+    /// because nothing is left to reconnect it.
+    pub(crate) async fn mark_account_halted(&self, account_id: &AccountId, reason: &str) {
+        self.update_runtime_overview(account_id, None, |current| {
+            current.status = AccountStatus::Offline;
+            current.push = PushStatus::Disabled;
+            current.last_sync_error = Some(format!(
+                "account runtime halted after {WATCHDOG_MAX_RESTARTS} failed restarts: {reason}"
+            ));
+            current.last_sync_error_code = Some("runtime_halted".to_string());
+            current.sync_progress = None;
+            true
+        })
+        .await;
+    }
+
     /// Handle a push stream disconnect: emit event and set push status to Reconnecting.
     pub(crate) async fn handle_push_disconnect(
         &self,

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -508,4 +508,253 @@ fn oauth_refresh_state_is_disabled_for_non_oauth_account() {
 
     assert!(!state.enabled());
     assert!(state.interval().is_none());
+}
+
+// ---------------------------------------------------------------------------
+// M21: cooperative stop + panic-surfacing watchdog (RFC-L2-lifecycle D61).
+// ---------------------------------------------------------------------------
+
+/// Sets a flag on drop, so an aborted incarnation task can be proven to have
+/// actually been dropped (i.e. the stop escalation fired), not merely detached.
+struct AbortFlag(Arc<AtomicBool>);
+impl Drop for AbortFlag {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// A fast, jitter-free watchdog policy for the panic/halt tests (the storm test
+/// pins the real backoff instead).
+fn fast_watchdog_policy(max_restarts: u32) -> WatchdogPolicy {
+    WatchdogPolicy {
+        max_restarts,
+        healthy_reset_after: Duration::from_secs(60),
+        backoff: BackoffPolicy {
+            base: Duration::from_millis(1),
+            factor: 2.0,
+            cap: Duration::from_millis(5),
+        },
+        jitter: Arc::new(|| 0.0),
+    }
+}
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d61
+#[tokio::test]
+async fn stop_all_joins_cooperative_accounts_and_escalates_a_straggler() {
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let supervisor = AccountSupervisor::from_shared_for_test(shared);
+
+    // A cooperative account: its incarnation exits promptly on cancel.
+    supervisor
+        .spawn_supervised_for_test(
+            AccountId::from("cooperative"),
+            WatchdogPolicy::production(),
+            Arc::new(|cancel: CancellationToken| tokio::spawn(async move { cancel.cancelled().await })),
+        )
+        .await;
+
+    // A straggler that ignores cancellation entirely — only the abort escalation
+    // can stop it; its Drop guard flips a flag so we can prove that happened.
+    let straggler_aborted = Arc::new(AtomicBool::new(false));
+    let flag = straggler_aborted.clone();
+    supervisor
+        .spawn_supervised_for_test(
+            AccountId::from("straggler"),
+            WatchdogPolicy::production(),
+            Arc::new(move |_cancel: CancellationToken| {
+                let flag = flag.clone();
+                tokio::spawn(async move {
+                    let _guard = AbortFlag(flag);
+                    std::future::pending::<()>().await;
+                })
+            }),
+        )
+        .await;
+
+    let start = tokio::time::Instant::now();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        supervisor.stop_all(Duration::from_millis(200)),
+    )
+    .await
+    .expect("stop_all must return within the test bound, not hang on the straggler");
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "stop_all must not block on the straggler past its deadline (took {elapsed:?})"
+    );
+    assert!(
+        supervisor.runtimes.read().await.is_empty(),
+        "stop_all must drain every account from the registry"
+    );
+
+    // The straggler must have been aborted (dropped) by the escalation.
+    let mut aborted = false;
+    for _ in 0..200 {
+        if straggler_aborted.load(Ordering::SeqCst) {
+            aborted = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        aborted,
+        "the straggler incarnation must be aborted (escalation), not left running"
+    );
+}
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d61
+#[tokio::test]
+async fn watchdog_surfaces_panic_and_restarts_with_degraded_status() {
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let account_id = account.id.clone();
+
+    // First incarnation panics; the second stays healthy until cancelled.
+    let spawns = Arc::new(AtomicUsize::new(0));
+    let counter = spawns.clone();
+    let spawn: SpawnIncarnation = Box::new(move |cancel: CancellationToken| {
+        let n = counter.fetch_add(1, Ordering::SeqCst);
+        tokio::spawn(async move {
+            assert!(n != 0, "boom on first incarnation");
+            cancel.cancelled().await;
+        })
+    });
+
+    let cancel = CancellationToken::new();
+    let first = spawn(cancel.clone());
+    let monitor = tokio::spawn(run_watchdog(
+        account_id.clone(),
+        shared.clone(),
+        cancel.clone(),
+        spawn,
+        fast_watchdog_policy(3),
+        first,
+    ));
+
+    // The panic is surfaced as a Degraded status and the account is restarted.
+    let mut recovered = false;
+    for _ in 0..400 {
+        let overview = shared.runtime_overview(&account_id).await;
+        if spawns.load(Ordering::SeqCst) >= 2 && overview.status == AccountStatus::Degraded {
+            recovered = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        recovered,
+        "a panicked account must surface a Degraded status (not silence) and restart"
+    );
+    let overview = shared.runtime_overview(&account_id).await;
+    assert_eq!(
+        overview.last_sync_error_code.as_deref(),
+        Some("runtime_fault"),
+        "the truthful error code for a panicked-but-retried account"
+    );
+
+    cancel.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(2), monitor).await;
+}
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d61
+#[tokio::test]
+async fn watchdog_halts_account_with_offline_status_after_restart_cap() {
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let account_id = account.id.clone();
+
+    // Every incarnation panics — the watchdog must give up at the cap.
+    let spawns = Arc::new(AtomicUsize::new(0));
+    let counter = spawns.clone();
+    let spawn: SpawnIncarnation = Box::new(move |_cancel| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        tokio::spawn(async {
+            panic!("always panics");
+        })
+    });
+
+    let cancel = CancellationToken::new();
+    let first = spawn(cancel.clone());
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        run_watchdog(
+            account_id.clone(),
+            shared.clone(),
+            cancel,
+            spawn,
+            fast_watchdog_policy(WATCHDOG_MAX_RESTARTS),
+            first,
+        ),
+    )
+    .await
+    .expect("the watchdog must halt (return) after exhausting the restart cap");
+
+    assert_eq!(
+        spawns.load(Ordering::SeqCst),
+        1 + WATCHDOG_MAX_RESTARTS as usize,
+        "one original run plus exactly the capped number of restart attempts"
+    );
+    let overview = shared.runtime_overview(&account_id).await;
+    assert_eq!(
+        overview.status,
+        AccountStatus::Offline,
+        "a halted account is truthfully Offline"
+    );
+    assert_eq!(
+        overview.last_sync_error_code.as_deref(),
+        Some("runtime_halted")
+    );
+}
+
+// spec: docs/eph/RFC-L2-lifecycle-and-errors#d61
+#[tokio::test(start_paused = true)]
+async fn watchdog_backoff_prevents_restart_storm() {
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let account_id = account.id.clone();
+
+    // Record the virtual-clock instant of every (re)spawn.
+    let spawn_times = Arc::new(StdMutex::new(Vec::<tokio::time::Instant>::new()));
+    let times = spawn_times.clone();
+    let spawn: SpawnIncarnation = Box::new(move |_cancel| {
+        times
+            .lock()
+            .expect("times mutex")
+            .push(tokio::time::Instant::now());
+        tokio::spawn(async {
+            panic!("panic to force backoff");
+        })
+    });
+
+    // The M9 near-end engine's backoff shape, worst-case (full) jitter.
+    let backoff = BackoffPolicy {
+        base: Duration::from_millis(500),
+        factor: 2.0,
+        cap: Duration::from_secs(30),
+    };
+    let policy = WatchdogPolicy {
+        max_restarts: 3,
+        healthy_reset_after: Duration::from_secs(3600),
+        backoff: backoff.clone(),
+        jitter: Arc::new(|| 1.0),
+    };
+
+    let cancel = CancellationToken::new();
+    let first = spawn(cancel.clone());
+    run_watchdog(account_id, shared, cancel, spawn, policy, first).await;
+
+    let times = spawn_times.lock().expect("times mutex").clone();
+    assert_eq!(times.len(), 4, "1 original run + 3 capped restarts before halt");
+    let gaps: Vec<Duration> = times
+        .windows(2)
+        .map(|pair| pair[1].duration_since(pair[0]))
+        .collect();
+    // Each restart waits at least the backoff ceiling for that attempt — the
+    // restarts are spaced by exponential backoff, never a tight storm.
+    assert!(gaps[0] >= backoff.ceiling(0), "attempt 1 waits >= base");
+    assert!(gaps[1] >= backoff.ceiling(1), "attempt 2 waits >= 2x base");
+    assert!(gaps[2] >= backoff.ceiling(2), "attempt 3 waits >= 4x base");
 }

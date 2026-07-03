@@ -155,6 +155,13 @@ pub const SUPERVISOR_ACCOUNT_RUNTIME_STOPPED: LogEvent =
     LogEvent::new("supervisor.account.runtime_stopped");
 pub const SUPERVISOR_ACCOUNT_STATUS_PERSIST_FAILED: LogEvent =
     LogEvent::new("supervisor.account.status_persist_failed");
+pub const SUPERVISOR_ACCOUNT_PANICKED: LogEvent = LogEvent::new("supervisor.account.panicked");
+pub const SUPERVISOR_ACCOUNT_EXITED_UNEXPECTEDLY: LogEvent =
+    LogEvent::new("supervisor.account.exited_unexpectedly");
+pub const SUPERVISOR_ACCOUNT_RESTARTING: LogEvent = LogEvent::new("supervisor.account.restarting");
+pub const SUPERVISOR_ACCOUNT_HALTED: LogEvent = LogEvent::new("supervisor.account.halted");
+pub const SUPERVISOR_ACCOUNT_STOP_ESCALATED: LogEvent =
+    LogEvent::new("supervisor.account.stop_escalated");
 pub const SUPERVISOR_CONNECTION_ESTABLISHED: LogEvent =
     LogEvent::new("supervisor.connection.established");
 pub const SUPERVISOR_CONNECTION_ESTABLISHING: LogEvent =
