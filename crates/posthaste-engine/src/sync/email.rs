@@ -3,9 +3,10 @@ use std::time::Instant;
 use jmap_client::client::Client;
 use jmap_client::email;
 use posthaste_domain_model::{
-    now_iso8601 as domain_now_iso8601, GatewayError, MessageId, MessageRecord, SyncCursor,
-    SyncObject,
+    now_iso8601 as domain_now_iso8601, GatewayError, MessageId, MessageRecord, SyncBatch,
+    SyncCursor, SyncObject,
 };
+use posthaste_domain_service::SyncChunkSink;
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
 use crate::conversions::to_message_record;
@@ -13,6 +14,23 @@ use crate::live::map_gateway_error;
 
 use super::cursor::{decode_email_cursor_state, encode_email_cursor_state};
 use super::MessageSync;
+
+/// Adapts a [`SyncChunkSink`] so [`fetch_email_full_streamed`] just calls
+/// `emit` per page (D63/M23b: `emit` is `async`, so the streaming callers pass
+/// the real sink directly rather than through a synchronous `FnMut` — see
+/// [`fetch_email_full`], which passes this in-memory accumulator instead of a
+/// real sink to collect the full snapshot as one batch).
+struct AccumulatingSink {
+    messages: Vec<MessageRecord>,
+}
+
+#[async_trait::async_trait]
+impl SyncChunkSink for AccumulatingSink {
+    async fn emit(&mut self, batch: SyncBatch) -> Result<(), GatewayError> {
+        self.messages.extend(batch.messages);
+        Ok(())
+    }
+}
 
 /// Sync email state: try delta via `Email/changes`, fall back to full snapshot
 /// on `cannotCalculateChanges`.
@@ -40,14 +58,14 @@ pub(crate) async fn fetch_email_sync(
 }
 
 /// Outcome of a streamed email sync, mirroring [`fetch_email_sync`] but emitting
-/// full-snapshot metadata page by page through `on_page` so mail surfaces
-/// progressively.
+/// full-snapshot metadata page by page through the caller's [`SyncChunkSink`]
+/// so mail surfaces progressively.
 ///
 pub(crate) enum StreamedEmailSync {
     /// Delta sync: small and self-reconciling. The caller emits it as one chunk
     /// carrying its explicit removals and cursors; no reconciliation pass runs.
     Delta(MessageSync),
-    /// Full snapshot: metadata pages were already emitted via `on_page`. Carries
+    /// Full snapshot: metadata pages were already emitted via the sink. Carries
     /// the complete remote id set and final cursor for the reconciliation pass.
     FullStreamed {
         remote_message_ids: Vec<MessageId>,
@@ -57,12 +75,15 @@ pub(crate) enum StreamedEmailSync {
 
 /// Streaming counterpart to [`fetch_email_sync`]: a delta returns its batch for
 /// the caller to emit as one chunk, while a full snapshot streams metadata pages
-/// through `on_page` and reports the complete remote id set for reconciliation.
+/// directly through `sink.emit` (D63/M23b: `emit` is `async` and offloads the
+/// store write to the blocking pool, so this takes the sink by reference and
+/// awaits it per page rather than going through a synchronous callback) and
+/// reports the complete remote id set for reconciliation.
 ///
 pub(crate) async fn fetch_email_sync_streamed(
     client: &Client,
     since_state: Option<&str>,
-    on_page: &mut (dyn FnMut(Vec<MessageRecord>) -> Result<(), GatewayError> + Send),
+    sink: &mut dyn SyncChunkSink,
 ) -> Result<StreamedEmailSync, GatewayError> {
     match since_state.and_then(decode_email_cursor_state) {
         Some(state) => match fetch_email_delta(client, &state).await {
@@ -73,7 +94,7 @@ pub(crate) async fn fetch_email_sync_streamed(
                     "JMAP email delta unavailable, falling back to full snapshot"
                 );
                 let (remote_message_ids, cursor) =
-                    fetch_email_full_streamed(client, on_page).await?;
+                    fetch_email_full_streamed(client, sink).await?;
                 Ok(StreamedEmailSync::FullStreamed {
                     remote_message_ids,
                     cursor,
@@ -82,7 +103,7 @@ pub(crate) async fn fetch_email_sync_streamed(
             Err(err) => Err(err),
         },
         None => {
-            let (remote_message_ids, cursor) = fetch_email_full_streamed(client, on_page).await?;
+            let (remote_message_ids, cursor) = fetch_email_full_streamed(client, sink).await?;
             Ok(StreamedEmailSync::FullStreamed {
                 remote_message_ids,
                 cursor,
@@ -173,14 +194,12 @@ async fn fetch_email_delta(
 /// @spec docs/L1-sync#sync-granularity
 /// @spec docs/L0-sync#sync-granularity
 async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> {
-    let mut messages = Vec::new();
-    let (_remote_message_ids, cursor) = fetch_email_full_streamed(client, &mut |page| {
-        messages.extend(page);
-        Ok(())
-    })
-    .await?;
+    let mut sink = AccumulatingSink {
+        messages: Vec::new(),
+    };
+    let (_remote_message_ids, cursor) = fetch_email_full_streamed(client, &mut sink).await?;
     Ok(MessageSync {
-        messages,
+        messages: sink.messages,
         deleted_message_ids: Vec::new(),
         replace_all_messages: true,
         cursor,
@@ -188,14 +207,14 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
 }
 
 /// Full email snapshot streamed page by page: queries all email IDs sorted by
-/// `receivedAt DESC`, fetches metadata in chunks of 100, and hands each page to
-/// `on_page` as it arrives. Returns the complete remote id set and the final
+/// `receivedAt DESC`, fetches metadata in chunks of 100, and emits each page to
+/// `sink` as it arrives. Returns the complete remote id set and the final
 /// cursor for the reconciliation pass. Bodies are omitted (fetched lazily).
 ///
 /// @spec docs/L1-sync#sync-granularity
 async fn fetch_email_full_streamed(
     client: &Client,
-    on_page: &mut (dyn FnMut(Vec<MessageRecord>) -> Result<(), GatewayError> + Send),
+    sink: &mut dyn SyncChunkSink,
 ) -> Result<(Vec<MessageId>, SyncCursor), GatewayError> {
     let started = Instant::now();
     let email_ids = client
@@ -239,7 +258,11 @@ async fn fetch_email_full_streamed(
             let page: Vec<MessageRecord> =
                 response.take_list().iter().map(to_message_record).collect();
             fetched_count += page.len();
-            on_page(page)?;
+            sink.emit(SyncBatch {
+                messages: page,
+                ..SyncBatch::default()
+            })
+            .await?;
             ph_info!(
                 events::JMAP_EMAIL_FULL_METADATA_PROGRESS,
                 chunk_index = chunk_index + 1,

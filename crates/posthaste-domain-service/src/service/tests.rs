@@ -45,6 +45,7 @@ mod identity_fallback;
 mod mailbox_role;
 mod message_mutation_cursors;
 mod message_mutation_retries;
+mod offload;
 mod outbox;
 mod smart_mailboxes;
 mod snooze;

@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use jmap_client::client::Client;
 use posthaste_domain_model::{
-    AccountId, GatewayError, MessageRecord, SyncBatch, SyncCursor, SyncObject, SyncOutcome,
-    SyncProgress, SyncProgressStage, SyncReconciliation, SyncTrigger,
+    AccountId, GatewayError, SyncBatch, SyncCursor, SyncObject, SyncOutcome, SyncProgress,
+    SyncProgressStage, SyncReconciliation, SyncTrigger,
 };
 use posthaste_domain_service::{SyncChunkSink, SyncProgressReporter};
 use posthaste_observability::{events, ph_info};
@@ -141,20 +141,18 @@ pub(crate) async fn sync_account_streamed(
                 mailbox_sync.deleted_mailbox_ids.clone()
             },
             ..SyncBatch::default()
-        })?;
+        })
+        .await?;
     }
 
     report_progress(
         &progress,
         JmapSyncProgressUpdate::new(SyncProgressStage::Fetching, "Fetching messages"),
     );
-    let mut on_page = |page: Vec<MessageRecord>| -> Result<(), GatewayError> {
-        sink.emit(SyncBatch {
-            messages: page,
-            ..SyncBatch::default()
-        })
-    };
-    let email = fetch_email_sync_streamed(client, message_cursor, &mut on_page).await?;
+    // `emit` is `async` (D63/M23b): the sink is threaded straight through to
+    // `fetch_email_sync_streamed`/`fetch_email_full_streamed` (rather than via
+    // a synchronous `FnMut` callback), which `.await` it per page.
+    let email = fetch_email_sync_streamed(client, message_cursor, sink).await?;
 
     // Reconciliation is needed when either object type is a full snapshot:
     // pruning by difference against the complete remote set cannot be done
@@ -170,7 +168,8 @@ pub(crate) async fn sync_account_streamed(
                     messages: message_sync.messages,
                     deleted_message_ids: message_sync.deleted_message_ids,
                     ..SyncBatch::default()
-                })?;
+                })
+                .await?;
                 Ok(SyncOutcome {
                     reconciliation: Some(SyncReconciliation {
                         remote_mailbox_ids: mailbox_sync
@@ -191,7 +190,8 @@ pub(crate) async fn sync_account_streamed(
                     deleted_message_ids: message_sync.deleted_message_ids,
                     cursors: vec![mailbox_sync.cursor, message_sync.cursor],
                     ..SyncBatch::default()
-                })?;
+                })
+                .await?;
                 Ok(SyncOutcome::single_batch())
             }
         }

@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
+
 use super::*;
 use crate::{SyncChunkSink, SyncWriteStore};
 use posthaste_domain_model::{MessageRecord, Operation, SyncBatch};
@@ -6,8 +10,16 @@ use posthaste_domain_model::{MessageRecord, Operation, SyncBatch};
 /// the per-chunk messages and counts the post-sync steps need. Chunk events are
 /// published immediately so mail surfaces progressively.
 ///
+/// `sync_writer` is an owned `Arc` (not a borrow): `emit` moves a clone of it
+/// onto the tokio blocking pool via [`offload`] (D63/M23b) — the store write
+/// it drives is the heaviest work on the sync path (a snapshot/delta apply),
+/// and [`SyncWriteStore`] stays a plain sync `&self` port (so
+/// `posthaste-store`'s own unit tests keep calling it directly, no runtime
+/// needed — see the port's doc comment), so the offload happens here at the
+/// call site instead. `Arc::clone` is a cheap refcount bump, paid once per
+/// chunk emit.
 struct ServiceSyncSink<'a> {
-    sync_writer: &'a dyn SyncWriteStore,
+    sync_writer: Arc<dyn SyncWriteStore>,
     account_id: &'a AccountId,
     /// Ids of messages with an un-acked optimistic op — the M35 durable guard's
     /// protected set (also passed to the store as `protected_message_ids` so a
@@ -84,18 +96,27 @@ fn guard_unsettled(
     Ok(())
 }
 
+#[async_trait]
 impl SyncChunkSink for ServiceSyncSink<'_> {
-    fn emit(&mut self, mut batch: SyncBatch) -> Result<(), GatewayError> {
+    async fn emit(&mut self, mut batch: SyncBatch) -> Result<(), GatewayError> {
         if let Err(error) = guard_unsettled(&mut batch, &self.unsettled, &self.unsettled_ops) {
             self.error = Some(error);
             return Err(GatewayError::Rejected(
                 "sync chunk could not be reconciled against pending ops".to_string(),
             ));
         }
-        match self
-            .sync_writer
-            .apply_sync_batch_protected(self.account_id, &batch, &self.unsettled)
-        {
+        // Offloaded (D63/M23b): `batch` is cloned once into the 'static
+        // closure spawn_blocking requires; `batch` itself stays owned here for
+        // the post-apply counts/append below.
+        let sync_writer = self.sync_writer.clone();
+        let account_id = self.account_id.clone();
+        let unsettled = self.unsettled.clone();
+        let owned_batch = batch.clone();
+        let result = offload(move || {
+            sync_writer.apply_sync_batch_protected(&account_id, &owned_batch, &unsettled)
+        })
+        .await;
+        match result {
             Ok(events) => {
                 (self.publish)(&events);
                 self.applied_events.extend(events);
@@ -196,7 +217,7 @@ impl MailService {
             outcome,
         ) = {
             let mut sink = ServiceSyncSink {
-                sync_writer: self.sync_writer.as_ref(),
+                sync_writer: self.sync_writer.clone(),
                 account_id,
                 unsettled: unsettled.clone(),
                 unsettled_ops,
@@ -236,11 +257,18 @@ impl MailService {
         // carried its own removals and cursors in the chunk.
         //
         if let Some(reconciliation) = &outcome.reconciliation {
-            let reconcile_events = self.sync_writer.reconcile_sync_protected(
-                account_id,
-                reconciliation,
-                &unsettled,
-            )?;
+            let sync_writer = self.sync_writer.clone();
+            let owned_account_id = account_id.clone();
+            let owned_reconciliation = reconciliation.clone();
+            let owned_unsettled = unsettled.clone();
+            let reconcile_events = offload(move || {
+                sync_writer.reconcile_sync_protected(
+                    &owned_account_id,
+                    &owned_reconciliation,
+                    &owned_unsettled,
+                )
+            })
+            .await?;
             publish(&reconcile_events);
             events.extend(reconcile_events);
         }
@@ -364,9 +392,15 @@ impl MailService {
             .map(|operation| operation.entity.id.clone())
             .collect();
         guard_unsettled(&mut batch, &unsettled, &unsettled_ops)?;
+        let sync_writer = self.sync_writer.clone();
+        let owned_account_id = account_id.clone();
+        let owned_batch = batch.clone();
+        let owned_unsettled = unsettled.clone();
         events.extend(
-            self.sync_writer
-                .apply_sync_batch_protected(account_id, &batch, &unsettled)?,
+            offload(move || {
+                sync_writer.apply_sync_batch_protected(&owned_account_id, &owned_batch, &owned_unsettled)
+            })
+            .await?,
         );
         Ok(events)
     }

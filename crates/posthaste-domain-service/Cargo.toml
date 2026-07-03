@@ -15,6 +15,7 @@ serde_json = { workspace = true }
 posthaste-observability = { path = "../posthaste-observability" }
 thiserror = { workspace = true }
 time = { workspace = true }
+tokio = { workspace = true }
 utoipa = { workspace = true, optional = true }
 uuid = { workspace = true }
 
@@ -23,9 +24,6 @@ uuid = { workspace = true }
 # OpenAPI without coupling the domain crate to the web stack by default.
 # Forwarded to `posthaste-domain-model`, which owns the pure type derives.
 openapi = ["dep:utoipa", "posthaste-domain-model/openapi"]
-
-[dev-dependencies]
-tokio = { workspace = true }
 
 [lints]
 workspace = true
