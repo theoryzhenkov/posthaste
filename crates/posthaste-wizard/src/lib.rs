@@ -12,6 +12,7 @@
 //! @spec docs/eph/PLAN-L2-install-wizard
 
 mod certs;
+mod ctl;
 mod fetch;
 mod install;
 mod interactive;
@@ -20,6 +21,10 @@ mod render;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub use ctl::{
+    ctl_binary_name, detect_ctl_platform, find_sidecar, install_ctl, register, sidecar_candidates,
+    CheckResult, CtlInstallOptions, CtlInstalled, CtlSource, RegisterReport,
+};
 pub use fetch::{Channel, GithubSource, ReleaseSource, Version};
 pub use install::{apply_join, detect_platform, install, InstallOptions, Installed, ServiceScope};
 pub use interactive::{guided_install, GuidedInstall};
