@@ -16,7 +16,8 @@ use tokio::sync::broadcast;
 
 use posthaste_domain_model::{
     AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, ConversationId,
-    ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId, MailboxSummary,
+    ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity, MailboxId,
+    MailboxSummary,
     MessageDetail, MessageId, MessageSummary, Operation, OperationId, ReplyContext,
     RevLogSnapshot, SendMessageRequest, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
     SyncMode, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
@@ -330,6 +331,10 @@ impl AuthorityServerApi for LocalAuthorityServer {
 
     async fn replay_events(&self, filter: EventFilter) -> Result<Vec<DomainEvent>, RuntimeError> {
         self.authority_server.replay_events(filter)
+    }
+
+    async fn event_log_bounds(&self) -> Result<Option<EventLogBounds>, RuntimeError> {
+        self.authority_server.event_log_bounds()
     }
 
     async fn get_draft_content(

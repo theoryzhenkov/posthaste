@@ -3,7 +3,7 @@
 //! shared [`assemble_runtime`] that composes a near node over an authority server link.
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -300,12 +300,20 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         reads.clone(),
     ));
     let links = Arc::new(LinkRegistry::new(views, event_sender.clone()));
+    // The fact-carrying event tap (RFC-L2-scripting D52 / S2): the down-channel
+    // half over the durable `event_log` (reached through the same `reads` the live
+    // broadcast records into), mounted on `/v1/events` by `subscribe_events`.
+    let event_tap = Arc::new(crate::handle::EventTap::new(Arc::new(
+        crate::read::EventLogFactLog::new(reads.clone()),
+    )));
     let core = Arc::new(RuntimeCoreState {
         authority_server_link,
         pending_set,
         reads,
         event_sender,
         links,
+        event_tap,
+        tap_subscriber_seq: AtomicU64::new(0),
         startup_status,
         stopped: stopped.clone(),
     });

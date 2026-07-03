@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use posthaste_domain_model::{now_iso8601, AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck, ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot, SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger, TagSummary, EVENT_TOPIC_REV_LOG_APPENDED};
+use posthaste_domain_model::{now_iso8601, AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck, ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot, SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger, TagSummary, EVENT_TOPIC_REV_LOG_APPENDED};
 use posthaste_domain_service::{MailService, MailStore, SharedGateway};
 use posthaste_replica_core::{MessageChangeDiff, MessageFoldState};
 use posthaste_observability::{events, ph_warn};
