@@ -1,0 +1,35 @@
+[package]
+name = "posthaste-provider-call"
+version = "0.1.0"
+edition = "2021"
+
+# The **native** outbound-call envelope (RFC-L2-provider-reliability D80/D83, M31):
+# the executor half over the wasm-pure `posthaste-call-policy` core. Where the
+# policy crate is pure arithmetic (deadline table, jittered backoff, Retry-After
+# math, terminality precedence), this crate is the tokio/reqwest *execution* of
+# it — it owns the shared connection pool, applies the per-class deadline (a total
+# via `tokio::time::timeout`; a between-chunks *stall* read-deadline for blobs),
+# runs the Retry-After-aware retry loop, and holds the per-account circuit
+# breaker (D83). It is deliberately native-only (tokio + reqwest): it must never
+# enter the D15 wasm frontier, so nothing on that frontier depends on it — only
+# `posthaste-engine` (native) routes its JMAP calls through it.
+
+[lib]
+name = "posthaste_provider_call"
+path = "src/lib.rs"
+
+[dependencies]
+posthaste-call-policy = { path = "../posthaste-call-policy" }
+posthaste-domain-model = { path = "../posthaste-domain-model" }
+async-stream = "0.3"
+futures-util = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
