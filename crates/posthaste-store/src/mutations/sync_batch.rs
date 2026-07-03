@@ -46,10 +46,11 @@ pub(crate) fn apply_sync_batch_tx(
 }
 
 /// Like [`apply_sync_batch_tx`], but for a `replace_all_messages` snapshot:
-/// `protected_message_ids` (messages with an unsettled optimistic op) are
-/// excluded from the prune-by-absence pass even though the caller has already
-/// dropped them from `batch.messages` (S3 unsettled-guard) — otherwise that
-/// same drop would make this pass treat them as "deleted remotely".
+/// `protected_message_ids` (messages with an un-acked optimistic op) are
+/// excluded from the prune-by-absence pass (M35 durable snapshot guard, D93).
+/// The caller folds present rows in-batch and only omits absent/folded-to-
+/// removed ones; this exemption keeps the prune from treating those omissions
+/// as "deleted remotely".
 pub(crate) fn apply_sync_batch_protected_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -300,11 +301,12 @@ pub(crate) fn prune_mailboxes_absent_from_remote_tx(
 /// `replace_all_messages` snapshot path and the streamed final-reconciliation
 /// pass.
 ///
-/// `protected_message_ids` (messages with an unsettled optimistic op, S3
-/// unsettled-guard) are skipped even when absent from `remote_message_ids`:
-/// a not-yet-uploaded local message, or one the guard dropped from the
-/// snapshot to avoid clobbering its in-flight write, must survive this pass
-/// and instead reconcile once its op settles.
+/// `protected_message_ids` (messages with an un-acked optimistic op, M35
+/// durable snapshot guard) are skipped even when absent from `remote_message_ids`:
+/// a not-yet-uploaded local message, or one the guard left out of the snapshot
+/// because it folded to removed (pending Destroy), must survive this pass and
+/// reconcile once its op settles. Rows the guard *did* fold into the snapshot
+/// are present in `remote_message_ids`, so they are not pruned regardless.
 pub(crate) fn prune_messages_absent_from_remote_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,

@@ -698,9 +698,10 @@ async fn rejected_mutation_reverts_canonical_and_settles_failed() {
 
 #[tokio::test]
 async fn unsettled_message_ids_tracks_queued_then_settled_assertions() {
-    // The S3 sync-guard skips exactly the messages this set names. A queued
-    // optimistic mutation puts its message in the set; settling it (flush)
-    // removes it, so the sync resumes applying provider state to that message.
+    // The M35 durable snapshot guard folds/protects exactly the messages this
+    // set names. A queued optimistic mutation puts its message in the set;
+    // settling it (flush/ack) removes it, so the sync applies plain provider
+    // state to that message (no stale overlay).
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
