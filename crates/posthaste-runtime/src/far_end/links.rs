@@ -5,7 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use posthaste_domain_model::{DomainEvent, Id};
-use posthaste_link_far_end::{Accept, DedupStore, ReplayStore, Resume, TerminalClass};
+use posthaste_link_far_end::down::{ReplayStore, Resume};
+use posthaste_link_far_end::up::{Accept, DedupStore, TerminalClass};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeViewSubscription};
 use posthaste_contract_core::{
     ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MailOperation,
@@ -27,6 +28,16 @@ use crate::far_end::view_registry::ViewRegistry;
 /// `Lagged` and we recover by collapsing to current state. Sized generously so
 /// ordinary bursts never lag; the collapse path remains the safety net.
 const LINK_FRAME_CHANNEL_CAPACITY: usize = 512;
+
+/// Idle-session reaper TTL (RFC-L2-lifecycle D68 / M28), in `now_secs` ticks
+/// (**seconds**). A link-connection whose SSE down-stream has been gone this
+/// long — the leak shape `open → stream → disconnect` with no explicit `DELETE`
+/// (`close_link`) — is reaped: its registry entry, open views, and dedup ledger
+/// are released. Also age-reaps a link opened but never streamed. Reuses the D48
+/// tick discipline (the same `now_secs` tick the dedup reaper runs on), never a
+/// new timer (D68). Sized to comfortably outlast an ordinary client reconnect
+/// gap while bounding leaked-session growth (cures N9). Flagged for review.
+const SESSION_IDLE_TTL: u64 = 300;
 
 pub(crate) struct LinkRegistry {
     views: Arc<ViewRegistry>,
@@ -66,6 +77,11 @@ struct StoredLink {
     open_views: HashSet<ViewId>,
     latest_snapshots: HashMap<ViewId, ViewSnapshot>,
     event_task: Option<AbortHandle>,
+    /// The last `now_secs` tick this link was opened or (re)subscribed, refreshed
+    /// while a live SSE down-stream holds it (M28/D68). A link with no live
+    /// down-stream (`frames.receiver_count() == 0`) idle past [`SESSION_IDLE_TTL`]
+    /// since this tick is reaped by [`LinkRegistry::reap_idle_sessions`].
+    last_active: u64,
 }
 
 #[derive(Clone)]
@@ -190,6 +206,7 @@ impl LinkRegistry {
                 open_views: HashSet::new(),
                 latest_snapshots: HashMap::new(),
                 event_task: None,
+                last_active: now_secs(),
             },
         );
         let event_task = self.spawn_notification_forwarder(link_id.clone());
@@ -222,6 +239,12 @@ impl LinkRegistry {
             self.dedup.ack(&link_id, seq.get());
         }
         self.dedup.reap(now);
+        // M28/D68 idle-session reaper, on the same D48 tick (reuse the plumbing,
+        // no new timer). Mark this link active FIRST so a stale reap cannot evict
+        // the very link we are (re)subscribing to before its new down-stream
+        // attaches below.
+        self.mark_link_active(&link_id, now);
+        self.reap_idle_sessions(now);
 
         // Reconnect detection (D50): the shared store's resume decides. `Fresh`
         // (no cursor) or `Replay` at head means the client is current — no
@@ -347,6 +370,64 @@ impl LinkRegistry {
         // Drop the link's dedup ledger entries (its link closed).
         self.dedup.purge(&link_id);
         Ok(())
+    }
+
+    /// Refresh a link's idle-reaper activity tick (M28/D68) — called on every
+    /// (re)subscribe so a link with an active down-stream is never reaped.
+    fn mark_link_active(&self, link_id: &RuntimeLinkId, now: u64) {
+        if let Some(link) = self.lock_links().get_mut(link_id) {
+            link.last_active = now;
+        }
+    }
+
+    /// The idle-session reaper (RFC-L2-lifecycle M28/D68): release link-
+    /// connections whose SSE down-stream is gone — the `open → stream →
+    /// disconnect`-without-`DELETE` leak (N9) — plus links opened but never
+    /// streamed that have aged out. A link with a live down-stream
+    /// (`frames.receiver_count() > 0`) is spared and its activity tick refreshed;
+    /// otherwise, if idle past [`SESSION_IDLE_TTL`] since its last activity, it is
+    /// torn down exactly as [`close_link`](Self::close_link) would (abort the
+    /// event task, close open views, purge the dedup ledger + seq counter). Driven
+    /// by the explicit `now` tick — the same D48 discipline as the dedup/sink
+    /// reapers, never ambient time. Returns the reaped ids.
+    pub(crate) fn reap_idle_sessions(&self, now: u64) -> Vec<RuntimeLinkId> {
+        let ttl = SESSION_IDLE_TTL;
+        // Collect teardown work under the links lock, then perform it (which takes
+        // other locks: view registry, dedup, seq) after releasing the links lock.
+        let mut teardown: Vec<(RuntimeLinkId, HashSet<ViewId>, Option<AbortHandle>)> = Vec::new();
+        {
+            let mut links = self.lock_links();
+            links.retain(|link_id, link| {
+                if link.frames.receiver_count() > 0 {
+                    // A live SSE down-stream holds the link — never idle; refresh.
+                    link.last_active = now;
+                    true
+                } else if now.saturating_sub(link.last_active) > ttl {
+                    teardown.push((
+                        link_id.clone(),
+                        std::mem::take(&mut link.open_views),
+                        link.event_task.take(),
+                    ));
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        let mut reaped = Vec::with_capacity(teardown.len());
+        for (link_id, open_views, event_task) in teardown {
+            if let Some(event_task) = event_task {
+                event_task.abort();
+            }
+            for view_id in open_views {
+                let _ = self.views.close_view(&view_id);
+            }
+            self.dedup.purge(&link_id);
+            self.seq.purge(&link_id);
+            debug!(link_id = %link_id.as_str(), "idle runtime link reaped (M28/D68)");
+            reaped.push(link_id);
+        }
+        reaped
     }
 
     pub(crate) async fn open_view(
@@ -1213,6 +1294,58 @@ mod race_tests {
             "the live stream carries the settlement that raced the subscribe"
         );
     }
+
+    // M28/D68 gate: open → stream → disconnect-WITHOUT-DELETE is reaped after the
+    // idle TTL. The leaked session (no explicit close_link) is released by the
+    // idle reaper, driven on the D48 `now` tick.
+    #[tokio::test]
+    async fn idle_session_reaped_after_ttl() {
+        let reg = registry();
+        let sid = reg.open_link(RuntimeCaller::test()).unwrap().link_id;
+
+        // Stream: the SSE down-stream attaches (its boxed stream holds the frame
+        // receiver, so `receiver_count() > 0` while connected).
+        let subscription = reg
+            .subscribe_frames(RuntimeCaller::test(), sid.clone(), None)
+            .await
+            .unwrap();
+        let last_active = reg
+            .lock_links()
+            .get(&sid)
+            .map(|link| link.last_active)
+            .expect("the streamed link is registered");
+
+        // Disconnect WITHOUT a DELETE: dropping the subscription drops the live
+        // stream (and its receiver), but no `close_link` ran → the entry leaks.
+        drop(subscription);
+        assert!(reg.lock_links().contains_key(&sid), "leaks without a reaper");
+
+        // Within the TTL the reaper spares it.
+        reg.reap_idle_sessions(last_active + 1);
+        assert!(reg.lock_links().contains_key(&sid), "within ttl → spared");
+
+        // Past the TTL it is reaped: the registry entry is released.
+        let reaped = reg.reap_idle_sessions(last_active + SESSION_IDLE_TTL + 1);
+        assert_eq!(reaped, vec![sid.clone()], "idle session reaped past ttl");
+        assert!(!reg.lock_links().contains_key(&sid), "registry entry released");
+    }
+
+    // A live down-stream is never reaped — the held receiver spares the link at
+    // any tick (and refreshes its activity).
+    #[tokio::test]
+    async fn a_live_stream_is_never_reaped() {
+        let reg = registry();
+        let sid = reg.open_link(RuntimeCaller::test()).unwrap().link_id;
+        let _subscription = reg
+            .subscribe_frames(RuntimeCaller::test(), sid.clone(), None)
+            .await
+            .unwrap();
+        assert!(
+            reg.reap_idle_sessions(SESSION_IDLE_TTL * 10).is_empty(),
+            "a live down-stream is never reaped"
+        );
+        assert!(reg.lock_links().contains_key(&sid));
+    }
 }
 
 #[cfg(test)]
@@ -1250,6 +1383,7 @@ mod collapse_tests {
             open_views: HashSet::new(),
             latest_snapshots: HashMap::new(),
             event_task: None,
+            last_active: 0,
         }
     }
 

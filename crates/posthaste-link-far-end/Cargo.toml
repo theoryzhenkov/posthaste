@@ -22,6 +22,9 @@ posthaste-contract-core = { path = "../posthaste-contract-core" }
 # alongside a seam's frame, D46) — the sub-stores themselves are transport-free.
 serde = { workspace = true }
 tokio = { workspace = true }
+# The `FactLog` port (D52) is async — its backings read a durable log (the
+# runtime's `event_log`, the authority server's store).
+async-trait = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
