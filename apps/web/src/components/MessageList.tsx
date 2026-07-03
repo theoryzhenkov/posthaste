@@ -38,7 +38,6 @@ import {
 import { useConversationTree } from './message-list/useConversationTree'
 import { useRuntimeMailListView } from './message-list/useRuntimeMailListView'
 import { useMessageListNavigation } from './message-list/useMessageListNavigation'
-import { useAutoSelectFirstMessage } from './message-list/useAutoSelectFirstMessage'
 import { useMessageListScroll } from './message-list/useMessageListScroll'
 import { useViewMode } from './message-list/useViewMode'
 import type { SidebarSelection } from './Sidebar'
@@ -183,14 +182,6 @@ export function MessageList({
     [onSelectMessage],
   )
 
-  const { clearAndSkip } = useAutoSelectFirstMessage({
-    isListActive,
-    rows,
-    selectedKey,
-    currentViewKey,
-    selectFirst: handleSelectRowMessage,
-    clearSelection: onClearSelection,
-  })
   // A fatal view-open failure surfaces here as an inline error + retry (instead
   // of an infinite skeleton); search-syntax errors still flow through
   // `buildErrorState` via `preparedSearchQuery`.
@@ -249,17 +240,17 @@ export function MessageList({
     (event: MouseEvent<HTMLDivElement>) => {
       if (event.button !== 0) return
       if (event.target === event.currentTarget) {
-        clearAndSkip()
+        onClearSelection()
         return
       }
       const target = event.target
       if (target instanceof HTMLElement) {
         if (target.closest('[data-message-list-empty="true"]')) {
-          clearAndSkip()
+          onClearSelection()
         }
       }
     },
-    [clearAndSkip],
+    [onClearSelection],
   )
 
   if (!selectedView) {
