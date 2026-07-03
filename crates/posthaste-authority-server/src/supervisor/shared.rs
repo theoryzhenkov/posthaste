@@ -59,6 +59,31 @@ impl SupervisorShared {
         generation
     }
 
+    /// Mints a fresh [`SyncCycleGeneration`] for `account_id` and registers it
+    /// as the account's current cycle, invalidating whatever token the
+    /// previous cycle (if any) handed to its progress forwarder (N5 + the M26
+    /// flag / M27 sub-unit (d)).
+    ///
+    /// Called twice per relevant occasion: once at the start of every sync
+    /// cycle (`sync_flow::process_sync_trigger_inner`), and again — with the
+    /// return value discarded — whenever a select!-loop arm abandons a cycle
+    /// (`runtime::record_arm_timeout`), so a progress write still in flight
+    /// for the abandoned cycle no longer matches and is rejected by
+    /// [`Self::set_sync_progress`]'s generation check.
+    pub(crate) async fn next_sync_cycle_generation(
+        &self,
+        account_id: &AccountId,
+    ) -> SyncCycleGeneration {
+        let mut cycles = self.sync_cycle_generations.write().await;
+        let cycle = cycles
+            .get(account_id.as_str())
+            .copied()
+            .unwrap_or(SyncCycleGeneration::INITIAL)
+            .next();
+        cycles.insert(account_id.to_string(), cycle);
+        cycle
+    }
+
     /// Broadcast domain events to all SSE subscribers.
     pub(crate) fn publish_events(&self, events: &[DomainEvent]) {
         for event in events {
@@ -76,14 +101,24 @@ impl SupervisorShared {
             .unwrap_or_default()
     }
 
-    /// Update the running sync progress, setting account status to Syncing while present.
+    /// Update the running sync progress, setting account status to Syncing
+    /// while present.
+    ///
+    /// `cycle` gates this write against [`Self::next_sync_cycle_generation`]'s
+    /// per-account current token (N5 + the M26 flag / M27 sub-unit (d)): a
+    /// write minted for a cycle that has since been abandoned (a select!-loop
+    /// arm timeout) or superseded (a fresh cycle already started) is dropped,
+    /// on top of — not instead of — the existing `RuntimeGeneration` guard,
+    /// which only catches a whole-incarnation restart, not an abandoned cycle
+    /// within the same incarnation.
     pub(crate) async fn set_sync_progress(
         &self,
         account_id: &AccountId,
         generation: RuntimeGeneration,
+        cycle: SyncCycleGeneration,
         progress: Option<SyncProgress>,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), move |current| {
+        self.update_runtime_overview(account_id, Some(generation), Some(cycle), move |current| {
             match progress {
                 Some(progress) => {
                     // Guarded against the committed overview under the lock: a
@@ -114,7 +149,7 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         push: PushStatus,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), move |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, move |current| {
             current.push = push;
             true
         })
@@ -127,7 +162,7 @@ impl SupervisorShared {
         account_id: &AccountId,
         generation: RuntimeGeneration,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = AccountStatus::Ready;
             current.last_sync_at = time::OffsetDateTime::now_utc()
                 .format(&time::format_description::well_known::Rfc3339)
@@ -150,7 +185,7 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         error: &ServiceError,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = match error {
                 ServiceError::Gateway(GatewayError::Auth) => AccountStatus::AuthError,
                 ServiceError::Gateway(GatewayError::Network(_))
@@ -182,7 +217,7 @@ impl SupervisorShared {
         attempt: u32,
         reason: &str,
     ) {
-        self.update_runtime_overview(account_id, None, |current| {
+        self.update_runtime_overview(account_id, None, None, |current| {
             current.status = AccountStatus::Degraded;
             current.last_sync_error = Some(format!(
                 "account runtime fault (restart {attempt}/{WATCHDOG_MAX_RESTARTS}): {reason}"
@@ -202,7 +237,7 @@ impl SupervisorShared {
     /// not serve until an operator restarts it (D61 / XIII). Push is `Disabled`
     /// because nothing is left to reconnect it.
     pub(crate) async fn mark_account_halted(&self, account_id: &AccountId, reason: &str) {
-        self.update_runtime_overview(account_id, None, |current| {
+        self.update_runtime_overview(account_id, None, None, |current| {
             current.status = AccountStatus::Offline;
             current.push = PushStatus::Disabled;
             current.last_sync_error = Some(format!(
@@ -230,7 +265,7 @@ impl SupervisorShared {
         arm: &'static str,
         budget: Duration,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = AccountStatus::Degraded;
             current.last_sync_error = Some(format!(
                 "supervisor arm '{arm}' exceeded its {budget:?} budget (provider/store call hung)"
@@ -320,7 +355,7 @@ impl SupervisorShared {
         account_id: &AccountId,
         overview: AccountRuntimeOverview,
     ) {
-        self.update_runtime_overview(account_id, None, move |current| {
+        self.update_runtime_overview(account_id, None, None, move |current| {
             *current = overview;
             true
         })
@@ -333,7 +368,7 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         overview: AccountRuntimeOverview,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), move |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, move |current| {
             *current = overview;
             true
         })
@@ -350,10 +385,26 @@ impl SupervisorShared {
     /// Emits status/push change events on commit.
     ///
     /// @spec docs/L1-sync#event-propagation
+    ///
+    /// `cycle`, when `Some`, additionally gates the write against
+    /// [`Self::next_sync_cycle_generation`]'s current per-account token
+    /// (N5 + the M26 flag / M27 sub-unit (d) — see [`SyncCycleGeneration`]'s
+    /// doc comment for why `generation` alone does not close this gap). The
+    /// `sync_cycle_generations` read lock is held for this whole call — from
+    /// the check through the `overviews` commit below, mirroring how
+    /// `generations` is already held — so a concurrent
+    /// `next_sync_cycle_generation` bump (which needs the matching write
+    /// lock) is always fully ordered before or after this write, never
+    /// interleaved with it: tokio's `RwLock` is FIFO-fair, so a bump that
+    /// arrives while this call already holds its read lock will queue behind
+    /// it rather than jump ahead, guaranteeing that a bump issued by
+    /// `record_arm_timeout` is visible to every progress write that starts
+    /// after it returns.
     async fn update_runtime_overview(
         &self,
         account_id: &AccountId,
         generation: Option<RuntimeGeneration>,
+        cycle: Option<SyncCycleGeneration>,
         update: impl FnOnce(&mut AccountRuntimeOverview) -> bool,
     ) {
         let generations = self.runtime_generations.read().await;
@@ -362,6 +413,17 @@ impl SupervisorShared {
                 return;
             };
             if *current != expected {
+                return;
+            }
+        }
+
+        let cycles = self.sync_cycle_generations.read().await;
+        if let Some(expected) = cycle {
+            let current_cycle = cycles
+                .get(account_id.as_str())
+                .copied()
+                .unwrap_or(SyncCycleGeneration::INITIAL);
+            if current_cycle != expected {
                 return;
             }
         }
@@ -447,6 +509,7 @@ impl SupervisorShared {
 
         overviews.insert(account_id.to_string(), overview);
         drop(overviews);
+        drop(cycles);
         drop(generations);
         self.publish_events(&side_effects);
     }

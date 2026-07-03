@@ -12,6 +12,7 @@ use posthaste_domain_model::{DomainEvent};
 use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
+use posthaste_observability::{events, ph_warn};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 
@@ -211,6 +212,26 @@ pub(crate) async fn build_authority_server_parts(
         config.state_root.join("mail.sqlite"),
         &config.state_root,
     )?);
+    // Deferred post-startup body-cache repair (N15 / RFC-L2-lifecycle D67(b) /
+    // M27 sub-unit (b)): this used to run unconditionally inside
+    // `init_schema`, blocking `DatabaseStore::open` behind an unbounded
+    // startup scan. It now runs off that path, on the blocking pool, after
+    // the store above is already open and serving real reads/writes. Best
+    // effort: a failure here is logged and does not fail startup — the scan
+    // is idempotent, so the next repair (a future retry, or the next
+    // process startup) catches up whatever this pass missed.
+    {
+        let repair_store = database_store.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = repair_store.repair_body_cache_objects() {
+                ph_warn!(
+                    events::STORE_STARTUP_BODY_CACHE_REPAIR_FAILED,
+                    error = %error,
+                    "deferred startup body-cache repair failed"
+                );
+            }
+        });
+    }
     let store: Arc<dyn MailStore> = database_store.clone();
     let config_repo: Arc<dyn ConfigRepository> = Arc::new(config_repo);
     let service = Arc::new(MailService::new(database_store.clone(), config_repo.clone()));

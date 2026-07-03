@@ -33,6 +33,17 @@ use posthaste_config::TlsConfig;
 /// connects but never negotiates cannot tie up resources.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Maximum number of TLS handshakes running concurrently in
+/// [`TlsListener`]'s `JoinSet`. Previously unbounded: a connection flood grew
+/// the set without limit, each entry a task with up to `HANDSHAKE_TIMEOUT`'s
+/// worth of lifetime (N6 / RFC-L2-lifecycle D67(e) / M27 sub-unit (e)). Once
+/// `handshakes.len()` reaches this cap, `accept` stops polling
+/// `TcpListener::accept()` until a handshake finishes and is drained via
+/// `join_next` — new connections queue in the OS accept backlog rather than
+/// each spawning its own handshake task. **Review** (picked sane, not
+/// measured).
+const MAX_CONCURRENT_HANDSHAKES: usize = 64;
+
 /// Build a [`TlsAcceptor`] from the `[tls]` cert+key paths. Reads PEM-encoded
 /// certificate(s) and a PKCS#1/PKCS#8/SEC1 private key. The first suitable key
 /// in the file is used; a missing key or empty cert chain is a hard error (fail
@@ -97,50 +108,70 @@ impl TlsListener {
     }
 }
 
+impl TlsListener {
+    /// One iteration of the accept-or-drain `select!`. Split out of
+    /// [`Listener::accept`] so a test can step through iterations and inspect
+    /// `handshakes.len()` between them (N6 / M27 sub-unit (e)) instead of
+    /// blocking on the whole, potentially long-running `accept` loop.
+    /// Returns `Some` exactly when a handshake completed successfully;
+    /// `None` means "loop again" (a connection was accepted-and-spawned, an
+    /// accept error was logged, or a failed/timed-out handshake was drained).
+    async fn accept_once(&mut self) -> Option<(TlsStream<TcpStream>, SocketAddr)> {
+        tokio::select! {
+            // Take a new TCP connection and start its handshake on a task —
+            // but only while under the concurrency cap (N6): at the cap this
+            // branch is not polled at all, so new connections queue in the OS
+            // accept backlog instead of spawning an unbounded handshake task.
+            accepted = self.inner.accept(), if self.handshakes.len() < MAX_CONCURRENT_HANDSHAKES => match accepted {
+                Ok((stream, addr)) => {
+                    let acceptor = self.acceptor.clone();
+                    self.handshakes.spawn(async move {
+                        match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream))
+                            .await
+                        {
+                            Ok(Ok(tls)) => Some((tls, addr)),
+                            Ok(Err(e)) => {
+                                warn!(error = %e, %addr, "tls handshake failed; dropped");
+                                None
+                            }
+                            Err(_) => {
+                                warn!(%addr, "tls handshake timed out; dropped");
+                                None
+                            }
+                        }
+                    });
+                    None
+                }
+                Err(e) => {
+                    if !is_connection_error(&e) {
+                        // Transient resource exhaustion (e.g. EMFILE): log + sleep.
+                        error!("tcp accept error: {e}");
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                    None
+                }
+            },
+            // A handshake finished. Return it if it succeeded; otherwise the
+            // connection was already logged + dropped, so the caller loops.
+            // The guard keeps `select!` from busy-spinning on an empty set.
+            Some(joined) = self.handshakes.join_next(), if !self.handshakes.is_empty() => {
+                match joined {
+                    Ok(Some(ready)) => Some(ready),
+                    _ => None,
+                }
+            }
+        }
+    }
+}
+
 impl Listener for TlsListener {
     type Io = TlsStream<TcpStream>;
     type Addr = SocketAddr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
-            tokio::select! {
-                // Take a new TCP connection and start its handshake on a task.
-                accepted = self.inner.accept() => match accepted {
-                    Ok((stream, addr)) => {
-                        let acceptor = self.acceptor.clone();
-                        self.handshakes.spawn(async move {
-                            match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream))
-                                .await
-                            {
-                                Ok(Ok(tls)) => Some((tls, addr)),
-                                Ok(Err(e)) => {
-                                    warn!(error = %e, %addr, "tls handshake failed; dropped");
-                                    None
-                                }
-                                Err(_) => {
-                                    warn!(%addr, "tls handshake timed out; dropped");
-                                    None
-                                }
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        if is_connection_error(&e) {
-                            continue;
-                        }
-                        // Transient resource exhaustion (e.g. EMFILE): log + sleep.
-                        error!("tcp accept error: {e}");
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
-                },
-                // A handshake finished. Return it if it succeeded; otherwise the
-                // connection was already logged + dropped, so keep looping. The
-                // guard keeps `select!` from busy-spinning on an empty set.
-                Some(joined) = self.handshakes.join_next(), if !self.handshakes.is_empty() => {
-                    if let Ok(Some(ready)) = joined {
-                        return ready;
-                    }
-                }
+            if let Some(ready) = self.accept_once().await {
+                return ready;
             }
         }
     }
@@ -222,5 +253,63 @@ mod tests {
         .err()
         .expect("expected an error for empty cert");
         assert!(err.contains("no certificates"), "unexpected error: {err}");
+    }
+
+    // spec: docs/eph/RFC-L2-lifecycle-and-errors#d67 (N6 / M27 sub-unit (e))
+    #[tokio::test]
+    async fn handshake_joinset_stays_bounded_under_a_connection_flood() {
+        let cert = fixture_dir().join(FIXTURE_CERT);
+        let key = fixture_dir().join(FIXTURE_KEY);
+        if !cert.exists() || !key.exists() {
+            eprintln!("skipping: TLS fixture missing at {}", cert.display());
+            return;
+        }
+        let acceptor = build_tls_acceptor(&TlsConfig {
+            cert_path: cert,
+            key_path: key,
+        })
+        .expect("acceptor should build");
+        let inner = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = inner.local_addr().expect("local addr");
+        let mut listener = TlsListener::new(inner, acceptor);
+
+        // Flood: open more raw TCP connections than the handshake cap, none
+        // of which ever sends a byte of TLS — each just connects and sits
+        // idle, standing in for a connection flood that never negotiates
+        // (N6's failure mode: an unbounded `JoinSet` of up-to-10s-lived
+        // handshake tasks).
+        let flood_count = MAX_CONCURRENT_HANDSHAKES + 32;
+        let mut clients = Vec::with_capacity(flood_count);
+        for _ in 0..flood_count {
+            clients.push(
+                TcpStream::connect(addr)
+                    .await
+                    .expect("flood client should connect"),
+            );
+        }
+
+        // Drive enough accept-loop iterations to give every flooded
+        // connection a chance to be accepted, sampling the JoinSet's size
+        // between iterations. None of the flood clients ever completes a
+        // handshake within this test, so each iteration is capped with a
+        // short timeout rather than blocking indefinitely on `join_next`.
+        let mut observed_peak = 0usize;
+        for _ in 0..(flood_count * 2) {
+            let _ = tokio::time::timeout(Duration::from_millis(20), listener.accept_once()).await;
+            observed_peak = observed_peak.max(listener.handshakes.len());
+        }
+
+        assert!(
+            observed_peak <= MAX_CONCURRENT_HANDSHAKES,
+            "handshake JoinSet peaked at {observed_peak}, exceeding the cap of {MAX_CONCURRENT_HANDSHAKES}"
+        );
+        assert_eq!(
+            observed_peak, MAX_CONCURRENT_HANDSHAKES,
+            "the flood should have filled the JoinSet up to the cap, not stalled below it"
+        );
+
+        drop(clients);
     }
 }

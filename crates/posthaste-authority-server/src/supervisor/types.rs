@@ -93,6 +93,7 @@ pub(crate) struct SupervisorShared {
     pub(crate) gateways: RwLock<HashMap<String, SharedGateway>>,
     pub(crate) runtime_overviews: RwLock<HashMap<String, AccountRuntimeOverview>>,
     pub(crate) runtime_generations: RwLock<HashMap<String, RuntimeGeneration>>,
+    pub(crate) sync_cycle_generations: RwLock<HashMap<String, SyncCycleGeneration>>,
     pub(crate) known_accounts: RwLock<HashSet<String>>,
     pub(crate) account_count: AtomicUsize,
     pub(crate) cache_resources: Mutex<CacheResourceGovernor>,
@@ -114,6 +115,44 @@ impl RuntimeGeneration {
         Self(self.0.saturating_add(1))
     }
 }
+
+/// Monotonic identity for a single sync cycle within one account incarnation
+/// (RFC-L2-lifecycle N5 + the M26 flag / M27 sub-unit (d)).
+///
+/// [`RuntimeGeneration`] only changes when the account's whole incarnation is
+/// replaced (a watchdog restart) — it does NOT change between sync cycles
+/// within the same incarnation. That leaves a gap: when a select!-loop arm's
+/// `tokio::time::timeout` (D66) abandons a hung sync cycle, the cycle's
+/// progress-forwarder task (`sync_flow::sync_progress_reporter`) is a
+/// separately-spawned task, not owned by the timed-out future — dropping the
+/// future does not cancel it. Without a finer-grained guard, a progress write
+/// already in flight from that abandoned cycle still carries a *matching*
+/// `RuntimeGeneration` and can land after `mark_arm_timeout` sets `Degraded`,
+/// flipping status back to `Syncing` — the M26 flap this type closes.
+///
+/// [`SupervisorShared::next_sync_cycle_generation`] mints one of these at the
+/// start of every sync cycle and again to invalidate the current one when an
+/// arm abandons a cycle (`record_arm_timeout`); progress writes carry the
+/// value minted for their own cycle, and are rejected once it no longer
+/// matches the account's current cycle token.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SyncCycleGeneration(u64);
+
+impl SyncCycleGeneration {
+    pub(crate) const INITIAL: Self = Self(0);
+
+    pub(crate) fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
+/// Capacity of the bounded channel [`sync_flow::sync_progress_reporter`] uses
+/// to forward progress updates to its single per-cycle writer task. Progress
+/// values are display-only and monotonically superseded by the next one, so a
+/// full channel drops the newest update via `try_send` rather than blocking
+/// the (synchronous) reporter callback — a small capacity just smooths a
+/// brief burst faster than the writer can drain it. **Review**.
+pub(crate) const SYNC_PROGRESS_CHANNEL_CAPACITY: usize = 8;
 
 /// Coordinates fire-and-forget sync triggers between the supervisor and the
 /// per-account runtime task. When the runtime is already executing a sync

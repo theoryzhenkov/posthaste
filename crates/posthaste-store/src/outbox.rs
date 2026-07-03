@@ -4,6 +4,29 @@
 
 use super::*;
 
+/// Bound on [`OperationOutboxStore::list_flushable_operations`]: the flush
+/// loop (`flush_account` in `posthaste-domain-service`) already re-invokes
+/// this once per sync cycle, and each op it processes transitions out of the
+/// flushable state set before the next call — so a bounded batch per call
+/// drains a large/stuck outbox across cycles instead of materializing it all
+/// into one unbounded `Vec` in a single query (N15 / RFC-L2-lifecycle D67(b)
+/// / M27 sub-unit (b)). Sized to comfortably clear within one
+/// `ARM_BUDGET_SYNC` cycle under normal per-op provider latency, not to
+/// guarantee full drainage of a pathological backlog in one pass — the next
+/// cycle picks up whatever remains. **Review** (picked sane, not measured).
+pub(crate) const OUTBOX_FLUSH_BATCH_LIMIT: i64 = 200;
+
+/// Bound on `list_pending_operations`/`list_unsettled_operations`. Unlike
+/// `list_flushable_operations` these two are not drained in a retry loop —
+/// `list_pending_operations` backs a compose/detail UI listing and
+/// `list_unsettled_operations` is folded over to compute a message's
+/// remaining state assertions at settlement time — so an aggressive per-cycle
+/// batch would risk silently truncating a correctness-relevant read instead
+/// of just being retried later. This is a generous worst-case safety cap
+/// only: it bounds the pathological case (N15) without changing behavior for
+/// any realistic per-account backlog. **Review**.
+pub(crate) const OUTBOX_LIST_SAFETY_LIMIT: i64 = 5_000;
+
 fn parse_operation_state(value: &str) -> Result<OperationState, StoreError> {
     match value {
         "pending" => Ok(OperationState::Pending),
@@ -122,10 +145,11 @@ fn collect_operations(
     connection: &Connection,
     sql: &str,
     account_id: &AccountId,
+    limit: i64,
 ) -> Result<Vec<Operation>, StoreError> {
     let mut statement = connection.prepare(sql).map_err(sql_to_store_error)?;
     let rows = statement
-        .query_map(params![account_id.as_str()], row_to_operation)
+        .query_map(params![account_id.as_str(), limit], row_to_operation)
         .map_err(sql_to_store_error)?;
     let mut operations = Vec::new();
     for row in rows {
@@ -177,9 +201,11 @@ impl OperationOutboxStore for DatabaseStore {
             &format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
                  WHERE account_id = ?1 AND state IN ('pending', 'inflight', 'conflicted')
-                 ORDER BY rowid ASC"
+                 ORDER BY rowid ASC
+                 LIMIT ?2"
             ),
             account_id,
+            OUTBOX_FLUSH_BATCH_LIMIT,
         )
     }
 
@@ -193,9 +219,11 @@ impl OperationOutboxStore for DatabaseStore {
             &format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
                  WHERE account_id = ?1 AND state != 'applied'
-                 ORDER BY rowid ASC"
+                 ORDER BY rowid ASC
+                 LIMIT ?2"
             ),
             account_id,
+            OUTBOX_LIST_SAFETY_LIMIT,
         )
     }
 
@@ -209,9 +237,11 @@ impl OperationOutboxStore for DatabaseStore {
             &format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
                  WHERE account_id = ?1 AND state != 'failed'
-                 ORDER BY rowid ASC"
+                 ORDER BY rowid ASC
+                 LIMIT ?2"
             ),
             account_id,
+            OUTBOX_LIST_SAFETY_LIMIT,
         )
     }
 
