@@ -65,6 +65,11 @@ export type MessageSortField =
 export interface MessagePage {
   items: MessageSummary[]
   nextCursor: string | null
+  /**
+   * Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log
+   * head seq as-of this read, for a gap-free tap tail from that point.
+   */
+  asOfSeq?: number | null
 }
 
 /**
@@ -141,6 +146,11 @@ export interface ConversationSummary {
 export interface ConversationPage {
   items: ConversationSummary[]
   nextCursor: string | null
+  /**
+   * Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log
+   * head seq as-of this read, for a gap-free tap tail from that point.
+   */
+  asOfSeq?: number | null
 }
 
 /**

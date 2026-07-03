@@ -1506,6 +1506,14 @@ export interface components {
          *     @spec docs/L1-api#cursor-pagination
          */
         ConversationPageResponse: {
+            /**
+             * Format: int64
+             * @description Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log
+             *     head seq as-of this read. A level-triggered script reads state here, then
+             *     tails `/v1/events` from `asOfSeq` for a gap-free attach with zero
+             *     server-side per-consumer state. `null` when the head is unavailable.
+             */
+            asOfSeq?: number | null;
             items: components["schemas"]["ConversationSummary"][];
             nextCursor?: string | null;
         };
@@ -1840,6 +1848,14 @@ export interface components {
          *     @spec docs/L1-api#cursor-pagination
          */
         MessagePageResponse: {
+            /**
+             * Format: int64
+             * @description Snapshot-attach consistency token (RFC-L2-scripting §5.3): the event-log
+             *     head seq as-of this read. A level-triggered script reads state here, then
+             *     tails `/v1/events` from `asOfSeq` for a gap-free attach with zero
+             *     server-side per-consumer state. `null` when the head is unavailable.
+             */
+            asOfSeq?: number | null;
             items: components["schemas"]["MessageSummary"][];
             nextCursor?: string | null;
         };
@@ -4497,7 +4513,10 @@ export interface operations {
     add_to_mailbox: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Source (account) identifier */
                 source_id: string;
@@ -4544,7 +4563,10 @@ export interface operations {
     destroy_message: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Source (account) identifier */
                 source_id: string;
@@ -4587,7 +4609,10 @@ export interface operations {
     remove_from_mailbox: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Source (account) identifier */
                 source_id: string;
@@ -4634,7 +4659,10 @@ export interface operations {
     replace_mailboxes: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Source (account) identifier */
                 source_id: string;
@@ -4681,7 +4709,10 @@ export interface operations {
     set_keywords: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client-supplied idempotency key (RFC-L2-scripting D53): a redelivery under the same key returns the first outcome instead of re-executing; reusing a key with a different operation is 409 Conflict. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Source (account) identifier */
                 source_id: string;

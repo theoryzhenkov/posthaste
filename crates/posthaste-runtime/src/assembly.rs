@@ -314,6 +314,7 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         links,
         event_tap,
         tap_subscriber_seq: AtomicU64::new(0),
+        apply_ledger: crate::apply_ledger::ApplyLedger::new(),
         startup_status,
         stopped: stopped.clone(),
     });
