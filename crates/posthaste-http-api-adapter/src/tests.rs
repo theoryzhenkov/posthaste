@@ -129,3 +129,168 @@ async fn static_asset_served_verbatim() {
         "static assets must never carry the injected token"
     );
 }
+
+// ---- M30: /v1 boundary sanitation, operator logging, deny reasons, fail_closed ----
+
+use std::sync::{Arc, Mutex};
+
+/// A `MakeWriter` capturing all formatted log output into a shared buffer, so a
+/// test can assert on what crossed the operator log without a real subscriber.
+#[derive(Clone)]
+struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for CaptureWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
+    type Writer = CaptureWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// Run `f` with a thread-local subscriber that captures every log line, and
+/// return `(f's value, captured logs)`.
+fn capture_logs<R>(f: impl FnOnce() -> R) -> (R, String) {
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(CaptureWriter(buf.clone()))
+        .with_max_level(tracing::Level::TRACE)
+        .without_time()
+        .finish();
+    let value = tracing::subscriber::with_default(subscriber, f);
+    let logs = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+    (value, logs)
+}
+
+/// D72: a 5xx runtime error must be sanitized at the boundary — the client body
+/// carries a generic message + a correlation id, never the io/sql cause, while
+/// the real cause AND that same correlation id reach the operator log so the two
+/// can be joined.
+#[tokio::test]
+async fn m30_internal_error_body_is_sanitized_and_cause_is_logged() {
+    use posthaste_contract_core::{RuntimeError, RuntimeErrorCode};
+
+    let cause = "sqlite: disk I/O error opening /var/db/posthaste/mail.sqlite";
+    let (response, logs) = capture_logs(|| {
+        crate::api::ApiError::from_runtime_error(RuntimeError::new(
+            RuntimeErrorCode::StorageFailure,
+            cause,
+        ))
+        .into_response()
+    });
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = body_string(response).await;
+
+    // The wire body leaks no server-internal detail.
+    assert!(
+        !body.contains("sqlite") && !body.contains("disk I/O") && !body.contains("/var/db"),
+        "5xx body must not carry io/sql cause text: {body}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("body is JSON");
+    assert_eq!(parsed["message"], "internal error", "generic message on the wire");
+    let correlation_id = parsed["details"]["correlationId"]
+        .as_str()
+        .expect("body carries a correlation id")
+        .to_string();
+    assert!(!correlation_id.is_empty());
+
+    // The operator log carries the real cause AND the correlation id that is on
+    // the wire — the join key between a 500 body and its cause.
+    assert!(logs.contains(cause), "cause must reach the server log: {logs}");
+    assert!(
+        logs.contains("http.internal_error"),
+        "5xx construction must emit the typed error event: {logs}"
+    );
+    assert!(
+        logs.contains(&correlation_id),
+        "log must carry the same correlation id as the body: {logs}"
+    );
+}
+
+/// D72: a 4xx runtime error is caller-actionable — its message is NOT sanitized
+/// away (this guards against over-redaction of the useful validation text).
+#[tokio::test]
+async fn m30_client_error_message_is_preserved() {
+    use posthaste_contract_core::RuntimeError;
+
+    let (response, _logs) = capture_logs(|| {
+        crate::api::ApiError::from_runtime_error(RuntimeError::invalid_mutation(
+            "request link id does not match path link id",
+        ))
+        .into_response()
+    });
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_string(response).await;
+    assert!(
+        body.contains("request link id does not match path link id"),
+        "actionable 4xx message must survive sanitization: {body}"
+    );
+}
+
+/// D72: an authz caveat denial logs its (non-sensitive) reason instead of
+/// discarding it.
+#[test]
+fn m30_authz_deny_reason_is_logged() {
+    let root = crate::token::RootKey::from_test_bytes([7u8; 32]);
+    // Token scoped to account `acct-a`; request targets `acct-b` → out of scope.
+    let token = crate::token::mint_with_caveats(&root, &["account = acct-a"]);
+    let presented = crate::auth::PresentedToken(token);
+    let ctx = crate::authz::CaveatContext {
+        action: crate::authz::Action::Read,
+        account: Some("acct-b".to_string()),
+        mailbox: None,
+        message: None,
+        now: time::OffsetDateTime::now_utc(),
+    };
+
+    let (result, logs) = capture_logs(|| {
+        crate::auth::authorize_presented_caveats(Some(&presented), &root, &ctx, "test route")
+    });
+
+    assert!(result.is_err(), "an out-of-scope token must be denied");
+    assert!(
+        logs.contains("http.authz.denied"),
+        "deny must emit the typed authz event: {logs}"
+    );
+    assert!(
+        logs.contains("account out of scope"),
+        "the deny reason must be logged, not discarded: {logs}"
+    );
+}
+
+/// D73: `fail_closed!` logs its reason at `error!` BEFORE it panics, so a
+/// deliberate fail-closed abort is diagnosable in the operator log.
+#[test]
+fn m30_fail_closed_logs_before_panicking() {
+    use posthaste_observability::fail_closed;
+
+    // Silence the default panic hook so the intentional panic does not spam
+    // stderr; restore it afterward.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let (outcome, logs) = capture_logs(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fail_closed!("tls acceptor missing key: {}", "reason-42")
+        }))
+    });
+    std::panic::set_hook(previous_hook);
+
+    assert!(outcome.is_err(), "fail_closed! must panic");
+    assert!(
+        logs.contains("fail_closed"),
+        "the fail-closed event must be logged: {logs}"
+    );
+    assert!(
+        logs.contains("tls acceptor missing key: reason-42"),
+        "the fail-closed reason must be logged before the panic: {logs}"
+    );
+}

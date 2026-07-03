@@ -71,6 +71,38 @@ define_ph_forwarded_macro!($ ph_forwarded_info => info);
 define_ph_forwarded_macro!($ ph_forwarded_warn => warn);
 define_ph_forwarded_macro!($ ph_forwarded_error => error);
 
+/// Mark a *deliberate* fail-closed panic — a safety invariant the process
+/// refuses to run without (e.g. a security-config parse that must not silently
+/// degrade). Unlike an incidental `unwrap`/`expect`, `fail_closed!`:
+///
+/// - **logs the reason at `error!`** (event [`events::FAIL_CLOSED`]) *before*
+///   panicking, so the abort is diagnosable in the operator log; and
+/// - is **`grep`-discoverable** (`grep -rn 'fail_closed!'`), so the whole
+///   fail-closed surface is enumerable and auditable.
+///
+/// Panic policy (RFC-L2-lifecycle D73): use this only for *intentional*
+/// fail-closed aborts of a safety/security invariant — never as a substitute
+/// for recoverable error handling. It always panics; it never returns.
+///
+/// ```ignore
+/// let acceptor = build_tls_acceptor(&config)
+///     .unwrap_or_else(|err| fail_closed!("invalid [tls] configuration: {err}"));
+/// ```
+#[macro_export]
+macro_rules! fail_closed {
+    ($($reason:tt)+) => {{
+        // `format!` handles a plain literal, inline captures (`{x}`), and
+        // positional/named args uniformly, so every call site formats identically.
+        let __fail_closed_reason = ::std::format!($($reason)+);
+        $crate::tracing::error!(
+            event = $crate::event_name($crate::events::FAIL_CLOSED),
+            reason = %__fail_closed_reason,
+            "deliberate fail-closed abort"
+        );
+        ::std::panic!("fail-closed: {}", __fail_closed_reason)
+    }};
+}
+
 pub mod events;
 
 #[cfg(test)]
