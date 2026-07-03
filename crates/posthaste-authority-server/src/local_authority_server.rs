@@ -25,7 +25,7 @@ use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkId,
     BaseAssertion, BaseUpdate, DownStream, LinkCoverage, MailCommandRequest, SequencedFrame,
 };
-use posthaste_link_far_end::Resume;
+use posthaste_link_far_end::down::Resume;
 use tracing::warn;
 use posthaste_replica_core::MessageFoldState;
 use posthaste_contract_core::{

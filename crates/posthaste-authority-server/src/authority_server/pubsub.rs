@@ -44,7 +44,7 @@ impl AuthorityServer {
         &self,
         runtime_id: &AuthorityServerLinkId,
         after_seq: Option<u64>,
-    ) -> posthaste_link_far_end::Resume<AuthorityServerFrame> {
+    ) -> posthaste_link_far_end::down::Resume<AuthorityServerFrame> {
         self.runtimes.replay_resume(runtime_id, after_seq)
     }
 

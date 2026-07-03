@@ -223,14 +223,14 @@ pub enum LinkCoverage {
 }
 
 /// This seam's down-channel envelope: an [`AuthorityServerFrame`] carried in the
-/// **generic** [`Sequenced`](posthaste_link_far_end::Sequenced) wire envelope
+/// **generic** [`Sequenced`](posthaste_link_far_end::down::Sequenced) wire envelope
 /// owned by the engine crate. [`AuthorityServerFrame`] stays the canonical,
 /// emitter-named frame vocabulary (D1/D39/XIV); the seq rides *alongside* it
 /// (`{ "seq": N, "frame": { .. } }`), never inside it. A resubscribing near node
 /// passes the last seq it saw as `after_seq` and the far node replays from there
 /// (coverage says WHAT to stream, seq says WHERE to resume). The envelope is
 /// generic over the frame precisely so the client↔runtime seam can reuse it.
-pub type SequencedFrame = posthaste_link_far_end::Sequenced<AuthorityServerFrame>;
+pub type SequencedFrame = posthaste_link_far_end::down::Sequenced<AuthorityServerFrame>;
 
 /// The ordered down-channel: authoritative base assertions + confirmation, each
 /// stamped with its per-subscriber seq per [`SequencedFrame`].
