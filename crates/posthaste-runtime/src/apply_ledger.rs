@@ -268,6 +268,12 @@ mod tests {
         })
         .name()
     }
+    // The send op name the send route reserves under (RFC-L2-scripting ruling
+    // 24). Mirrors `handle::SEND_OP_NAME`; kept in sync as the ledger's op-name
+    // slot. A send settles an `Ack`-shaped outcome (it produces no `Operation`).
+    fn send() -> &'static str {
+        "message.send"
+    }
 
     // A redelivery under the same key returns the first Confirmed outcome and
     // never re-executes (the milestone's write-back-dedup property).
@@ -363,6 +369,103 @@ mod tests {
             ledger.reserve(&c, &k, destroy()),
             Reserved::Execute
         ));
+    }
+
+    // Ruling 24 (sequential): a keyed send re-runs under the SAME key → the
+    // ledger returns the first outcome, NOT a second `Execute`. Because a second
+    // `Execute` is what would call `authority_server_link.send_message` again,
+    // `Return` here is exactly "no second outbox send is enqueued".
+    #[test]
+    fn keyed_send_redelivery_returns_first_outcome_no_second_execute() {
+        let ledger = ApplyLedger::new();
+        let (c, k) = (caller(), key("send-1"));
+        assert!(
+            matches!(ledger.reserve(&c, &k, send()), Reserved::Execute),
+            "first sight of the send key must execute"
+        );
+        ledger.settle(&c, &k, Ok(ack_outcome()));
+        match ledger.reserve(&c, &k, send()) {
+            Reserved::Return(result) => {
+                result.expect("a redelivered send re-observes the Confirmed outcome");
+            }
+            Reserved::Execute => {
+                panic!("a redelivered send must re-observe the first outcome, not re-send")
+            }
+        }
+    }
+
+    // Ruling 24 (concurrent duplicate): two simultaneous sends under the same key
+    // — the second reserving BEFORE the first settles — yield exactly one
+    // `Execute`; the in-flight duplicate gets a retryable `Conflict`, never a
+    // second send. This reuses the ledger's existing reservation guarantee, not a
+    // new mechanism.
+    #[test]
+    fn concurrent_duplicate_send_reserves_exactly_one_execute() {
+        let ledger = ApplyLedger::new();
+        let (c, k) = (caller(), key("send-race"));
+        let first = ledger.reserve(&c, &k, send());
+        let second = ledger.reserve(&c, &k, send());
+        assert!(
+            matches!(first, Reserved::Execute),
+            "exactly one of the racing sends executes"
+        );
+        match second {
+            Reserved::Return(Err(error)) => {
+                assert_eq!(error.envelope().code, RuntimeErrorCode::Conflict);
+                assert!(
+                    error.envelope().terminality != Terminality::Permanent,
+                    "an in-flight duplicate is retryable, not a permanent verdict"
+                );
+            }
+            _ => panic!("the concurrent duplicate must not also execute (double-send)"),
+        }
+    }
+
+    // Ruling 24 (distinct keys): two sends under DIFFERENT keys each execute —
+    // two operations, as intended (the header only dedupes an identical key).
+    #[test]
+    fn distinct_send_keys_each_execute() {
+        let ledger = ApplyLedger::new();
+        let c = caller();
+        let (k1, k2) = (key("send-a"), key("send-b"));
+        assert!(matches!(ledger.reserve(&c, &k1, send()), Reserved::Execute));
+        ledger.settle(&c, &k1, Ok(ack_outcome()));
+        assert!(
+            matches!(ledger.reserve(&c, &k2, send()), Reserved::Execute),
+            "a different key is a different send and must execute"
+        );
+    }
+
+    // A send key reused for a message-command (or vice versa) is a `Conflict`:
+    // `SEND_OP_NAME` is distinct from every `MailOperation::name()`.
+    #[test]
+    fn send_key_reused_for_a_message_command_is_rejected() {
+        let ledger = ApplyLedger::new();
+        let (c, k) = (caller(), key("shared-key"));
+        ledger.reserve(&c, &k, send());
+        ledger.settle(&c, &k, Ok(ack_outcome()));
+        match ledger.reserve(&c, &k, destroy()) {
+            Reserved::Return(Err(error)) => {
+                assert_eq!(error.envelope().code, RuntimeErrorCode::Conflict)
+            }
+            _ => panic!("a send key reused with a message-command op must be rejected"),
+        }
+    }
+
+    // A send key reused for a draft op is likewise a `Conflict`: `SEND_OP_NAME`
+    // is distinct from `draft.save`/`draft.delete` too.
+    #[test]
+    fn send_key_reused_for_a_draft_op_is_rejected() {
+        let ledger = ApplyLedger::new();
+        let (c, k) = (caller(), key("shared-key"));
+        ledger.reserve(&c, &k, send());
+        ledger.settle(&c, &k, Ok(ack_outcome()));
+        match ledger.reserve(&c, &k, DRAFT_SAVE_OP) {
+            Reserved::Return(Err(error)) => {
+                assert_eq!(error.envelope().code, RuntimeErrorCode::Conflict)
+            }
+            _ => panic!("a send key reused with a draft op must be rejected"),
+        }
     }
 
     // Same key, different op → rejected (the replica path's rule).

@@ -235,11 +235,21 @@ pub trait RuntimeMailWriteApi: Send + Sync {
         message_id: MessageId,
     ) -> Result<DraftContent, RuntimeError>;
 
+    /// Queue a local-first send for an account.
+    ///
+    /// `idempotency_key` (RFC-L2-scripting ruling 24, extending the D53/S4 apply
+    /// ledger to the send surface) is a client-supplied key making at-least-once
+    /// script reply/send safe at the HTTP boundary: a redelivery under the same
+    /// key returns the first outcome instead of enqueuing a SECOND outbox send.
+    /// `None` keeps the pre-existing keyless behavior (no ledger; the header stays
+    /// optional). This composes with M32's outbox-level exactly-once rather than
+    /// duplicating it — see the `RuntimeHandle` impl doc.
     async fn send_message(
         &self,
         caller: RuntimeCaller,
         account_id: AccountId,
         request: SendMessageRequest,
+        idempotency_key: Option<ClientMutationId>,
     ) -> Result<(), RuntimeError>;
 
     /// Save a draft local-first, returning the enqueued operation. `draft_id` is

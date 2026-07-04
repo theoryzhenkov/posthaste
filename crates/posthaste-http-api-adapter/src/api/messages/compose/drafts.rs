@@ -14,23 +14,39 @@ use super::*;
     tag = "messages",
     summary = "Send message",
     description = "Validates and submits a new email via the source gateway, then triggers a sync.",
-    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("Idempotency-Key" = Option<String>, Header, description = "Client-supplied idempotency key (RFC-L2-scripting ruling 24): a redelivery under the same key returns the first outcome instead of enqueuing a second outbox send; reusing a key with a different operation is 409 Conflict.")
+    ),
     request_body = SendMessageRequest,
     responses(
         (status = 200, description = "Message accepted for delivery", body = OkResponse),
         (status = 400, description = "Invalid compose request", body = ApiErrorBody),
+        (status = 409, description = "Idempotency key reused with a different operation", body = ApiErrorBody),
         (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
     )
 )]
 pub async fn send_message(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
+    headers: HeaderMap,
     Json(request): Json<SendMessageRequest>,
 ) -> Result<Json<OkResponse>, ApiError> {
     validate_send_message_request(&request)?;
+    // Forward the `Idempotency-Key` (RFC-L2-scripting ruling 24) so an
+    // at-least-once script's retried reply/send under the same key enqueues
+    // exactly ONE outbox send. This ledger check guards the HTTP boundary (key →
+    // one operation created); M32's outbox exactly-once (deterministic
+    // `phsend-<op-id>`) then guards provider-side duplicates for that one
+    // operation — they compose, key → one operation → one provider submission.
     state
         .runtime
-        .send_message(RuntimeCaller::api(), AccountId(source_id), request)
+        .send_message(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            request,
+            idempotency_key(&headers),
+        )
         .await
         .map_err(ApiError::from_runtime_error)?;
     Ok(Json(OkResponse { ok: true }))
