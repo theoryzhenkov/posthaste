@@ -44,6 +44,7 @@ export function topLevelHelp(operations: Operation[]): string {
   );
   lines.push(
     `  ${"hook serve".padEnd(width)}  Run a localhost webhook receiver (a script per delivery)`,
+    `  ${"mcp".padEnd(width)}  Run the stdio MCP server for an agent host (POSTHASTE_MCP_* env)`,
   );
   lines.push(`  ${"tag".padEnd(width)}  Add/remove keywords on a message`);
   lines.push(
