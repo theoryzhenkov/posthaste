@@ -3233,6 +3233,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-scripting ruling 24): a redelivery under the same key returns the first outcome instead of enqueuing a second outbox send; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -3258,6 +3270,16 @@
           },
           "400": {
             "description": "Invalid compose request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key reused with a different operation",
             "content": {
               "application/json": {
                 "schema": {
