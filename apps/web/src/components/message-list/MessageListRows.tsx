@@ -7,6 +7,7 @@ import { useDesignTheme } from '@/hooks/useDesignTheme'
 import { MessageRow } from '../MessageRow'
 import type { ColumnId, ThreadListLayout } from '../thread-list/columns'
 import type { ConversationTreeRow } from './conversationTree'
+import type { MailboxDirectory } from './useMailboxDirectory'
 import { MessageListErrorBanner } from './MessageListErrorBanner'
 import { EmptyMessages, LoadingRows } from './MessageListStates'
 import { messageKey, OVERSCAN_ROWS } from './model'
@@ -39,6 +40,9 @@ export function MessageListRows({
   isPaneActive,
   viewRole,
   viewportHeight,
+  showSourceMailbox,
+  mailboxDirectory,
+  excludeMailboxId,
 }: {
   actions: EmailActions
   columns: ColumnId[]
@@ -60,6 +64,12 @@ export function MessageListRows({
   isPaneActive: boolean
   viewRole: string | null
   viewportHeight: number
+  /** Per-view "show source mailbox" toggle state (top-bar control). */
+  showSourceMailbox: boolean
+  mailboxDirectory: MailboxDirectory
+  /** The mailbox already being viewed (single source-mailbox views), excluded
+   *  from the chip's candidate memberships when possible. */
+  excludeMailboxId: string | null
 }) {
   const rowHeight = messageRowHeight(useDesignTheme().density)
   const virtual = virtualizeRows(rows, scrollTop, viewportHeight, rowHeight)
@@ -104,6 +114,9 @@ export function MessageListRows({
                 onViewConversation={onViewConversation}
                 treeRow={treeMode ? row : undefined}
                 onToggleCollapse={onToggleCollapse}
+                showSourceMailbox={showSourceMailbox}
+                mailboxDirectory={mailboxDirectory}
+                excludeMailboxId={excludeMailboxId}
               />
             </div>
           ))}
