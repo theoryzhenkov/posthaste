@@ -15,15 +15,13 @@ export function createCommandProviders(input: {
     'smartMailboxes' | 'sources' | 'tags'
   >
   recentMessages: MessageSummary[]
-  /** User tags on the selected message; drives the selection-scoped tag actions. */
-  selectedMessageTags: readonly string[]
 }): SearchProvider[] {
   return [
     createCommandProvider(),
     createQueryCompletionProvider(input),
     createMailboxProvider(input),
     createTagProvider(input),
-    createTagActionProvider(input),
+    createTagActionProvider(),
     createMessageProvider(input),
   ]
 }
