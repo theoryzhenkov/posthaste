@@ -15,6 +15,7 @@ import {
   AccountActions,
   type AccountCommandAction,
 } from './account-editor/AccountActions'
+import { AccountHealthNotice } from './AccountHealthNotice'
 import { AccountAppearanceFields } from './account-editor/AccountAppearanceFields'
 import { AccountHeaderMeta } from './account-editor/AccountHeaderMeta'
 import { ConnectionEditor } from './account-editor/ConnectionEditor'
@@ -167,11 +168,13 @@ export function AccountEditor({
         </div>
       )}
 
-      {existingAccount?.runtime.lastSyncError && (
+      {existingAccount && (
         <div className="mt-4">
-          <FeedbackBanner tone="error">
-            {existingAccount.runtime.lastSyncError}
-          </FeedbackBanner>
+          <AccountHealthNotice
+            account={existingAccount}
+            onAction={(account) => onCommand('sync', account)}
+            isActionPending={isCommandPending}
+          />
         </div>
       )}
 
