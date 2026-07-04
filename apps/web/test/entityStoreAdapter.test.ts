@@ -189,6 +189,37 @@ function setFlagged(
   }
 }
 
+/** The ids present in the latest projected view snapshot (row order). */
+function rowIds(
+  frames: RuntimeFrame<RuntimeMailListViewState>[],
+): string[] | undefined {
+  const last = [...frames]
+    .reverse()
+    .find((f) => f.type === 'viewReplace' || f.type === 'viewSnapshot')
+  if (last?.type !== 'viewReplace' && last?.type !== 'viewSnapshot') {
+    return undefined
+  }
+  return last.snapshot.data.rows.map((r) => (r.projection as { id: string }).id)
+}
+
+/**
+ * A `message.deleteDraft` runtime mutation (D130). The optimistic fold keys on
+ * the row's `messageId` (the blink); the stable `draftId` rides along for the
+ * far node's live-Email resolution.
+ */
+function deleteDraft(
+  messageId: string,
+  clientMutationId: string,
+  draftId = `stable-${messageId}`,
+): RuntimeRunMutationRequest {
+  return {
+    linkId: 'sess',
+    name: 'message.deleteDraft',
+    args: { sourceId: 's', messageId, draftId },
+    clientMutationId,
+  }
+}
+
 function keywordsOf(
   frames: RuntimeFrame<RuntimeMailListViewState>[],
   messageId: string,
@@ -333,6 +364,96 @@ describe('entityStoreAdapter', () => {
 
     expect(await pendingSet.all()).toHaveLength(0)
     expect(keywordsOf(frames, 'm1')).not.toContain('$flagged')
+  })
+
+  it('discard (D130): optimistically removes the draft row (the blink) + forwards the mutation + pending set', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
+    const opened = await adapter.openRuntimeLinkMessageListView(viewRequest)
+    expect(
+      opened.snapshot.data.rows.map((r) => (r.projection as { id: string }).id),
+    ).toEqual(['m1', 'm2'])
+
+    const receipt = await adapter.runRuntimeMutation(deleteDraft('m1', 'd1'))
+
+    // The blink: the draft row is gone from the projected view immediately.
+    expect(rowIds(frames)).toEqual(['m2'])
+    // It forwarded as a real runtime mutation (not a fire-and-forget POST),
+    // carrying the stable draftId for far-node resolution.
+    expect(harness.mutations.map((m) => m.name)).toEqual([
+      'message.deleteDraft',
+    ])
+    expect(harness.mutations[0]?.args).toMatchObject({
+      messageId: 'm1',
+      draftId: 'stable-m1',
+    })
+    expect((await pendingSet.all()).map((r) => r.clientMutationId)).toEqual([
+      'd1',
+    ])
+    expect(receipt.clientMutationId).toBe('d1')
+  })
+
+  it('discard (D130): a confirmed settlement KEEPS the row removed', async () => {
+    const built = build()
+    const { adapter, frames } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+    await adapter.runRuntimeMutation(deleteDraft('m1', 'd1'))
+    expect(rowIds(frames)).toEqual(['m2'])
+
+    built.harness.push({
+      type: 'mutationNotification',
+      linkSeq: 5,
+      clientMutationId: 'd1',
+      notification: { type: 'confirmed' },
+    })
+    await tick()
+
+    // Still gone; the reconciling message.updated{deleted:true} then prunes the
+    // base authoritatively (the row never comes back).
+    expect(rowIds(frames)).toEqual(['m2'])
+    built.harness.push({
+      type: 'notification',
+      linkSeq: 101,
+      kind: 'message.updated',
+      payload: {
+        seq: 2,
+        accountId: 's',
+        topic: 'message.updated',
+        occurredAt: 'now',
+        payload: { messageId: 'm1', deleted: true },
+      },
+    } as RuntimeFrame<RuntimeMailListViewState>)
+    await tick()
+    expect(rowIds(frames)).toEqual(['m2'])
+  })
+
+  it('discard (D130/D134): a rejected settlement REVERTS the blink + surfaces (not silent)', async () => {
+    const built = build()
+    const { adapter, pendingSet, frames } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+    await adapter.runRuntimeMutation(deleteDraft('m1', 'd1'))
+    // Optimistically removed.
+    expect(rowIds(frames)).toEqual(['m2'])
+
+    built.harness.push({
+      type: 'mutationNotification',
+      linkSeq: 5,
+      clientMutationId: 'd1',
+      notification: {
+        type: 'rejected',
+        error: {
+          code: 'notFound',
+          message: 'draft not found',
+          terminality: 'permanent',
+        },
+      },
+    })
+    await tick()
+
+    // The row comes back (the reverting settlement) and the pending op clears —
+    // a user discard's failure is surfaced, never a silent success (the M60
+    // regression this fixes).
+    expect(rowIds(frames)).toEqual(['m1', 'm2'])
+    expect(await pendingSet.all()).toHaveLength(0)
   })
 
   it('surfaces a clear error + reverts the optimistic fold when the durable write fails (W4 quota)', async () => {

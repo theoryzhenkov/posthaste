@@ -219,6 +219,30 @@ export const runtimeMutations = {
     }): Promise<Operation> {
       return getRuntimeAdapter().deleteDraft(request)
     },
+    /**
+     * Discard a draft through the optimistic runtime-mutation path (D130) —
+     * unlike {@link deleteDraft} (a fire-and-forget POST) this folds an
+     * optimistic destroy on the row's `messageId` (the blink), settles on the
+     * runtime notification, and reverts + surfaces the error on failure. The
+     * stable `draftId` (D131) rides along so the far node resolves the current
+     * live Email even after a JMAP autosave rotates the id.
+     */
+    async discardDraft(
+      request: { sourceId: string; messageId: string; draftId: string },
+      options?: { userInitiated?: boolean },
+    ): Promise<MessageCommandResult> {
+      const receipt = await runtimeLinkClient.runMutation({
+        name: 'message.deleteDraft',
+        args: {
+          sourceId: request.sourceId,
+          messageId: request.messageId,
+          draftId: request.draftId,
+        },
+        sourceId: request.sourceId,
+        ...(options?.userInitiated ? { context: { userInitiated: true } } : {}),
+      })
+      return confirmedMessageCommandResult(receipt)
+    },
     listPendingOperations(sourceId: string): Promise<Operation[]> {
       return getRuntimeAdapter().listPendingOperations(sourceId)
     },

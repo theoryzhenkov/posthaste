@@ -22,9 +22,8 @@ pub(crate) fn query_message_detail_tx(
 
     let detail = statement
         .query_row(params![account_id.as_str(), message_id.as_str()], |row| {
-            let draft_id: Option<String> = row.get(14)?;
             Ok((
-                draft_id,
+                (),
                 MessageSummary {
                     id: MessageId(row.get(0)?),
                     source_id: AccountId(row.get(1)?),
@@ -45,13 +44,14 @@ pub(crate) fn query_message_detail_tx(
                     version: None,
                     rfc_message_id: row.get(15)?,
                     in_reply_to: row.get(16)?,
+                    draft_id: row.get(14)?,
                 },
             ))
         })
         .optional()
         .map_err(sql_to_store_error)?;
 
-    let Some((draft_id, mut summary)) = detail else {
+    let Some(((), mut summary)) = detail else {
         return Ok(None);
     };
 
@@ -96,7 +96,6 @@ pub(crate) fn query_message_detail_tx(
         body_text: body.as_ref().and_then(|tuple| tuple.1.clone()),
         raw_message: body.and_then(|tuple| tuple.2),
         attachments,
-        draft_id,
     }))
 }
 
@@ -115,7 +114,7 @@ pub(crate) fn query_message_summary_tx(
         .prepare_cached(
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
-                    m.is_read, m.is_flagged, m.rfc_message_id, m.in_reply_to
+                    m.is_read, m.is_flagged, m.rfc_message_id, m.in_reply_to, m.draft_id
              FROM message m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
@@ -144,6 +143,7 @@ pub(crate) fn query_message_summary_tx(
                 version: None,
                 rfc_message_id: row.get(14)?,
                 in_reply_to: row.get(15)?,
+                draft_id: row.get(16)?,
             })
         })
         .optional()

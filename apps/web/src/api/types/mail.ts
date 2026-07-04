@@ -50,6 +50,13 @@ export interface MessageSummary {
   rfcMessageId?: string | null
   /** `Message-ID` this is a reply to (parent in the reply tree). */
   inReplyTo?: string | null
+  /**
+   * Stable `X-Posthaste-Draft-Id` when this list row is a draft we saved
+   * (D131); `null`/absent otherwise. Surfaced on the summary so a list-row
+   * discard carries the stable id — it survives the provider id rotation a
+   * JMAP autosave causes, so the discard never targets a stale Email id.
+   */
+  draftId?: string | null
 }
 
 /** @spec docs/L1-api#cursor-pagination */
@@ -105,8 +112,6 @@ export interface MessageDetail extends MessageSummary {
   bodyText: string | null
   rawMessage: RawMessageRef | null
   attachments: MessageAttachment[]
-  /** Stable `X-Posthaste-Draft-Id` when this message is a draft we saved. */
-  draftId?: string | null
 }
 
 /**

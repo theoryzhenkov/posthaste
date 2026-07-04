@@ -194,8 +194,9 @@ impl MailGateway for LiveJmapGateway {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        idempotent_redelivery: bool,
     ) -> Result<(), GatewayError> {
-        crate::live_compose::delete_draft(self, account_id, message_id).await
+        crate::live_compose::delete_draft(self, account_id, message_id, idempotent_redelivery).await
     }
 
     /// Return available push transports, preferring WebSocket over SSE.

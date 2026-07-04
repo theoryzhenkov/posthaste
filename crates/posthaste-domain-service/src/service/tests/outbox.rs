@@ -156,7 +156,7 @@ fn delete_draft_enqueues_a_delete() {
     let service = MailService::new(store, Arc::new(TestConfig::default()));
 
     let op = service
-        .delete_draft(&account, MessageId::from("provider-7"))
+        .delete_draft(&account, MessageId::from("provider-7"), false)
         .expect("delete draft");
 
     assert_eq!(op.kind, OperationKind::DraftDelete);
@@ -858,7 +858,7 @@ async fn delete_draft_flushes_and_settles() {
             &account,
             draft_entity("provider-7"),
             OperationKind::DraftDelete,
-            serde_json::json!({}),
+            serde_json::json!({ "idempotentRedelivery": true }),
         )
         .expect("queue delete");
 
@@ -867,11 +867,76 @@ async fn delete_draft_flushes_and_settles() {
         .await
         .expect("flush ok");
 
-    assert_eq!(events.len(), 1);
+    // D132: the DraftDelete settlement emits BOTH operation.settled AND the
+    // reconciling message.updated{deleted:true}, so the client's fold/prune
+    // converges without a follow-up sync.
+    assert_eq!(events.len(), 2);
+    let reconciling = events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MESSAGE_UPDATED)
+        .expect("DraftDelete settlement emits message.updated");
+    assert_eq!(reconciling.payload["messageId"], "provider-7");
+    assert_eq!(reconciling.payload["deleted"], true);
+
     let deletes = gateway.delete_draft_calls.lock().unwrap();
     assert_eq!(deletes.as_slice(), &[MessageId::from("provider-7")]);
+    // D133: the idempotent-redelivery flag reaches the gateway so the notFound
+    // mask can be narrowed to that case only.
+    assert_eq!(
+        gateway
+            .delete_draft_idempotent_calls
+            .lock()
+            .unwrap()
+            .as_slice(),
+        &[true]
+    );
     assert!(service
         .list_pending_operations(&account)
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn discard_draft_removes_the_row_emits_deleted_and_queues_a_non_idempotent_delete() {
+    let account = AccountId::from("primary");
+    // Seed a live draft row (in the Drafts mailbox) so the discard resolves it.
+    let store = Arc::new(TestStore::with_message_state("draft-1", &["drafts"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    // A user-initiated discard (D130): emits the reconciling event immediately
+    // and queues a non-idempotent provider delete (D133).
+    let ack = service
+        .discard_draft(&account, MessageId::from("draft-1"))
+        .await
+        .expect("discard ok");
+    let reconciling = ack
+        .events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MESSAGE_UPDATED)
+        .expect("discard emits message.updated");
+    assert_eq!(reconciling.payload["messageId"], "draft-1");
+    assert_eq!(reconciling.payload["deleted"], true);
+
+    let pending = service.list_pending_operations(&account).unwrap();
+    let delete = pending
+        .iter()
+        .find(|op| op.kind == OperationKind::DraftDelete)
+        .expect("a DraftDelete op is queued");
+    assert_eq!(delete.entity.id, "draft-1");
+    assert_eq!(delete.payload["idempotentRedelivery"], false);
+}
+
+#[tokio::test]
+async fn discard_of_an_unknown_draft_surfaces_not_found() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    // D133/D134: a discard of a draft that no longer resolves to a live row is a
+    // surfaced failure (the client reverts the optimistic fold), not a silent
+    // success.
+    let result = service
+        .discard_draft(&account, MessageId::from("ghost-draft"))
+        .await;
+    assert!(result.is_err(), "unknown-draft discard must surface an error");
 }

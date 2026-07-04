@@ -185,6 +185,10 @@ impl MailGateway for LiveImapSmtpGateway {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        // IMAP expunges by UID: an absent draft simply matches no UID, so the
+        // idempotent-redelivery distinction (D133) is a JMAP `notFound`-mask
+        // concern only and does not change the IMAP expunge path.
+        _idempotent_redelivery: bool,
     ) -> Result<(), GatewayError> {
         let mut lease = self
             .sessions

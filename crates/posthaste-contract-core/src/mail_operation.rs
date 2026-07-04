@@ -18,10 +18,10 @@ use serde::{Deserialize, Serialize};
 use posthaste_replica_core::{MessageAssertion, MessageChangeDiff};
 
 use crate::mutation_args::{
-    keyword_toggle, MessageApplyDiffArgs, MessageMailboxMembershipArgs, MessageMoveToMailboxArgs,
-    MessageMoveToRoleArgs, MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs,
-    MessageSetKeywordsMutationArgs, MessageSetReadStateArgs, MessageSetUserTagsArgs,
-    MessageSnoozeArgs, MessageTargetArgs, MessageUnsnoozeArgs,
+    keyword_toggle, MessageApplyDiffArgs, MessageDeleteDraftArgs, MessageMailboxMembershipArgs,
+    MessageMoveToMailboxArgs, MessageMoveToRoleArgs, MessageReplaceMailboxesArgs,
+    MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs, MessageSetReadStateArgs,
+    MessageSetUserTagsArgs, MessageSnoozeArgs, MessageTargetArgs, MessageUnsnoozeArgs,
 };
 use crate::RevCursorArgs;
 
@@ -59,6 +59,11 @@ pub enum MailOperation {
     RemoveFromMailbox(MessageMailboxMembershipArgs),
     #[serde(rename = "message.destroy")]
     Destroy(MessageTargetArgs),
+    /// Discard a draft (D130). Folds as a `Destroy` on the client (the blink);
+    /// the far node resolves the stable `draftId` to the live Email and routes
+    /// to the draft-delete gateway path (not a generic message destroy).
+    #[serde(rename = "message.deleteDraft")]
+    DeleteDraft(MessageDeleteDraftArgs),
     #[serde(rename = "message.applyDiff")]
     ApplyDiff(MessageApplyDiffArgs),
     #[serde(rename = "message.snooze")]
@@ -87,6 +92,7 @@ impl MailOperation {
             MailOperation::AddToMailbox(_) => "message.addToMailbox",
             MailOperation::RemoveFromMailbox(_) => "message.removeFromMailbox",
             MailOperation::Destroy(_) => "message.destroy",
+            MailOperation::DeleteDraft(_) => "message.deleteDraft",
             MailOperation::ApplyDiff(_) => "message.applyDiff",
             MailOperation::Snooze(_) => "message.snooze",
             MailOperation::Unsnooze(_) => "message.unsnooze",
@@ -108,6 +114,7 @@ impl MailOperation {
             MailOperation::AddToMailbox(args) => &args.source_id,
             MailOperation::RemoveFromMailbox(args) => &args.source_id,
             MailOperation::Destroy(args) => &args.source_id,
+            MailOperation::DeleteDraft(args) => &args.source_id,
             MailOperation::ApplyDiff(args) => &args.source_id,
             MailOperation::Snooze(args) => &args.source_id,
             MailOperation::Unsnooze(args) => &args.source_id,
@@ -129,6 +136,7 @@ impl MailOperation {
             MailOperation::AddToMailbox(args) => &args.message_id,
             MailOperation::RemoveFromMailbox(args) => &args.message_id,
             MailOperation::Destroy(args) => &args.message_id,
+            MailOperation::DeleteDraft(args) => &args.message_id,
             MailOperation::ApplyDiff(args) => &args.message_id,
             MailOperation::Snooze(args) => &args.message_id,
             MailOperation::Unsnooze(args) => &args.message_id,
@@ -205,6 +213,9 @@ impl MailOperation {
                 },
             }),
             MailOperation::Destroy(_) => Some(MessageAssertion::Destroy),
+            // A discard folds locally as a destroy (the row blinks out); the far
+            // node resolves the stable id and routes to the draft-delete path.
+            MailOperation::DeleteDraft(_) => Some(MessageAssertion::Destroy),
             MailOperation::ApplyDiff(args) => Some(MessageAssertion::ApplyDiff {
                 diff: args.diff.clone(),
             }),
