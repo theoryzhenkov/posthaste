@@ -43,6 +43,50 @@ impl ServiceScope {
             _ => ServiceScope::None,
         }
     }
+
+    /// The wire name recorded in the install manifest so `update` can recover
+    /// the scope and drive the service around a swap.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ServiceScope::UserSystemd => "user-systemd",
+            ServiceScope::SystemSystemd => "system-systemd",
+            ServiceScope::Launchd => "launchd",
+            ServiceScope::None => "none",
+        }
+    }
+
+    /// Parse a scope from its manifest wire name.
+    pub fn parse(s: &str) -> ServiceScope {
+        match s {
+            "user-systemd" => ServiceScope::UserSystemd,
+            "system-systemd" => ServiceScope::SystemSystemd,
+            "launchd" => ServiceScope::Launchd,
+            _ => ServiceScope::None,
+        }
+    }
+}
+
+/// Stop a running service before a binary swap. `unit` is the systemd unit name
+/// or the launchd plist path (as recorded in the manifest). Best-effort: a
+/// stop failure is returned so `update` can warn, never a hard error (the unit
+/// may simply not be loaded).
+pub fn stop_service(scope: ServiceScope, unit: &str) -> Result<(), String> {
+    match scope {
+        ServiceScope::UserSystemd => run("systemctl", &["--user", "stop", unit]),
+        ServiceScope::SystemSystemd => run("systemctl", &["stop", unit]),
+        ServiceScope::Launchd => run("launchctl", &["unload", unit]),
+        ServiceScope::None => Ok(()),
+    }
+}
+
+/// Start a service after a binary swap (the inverse of [`stop_service`]).
+pub fn start_service(scope: ServiceScope, unit: &str) -> Result<(), String> {
+    match scope {
+        ServiceScope::UserSystemd => run("systemctl", &["--user", "start", unit]),
+        ServiceScope::SystemSystemd => run("systemctl", &["start", unit]),
+        ServiceScope::Launchd => run("launchctl", &["load", "-w", unit]),
+        ServiceScope::None => Ok(()),
+    }
 }
 
 /// Everything `install` needs beyond a provisioning [`Plan`].
@@ -203,6 +247,13 @@ fn launch_agents_dir() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
         .map(|h| PathBuf::from(h).join("Library").join("LaunchAgents"))
         .ok_or_else(|| "HOME is not set; cannot place the launchd agent".into())
+}
+
+/// Public accessor for [`launch_agents_dir`] so `update`/`watch` can place their
+/// own LaunchAgents (the auto-update timer, a registered watch) alongside the
+/// role agents.
+pub fn launch_agents_dir_pub() -> Result<PathBuf, String> {
+    launch_agents_dir()
 }
 
 /// The launchd plist file name for a role, e.g. `com.posthaste.authority-server.plist`.
