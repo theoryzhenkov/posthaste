@@ -7,6 +7,15 @@ pub(super) struct MutationGateway {
     /// reconciliation set, exercising the progressive-delivery service path.
     pub(super) stream: Option<(Vec<SyncBatch>, posthaste_domain_model::SyncReconciliation)>,
     pub(super) fetch_body_result: Mutex<Option<Result<FetchedBody, GatewayError>>>,
+    /// When set, `fetch_message_body` sleeps for this long before answering —
+    /// a slow (or, with a large value, effectively hung) body source for the
+    /// cache-worker batch-deadline tests. Uses tokio's clock, so paused-time
+    /// tests drive it virtually.
+    pub(super) fetch_body_delay: Mutex<Option<std::time::Duration>>,
+    /// Fallback body returned by `fetch_message_body` once `fetch_body_result`
+    /// is exhausted (instead of the default `Rejected("unused")`), letting a
+    /// test feed several candidates through one gateway.
+    pub(super) fetch_body_fallback: Mutex<Option<FetchedBody>>,
     /// Result returned by `fetch_identity`; `None` falls back to an error (the
     /// default unused stub), preserving the pre-change test behavior.
     pub(super) fetch_identity_result: Mutex<Option<Result<Identity, GatewayError>>>,
@@ -58,6 +67,8 @@ impl MutationGateway {
             batch: None,
             stream: None,
             fetch_body_result: Mutex::new(None),
+            fetch_body_delay: Mutex::new(None),
+            fetch_body_fallback: Mutex::new(None),
             fetch_identity_result: Mutex::new(None),
             fetch_attempts: Mutex::new(Vec::new()),
             save_draft_results: Mutex::new(Vec::new()),
@@ -168,10 +179,26 @@ impl MailGateway for MutationGateway {
             .lock()
             .expect("fetch attempts lock poisoned")
             .push(message_id.clone());
-        self.fetch_body_result
+        let delay = *self
+            .fetch_body_delay
+            .lock()
+            .expect("fetch body delay lock poisoned");
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        if let Some(result) = self
+            .fetch_body_result
             .lock()
             .expect("fetch body result lock poisoned")
             .take()
+        {
+            return result;
+        }
+        self.fetch_body_fallback
+            .lock()
+            .expect("fetch body fallback lock poisoned")
+            .clone()
+            .map(Ok)
             .unwrap_or_else(|| Err(GatewayError::Rejected("unused".to_string())))
     }
 
