@@ -8,6 +8,7 @@ const allowedStorageFiles = new Set([
   'src/client-preferences/storage.ts',
   'src/client-preferences/store.ts',
   'src/components/floating-panel/geometry.ts',
+  'src/components/message-list/useShowSourceMailbox.ts',
   'src/components/message-list/useViewMode.ts',
   'src/components/thread-list/useColumnConfig.ts',
   'src/connection/store.ts',

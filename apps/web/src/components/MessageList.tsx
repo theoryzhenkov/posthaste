@@ -30,15 +30,18 @@ import {
 } from './message-list/MessageListRows'
 import { NoMailboxSelected } from './message-list/MessageListStates'
 import {
+  isAggregateMessageView,
   messageKey,
   selectionKey,
   viewKey,
   viewModeKey,
 } from './message-list/model'
 import { useConversationTree } from './message-list/useConversationTree'
+import { useMailboxDirectory } from './message-list/useMailboxDirectory'
 import { useRuntimeMailListView } from './message-list/useRuntimeMailListView'
 import { useMessageListNavigation } from './message-list/useMessageListNavigation'
 import { useMessageListScroll } from './message-list/useMessageListScroll'
+import { useShowSourceMailbox } from './message-list/useShowSourceMailbox'
 import { useViewMode } from './message-list/useViewMode'
 import type { SidebarSelection } from './Sidebar'
 import { buildThreadListLayout } from './thread-list/columns'
@@ -94,6 +97,16 @@ export function MessageList({
   )
   const { mode } = useViewMode(viewModeKeyValue)
   const treeMode = mode === 'conversations'
+  const showSourceMailboxDefault = useMemo(
+    () => isAggregateMessageView(selectedView, searchQuery),
+    [selectedView, searchQuery],
+  )
+  const { show: showSourceMailbox } = useShowSourceMailbox(
+    viewModeKeyValue,
+    showSourceMailboxDefault,
+  )
+  const excludeMailboxId =
+    selectedView?.kind === 'source-mailbox' ? selectedView.mailboxId : null
   const currentViewKey = useMemo(
     () => `${viewKey(selectedView, searchQuery, sort)}#mode=${mode}`,
     [selectedView, searchQuery, sort, mode],
@@ -117,6 +130,7 @@ export function MessageList({
     null,
   )
   const accountDirectory = useAccountDirectory()
+  const mailboxDirectory = useMailboxDirectory(accountDirectory)
   const messageQueryKey = useMemo(
     () => queryKeys.messages(selectedView, searchQuery, sort),
     [selectedView, searchQuery, sort],
@@ -316,6 +330,9 @@ export function MessageList({
               isPaneActive={isListActive}
               viewRole={viewRole}
               viewportHeight={viewportHeight}
+              showSourceMailbox={showSourceMailbox}
+              mailboxDirectory={mailboxDirectory}
+              excludeMailboxId={excludeMailboxId}
             />
           </div>
         </div>
