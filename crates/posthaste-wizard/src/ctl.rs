@@ -240,7 +240,7 @@ fn ctl_artifact_base_name(channel: Channel) -> &'static str {
 /// with the signed bare binary as the sole entry; releases up to
 /// v0.2.0-nightly.49 shipped the bare binary directly, so `--version` against
 /// an older tag falls back to the unwrapped asset name.
-fn fetch_ctl(source: &dyn ReleaseSource, version: &Version, platform: &str) -> Result<Vec<u8>, FetchError> {
+pub(crate) fn fetch_ctl(source: &dyn ReleaseSource, version: &Version, platform: &str) -> Result<Vec<u8>, FetchError> {
     let tag = version.tag();
     let base = ctl_artifact_base_name(version.channel());
     let exe = if platform.starts_with("windows") { ".exe" } else { "" };

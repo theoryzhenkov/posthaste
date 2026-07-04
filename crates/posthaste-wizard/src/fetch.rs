@@ -83,10 +83,37 @@ pub enum Channel {
 
 impl Channel {
     /// The rolling release tag that always points at the channel's latest build.
-    fn rolling_tag(self) -> &'static str {
+    pub(crate) fn rolling_tag(self) -> &'static str {
         match self {
             Channel::Nightly => "nightly",
             Channel::Stable => "stable",
+        }
+    }
+
+    /// The updater-manifest asset name on the rolling release — the one asset
+    /// that carries the channel's concrete latest version (`channel-policy.sh`:
+    /// `latest.json` for nightly, `latest-stable.json` for stable).
+    pub(crate) fn updater_manifest(self) -> &'static str {
+        match self {
+            Channel::Nightly => "latest.json",
+            Channel::Stable => "latest-stable.json",
+        }
+    }
+
+    /// The channel's wire name (`nightly` | `stable`), as stored in the manifest.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Channel::Nightly => "nightly",
+            Channel::Stable => "stable",
+        }
+    }
+
+    /// Parse a channel from its wire name; `None` for anything else.
+    pub fn parse(s: &str) -> Option<Channel> {
+        match s {
+            "nightly" => Some(Channel::Nightly),
+            "stable" => Some(Channel::Stable),
+            _ => None,
         }
     }
 
@@ -99,6 +126,49 @@ impl Channel {
             Channel::Stable
         }
     }
+}
+
+/// Resolve the channel's current concrete version (e.g. `0.2.0-nightly.50`) by
+/// fetching the rolling release's updater manifest and reading its `version`
+/// field — the same artifact the desktop Tauri updater consumes, reused here as
+/// the headless updater's channel-latest signal (ruling 14: "channel-latest
+/// resolution via the existing release/checksum machinery").
+pub(crate) fn resolve_latest_version(
+    source: &dyn ReleaseSource,
+    channel: Channel,
+) -> Result<String, FetchError> {
+    let bytes = source.fetch(channel.rolling_tag(), channel.updater_manifest())?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+        FetchError::Http(channel.updater_manifest().to_string(), format!("not JSON: {e}"))
+    })?;
+    value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            FetchError::Http(
+                channel.updater_manifest().to_string(),
+                "no `version` field".to_string(),
+            )
+        })
+}
+
+/// Download `<base>-<platform>.tar.gz` for `tag`, verify it against the
+/// release's `SHA256SUMS`, and return the extracted `binary` bytes. The
+/// generic core `update` uses to fetch any tarball-packaged component (role
+/// binaries and the wizard itself), independent of the [`Role`] enum.
+pub(crate) fn download_verified_tarball_binary(
+    source: &dyn ReleaseSource,
+    base: &str,
+    binary: &str,
+    platform: &str,
+    tag: &str,
+) -> Result<Vec<u8>, FetchError> {
+    let tarball_name = format!("{base}-{platform}.tar.gz");
+    let tarball = source.fetch(tag, &tarball_name)?;
+    let sums = source.fetch(tag, "SHA256SUMS")?;
+    verify_checksum(&tarball, &tarball_name, &sums)?;
+    extract_binary(&tarball, binary)
 }
 
 impl Version {
@@ -147,7 +217,7 @@ pub fn fetch_and_install(
 
 /// The channel-aware release artifact base name. Mirrors `channel-policy.sh`,
 /// which is the source of truth for these names on the publishing side.
-fn artifact_base_name(role: Role, channel: Channel) -> String {
+pub(crate) fn artifact_base_name(role: Role, channel: Channel) -> String {
     let base = match role {
         Role::Daemon => "PosthasteAuthorityRuntimeServer",
         Role::AuthorityServer => "PosthasteAuthorityServer",

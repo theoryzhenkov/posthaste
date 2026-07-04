@@ -204,7 +204,7 @@ pub fn render_launchd_plist(plan: &Plan) -> String {
 }
 
 /// Minimal XML escaping for plist string values (paths can contain `&`).
-fn xml_escape(s: &str) -> String {
+pub(crate) fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
