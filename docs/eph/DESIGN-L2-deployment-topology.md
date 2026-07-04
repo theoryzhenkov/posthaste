@@ -17,6 +17,12 @@ dependents: []
 
 # Productizing the deployment topology
 
+> **Status: REFERENCE (design note).** Forward design over the realized link
+> mechanism (the build seam / role binaries exist). The productization it
+> describes — control-pane topology UI, transport selector, Tauri-native IPC
+> node, split-runtime hardening — is a forward menu, only partly realized; not
+> tracked by a migration ledger. Treat as a design reference, not a shipped plan.
+
 The topology mechanism is realized: the build seam (`build_backend` /
 `build_runtime`), the lean role binaries (`posthaste-backend` / `posthaste-runtime`
 / `posthaste-daemon`), config-selected transports, and authenticated remote links

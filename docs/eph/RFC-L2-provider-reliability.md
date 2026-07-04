@@ -17,6 +17,17 @@ dependents: []
 
 # RFC — Provider & Sync Reliability (draft)
 
+> **Status (2026-07-04): SHIPPED.** Ratified (owner, 2026-07-03) and fully
+> landed: M30–M37 all shipped. Delivered: the `posthaste-call-policy`
+> outbound-call envelope (per-class deadlines, jittered retry, circuit breaker),
+> send-exactly-once (S1 CRITICAL — idempotent JMAP/SMTP submission +
+> DispatchUncertain; M32), push-lifecycle repair (M33), IMAP connection
+> lifecycle (M34/M35b), the durable full-snapshot unsettled guard that retired
+> the P1/S2 hotfix (M35), supervision/scheduling + the P5 idle-claim fix (M36),
+> and OAuth single-flight + CAS rotation (M37). **[Update 2026-07-04]:** the
+> "draft — for ratification review" line below and the "(draft)" in the title
+> are historical — the RFC was ratified and every M30–M37 row landed.
+
 Status: **draft — for ratification review.** Every row below is `proposed`
 (one is `deferred`, awaiting an explicit owner ruling — §6/O1). Nothing here
 touches code until a row is ratified and given a migration step + gate (§5).

@@ -14,6 +14,13 @@ dependents: []
 
 # Finish the client↔runtime link unification
 
+> **Status: REFERENCE (forward plan) — partially realized.** The U2 mail-list
+> view-deltas slice landed both sides (`feat(replication): mail-list view deltas
+> … L6 U2`). The numbered slices U1 (runtime incremental recompute), U3 (replica
+> as default client path + surfaced-failure gap), U4 (coverage-replaces-sessions),
+> U5 (one BackendApi) remain open. Note overlap with RFC-L2-client-resilience
+> Part 2 (the reactive-store revamp) — reconcile scope before picking this up.
+
 The client↔runtime link is being unified onto the runtime↔backend
 assertion-replication shape ([backend-link L1](../replication/backend-link/L1.md)),
 **driven by performance**: the snapshot-push model re-sends the whole view on

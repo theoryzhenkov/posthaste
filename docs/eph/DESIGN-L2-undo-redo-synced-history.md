@@ -18,6 +18,12 @@ dependents: []
 
 # Undo/redo as a synced, durable reversible-operation log
 
+> **Status: REFERENCE (design note) — realized.** The overview + Phase 1 model.
+> Phase 1 (client-owned optimistic history + runtime retirement) shipped; Phase 2
+> (the server-authoritative synced log) was specified in
+> DESIGN-L2-undo-redo-revlog-contract and implemented through Phase 2 Slice 5c.
+> Kept as the design narrative behind that shipped work.
+
 ## Problem
 
 The shipped design (`DESIGN-L2-reversible-undo-redo`) made undo _execution_ a

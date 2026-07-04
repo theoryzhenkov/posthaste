@@ -18,6 +18,14 @@ dependents: []
 
 # The RevLog: a server-authoritative synced undo/redo log
 
+> **Status: REFERENCE (design contract) — largely realized.** The Phase 2
+> implementable contract. Slices 1–5c landed (store tables, RevLog synced view,
+> forward-action append + cursor auto-advance, revCursor arbitration, client
+> send/receive mirror, multi-account per-store history with global Ctrl+Z merge);
+> see the `feat(runtime): Phase 2 Slice …` / `feat(web): Phase 2 Slice …`
+> commits. **Remaining:** JMAP per-message version; e2e verification against the
+> real dev stack (per the `status:` field in the frontmatter below).
+
 This is the **Phase 2 implementable contract** for the synced-history refactor.
 Phase 1 (a client-local optimistic cursor, durable in IndexedDB, round-trip-free)
 shipped in `.26` — it moved history ownership to the client + retired the runtime's

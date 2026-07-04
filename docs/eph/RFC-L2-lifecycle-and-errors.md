@@ -17,6 +17,14 @@ dependents: []
 
 # RFC — L2 Lifecycle & Errors
 
+> **Status (2026-07-04): SHIPPED.** Ratified (owner, 2026-07-03) and fully
+> landed: M20–M31 (incl. M23b) all shipped. M28 (idle-session reaper) was
+> absorbed into the scripting track (S1). Delivered: the ordered
+> shutdown/teardown sequence, deadline discipline, bounded growth, watchdog
+> liveness, and the typed `Terminality` retryability vocabulary with
+> sanitize-at-boundary error hygiene. **[Update 2026-07-04]:** the "Execution
+> queued as the next refactor run" note below is historical — the M-track completed.
+
 Status: **ratified 2026-07-03** (rulings in §7). Execution queued as the next refactor run. This is the drain/outbox for the next
 refactor run: two intertwined domains, **lifecycle** (shutdown, deadlines,
 bounded growth, drain/liveness) and **errors** (one typed retryability
