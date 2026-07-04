@@ -546,6 +546,10 @@ impl MailGateway for MockJmapGateway {
         _account_id: &AccountId,
         request: &SendMessageRequest,
         replace: Option<&MessageId>,
+        // The mock's replace always matches (or harmlessly no-ops), so the DS3
+        // `notFound` discrimination has no distinct outcome here — the live JMAP
+        // `Email/set` `destroyed` check is where it bites.
+        _idempotent_redelivery: bool,
     ) -> Result<MessageId, GatewayError> {
         let mut state = self
             .state

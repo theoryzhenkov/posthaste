@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
-use posthaste_domain_model::{DomainEvent, Id};
+use posthaste_domain_model::{
+    DomainEvent, Id, OperationDispatchUncertain, OperationId, OperationOutcome, OperationSettlement,
+    EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN, EVENT_TOPIC_OPERATION_SETTLED,
+};
 use posthaste_link_far_end::down::{ReplayStore, Resume};
 use posthaste_link_far_end::up::{Accept, DedupStore, TerminalClass};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeViewSubscription};
@@ -56,6 +59,15 @@ pub(crate) struct LinkRegistry {
     /// Replaces the former hand-rolled `StoredLink.last_seq` / `next_seq`.
     seq: ReplayStore<RuntimeLinkId, ()>,
     next_mutation_id: AtomicU64,
+    /// The send-bridge near-node half: outbox operation id → the client link +
+    /// runtime mutation id of a DEFERRED async-settled mutation (a Send) whose
+    /// verdict is held past the authority receipt (`Accepted`). Populated when the
+    /// up-channel accepts the send; drained + settled (→ the terminal
+    /// `mutation.notification` the client's fold consumes) when the co-located
+    /// settlement bridge sees the flush's `operation.settled`/`dispatch_uncertain`.
+    /// Co-located delivery only — a remote near node settles from the routed
+    /// down-channel `Settlement` frame instead.
+    deferred_settlements: Mutex<HashMap<OperationId, (RuntimeLinkId, RuntimeMutationId)>>,
     /// Test-only barrier fired inside `subscribe_frames`, exactly between the live
     /// `frames.subscribe()` and the catch-up snapshot — lets a test deterministically
     /// interpose a `settle` in that window to pin the [2] ordering invariant.
@@ -166,6 +178,7 @@ impl LinkRegistry {
             dedup: DedupStore::new(),
             seq: ReplayStore::collapse_always(),
             next_mutation_id: AtomicU64::new(1),
+            deferred_settlements: Mutex::new(HashMap::new()),
             #[cfg(test)]
             subscribe_barrier: Mutex::new(None),
             #[cfg(test)]
@@ -642,6 +655,96 @@ impl LinkRegistry {
         Ok(receipt)
     }
 
+    /// Send-bridge (near-node step): record a DEFERRED async-settled mutation so
+    /// the co-located settlement bridge can settle it by outbox op id when the
+    /// flush settles. The mutation stays `Accepted` (in-flight) — its optimistic
+    /// fold is HELD on the client until the terminal verdict arrives; confirming
+    /// at the authority receipt would be a false Sent (D125).
+    pub(crate) fn register_deferred_settlement(
+        &self,
+        operation_id: OperationId,
+        link_id: RuntimeLinkId,
+        mutation_id: RuntimeMutationId,
+    ) {
+        self.deferred_settlements
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(operation_id, (link_id, mutation_id));
+    }
+
+    /// Settle a deferred async mutation from the flush's terminal outcome (the
+    /// co-located send-bridge): resolve the held (link, mutation) by op id and
+    /// drive [`settle_mutation`] so the terminal `mutation.notification` reaches
+    /// the client — `Confirmed` (the send left Drafts; the draft-Destroy fold
+    /// confirms) or `Failed` (a parked/failed send; the client REVERTS the fold,
+    /// the draft returns, no false Sent — D125). A no-op for an op id this runtime
+    /// never deferred (a non-Send settlement, or a different near node).
+    pub(crate) fn settle_deferred_settlement(
+        &self,
+        operation_id: &OperationId,
+        confirmed: bool,
+        error: Option<RuntimeAdapterError>,
+    ) {
+        let held = self
+            .deferred_settlements
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(operation_id);
+        let Some((link_id, mutation_id)) = held else {
+            return;
+        };
+        let state = if confirmed {
+            MutationSettlementState::Confirmed
+        } else {
+            MutationSettlementState::Failed
+        };
+        // Best-effort: a closed/reaped link has nothing left to settle.
+        let _ = self.settle_mutation(&link_id, &mutation_id, state, error, Value::Null);
+    }
+
+    /// Co-located send-bridge dispatch: translate an async flush's terminal
+    /// settlement DomainEvent into the deferred mutation's verdict. Shares the
+    /// process event bus with the authority server, so this is the co-located
+    /// delivery of the same terminal class the authority server routes as a
+    /// `Settlement` frame for a remote near node. A no-op for any event that is
+    /// not a deferred op's terminal settlement.
+    pub(crate) fn settle_deferred_from_event(&self, event: &DomainEvent) {
+        match event.topic.as_str() {
+            EVENT_TOPIC_OPERATION_SETTLED => {
+                let Ok(settlement) =
+                    serde_json::from_value::<OperationSettlement>(event.payload.clone())
+                else {
+                    return;
+                };
+                match settlement.outcome {
+                    OperationOutcome::Applied => {
+                        self.settle_deferred_settlement(&settlement.id, true, None)
+                    }
+                    OperationOutcome::Failed => self.settle_deferred_settlement(
+                        &settlement.id,
+                        false,
+                        Some(deferred_send_error(
+                            settlement.error.unwrap_or_else(|| "send failed".to_string()),
+                        )),
+                    ),
+                }
+            }
+            EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN => {
+                let Ok(uncertain) =
+                    serde_json::from_value::<OperationDispatchUncertain>(event.payload.clone())
+                else {
+                    return;
+                };
+                self.settle_deferred_settlement(
+                    &uncertain.id,
+                    false,
+                    Some(deferred_send_error(uncertain.reason)),
+                );
+            }
+            _ => {}
+        }
+    }
+
     /// Read the current settlement of a mutation by its **client** mutation id —
     /// the near-end reconciler's cross-link query (D44b, `RuntimeLink::
     /// mutation_settlement`). `Ok(None)` when the runtime has no record: an
@@ -1046,6 +1149,41 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// The carried error for a deferred send that parked/failed. The near node maps a
+/// `Failed` mutation to `MutationNotification::Rejected`, so this is what the
+/// client surfaces while reverting the optimistic draft-Destroy fold.
+fn deferred_send_error(message: String) -> RuntimeAdapterError {
+    RuntimeError::internal(message, None).envelope().clone()
+}
+
+/// Spawn the co-located send-bridge (near-node half): a bus subscriber that
+/// settles a deferred async mutation (a Send) when its outbox flush emits
+/// `operation.settled`/`dispatch_uncertain` on the shared process event bus. The
+/// task holds a `Weak` handle so it self-terminates when the registry drops; a
+/// broadcast lag skips (the deferred record stays until a later frame or link
+/// reap). Must run within a Tokio runtime.
+pub(crate) fn spawn_deferred_settlement_bridge(
+    links: &Arc<LinkRegistry>,
+    event_sender: &broadcast::Sender<DomainEvent>,
+) -> tokio::task::JoinHandle<()> {
+    let weak = Arc::downgrade(links);
+    let mut rx = event_sender.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    let Some(links) = weak.upgrade() else {
+                        break;
+                    };
+                    links.settle_deferred_from_event(&event);
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
+}
+
 /// Map a runtime settlement (state + error) to the D47 dedup terminal class.
 /// `Confirmed` is kept + bounded-evicted; a `Failed` splits by the error's typed
 /// [`Terminality`] — a transient failure is `Failed` (cleared, so a retry
@@ -1345,6 +1483,124 @@ mod race_tests {
             "a live down-stream is never reaped"
         );
         assert!(reg.lock_links().contains_key(&sid));
+    }
+
+    fn operation_settled_event(op_id: &str, applied: bool) -> DomainEvent {
+        let settlement = OperationSettlement {
+            id: OperationId::from(op_id),
+            outcome: if applied {
+                OperationOutcome::Applied
+            } else {
+                OperationOutcome::Failed
+            },
+            assigned_entity_id: None,
+            error: (!applied).then(|| "send permanently failed".to_string()),
+        };
+        DomainEvent {
+            seq: 1,
+            account_id: posthaste_domain_model::AccountId::from("acct"),
+            topic: EVENT_TOPIC_OPERATION_SETTLED.to_string(),
+            occurred_at: String::new(),
+            mailbox_id: None,
+            message_id: None,
+            payload: serde_json::to_value(&settlement).unwrap(),
+        }
+    }
+
+    fn dispatch_uncertain_event(op_id: &str) -> DomainEvent {
+        let uncertain = OperationDispatchUncertain {
+            id: OperationId::from(op_id),
+            reason: "send timed out; delivery uncertain".to_string(),
+        };
+        DomainEvent {
+            seq: 1,
+            account_id: posthaste_domain_model::AccountId::from("acct"),
+            topic: EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN.to_string(),
+            occurred_at: String::new(),
+            mailbox_id: None,
+            message_id: None,
+            payload: serde_json::to_value(&uncertain).unwrap(),
+        }
+    }
+
+    async fn deferred_send_link() -> (Arc<LinkRegistry>, RuntimeLinkId, RuntimeMutationId) {
+        let reg = registry();
+        let sid = reg.open_link(RuntimeCaller::test()).unwrap().link_id;
+        let mutation_id = match reg
+            .accept_mutation(RuntimeCaller::test(), &request(&sid, "send-cmid"))
+            .unwrap()
+        {
+            MutationAcceptance::New { mutation_id } => mutation_id,
+            _ => panic!("first accept is New"),
+        };
+        (reg, sid, mutation_id)
+    }
+
+    // Send-bridge (near-node, co-located): a deferred send whose flush settles
+    // Applied delivers a terminal `Confirmed` notification to the client (the
+    // draft-Destroy fold confirms — the send left Drafts).
+    #[tokio::test]
+    async fn deferred_send_applied_confirms_at_the_client() {
+        let (reg, sid, mutation_id) = deferred_send_link().await;
+        reg.register_deferred_settlement(OperationId::from("op-send-c"), sid.clone(), mutation_id);
+        // Accepted (in-flight) at subscribe — no notification yet.
+        let subscription = reg
+            .subscribe_frames(RuntimeCaller::test(), sid.clone(), None)
+            .await
+            .unwrap();
+        let mut live = subscription.live;
+        // The async flush settles Applied → the client confirms.
+        reg.settle_deferred_from_event(&operation_settled_event("op-send-c", true));
+        let frame = tokio::time::timeout(Duration::from_secs(1), live.next())
+            .await
+            .expect("a deferred Applied must deliver a terminal notification")
+            .expect("a live frame");
+        assert!(matches!(
+            frame,
+            RuntimeFrame::MutationNotification {
+                notification: MutationNotification::Confirmed,
+                ..
+            }
+        ));
+    }
+
+    // Send-bridge (near-node, co-located) D125: a PARKED send (DispatchUncertain)
+    // delivers a terminal `Rejected` notification — the client REVERTS the
+    // optimistic draft-Destroy fold (the draft returns) and there is NO false
+    // Sent. A permanent Failed settlement behaves the same.
+    #[tokio::test]
+    async fn deferred_send_parked_reverts_at_the_client_no_false_sent() {
+        let (reg, sid, mutation_id) = deferred_send_link().await;
+        reg.register_deferred_settlement(OperationId::from("op-send-p"), sid.clone(), mutation_id);
+        let subscription = reg
+            .subscribe_frames(RuntimeCaller::test(), sid.clone(), None)
+            .await
+            .unwrap();
+        let mut live = subscription.live;
+        reg.settle_deferred_from_event(&dispatch_uncertain_event("op-send-p"));
+        let frame = tokio::time::timeout(Duration::from_secs(1), live.next())
+            .await
+            .expect("a parked send must deliver a terminal notification")
+            .expect("a live frame");
+        assert!(
+            matches!(
+                frame,
+                RuntimeFrame::MutationNotification {
+                    notification: MutationNotification::Rejected { .. },
+                    ..
+                }
+            ),
+            "a parked send reverts (Rejected) — not a false Sent"
+        );
+    }
+
+    // An op id this runtime never deferred is ignored (a non-Send settlement, or a
+    // different near node's op) — no panic, no spurious frame.
+    #[tokio::test]
+    async fn a_non_deferred_settlement_is_ignored() {
+        let (reg, _sid, _mutation_id) = deferred_send_link().await;
+        reg.settle_deferred_from_event(&operation_settled_event("op-unknown", true));
+        // No deferred record removed, nothing settled — the call is a no-op.
     }
 }
 

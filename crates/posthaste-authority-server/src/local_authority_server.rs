@@ -372,7 +372,12 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         request: SendMessageRequest,
     ) -> Result<(), RuntimeError> {
-        self.authority_server.send_message(account_id, request).await
+        // The legacy direct REST send: no up-channel origin to register, so the
+        // enqueued op id (the send-bridge join key) is not needed here.
+        self.authority_server
+            .send_message(account_id, request)
+            .await
+            .map(|_operation_id| ())
     }
 
     async fn save_draft(
