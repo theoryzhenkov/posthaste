@@ -1,5 +1,24 @@
 use super::*;
 
+/// Wall-clock budget for one body-cache fetch batch
+/// (`MailService::process_body_cache_batch`).
+///
+/// The batch checks this deadline before each candidate and bounds the
+/// in-flight provider fetch to the remaining budget, so a batch against a slow
+/// or hung body source returns cleanly with partial work instead of being the
+/// thing the supervisor's cache arm budget (`ARM_BUDGET_CACHE`, 120 s) drops.
+/// That distinction is load-bearing: a batch future *dropped* by the arm
+/// timeout never reaches `CacheResourceGovernor::record_feedback`, so backoff
+/// never engages and the 2 s cache tick re-hits the slow server forever (the
+/// "stuck until reload" field bug). A batch that *returns* records its
+/// feedback normally and the governor backs off.
+///
+/// Must stay well under `ARM_BUDGET_CACHE` (a compile-time assertion in the
+/// supervisor enforces `2 × budget ≤ arm budget`), leaving the arm budget as
+/// the last-resort backstop it was designed to be. **Review** (picked sane,
+/// not measured; half the arm budget).
+pub const BODY_CACHE_BATCH_BUDGET: Duration = Duration::from_secs(60);
+
 /// Resource policy for optional-content cache maintenance.
 ///
 /// The priority queue decides which cache objects matter most. This policy

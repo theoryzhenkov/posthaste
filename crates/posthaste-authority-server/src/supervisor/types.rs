@@ -113,7 +113,26 @@ pub(crate) const ARM_BUDGET_SYNC: Duration = Duration::from_secs(300);
 pub(crate) const ARM_BUDGET_BACKFILL: Duration = Duration::from_secs(120);
 /// Budget for one cache-maintenance batch (a bounded fetch/rescore batch
 /// under the cache resource governor's lease).
+///
+/// This arm budget is the *last-resort backstop*, not the working bound: the
+/// body-cache batch carries its own deadline
+/// ([`posthaste_domain_model::BODY_CACHE_BATCH_BUDGET`], checked per candidate
+/// with the in-flight fetch bounded to the remaining budget), so under a slow
+/// or hung provider the batch returns with partial work — and records governor
+/// feedback/backoff — well before this timeout can drop it. If this arm budget
+/// ever does fire (e.g. a wedged local store call the batch deadline does not
+/// cover), the runtime additionally records a cancelled slice on the governor
+/// so the cache tick backs off instead of re-wedging every 2 s.
 pub(crate) const ARM_BUDGET_CACHE: Duration = Duration::from_secs(120);
+
+// The batch deadline must leave the arm budget as a comfortably-later
+// backstop; if either constant is retuned, keep the batch's worst case
+// (deadline check + one remaining-budget-bounded fetch + local store writes)
+// well inside the arm budget.
+const _: () = assert!(
+    BODY_CACHE_BATCH_BUDGET.as_millis() * 2 <= ARM_BUDGET_CACHE.as_millis(),
+    "BODY_CACHE_BATCH_BUDGET must stay well under ARM_BUDGET_CACHE (the arm is the backstop)"
+);
 /// Budget for one snooze-scheduler tick. Local-store-only — it reads
 /// `message_snooze` and enqueues a mailbox-move outbox op rather than
 /// sending one inline — so this is the tightest budget: a backstop against a

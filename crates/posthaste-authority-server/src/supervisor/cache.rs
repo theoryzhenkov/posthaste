@@ -9,10 +9,12 @@ pub(crate) async fn process_cache_maintenance_batch(
 ) {
     let operation_id = operation_id.unwrap_or("");
     let is_interactive = !operation_id.is_empty();
-    let started = Instant::now();
+    // tokio's clock (identical to std's in production) so paused-time tests
+    // can drive the governor's backoff window virtually.
+    let started = tokio::time::Instant::now();
     let lease = {
         let mut governor = shared.cache_resources.lock().await;
-        governor.grant(started, interactive_pressure)
+        governor.grant(started.into_std(), interactive_pressure)
     };
     let mut feedback = CacheMaintenanceFeedback::default();
     if is_interactive || lease.in_backoff {
@@ -137,6 +139,7 @@ pub(crate) async fn process_cache_maintenance_batch(
                             failed = outcome.failed,
                             skipped = outcome.skipped,
                             event_count = outcome.events.len(),
+                            deadline_exceeded = outcome.deadline_exceeded,
                             "cache worker batch completed"
                         );
                     } else if outcome.skipped > 0 {
@@ -185,7 +188,7 @@ pub(crate) async fn process_cache_maintenance_batch(
     }
 
     feedback.elapsed = started.elapsed();
-    let now = Instant::now();
+    let now = tokio::time::Instant::now().into_std();
     let mut governor = shared.cache_resources.lock().await;
     governor.record_feedback(now, &lease, feedback);
     let has_work = feedback.stale_rescore_queued > 0

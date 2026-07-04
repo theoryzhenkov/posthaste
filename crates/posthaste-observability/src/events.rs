@@ -6,6 +6,7 @@ pub const ACCOUNT_SECRET_DELETE_FAILED: LogEvent = LogEvent::new("account.secret
 
 pub const CACHE_BODY_ADMISSION_EVALUATED: LogEvent =
     LogEvent::new("cache.body.admission_evaluated");
+pub const CACHE_BODY_BATCH_DEADLINE: LogEvent = LogEvent::new("cache.body.batch_deadline");
 pub const CACHE_BODY_CANDIDATE_GENERATION_SKIPPED: LogEvent =
     LogEvent::new("cache.body.candidate_generation_skipped");
 pub const CACHE_BODY_CANDIDATE_SCORED: LogEvent = LogEvent::new("cache.body.candidate_scored");

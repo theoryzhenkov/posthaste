@@ -1,11 +1,28 @@
 use super::*;
 use crate::service::offload;
+use posthaste_domain_model::BODY_CACHE_BATCH_BUDGET;
+
+/// Error code recorded on a candidate whose in-flight fetch was cut short by
+/// the batch-level deadline ([`BODY_CACHE_BATCH_BUDGET`]): the candidate is
+/// marked `Failed` — never left stuck `Fetching`, which would leak it out of
+/// the wanted set forever (Failed rows can be re-scored; Fetching rows are
+/// excluded from both fetch and rescore candidate queries).
+pub const BODY_CACHE_BATCH_DEADLINE_ERROR_CODE: &str = "batch_deadline";
 
 impl MailService {
     /// Fetch one bounded batch of wanted message-body cache candidates.
     ///
     /// The first worker slice has no eviction path, so it admits only bodies
     /// that fit under the current effective background target.
+    ///
+    /// The whole batch runs under its own wall-clock deadline
+    /// ([`BODY_CACHE_BATCH_BUDGET`]), checked before each candidate, and the
+    /// in-flight provider fetch is bounded to the remaining budget. A slow or
+    /// hung body source therefore makes the batch *return* with partial work
+    /// (letting the caller record governor feedback and back off) instead of
+    /// legitimately exceeding the supervisor's cache arm budget and being
+    /// dropped mid-flight — the drop path never records feedback, so the 2 s
+    /// cache tick would re-hit the slow server forever.
     ///
     /// @spec docs/L1-sync#local-cache-planning
     pub async fn process_body_cache_batch(
@@ -18,6 +35,9 @@ impl MailService {
         if !lease.has_fetch_budget() {
             return Ok(outcome);
         }
+        // tokio's clock (not std's) so paused-time tests can drive the
+        // deadline virtually; in production they are the same clock.
+        let batch_started = tokio::time::Instant::now();
 
         let settings = self.config.get_app_settings()?;
         if !settings.cache_policy.cache_bodies {
@@ -91,6 +111,23 @@ impl MailService {
             if outcome.attempted >= lease.request_limit {
                 break;
             }
+            // Batch deadline (see the method doc): stop cleanly with partial
+            // work once the budget is spent — the remaining candidates stay
+            // `wanted` for a later batch.
+            if batch_started.elapsed() >= BODY_CACHE_BATCH_BUDGET {
+                outcome.deadline_exceeded = true;
+                ph_debug!(
+                    events::CACHE_BODY_BATCH_DEADLINE,
+                    account_id = %account_id,
+                    layer = CacheLayer::Body.as_str(),
+                    budget_ms = BODY_CACHE_BATCH_BUDGET.as_millis() as u64,
+                    attempted = outcome.attempted,
+                    cached = outcome.cached,
+                    failed = outcome.failed,
+                    "cache worker body batch stopped at its deadline with partial work"
+                );
+                break;
+            }
             outcome.scanned += 1;
             if candidate.fetch_bytes > remaining_lease_bytes {
                 outcome.skipped += 1;
@@ -156,7 +193,47 @@ impl MailService {
                 "cache candidate fetch started"
             );
 
-            let fetched = match gateway.fetch_message_body(account_id, &message_id).await {
+            // Bound the in-flight fetch to the batch's remaining budget: a
+            // hung provider call is cut here (and the candidate marked Failed
+            // below) rather than dragging the whole batch past the supervisor
+            // arm budget. The per-call provider envelopes (IMAP 60 s per-op,
+            // JMAP per-class deadline/stall) usually fire first; this is the
+            // batch-shaped ceiling over them.
+            let remaining_budget =
+                BODY_CACHE_BATCH_BUDGET.saturating_sub(batch_started.elapsed());
+            let fetch_result = match tokio::time::timeout(
+                remaining_budget,
+                gateway.fetch_message_body(account_id, &message_id),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_elapsed) => {
+                    // Cut short by the batch deadline: mark Failed (never
+                    // leave it stuck Fetching) and stop the batch.
+                    outcome.deadline_exceeded = true;
+                    outcome.failed += 1;
+                    ph_debug!(
+                        events::CACHE_BODY_BATCH_DEADLINE,
+                        account_id = %account_id,
+                        message_id = %message_id,
+                        layer = candidate.layer.as_str(),
+                        fetch_unit = candidate.fetch_unit.as_str(),
+                        budget_ms = BODY_CACHE_BATCH_BUDGET.as_millis() as u64,
+                        "cache candidate fetch cut short by the batch deadline"
+                    );
+                    self.cache_store.mark_cache_object_state(
+                        account_id,
+                        &message_id,
+                        candidate.layer,
+                        candidate.object_id.as_deref(),
+                        CacheObjectState::Failed,
+                        Some(BODY_CACHE_BATCH_DEADLINE_ERROR_CODE),
+                    )?;
+                    break;
+                }
+            };
+            let fetched = match fetch_result {
                 Ok(fetched) => fetched,
                 Err(error) => {
                     let service_error = ServiceError::from(error);

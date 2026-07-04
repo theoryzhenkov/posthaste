@@ -1285,6 +1285,138 @@ async fn snooze_tick_still_returns_a_due_message_on_the_monotonic_anchored_clock
 }
 
 // ---------------------------------------------------------------------------
+// Field bug (RFC-L2-provider-reliability, "cache_maintenance arm wedges"):
+// a slow/hung body source made the cache batch exceed ARM_BUDGET_CACHE, the
+// arm timeout DROPPED the batch future (so governor feedback/backoff never
+// ran), and the 2 s cache tick re-hit the hung provider forever — the account
+// was wedged until an app reload. The fix bounds the batch under its own
+// deadline (BODY_CACHE_BATCH_BUDGET) so it returns with partial work and
+// records backoff, and additionally records a cancelled slice if the arm
+// backstop ever does fire.
+// ---------------------------------------------------------------------------
+
+// spec: docs/eph/RFC-L2-provider-reliability
+#[tokio::test(start_paused = true)]
+async fn hung_body_source_cannot_wedge_cache_maintenance_and_recovery_needs_no_restart() {
+    use posthaste_domain_model::CacheLayer;
+
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    let sync_state = SyncTriggerState::new();
+
+    // A mock provider whose messages carry no inline bodies, so the sync
+    // seeds `wanted` body-cache candidates that the cache worker must fetch.
+    let mock = Arc::new(MockJmapGateway::default());
+    mock.strip_message_bodies_for_tests();
+    let gateway: SharedGateway = mock.clone();
+    let mut connection = AccountRuntimeConnectionState::default();
+    connection.set_connected(AccountConnection {
+        gateway: gateway.clone(),
+        push_events: None,
+        remote_observation: RemoteObservationPolicy::disabled(),
+        secret_resolver: Arc::new(StaticSecretResolver::new("")),
+    });
+    process_sync_trigger_with_state(
+        &sync_state,
+        &shared,
+        &account,
+        generation,
+        SyncTriggerRequest::new(SyncTrigger::Startup, SyncMode::Incremental),
+        &mut connection,
+    )
+    .await;
+    let candidates = shared
+        .store
+        .list_cache_fetch_candidates(&account.id, CacheLayer::Body, 16)
+        .expect("candidates should list");
+    assert!(
+        !candidates.is_empty(),
+        "the body-less sync must seed wanted body-cache candidates"
+    );
+
+    // Phase 1 — the body source hangs. The cache arm, wrapped exactly the way
+    // the runtime loop wraps it, must complete (the batch's own deadline
+    // returns first); the arm-budget backstop must NOT be what fires.
+    mock.set_body_fetch_delay_for_tests(Duration::from_secs(3600));
+    let arm = tokio::time::timeout(
+        ARM_BUDGET_CACHE,
+        handle_cache_tick(
+            &shared,
+            &account.id,
+            Some(gateway.clone()),
+            CACHE_BACKGROUND_PRESSURE,
+            None,
+        ),
+    )
+    .await;
+    assert!(
+        arm.is_ok(),
+        "the batch must return under its own deadline, not be dropped by the arm budget"
+    );
+    let attempts_while_hung = mock.body_fetch_attempts_for_tests();
+    assert!(attempts_while_hung >= 1, "the hung fetch was attempted");
+
+    // The governor is in backoff, so the next 2 s tick must NOT re-hit the
+    // hung provider — the perpetual-recurrence half of the wedge.
+    {
+        let governor = shared.cache_resources.lock().await;
+        assert!(
+            governor.is_in_backoff(tokio::time::Instant::now().into_std()),
+            "a no-progress batch against a hung source must engage backoff"
+        );
+    }
+    handle_cache_tick(
+        &shared,
+        &account.id,
+        Some(gateway.clone()),
+        CACHE_BACKGROUND_PRESSURE,
+        None,
+    )
+    .await;
+    assert_eq!(
+        mock.body_fetch_attempts_for_tests(),
+        attempts_while_hung,
+        "a backed-off tick must not hammer the slow provider"
+    );
+
+    // The wedged candidate was marked Failed — it left the wanted set instead
+    // of being stuck Fetching forever.
+    let remaining = shared
+        .store
+        .list_cache_fetch_candidates(&account.id, CacheLayer::Body, 16)
+        .expect("candidates should list");
+    assert_eq!(
+        remaining.len(),
+        candidates.len() - 1,
+        "the cut-short candidate must leave the wanted set (Failed), not leak as Fetching"
+    );
+
+    // Phase 2 — the provider recovers. Once the backoff expires (virtual
+    // time), the next tick fetches and caches again: the account recovers
+    // WITHOUT any restart or reload.
+    mock.clear_body_fetch_delay_for_tests();
+    tokio::time::sleep(Duration::from_secs(6)).await; // past the first 5 s backoff
+    handle_cache_tick(
+        &shared,
+        &account.id,
+        Some(gateway.clone()),
+        CACHE_BACKGROUND_PRESSURE,
+        None,
+    )
+    .await;
+    assert!(
+        mock.body_fetch_attempts_for_tests() > attempts_while_hung,
+        "after backoff + recovery the cache worker fetches again without a restart"
+    );
+    let governor = shared.cache_resources.lock().await;
+    assert!(
+        !governor.is_in_backoff(tokio::time::Instant::now().into_std()),
+        "a successful batch clears the backoff"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // M36 / D98 (Sc1 / R4): startup splay + the global concurrent-sync cap.
 // ---------------------------------------------------------------------------
 

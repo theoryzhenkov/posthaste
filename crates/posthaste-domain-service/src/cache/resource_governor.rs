@@ -91,14 +91,7 @@ impl CacheResourceGovernor {
         self.refund_unused(lease, feedback);
         let fetch_failed = feedback.fetch_failed > 0 || feedback.had_fetch_error;
         if fetch_failed {
-            self.consecutive_fetch_failures = self.consecutive_fetch_failures.saturating_add(1);
-            self.network_rate_multiplier =
-                (self.network_rate_multiplier * 0.5).max(self.policy.min_network_rate_multiplier);
-            if feedback.fetch_cached == 0 {
-                let exponent = self.consecutive_fetch_failures.saturating_sub(1).min(6);
-                let backoff_seconds = 5_u64.saturating_mul(1_u64 << exponent).min(300);
-                self.backoff_until = Some(now + Duration::from_secs(backoff_seconds));
-            }
+            self.record_fetch_failure(now, feedback.fetch_cached > 0);
             return;
         }
 
@@ -106,6 +99,31 @@ impl CacheResourceGovernor {
             self.consecutive_fetch_failures = 0;
             self.backoff_until = None;
             self.network_rate_multiplier = (self.network_rate_multiplier + 0.1).min(1.0);
+        }
+    }
+
+    /// A cache-maintenance slice was cancelled out from under the worker (the
+    /// supervisor's arm-budget backstop dropped the future), so
+    /// [`Self::record_feedback`] never ran for it. Treat the cancellation as a
+    /// no-progress fetch failure: without this, the arm-drop path leaves the
+    /// governor pristine and the short cache tick immediately re-hits the slow
+    /// provider — the perpetual-recurrence half of the "stuck until reload"
+    /// wedge. Consecutive cancellations escalate the backoff exactly like
+    /// consecutive fetch failures.
+    pub fn record_cancelled_slice(&mut self, now: Instant) {
+        self.record_fetch_failure(now, false);
+    }
+
+    /// Shared failure arithmetic: halve the network rate multiplier, and when
+    /// the slice made no caching progress, enter (escalating) backoff.
+    fn record_fetch_failure(&mut self, now: Instant, made_progress: bool) {
+        self.consecutive_fetch_failures = self.consecutive_fetch_failures.saturating_add(1);
+        self.network_rate_multiplier =
+            (self.network_rate_multiplier * 0.5).max(self.policy.min_network_rate_multiplier);
+        if !made_progress {
+            let exponent = self.consecutive_fetch_failures.saturating_sub(1).min(6);
+            let backoff_seconds = 5_u64.saturating_mul(1_u64 << exponent).min(300);
+            self.backoff_until = Some(now + Duration::from_secs(backoff_seconds));
         }
     }
 
