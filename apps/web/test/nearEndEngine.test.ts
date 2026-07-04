@@ -52,6 +52,9 @@ class FakeIo implements NearEndTransportIo {
   streams: FakeStream[] = []
   /** Scripted mutation-POST responses (fallback echoes a confirmed receipt). */
   mutationResponses: PostResponder[] = []
+  /** Scripted link-open bodies (in order); falls back to `{linkId:'link-A'}` —
+   *  lets a re-prepare test hand out a DIFFERENT fresh link id. */
+  linkBodies: string[] = []
   /** Scripted settlement-GET responses (fallback: no record). */
   settlementResponses: { status: number; body: string }[] = []
 
@@ -69,7 +72,9 @@ class FakeIo implements NearEndTransportIo {
       }
     }
     // Link open.
-    return { status: 200, body: JSON.stringify({ linkId: 'link-A' }) }
+    const linkBody =
+      this.linkBodies.shift() ?? JSON.stringify({ linkId: 'link-A' })
+    return { status: 200, body: linkBody }
   }
 
   async getJson(url: string) {
@@ -366,6 +371,52 @@ describe('the near-end engine over fake IO', () => {
     await waitFor(() => expect(reconciled.length).toBe(1))
     expect(reconciled[0]!.clientMutationId).toBe('c-lost')
     expect(io.posts.filter((p) => p.url.includes('/mutations')).length).toBe(1)
+  })
+
+  it('surfaces onLinkReestablished with the fresh link id on a stale-link re-prepare (M44)', async () => {
+    // The first link is 'link-A'; after the 404 re-prepare the fresh link is 'link-B'.
+    io.linkBodies = [
+      JSON.stringify({ linkId: 'link-A' }),
+      JSON.stringify({ linkId: 'link-B' }),
+    ]
+    const reestablished: string[] = []
+    subscribeNearEndFrames({
+      onFrame: () => {},
+      onTransientError: () => {},
+      onLinkReestablished: (id) => reestablished.push(id),
+    })
+
+    const { linkId } = await connectNearEnd()
+    expect(linkId).toBe('link-A')
+    await waitForStreams(1)
+
+    io.streams[0]!.emit('open', '')
+    // The subscribe GET is rejected 404 (idle-reaped/dead link) → re-prepare.
+    io.streams[0]!.emit('error', 'runtime stream rejected with 404', 404)
+
+    // The engine re-prepares a FRESH link and re-subscribes (no reload).
+    await waitForStreams(2)
+    await waitFor(() => expect(reestablished).toEqual(['link-B']))
+  })
+
+  it('does NOT surface onLinkReestablished on a same-link reconnect (M44)', async () => {
+    const reestablished: string[] = []
+    subscribeNearEndFrames({
+      onFrame: () => {},
+      onTransientError: () => {},
+      onLinkReestablished: (id) => reestablished.push(id),
+    })
+    await connectNearEnd()
+    await waitForStreams(1)
+
+    io.streams[0]!.emit('open', '')
+    // A statusless drop: the SAME link reconnects — no re-prepare, no edge.
+    io.streams[0]!.emit('error', 'network dropped')
+
+    await waitForStreams(2)
+    // Give any spurious edge ample time to (not) fire.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(reestablished).toEqual([])
   })
 
   it('seeds the reconnect cursor from sessionStorage across an engine restart', async () => {
