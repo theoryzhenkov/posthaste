@@ -449,6 +449,126 @@ fn stream_reconnects_and_carries_the_resume_cursor() {
     assert!(h.sink.statuses.borrow().iter().any(|s| s == "reconnecting"));
 }
 
+// Count POSTs to the link-open route (`/runtime/sessions`, NOT the per-link
+// `/mutations` sub-route) — one per prepare handshake, so a re-prepare shows as 2.
+fn prepare_post_count(h: &Harness) -> usize {
+    h.transport
+        .posts
+        .borrow()
+        .iter()
+        .filter(|(u, _)| u.contains("/runtime/sessions") && !u.contains("/mutations"))
+        .count()
+}
+
+// D110a / M40 — the CONFIRMED F1 hotfix. A stream-open failure indicating a
+// stale/absent link (404 — the runtime's `not_found` for a link idle-reaped at
+// SESSION_IDLE_TTL, i.e. every laptop sleep >5min, or dropped by a daemon
+// restart) must NOT classify Permanent. The engine clears the dead link's
+// prepared state + resume cursor and re-runs the prepare handshake against a
+// FRESH link, so `run()` keeps going instead of halting live updates until reload.
+#[test]
+fn stale_link_404_stream_error_re_prepares_a_fresh_link() {
+    let transport = FakeTransport::new()
+        .with_stream(vec![
+            StreamEvent::Open,
+            // A frame advances the resume cursor to 7 before the link dies...
+            StreamEvent::Message(r#"{"type":"heartbeat","linkSeq":7}"#.to_string()),
+            // ...then the subscribe GET is rejected 404 (the reaped/dead link).
+            StreamEvent::Error {
+                status: Some(404),
+                message: "runtime stream rejected with 404".to_string(),
+            },
+        ])
+        // The re-prepared fresh link opens, then a 403 stops the loop so the test
+        // terminates deterministically.
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+
+    block_on(h.engine.clone().run());
+
+    // The prepare handshake ran TWICE — the 404 forced a fresh link open, not a
+    // permanent halt.
+    assert_eq!(prepare_post_count(&h), 2, "the stale link was re-prepared");
+    // Two subscribes; the resume cursor was CLEARED with the dead link, so the
+    // fresh subscribe carries no `afterSeq` (a seq 7 from the defunct link's seq
+    // space must never leak into the new link).
+    let urls = h.transport.stream_urls.borrow();
+    assert_eq!(urls.len(), 2, "re-subscribed on the fresh link");
+    assert!(
+        !urls[1].contains("afterSeq"),
+        "the fresh link subscribe drops the dead link's cursor: {}",
+        urls[1]
+    );
+    // The 404 was surfaced as transient + drove the reconnect/backoff tail, never
+    // a permanent stop.
+    let statuses = h.sink.statuses.borrow();
+    assert!(statuses.iter().any(|s| s == "transient"), "{statuses:?}");
+    assert!(statuses.iter().any(|s| s == "reconnecting"), "{statuses:?}");
+    // A jittered backoff sleep ran between the re-prepare attempts (no tight storm).
+    assert!(h.scheduler.sleeps.borrow().iter().any(|d| *d > Duration::ZERO));
+}
+
+// D110a — 410 Gone is treated identically to 404 (forward-compatibility for a
+// server that ever distinguishes a reaped link): re-prepare, not Permanent.
+#[test]
+fn stale_link_410_stream_error_re_prepares_a_fresh_link() {
+    let transport = FakeTransport::new()
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(410),
+                message: "gone".to_string(),
+            },
+        ])
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+
+    block_on(h.engine.clone().run());
+
+    assert_eq!(prepare_post_count(&h), 2, "410 also re-prepares");
+    assert_eq!(h.transport.stream_urls.borrow().len(), 2);
+}
+
+// D110a — the reserved case: a genuine auth refusal (401/403) still classifies
+// Permanent and stops the loop. Re-prepare is ONLY for a stale/absent link.
+#[test]
+fn auth_refused_stream_error_stays_permanent() {
+    for status in [401u16, 403u16] {
+        let transport = FakeTransport::new().with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(status),
+                message: "auth refused".to_string(),
+            },
+        ]);
+        let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+
+        block_on(h.engine.clone().run());
+
+        // Exactly one prepare + one subscribe: no re-prepare, no reconnect.
+        assert_eq!(prepare_post_count(&h), 1, "{status} must not re-prepare");
+        assert_eq!(h.transport.stream_urls.borrow().len(), 1, "{status}");
+        let statuses = h.sink.statuses.borrow();
+        assert!(statuses.iter().any(|s| s == "permanent"), "{status}: {statuses:?}");
+        assert!(
+            !statuses.iter().any(|s| s == "reconnecting"),
+            "{status}: an auth refusal must not reconnect: {statuses:?}"
+        );
+    }
+}
+
 #[test]
 fn permanent_stream_error_stops_the_loop() {
     let transport = FakeTransport::new().with_stream(vec![
