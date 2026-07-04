@@ -40,6 +40,14 @@ type FlagToggleTarget = MailSelection &
 /** Return type of {@link useEmailActions}. */
 export type EmailActions = ReturnType<typeof useEmailActions>
 
+/**
+ * Client-side grace before a discarded draft's delete-draft op is actually
+ * dispatched (D127). During this window a "Draft discarded" toast offers Undo,
+ * which cancels the pending dispatch so nothing is ever sent — replacing the
+ * Trash safety net a normal message relies on.
+ */
+export const DRAFT_DISCARD_GRACE_MS = 5000
+
 function toSourceMessageRef(
   message: SourceMessageRef | MessageSummary | MailSelection,
 ): SourceMessageRef {
@@ -134,6 +142,11 @@ export function useEmailActions({ undo }: { undo: () => void }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const pendingRef = useRef(0)
   const [isPending, setIsPending] = useState(false)
+  /** Pending draft-discard timers keyed by `sourceId:messageId`; an Undo clears
+   * the entry before the delay elapses so the delete-draft op never dispatches. */
+  const discardTimersRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  )
 
   const setPending = useCallback((delta: number) => {
     pendingRef.current = Math.max(0, pendingRef.current + delta)
@@ -197,6 +210,62 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       })
     },
     [dispatch],
+  )
+
+  /**
+   * D127 — discard a draft. Never routes to the trash mutation; instead it
+   * schedules the draft-delete op ({@link runtimeMutations.messages.deleteDraft})
+   * after a short {@link DRAFT_DISCARD_GRACE_MS} grace and shows an undo toast.
+   * Undo clears the timer so nothing dispatches (the draft survives).
+   *
+   * The delete-draft route accepts the draft's `MessageId` as its `draftId`
+   * (server wraps it as `MessageId(draft_id)`), so a plain {@link SourceMessageRef}
+   * is sufficient — works uniformly for list rows, the detail pane, and keys.
+   *
+   * Tab close during the grace: the pending timer is dropped with the page, so
+   * the delete-draft op never dispatches and the draft is kept — the SAFE
+   * direction (an undone-able discard that never fired = the draft survives).
+   * We deliberately do NOT force-flush it on unload.
+   */
+  const discardDraft = useCallback(
+    (target: SourceMessageRef) => {
+      setErrorMessage(null)
+      const key = `${target.sourceId}:${target.messageId}`
+      // Coalesce repeated discards of the same draft into one pending dispatch.
+      if (discardTimersRef.current.has(key)) {
+        return
+      }
+      const timer = setTimeout(() => {
+        discardTimersRef.current.delete(key)
+        setPending(1)
+        void runtimeMutations.messages
+          .deleteDraft({
+            sourceId: target.sourceId,
+            draftId: target.messageId,
+          })
+          .catch((error: unknown) => {
+            setErrorMessage(
+              error instanceof Error ? error.message : 'Operation failed',
+            )
+          })
+          .finally(() => setPending(-1))
+      }, DRAFT_DISCARD_GRACE_MS)
+      discardTimersRef.current.set(key, timer)
+      toast('Draft discarded', {
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            const pending = discardTimersRef.current.get(key)
+            if (pending) {
+              clearTimeout(pending)
+              discardTimersRef.current.delete(key)
+            }
+          },
+        },
+        duration: DRAFT_DISCARD_GRACE_MS,
+      })
+    },
+    [setPending],
   )
 
   const runKeywords = useCallback(
@@ -276,6 +345,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       moveToRole(target, MAILBOX_ROLES.Archive, 'Message archived'),
     trash: (target: SourceMessageRef) =>
       moveToRole(target, MAILBOX_ROLES.Trash, 'Message trashed'),
+    discardDraft,
     moveToInbox: (target: SourceMessageRef) =>
       moveToRole(target, MAILBOX_ROLES.Inbox, 'Moved to Inbox'),
     snooze: (target: SourceMessageRef, until: number) =>
