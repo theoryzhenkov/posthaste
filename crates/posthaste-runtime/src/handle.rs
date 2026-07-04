@@ -249,6 +249,28 @@ impl RuntimeHandle {
         match forward.await {
             Ok(authority_server_receipt) => {
                 guard.armed = false;
+                // Send-bridge (near-node step 2): an async-flush-settled op (a
+                // Send) has NO terminal verdict at the authority receipt — it
+                // returns `Accepted`, its confirm/park/fail rides the async-flush
+                // Settlement bridge (D125/D126). HOLD the optimistic draft-Destroy
+                // fold: register the deferred settlement (keyed by the outbox op id
+                // carried on the receipt) and leave the mutation `Accepted` — do
+                // NOT settle `Confirmed` here (that would be a false Sent — the
+                // send has not actually left the provider yet).
+                if matches!(request.operation, MailOperation::Send(_)) {
+                    if let Some(operation_id) = authority_server_receipt
+                        .output
+                        .get("deferredOperationId")
+                        .and_then(|value| value.as_str())
+                    {
+                        self.core.links.register_deferred_settlement(
+                            OperationId::from(operation_id),
+                            link_id.clone(),
+                            mutation_id.clone(),
+                        );
+                    }
+                    return Ok(authority_server_receipt);
+                }
                 // The authority server already serialized the command's events as the
                 // receipt output (state-before-event: the effect is applied
                 // before the receipt returns); settle the link with it.

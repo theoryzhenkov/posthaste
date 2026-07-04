@@ -241,6 +241,37 @@ function saveDraft(
   }
 }
 
+/**
+ * A `message.send` runtime mutation (M66). Its `fold_effect` is a Destroy on the
+ * originating draft's row (the blink): the stable draft key rides as `messageId`
+ * (the fold target), the full send payload as `request`. A parked/rejected
+ * settlement RETURNS the draft — a parked send is not a confirmed send.
+ */
+function send(
+  messageId: string,
+  clientMutationId: string,
+): RuntimeRunMutationRequest {
+  return {
+    linkId: 'sess',
+    name: 'message.send',
+    args: {
+      sourceId: 's',
+      messageId,
+      request: {
+        to: [{ name: null, email: 'to@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'hi',
+        body: 'send body',
+        inReplyTo: null,
+        references: null,
+        attachments: [],
+      },
+    },
+    clientMutationId,
+  }
+}
+
 function keywordsOf(
   frames: RuntimeFrame<RuntimeMailListViewState>[],
   messageId: string,
@@ -503,6 +534,161 @@ describe('entityStoreAdapter', () => {
     // Foldless ops carry no optimism to settle/revert → no pending-set record.
     expect(await pendingSet.all()).toHaveLength(0)
     expect(receipt.clientMutationId).toBe('s1')
+  })
+
+  it('send (M66): optimistically Destroys the originating draft row (the blink) + forwards + pending set', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
+    const opened = await adapter.openRuntimeLinkMessageListView(viewRequest)
+    expect(
+      opened.snapshot.data.rows.map((r) => (r.projection as { id: string }).id),
+    ).toEqual(['m1', 'm2'])
+
+    const receipt = await adapter.runRuntimeMutation(send('m1', 'snd1'))
+
+    // The blink: the originating draft row is gone from the projected view
+    // immediately (the Destroy fold applied).
+    expect(rowIds(frames)).toEqual(['m2'])
+    // It forwarded as a real, typed runtime mutation (not a fire-and-forget
+    // POST), carrying the stable draft key + the send payload.
+    expect(harness.mutations.map((m) => m.name)).toEqual(['message.send'])
+    expect(harness.mutations[0]?.args).toMatchObject({
+      messageId: 'm1',
+      request: { subject: 'hi' },
+    })
+    // A folded op carries optimism to settle/revert → exactly one pending-set
+    // record survives (the durable outbox intent).
+    expect((await pendingSet.all()).map((r) => r.clientMutationId)).toEqual([
+      'snd1',
+    ])
+    expect(receipt.clientMutationId).toBe('snd1')
+  })
+
+  it('send (M66): an Applied CONFIRMS — the draft stays gone, no false Sent flicker', async () => {
+    const built = build()
+    const { adapter, frames } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+    await adapter.runRuntimeMutation(send('m1', 'snd1'))
+    expect(rowIds(frames)).toEqual(['m2'])
+
+    built.harness.push({
+      type: 'mutationNotification',
+      linkSeq: 5,
+      clientMutationId: 'snd1',
+      notification: { type: 'confirmed' },
+    })
+    await tick()
+
+    // Still gone; the send Applied, so the reconciling message.updated then
+    // prunes the base authoritatively. No false "Sent then flicker back".
+    expect(rowIds(frames)).toEqual(['m2'])
+    built.harness.push({
+      type: 'notification',
+      linkSeq: 101,
+      kind: 'message.updated',
+      payload: {
+        seq: 2,
+        accountId: 's',
+        topic: 'message.updated',
+        occurredAt: 'now',
+        payload: { messageId: 'm1', deleted: true },
+      },
+    } as RuntimeFrame<RuntimeMailListViewState>)
+    await tick()
+    expect(rowIds(frames)).toEqual(['m2'])
+  })
+
+  it('send (DS8): a DispatchUncertain/park => Rejected settlement RETURNS the draft (a parked send is not a confirmed send)', async () => {
+    const built = build()
+    const { adapter, pendingSet, frames } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+    await adapter.runRuntimeMutation(send('m1', 'snd1'))
+    // The blink: optimistically Destroyed.
+    expect(rowIds(frames)).toEqual(['m2'])
+
+    built.harness.push({
+      type: 'mutationNotification',
+      linkSeq: 5,
+      clientMutationId: 'snd1',
+      notification: {
+        type: 'rejected',
+        error: {
+          code: 'dispatchUncertain',
+          message: 'send parked; delivery outcome unknown',
+          terminality: 'permanent',
+        },
+      },
+    })
+    await tick()
+
+    // The draft comes back (the reverting settlement) and the pending op clears.
+    // A parked send is surfaced as needs-attention, never a silent "Sent".
+    expect(rowIds(frames)).toEqual(['m1', 'm2'])
+    expect(await pendingSet.all()).toHaveLength(0)
+  })
+
+  it('send (DS8): a resolved failed receipt reverts the blink immediately (state, not id-presence)', async () => {
+    const built = build()
+    const { adapter, pendingSet, frames, harness } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+
+    // The runtime resolves the dispatch ALREADY terminally failed (state, not a
+    // throw) — and hands back a runtimeMutationId too, to prove the adapter
+    // checks `state` rather than just id-presence (which would mis-link + park).
+    harness.base.runRuntimeMutation = async (
+      request: RuntimeRunMutationRequest,
+    ) => {
+      harness.mutations.push(request)
+      return {
+        runtimeMutationId: 'r-fail',
+        clientMutationId: request.clientMutationId,
+        name: request.name,
+        state: 'failed',
+        error: {
+          code: 'refused',
+          message: 'send refused',
+          terminality: 'permanent',
+        },
+      } satisfies RuntimeMutationReceipt
+    }
+
+    const receipt = await adapter.runRuntimeMutation(send('m1', 'snd1'))
+
+    // WITHOUT pushing any settlement frame: the blink is already reverted (the
+    // draft is back) and the pending op cleared — the terminal receipt settled it.
+    expect(receipt.state).toBe('failed')
+    expect(rowIds(frames)).toEqual(['m1', 'm2'])
+    expect(await pendingSet.all()).toHaveLength(0)
+  })
+
+  it('send (M66): idempotent redelivery = one durable send (same clientMutationId dedups)', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+
+    // Redelivery: the SAME send (same clientMutationId) runs twice — a retried
+    // forward, not a second message.
+    const r1 = await adapter.runRuntimeMutation(send('m1', 'snd1'))
+    const r2 = await adapter.runRuntimeMutation(send('m1', 'snd1'))
+
+    // One blink, not a double-fold artifact: the draft is Destroyed once.
+    expect(rowIds(frames)).toEqual(['m2'])
+    // Both receipts key to the same client mutation id: redelivery is the same
+    // send. The durable outbox dedups to exactly ONE record (the seam the far
+    // node's exactly-once dedup keys on), never two competing sends.
+    expect(r1.clientMutationId).toBe('snd1')
+    expect(r2.clientMutationId).toBe('snd1')
+    expect((await pendingSet.all()).map((r) => r.clientMutationId)).toEqual([
+      'snd1',
+    ])
+    // Every forwarded op carries that same stable id (so a redelivery is
+    // dedup-able downstream), never a fresh per-attempt id.
+    expect(harness.mutations.map((m) => m.name)).toEqual([
+      'message.send',
+      'message.send',
+    ])
+    expect(harness.mutations.map((m) => m.clientMutationId)).toEqual([
+      'snd1',
+      'snd1',
+    ])
   })
 
   it('surfaces a clear error + reverts the optimistic fold when the durable write fails (W4 quota)', async () => {

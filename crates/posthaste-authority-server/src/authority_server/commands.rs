@@ -7,6 +7,25 @@
 //! typed at M5.
 use super::*;
 
+/// The result of [`AuthorityServer::apply_operation`]: the command ack plus, for
+/// an async-flush-settled op (a Send), the enqueued outbox operation id whose
+/// terminal verdict is DEFERRED past enqueue (the send-bridge). `None` for every
+/// op whose verdict is emitted synchronously at enqueue.
+pub(crate) struct ApplyOutcome {
+    pub ack: CommandAck,
+    pub deferred_settlement_op: Option<OperationId>,
+}
+
+impl ApplyOutcome {
+    /// A synchronously-settled op: no deferred verdict.
+    fn immediate(ack: CommandAck) -> Self {
+        Self {
+            ack,
+            deferred_settlement_op: None,
+        }
+    }
+}
+
 impl AuthorityServer {
     /// Phase 2: on a confirmed forward action whose `context` carries a
     /// `revStep`, append the reversible-op step to `rev_log` + emit
@@ -223,9 +242,12 @@ impl AuthorityServer {
         &self,
         account_id: AccountId,
         request: SendMessageRequest,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<OperationId, RuntimeError> {
         let sender = request.from.clone();
-        self.service.enqueue_send(&account_id, request)?;
+        // The enqueued send's operation id is the send-bridge join key: the async
+        // flush emits `operation.settled`/`dispatch_uncertain` under it, and the
+        // bridge resolves the deferred origin by it to route the terminal frame.
+        let operation = self.service.enqueue_send(&account_id, request)?;
         if let Some(sender) = &sender {
             if let Err(error) = self.store.remember_sender_address(&account_id, sender) {
                 ph_warn!(
@@ -238,7 +260,7 @@ impl AuthorityServer {
             }
         }
         self.trigger_outbox_flush(&account_id).await;
-        Ok(())
+        Ok(operation.id)
     }
 
     /// Write: save (create or update) a draft and nudge a flush.
@@ -485,8 +507,8 @@ impl AuthorityServer {
             // half of D47's fix).
             ForwardAcceptance::Rejected(error) => Err(RuntimeError(error)),
             ForwardAcceptance::New { runtime_mutation_id } => {
-                let ack = match self.apply_operation(&mutation).await {
-                    Ok(ack) => ack,
+                let outcome = match self.apply_operation(&mutation).await {
+                    Ok(outcome) => outcome,
                     Err(error) => {
                         // The mutation did not apply (atomic). Split by D47
                         // terminal class from the error's typed terminality: a
@@ -508,12 +530,47 @@ impl AuthorityServer {
                         return Err(error);
                     }
                 };
-                let output = serde_json::to_value(&ack).map_err(|error| {
+                let output = serde_json::to_value(&outcome.ack).map_err(|error| {
                     RuntimeError::internal(
                         format!("failed to serialize mutation output: {error}"),
                         None,
                     )
                 })?;
+                // Send-bridge (step 2): an async-flush-settled op (a Send) has NO
+                // terminal verdict at enqueue — the optimistic draft-Destroy fold
+                // must be held until the flush actually settles (ack ⇒ confirm;
+                // park/fail ⇒ revert — D125). SKIP the enqueue-time confirm frame,
+                // keep the dedup record PENDING, register the deferred origin so
+                // the settlement bridge routes the terminal frame when the flush
+                // settles, and return `Accepted` with no verdict.
+                if let Some(operation_id) = outcome.deferred_settlement_op {
+                    self.runtimes.register_send_origin(
+                        operation_id.clone(),
+                        SendOrigin {
+                            runtime_id: runtime_id.clone(),
+                            runtime_mutation_id: runtime_mutation_id.clone(),
+                            client_mutation_id: mutation.client_mutation_id.clone(),
+                        },
+                    );
+                    // Carry the outbox op id on the receipt so the near node can
+                    // register its deferred settlement (the co-located delivery
+                    // join key). Internal wire only — the client ignores it.
+                    let mut deferred_output = output;
+                    if let Some(object) = deferred_output.as_object_mut() {
+                        object.insert(
+                            "deferredOperationId".to_string(),
+                            serde_json::Value::String(operation_id.as_str().to_string()),
+                        );
+                    }
+                    return Ok(MutationReceipt {
+                        runtime_mutation_id: Some(runtime_mutation_id),
+                        client_mutation_id: mutation.client_mutation_id,
+                        name: mutation.operation.name().to_string(),
+                        state: MutationSettlementState::Accepted,
+                        error: None,
+                        output: deferred_output,
+                    });
+                }
                 // Route the per-mutation confirmation onto the originating
                 // runtime's down-stream only (`settlement-routed-to-origin-runtime`):
                 // never broadcast — a Settlement names one runtime's mutation. The
@@ -557,13 +614,18 @@ impl AuthorityServer {
     pub(crate) async fn apply_operation(
         &self,
         request: &MutationRequest,
-    ) -> Result<CommandAck, RuntimeError> {
+    ) -> Result<ApplyOutcome, RuntimeError> {
         let operation = &request.operation;
         // Phase 2: `revCursor` is a control operation (not a message mutation) —
         // it targets no message and appends no rev-log step.
         if let MailOperation::RevCursor(args) = operation {
-            return self.apply_rev_cursor(args);
+            return self.apply_rev_cursor(args).map(ApplyOutcome::immediate);
         }
+        // The send-bridge (step 1): a Send enqueues an outbox op whose terminal
+        // verdict is DEFERRED to the async flush. `apply_operation` surfaces that
+        // op id so the up-channel (`forward_mutation_for`) can register the origin
+        // and skip the enqueue-time confirm.
+        let mut deferred_settlement_op = None;
         let account = AccountId(operation.account_id().to_string());
         let message = operation
             .message_id()
@@ -677,11 +739,13 @@ impl AuthorityServer {
             // Send (M66/D130): route to the existing local-first send path. The
             // client folds an optimistic `Destroy` on the originating draft; that
             // fold is held past enqueue and settled by the async-flush bridge
-            // (ack ⇒ confirm; park/fail ⇒ revert — D125/D126), NOT here.
-            MailOperation::Send(args) => self
-                .send_message(account.clone(), args.request)
-                .await
-                .map(|()| CommandAck { events: Vec::new() }),
+            // (ack ⇒ confirm; park/fail ⇒ revert — D125/D126), NOT here. Surface
+            // the enqueued op id so the up-channel registers the deferred origin.
+            MailOperation::Send(args) => {
+                let operation_id = self.send_message(account.clone(), args.request).await?;
+                deferred_settlement_op = Some(operation_id);
+                Ok(CommandAck { events: Vec::new() })
+            }
             // `message.applyDiff` is the undo/redo vehicle — see `apply_diff`.
             MailOperation::ApplyDiff(args) => {
                 self.apply_diff(account.clone(), message.clone(), args.diff).await
@@ -692,7 +756,10 @@ impl AuthorityServer {
         // whose context carries a `revStep`, + emit the recompute trigger so the
         // `RevLog` synced view re-serves the log + cursor.
         self.append_rev_log_step_if_present(account.as_str(), message.as_str(), &request.context);
-        Ok(ack)
+        Ok(ApplyOutcome {
+            ack,
+            deferred_settlement_op,
+        })
     }
 
     /// `message.applyDiff`: apply the invertible diff as the equivalent keyword
