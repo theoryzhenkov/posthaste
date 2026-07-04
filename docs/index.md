@@ -24,9 +24,9 @@ structure → L3 implementation reference):
 Task-oriented, tool-facing guides (as opposed to the layered specs above) live
 alongside the specs:
 
-- [Scripting quickstart](scripting-quickstart.md): automate Posthaste from a shell script with no protocol code — the `/v1/events` tap plus the one-vocabulary apply path, driven by `posthastectl`.
-- [Scripting security & threat model](scripting-security.md): the trust relationships and mitigations for event-triggered code (`watch --exec`, `exec`/`webhook` rules).
-- [Guide](guide/index.md): the walkthrough-style user/operator guide.
+- [Scripting quickstart](https://posthaste.theor.net/docs/scripting-quickstart): automate Posthaste from a shell script with no protocol code — the `/v1/events` tap plus the one-vocabulary apply path, driven by `posthastectl`.
+- [Scripting security & threat model](https://posthaste.theor.net/docs/scripting-security): the trust relationships and mitigations for event-triggered code (`watch --exec`, `exec`/`webhook` rules).
+- [User guide](https://posthaste.theor.net/docs): the walkthrough-style user/operator guide.
 
 ## Decision records and design history
 
