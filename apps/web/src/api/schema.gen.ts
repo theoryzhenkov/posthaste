@@ -2571,9 +2571,13 @@ export interface components {
              * @description Stable draft identity stamped as `X-Posthaste-Draft-Id` when this request
              *     saves a draft. The domain layer injects it from the draft key before
              *     queuing; `save_draft` writes it as a header so the id survives provider
-             *     id rotation. Ignored by `send` (a sent message is a fresh message).
+             *     id rotation. On a `send`, it names the originating draft: the sent
+             *     message is still a fresh message (no header is stamped), but the draft
+             *     is destroyed as a settlement effect once the send settles success
+             *     (D126) — and kept when the send parks `DispatchUncertain` (D125).
              *
              *     @spec docs/L1-outbox#temp-id-reconciliation
+             *     @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
              */
             draftId?: string | null;
             from?: null | components["schemas"]["Recipient"];
