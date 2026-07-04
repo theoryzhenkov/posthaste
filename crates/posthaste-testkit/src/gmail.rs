@@ -5,30 +5,49 @@
 //! server on a loopback port. Unlike the focused single-shot protocol mock in
 //! `posthaste-imap`'s discovery tests (which asserts capability negotiation and
 //! FETCH parsing in isolation), this fixture answers the full discovery + sync
-//! command set the real gateway drives across several connections, so a
-//! `create_gmail_account` -> sync -> store -> mailList view test exercises the
-//! Gmail IMAP path end to end (mirroring the JMAP live test).
+//! + mutation command set the real gateway drives across several connections,
+//! so a `create_gmail_account` -> sync -> store -> mailList view test exercises
+//! the Gmail IMAP path end to end (mirroring the JMAP live test).
 //!
-//! The server holds a shared [`InboxModel`] (behind a mutex) so a test can
-//! mutate the mailbox between syncs — [`GmailImapFixture::vanish_inbox_and_deliver`]
-//! advances the mailbox's MODSEQ, marks the current message vanished, and
-//! delivers a new one. The second sync then exercises the real CONDSTORE /
-//! QRESYNC delta path: `ENABLE QRESYNC` -> `UID FETCH 1:* (CHANGEDSINCE <modseq>
-//! VANISHED)` -> changed `FETCH`es + `* VANISHED (EARLIER) <uids>`.
+//! The server holds a shared [`MailModel`] (behind a mutex) modeling Gmail's
+//! **label** semantics: one message store where each message carries a label
+//! set, and mailboxes are views over labels — `INBOX` is the `\Inbox` label,
+//! `[Gmail]/Starred` is `\Starred`, `[Gmail]/All Mail` is every live message
+//! not in Trash/Spam. Mutation commands are modeled Gmail-faithfully:
+//!
+//! - `UID STORE +FLAGS (\Deleted)` marks the message deleted *in the selected
+//!   mailbox only* (no visible effect on its own — exactly real Gmail).
+//! - `UID EXPUNGE` of a `\Deleted`-marked message removes the selected
+//!   mailbox's label (expunge-from-INBOX == archive); expunging from All Mail,
+//!   Trash, or Spam deletes the message permanently.
+//! - `UID COPY`/`UID MOVE` add the target mailbox's label; copying or moving
+//!   into Trash/Spam **strips every other label** (real Gmail does this), so a
+//!   trashed message leaves INBOX/All Mail/Starred immediately.
+//!
+//! Every label change advances the mailbox-shared MODSEQ and records
+//! per-mailbox vanished UIDs, so the next sync observes mutations through the
+//! real CONDSTORE / QRESYNC delta path (`ENABLE QRESYNC` -> `UID FETCH 1:*
+//! (CHANGEDSINCE <modseq> VANISHED)` -> changed `FETCH`es + `* VANISHED
+//! (EARLIER) <uids>`), and tests can assert the exact wire commands the
+//! gateway issued via [`GmailImapFixture::commands`].
 //!
 //! Scope: [`GmailImapFixture::start`] advertises `X-GM-EXT-1` + `CONDSTORE` +
 //! `QRESYNC`, while [`GmailImapFixture::start_condstore_only`] is
 //! Gmail-faithful — real Gmail advertises **only** `CONDSTORE` — so it drives
 //! the executor's CONDSTORE-only delta path (`UID FETCH ... (CHANGEDSINCE ...)`
 //! without `VANISHED`, plus a header-free `UID SEARCH UNDELETED` for deletion
-//! reconciliation). Per RFC 7162 the mock only emits `* VANISHED` when the
-//! client used the `VANISHED` fetch modifier, and rejects that modifier with
-//! `BAD` when QRESYNC is not advertised. Neither variant advertises `IDLE`, so
-//! the gateway does not start a background IMAP IDLE push stream and the
-//! explicit `sync_account` trigger drives a deterministic sync.
-//! Per-message MODSEQ is omitted from FETCH responses (the parse defaults it;
-//! the mailbox's new HIGHESTMODSEQ comes from the `EXAMINE`/`STATUS` response).
+//! reconciliation). [`GmailImapFixture::start_generic_uidplus`] and
+//! [`GmailImapFixture::start_generic_without_uidplus`] are plain-IMAP variants
+//! (no Gmail extensions, no label stripping) for the generic move/expunge
+//! wire tests. Per RFC 7162 the mock only emits `* VANISHED` when the client
+//! used the `VANISHED` fetch modifier, and rejects that modifier with `BAD`
+//! when QRESYNC is not advertised. No variant advertises `IDLE`, so the
+//! gateway does not start a background IMAP IDLE push stream and the explicit
+//! `sync_account` trigger drives a deterministic sync. Plain `EXPUNGE` and
+//! `CLOSE` are answered with `BAD` on purpose: the adapter must never issue
+//! the RFC 4315 mailbox-wide expunge, and a regression fails loudly here.
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use posthaste_domain_model::{AccountDriver, AccountId, ImapTransportSettings, SmtpTransportSettings};
@@ -44,20 +63,35 @@ use tokio::task::JoinHandle;
 
 use crate::RuntimeHarness;
 
-/// Capabilities the QRESYNC-capable mock advertises. Deliberately omits `IDLE`
-/// (see module docs): with no IDLE the gateway skips the background push
+/// Capabilities the QRESYNC-capable Gmail mock advertises. Deliberately omits
+/// `IDLE` (see module docs): with no IDLE the gateway skips the background push
 /// stream and syncs only on the explicit trigger.
-const QRESYNC_CAPS: &str = "IMAP4rev1 CONDSTORE QRESYNC X-GM-EXT-1 UIDPLUS ENABLE";
+const GMAIL_QRESYNC_CAPS: &str = "IMAP4rev1 CONDSTORE QRESYNC X-GM-EXT-1 UIDPLUS MOVE ENABLE";
 
-/// Gmail-faithful capabilities: real Gmail advertises `CONDSTORE` but NOT
-/// `QRESYNC`, so syncs must take the CONDSTORE-only delta path.
-const CONDSTORE_ONLY_CAPS: &str = "IMAP4rev1 CONDSTORE X-GM-EXT-1 UIDPLUS ENABLE";
+/// Gmail-faithful capabilities: real Gmail advertises `CONDSTORE` (never
+/// QRESYNC), `UIDPLUS`, and `MOVE`.
+const GMAIL_CONDSTORE_ONLY_CAPS: &str = "IMAP4rev1 CONDSTORE X-GM-EXT-1 UIDPLUS MOVE ENABLE";
 
-fn caps(qresync: bool) -> &'static str {
-    if qresync {
-        QRESYNC_CAPS
-    } else {
-        CONDSTORE_ONLY_CAPS
+/// A plain IMAP server with UIDPLUS but no MOVE and no Gmail extensions — the
+/// copy+`UID EXPUNGE` move path.
+const GENERIC_UIDPLUS_CAPS: &str = "IMAP4rev1 UIDPLUS ENABLE";
+
+/// A minimal IMAP server without UIDPLUS — pins the mark-`\Deleted`-only
+/// removal fallback (no `UID EXPUNGE` available, plain EXPUNGE forbidden).
+const GENERIC_BASIC_CAPS: &str = "IMAP4rev1 ENABLE";
+
+/// Which server personality a fixture models.
+#[derive(Clone, Copy)]
+struct ServerFlavor {
+    caps: &'static str,
+    /// Gmail label semantics: X-GM-LABELS served on FETCH, Trash/Spam strips
+    /// other labels on COPY/MOVE.
+    gmail: bool,
+}
+
+impl ServerFlavor {
+    fn qresync(&self) -> bool {
+        self.caps.contains("QRESYNC")
     }
 }
 
@@ -68,42 +102,100 @@ const UID_VALIDITY: u32 = 7;
 /// tests can assert against the same values the mock serves.
 pub const SEEDED_SUBJECT: &str = "Quarterly numbers";
 pub const SEEDED_FROM_EMAIL: &str = "alice@example.test";
-/// The Gmail labels served on every mock message (system + one custom).
+/// The Gmail labels served on the seeded message (system + one custom).
 pub const SEEDED_LABELS: &[&str] = &["\\Inbox", "\\Starred", "Project Alpha"];
 
-/// One message the mock serves from INBOX.
+/// The mailbox names the mock LISTs and models membership for.
+pub const MAILBOX_INBOX: &str = "INBOX";
+pub const MAILBOX_ALL_MAIL: &str = "[Gmail]/All Mail";
+pub const MAILBOX_STARRED: &str = "[Gmail]/Starred";
+pub const MAILBOX_TRASH: &str = "[Gmail]/Trash";
+pub const MAILBOX_SPAM: &str = "[Gmail]/Spam";
+
+/// Mailboxes whose membership the model tracks (the rest are always empty).
+const MODELED_MAILBOXES: &[&str] = &[
+    MAILBOX_INBOX,
+    MAILBOX_ALL_MAIL,
+    MAILBOX_STARRED,
+    MAILBOX_TRASH,
+    MAILBOX_SPAM,
+];
+
+/// The Gmail label whose presence puts a message in a mailbox view. All Mail
+/// has no label — membership there is implicit (every live non-Trash/Spam
+/// message).
+fn label_for_mailbox(mailbox: &str) -> Option<&'static str> {
+    if mailbox.eq_ignore_ascii_case(MAILBOX_INBOX) {
+        return Some("\\Inbox");
+    }
+    match mailbox {
+        MAILBOX_STARRED => Some("\\Starred"),
+        MAILBOX_TRASH => Some("\\Trash"),
+        MAILBOX_SPAM => Some("\\Spam"),
+        _ => None,
+    }
+}
+
+/// One message in the mock server's single (Gmail-style) message store.
 #[derive(Clone)]
 struct MockMessage {
     uid: u32,
     gmail_msgid: u64,
     gmail_thrid: u64,
     subject: String,
-    /// The MODSEQ at which this message last changed (delivered).
+    /// The MODSEQ at which this message last changed (delivered or relabeled).
     modseq: u64,
+    /// The Gmail label set (drives mailbox-view membership).
+    labels: BTreeSet<String>,
+    /// Mailboxes in which `\Deleted` is currently set (per-mailbox, like real
+    /// IMAP: the flag is folder-scoped on Gmail).
+    deleted_in: BTreeSet<String>,
 }
 
-/// The mock INBOX's mutable state, shared across all connection handlers.
-struct InboxModel {
+impl MockMessage {
+    fn in_mailbox(&self, mailbox: &str) -> bool {
+        if mailbox == MAILBOX_ALL_MAIL {
+            return !self.labels.contains("\\Trash") && !self.labels.contains("\\Spam");
+        }
+        label_for_mailbox(mailbox)
+            .map(|label| self.labels.contains(label))
+            .unwrap_or(false)
+    }
+}
+
+/// The mock server's mutable state, shared across all connection handlers.
+struct MailModel {
     highest_modseq: u64,
     next_uid: u32,
-    /// Messages currently present in INBOX.
+    /// Messages currently present anywhere on the server.
     live: Vec<MockMessage>,
-    /// Messages expunged since the baseline, with the MODSEQ at which they
-    /// vanished (so a `CHANGEDSINCE` delta returns only the relevant removals).
-    vanished: Vec<(u64, u32)>,
+    /// Per-mailbox (mailbox name, modseq, uid) removals since the baseline, so
+    /// a `CHANGEDSINCE` delta returns only the relevant removals per mailbox.
+    vanished: Vec<(String, u64, u32)>,
     /// How many `UID FETCH ... (CHANGEDSINCE ...)` commands the server has
     /// answered — lets a test prove the CONDSTORE/QRESYNC delta path was taken
     /// rather than a full re-snapshot.
     changedsince_fetches: usize,
     /// How many header-bearing FETCH responses the server has served (one per
-    /// message) — lets a test prove a delta sync fetched exactly the changed
-    /// messages' headers and nothing else.
+    /// message per mailbox) — lets a test prove a delta sync fetched exactly
+    /// the changed messages' headers and nothing else.
     header_fetches: usize,
+    /// Every command line received, prefixed with the connection's selected
+    /// mailbox (`-` before any SELECT) — the wire-assertion log.
+    commands: Vec<String>,
 }
 
-impl InboxModel {
-    /// The baseline: one message (UID 1, MODSEQ 100), HIGHESTMODSEQ 100.
-    fn baseline() -> Self {
+impl MailModel {
+    /// The baseline: one message (UID 1, MODSEQ 100), HIGHESTMODSEQ 100. The
+    /// Gmail flavor seeds it with [`SEEDED_LABELS`] (INBOX + Starred + a custom
+    /// label — so it also lives in All Mail and [Gmail]/Starred); the generic
+    /// flavor seeds `\Inbox` only.
+    fn baseline(gmail: bool) -> Self {
+        let labels: BTreeSet<String> = if gmail {
+            SEEDED_LABELS.iter().map(|label| label.to_string()).collect()
+        } else {
+            BTreeSet::from(["\\Inbox".to_string()])
+        };
         Self {
             highest_modseq: 100,
             next_uid: 2,
@@ -113,31 +205,47 @@ impl InboxModel {
                 gmail_thrid: 1266894439832287888,
                 subject: SEEDED_SUBJECT.to_string(),
                 modseq: 100,
+                labels,
+                deleted_in: BTreeSet::new(),
             }],
             vanished: Vec::new(),
             changedsince_fetches: 0,
             header_fetches: 0,
+            commands: Vec::new(),
         }
     }
 
-    /// Expunge every live message and deliver one new message, advancing the
-    /// mailbox MODSEQ. Returns the new message's UID.
+    fn members(&self, mailbox: &str) -> Vec<&MockMessage> {
+        self.live
+            .iter()
+            .filter(|message| message.in_mailbox(mailbox))
+            .collect()
+    }
+
+    /// Record per-mailbox vanished entries for every modeled mailbox `message`
+    /// currently belongs to (used when a message leaves the server entirely).
+    fn record_vanished_everywhere(&mut self, index: usize, modseq: u64) {
+        let uid = self.live[index].uid;
+        let mailboxes: Vec<String> = MODELED_MAILBOXES
+            .iter()
+            .filter(|mailbox| self.live[index].in_mailbox(mailbox))
+            .map(|mailbox| mailbox.to_string())
+            .collect();
+        for mailbox in mailboxes {
+            self.vanished.push((mailbox, modseq, uid));
+        }
+    }
+
+    /// Expunge every live message and deliver one new message (labels
+    /// `\Inbox`), advancing the mailbox MODSEQ. Returns the new message's UID.
     fn vanish_all_and_deliver(&mut self, subject: &str) -> u32 {
         self.highest_modseq += 1;
         let modseq = self.highest_modseq;
-        for message in self.live.drain(..) {
-            self.vanished.push((modseq, message.uid));
+        for index in 0..self.live.len() {
+            self.record_vanished_everywhere(index, modseq);
         }
-        let uid = self.next_uid;
-        self.next_uid += 1;
-        self.live.push(MockMessage {
-            uid,
-            gmail_msgid: 1278455344230334999,
-            gmail_thrid: 1266894439832287888,
-            subject: subject.to_string(),
-            modseq,
-        });
-        uid
+        self.live.clear();
+        self.push_message(subject, modseq)
     }
 
     /// Deliver one new message (advancing MODSEQ) without expunging anything —
@@ -145,6 +253,10 @@ impl InboxModel {
     fn deliver(&mut self, subject: &str) -> u32 {
         self.highest_modseq += 1;
         let modseq = self.highest_modseq;
+        self.push_message(subject, modseq)
+    }
+
+    fn push_message(&mut self, subject: &str, modseq: u64) -> u32 {
         let uid = self.next_uid;
         self.next_uid += 1;
         self.live.push(MockMessage {
@@ -153,6 +265,8 @@ impl InboxModel {
             gmail_thrid: 1266894439832280000 + u64::from(uid),
             subject: subject.to_string(),
             modseq,
+            labels: BTreeSet::from(["\\Inbox".to_string()]),
+            deleted_in: BTreeSet::new(),
         });
         uid
     }
@@ -163,27 +277,139 @@ impl InboxModel {
     fn expunge_all(&mut self) {
         self.highest_modseq += 1;
         let modseq = self.highest_modseq;
-        for message in self.live.drain(..) {
-            self.vanished.push((modseq, message.uid));
+        for index in 0..self.live.len() {
+            self.record_vanished_everywhere(index, modseq);
         }
+        self.live.clear();
     }
 
-    /// Messages and vanished UIDs changed strictly after `since_modseq` (the
-    /// `CHANGEDSINCE` delta set).
-    fn changed_since(&self, since_modseq: u64) -> (Vec<MockMessage>, Vec<u32>) {
+    /// Messages and vanished UIDs in `mailbox` changed strictly after
+    /// `since_modseq` (the `CHANGEDSINCE` delta set).
+    fn changed_since(&self, mailbox: &str, since_modseq: u64) -> (Vec<MockMessage>, Vec<u32>) {
         let changed = self
-            .live
-            .iter()
+            .members(mailbox)
+            .into_iter()
             .filter(|m| m.modseq > since_modseq)
             .cloned()
             .collect();
         let vanished = self
             .vanished
             .iter()
-            .filter(|(modseq, _)| *modseq > since_modseq)
-            .map(|(_, uid)| *uid)
+            .filter(|(name, modseq, _)| name == mailbox && *modseq > since_modseq)
+            .map(|(_, _, uid)| *uid)
             .collect();
         (changed, vanished)
+    }
+
+    /// `UID STORE <uids> ±FLAGS (\Deleted)` in `mailbox`: track the
+    /// folder-scoped `\Deleted` mark. Other flags are accepted and ignored
+    /// (the mock does not model them).
+    fn store_deleted(&mut self, mailbox: &str, uids: &[u32], add: bool) {
+        for message in &mut self.live {
+            if uids.contains(&message.uid) && message.in_mailbox(mailbox) {
+                if add {
+                    message.deleted_in.insert(mailbox.to_string());
+                } else {
+                    message.deleted_in.remove(mailbox);
+                }
+            }
+        }
+    }
+
+    /// `UID EXPUNGE <uids>` in `mailbox`, Gmail-faithfully: expunging a
+    /// `\Deleted`-marked message from a label mailbox removes that label only
+    /// (expunge-from-INBOX == archive; the message stays in All Mail);
+    /// expunging from All Mail, Trash, or Spam deletes it permanently.
+    /// Returns the (sequence, uid) pairs expunged.
+    fn uid_expunge(&mut self, mailbox: &str, uids: &[u32]) -> Vec<(u32, u32)> {
+        let targets: Vec<u32> = self
+            .members(mailbox)
+            .into_iter()
+            .filter(|m| uids.contains(&m.uid) && m.deleted_in.contains(mailbox))
+            .map(|m| m.uid)
+            .collect();
+        if targets.is_empty() {
+            return Vec::new();
+        }
+        self.highest_modseq += 1;
+        let modseq = self.highest_modseq;
+        let mut expunged = Vec::new();
+        for uid in targets {
+            let seq = self
+                .members(mailbox)
+                .iter()
+                .position(|m| m.uid == uid)
+                .map(|index| (index + 1) as u32)
+                .unwrap_or(1);
+            let index = self
+                .live
+                .iter()
+                .position(|m| m.uid == uid)
+                .expect("expunge target is live");
+            let permanent = matches!(mailbox, MAILBOX_ALL_MAIL | MAILBOX_TRASH | MAILBOX_SPAM);
+            if permanent {
+                self.record_vanished_everywhere(index, modseq);
+                self.live.remove(index);
+            } else {
+                let message = &mut self.live[index];
+                if let Some(label) = label_for_mailbox(mailbox) {
+                    message.labels.remove(label);
+                }
+                message.deleted_in.remove(mailbox);
+                message.modseq = modseq;
+                self.vanished.push((mailbox.to_string(), modseq, uid));
+            }
+            expunged.push((seq, uid));
+        }
+        expunged
+    }
+
+    /// `UID COPY`-into semantics: add the target mailbox's label. With Gmail
+    /// semantics, copying into Trash or Spam strips every other label (real
+    /// Gmail removes a trashed message from INBOX/All Mail/Starred itself).
+    fn add_to_mailbox(&mut self, uids: &[u32], target: &str, gmail: bool) {
+        self.highest_modseq += 1;
+        let modseq = self.highest_modseq;
+        let strip = gmail && matches!(target, MAILBOX_TRASH | MAILBOX_SPAM);
+        for index in 0..self.live.len() {
+            if !uids.contains(&self.live[index].uid) {
+                continue;
+            }
+            if strip {
+                let uid = self.live[index].uid;
+                let left: Vec<String> = MODELED_MAILBOXES
+                    .iter()
+                    .filter(|mailbox| **mailbox != target && self.live[index].in_mailbox(mailbox))
+                    .map(|mailbox| mailbox.to_string())
+                    .collect();
+                for mailbox in left {
+                    self.vanished.push((mailbox, modseq, uid));
+                }
+                self.live[index].labels.clear();
+                self.live[index].deleted_in.clear();
+            }
+            if let Some(label) = label_for_mailbox(target) {
+                self.live[index].labels.insert(label.to_string());
+            }
+            self.live[index].modseq = modseq;
+        }
+    }
+
+    /// `UID MOVE` semantics: [`MailModel::add_to_mailbox`] plus removal from
+    /// the source mailbox (already implied when Gmail stripping applied).
+    fn move_to_mailbox(&mut self, source: &str, uids: &[u32], target: &str, gmail: bool) {
+        self.add_to_mailbox(uids, target, gmail);
+        let modseq = self.highest_modseq;
+        for message in &mut self.live {
+            if uids.contains(&message.uid) && message.in_mailbox(source) {
+                if let Some(label) = label_for_mailbox(source) {
+                    message.labels.remove(label);
+                    message.modseq = modseq;
+                    self.vanished
+                        .push((source.to_string(), modseq, message.uid));
+                }
+            }
+        }
     }
 }
 
@@ -196,35 +422,77 @@ impl InboxModel {
 pub struct GmailImapFixture {
     port: u16,
     server: JoinHandle<()>,
-    state: Arc<Mutex<InboxModel>>,
+    state: Arc<Mutex<MailModel>>,
+    provider: ProviderHint,
 }
 
 impl GmailImapFixture {
     /// Bind a loopback port and start the mock server's accept loop with the
-    /// baseline INBOX (one Gmail-labeled message), advertising CONDSTORE +
+    /// baseline mailboxes (one Gmail-labeled message), advertising CONDSTORE +
     /// QRESYNC (the QRESYNC-delta coverage variant).
     pub async fn start() -> Self {
-        Self::start_with_capabilities(true).await
+        Self::start_with_flavor(
+            ServerFlavor {
+                caps: GMAIL_QRESYNC_CAPS,
+                gmail: true,
+            },
+            ProviderHint::Gmail,
+        )
+        .await
     }
 
     /// Like [`GmailImapFixture::start`], but Gmail-faithful: advertises
     /// CONDSTORE **without** QRESYNC (real Gmail never advertises QRESYNC), so
     /// re-syncs must take the executor's CONDSTORE-only delta path.
     pub async fn start_condstore_only() -> Self {
-        Self::start_with_capabilities(false).await
+        Self::start_with_flavor(
+            ServerFlavor {
+                caps: GMAIL_CONDSTORE_ONLY_CAPS,
+                gmail: true,
+            },
+            ProviderHint::Gmail,
+        )
+        .await
     }
 
-    async fn start_with_capabilities(qresync: bool) -> Self {
+    /// A plain IMAP server (no Gmail extensions, no label stripping) with
+    /// UIDPLUS but without MOVE — drives the generic copy + `UID EXPUNGE`
+    /// non-simple move path.
+    pub async fn start_generic_uidplus() -> Self {
+        Self::start_with_flavor(
+            ServerFlavor {
+                caps: GENERIC_UIDPLUS_CAPS,
+                gmail: false,
+            },
+            ProviderHint::Generic,
+        )
+        .await
+    }
+
+    /// A plain IMAP server without UIDPLUS — pins the removal fallback
+    /// (mark `\Deleted` only; no `UID EXPUNGE`, and never plain EXPUNGE).
+    pub async fn start_generic_without_uidplus() -> Self {
+        Self::start_with_flavor(
+            ServerFlavor {
+                caps: GENERIC_BASIC_CAPS,
+                gmail: false,
+            },
+            ProviderHint::Generic,
+        )
+        .await
+    }
+
+    async fn start_with_flavor(flavor: ServerFlavor, provider: ProviderHint) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind mock gmail imap");
         let port = listener.local_addr().expect("mock gmail addr").port();
-        let state = Arc::new(Mutex::new(InboxModel::baseline()));
+        let state = Arc::new(Mutex::new(MailModel::baseline(flavor.gmail)));
         let server = {
             let state = Arc::clone(&state);
             tokio::spawn(async move {
                 while let Ok((stream, _)) = listener.accept().await {
-                    tokio::spawn(handle_connection(stream, Arc::clone(&state), qresync));
+                    tokio::spawn(handle_connection(stream, Arc::clone(&state), flavor));
                 }
             })
         };
@@ -232,6 +500,7 @@ impl GmailImapFixture {
             port,
             server,
             state,
+            provider,
         }
     }
 
@@ -240,13 +509,13 @@ impl GmailImapFixture {
         self.port
     }
 
-    /// Expunge the current INBOX message(s) and deliver a new one with `subject`,
+    /// Expunge the current message(s) and deliver a new one with `subject`,
     /// advancing the mailbox MODSEQ. The next sync observes this as a QRESYNC
     /// delta (`VANISHED` + a changed `FETCH`). Returns the new message's UID.
     pub fn vanish_inbox_and_deliver(&self, subject: &str) -> u32 {
         self.state
             .lock()
-            .expect("inbox model mutex")
+            .expect("mail model mutex")
             .vanish_all_and_deliver(subject)
     }
 
@@ -256,15 +525,15 @@ impl GmailImapFixture {
     pub fn deliver_additional(&self, subject: &str) -> u32 {
         self.state
             .lock()
-            .expect("inbox model mutex")
+            .expect("mail model mutex")
             .deliver(subject)
     }
 
-    /// Expunge every live INBOX message (advancing MODSEQ) without delivering
+    /// Expunge every live message (advancing MODSEQ) without delivering
     /// anything — the next CONDSTORE-only sync must observe the removal through
     /// UID reconciliation while fetching zero headers.
     pub fn expunge_inbox(&self) {
-        self.state.lock().expect("inbox model mutex").expunge_all();
+        self.state.lock().expect("mail model mutex").expunge_all();
     }
 
     /// How many `CHANGEDSINCE` (CONDSTORE/QRESYNC-delta) fetches the server has
@@ -273,16 +542,45 @@ impl GmailImapFixture {
     pub fn changedsince_fetch_count(&self) -> usize {
         self.state
             .lock()
-            .expect("inbox model mutex")
+            .expect("mail model mutex")
             .changedsince_fetches
     }
 
-    /// How many header-bearing FETCH responses (one per message) the server has
-    /// served across all syncs. The zero-refetch gate: a no-change re-sync must
-    /// leave this untouched, and a delta must advance it by exactly the number
-    /// of changed messages.
+    /// How many header-bearing FETCH responses (one per message per mailbox)
+    /// the server has served across all syncs. The zero-refetch gate: a
+    /// no-change re-sync must leave this untouched, and a delta must advance it
+    /// by exactly the number of changed (message, mailbox) pairs.
     pub fn header_fetch_count(&self) -> usize {
-        self.state.lock().expect("inbox model mutex").header_fetches
+        self.state.lock().expect("mail model mutex").header_fetches
+    }
+
+    /// Every command line the server received, prefixed with the connection's
+    /// selected mailbox at the time (`-` before any SELECT), e.g.
+    /// `INBOX: a5 UID EXPUNGE 1`. The wire-assertion log for mutation tests.
+    pub fn commands(&self) -> Vec<String> {
+        self.state.lock().expect("mail model mutex").commands.clone()
+    }
+
+    /// Whether the message with `uid` is currently a member of `mailbox` on
+    /// the mock server (label-model membership).
+    pub fn mailbox_contains_uid(&self, mailbox: &str, uid: u32) -> bool {
+        self.state
+            .lock()
+            .expect("mail model mutex")
+            .members(mailbox)
+            .iter()
+            .any(|message| message.uid == uid)
+    }
+
+    /// Whether the message with `uid` is marked `\Deleted` in `mailbox` (the
+    /// unexpunged-residual observation for the non-UIDPLUS fallback).
+    pub fn is_marked_deleted_in(&self, mailbox: &str, uid: u32) -> bool {
+        self.state
+            .lock()
+            .expect("mail model mutex")
+            .live
+            .iter()
+            .any(|message| message.uid == uid && message.deleted_in.contains(mailbox))
     }
 
     /// The `ImapSmtp` account transport pointed at this mock. SMTP settings are
@@ -299,7 +597,7 @@ impl GmailImapFixture {
             email_patterns: vec!["dev@gmail.example".to_string()],
             appearance: None,
             transport: AccountTransportMutation {
-                provider: Some(ProviderHint::Gmail),
+                provider: Some(self.provider.clone()),
                 auth: Some(ProviderAuthKind::Password),
                 base_url: None,
                 username: Some("dev@gmail.example".to_string()),
@@ -329,10 +627,10 @@ impl Drop for GmailImapFixture {
 }
 
 impl RuntimeHarness {
-    /// Create a Gmail `ImapSmtp` account against a [`GmailImapFixture`], enable
-    /// it (which runs discovery), and run an initial sync (full-snapshot fetch
-    /// that lands the baseline INBOX message in the store). Returns the account
-    /// id; re-sync after mutating the fixture with
+    /// Create an `ImapSmtp` account against a [`GmailImapFixture`] (any
+    /// flavor), enable it (which runs discovery), and run an initial sync
+    /// (full-snapshot fetch that lands the baseline message in the store).
+    /// Returns the account id; re-sync after mutating the fixture with
     /// [`RuntimeHarness::sync_account`].
     pub async fn create_gmail_account(&self, id: &str, gmail: &GmailImapFixture) -> AccountId {
         let account = self
@@ -345,9 +643,6 @@ impl RuntimeHarness {
     }
 }
 
-/// Handle one client connection for the full discovery + sync command set,
-/// reading the shared [`InboxModel`] so SEARCH / FETCH / STATUS answer the
-/// mailbox's current state, and tracking the selected mailbox per connection.
 /// Run the mock Gmail IMAP server on fixed ports indefinitely — the
 /// long-running dev-provider counterpart to [`GmailImapFixture::start`]. Serves
 /// IMAP on `imap_port` and a tiny HTTP control surface on `control_port`:
@@ -360,7 +655,11 @@ impl RuntimeHarness {
 /// so a developer can drive deliveries/expunges against a live account and watch
 /// the next sync take the QRESYNC delta path (`VANISHED` + a changed `FETCH`).
 pub async fn serve(imap_port: u16, control_port: u16) -> std::io::Result<()> {
-    let state = Arc::new(Mutex::new(InboxModel::baseline()));
+    let flavor = ServerFlavor {
+        caps: GMAIL_QRESYNC_CAPS,
+        gmail: true,
+    };
+    let state = Arc::new(Mutex::new(MailModel::baseline(true)));
     let imap = TcpListener::bind(("127.0.0.1", imap_port)).await?;
     let control = TcpListener::bind(("127.0.0.1", control_port)).await?;
     eprintln!(
@@ -369,7 +668,7 @@ pub async fn serve(imap_port: u16, control_port: u16) -> std::io::Result<()> {
     let imap_state = Arc::clone(&state);
     let imap_loop = tokio::spawn(async move {
         while let Ok((stream, _)) = imap.accept().await {
-            tokio::spawn(handle_connection(stream, Arc::clone(&imap_state), true));
+            tokio::spawn(handle_connection(stream, Arc::clone(&imap_state), flavor));
         }
     });
     let control_loop = tokio::spawn(async move {
@@ -381,9 +680,9 @@ pub async fn serve(imap_port: u16, control_port: u16) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Minimal HTTP control surface: parse the request line, drive the inbox model,
+/// Minimal HTTP control surface: parse the request line, drive the mail model,
 /// reply 200. Just enough for `curl` to trigger a delivery or an expunge.
-async fn handle_control(stream: tokio::net::TcpStream, state: Arc<Mutex<InboxModel>>) {
+async fn handle_control(stream: tokio::net::TcpStream, state: Arc<Mutex<MailModel>>) {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut request_line = String::new();
@@ -399,7 +698,7 @@ async fn handle_control(stream: tokio::net::TcpStream, state: Arc<Mutex<InboxMod
         .map(|value| value.replace('+', " "))
         .unwrap_or_else(|| "Dev message".to_string());
     let body = {
-        let mut model = state.lock().expect("inbox model mutex");
+        let mut model = state.lock().expect("mail model mutex");
         match route {
             "/deliver" => format!("delivered uid {}\n", model.deliver(&subject)),
             "/vanish" => format!(
@@ -416,16 +715,20 @@ async fn handle_control(stream: tokio::net::TcpStream, state: Arc<Mutex<InboxMod
     let _ = writer.write_all(response.as_bytes()).await;
 }
 
+/// Handle one client connection for the full discovery + sync + mutation
+/// command set, reading the shared [`MailModel`] so SEARCH / FETCH / STATUS /
+/// STORE / EXPUNGE / COPY / MOVE answer the model's current state, and tracking
+/// the selected mailbox per connection.
 async fn handle_connection(
     stream: tokio::net::TcpStream,
-    state: Arc<Mutex<InboxModel>>,
-    qresync: bool,
+    state: Arc<Mutex<MailModel>>,
+    flavor: ServerFlavor,
 ) {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
-    let mut selected_inbox = false;
-    let caps = caps(qresync);
+    let mut selected: Option<String> = None;
+    let caps = flavor.caps;
 
     if !send(
         &mut writer,
@@ -443,6 +746,14 @@ async fn handle_connection(
             Ok(_) => {}
         }
         let cmd = line.trim_end_matches(['\r', '\n']).to_string();
+        {
+            let mut model = state.lock().expect("mail model mutex");
+            model.commands.push(format!(
+                "{}: {}",
+                selected.as_deref().unwrap_or("-"),
+                cmd
+            ));
+        }
         let upper = cmd.to_ascii_uppercase();
         let mut parts = cmd.split_whitespace();
         let tag = parts.next().unwrap_or("A1").to_string();
@@ -476,7 +787,7 @@ async fn handle_connection(
                 // it; an unsupported capability is silently absent from the
                 // ENABLED response.
                 let mut ok = true;
-                if qresync && upper.contains("QRESYNC") {
+                if flavor.qresync() && upper.contains("QRESYNC") {
                     ok = send(&mut writer, "* ENABLED QRESYNC\r\n").await;
                 }
                 ok && send(&mut writer, &format!("{tag} OK ENABLE completed\r\n")).await
@@ -487,18 +798,10 @@ async fn handle_connection(
                 // Preflight the gateway issues on a re-sync to decide
                 // skip-unchanged. Report the current MODSEQ/count so a mailbox
                 // that changed since the last sync is correctly re-fetched.
-                let is_inbox = upper.contains("INBOX");
-                let name = if is_inbox { "INBOX" } else { mailbox_arg(&cmd) };
-                let (messages, highest_modseq) = if is_inbox {
-                    let model = state.lock().expect("inbox model mutex");
-                    (model.live.len(), model.highest_modseq)
-                } else {
-                    (0, 1)
-                };
-                let next_uid = if is_inbox {
-                    state.lock().expect("inbox model mutex").next_uid
-                } else {
-                    1
+                let name = normalized_mailbox(mailbox_arg(&cmd));
+                let (messages, highest_modseq, next_uid) = {
+                    let model = state.lock().expect("mail model mutex");
+                    mailbox_status(&model, &name)
                 };
                 send(
                     &mut writer,
@@ -510,40 +813,76 @@ async fn handle_connection(
                     && send(&mut writer, &format!("{tag} OK STATUS completed\r\n")).await
             }
             "SELECT" | "EXAMINE" => {
-                selected_inbox = upper.contains("INBOX");
-                let (exists, highest_modseq, next_uid) = if selected_inbox {
-                    let model = state.lock().expect("inbox model mutex");
-                    (
-                        model.live.len() as u32,
-                        model.highest_modseq,
-                        model.next_uid,
-                    )
-                } else {
-                    (0, 1, 1)
+                let name = normalized_mailbox(mailbox_arg(&cmd));
+                let (exists, highest_modseq, next_uid) = {
+                    let model = state.lock().expect("mail model mutex");
+                    mailbox_status(&model, &name)
                 };
+                selected = Some(name);
                 send_select(&mut writer, &tag, &verb, exists, highest_modseq, next_uid).await
             }
             "UID" => {
                 let sub = parts.next().unwrap_or("").to_ascii_uppercase();
+                let mailbox = selected.clone().unwrap_or_default();
                 match sub.as_str() {
                     "SEARCH" => {
-                        let hits = if selected_inbox {
-                            let model = state.lock().expect("inbox model mutex");
+                        // The executor's deletion reconciliation sends `UID
+                        // SEARCH UNDELETED`; honor the criterion by excluding
+                        // `\Deleted`-marked members.
+                        let hits = {
+                            let model = state.lock().expect("mail model mutex");
                             model
-                                .live
+                                .members(&mailbox)
                                 .iter()
+                                .filter(|m| {
+                                    !(upper.contains("UNDELETED")
+                                        && m.deleted_in.contains(&mailbox))
+                                })
                                 .map(|m| m.uid.to_string())
                                 .collect::<Vec<_>>()
                                 .join(" ")
-                        } else {
-                            String::new()
                         };
                         send(&mut writer, &format!("* SEARCH {hits}\r\n")).await
                             && send(&mut writer, &format!("{tag} OK SEARCH completed\r\n")).await
                     }
                     "FETCH" => {
-                        send_fetch(&mut writer, &tag, &upper, selected_inbox, &state, qresync)
-                            .await
+                        send_fetch(&mut writer, &tag, &cmd, &mailbox, &state, flavor).await
+                    }
+                    "STORE" => {
+                        let uids = uid_set_arg(&cmd, &state);
+                        if upper.contains("\\DELETED") {
+                            let add = !cmd.split_whitespace().any(|t| t.starts_with("-FLAGS"));
+                            state
+                                .lock()
+                                .expect("mail model mutex")
+                                .store_deleted(&mailbox, &uids, add);
+                        }
+                        send(&mut writer, &format!("{tag} OK STORE completed\r\n")).await
+                    }
+                    "EXPUNGE" => {
+                        let uids = uid_set_arg(&cmd, &state);
+                        let expunged = state
+                            .lock()
+                            .expect("mail model mutex")
+                            .uid_expunge(&mailbox, &uids);
+                        let mut ok = true;
+                        for (seq, _uid) in expunged {
+                            ok = ok && send(&mut writer, &format!("* {seq} EXPUNGE\r\n")).await;
+                        }
+                        ok && send(&mut writer, &format!("{tag} OK EXPUNGE completed\r\n")).await
+                    }
+                    "COPY" | "MOVE" => {
+                        let uids = uid_set_arg(&cmd, &state);
+                        let target = normalized_mailbox(trailing_mailbox_arg(&cmd));
+                        {
+                            let mut model = state.lock().expect("mail model mutex");
+                            if sub == "MOVE" {
+                                model.move_to_mailbox(&mailbox, &uids, &target, flavor.gmail);
+                            } else {
+                                model.add_to_mailbox(&uids, &target, flavor.gmail);
+                            }
+                        }
+                        send(&mut writer, &format!("{tag} OK {sub} completed\r\n")).await
                     }
                     other => {
                         send(
@@ -559,6 +898,9 @@ async fn handle_connection(
                 let _ = send(&mut writer, &format!("{tag} OK LOGOUT completed\r\n")).await;
                 break;
             }
+            // Deliberately BAD: the adapter must never issue the RFC 4315
+            // mailbox-wide expunge (plain EXPUNGE / CLOSE) — it would sweep
+            // other clients' `\Deleted` messages. A regression fails loudly.
             other => send(&mut writer, &format!("{tag} BAD unsupported {other}\r\n")).await,
         };
         if !ok {
@@ -567,9 +909,29 @@ async fn handle_connection(
     }
 }
 
+/// The mock's per-mailbox STATUS/SELECT numbers. Modeled mailboxes share the
+/// server-wide HIGHESTMODSEQ (Gmail's modseq is account-global); unmodeled
+/// mailboxes are permanently empty at MODSEQ 1 so skip-unchanged applies.
+fn mailbox_status(model: &MailModel, mailbox: &str) -> (u32, u64, u32) {
+    if MODELED_MAILBOXES
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(mailbox))
+    {
+        (
+            model.members(mailbox).len() as u32,
+            model.highest_modseq,
+            model.next_uid,
+        )
+    } else {
+        (0, 1, 1)
+    }
+}
+
 /// Answer a `UID FETCH`. A `CHANGEDSINCE` modifier (CONDSTORE/QRESYNC delta)
-/// returns the messages changed after that MODSEQ; otherwise (full-snapshot
-/// fetch after a SEARCH) it returns every live message.
+/// returns the messages changed after that MODSEQ; a header-bearing fetch
+/// (RFC822.HEADER requested) returns the selected mailbox's members filtered
+/// by the UID set; a UID-only fetch (the mutation path's pre-flight probe)
+/// returns bare `UID` items without counting header fetches.
 ///
 /// VANISHED fidelity (RFC 7162): `* VANISHED (EARLIER)` responses are emitted
 /// ONLY when the client used the `VANISHED` fetch modifier — a plain
@@ -579,13 +941,14 @@ async fn handle_connection(
 async fn send_fetch(
     writer: &mut (impl AsyncWriteExt + Unpin),
     tag: &str,
-    upper_cmd: &str,
-    selected_inbox: bool,
-    state: &Arc<Mutex<InboxModel>>,
-    qresync: bool,
+    cmd: &str,
+    mailbox: &str,
+    state: &Arc<Mutex<MailModel>>,
+    flavor: ServerFlavor,
 ) -> bool {
+    let upper_cmd = cmd.to_ascii_uppercase();
     let wants_vanished = upper_cmd.contains("VANISHED");
-    if wants_vanished && !qresync {
+    if wants_vanished && !flavor.qresync() {
         // RFC 7162: the VANISHED fetch modifier requires QRESYNC to be
         // enabled; a CONDSTORE-only server rejects it.
         return send(
@@ -594,19 +957,47 @@ async fn send_fetch(
         )
         .await;
     }
-    let (messages, vanished): (Vec<MockMessage>, Vec<u32>) = if !selected_inbox {
-        (Vec::new(), Vec::new())
-    } else if let Some(since) = parse_changedsince(upper_cmd) {
-        let mut model = state.lock().expect("inbox model mutex");
-        model.changedsince_fetches += 1;
-        let (changed, vanished) = model.changed_since(since);
-        model.header_fetches += changed.len();
-        (changed, vanished)
-    } else {
-        let mut model = state.lock().expect("inbox model mutex");
-        model.header_fetches += model.live.len();
-        (model.live.clone(), Vec::new())
-    };
+    let wants_header = upper_cmd.contains("RFC822.HEADER");
+    let requested = uid_set_arg(cmd, state);
+
+    if !wants_header {
+        // The mutation path's `UID FETCH <uid> (UID)` existence probe.
+        let members: Vec<(u32, u32)> = {
+            let model = state.lock().expect("mail model mutex");
+            model
+                .members(mailbox)
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| requested.contains(&m.uid))
+                .map(|(index, m)| ((index + 1) as u32, m.uid))
+                .collect()
+        };
+        for (seq, uid) in members {
+            if !send(writer, &format!("* {seq} FETCH (UID {uid})\r\n")).await {
+                return false;
+            }
+        }
+        return send(writer, &format!("{tag} OK FETCH completed\r\n")).await;
+    }
+
+    let (messages, vanished): (Vec<MockMessage>, Vec<u32>) =
+        if let Some(since) = parse_changedsince(&upper_cmd) {
+            let mut model = state.lock().expect("mail model mutex");
+            model.changedsince_fetches += 1;
+            let (changed, vanished) = model.changed_since(mailbox, since);
+            model.header_fetches += changed.len();
+            (changed, vanished)
+        } else {
+            let mut model = state.lock().expect("mail model mutex");
+            let members: Vec<MockMessage> = model
+                .members(mailbox)
+                .into_iter()
+                .filter(|m| requested.contains(&m.uid))
+                .cloned()
+                .collect();
+            model.header_fetches += members.len();
+            (members, Vec::new())
+        };
 
     if wants_vanished && !vanished.is_empty() {
         let uids = vanished
@@ -623,7 +1014,12 @@ async fn send_fetch(
         }
     }
     for (index, message) in messages.iter().enumerate() {
-        if !write_bytes(writer, &encode_fetch((index + 1) as u32, message)).await {
+        if !write_bytes(
+            writer,
+            &encode_fetch((index + 1) as u32, message, flavor.gmail),
+        )
+        .await
+        {
             return false;
         }
     }
@@ -649,8 +1045,8 @@ async fn write_bytes(writer: &mut (impl AsyncWriteExt + Unpin), bytes: &[u8]) ->
     writer.write_all(bytes).await.is_ok()
 }
 
-/// Extract the mailbox argument from a `STATUS "<name>" (...)` command, falling
-/// back to the first bare token after the verb.
+/// Extract the mailbox argument from a `STATUS "<name>" (...)` / `SELECT
+/// <name>` command, falling back to the first bare token after the verb.
 fn mailbox_arg(cmd: &str) -> &str {
     if let Some(start) = cmd.find('"') {
         if let Some(end) = cmd[start + 1..].find('"') {
@@ -660,15 +1056,71 @@ fn mailbox_arg(cmd: &str) -> &str {
     cmd.split_whitespace().nth(2).unwrap_or("INBOX")
 }
 
+/// Extract the trailing mailbox argument of `UID COPY <set> <mailbox>` /
+/// `UID MOVE <set> <mailbox>` (quoted or bare).
+fn trailing_mailbox_arg(cmd: &str) -> &str {
+    if let Some(start) = cmd.find('"') {
+        if let Some(end) = cmd[start + 1..].find('"') {
+            return &cmd[start + 1..start + 1 + end];
+        }
+    }
+    cmd.split_whitespace().nth(4).unwrap_or("INBOX")
+}
+
+/// Fold mailbox-name case for INBOX (case-insensitive per RFC 3501); other
+/// names are matched verbatim as LISTed.
+fn normalized_mailbox(name: &str) -> String {
+    if name.eq_ignore_ascii_case("INBOX") {
+        MAILBOX_INBOX.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+/// Parse a UID sequence set (`1`, `1:3`, `1,4:*`, `1:*`) against the model's
+/// current UID space.
+fn uid_set_arg(cmd: &str, state: &Arc<Mutex<MailModel>>) -> Vec<u32> {
+    let max_uid = {
+        let model = state.lock().expect("mail model mutex");
+        model.next_uid.saturating_sub(1)
+    };
+    let Some(spec) = cmd.split_whitespace().nth(3) else {
+        return Vec::new();
+    };
+    let mut uids = Vec::new();
+    for part in spec.split(',') {
+        let (from, to) = match part.split_once(':') {
+            Some((from, to)) => (from, to),
+            None => (part, part),
+        };
+        let from: u32 = if from == "*" {
+            max_uid
+        } else {
+            from.parse().unwrap_or(0)
+        };
+        let to: u32 = if to == "*" {
+            max_uid
+        } else {
+            to.parse().unwrap_or(0)
+        };
+        for uid in from.min(to)..=from.max(to) {
+            if uid > 0 && !uids.contains(&uid) {
+                uids.push(uid);
+            }
+        }
+    }
+    uids
+}
+
 async fn send_list(writer: &mut (impl AsyncWriteExt + Unpin), tag: &str) -> bool {
     for (attrs, name) in [
         ("\\Inbox", "INBOX"),
         ("\\HasChildren", "[Gmail]"),
-        ("\\All \\HasNoChildren", "[Gmail]/All Mail"),
+        ("\\All \\HasNoChildren", MAILBOX_ALL_MAIL),
         ("\\Drafts \\HasNoChildren", "[Gmail]/Drafts"),
-        ("\\Flagged \\HasNoChildren", "[Gmail]/Starred"),
-        ("\\Junk \\HasNoChildren", "[Gmail]/Spam"),
-        ("\\Trash \\HasNoChildren", "[Gmail]/Trash"),
+        ("\\Flagged \\HasNoChildren", MAILBOX_STARRED),
+        ("\\Junk \\HasNoChildren", MAILBOX_SPAM),
+        ("\\Trash \\HasNoChildren", MAILBOX_TRASH),
         ("\\Sent \\HasNoChildren", "[Gmail]/Sent Mail"),
     ] {
         if !send(writer, &format!("* LIST ({attrs}) \"/\" \"{name}\"\r\n")).await {
@@ -686,8 +1138,12 @@ async fn send_select(
     highest_modseq: u64,
     next_uid: u32,
 ) -> bool {
-    send(writer, "* FLAGS (\\Seen \\Flagged)\r\n").await
-        && send(writer, "* OK [PERMANENTFLAGS (\\Seen \\Flagged \\*)]\r\n").await
+    send(writer, "* FLAGS (\\Seen \\Flagged \\Deleted)\r\n").await
+        && send(
+            writer,
+            "* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\*)]\r\n",
+        )
+        .await
         && send(writer, &format!("* {exists} EXISTS\r\n")).await
         && send(writer, "* 0 RECENT\r\n").await
         && send(writer, &format!("* OK [UIDVALIDITY {UID_VALIDITY}]\r\n")).await
@@ -705,9 +1161,9 @@ async fn send_select(
 }
 
 /// Encode one message's FETCH response via the forked `imap-codec`: UID +
-/// RFC822.SIZE + RFC822.HEADER (literal) + X-GM-MSGID + X-GM-THRID +
-/// X-GM-LABELS + MODSEQ. Multi-word labels are pre-quoted because the fork's
-/// `Text` encode emits raw bytes with no quoting.
+/// RFC822.SIZE + RFC822.HEADER (literal) and, for the Gmail flavor, X-GM-MSGID
+/// + X-GM-THRID + X-GM-LABELS + MODSEQ. Multi-word labels are pre-quoted
+/// because the fork's `Text` encode emits raw bytes with no quoting.
 ///
 /// MODSEQ is **spliced in** rather than encoded: the fork's encoder emits
 /// `MODSEQ <v>` but its own decoder requires `MODSEQ (<v>)` (RFC 7162), so
@@ -717,7 +1173,7 @@ async fn send_select(
 /// value is required for the next sync to take the QRESYNC delta path. We reuse
 /// the encoder for the error-prone literal + label parts and append
 /// ` MODSEQ (<v>)` inside the FETCH item list by hand.
-fn encode_fetch(seq: u32, message: &MockMessage) -> Vec<u8> {
+fn encode_fetch(seq: u32, message: &MockMessage, gmail: bool) -> Vec<u8> {
     use imap_codec::encode::Encoder;
     use imap_codec::imap_types::core::{IString, Literal, NString, Vec1};
     use imap_codec::imap_types::fetch::MessageDataItem;
@@ -729,21 +1185,33 @@ fn encode_fetch(seq: u32, message: &MockMessage) -> Vec<u8> {
         "From: Alice <{SEEDED_FROM_EMAIL}>\r\nSubject: {}\r\nMessage-ID: <uid{}@example.test>\r\n\r\n",
         message.subject, message.uid
     );
-    let items = Vec1::try_from(vec![
+    let mut items = vec![
         MessageDataItem::Uid(NonZeroU32::new(message.uid).expect("nonzero uid")),
         MessageDataItem::Rfc822Size(512),
         MessageDataItem::Rfc822Header(NString(Some(IString::Literal(
             Literal::try_from(header.into_bytes()).expect("header literal"),
         )))),
-        MessageDataItem::GmailMessageId(message.gmail_msgid),
-        MessageDataItem::GmailThreadId(message.gmail_thrid),
-        MessageDataItem::GmailLabels(vec![
-            std::borrow::Cow::from("\\Inbox"),
-            std::borrow::Cow::from("\\Starred"),
-            std::borrow::Cow::from("Project Alpha"),
-        ]),
-    ])
-    .expect("at least one fetch item");
+    ];
+    if gmail {
+        items.push(MessageDataItem::GmailMessageId(message.gmail_msgid));
+        items.push(MessageDataItem::GmailThreadId(message.gmail_thrid));
+        items.push(MessageDataItem::GmailLabels(
+            message
+                .labels
+                .iter()
+                .map(|label| {
+                    // Multi-word labels must be pre-quoted (see doc comment).
+                    let encoded = if label.contains(' ') {
+                        format!("\"{label}\"")
+                    } else {
+                        label.clone()
+                    };
+                    std::borrow::Cow::from(encoded)
+                })
+                .collect(),
+        ));
+    }
+    let items = Vec1::try_from(items).expect("at least one fetch item");
     let response = Response::Data(Data::Fetch {
         seq: NonZeroU32::new(seq).expect("nonzero seq"),
         items,

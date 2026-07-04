@@ -107,8 +107,11 @@ pub(crate) async fn move_imap_message_to_mailbox_by_location(
 /// Mark one IMAP message as `\Deleted` without issuing broad EXPUNGE.
 ///
 /// This avoids the RFC 6851/RFC 4315 footgun where plain EXPUNGE can remove
-/// other clients' deleted messages. A later UID EXPUNGE wrapper can make this
-/// a true permanent delete when the dependency exposes it.
+/// other clients' deleted messages. On servers with UIDPLUS/IMAP4rev2 use
+/// [`expunge_imap_message_by_location`] instead — the UID-scoped expunge is
+/// safe and actually removes the message; this mark-only form is the
+/// non-UIDPLUS fallback, which leaves a `\Deleted` residual visible to other
+/// clients until the server expunges it.
 ///
 /// @spec docs/L1-api#message-commands
 pub(crate) async fn mark_imap_message_deleted_by_location(
