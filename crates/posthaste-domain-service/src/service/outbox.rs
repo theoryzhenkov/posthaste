@@ -836,8 +836,10 @@ impl MailService {
         match operation.kind {
             OperationKind::DraftCreate => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
+                // A create has no replace target, so the DS3 redelivery flag is
+                // irrelevant (no destroy outcome to mask).
                 let new_id = gateway
-                    .save_draft(account_id, &request, None)
+                    .save_draft(account_id, &request, None, false)
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
@@ -847,8 +849,14 @@ impl MailService {
             OperationKind::DraftUpdate => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
                 let replace = MessageId::from(operation.entity.id.as_str());
+                // DS3/D133: a re-flush of this save (attempts > 0) may have already
+                // committed the prior-draft destroy on an earlier attempt, so an
+                // already-gone replace target is benign; a first delivery's failed
+                // replace-destroy surfaces so the save is retried rather than
+                // silently leaving the old draft behind (the twin).
+                let idempotent_redelivery = operation.attempts > 0;
                 let new_id = gateway
-                    .save_draft(account_id, &request, Some(&replace))
+                    .save_draft(account_id, &request, Some(&replace), idempotent_redelivery)
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {

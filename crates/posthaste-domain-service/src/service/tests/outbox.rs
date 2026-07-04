@@ -149,6 +149,51 @@ async fn stable_draft_key_reuses_provider_id_across_flush() {
     );
 }
 
+// DS3/D133: a `DraftUpdate` (create-new + destroy-old) threads the replace-
+// destroy `notFound ⇒ Ok` mask by redelivery — `false` on the first delivery (so
+// a failed replace-destroy surfaces rather than silently leaving a twin), `true`
+// on a retry (whose earlier attempt may already have destroyed the old draft).
+#[tokio::test]
+async fn ds3_draft_update_redelivery_flag_tracks_attempts() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-stable");
+
+    // Create + flush. A create carries no replace target → the flag is false.
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .expect("create");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("create flush");
+
+    // Edit → a `DraftUpdate` (replace). Fail the first replace transiently so it
+    // retries, making the second attempt a genuine redelivery.
+    service
+        .save_draft(&account, Some(key), draft_request("v2"))
+        .expect("edit");
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Unavailable("offline".to_string())));
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("first update flush stops on the transient");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("retry flush");
+
+    // create=false, first update attempt=false (attempts 0), retry=true (attempts 1).
+    let flags = gateway.save_draft_idempotent_calls.lock().unwrap();
+    assert_eq!(flags.as_slice(), &[false, false, true]);
+}
+
 #[test]
 fn delete_draft_enqueues_a_delete() {
     let account = AccountId::from("primary");

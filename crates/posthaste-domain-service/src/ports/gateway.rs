@@ -177,6 +177,13 @@ pub trait MailGateway: Send + Sync {
     /// message id. When `replace` is set, the prior draft message is removed
     /// (drafts are immutable in JMAP, so an update is create-new + destroy-old).
     ///
+    /// `idempotent_redelivery` narrows the replace-destroy `notFound ⇒ Ok` mask
+    /// (DS3/D133), mirroring [`delete_draft`]: `true` (a redelivered save whose
+    /// prior-draft destroy already ran) treats an already-gone replace target as
+    /// success; `false` (a first delivery) surfaces a failed replace-destroy as a
+    /// retryable failure rather than a clean save that silently left the old
+    /// draft behind (the twin).
+    ///
     /// Default transport behaviour rejects draft writes; JMAP and IMAP override.
     ///
     /// @spec docs/L1-outbox#operation-model
@@ -185,6 +192,7 @@ pub trait MailGateway: Send + Sync {
         _account_id: &AccountId,
         _request: &SendMessageRequest,
         _replace: Option<&MessageId>,
+        _idempotent_redelivery: bool,
     ) -> Result<MessageId, GatewayError> {
         Err(GatewayError::Rejected(
             "draft writes are not supported by this transport".to_string(),

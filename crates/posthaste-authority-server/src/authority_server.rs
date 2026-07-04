@@ -40,7 +40,7 @@ use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
-use crate::runtime_registry::{ForwardAcceptance, RuntimeRegistry};
+use crate::runtime_registry::{ForwardAcceptance, RuntimeRegistry, SendOrigin};
 use posthaste_authority_server_link::{
     AuthorityServerFrame, AuthorityServerLinkId, WireSettlementOutcome,
 };
@@ -103,6 +103,8 @@ impl AuthorityServer {
 mod commands;
 mod pubsub;
 mod reads;
+
+pub(crate) use pubsub::spawn_settlement_bridge;
 
 
 /// Map a store-layer failure to an internal runtime error — the shape the

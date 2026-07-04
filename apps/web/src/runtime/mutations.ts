@@ -201,11 +201,32 @@ export const runtimeMutations = {
       })
       return confirmedMessageCommandResult(receipt)
     },
-    send(request: {
+    /**
+     * Send a message through the optimistic runtime-mutation path (M66) instead
+     * of the old fire-and-forget REST POST. `message.send` folds a Destroy on the
+     * originating draft's row (the blink): the draft disappears the instant the
+     * user hits send, then settles/reverts on the runtime's terminal verdict —
+     * a parked (dispatch-uncertain) send is NOT a confirmed send, so its rejected
+     * settlement RETURNS the draft rather than leaving a false "Sent". The stable
+     * draft key rides as `messageId` so the Destroy fold targets the right row
+     * (mirrors `saveDraft`/`discardDraft`); the full send payload rides as
+     * `request` (the far node's `message.send` args shape).
+     */
+    async send(request: {
       sourceId: string
       input: SendMessageInput
-    }): Promise<OkResponse> {
-      return getRuntimeAdapter().sendMessage(request)
+    }): Promise<MessageCommandResult> {
+      const receipt = await runtimeLinkClient.runMutation({
+        name: 'message.send',
+        args: {
+          sourceId: request.sourceId,
+          // The originating draft's stable key: the Destroy fold keys on it.
+          messageId: request.input.draftId ?? '',
+          request: request.input,
+        },
+        sourceId: request.sourceId,
+      })
+      return confirmedMessageCommandResult(receipt)
     },
     /**
      * Save (create or update) a draft through the optimistic runtime-mutation

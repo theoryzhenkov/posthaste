@@ -25,6 +25,8 @@ pub(super) struct MutationGateway {
     pub(super) save_draft_results: Mutex<Vec<Result<MessageId, GatewayError>>>,
     /// Records the `replace` argument of each `save_draft` call.
     pub(super) save_draft_calls: Mutex<Vec<Option<MessageId>>>,
+    /// The `idempotent_redelivery` flag (DS3/D133) of each `save_draft` call.
+    pub(super) save_draft_idempotent_calls: Mutex<Vec<bool>>,
     pub(super) delete_draft_calls: Mutex<Vec<MessageId>>,
     /// The `idempotent_redelivery` flag (D133) of each `delete_draft` call.
     pub(super) delete_draft_idempotent_calls: Mutex<Vec<bool>>,
@@ -75,6 +77,7 @@ impl MutationGateway {
             fetch_attempts: Mutex::new(Vec::new()),
             save_draft_results: Mutex::new(Vec::new()),
             save_draft_calls: Mutex::new(Vec::new()),
+            save_draft_idempotent_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
             delete_draft_idempotent_calls: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
@@ -313,7 +316,12 @@ impl MailGateway for MutationGateway {
         _account_id: &AccountId,
         _request: &SendMessageRequest,
         replace: Option<&MessageId>,
+        idempotent_redelivery: bool,
     ) -> Result<MessageId, GatewayError> {
+        self.save_draft_idempotent_calls
+            .lock()
+            .expect("save draft idempotent calls poisoned")
+            .push(idempotent_redelivery);
         let call_index = {
             let mut calls = self
                 .save_draft_calls

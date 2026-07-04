@@ -353,6 +353,10 @@ pub(crate) async fn build_authority_server_parts(
         account_supervisor.clone(),
         event_sender.clone(),
     ));
+    // The send-bridge (step 3): route async outbox settlements → routed
+    // `Settlement` frames. Always on — every deployment (bundled + standalone far
+    // node) accepts sends whose verdict is deferred to the async flush.
+    crate::authority_server::spawn_settlement_bridge(&authority_server, &event_sender);
 
     Ok(AuthorityServerParts {
         secret_store,
