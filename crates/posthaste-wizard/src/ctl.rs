@@ -69,14 +69,33 @@ pub enum CtlSource {
 /// - So the search is: the `Contents/MacOS` (macOS) / install dir (Windows,
 ///   Linux) of a known Posthaste install, plus `posthastectl` appended.
 ///
-/// `POSTHASTE_APP_DIR`, if set, is checked first and is the exact contract
-/// the desktop's own "Install CLI" affordance should use: it already knows
-/// its own `current_exe()` directory, so it can hand the wizard that
-/// directory directly rather than making the wizard guess.
+/// **Locate order** (least-surprise: an explicit human override outranks an
+/// automatic hint, which outranks a hardcoded guess), all three sourced
+/// before falling through to a download in [`install_ctl`]:
+///
+/// 1. `POSTHASTE_APP_DIR`, if set — an explicit operator/desktop-supplied
+///    override, checked first. This is the exact contract the desktop's own
+///    "Install CLI" affordance can use directly instead of going through
+///    discovery.
+/// 2. `daemon.json`'s `appDir` field, if the discovery file exists and parses
+///    (RFC-L2-scripting distribution-wave follow-up) — the running app *told
+///    us* where it lives (its own `current_exe()`'s parent, written by both
+///    `posthaste serve` and the desktop's embedded server; see
+///    `posthaste-http-api-adapter::discovery`), so this is automatic and
+///    needs no env var at all. This is what makes the sidecar discoverable on
+///    every platform, including a future Linux AppImage, without per-OS path
+///    guessing.
+/// 3. The hardcoded per-OS candidates below — best-effort guesses at known
+///    install locations, used only when neither of the above is available
+///    (e.g. `ctl install` runs before the app has ever started, so no
+///    `daemon.json` exists yet).
 pub fn sidecar_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(dir) = std::env::var_os("POSTHASTE_APP_DIR") {
         out.push(PathBuf::from(dir).join(ctl_binary_name()));
+    }
+    if let Some(dir) = discovery_app_dir() {
+        out.push(dir.join(ctl_binary_name()));
     }
     let home = std::env::var_os("HOME").map(PathBuf::from);
     match std::env::consts::OS {
@@ -107,24 +126,46 @@ pub fn sidecar_candidates() -> Vec<PathBuf> {
                 out.push(PathBuf::from(dir).join(ctl_binary_name()));
             }
         }
-        "windows" => {
-            if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-                for app in ["Posthaste", "PosthasteNightly"] {
-                    out.push(
-                        PathBuf::from(&local)
-                            .join("Programs")
-                            .join(app)
-                            .join(ctl_binary_name()),
-                    );
-                }
-            }
-            if let Some(pf) = std::env::var_os("PROGRAMFILES") {
-                for app in ["Posthaste", "PosthasteNightly"] {
-                    out.push(PathBuf::from(&pf).join(app).join(ctl_binary_name()));
-                }
-            }
-        }
+        "windows" => out.extend(windows_candidates(
+            std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            std::env::var_os("PROGRAMFILES").map(PathBuf::from),
+        )),
         _ => {}
+    }
+    out
+}
+
+/// The Windows candidate list, factored out of [`sidecar_candidates`] so it
+/// is unit-testable via explicit env values regardless of host OS (no
+/// Windows machine available for this verification — see the doc comment
+/// below for the citations backing the NSIS default install dir).
+fn windows_candidates(local_appdata: Option<PathBuf>, program_files: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Some(local) = local_appdata {
+        // Tauri's NSIS bundle in the default `currentUser` install mode
+        // installs directly under `%LOCALAPPDATA%\<ProductName>\` — NOT
+        // `%LOCALAPPDATA%\Programs\<ProductName>\`. The `\Programs\` nesting
+        // below is a WiX/MSI (`perMachine`-style per-user) convention, not
+        // NSIS's; see the Tauri NSIS template (`tauri-bundler`'s
+        // `installer.nsi`, the `!define INSTALLMODE "currentUser"` branch,
+        // which sets `InstallDir "$LocalAppData\${PRODUCTNAME}"`) and
+        // https://v2.tauri.app/distribute/windows-installer/#installer-modes
+        // ("Per-user application data location: ... `$LOCALAPPDATA`").
+        // Listed first since this is the documented NSIS default; the
+        // `\Programs\` variant below is kept as a fallback guess.
+        for app in ["Posthaste", "PosthasteNightly"] {
+            out.push(local.join(app).join(ctl_binary_name()));
+        }
+        for app in ["Posthaste", "PosthasteNightly"] {
+            out.push(local.join("Programs").join(app).join(ctl_binary_name()));
+        }
+    }
+    if let Some(pf) = program_files {
+        // `perMachine` NSIS/WiX installs (admin-elevated) default to Program
+        // Files.
+        for app in ["Posthaste", "PosthasteNightly"] {
+            out.push(pf.join(app).join(ctl_binary_name()));
+        }
     }
     out
 }
@@ -132,6 +173,20 @@ pub fn sidecar_candidates() -> Vec<PathBuf> {
 /// The first sidecar candidate that exists as a file.
 pub fn find_sidecar() -> Option<PathBuf> {
     sidecar_candidates().into_iter().find(|p| p.is_file())
+}
+
+/// Read `daemon.json`'s optional `appDir` field (if a discovery file exists
+/// at all, and parses, and carries the field — an old daemon.json written
+/// before `appDir` existed simply has none of that, which is not an error;
+/// see [`sidecar_candidates`]'s locate-order doc). Uses the same ad-hoc
+/// `serde_json::Value` read [`check_discovery`] already uses, rather than a
+/// typed struct, so the wizard stays free of the
+/// `posthaste-http-api-adapter` dependency (lean by design — see this
+/// crate's `Cargo.toml`).
+fn discovery_app_dir() -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(daemon_json_path()).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    value.get("appDir").and_then(|v| v.as_str()).map(PathBuf::from)
 }
 
 /// Everything `install_ctl` needs.
@@ -523,6 +578,160 @@ mod tests {
             &[("POSTHASTE_APP_DIR", Some(empty_dir.path().to_str().unwrap()))],
             || {
                 assert_eq!(find_sidecar(), None);
+            },
+        );
+    }
+
+    #[test]
+    fn windows_candidates_include_the_nsis_currentuser_localappdata_path() {
+        let local = PathBuf::from(r"C:\Users\me\AppData\Local");
+        let pf = PathBuf::from(r"C:\Program Files");
+        let candidates = windows_candidates(Some(local.clone()), Some(pf.clone()));
+
+        // The NSIS `currentUser` default (no `\Programs\`), for both product
+        // names, listed ahead of every other guess.
+        assert_eq!(candidates[0], local.join("Posthaste").join(ctl_binary_name()));
+        assert_eq!(candidates[1], local.join("PosthasteNightly").join(ctl_binary_name()));
+
+        // Existing candidates are preserved: the `\Programs\` guess...
+        assert!(candidates.contains(&local.join("Programs").join("Posthaste").join(ctl_binary_name())));
+        assert!(candidates.contains(&local.join("Programs").join("PosthasteNightly").join(ctl_binary_name())));
+        // ...and the perMachine Program Files guess.
+        assert!(candidates.contains(&pf.join("Posthaste").join(ctl_binary_name())));
+        assert!(candidates.contains(&pf.join("PosthasteNightly").join(ctl_binary_name())));
+
+        assert_eq!(candidates.len(), 6);
+    }
+
+    #[test]
+    fn windows_candidates_is_empty_without_either_env_var() {
+        assert_eq!(windows_candidates(None, None), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn discovery_app_dir_is_checked_before_hardcoded_candidates_but_after_the_env_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let discovered_app_dir = dir.path().join("discovered-app");
+        std::fs::write(
+            state_dir.join("daemon.json"),
+            serde_json::json!({
+                "version": 1,
+                "port": 4321,
+                "url": "http://127.0.0.1:4321/v1",
+                "token": "tok",
+                "appDir": discovered_app_dir.to_str().unwrap(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        // No POSTHASTE_APP_DIR: the discovery-file appDir is candidate #0.
+        temp_env(
+            &[
+                ("POSTHASTE_STATE_ROOT", Some(state_dir.to_str().unwrap())),
+                ("POSTHASTE_APP_DIR", None),
+            ],
+            || {
+                let candidates = sidecar_candidates();
+                assert_eq!(candidates[0], discovered_app_dir.join(ctl_binary_name()));
+            },
+        );
+
+        // POSTHASTE_APP_DIR set too: the explicit env override still wins.
+        temp_env(
+            &[
+                ("POSTHASTE_STATE_ROOT", Some(state_dir.to_str().unwrap())),
+                ("POSTHASTE_APP_DIR", Some("/opt/explicit-override")),
+            ],
+            || {
+                let candidates = sidecar_candidates();
+                assert_eq!(candidates[0], PathBuf::from("/opt/explicit-override").join(ctl_binary_name()));
+                assert_eq!(candidates[1], discovered_app_dir.join(ctl_binary_name()));
+            },
+        );
+    }
+
+    #[test]
+    fn old_daemon_json_without_app_dir_is_tolerated_and_contributes_no_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        // Pre-appDir shape: no `appDir` key at all.
+        std::fs::write(
+            state_dir.join("daemon.json"),
+            serde_json::json!({
+                "version": 1,
+                "port": 4321,
+                "url": "http://127.0.0.1:4321/v1",
+                "token": "tok",
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        temp_env(
+            &[
+                ("POSTHASTE_STATE_ROOT", Some(state_dir.to_str().unwrap())),
+                ("POSTHASTE_APP_DIR", None),
+            ],
+            || {
+                assert_eq!(discovery_app_dir(), None, "an old daemon.json has no appDir hint");
+                // Must not panic or otherwise misbehave building the rest of
+                // the candidate list.
+                let _ = sidecar_candidates();
+            },
+        );
+    }
+
+    #[test]
+    fn install_locates_the_sidecar_via_discovery_app_dir_with_no_env_var_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let discovered_app_dir = dir.path().join("discovered-app");
+        std::fs::create_dir_all(&discovered_app_dir).unwrap();
+        std::fs::write(discovered_app_dir.join(ctl_binary_name()), b"SIDECAR-VIA-DISCOVERY").unwrap();
+        std::fs::write(
+            state_dir.join("daemon.json"),
+            serde_json::json!({
+                "version": 1,
+                "port": 4321,
+                "url": "http://127.0.0.1:4321/v1",
+                "token": "tok",
+                "appDir": discovered_app_dir.to_str().unwrap(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let to_dir = dir.path().join("bin");
+
+        struct NoopSource;
+        impl ReleaseSource for NoopSource {
+            fn fetch(&self, _tag: &str, _asset: &str) -> Result<Vec<u8>, FetchError> {
+                panic!("must not fetch when a discovery-appDir sidecar is found");
+            }
+        }
+
+        temp_env(
+            &[
+                ("POSTHASTE_STATE_ROOT", Some(state_dir.to_str().unwrap())),
+                ("POSTHASTE_APP_DIR", None),
+            ],
+            || {
+                let opts = CtlInstallOptions {
+                    from: None,
+                    to_dir: to_dir.clone(),
+                    version: Version::Channel(Channel::Nightly),
+                    platform: None,
+                };
+                let installed = install_ctl(&opts, &NoopSource).expect("install via discovery appDir");
+                assert_eq!(installed.source, CtlSource::Sidecar);
+                assert_eq!(
+                    std::fs::read(&installed.binary_path).unwrap(),
+                    b"SIDECAR-VIA-DISCOVERY"
+                );
             },
         );
     }
