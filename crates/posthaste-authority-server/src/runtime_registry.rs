@@ -22,13 +22,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use posthaste_authority_server_link::{AuthorityServerFrame, AuthorityServerLinkId, SequencedFrame};
+use posthaste_authority_server_link::{
+    AuthorityServerFrame, AuthorityServerLinkId, SequencedFrame, WireSettlementOutcome,
+};
 use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationSettlementState, RuntimeAdapterError,
     RuntimeMutationId,
 };
+use posthaste_domain_model::OperationId;
 use posthaste_link_far_end::down::{ReplayStore, Resume};
 use posthaste_link_far_end::up::{Accept, DedupStore, SettlementSinkStore, TerminalClass};
+use posthaste_replica_core::MutationId;
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 
@@ -66,6 +70,21 @@ impl StoredForwardMutation {
             output: self.output.clone(),
         }
     }
+}
+
+/// The originating runtime + ids for an async-flush-settled operation (a Send)
+/// whose terminal verdict is DEFERRED past enqueue (the send-bridge). Recorded at
+/// enqueue by [`RuntimeRegistry::register_send_origin`], keyed by the outbox
+/// operation id, and resolved by the settlement bridge when the outbox flush
+/// settles — to route the terminal `Settlement` frame to this runtime and settle
+/// its dedup record. Carries the authority-minted `RuntimeMutationId` (the frame's
+/// `mutation_id`, the confirmation join the near node matches on) and the
+/// `ClientMutationId` (the dedup key).
+#[derive(Clone)]
+pub(crate) struct SendOrigin {
+    pub runtime_id: AuthorityServerLinkId,
+    pub runtime_mutation_id: RuntimeMutationId,
+    pub client_mutation_id: ClientMutationId,
 }
 
 /// The outcome of reserving a mutation at the authority server up-channel.
@@ -120,6 +139,11 @@ pub(crate) struct RuntimeRegistry {
     /// the current generation (D49 [8]). A runtime with no entry here is not
     /// subscribed, so base frames are not recorded for it (it starts fresh).
     down_streams: Mutex<HashMap<AuthorityServerLinkId, DownStreamHandle>>,
+    /// The send-bridge: outbox operation id → originating runtime + ids, for
+    /// operations whose terminal verdict is deferred to the async flush (Send).
+    /// Populated at enqueue in `forward_mutation_for`; drained by the settlement
+    /// bridge when the flush emits `operation.settled`/`dispatch_uncertain`.
+    send_origins: Mutex<HashMap<OperationId, SendOrigin>>,
 }
 
 impl RuntimeRegistry {
@@ -132,7 +156,76 @@ impl RuntimeRegistry {
             sinks: SettlementSinkStore::new(),
             replay: ReplayStore::new(),
             down_streams: Mutex::new(HashMap::new()),
+            send_origins: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn lock_send_origins(&self) -> std::sync::MutexGuard<'_, HashMap<OperationId, SendOrigin>> {
+        self.send_origins
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Record an async-flush-settled op's origin at enqueue (the send-bridge,
+    /// step 1). The terminal verdict is NOT emitted here — `forward_mutation_for`
+    /// returns `Accepted` and the dedup record stays pending; the settlement
+    /// bridge finalizes both when the flush settles.
+    pub(crate) fn register_send_origin(&self, operation_id: OperationId, origin: SendOrigin) {
+        self.lock_send_origins().insert(operation_id, origin);
+    }
+
+    /// Resolve + remove an async op's origin when its flush settles. `None` for a
+    /// settlement that is not a deferred async op (every non-Send op, whose
+    /// verdict was already emitted at enqueue) — the bridge then does nothing.
+    pub(crate) fn take_send_origin(&self, operation_id: &OperationId) -> Option<SendOrigin> {
+        self.lock_send_origins().remove(operation_id)
+    }
+
+    /// Send-bridge terminal `Applied` → routed `Settlement{Confirmed}`: emit the
+    /// frame to the originating runtime and finalize its dedup record (the same
+    /// mechanism `forward_mutation_for` uses at enqueue for sync ops, fired now
+    /// that the async flush confirmed). The draft-Destroy fold stays absorbed
+    /// (the send really left Drafts), the Sent row arrives via sync.
+    pub(crate) fn settle_async_confirmed(&self, origin: &SendOrigin, output: Value) {
+        let seq = self.emit_settlement(
+            &origin.runtime_id,
+            AuthorityServerFrame::Settlement {
+                mutation_id: MutationId(origin.runtime_mutation_id.as_str().to_string()),
+                outcome: WireSettlementOutcome::Confirmed,
+            },
+        );
+        self.settle_confirmed(
+            &origin.runtime_id,
+            &origin.client_mutation_id,
+            output,
+            seq,
+        );
+    }
+
+    /// Send-bridge terminal `DispatchUncertain`/`Failed` → routed
+    /// `Settlement{Failed}`: emit the frame (the near node maps `Failed` →
+    /// `Rejected`, so the client REVERTS the optimistic draft-Destroy fold — the
+    /// draft RETURNS — and surfaces the error/park; D125: a parked send is NOT a
+    /// confirmed send, no false Sent). Unlike the up-channel rejection path, this
+    /// deferred verdict has no receipt to carry it, so the frame IS the signal.
+    /// The dedup record is kept (D47 `Rejected`) so a duplicate re-observes it,
+    /// stamped with the frame's seq for D48 ack-reclamation.
+    pub(crate) fn settle_async_failed(&self, origin: &SendOrigin, error: RuntimeAdapterError) {
+        let seq = self.emit_settlement(
+            &origin.runtime_id,
+            AuthorityServerFrame::Settlement {
+                mutation_id: MutationId(origin.runtime_mutation_id.as_str().to_string()),
+                outcome: WireSettlementOutcome::Failed,
+            },
+        );
+        self.dedup.settle(
+            &origin.runtime_id,
+            &origin.client_mutation_id,
+            TerminalClass::Rejected,
+            Some(seq),
+            now_secs(),
+            |record| record.error = Some(error),
+        );
     }
 
     fn lock_down_streams(&self) -> std::sync::MutexGuard<'_, HashMap<AuthorityServerLinkId, DownStreamHandle>> {
@@ -324,6 +417,11 @@ impl RuntimeRegistry {
             self.dedup.purge(&departed);
             self.replay.purge(&departed);
             self.lock_down_streams().remove(&departed);
+            // Drop any deferred send-origins for the departed runtime — its
+            // settlement sink is gone, so a routed frame would have nowhere to
+            // land (D49 [6]: departure purges ALL per-link state).
+            self.lock_send_origins()
+                .retain(|_, origin| origin.runtime_id != departed);
         }
         self.dedup.reap(now);
     }
@@ -432,6 +530,84 @@ mod tests {
         assert!(
             matches!(registry.accept(&r, &cr, "message.setKeywords"), ForwardAcceptance::Rejected(_)),
             "a frameless rejection is not acked away — re-observed until TTL"
+        );
+    }
+
+    // Send-bridge (step 3): a deferred async op emits NO verdict at enqueue; when
+    // the flush settles Applied it routes a `Settlement{Confirmed}` to the origin
+    // runtime (keyed by the authority `RuntimeMutationId`) and the dedup record
+    // becomes Confirmed (a duplicate re-observes it).
+    #[test]
+    fn send_bridge_applied_routes_confirmed_to_the_origin_and_dedups() {
+        let registry = RuntimeRegistry::new();
+        let (r, c) = (rid("rt-A"), cid("send-1"));
+        let mut ch = registry.register_down_stream(&r);
+        let runtime_mutation_id = match registry.accept(&r, &c, "message.send") {
+            ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
+            _ => panic!("first accept must be New"),
+        };
+        let op = OperationId::from("op-send-1");
+        registry.register_send_origin(
+            op.clone(),
+            SendOrigin {
+                runtime_id: r.clone(),
+                runtime_mutation_id: runtime_mutation_id.clone(),
+                client_mutation_id: c.clone(),
+            },
+        );
+        // Enqueue emitted no verdict — the origin's settlement stream is empty.
+        assert!(ch.settlement.try_recv().is_err(), "no verdict at enqueue");
+        // The async flush settles Applied → routed Settlement{Confirmed}.
+        let origin = registry.take_send_origin(&op).expect("origin was registered");
+        registry.settle_async_confirmed(&origin, serde_json::json!({ "events": [] }));
+        match ch.settlement.try_recv().expect("confirmed settlement routed").frame() {
+            Some(AuthorityServerFrame::Settlement { mutation_id, outcome }) => {
+                assert_eq!(mutation_id.0, runtime_mutation_id.as_str());
+                assert!(matches!(outcome, WireSettlementOutcome::Confirmed));
+            }
+            other => panic!("expected a Settlement frame, got {other:?}"),
+        }
+        assert!(
+            matches!(registry.accept(&r, &c, "message.send"), ForwardAcceptance::Existing(_)),
+            "a confirmed deferred send dedups on retry"
+        );
+        assert!(registry.take_send_origin(&op).is_none(), "origin drained once");
+    }
+
+    // Send-bridge (step 3): a parked (DispatchUncertain) or failed flush routes a
+    // `Settlement{Failed}` — the client REVERTS the optimistic draft-Destroy fold
+    // (the draft returns) with NO false Sent (D125) — and keeps the rejection so a
+    // duplicate re-observes it.
+    #[test]
+    fn send_bridge_failed_routes_failed_and_keeps_the_rejection() {
+        let registry = RuntimeRegistry::new();
+        let (r, c) = (rid("rt-A"), cid("send-2"));
+        let mut ch = registry.register_down_stream(&r);
+        let runtime_mutation_id = match registry.accept(&r, &c, "message.send") {
+            ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
+            _ => panic!("first accept must be New"),
+        };
+        let op = OperationId::from("op-send-2");
+        registry.register_send_origin(
+            op.clone(),
+            SendOrigin {
+                runtime_id: r.clone(),
+                runtime_mutation_id: runtime_mutation_id.clone(),
+                client_mutation_id: c.clone(),
+            },
+        );
+        let origin = registry.take_send_origin(&op).expect("origin was registered");
+        registry.settle_async_failed(&origin, rejection());
+        match ch.settlement.try_recv().expect("failed settlement routed").frame() {
+            Some(AuthorityServerFrame::Settlement { mutation_id, outcome }) => {
+                assert_eq!(mutation_id.0, runtime_mutation_id.as_str());
+                assert!(matches!(outcome, WireSettlementOutcome::Failed));
+            }
+            other => panic!("expected a Settlement frame, got {other:?}"),
+        }
+        assert!(
+            matches!(registry.accept(&r, &c, "message.send"), ForwardAcceptance::Rejected(_)),
+            "a parked/failed deferred send is kept + re-observed on retry"
         );
     }
 
