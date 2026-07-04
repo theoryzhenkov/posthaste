@@ -11,8 +11,8 @@
 use super::message_queries::project_record;
 use super::*;
 use posthaste_domain_model::{
-    MessageReadback, MessageRecord, MutationOutcome, OperationDispatchUncertain, SyncBatch,
-    EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN,
+    CommandAck, MessageReadback, MessageRecord, MutationOutcome, OperationDispatchUncertain,
+    SyncBatch, EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN,
 };
 
 /// How a push failure routes the operation. A superset of the D70 retryability
@@ -398,11 +398,18 @@ impl MailService {
     /// Delete a draft local-first: enqueue a draft delete operation for the
     /// draft's current id (temporary or provider-assigned).
     ///
+    /// `idempotent_redelivery` records whether a provider `notFound` at flush
+    /// time is a benign already-gone (the send-consume settlement effect, which
+    /// re-enqueues the delete under redelivery — D126) or a genuine failure a
+    /// user-initiated discard must surface (D133). It is stamped onto the op so
+    /// the gateway narrows its `notFound ⇒ Ok` mask to the idempotent case only.
+    ///
     /// @spec docs/L1-outbox#operation-model
     pub fn delete_draft(
         &self,
         account_id: &AccountId,
         draft_key: MessageId,
+        idempotent_redelivery: bool,
     ) -> Result<Operation, ServiceError> {
         let key = draft_key.to_string();
         let entity_id = self
@@ -416,10 +423,84 @@ impl MailService {
                 id: entity_id,
             },
             OperationKind::DraftDelete,
-            serde_json::json!({}),
+            serde_json::json!({ "idempotentRedelivery": idempotent_redelivery }),
         )?;
         self.outbox.remove_draft_alias(account_id, &key)?;
         Ok(operation)
+    }
+
+    /// Discard a draft through the optimistic runtime-mutation path (D130).
+    ///
+    /// Unlike [`delete_draft`] (the send-consume settlement effect), this is
+    /// user-initiated: it resolves the stable draft key to the live entity
+    /// (D131), removes the local draft row and emits the reconciling
+    /// `message.updated{deleted:true}` immediately so the client's base prunes
+    /// and the optimistic destroy retires without a follow-up sync (D132), and
+    /// queues the provider destroy as a NON-idempotent op (D133 — a `notFound`
+    /// now surfaces retryably). A key that no longer names a live draft is a
+    /// surfaced `NotFound`, not a silent success: the client reverts the
+    /// optimistic fold and shows the error (D133/D134).
+    ///
+    /// @spec docs/eph/RFC-L2-drafts#rfc-part-2
+    pub async fn discard_draft(
+        &self,
+        account_id: &AccountId,
+        draft_key: MessageId,
+    ) -> Result<CommandAck, ServiceError> {
+        let key = draft_key.to_string();
+        let entity_id = self
+            .outbox
+            .resolve_draft_entity(account_id, &key)?
+            .unwrap_or_else(|| key.clone());
+        let message_id = MessageId::from(entity_id.as_str());
+        // A discard of a draft that no longer resolves to a live local row must
+        // surface (D133) — the optimistic fold on the client reverts + shows the
+        // error rather than silently "succeeding".
+        let mailboxes = self
+            .message_mailboxes
+            .get_message_mailboxes(account_id, &message_id)?;
+        if mailboxes.is_empty()
+            && self
+                .message_detail_reader
+                .get_message_summary(account_id, &message_id)?
+                .is_none()
+        {
+            return Err(ServiceError::from(StoreError::NotFound(format!(
+                "draft:{}",
+                message_id.as_str()
+            ))));
+        }
+        // Queue the provider destroy (non-idempotent) via the stable-id path.
+        let operation = self.delete_draft(account_id, draft_key, false)?;
+        // Optimistic local removal (write-through) so canonical reflects the
+        // discard immediately, mirroring `destroy_message`. On a local failure,
+        // retract the op so the outbox and canonical do not diverge.
+        let message_commands = self.message_commands.clone();
+        let owned_account = account_id.clone();
+        let owned_message = message_id.clone();
+        if let Err(error) =
+            offload(move || message_commands.destroy_message(&owned_account, &owned_message, None))
+                .await
+        {
+            let _ = self.outbox.remove_operation(&operation.id);
+            return Err(ServiceError::from(error));
+        }
+        let event = match self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            mailboxes.first(),
+            Some(&message_id),
+            serde_json::json!({ "messageId": message_id.as_str(), "deleted": true }),
+        ) {
+            Ok(event) => event,
+            Err(error) => {
+                let _ = self.outbox.remove_operation(&operation.id);
+                return Err(ServiceError::from(error));
+            }
+        };
+        Ok(CommandAck {
+            events: vec![event],
+        })
     }
 
     /// Whether `draft_key` names a message already in the projection — i.e. a
@@ -569,6 +650,23 @@ impl MailService {
                         error: None,
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
+                    // D132: a settled DraftDelete emits the reconciling
+                    // `message.updated{deleted:true}` so the client's fold/prune
+                    // converges without leaning on a follow-up sync (the
+                    // send-consume path has no apply-time event; the user-discard
+                    // path already emitted one — this is an idempotent backstop).
+                    if operation.kind == OperationKind::DraftDelete {
+                        events.push(self.events.append_event(
+                            account_id,
+                            EVENT_TOPIC_MESSAGE_UPDATED,
+                            None,
+                            Some(&MessageId::from(operation.entity.id.as_str())),
+                            serde_json::json!({
+                                "messageId": operation.entity.id.as_str(),
+                                "deleted": true,
+                            }),
+                        )?);
+                    }
                     self.outbox.remove_operation(&operation.id)?;
                     // D126: a settled send consumes its originating draft — the
                     // destroy is enqueued as a follow-up op so it is retried
@@ -706,7 +804,8 @@ impl MailService {
         if !known {
             return Ok(None);
         }
-        self.delete_draft(account_id, MessageId::from(key)).map(Some)
+        self.delete_draft(account_id, MessageId::from(key), true)
+            .map(Some)
     }
 
     /// Whether the operation this one depends on has applied, is still waiting,
@@ -758,8 +857,16 @@ impl MailService {
             }
             OperationKind::DraftDelete => {
                 let target = MessageId::from(operation.entity.id.as_str());
+                // D133: only an idempotent redelivery (a send-consume re-enqueue)
+                // masks a provider `notFound` as success; a user discard's
+                // `notFound` surfaces as a retryable failure.
+                let idempotent_redelivery = operation
+                    .payload
+                    .get("idempotentRedelivery")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
                 gateway
-                    .delete_draft(account_id, &target)
+                    .delete_draft(account_id, &target, idempotent_redelivery)
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {

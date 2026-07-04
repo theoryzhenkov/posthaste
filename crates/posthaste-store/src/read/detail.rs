@@ -69,15 +69,6 @@ impl MessageDetailStore for DatabaseStore {
         let Some(summary) = read_message_summary(&connection, account_id, message_id)? else {
             return Ok(None);
         };
-        let draft_id: Option<String> = connection
-            .query_row(
-                "SELECT draft_id FROM message WHERE account_id = ?1 AND id = ?2",
-                params![account_id.as_str(), message_id.as_str()],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()
-            .map_err(sql_to_store_error)?
-            .flatten();
 
         let body = connection
             .query_row(
@@ -116,7 +107,6 @@ impl MessageDetailStore for DatabaseStore {
             body_text: body.as_ref().and_then(|row| row.1.clone()),
             raw_message: body.and_then(|row| row.2),
             attachments,
-            draft_id,
         }))
     }
 
@@ -144,15 +134,6 @@ impl MessageDetailStore for DatabaseStore {
         let Some(summary) = read_message_summary(&connection, account_id, message_id)? else {
             return Ok(None);
         };
-        let draft_id: Option<String> = connection
-            .query_row(
-                "SELECT draft_id FROM message WHERE account_id = ?1 AND id = ?2",
-                params![account_id.as_str(), message_id.as_str()],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()
-            .map_err(sql_to_store_error)?
-            .flatten();
         let attachments = fetch_message_attachments(&connection, account_id, message_id)?;
         Ok(Some(MessageDetail {
             summary,
@@ -160,7 +141,6 @@ impl MessageDetailStore for DatabaseStore {
             body_text: None,
             raw_message: None,
             attachments,
-            draft_id,
         }))
     }
 

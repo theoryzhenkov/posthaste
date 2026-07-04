@@ -213,36 +213,47 @@ export function useEmailActions({ undo }: { undo: () => void }) {
   )
 
   /**
-   * D127 — discard a draft. Never routes to the trash mutation; instead it
-   * schedules the draft-delete op ({@link runtimeMutations.messages.deleteDraft})
-   * after a short {@link DRAFT_DISCARD_GRACE_MS} grace and shows an undo toast.
-   * Undo clears the timer so nothing dispatches (the draft survives).
+   * D130/D127 — discard a draft. Never routes to the trash mutation. The
+   * removal now flows through the optimistic runtime-mutation path
+   * ({@link runtimeMutations.messages.discardDraft}): the destroy folds
+   * instantly on the row's `messageId` (the blink), settles on the runtime
+   * notification, and reverts + surfaces the error on failure — replacing the
+   * old fire-and-forget POST whose deferred dispatch never reliably landed
+   * ("discard does nothing"). The stable `draftId` (D131) rides along so the
+   * far node resolves the current live Email even after a JMAP autosave
+   * rotates the id.
    *
-   * The delete-draft route accepts the draft's `MessageId` as its `draftId`
-   * (server wraps it as `MessageId(draft_id)`), so a plain {@link SourceMessageRef}
-   * is sufficient — works uniformly for list rows, the detail pane, and keys.
-   *
-   * Tab close during the grace: the pending timer is dropped with the page, so
-   * the delete-draft op never dispatches and the draft is kept — the SAFE
-   * direction (an undone-able discard that never fired = the draft survives).
-   * We deliberately do NOT force-flush it on unload.
+   * Undo shape (D134): a short {@link DRAFT_DISCARD_GRACE_MS} pre-commit grace
+   * gates the dispatch — the "Undo" toast cancels the pending timer so nothing
+   * is ever dispatched and the draft survives (the SAFE direction). Once the
+   * grace elapses the optimistic destroy is dispatched and is itself
+   * reversible via the settlement (a rejected destroy reverts the fold). Tab
+   * close during the grace drops the timer with the page, so the draft is
+   * kept. We deliberately do NOT force-flush on unload.
    */
   const discardDraft = useCallback(
-    (target: SourceMessageRef) => {
+    (target: SourceMessageRef & { draftId?: string | null }) => {
       setErrorMessage(null)
       const key = `${target.sourceId}:${target.messageId}`
       // Coalesce repeated discards of the same draft into one pending dispatch.
       if (discardTimersRef.current.has(key)) {
         return
       }
+      // The stable draft id (D131) resolves the live Email across id rotation;
+      // fall back to the row's messageId for a legacy row without one.
+      const draftId = target.draftId ?? target.messageId
       const timer = setTimeout(() => {
         discardTimersRef.current.delete(key)
         setPending(1)
         void runtimeMutations.messages
-          .deleteDraft({
-            sourceId: target.sourceId,
-            draftId: target.messageId,
-          })
+          .discardDraft(
+            {
+              sourceId: target.sourceId,
+              messageId: target.messageId,
+              draftId,
+            },
+            { userInitiated: true },
+          )
           .catch((error: unknown) => {
             setErrorMessage(
               error instanceof Error ? error.message : 'Operation failed',

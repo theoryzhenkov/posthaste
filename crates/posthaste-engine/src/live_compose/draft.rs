@@ -126,6 +126,7 @@ pub(crate) async fn delete_draft(
     gateway: &LiveJmapGateway,
     _account_id: &AccountId,
     message_id: &MessageId,
+    idempotent_redelivery: bool,
 ) -> Result<(), GatewayError> {
     let mut request = gateway.client().build();
     request.set_email().destroy([message_id.as_str()]);
@@ -136,11 +137,17 @@ pub(crate) async fn delete_draft(
             .map_err(map_gateway_error)?;
     match email_set_response.destroyed(message_id.as_str()) {
         Ok(()) => Ok(()),
+        // D133: a `notFound` is a benign already-gone ONLY for an idempotent
+        // redelivery (the send-consume settlement effect re-enqueues the
+        // delete). A user-initiated discard's `notFound` surfaces as a
+        // retryable failure so the client reverts the optimistic fold + shows
+        // the error, rather than silently "succeeding" (the M60 regression).
         Err(jmap_client::Error::Set(error))
-            if matches!(
-                error.error(),
-                jmap_client::core::set::SetErrorType::NotFound
-            ) =>
+            if idempotent_redelivery
+                && matches!(
+                    error.error(),
+                    jmap_client::core::set::SetErrorType::NotFound
+                ) =>
         {
             Ok(())
         }

@@ -253,15 +253,31 @@ impl AuthorityServer {
         Ok(operation)
     }
 
-    /// Write: delete a draft and nudge a flush.
+    /// Write: delete a draft and nudge a flush (the direct REST command path —
+    /// user-initiated, so a provider `notFound` surfaces rather than masking,
+    /// D133).
     pub(crate) async fn delete_draft(
         &self,
         account_id: AccountId,
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
-        let operation = self.service.delete_draft(&account_id, draft_id)?;
+        let operation = self.service.delete_draft(&account_id, draft_id, false)?;
         self.trigger_outbox_flush(&account_id).await;
         Ok(operation)
+    }
+
+    /// Write: discard a draft through the optimistic runtime-mutation path
+    /// (D130) — resolves the stable id, removes the local row + emits the
+    /// reconciling event, and queues the non-idempotent provider destroy.
+    pub(crate) async fn discard_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: MessageId,
+    ) -> Result<CommandAck, RuntimeError> {
+        let ack = self.service.discard_draft(&account_id, draft_id).await?;
+        self.publish_events(&ack.events);
+        self.trigger_outbox_flush(&account_id).await;
+        Ok(ack)
     }
 
     /// Write: discard a pending outbox operation.
@@ -640,6 +656,14 @@ impl AuthorityServer {
             }
             MailOperation::Destroy(_) => {
                 self.destroy(account.clone(), message.clone()).await
+            }
+            // Discard (D130): resolve the stable `draftId` to the live Email and
+            // route to the draft-delete path (not a generic destroy) so the
+            // optimistic fold, the reconciling event, and the mask-narrowing all
+            // apply. The client folds this as a destroy on the row's `messageId`.
+            MailOperation::DeleteDraft(args) => {
+                self.discard_draft(account.clone(), MessageId(args.draft_id))
+                    .await
             }
             // `message.applyDiff` is the undo/redo vehicle — see `apply_diff`.
             MailOperation::ApplyDiff(args) => {

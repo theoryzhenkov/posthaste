@@ -20,7 +20,7 @@ use posthaste_domain_model::{
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection, StoreError,
     SyncBatch, SyncCursor, SyncMode, SyncObject, SyncTrigger, TagSummary, ThreadId, ThreadView,
-    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_OPERATION_SETTLED,
+    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_OPERATION_SETTLED,
 };
 
 mod config;

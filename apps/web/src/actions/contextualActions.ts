@@ -133,7 +133,7 @@ export function buildMessageContextActions(
       title: 'Discard draft',
       icon: Trash2,
       destructive: true,
-      run: () => actions.discardDraft(target),
+      run: () => actions.discardDraft({ ...target, draftId: message.draftId }),
     })
   } else if (viewRole !== 'trash') {
     list.push({

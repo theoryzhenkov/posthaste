@@ -183,7 +183,7 @@ impl MailService {
         // The stable draft identity is projected from the `X-Posthaste-Draft-Id`
         // header during sync; surface it so the client keys autosave by it and a
         // resumed edit updates the draft in place across provider id rotation.
-        let draft_id = detail.draft_id.clone();
+        let draft_id = detail.summary.draft_id.clone();
 
         if let Some(raw) = self
             .message_detail_reader
