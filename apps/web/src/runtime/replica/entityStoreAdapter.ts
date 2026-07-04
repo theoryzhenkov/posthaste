@@ -746,6 +746,17 @@ class EntityStoreController {
     let receipt: RuntimeMutationReceipt
     try {
       receipt = await this.deps.base.runRuntimeMutation(request)
+      // DS8 (defense-in-depth): a receipt can RESOLVE already terminally failed
+      // (a synchronous rejection surfaced as state, not a throw) — e.g. a send
+      // the runtime refuses outright. Revert the optimism NOW rather than parking
+      // it waiting for a `mutationNotification` frame that may never come. This is
+      // the terminal-revert set: `failed` and `conflict` (the non-`accepted`
+      // states that never confirm). Do NOT also link the runtimeMutationId — a
+      // reverted op is settled, not in flight.
+      if (receipt.state === 'failed' || receipt.state === 'conflict') {
+        await this.settleAll(clientMutationId, 'failed')
+        return receipt
+      }
       if (receipt.runtimeMutationId) {
         await this.deps.pendingSet.linkRuntimeMutationId(
           clientMutationId,

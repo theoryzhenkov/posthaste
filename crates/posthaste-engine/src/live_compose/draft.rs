@@ -20,6 +20,7 @@ pub(crate) async fn save_draft(
     gateway: &LiveJmapGateway,
     request_data: &SendMessageRequest,
     replace: Option<&MessageId>,
+    idempotent_redelivery: bool,
 ) -> Result<MessageId, GatewayError> {
     // A draft create carries no `identityId`, only the `from` address, so resolve
     // the sender tolerantly: a provider with an empty `Identity/get` must not
@@ -109,6 +110,27 @@ pub(crate) async fn save_draft(
         .id()
         .ok_or_else(|| GatewayError::Rejected("draft create returned no id".to_string()))?
         .to_string();
+    // DS3: the replace is a create-new + destroy-old in the SAME `Email/set`. The
+    // create outcome was checked above but the destroy outcome was not — a
+    // rejected/`notFound` replace-destroy would leave the OLD draft alongside the
+    // new one (the twin) while the save still reported success. Inspect it, with
+    // the same D133 discrimination `delete_draft` uses: a `notFound` is a benign
+    // already-gone ONLY for an idempotent redelivery (the prior-draft destroy
+    // already committed on an earlier delivery of this save); a first delivery's
+    // failed destroy surfaces as a retryable failure so the save is retried
+    // instead of silently leaving two drafts.
+    if let Some(replace) = replace {
+        match email_set_response.destroyed(replace.as_str()) {
+            Ok(()) => {}
+            Err(jmap_client::Error::Set(error))
+                if idempotent_redelivery
+                    && matches!(
+                        error.error(),
+                        jmap_client::core::set::SetErrorType::NotFound
+                    ) => {}
+            Err(error) => return Err(map_gateway_error(error)),
+        }
+    }
     Ok(MessageId::from(new_id))
 }
 

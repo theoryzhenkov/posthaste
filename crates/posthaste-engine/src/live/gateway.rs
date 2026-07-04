@@ -182,8 +182,9 @@ impl MailGateway for LiveJmapGateway {
         _account_id: &AccountId,
         request_data: &SendMessageRequest,
         replace: Option<&MessageId>,
+        idempotent_redelivery: bool,
     ) -> Result<MessageId, GatewayError> {
-        crate::live_compose::save_draft(self, request_data, replace).await
+        crate::live_compose::save_draft(self, request_data, replace, idempotent_redelivery).await
     }
 
     /// Destroy a draft message from the Drafts mailbox via `Email/set`.

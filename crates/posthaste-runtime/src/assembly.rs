@@ -300,6 +300,12 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         reads.clone(),
     ));
     let links = Arc::new(LinkRegistry::new(views, event_sender.clone()));
+    // The co-located send-bridge (near-node half): settle deferred async sends
+    // from the shared process event bus when their outbox flush settles. The task
+    // self-terminates on registry drop (Weak). Detached — no explicit teardown
+    // step needed (the down-channel task is retained only because a remote
+    // reconnect loop must be stopped; this is a pure bus reader).
+    let _ = crate::far_end::links::spawn_deferred_settlement_bridge(&links, &event_sender);
     // The fact-carrying event tap (RFC-L2-scripting D52 / S2): the down-channel
     // half over the durable `event_log` (reached through the same `reads` the live
     // broadcast records into), mounted on `/v1/events` by `subscribe_events`.
