@@ -573,11 +573,20 @@ jobs:
           # entry would make every plain `cargo check` of the desktop crate
           # demand the staged binary (breaking CI/dev). The release build stages
           # it (step above) and merges it in via --config.
-          config='{"build":{"beforeBuildCommand":null},"bundle":{"externalBin":["binaries/posthastectl"]'
+          # Sidecar DESCOPED on Linux for now: linuxdeploy fails on the Bun
+          # --compile binary even with NO_STRIP (root cause needs a local
+          # x86_64 repro; the AppImage sidecar also lacks POSTHASTE_APP_DIR
+          # wiring to be discoverable). Linux users get the CLI via the wizard
+          # tarball path. Windows injects below; macOS injects in its own step.
+          sidecar_config=""
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            sidecar_config="\"externalBin\":[\"binaries/posthastectl\"],"
+          fi
+          config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${sidecar_config}"
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            config="${config},\"createUpdaterArtifacts\":true}"
+            config="${config}\"createUpdaterArtifacts\":true}"
           else
-            config="${config}}"
+            config="${config%,}}"
             echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
           fi
           config="${config},\"identifier\":\"$POSTHASTE_IDENTIFIER\",\"productName\":\"$POSTHASTE_PRODUCT_NAME\",\"plugins\":{\"updater\":{\"endpoints\":[\"$POSTHASTE_UPDATER_ENDPOINT\"]}}}"
@@ -592,10 +601,7 @@ jobs:
           # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
           # have no code-signing certs configured, so code signing is a no-op
           # here regardless, while updater signatures (.sig) are now produced.
-          # NO_STRIP: linuxdeploy's strip pass fails on the Bun --compile
-          # posthastectl sidecar (non-standard sections); stripping is a size
-          # nicety only. Scoped to this invocation.
-          NO_STRIP=1 bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config" "${icon_config[@]}"
+          bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config" "${icon_config[@]}"
 
       - name: Build macOS desktop bundles
         if: runner.os == 'macOS'
