@@ -50,6 +50,19 @@ fn dispatch_uncertain(reason: impl Into<String>) -> GatewayError {
 /// create-id + `Message-ID` are the field-proving foundation for the future
 /// bounded-auto-retry (D87/O1 Option B).
 ///
+/// Draft consumption (D126): the request's `draft_id` is deliberately NOT
+/// destroyed here via `onSuccessDestroyEmail`. The fork exposes the builder
+/// (`SetArguments::on_success_destroy_email`), but RFC 8621 §7.5 scopes that
+/// field to EmailSubmission ids — it destroys the *submitted* Email, and this
+/// send submits a freshly created Email (the compose buffer is the source of
+/// truth; the server-side draft may be stale), not the draft. Destroying the
+/// originating draft atomically would require submitting the draft Email
+/// itself, which JMAP's Email immutability rules out for edited content. The
+/// draft is instead consumed as a settlement effect: the outbox enqueues a
+/// draft-delete once this send settles success (idempotent `Email/set`
+/// destroy — see `delete_draft`), and keeps the draft on `DispatchUncertain`
+/// (D125).
+///
 /// @spec docs/L1-compose#mime-structure
 /// @spec docs/L1-jmap#methods-used
 /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once

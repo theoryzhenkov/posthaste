@@ -57,7 +57,7 @@ use posthaste_contract_core::{
     SecretWriteMutation,
 };
 use posthaste_runtime_api::RuntimeAccountApi;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
@@ -111,6 +111,8 @@ pub const MAILBOX_ALL_MAIL: &str = "[Gmail]/All Mail";
 pub const MAILBOX_STARRED: &str = "[Gmail]/Starred";
 pub const MAILBOX_TRASH: &str = "[Gmail]/Trash";
 pub const MAILBOX_SPAM: &str = "[Gmail]/Spam";
+pub const MAILBOX_DRAFTS: &str = "[Gmail]/Drafts";
+pub const MAILBOX_SENT: &str = "[Gmail]/Sent Mail";
 
 /// Mailboxes whose membership the model tracks (the rest are always empty).
 const MODELED_MAILBOXES: &[&str] = &[
@@ -119,6 +121,8 @@ const MODELED_MAILBOXES: &[&str] = &[
     MAILBOX_STARRED,
     MAILBOX_TRASH,
     MAILBOX_SPAM,
+    MAILBOX_DRAFTS,
+    MAILBOX_SENT,
 ];
 
 /// The Gmail label whose presence puts a message in a mailbox view. All Mail
@@ -132,6 +136,8 @@ fn label_for_mailbox(mailbox: &str) -> Option<&'static str> {
         MAILBOX_STARRED => Some("\\Starred"),
         MAILBOX_TRASH => Some("\\Trash"),
         MAILBOX_SPAM => Some("\\Spam"),
+        MAILBOX_DRAFTS => Some("\\Draft"),
+        MAILBOX_SENT => Some("\\Sent"),
         _ => None,
     }
 }
@@ -150,17 +156,53 @@ struct MockMessage {
     /// Mailboxes in which `\Deleted` is currently set (per-mailbox, like real
     /// IMAP: the flag is folder-scoped on Gmail).
     deleted_in: BTreeSet<String>,
+    /// The RFC822 header block served on header FETCHes. Synthesized for
+    /// seeded/delivered messages; the literal client bytes for APPENDed and
+    /// SMTP-submitted messages (so e.g. `X-Posthaste-Draft-Id` round-trips).
+    header: String,
 }
 
 impl MockMessage {
     fn in_mailbox(&self, mailbox: &str) -> bool {
         if mailbox == MAILBOX_ALL_MAIL {
-            return !self.labels.contains("\\Trash") && !self.labels.contains("\\Spam");
+            // Gmail's All Mail: every live message except Trash/Spam — and
+            // drafts, which live only in the Drafts view.
+            return !self.labels.contains("\\Trash")
+                && !self.labels.contains("\\Spam")
+                && !self.labels.contains("\\Draft");
         }
         label_for_mailbox(mailbox)
             .map(|label| self.labels.contains(label))
             .unwrap_or(false)
     }
+}
+
+/// The synthesized header block for seeded/delivered messages (the shape the
+/// fixture always served before APPEND support carried real client bytes).
+fn synthesized_header(subject: &str, uid: u32) -> String {
+    format!(
+        "From: Alice <{SEEDED_FROM_EMAIL}>\r\nSubject: {subject}\r\nMessage-ID: <uid{uid}@example.test>\r\n\r\n"
+    )
+}
+
+/// The header block (up to and including the blank line) of raw RFC822 bytes.
+fn raw_header_block(raw: &[u8]) -> String {
+    let end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
+        .unwrap_or(raw.len());
+    String::from_utf8_lossy(&raw[..end]).into_owned()
+}
+
+/// The (unfolded, single-line) value of `name:` in a raw header block.
+fn header_value(header: &str, name: &str) -> Option<String> {
+    header.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| value.trim().to_string())
+    })
 }
 
 /// The mock server's mutable state, shared across all connection handlers.
@@ -183,6 +225,8 @@ struct MailModel {
     /// Every command line received, prefixed with the connection's selected
     /// mailbox (`-` before any SELECT) — the wire-assertion log.
     commands: Vec<String>,
+    /// Raw RFC5322 payloads accepted over the mock SMTP endpoint, in order.
+    smtp_submissions: Vec<Vec<u8>>,
 }
 
 impl MailModel {
@@ -207,11 +251,13 @@ impl MailModel {
                 modseq: 100,
                 labels,
                 deleted_in: BTreeSet::new(),
+                header: synthesized_header(SEEDED_SUBJECT, 1),
             }],
             vanished: Vec::new(),
             changedsince_fetches: 0,
             header_fetches: 0,
             commands: Vec::new(),
+            smtp_submissions: Vec::new(),
         }
     }
 
@@ -267,6 +313,34 @@ impl MailModel {
             modseq,
             labels: BTreeSet::from(["\\Inbox".to_string()]),
             deleted_in: BTreeSet::new(),
+            header: synthesized_header(subject, uid),
+        });
+        uid
+    }
+
+    /// Store raw client-supplied RFC5322 bytes as a new message labeled into
+    /// `mailbox` (IMAP `APPEND`, and the Gmail-SMTP auto-placed Sent copy),
+    /// advancing the MODSEQ. Returns the new UID.
+    fn append_raw(&mut self, mailbox: &str, raw: &[u8]) -> u32 {
+        self.highest_modseq += 1;
+        let modseq = self.highest_modseq;
+        let uid = self.next_uid;
+        self.next_uid += 1;
+        let header = raw_header_block(raw);
+        let subject = header_value(&header, "Subject").unwrap_or_default();
+        let labels: BTreeSet<String> = label_for_mailbox(mailbox)
+            .into_iter()
+            .map(|label| label.to_string())
+            .collect();
+        self.live.push(MockMessage {
+            uid,
+            gmail_msgid: 1278455344230330000 + u64::from(uid),
+            gmail_thrid: 1266894439832280000 + u64::from(uid),
+            subject,
+            modseq,
+            labels,
+            deleted_in: BTreeSet::new(),
+            header,
         });
         uid
     }
@@ -319,8 +393,9 @@ impl MailModel {
     /// `UID EXPUNGE <uids>` in `mailbox`, Gmail-faithfully: expunging a
     /// `\Deleted`-marked message from a label mailbox removes that label only
     /// (expunge-from-INBOX == archive; the message stays in All Mail);
-    /// expunging from All Mail, Trash, or Spam deletes it permanently.
-    /// Returns the (sequence, uid) pairs expunged.
+    /// expunging from All Mail, Trash, Spam, or Drafts deletes it permanently
+    /// (a Gmail draft exists only as a draft — discarding it removes the
+    /// message everywhere). Returns the (sequence, uid) pairs expunged.
     fn uid_expunge(&mut self, mailbox: &str, uids: &[u32]) -> Vec<(u32, u32)> {
         let targets: Vec<u32> = self
             .members(mailbox)
@@ -346,7 +421,10 @@ impl MailModel {
                 .iter()
                 .position(|m| m.uid == uid)
                 .expect("expunge target is live");
-            let permanent = matches!(mailbox, MAILBOX_ALL_MAIL | MAILBOX_TRASH | MAILBOX_SPAM);
+            let permanent = matches!(
+                mailbox,
+                MAILBOX_ALL_MAIL | MAILBOX_TRASH | MAILBOX_SPAM | MAILBOX_DRAFTS
+            );
             if permanent {
                 self.record_vanished_everywhere(index, modseq);
                 self.live.remove(index);
@@ -421,7 +499,9 @@ impl MailModel {
 /// [`create_gmail_account`]: RuntimeHarness::create_gmail_account
 pub struct GmailImapFixture {
     port: u16,
+    smtp_port: u16,
     server: JoinHandle<()>,
+    smtp_server: JoinHandle<()>,
     state: Arc<Mutex<MailModel>>,
     provider: ProviderHint,
 }
@@ -487,6 +567,10 @@ impl GmailImapFixture {
             .await
             .expect("bind mock gmail imap");
         let port = listener.local_addr().expect("mock gmail addr").port();
+        let smtp_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock gmail smtp");
+        let smtp_port = smtp_listener.local_addr().expect("mock smtp addr").port();
         let state = Arc::new(Mutex::new(MailModel::baseline(flavor.gmail)));
         let server = {
             let state = Arc::clone(&state);
@@ -496,17 +580,63 @@ impl GmailImapFixture {
                 }
             })
         };
+        let smtp_server = {
+            let state = Arc::clone(&state);
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = smtp_listener.accept().await {
+                    tokio::spawn(handle_smtp_connection(stream, Arc::clone(&state), flavor));
+                }
+            })
+        };
         Self {
             port,
+            smtp_port,
             server,
+            smtp_server,
             state,
             provider,
         }
     }
 
-    /// The loopback port the mock server is listening on.
+    /// The loopback port the mock IMAP server is listening on.
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// The loopback port the mock SMTP submission endpoint is listening on.
+    pub fn smtp_port(&self) -> u16 {
+        self.smtp_port
+    }
+
+    /// How many messages `mailbox` currently holds on the mock server
+    /// (label-model membership) — e.g. the exactly-one-Sent-copy assertion.
+    pub fn mailbox_message_count(&self, mailbox: &str) -> usize {
+        self.state
+            .lock()
+            .expect("mail model mutex")
+            .members(mailbox)
+            .len()
+    }
+
+    /// The subjects of the messages `mailbox` currently holds, in UID order —
+    /// e.g. asserting the single Sent copy is the message that was sent.
+    pub fn mailbox_subjects(&self, mailbox: &str) -> Vec<String> {
+        self.state
+            .lock()
+            .expect("mail model mutex")
+            .members(mailbox)
+            .iter()
+            .map(|message| message.subject.clone())
+            .collect()
+    }
+
+    /// How many raw messages the mock SMTP endpoint has accepted.
+    pub fn smtp_submission_count(&self) -> usize {
+        self.state
+            .lock()
+            .expect("mail model mutex")
+            .smtp_submissions
+            .len()
     }
 
     /// Expunge the current message(s) and deliver a new one with `subject`,
@@ -608,7 +738,7 @@ impl GmailImapFixture {
                 }),
                 smtp: Some(SmtpTransportSettings {
                     host: "127.0.0.1".to_string(),
-                    port: self.port,
+                    port: self.smtp_port,
                     security: TransportSecurity::Plain,
                 }),
             },
@@ -623,6 +753,7 @@ impl GmailImapFixture {
 impl Drop for GmailImapFixture {
     fn drop(&mut self) {
         self.server.abort();
+        self.smtp_server.abort();
     }
 }
 
@@ -893,6 +1024,42 @@ async fn handle_connection(
                     }
                 }
             }
+            "APPEND" => {
+                // `tag APPEND <mailbox> (<flags>) {N}` — reply with the literal
+                // continuation, read exactly N raw bytes (+ the trailing CRLF),
+                // store the message, and (under UIDPLUS) report APPENDUID. Both
+                // the draft-save path and the generic-provider Sent copy land
+                // here.
+                let mailbox = normalized_mailbox(mailbox_arg(&cmd));
+                let Some(size) = literal_size_arg(&cmd) else {
+                    let _ = send(&mut writer, &format!("{tag} BAD APPEND without a literal\r\n"))
+                        .await;
+                    continue;
+                };
+                // The caps never advertise LITERAL+, so the literal is always
+                // synchronizing: issue the continuation before reading.
+                if !send(&mut writer, "+ Ready for literal data\r\n").await {
+                    break;
+                }
+                let mut raw = vec![0_u8; size];
+                if reader.read_exact(&mut raw).await.is_err() {
+                    break;
+                }
+                let mut trailer = String::new();
+                if reader.read_line(&mut trailer).await.is_err() {
+                    break;
+                }
+                let uid = state
+                    .lock()
+                    .expect("mail model mutex")
+                    .append_raw(&mailbox, &raw);
+                let status = if caps.contains("UIDPLUS") {
+                    format!("{tag} OK [APPENDUID {UID_VALIDITY} {uid}] APPEND completed\r\n")
+                } else {
+                    format!("{tag} OK APPEND completed\r\n")
+                };
+                send(&mut writer, &status).await
+            }
             "LOGOUT" => {
                 let _ = send(&mut writer, "* BYE mock-gmail signing off\r\n").await;
                 let _ = send(&mut writer, &format!("{tag} OK LOGOUT completed\r\n")).await;
@@ -902,6 +1069,96 @@ async fn handle_connection(
             // mailbox-wide expunge (plain EXPUNGE / CLOSE) — it would sweep
             // other clients' `\Deleted` messages. A regression fails loudly.
             other => send(&mut writer, &format!("{tag} BAD unsupported {other}\r\n")).await,
+        };
+        if !ok {
+            break;
+        }
+    }
+}
+
+/// Handle one mock SMTP submission session: a permissive ESMTP endpoint that
+/// accepts any AUTH and one or more MAIL/RCPT/DATA transactions. Accepted
+/// payloads are recorded on the model; with Gmail semantics the message is
+/// additionally auto-placed into the Sent mailbox (real Gmail SMTP does this —
+/// the client APPENDing its own copy is exactly the classic duplicate the
+/// per-provider Sent-copy gate must prevent). Generic flavors record only, so
+/// the Sent copy exists solely if the client APPENDs it.
+async fn handle_smtp_connection(
+    stream: tokio::net::TcpStream,
+    state: Arc<Mutex<MailModel>>,
+    flavor: ServerFlavor,
+) {
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    if !send(&mut writer, "220 mock-gmail-smtp ESMTP ready\r\n").await {
+        return;
+    }
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let cmd = line.trim_end_matches(['\r', '\n']);
+        let upper = cmd.to_ascii_uppercase();
+        let ok = if upper.starts_with("EHLO") || upper.starts_with("HELO") {
+            send(
+                &mut writer,
+                "250-mock-gmail-smtp\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n",
+            )
+            .await
+        } else if upper.starts_with("AUTH") {
+            // Accept anything. A mechanism without an inline initial response
+            // gets one continuation whose reply is read and discarded.
+            if cmd.split_whitespace().nth(2).is_none() {
+                if !send(&mut writer, "334 \r\n").await {
+                    break;
+                }
+                let mut response = String::new();
+                if reader.read_line(&mut response).await.is_err() {
+                    break;
+                }
+            }
+            send(&mut writer, "235 2.7.0 Authentication successful\r\n").await
+        } else if upper.starts_with("MAIL") || upper.starts_with("RCPT") {
+            send(&mut writer, "250 2.1.0 Ok\r\n").await
+        } else if upper.starts_with("DATA") {
+            if !send(&mut writer, "354 End data with <CR><LF>.<CR><LF>\r\n").await {
+                break;
+            }
+            let mut raw: Vec<u8> = Vec::new();
+            loop {
+                let mut data_line = String::new();
+                match reader.read_line(&mut data_line).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => {}
+                }
+                let trimmed = data_line.trim_end_matches(['\r', '\n']);
+                if trimmed == "." {
+                    break;
+                }
+                // Undo SMTP dot-stuffing (RFC 5321 §4.5.2).
+                let unstuffed = trimmed.strip_prefix('.').filter(|_| trimmed.starts_with(".."));
+                raw.extend_from_slice(unstuffed.unwrap_or(trimmed).as_bytes());
+                raw.extend_from_slice(b"\r\n");
+            }
+            {
+                let mut model = state.lock().expect("mail model mutex");
+                if flavor.gmail {
+                    // Real Gmail auto-places SMTP-submitted mail in Sent.
+                    model.append_raw(MAILBOX_SENT, &raw);
+                }
+                model.smtp_submissions.push(raw);
+            }
+            send(&mut writer, "250 2.0.0 Ok: accepted\r\n").await
+        } else if upper.starts_with("QUIT") {
+            let _ = send(&mut writer, "221 2.0.0 Bye\r\n").await;
+            break;
+        } else if upper.starts_with("RSET") || upper.starts_with("NOOP") {
+            send(&mut writer, "250 2.0.0 Ok\r\n").await
+        } else {
+            send(&mut writer, "502 5.5.2 Command not implemented\r\n").await
         };
         if !ok {
             break;
@@ -1067,6 +1324,17 @@ fn trailing_mailbox_arg(cmd: &str) -> &str {
     cmd.split_whitespace().nth(4).unwrap_or("INBOX")
 }
 
+/// Extract the trailing literal size of an `APPEND ... {N}` / `{N+}` command.
+fn literal_size_arg(cmd: &str) -> Option<usize> {
+    cmd.rsplit('{')
+        .next()?
+        .trim_end()
+        .trim_end_matches('}')
+        .trim_end_matches('+')
+        .parse()
+        .ok()
+}
+
 /// Fold mailbox-name case for INBOX (case-insensitive per RFC 3501); other
 /// names are matched verbatim as LISTed.
 fn normalized_mailbox(name: &str) -> String {
@@ -1181,15 +1449,11 @@ fn encode_fetch(seq: u32, message: &MockMessage, gmail: bool) -> Vec<u8> {
     use imap_codec::ResponseCodec;
     use std::num::NonZeroU32;
 
-    let header = format!(
-        "From: Alice <{SEEDED_FROM_EMAIL}>\r\nSubject: {}\r\nMessage-ID: <uid{}@example.test>\r\n\r\n",
-        message.subject, message.uid
-    );
     let mut items = vec![
         MessageDataItem::Uid(NonZeroU32::new(message.uid).expect("nonzero uid")),
         MessageDataItem::Rfc822Size(512),
         MessageDataItem::Rfc822Header(NString(Some(IString::Literal(
-            Literal::try_from(header.into_bytes()).expect("header literal"),
+            Literal::try_from(message.header.clone().into_bytes()).expect("header literal"),
         )))),
     ];
     if gmail {

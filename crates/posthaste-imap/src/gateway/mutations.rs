@@ -109,7 +109,7 @@ pub(crate) async fn replace_message_mailboxes(
 /// pre-mutation UID probe) counts as removed: removal is idempotent, and Gmail
 /// strips a message's other labels itself when it is copied/moved into Trash
 /// or Spam, so the follow-up removals of a trash flow find nothing to expunge.
-async fn remove_imap_message_from_mailbox(
+pub(crate) async fn remove_imap_message_from_mailbox(
     gateway: &LiveImapSmtpGateway,
     client: &mut ImapClient,
     mailbox_name: &str,
