@@ -13,6 +13,11 @@ dependents: []
 
 # Error-Taxonomy Audit — Consolidated Report
 
+> **Status: EVIDENCE/AUDIT (evidence-complete).** Read-only investigation, not a
+> plan. This is the M29/D70–D73 worklist input for RFC-L2-lifecycle-and-errors —
+> those decisions shipped (M29 landed); the findings here are preserved as
+> provenance. Paths are pre-M9c snapshot (renames noted in the provenance note).
+
 **Provenance note:** all evidence gathered from the pre-M9c snapshot worktree `/home/usr.prj_posthaste/src/.workspaces/architecture-cleanup-hygiene/` (paths below are relative to it). Post-M9 renames apply: link-core→replica-core, link-replica→replica-projector, link-wasm→client-node-wasm, RuntimeSessionId→RuntimeLinkId; the near-end engine now owns transport error classification at both seams — findings against `runtime/src/transport.rs` should be re-verified against the new owner. The HTTP-boundary sweep was delivered separately to the orchestrator; this report covers that seam only via my directly-read evidence (`api/errors.rs`).
 
 ## 1. Error-type census

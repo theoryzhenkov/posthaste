@@ -16,6 +16,13 @@ dependents:
 
 # posthaste-testkit forward roadmap
 
+> **Status: MOSTLY SHIPPED (forward plan).** P0–P3d all landed (spec migration,
+> shared testkit crate, runtime-in-harness + view-settlement recorder,
+> declarative fixtures, mock Gmail IMAP fixture, flicker-diagnosis fixture).
+> **Remaining:** P4 (posthastectl headless driver — note posthastectl itself now
+> ships via the scripting track) and P5 (proptest invertible-diff laws +
+> profiling in lab artifacts). Folds back into docs/testing/L1 as slices land.
+
 Ephemeral plan. Folds back into `docs/testing/L1` as each slice lands, then this
 doc is deleted. The `[::state planned]` / `[::state partial]` markers in
 `docs/testing/L1` point here.

@@ -1,5 +1,15 @@
 # RFC-L2-client-resilience — the client converges from any state
 
+> **Status (2026-07-04): IN PROGRESS.** Part 1 ratified; Part 2 ratified (owner,
+> 2026-07-04). **Landed:** M40 (stale-link 404/410 re-prepare — kills the
+> laptop-sleep freeze; the highest-value fix), M46 (the one reactive store), M47
+> (event-boundary codegen), M48 (client testkit + boundary lint). **Pending:**
+> M41 (enqueue failure paths), M42 (worker re-seed), M43 (subscription
+> handshake), M44 (reconcile pass + health FSM), M45 (degraded indicator), M49
+> (adapter decomposition), M50 (react-query shrink). **[Update 2026-07-04]:** M47
+> and M48 have landed (commits `feat(M47)` / `feat(M48)`) though their
+> migration-table rows in §Part 2 are not yet marked `[::done]`.
+
 Status: DRAFT for owner ratification (2026-07-03). Evidence: the client-fragility
 audit (5 subsystem maps + 2 symptom hunts + 14 adversarial verifications; 2
 CONFIRMED, 3 PLAUSIBLE-high, 9 refuted — refutations recorded below).

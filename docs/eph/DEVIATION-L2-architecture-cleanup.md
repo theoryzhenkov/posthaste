@@ -13,6 +13,12 @@ dependents: []
 
 # DEVIATION — Architecture Cleanup (reality ledger)
 
+> **Status: REFERENCE (reality ledger) — complete.** Companion to
+> RFC-L2-architecture-cleanup. All rows are closed (M8 ritual: DEVIATION register
+> complete, all 13 rows closed) — the code caught up to the specs and every
+> `[::state]` marker flipped. Kept intact as the reality ledger; not edited back
+> into specs.
+
 This register carries **reality**: for every drained RFC decision, one row
 describing how the code *currently* diverges from the spec's end-state. Specs
 carry intent; this file carries the delta; reality is never edited back into a
