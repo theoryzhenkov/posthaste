@@ -148,6 +148,7 @@ async fn gmail_send_consumes_the_draft_with_exactly_one_sent_copy() {
             RuntimeCaller::test(),
             account.clone(),
             compose_request("Quarterly reply", Some(draft_key.as_str())),
+            None,
         )
         .await
         .expect("send should queue");
@@ -219,6 +220,7 @@ async fn generic_send_consumes_the_draft_and_appends_the_single_sent_copy() {
             RuntimeCaller::test(),
             account.clone(),
             compose_request("Weekly update", Some(draft_key.as_str())),
+            None,
         )
         .await
         .expect("send should queue");
@@ -282,6 +284,7 @@ async fn send_without_draft_id_leaves_saved_drafts_untouched() {
             RuntimeCaller::test(),
             account.clone(),
             compose_request("Standalone send", None),
+            None,
         )
         .await
         .expect("send should queue");

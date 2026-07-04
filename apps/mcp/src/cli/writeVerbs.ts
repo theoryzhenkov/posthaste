@@ -417,11 +417,11 @@ function toRecipients(addresses: string[]): Schemas["Recipient"][] {
 /**
  * Send a new message (not in reply to anything — see `reply` for in-thread).
  *
- * NOTE: `POST /commands/send` does not yet honor `Idempotency-Key` server-side
- * (only the five `commands/messages/{id}/…` routes do, RFC-L2-scripting D53)
- * — the header is still sent for forward-compatibility, but a retried `send`
- * after an ambiguous failure can currently double-send. Not a regression this
- * unit introduces; documented in scripting-quickstart.md.
+ * `POST /commands/send` honors `Idempotency-Key` server-side (RFC-L2-scripting
+ * ruling 24), same as the five `commands/messages/{id}/…` routes (D53): a
+ * retried `send`/`reply` after an ambiguous failure, or a redelivered rule that
+ * re-runs this verb under the same derived key, enqueues exactly ONE outbox send
+ * instead of double-sending.
  */
 export async function runSend(
   conn: Connection,
