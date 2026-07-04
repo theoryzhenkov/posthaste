@@ -12,9 +12,12 @@
  * membership (place-or-ignore against the held coverage `[TOP, W]`). On each
  * drain the adapter re-projects open views + emits `viewReplace` for changed
  * ones (covers content-only mutations — P2 — without a message→rows index),
- * and writes the affected mailboxes' counts straight into the React Query
- * cache (`setQueryData`) so the sidebar updates without a REST refetch. Rows
- * and counts arrive on one stream, one batch — no divergence (I1).
+ * and mirrors the affected mailboxes' counts into the live store's counts slice
+ * (`setMailboxCount`, D116) so the sidebar updates without a REST refetch and
+ * without treating react-query as a live-state authority. Rows and counts
+ * arrive on one stream, one batch — no divergence (I1). The view projection is
+ * additionally mirrored into the store's view slice (D115); the synthesized
+ * `viewReplace` sink path is kept until its consumers migrate (M49).
  *
  * Views open **non-delta-capable** (option i): the runtime serves full
  * `viewSnapshot`/`viewReplace`, and the store re-derives placement from
@@ -26,6 +29,11 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import { queryClient as singletonQueryClient } from '@/app/queryClient'
+import {
+  clearViewProjection,
+  setMailboxCount,
+  setViewProjection,
+} from '@/live-store/store'
 import { LOG_EVENTS, syncLogger } from '@/logger'
 import type { Mailbox } from '@/api/types'
 import type { DomainEvent } from '@/api/types'
@@ -465,6 +473,9 @@ class EntityStoreController {
       lastProjectionJson: projected.json,
     }
     this.views.set(viewId, entry)
+    // D115: seed the store's view slice so a fresh mirror carries the opened
+    // view's rows immediately.
+    setViewProjection(viewId, projected.rows)
     return { viewId, snapshot: this.snapshotFrom(entry, projected.rows) }
   }
 
@@ -503,6 +514,7 @@ class EntityStoreController {
 
   closeView(request: RuntimeLinkViewCloseRequest): Promise<OkResponse> {
     this.views.delete(request.viewId)
+    clearViewProjection(request.viewId)
     void this.enqueue(() => this.store.closeView(request.viewId))
     return this.deps.base.closeRuntimeLinkView(request)
   }
@@ -944,6 +956,10 @@ class EntityStoreController {
         continue
       }
       entry.lastProjectionJson = projected.json
+      // D115: mirror the projected rows into the live store's view slice, next
+      // to the synthesized `viewReplace` sink below (kept until useLiveView's
+      // consumers migrate — M49).
+      setViewProjection(viewId, projected.rows)
       const snapshot = this.snapshotFrom(entry, projected.rows)
       this.sink.onFrame({
         type: 'viewReplace',
@@ -977,7 +993,11 @@ class EntityStoreController {
     return { json, rows }
   }
 
-  /** Write a dirty mailbox's counts straight into the React Query cache. */
+  /** Mirror a dirty mailbox's counts into the live store's counts slice (D116).
+   *  The replica owns the count; the store is the dumb main-thread mirror the
+   *  sidebar reads via `useMailboxCounts`. NOT react-query — live counts are no
+   *  longer request/response cache state (the setQueryData-for-counts path is
+   *  deleted; the M46 gate greps for its absence). */
   private async writeMailboxCount(mailboxId: string): Promise<void> {
     const accountId = this.mailboxAccount.get(mailboxId)
     if (!accountId) {
@@ -990,19 +1010,10 @@ class EntityStoreController {
     if (!counts) {
       return
     }
-    this.queryClient.setQueryData<Mailbox[]>(
-      queryKeys.mailboxes(accountId),
-      (old) =>
-        old?.map((mailbox) =>
-          mailbox.id === mailboxId
-            ? {
-                ...mailbox,
-                unreadEmails: counts.unreadCount,
-                totalEmails: counts.totalCount,
-              }
-            : mailbox,
-        ),
-    )
+    setMailboxCount(accountId, mailboxId, {
+      unread: counts.unreadCount,
+      total: counts.totalCount,
+    })
   }
 
   private snapshotFrom(
