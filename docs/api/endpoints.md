@@ -104,6 +104,10 @@ Application settings and automation rules
 | Method | Path | Summary | Operation |
 | --- | --- | --- | --- |
 | `POST` | `/v1/automation-rules:preview` | Preview automation rule | `preview_automation_rule` |
+| `GET` | `/v1/rules` | List automation rules | `list_rules` |
+| `POST` | `/v1/rules` | Create an automation rule | `create_rule` |
+| `DELETE` | `/v1/rules/{rule_id}` | Delete an automation rule | `delete_rule` |
+| `PUT` | `/v1/rules/{rule_id}` | Replace an automation rule | `update_rule` |
 | `GET` | `/v1/settings` | Get settings | `get_settings` |
 | `PATCH` | `/v1/settings` | Update settings | `patch_settings` |
 
