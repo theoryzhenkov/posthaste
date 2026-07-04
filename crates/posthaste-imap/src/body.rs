@@ -28,6 +28,16 @@ pub(crate) async fn fetch_message_body_by_location(
 /// both paths validate the same `(mailbox, UIDVALIDITY, UID)` identity before
 /// trusting `BODY.PEEK[]` bytes.
 ///
+/// Deadline shape: each round trip is bounded by the 60 s per-op envelope
+/// (`with_deadline` / `IMAP_OP_TIMEOUT_MS`). A byte-progress *stall* guard
+/// (parity with the JMAP blob class, M31/M34) is not implementable at this
+/// seam: `imap-client`'s task API resolves a whole `UID FETCH` response — one
+/// message body arrives as a single literal parsed only when complete — and
+/// exposes no read-progress or transport hook, so per-op wall clock is the
+/// tightest available cut without forking the client. The cache worker's
+/// batch-level deadline (`BODY_CACHE_BATCH_BUDGET`) additionally bounds a
+/// stalled fetch on the background cache path.
+///
 /// @spec docs/L1-sync#body-lazy
 pub(crate) async fn fetch_raw_message_by_location(
     client: &mut ImapClient,

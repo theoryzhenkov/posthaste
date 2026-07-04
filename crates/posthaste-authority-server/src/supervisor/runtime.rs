@@ -154,6 +154,20 @@ pub(crate) async fn run_account_runtime(
                     ),
                 ).await.is_err() {
                     record_arm_timeout(&sync_state, &shared, &account_id, generation, "cache_maintenance", ARM_BUDGET_CACHE).await;
+                    // The dropped batch future never reached the governor's
+                    // record_feedback, so backoff would never engage and the
+                    // short cache tick would re-hit the slow provider forever
+                    // (the "stuck until reload" wedge). Record the cancelled
+                    // slice as a no-progress fetch failure so the next ticks
+                    // are spaced by escalating backoff. This is the backstop
+                    // path: the batch's own deadline (BODY_CACHE_BATCH_BUDGET,
+                    // well under this arm's budget) normally returns first and
+                    // records feedback the ordinary way.
+                    shared
+                        .cache_resources
+                        .lock()
+                        .await
+                        .record_cancelled_slice(tokio::time::Instant::now().into_std());
                 }
             }
             _ = snooze_interval.tick() => {
