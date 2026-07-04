@@ -454,7 +454,19 @@ function parseHookServeOptions(tokens: string[]): HookServeOptions {
  * Run one CLI invocation. `argv` is the args after the program name
  * (`process.argv.slice(2)`). Returns the process exit code; never throws.
  */
+// Injected at compile time by scripts/build-cli.ts (--define); undefined in
+// dev/tests. The release smoke runs `<binary> --print-release-channel` on
+// every executable in a bundle to catch channel mix-ups.
+declare const POSTHASTE_BUILD_CHANNEL: string | undefined;
+
 export async function run(argv: string[], deps: RunDeps): Promise<number> {
+  if (argv[0] === "--print-release-channel") {
+    const channel =
+      typeof POSTHASTE_BUILD_CHANNEL === "string" ? POSTHASTE_BUILD_CHANNEL : "";
+    if (channel === "") return ExitCode.UsageError;
+    deps.stdout(`${channel}\n`);
+    return ExitCode.Ok;
+  }
   let globals: Globals;
   let rest: string[];
   try {

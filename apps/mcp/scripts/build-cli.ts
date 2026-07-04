@@ -62,6 +62,12 @@ const outfile = userOutfile
 await mkdir(dirname(outfile), { recursive: true });
 
 const args = ["build", "--compile", "--minify"];
+// Stamp the release channel (nightly/stable) into the binary so the release
+// smoke's --print-release-channel convention (every bundled executable must
+// report its channel — catches channel mix-ups like a nightly app carrying a
+// stable sidecar) works for the CLI too. Empty outside release builds.
+const channel = process.env.POSTHASTE_RELEASE_CHANNEL ?? "";
+args.push(`--define=POSTHASTE_BUILD_CHANNEL=${JSON.stringify(channel)}`);
 if (target) args.push(`--target=${target}`);
 args.push(`--outfile=${outfile}`, ENTRY);
 
