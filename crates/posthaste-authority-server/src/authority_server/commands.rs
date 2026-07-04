@@ -665,6 +665,23 @@ impl AuthorityServer {
                 self.discard_draft(account.clone(), MessageId(args.draft_id))
                     .await
             }
+            // Save-draft (M65/D130): route the optimistic runtime mutation to the
+            // existing local-first save path. `message` is the stable draft key
+            // (D131) used as the draft id. Not locally folded (fold_effect=None);
+            // the draft row reconciles via the settlement `message.updated`
+            // (D132). Returns an empty ack — nothing settles at enqueue.
+            MailOperation::SaveDraft(args) => self
+                .save_draft(account.clone(), Some(message.clone()), args.request)
+                .await
+                .map(|_operation| CommandAck { events: Vec::new() }),
+            // Send (M66/D130): route to the existing local-first send path. The
+            // client folds an optimistic `Destroy` on the originating draft; that
+            // fold is held past enqueue and settled by the async-flush bridge
+            // (ack ⇒ confirm; park/fail ⇒ revert — D125/D126), NOT here.
+            MailOperation::Send(args) => self
+                .send_message(account.clone(), args.request)
+                .await
+                .map(|()| CommandAck { events: Vec::new() }),
             // `message.applyDiff` is the undo/redo vehicle — see `apply_diff`.
             MailOperation::ApplyDiff(args) => {
                 self.apply_diff(account.clone(), message.clone(), args.diff).await

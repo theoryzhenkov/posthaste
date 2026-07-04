@@ -151,7 +151,7 @@ pub struct Identity {
 /// Email address with optional display name.
 ///
 /// @spec docs/L1-jmap#methods-used
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Recipient {
@@ -250,7 +250,7 @@ pub fn format_forwarded_body(
 /// or embeds the bytes using the transport-native attachment path before send.
 ///
 /// @spec docs/L1-compose#attachment-handling
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SendMessageAttachment {
@@ -262,7 +262,7 @@ pub struct SendMessageAttachment {
 /// Request payload for sending a new email via `EmailSubmission/set`.
 ///
 /// @spec docs/L1-jmap#methods-used
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SendMessageRequest {
