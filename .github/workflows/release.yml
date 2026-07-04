@@ -359,7 +359,10 @@ jobs:
 
   build-desktop:
     name: Build desktop ${{ matrix.platform }}
-    needs: resolve-channel
+    # Also needs build-cli: the posthastectl sidecar (RFC-L2-scripting §7 rider
+    # 9/14) is bundled into the app from build-cli's raw cross-compiled binaries,
+    # so this job downloads that artifact and stages it before `tauri build`.
+    needs: [resolve-channel, build-cli]
     runs-on: ${{ matrix.os }}
     env:
       # Resolved by apps/desktop/build.rs into a compile-time constant the binary
@@ -375,9 +378,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # cli_platform / target_triple: the posthastectl sidecar is staged as
+          # apps/desktop/binaries/posthastectl-<target_triple>[.exe] before the
+          # tauri build. cli_platform selects build-cli's raw artifact
+          # (PosthasteCTL[Nightly]-<cli_platform>); target_triple is the Rust
+          # host triple of this runner, which is the exact suffix Tauri's
+          # externalBin resolver expects for this platform.
           - os: ubuntu-latest
             platform: linux-x86_64
             bundle_targets: appimage
+            cli_platform: linux-x64
+            target_triple: x86_64-unknown-linux-gnu
           # Pinned to macos-14 (arm64): the DMG step (bundle_dmg.sh) hits the
           # hdiutil "Resource busy" flake far less on macos-14 than on newer
           # runner images. Same architecture as macos-latest, so the artifact
@@ -390,9 +401,15 @@ jobs:
             # step codesign-verifies the .app, which dmg-only bundling does not
             # leave in bundle/macos/.
             bundle_targets: app,dmg
+            # macos-14 is Apple Silicon, so the desktop app builds aarch64 and
+            # the matching sidecar is the darwin-arm64 CLI.
+            cli_platform: darwin-arm64
+            target_triple: aarch64-apple-darwin
           - os: windows-latest
             platform: windows-x86_64
             bundle_targets: nsis
+            cli_platform: windows-x64
+            target_triple: x86_64-pc-windows-msvc
 
     steps:
       - uses: actions/checkout@v4
@@ -428,6 +445,41 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
+
+      # -- posthastectl sidecar (RFC-L2-scripting §7 rider 9/14) ---------------
+      # Bundle posthastectl INTO the desktop app so the app's Tauri updater
+      # carries app + embedded server + CLI as one unit. Tauri's
+      # `bundle.externalBin` (tauri.conf.json: "binaries/posthastectl") requires
+      # the resolved binary to exist at
+      #   apps/desktop/binaries/posthastectl-<target_triple>[.exe]
+      # BEFORE `tauri build` runs (externalBin is validated at bundle time). We
+      # reuse build-cli's cross-compiled raw binaries instead of rebuilding.
+      # Tauri strips the -<triple> suffix when it copies the binary into the
+      # bundle, so the INSTALLED name is `posthastectl` (posthastectl.exe on
+      # Windows) — exactly what posthaste-wizard's sidecar_candidates() expects
+      # (crates/posthaste-wizard/src/ctl.rs, ctl_binary_name()).
+      - name: Download posthastectl raw binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: posthaste-cli-raw
+          path: cli-raw
+
+      - name: Stage posthastectl as the Tauri sidecar
+        shell: bash
+        run: |
+          ext=""
+          [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          src="cli-raw/${POSTHASTE_CLI_NAME}-${{ matrix.cli_platform }}${ext}"
+          dest="apps/desktop/binaries/posthastectl-${{ matrix.target_triple }}${ext}"
+          mkdir -p apps/desktop/binaries
+          if [ ! -f "$src" ]; then
+            echo "sidecar source binary not found: $src" >&2
+            ls -la cli-raw >&2 || true
+            exit 1
+          fi
+          cp "$src" "$dest"
+          chmod +x "$dest"
+          echo "staged Tauri sidecar: $dest"
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
@@ -516,10 +568,16 @@ jobs:
           fi
           # Channel identity + updater endpoint are baked in at build time via
           # --config so an artifact cannot switch channels.
-          config='{"build":{"beforeBuildCommand":null}'
+          # externalBin is injected HERE (not committed in tauri.conf.json): the
+          # Tauri context validates externalBin at compile time, so a committed
+          # entry would make every plain `cargo check` of the desktop crate
+          # demand the staged binary (breaking CI/dev). The release build stages
+          # it (step above) and merges it in via --config.
+          config='{"build":{"beforeBuildCommand":null},"bundle":{"externalBin":["binaries/posthastectl"]'
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            config="${config},\"bundle\":{\"createUpdaterArtifacts\":true}"
+            config="${config},\"createUpdaterArtifacts\":true}"
           else
+            config="${config}}"
             echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
           fi
           config="${config},\"identifier\":\"$POSTHASTE_IDENTIFIER\",\"productName\":\"$POSTHASTE_PRODUCT_NAME\",\"plugins\":{\"updater\":{\"endpoints\":[\"$POSTHASTE_UPDATER_ENDPOINT\"]}}}"
@@ -606,12 +664,34 @@ jobs:
           fi
           identity_config="\"identifier\":\"$POSTHASTE_IDENTIFIER\",\"productName\":\"$POSTHASTE_PRODUCT_NAME\","
           updater_config="\"plugins\":{\"updater\":{\"endpoints\":[\"$POSTHASTE_UPDATER_ENDPOINT\"]}}}"
+          # !!! HIGHEST-RISK SIGNING DETAIL — do not remove without understanding !!!
+          # The posthastectl sidecar (RFC-L2-scripting §7 rider 9) is a Bun
+          # `--compile` binary that JIT-compiles at runtime. Under the hardened
+          # runtime (developer-id path below) the JIT is BLOCKED unless the
+          # signature carries the allow-jit / allow-unsigned-executable-memory /
+          # disable-library-validation entitlements — the SAME plist the
+          # standalone CLI is signed with in tools/release/sign-and-package-cli.sh.
+          #
+          # Ordering is already correct and DOES NOT need a manual pre-sign:
+          # tauri-bundler copies externalBin into Contents/MacOS, then codesigns
+          # INSIDE-OUT (nested sidecars/frameworks first, app bundle last) using
+          # ONE global entitlements path for every SignTarget — so setting
+          # bundle.macOS.entitlements makes Tauri sign the nested posthastectl
+          # WITH these entitlements during its own pass, before notarization runs
+          # over the whole .app. Without this key Tauri would re-sign the sidecar
+          # with hardened runtime and NO entitlements, stripping the JIT
+          # capability and crashing the CLI on first launch. Path is relative to
+          # tauri.conf.json (apps/desktop), same resolution as the icon config.
+          # Applied on both signing branches (harmless under ad-hoc / hardened
+          # runtime off). VERIFY on the next release run: `codesign -d
+          # --entitlements - <app>/Contents/MacOS/posthastectl` must list allow-jit.
+          sidecar_entitlements="../../tools/release/posthastectl-entitlements.plist"
           if [ "${POSTHASTE_MACOS_SIGNING:-adhoc}" = "developer-id" ]; then
             echo "Building macOS bundle with Apple signing identity: ${APPLE_SIGNING_IDENTITY}"
-            macos_bundle_config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}},${identity_config}${updater_config}"
+            macos_bundle_config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{\"externalBin\":[\"binaries/posthastectl\"],${updater}\"macOS\":{\"entitlements\":\"${sidecar_entitlements}\",\"hardenedRuntime\":true}},${identity_config}${updater_config}"
           else
             echo "Building macOS bundle with ad-hoc signing. Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets to use Apple Developer signing."
-            macos_bundle_config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},${identity_config}${updater_config}"
+            macos_bundle_config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{\"externalBin\":[\"binaries/posthastectl\"],${updater}\"macOS\":{\"entitlements\":\"${sidecar_entitlements}\",\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},${identity_config}${updater_config}"
           fi
 
           # Per-channel app icon: merged via a second --config (deep-merge;
