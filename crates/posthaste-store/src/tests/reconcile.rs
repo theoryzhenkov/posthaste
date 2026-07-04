@@ -114,6 +114,139 @@ fn reconcile_retains_message_delivered_in_a_later_chunk() -> Result<(), StoreErr
 }
 
 #[test]
+fn floor_guard_refuses_prune_on_empty_remote_set() -> Result<(), StoreError> {
+    // DS1 mail-loss: a transiently-empty-but-`Ok` remote query (or any empty
+    // remote id set reaching prune-by-absence) must NOT wipe the local store.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    for i in 1..=3 {
+        apply_upsert_chunk(
+            &store,
+            &account,
+            vec![sample_message(
+                &format!("message-{i}"),
+                "inbox",
+                Some(&format!("mime-{i}")),
+            )],
+        )?;
+    }
+
+    store.reconcile_sync(
+        &account,
+        &SyncReconciliation {
+            remote_message_ids: Vec::new(),
+            remote_mailbox_ids: Vec::new(),
+            prune_messages: true,
+            prune_mailboxes: false,
+            cursors: vec![message_cursor("state-final", "2026-03-31T10:05:00Z")],
+        },
+    )?;
+
+    // The store is preserved; the cursor still advances (the prune was skipped,
+    // not the whole pass).
+    assert_eq!(
+        store.list_messages(&account, None)?.len(),
+        3,
+        "an empty remote set must not prune the local store",
+    );
+    let cursor = store.get_cursor(&account, SyncObject::Message)?;
+    assert_eq!(cursor.map(|cursor| cursor.state), Some("state-final".into()));
+    Ok(())
+}
+
+#[test]
+fn floor_guard_refuses_prune_on_drastic_shrink() -> Result<(), StoreError> {
+    // DS1 mail-loss: a remote set drastically smaller than the local store (an
+    // id set that slipped past the completeness check) must not silently wipe
+    // most of the mailbox. Four local, remote of one → would prune 3 (> 50%).
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    for i in 1..=4 {
+        apply_upsert_chunk(
+            &store,
+            &account,
+            vec![sample_message(
+                &format!("message-{i}"),
+                "inbox",
+                Some(&format!("mime-{i}")),
+            )],
+        )?;
+    }
+
+    store.reconcile_sync(
+        &account,
+        &SyncReconciliation {
+            remote_message_ids: vec![MessageId::from("message-1")],
+            remote_mailbox_ids: Vec::new(),
+            prune_messages: true,
+            prune_mailboxes: false,
+            cursors: Vec::new(),
+        },
+    )?;
+
+    assert_eq!(
+        store.list_messages(&account, None)?.len(),
+        4,
+        "a drastic remote shrink must not prune past the floor",
+    );
+    Ok(())
+}
+
+#[test]
+fn floor_guard_allows_ordinary_deletion_below_floor() -> Result<(), StoreError> {
+    // The guard must not over-correct into never-pruning: a genuine deletion of
+    // one message from an otherwise-complete remote set (well under the floor)
+    // still prunes normally. Four local, remote of three → prune exactly one.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    for i in 1..=4 {
+        apply_upsert_chunk(
+            &store,
+            &account,
+            vec![sample_message(
+                &format!("message-{i}"),
+                "inbox",
+                Some(&format!("mime-{i}")),
+            )],
+        )?;
+    }
+
+    store.reconcile_sync(
+        &account,
+        &SyncReconciliation {
+            remote_message_ids: vec![
+                MessageId::from("message-1"),
+                MessageId::from("message-2"),
+                MessageId::from("message-3"),
+            ],
+            remote_mailbox_ids: Vec::new(),
+            prune_messages: true,
+            prune_mailboxes: false,
+            cursors: Vec::new(),
+        },
+    )?;
+
+    let messages = store.list_messages(&account, None)?;
+    assert_eq!(messages.len(), 3, "a single genuine deletion still prunes");
+    assert!(
+        store
+            .get_message_detail(&account, &MessageId::from("message-4"))?
+            .is_none(),
+        "message-4, absent from the complete remote set, is pruned",
+    );
+    Ok(())
+}
+
+#[test]
 fn reconcile_prunes_mailboxes_absent_from_remote_set() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;

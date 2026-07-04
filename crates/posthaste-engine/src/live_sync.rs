@@ -197,6 +197,7 @@ pub(crate) async fn sync_account_streamed(
         }
         StreamedEmailSync::FullStreamed {
             remote_message_ids,
+            remote_ids_complete,
             cursor: message_cursor,
         } => Ok(SyncOutcome {
             reconciliation: Some(SyncReconciliation {
@@ -210,7 +211,12 @@ pub(crate) async fn sync_account_streamed(
                 } else {
                     Vec::new()
                 },
-                prune_messages: true,
+                // DS1 mail-loss guard: only prune-by-absence when the remote id
+                // set was proven exhaustive. A capped/incomplete `Email/query`
+                // still upserts every page it retrieved (already emitted to the
+                // sink above), but must NOT drive deletion, or mail beyond the
+                // server cap would be durably removed from the local store.
+                prune_messages: remote_ids_complete,
                 prune_mailboxes,
                 cursors: vec![mailbox_sync.cursor, message_cursor],
             }),

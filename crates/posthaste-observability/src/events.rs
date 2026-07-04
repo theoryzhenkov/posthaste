@@ -86,6 +86,13 @@ pub const JMAP_EMAIL_FULL_METADATA_PROGRESS: LogEvent =
     LogEvent::new("jmap.email.full_metadata_progress");
 pub const JMAP_EMAIL_FULL_SNAPSHOT_FETCHED: LogEvent =
     LogEvent::new("jmap.email.full_snapshot_fetched");
+/// The paginated full-snapshot `Email/query` could not be proven exhaustive
+/// (server capped the result and did not advance, or the reported `total` was
+/// not reached). The remote id set is treated as INCOMPLETE, so this cycle
+/// upserts what it retrieved but refuses prune-by-absence — never delete local
+/// mail against an id set that is not provably the full remote truth.
+pub const JMAP_EMAIL_FULL_QUERY_INCOMPLETE: LogEvent =
+    LogEvent::new("jmap.email.full_query_incomplete");
 pub const JMAP_MAILBOX_DELTA_COMPLETED: LogEvent = LogEvent::new("jmap.mailbox.delta.completed");
 pub const JMAP_MAILBOX_DELTA_STARTED: LogEvent = LogEvent::new("jmap.mailbox.delta.started");
 pub const JMAP_MAILBOX_DELTA_UNAVAILABLE: LogEvent =
@@ -166,6 +173,14 @@ pub const IMAP_SYNC_FETCH_STARTED: LogEvent = LogEvent::new("imap.sync.fetch_sta
 pub const STORE_CACHE_ORPHANS_PRUNED: LogEvent = LogEvent::new("store.cache.orphans_pruned");
 pub const STORE_CACHE_STRUCTURAL_BODY_REPAIRED: LogEvent =
     LogEvent::new("store.cache.structural_body_repaired");
+/// The full-snapshot prune-by-absence floor guard tripped: the remote id set
+/// was empty or drastically smaller than the local store, so pruning was
+/// refused and the local store preserved (a transiently-empty-but-`Ok` remote
+/// query, or an id set that slipped past the completeness check, must never
+/// silently wipe local mail). A legitimate mass deletion must arrive via an
+/// explicit full-resync signal, not an unbounded absence-prune.
+pub const STORE_SYNC_ABSENCE_PRUNE_REFUSED: LogEvent =
+    LogEvent::new("store.sync.absence_prune_refused");
 pub const STORE_SYNC_BATCH_APPLIED: LogEvent = LogEvent::new("store.sync.batch_applied");
 pub const STORE_SYNC_BATCH_APPLYING: LogEvent = LogEvent::new("store.sync.batch_applying");
 /// The deferred post-startup body-cache repair (RFC-L2-lifecycle N15 / M27
