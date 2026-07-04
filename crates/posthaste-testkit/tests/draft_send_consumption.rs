@@ -19,10 +19,11 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_domain_model::{AccountId, MessageId, Recipient, SendMessageRequest};
+use posthaste_domain_model::{AccountId, MessageId, OperationKind, Recipient, SendMessageRequest};
 use posthaste_client_link::RuntimeLink;
 use posthaste_contract_core::{
-    AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot,
+    AccountScopeRequest, ClientMutationId, MailListViewState, RuntimeCaller, RuntimeErrorCode,
+    ViewSnapshot,
 };
 use posthaste_runtime_api::{RuntimeMailReadApi, RuntimeMailWriteApi};
 use posthaste_testkit::{
@@ -106,6 +107,7 @@ async fn save_and_flush_draft(
             RuntimeCaller::test(),
             account.clone(),
             Some(draft_key.clone()),
+            None,
             compose_request(subject, None),
         )
         .await
@@ -295,5 +297,273 @@ async fn send_without_draft_id_leaves_saved_drafts_untouched() {
         gmail.mailbox_subjects(MAILBOX_SENT),
         vec!["Standalone send".to_string()],
         "the send still lands its single Sent copy"
+    );
+}
+
+/// The canonical-id twin fix (D128): a Gmail draft, whose UID the server
+/// re-canonicalizes to an `X-GM-MSGID`-based id on sync, must be saved under —
+/// and reconciled to — the SAME id sync will observe. Otherwise the save returns
+/// a UID-based id that never materializes (an orphaned edit session) while the
+/// synced `X-GM-MSGID` row surfaces as a duplicate "twin" in the Drafts list.
+///
+/// This pins both halves: after save + sync there is exactly ONE Drafts row,
+/// under the Gmail canonical id, and a resumed edit's pending `DraftUpdate`
+/// targets that SAME id — proving the compose session was reconciled to the
+/// materialized draft, not stranded beside it.
+#[tokio::test]
+async fn gmail_draft_save_reconciles_to_the_synced_canonical_id_with_no_twin() {
+    let gmail = GmailImapFixture::start_condstore_only().await;
+    let harness = Harness::new().with_runtime().await;
+    let account = harness.create_gmail_account("gmail-draft-twin", &gmail).await;
+
+    // Save + flush + sync (asserts one provider Drafts message internally).
+    let draft_key = save_and_flush_draft(&harness, &account, &gmail, "Draft v1").await;
+
+    // Exactly one local Drafts row — no transient twin — under the Gmail
+    // canonical id the sync materialized.
+    let drafts_mailbox = mailbox_id_by_name(&harness, &account, MAILBOX_DRAFTS).await;
+    let drafts_view = open_mailbox_view(&harness, &account, &drafts_mailbox).await;
+    assert_eq!(
+        drafts_view.rows.len(),
+        1,
+        "exactly one Drafts row after save + sync (no canonical-id twin): {:#?}",
+        drafts_view.rows
+    );
+    let row_id = drafts_view.rows[0]
+        .projection
+        .get("id")
+        .and_then(|id| id.as_str())
+        .expect("the row projection carries the message id")
+        .to_string();
+    assert!(
+        row_id.starts_with("imap:gmail:msgid:"),
+        "the synced draft row is under the Gmail canonical id, got {row_id}"
+    );
+
+    // Resume the edit. The pending DraftUpdate must target the SAME canonical id
+    // the sync materialized — without the twin fix it would target the orphaned
+    // UID-based id save used to return, stranding the compose session.
+    harness
+        .core()
+        .save_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(draft_key.clone()),
+            None,
+            compose_request("Draft v2", None),
+        )
+        .await
+        .expect("resumed edit should save");
+    let pending = harness
+        .core()
+        .list_pending_operations(RuntimeCaller::test(), account.clone())
+        .await
+        .expect("pending operations should list");
+    let edit = pending
+        .iter()
+        .find(|op| op.kind == OperationKind::DraftUpdate)
+        .expect("the resumed edit enqueues a DraftUpdate");
+    assert_eq!(
+        edit.entity.id, row_id,
+        "the resumed edit targets the synced draft id, not an orphaned UID-based twin"
+    );
+}
+
+/// Count the pending draft save/update operations for an account.
+async fn pending_draft_save_count(harness: &RuntimeHarness, account: &AccountId) -> usize {
+    harness
+        .core()
+        .list_pending_operations(RuntimeCaller::test(), account.clone())
+        .await
+        .expect("pending operations should list")
+        .iter()
+        .filter(|op| {
+            matches!(
+                op.kind,
+                OperationKind::DraftCreate | OperationKind::DraftUpdate
+            )
+        })
+        .count()
+}
+
+/// The apply-ledger on the draft routes (D128, closing the ruling-24 flag): a
+/// redelivered save under the SAME `Idempotency-Key` re-observes the ORIGINAL
+/// operation — same id, byte-identical response — and enqueues no second draft.
+#[tokio::test]
+async fn replayed_save_returns_the_same_operation_and_enqueues_one_draft() {
+    let imap = GmailImapFixture::start_generic_uidplus().await;
+    let harness = Harness::new().with_runtime().await;
+    let account = harness.create_gmail_account("replay-save", &imap).await;
+
+    let key = ClientMutationId::new("save-key-1");
+    let draft = MessageId::from("compose-session-1");
+    let first = harness
+        .core()
+        .save_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(draft.clone()),
+            Some(key.clone()),
+            compose_request("Replayed subject", None),
+        )
+        .await
+        .expect("first save should enqueue");
+    let replay = harness
+        .core()
+        .save_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(draft.clone()),
+            Some(key.clone()),
+            compose_request("Replayed subject", None),
+        )
+        .await
+        .expect("replayed save should return the stored outcome");
+
+    assert_eq!(
+        first.id, replay.id,
+        "a replay under the same key returns the SAME operation id"
+    );
+    assert_eq!(
+        serde_json::to_value(&first).unwrap(),
+        serde_json::to_value(&replay).unwrap(),
+        "a replay returns a byte-identical response"
+    );
+    assert_eq!(
+        pending_draft_save_count(&harness, &account).await,
+        1,
+        "the replay enqueues no second draft version"
+    );
+
+    harness.sync_account(&account).await;
+    assert_eq!(
+        imap.mailbox_message_count(MAILBOX_DRAFTS),
+        1,
+        "exactly one draft reaches the provider Drafts mailbox"
+    );
+}
+
+/// Two saves under DISTINCT keys are two operations — the versioned replace
+/// still applies (a genuine second autosave is not deduped away).
+#[tokio::test]
+async fn distinct_keys_enqueue_two_saves() {
+    let imap = GmailImapFixture::start_generic_uidplus().await;
+    let harness = Harness::new().with_runtime().await;
+    let account = harness.create_gmail_account("distinct-save", &imap).await;
+
+    let draft = MessageId::from("compose-session-1");
+    let first = harness
+        .core()
+        .save_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(draft.clone()),
+            Some(ClientMutationId::new("k1")),
+            compose_request("First", None),
+        )
+        .await
+        .expect("first save");
+    let second = harness
+        .core()
+        .save_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(draft.clone()),
+            Some(ClientMutationId::new("k2")),
+            compose_request("Second", None),
+        )
+        .await
+        .expect("second save");
+
+    assert_ne!(
+        first.id, second.id,
+        "distinct keys produce distinct operations"
+    );
+    assert_eq!(
+        pending_draft_save_count(&harness, &account).await,
+        2,
+        "both saves are enqueued (versioned replace applies)"
+    );
+}
+
+/// Reusing a save key for a delete is a cross-op key reuse → Conflict (distinct
+/// `draft.save` / `draft.delete` op-names guard the ledger).
+#[tokio::test]
+async fn reusing_a_save_key_for_a_delete_conflicts() {
+    let imap = GmailImapFixture::start_generic_uidplus().await;
+    let harness = Harness::new().with_runtime().await;
+    let account = harness.create_gmail_account("cross-op", &imap).await;
+
+    let key = ClientMutationId::new("shared-key");
+    let draft = MessageId::from("compose-session-1");
+    harness
+        .core()
+        .save_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(draft.clone()),
+            Some(key.clone()),
+            compose_request("Draft", None),
+        )
+        .await
+        .expect("save under the key");
+    let error = harness
+        .core()
+        .delete_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(key.clone()),
+            draft.clone(),
+        )
+        .await
+        .expect_err("reusing the save key for a delete must conflict");
+    assert_eq!(error.envelope().code, RuntimeErrorCode::Conflict);
+}
+
+/// A replayed delete under the same key is idempotent — it re-observes the
+/// original operation instead of enqueuing a second delete.
+#[tokio::test]
+async fn replayed_delete_is_idempotent() {
+    let imap = GmailImapFixture::start_generic_uidplus().await;
+    let harness = Harness::new().with_runtime().await;
+    let account = harness.create_gmail_account("replay-delete", &imap).await;
+
+    let draft = MessageId::from("compose-session-1");
+    harness
+        .core()
+        .save_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(draft.clone()),
+            None,
+            compose_request("Draft to delete", None),
+        )
+        .await
+        .expect("seed a draft to delete");
+
+    let key = ClientMutationId::new("delete-key-1");
+    let first = harness
+        .core()
+        .delete_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(key.clone()),
+            draft.clone(),
+        )
+        .await
+        .expect("first delete");
+    let replay = harness
+        .core()
+        .delete_draft(
+            RuntimeCaller::test(),
+            account.clone(),
+            Some(key.clone()),
+            draft.clone(),
+        )
+        .await
+        .expect("replayed delete re-observes the original");
+    assert_eq!(
+        first.id, replay.id,
+        "a replayed delete returns the same operation id"
     );
 }

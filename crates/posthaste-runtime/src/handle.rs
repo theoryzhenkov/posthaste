@@ -40,7 +40,9 @@ use tokio::sync::broadcast;
 
 use posthaste_link_far_end::down::{Sequenced, Tap, TapResume};
 
-use crate::apply_ledger::{ApplyLedger, Reserved};
+use crate::apply_ledger::{
+    AppliedOutcome, ApplyLedger, Reserved, DRAFT_DELETE_OP, DRAFT_SAVE_OP,
+};
 use crate::near_node::{named_message_assertion, AuthorityServerPendingSet};
 use crate::read::{EventLogFactLog, ReadCache};
 use crate::far_end::links::{MutationAcceptance, LinkRegistry};
@@ -817,16 +819,42 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     /// @spec docs/L1-outbox#operation-model
     async fn save_draft(
         &self,
-        _caller: RuntimeCaller,
+        caller: RuntimeCaller,
         account_id: AccountId,
         draft_id: Option<MessageId>,
+        idempotency_key: Option<ClientMutationId>,
         request: SendMessageRequest,
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .save_draft(account_id, draft_id, request)
-            .await
+        // Keyless save keeps the pre-existing behavior; the enqueued operation's
+        // own id is the only idempotency (a redelivery duplicates the draft).
+        let Some(key) = idempotency_key else {
+            return self
+                .core
+                .authority_server_link
+                .save_draft(account_id, draft_id, request)
+                .await;
+        };
+        // Keyed save (D128): a redelivery under the same key re-observes the
+        // ORIGINAL operation (its id and response), never enqueuing a second
+        // draft version. `draft.save` is a distinct op-name so reusing a key for
+        // a delete (or any other command) Conflicts on the op-name guard.
+        match self.core.apply_ledger.reserve(&caller, &key, DRAFT_SAVE_OP) {
+            Reserved::Return(result) => result.and_then(AppliedOutcome::into_draft),
+            Reserved::Execute => {
+                let result = self
+                    .core
+                    .authority_server_link
+                    .save_draft(account_id, draft_id, request)
+                    .await;
+                self.core.apply_ledger.settle(
+                    &caller,
+                    &key,
+                    result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
+                );
+                result
+            }
+        }
     }
 
     /// Delete a draft local-first, returning the enqueued operation.
@@ -834,15 +862,37 @@ impl RuntimeMailWriteApi for RuntimeHandle {
     /// @spec docs/L1-outbox#operation-model
     async fn delete_draft(
         &self,
-        _caller: RuntimeCaller,
+        caller: RuntimeCaller,
         account_id: AccountId,
+        idempotency_key: Option<ClientMutationId>,
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .delete_draft(account_id, draft_id)
-            .await
+        let Some(key) = idempotency_key else {
+            return self
+                .core
+                .authority_server_link
+                .delete_draft(account_id, draft_id)
+                .await;
+        };
+        // Keyed delete (D128): idempotent under redelivery; `draft.delete` is a
+        // distinct op-name from `draft.save` so cross-op key reuse Conflicts.
+        match self.core.apply_ledger.reserve(&caller, &key, DRAFT_DELETE_OP) {
+            Reserved::Return(result) => result.and_then(AppliedOutcome::into_draft),
+            Reserved::Execute => {
+                let result = self
+                    .core
+                    .authority_server_link
+                    .delete_draft(account_id, draft_id)
+                    .await;
+                self.core.apply_ledger.settle(
+                    &caller,
+                    &key,
+                    result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
+                );
+                result
+            }
+        }
     }
 
     /// List an account's non-terminal outbox operations (pending/failed work),
@@ -913,10 +963,14 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         // Keyed direct-apply (D53 / P8 fix): dedupe at-least-once write-back so a
         // redelivery re-observes the first outcome instead of re-executing.
         match self.core.apply_ledger.reserve(&caller, &key, op.name()) {
-            Reserved::Return(result) => result,
+            Reserved::Return(result) => result.and_then(AppliedOutcome::into_ack),
             Reserved::Execute => {
                 let result = self.core.authority_server_link.apply(op).await;
-                self.core.apply_ledger.settle(&caller, &key, &result);
+                self.core.apply_ledger.settle(
+                    &caller,
+                    &key,
+                    result.as_ref().map(|ack| AppliedOutcome::Ack(ack.clone())),
+                );
                 result
             }
         }

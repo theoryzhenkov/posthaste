@@ -1,3 +1,7 @@
+use axum::http::HeaderMap;
+
+use crate::api::message_commands::idempotency_key;
+
 use super::*;
 
 /// POST /v1/sources/{source_id}/commands/send
@@ -60,17 +64,22 @@ pub struct DeleteDraftRequest {
     tag = "messages",
     summary = "Save draft",
     description = "Enqueues a local-first draft create/update; flushed to the provider Drafts mailbox when connected.",
-    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("Idempotency-Key" = Option<String>, Header, description = "Client-supplied idempotency key (RFC-L2-drafts D128): a redelivery under the same key returns the original operation (same id and response) instead of enqueuing a second draft; reusing a key with a different operation is 409 Conflict.")
+    ),
     request_body = SaveDraftRequest,
     responses(
         (status = 200, description = "Draft operation enqueued", body = Operation),
         (status = 400, description = "Invalid draft request", body = ApiErrorBody),
+        (status = 409, description = "Idempotency key reused with a different operation", body = ApiErrorBody),
         (status = 503, description = "Runtime unavailable", body = ApiErrorBody)
     )
 )]
 pub async fn save_draft(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
+    headers: HeaderMap,
     Json(request): Json<SaveDraftRequest>,
 ) -> Result<Json<Operation>, ApiError> {
     if request
@@ -91,6 +100,7 @@ pub async fn save_draft(
             RuntimeCaller::api(),
             AccountId(source_id),
             request.draft_id.map(MessageId),
+            idempotency_key(&headers),
             request.message,
         )
         .await
@@ -107,16 +117,21 @@ pub async fn save_draft(
     tag = "messages",
     summary = "Delete draft",
     description = "Enqueues a local-first draft deletion; flushed to the provider when connected.",
-    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("Idempotency-Key" = Option<String>, Header, description = "Client-supplied idempotency key (RFC-L2-drafts D128): a redelivery under the same key returns the original operation instead of enqueuing a second deletion; reusing a key with a different operation is 409 Conflict.")
+    ),
     request_body = DeleteDraftRequest,
     responses(
         (status = 200, description = "Draft deletion enqueued", body = Operation),
+        (status = 409, description = "Idempotency key reused with a different operation", body = ApiErrorBody),
         (status = 503, description = "Runtime unavailable", body = ApiErrorBody)
     )
 )]
 pub async fn delete_draft(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
+    headers: HeaderMap,
     Json(request): Json<DeleteDraftRequest>,
 ) -> Result<Json<Operation>, ApiError> {
     state
@@ -124,6 +139,7 @@ pub async fn delete_draft(
         .delete_draft(
             RuntimeCaller::api(),
             AccountId(source_id),
+            idempotency_key(&headers),
             MessageId(request.draft_id),
         )
         .await

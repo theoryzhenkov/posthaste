@@ -2663,6 +2663,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-drafts D128): a redelivery under the same key returns the original operation instead of enqueuing a second deletion; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -2682,6 +2694,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key reused with a different operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
                 }
               }
             }
@@ -3126,6 +3148,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-supplied idempotency key (RFC-L2-drafts D128): a redelivery under the same key returns the original operation (same id and response) instead of enqueuing a second draft; reusing a key with a different operation is 409 Conflict.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -3151,6 +3185,16 @@
           },
           "400": {
             "description": "Invalid draft request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key reused with a different operation",
             "content": {
               "application/json": {
                 "schema": {
