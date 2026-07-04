@@ -487,10 +487,28 @@ an `exec` rule — is a deliberate, file-system-level act by the host operator.
 ## Agent via MCP
 
 The north-star agent flow (RFC-L2-scripting ruling 22): a **rule at the
-authority server** provides the *trigger*, and a **persistent localhost agent,
-connected once over MCP**, provides the *capability*. One connection gives the
-agent both — it is pushed each `rule.fired` fact as an MCP notification and acts
-through the same typed tools, with **no script and no hand-written types**.
+authority server** provides the *trigger*, and a **localhost agent connected
+over MCP** provides the *capability* (typed tools + a live event feed).
+
+**Capability vs. wake — read this first.** MCP's transport is bidirectional:
+the server pushes each `rule.fired` fact to the connected client as a
+`notifications/message`. But delivery is not the same as *waking* your agent.
+A standard MCP host (a chat app) treats that notification as **logging** — it
+does NOT autonomously start a model turn. The event wakes the agent only if the
+agent's **runtime is built to consume the notification stream as work** (a
+purpose-built loop — see [Reference: a wake-on-event agent
+loop](#reference-a-wake-on-event-agent-loop) below). So there are two shapes:
+
+- **Capability-only (stock host):** connect the MCP server to your host for the
+  tools; you (or an agentic loop) drive turns. Good for "I ask my agent to
+  triage my inbox," not for "act automatically when mail arrives."
+- **Wake + capability:** to have a server-side event *trigger* the agent
+  automatically, EITHER run a purpose-built MCP loop that blocks on
+  notifications and acts, OR use a **push-to-a-runner rule** —
+  `webhook`/`exec` (the server invokes your agent), or `hook serve` /
+  `watch --exec` at the edge. The runner wakes the agent; MCP (or REST) gives
+  it capability. `emit` + MCP-notifications is the elegant path *only* once the
+  consuming loop exists.
 
 Posthaste ships an MCP server (`apps/mcp` — the same package as `posthastectl`).
 It exposes:
