@@ -54,6 +54,7 @@ interface MessageDetailProps {
   selection: MessageSelection | null
   onArchive: () => void
   onSnooze: (until: number) => void
+  onDiscardDraft?: () => void
   onEditDraft?: () => void
   onForward: () => void
   onOpenFocusedMessage?: () => void
@@ -75,6 +76,7 @@ export function MessageDetail({
   selection,
   onArchive,
   onSnooze,
+  onDiscardDraft,
   onEditDraft,
   onForward,
   onOpenFocusedMessage,
@@ -194,6 +196,7 @@ export function MessageDetail({
         message={message}
         onArchive={onArchive}
         onSnooze={onSnooze}
+        onDiscardDraft={onDiscardDraft}
         onEditDraft={onEditDraft}
         onForward={onForward}
         onOpenFocusedMessage={onOpenFocusedMessage}

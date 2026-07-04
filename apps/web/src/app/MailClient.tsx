@@ -249,6 +249,7 @@ export function MailClient({
           onApplySearch={handlers.handleApplySearch}
           onArchive={handlers.handleArchive}
           onSnooze={handlers.handleSnooze}
+          onDiscardDraft={handlers.handleDiscardDraft}
           onEditDraft={handlers.handleEditDraft}
           onClearSearch={handlers.handleRejectSearchPreview}
           onClearSelectedMessage={handlers.handleClearSelectedMessage}
