@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, RefreshCw, Settings } from 'lucide-react'
 
 import type { AccountAppearance, Mailbox } from '@/api/types'
 import { useMailboxColorLookup } from '@/hooks/useMailboxColors'
+import { useMailboxCounts } from '@/live-store/store'
 
 import { AccountMark } from '../AccountMark'
 import type { SidebarSelection } from '../Sidebar'
@@ -46,10 +47,17 @@ export function SourceSection({
   onSyncSource: (sourceId: string) => void
 }) {
   const mailboxColorHue = useMailboxColorLookup()
+  // The account header's aggregate unread reflects live COUNTS (D116): sum each
+  // mailbox's live count, falling back to the query's server count when no frame
+  // has seeded a live entry yet (bootstrap).
+  const liveCounts = useMailboxCounts(source.id)
   const unreadTotal = useMemo(
     () =>
-      source.mailboxes.reduce((sum, mailbox) => sum + mailbox.unreadEmails, 0),
-    [source.mailboxes],
+      source.mailboxes.reduce((sum, mailbox) => {
+        const live = liveCounts[mailbox.id]
+        return sum + (live ? live.unread : mailbox.unreadEmails)
+      }, 0),
+    [source.mailboxes, liveCounts],
   )
 
   const headerButton = (
