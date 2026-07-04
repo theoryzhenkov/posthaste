@@ -40,7 +40,6 @@ export function MessageListRows({
   isPaneActive,
   viewRole,
   viewportHeight,
-  showSourceMailbox,
   mailboxDirectory,
   excludeMailboxId,
 }: {
@@ -64,11 +63,10 @@ export function MessageListRows({
   isPaneActive: boolean
   viewRole: string | null
   viewportHeight: number
-  /** Per-view "show source mailbox" toggle state (top-bar control). */
-  showSourceMailbox: boolean
+  /** Cache-only mailbox resolver, consumed by the `sourceMailbox` column cell. */
   mailboxDirectory: MailboxDirectory
   /** The mailbox already being viewed (single source-mailbox views), excluded
-   *  from the chip's candidate memberships when possible. */
+   *  from the `sourceMailbox` cell's candidate memberships when possible. */
   excludeMailboxId: string | null
 }) {
   const rowHeight = messageRowHeight(useDesignTheme().density)
@@ -114,7 +112,6 @@ export function MessageListRows({
                 onViewConversation={onViewConversation}
                 treeRow={treeMode ? row : undefined}
                 onToggleCollapse={onToggleCollapse}
-                showSourceMailbox={showSourceMailbox}
                 mailboxDirectory={mailboxDirectory}
                 excludeMailboxId={excludeMailboxId}
               />

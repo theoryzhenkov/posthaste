@@ -1,10 +1,7 @@
 import { X } from 'lucide-react'
 
 import { ActionBar } from '@/components/ActionBar'
-import {
-  isAggregateMessageView,
-  viewModeKey,
-} from '@/components/message-list/model'
+import { viewModeKey } from '@/components/message-list/model'
 import type { EmailActions } from '@/hooks/useEmailActions'
 
 import { MailOverlays } from './MailOverlays'
@@ -27,10 +24,6 @@ export function MailClientView(props: MailClientViewProps) {
             ? null
             : viewModeKey(props.effectiveView, props.searchQuery)
         }
-        showSourceMailboxDefault={isAggregateMessageView(
-          props.effectiveView,
-          props.searchQuery,
-        )}
         onClearSearch={props.onClearSearch}
         onCompose={props.onCompose}
         onOpenCommandPalette={props.onOpenCommandPalette}

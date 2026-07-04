@@ -16,7 +16,6 @@ import type { MessageSummary } from '../api/types'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { cn } from '../lib/utils'
 import type { ConversationTreeRow } from './message-list/conversationTree'
-import { MailboxChip } from './message-list/MailboxChip'
 import { messageKey } from './message-list/model'
 import type { MailboxDirectory } from './message-list/useMailboxDirectory'
 import {
@@ -28,6 +27,7 @@ import {
 } from './ui/context-menu'
 import {
   type ColumnId,
+  type ColumnRenderContext,
   type ThreadListLayout,
   getColumnDef,
 } from './thread-list/columns'
@@ -51,11 +51,10 @@ interface MessageRowProps {
   /** Toggle one node's collapse state, keyed by message key (conversation view
    *  only). */
   onToggleCollapse?: (messageKey: string) => void
-  /** Per-view "show source mailbox" toggle state (top-bar control). */
-  showSourceMailbox: boolean
+  /** Cache-only mailbox resolver, consumed by the `sourceMailbox` column cell. */
   mailboxDirectory: MailboxDirectory
   /** The mailbox already being viewed (single source-mailbox views), excluded
-   *  from the chip's candidate memberships when possible. */
+   *  from the `sourceMailbox` cell's candidate memberships when possible. */
   excludeMailboxId: string | null
 }
 
@@ -82,14 +81,14 @@ export const MessageRow = memo(function MessageRow({
   onViewConversation,
   treeRow,
   onToggleCollapse,
-  showSourceMailbox,
   mailboxDirectory,
   excludeMailboxId,
 }: MessageRowProps) {
   const messageRef = { messageId: message.id, sourceId: message.sourceId }
-  const resolvedMailbox = showSourceMailbox
-    ? mailboxDirectory.resolve(message, excludeMailboxId)
-    : null
+  const renderContext: ColumnRenderContext = {
+    mailboxDirectory,
+    excludeMailboxId,
+  }
   const handleSelect = useCallback(() => {
     onSelectMessage(message)
   }, [message, onSelectMessage])
@@ -146,25 +145,11 @@ export const MessageRow = memo(function MessageRow({
                 def.align === 'center' && 'justify-center px-0',
               )}
             >
-              {def.render(message)}
+              {def.render(message, renderContext)}
             </div>
           )
         })}
       </div>
-      {resolvedMailbox && (
-        <div className="flex h-full shrink-0 items-center overflow-hidden pr-2.5">
-          <MailboxChip
-            name={resolvedMailbox.mailbox.name}
-            role={resolvedMailbox.mailbox.role}
-            accountName={
-              resolvedMailbox.isMultiAccount
-                ? resolvedMailbox.accountName
-                : null
-            }
-            className="max-w-32"
-          />
-        </div>
-      )}
     </button>
   )
 

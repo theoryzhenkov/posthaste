@@ -1,7 +1,6 @@
 import { Command, Moon, PenSquare, Settings, SunMedium, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { ShowSourceMailboxToggle } from './message-list/ShowSourceMailboxToggle'
 import { ViewModeToggle } from './message-list/ViewModeToggle'
 import { NotificationsButton } from './NotificationsButton'
 import { TrafficLightInset, WINDOW_TITLEBAR_HEIGHT } from './WindowChrome'
@@ -19,13 +18,8 @@ interface ActionBarProps {
   isSettingsOpen: boolean
   searchQuery: string
   /** Per-view key for the conversation/flat toggle, or null to hide it (no mail
-   *  view is active, e.g. settings is open). Also doubles as the "show source
-   *  mailbox" toggle's view key — both toggles share the same view identity. */
+   *  view is active, e.g. settings is open). */
   viewModeKey: string | null
-  /** Default for the "show source mailbox" toggle when the user hasn't
-   *  explicitly overridden it for this view; ignored when `viewModeKey` is
-   *  null. */
-  showSourceMailboxDefault: boolean
   onClearSearch: () => void
   onCompose: () => void
   onOpenCommandPalette: () => void
@@ -105,7 +99,6 @@ export function ActionBar({
   isSettingsOpen,
   searchQuery,
   viewModeKey,
-  showSourceMailboxDefault,
   onClearSearch,
   onCompose,
   onOpenCommandPalette,
@@ -131,10 +124,6 @@ export function ActionBar({
       {viewModeKey !== null && (
         <div className="flex items-center gap-1.5">
           <ViewModeToggle viewModeKey={viewModeKey} />
-          <ShowSourceMailboxToggle
-            viewKey={viewModeKey}
-            defaultValue={showSourceMailboxDefault}
-          />
         </div>
       )}
 
