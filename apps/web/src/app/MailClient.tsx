@@ -246,6 +246,7 @@ export function MailClient({
           showShortcuts={showShortcuts}
           tags={tagsQuery.data ?? []}
           viewRole={viewRole}
+          onAddTag={handlers.handleAddTag}
           onApplySearch={handlers.handleApplySearch}
           onArchive={handlers.handleArchive}
           onSnooze={handlers.handleSnooze}
@@ -263,6 +264,7 @@ export function MailClient({
           onOpenSettings={handlers.handleOpenSettings}
           onPlaceholderAction={handlers.handlePlaceholderAction}
           onRejectSearchPreview={handlers.handleRejectSearchPreview}
+          onRemoveTag={handlers.handleRemoveTag}
           onReply={handlers.handleReply}
           onSearch={handlers.handleSearch}
           onSelectMessage={handlers.handleSelectMessage}

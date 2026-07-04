@@ -28,6 +28,8 @@ import { Command, CommandInput } from './ui/command'
 
 interface CommandPaletteProps {
   hasSelectedMessage: boolean
+  selectedMessageTags: readonly string[]
+  onAddTag: (tag: string) => void
   onApplySearch: (query: string) => void
   onArchive: () => void
   onClose: () => void
@@ -35,6 +37,7 @@ interface CommandPaletteProps {
   onOpenSettings: (category?: SettingsCategory) => void
   onOpenShortcuts: () => void
   onPlaceholderAction: (label: string) => void
+  onRemoveTag: (tag: string) => void
   onReply: () => void
   onSelectMessage: (selection: MailSelection) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
@@ -48,6 +51,8 @@ interface CommandPaletteProps {
 
 export function CommandPalette({
   hasSelectedMessage,
+  selectedMessageTags,
+  onAddTag,
   onApplySearch,
   onArchive,
   onClose,
@@ -55,6 +60,7 @@ export function CommandPalette({
   onOpenSettings,
   onOpenShortcuts,
   onPlaceholderAction,
+  onRemoveTag,
   onReply,
   onSelectMessage,
   onSelectSmartMailbox,
@@ -63,7 +69,7 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const { activeSelectedIndex, itemRows, search, selectedValue } =
-    useCommandPaletteSearch({ hasSelectedMessage, query })
+    useCommandPaletteSearch({ hasSelectedMessage, query, selectedMessageTags })
 
   function handleQueryChange(value: string) {
     setQuery(value)
@@ -88,12 +94,14 @@ export function CommandPalette({
 
   const paletteActionHandlers = useMemo(
     () => ({
+      onAddTag,
       onApplySearch,
       onArchive,
       onCompose,
       onOpenSettings,
       onOpenShortcuts,
       onPlaceholderAction,
+      onRemoveTag,
       onReply,
       onSelectMessage,
       onSelectSmartMailbox,
@@ -105,12 +113,14 @@ export function CommandPalette({
       },
     }),
     [
+      onAddTag,
       onApplySearch,
       onArchive,
       onCompose,
       onOpenSettings,
       onOpenShortcuts,
       onPlaceholderAction,
+      onRemoveTag,
       onReply,
       onSelectMessage,
       onSelectSmartMailbox,

@@ -97,6 +97,8 @@ export type PaletteAction =
   | { kind: 'open-compose'; intent: ComposeIntent }
   | { kind: 'open-contact'; contactId: string; query: string }
   | { kind: 'replace-query'; query: string }
+  | { kind: 'add-tag-to-message'; tag: string }
+  | { kind: 'remove-tag-from-message'; tag: string }
   | { kind: 'noop'; label: string }
 
 export type CommandActionId =

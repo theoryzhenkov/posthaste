@@ -63,10 +63,15 @@ export function MailOverlays(props: MailClientViewProps) {
 }
 
 function CommandPaletteOverlay(props: MailClientViewProps) {
+  const selectedMessageTags = (
+    props.selectedMessageData?.keywords ?? []
+  ).filter((keyword) => !keyword.startsWith('$'))
   return (
     <Suspense fallback={null}>
       <CommandPalette
         hasSelectedMessage={props.selectedMessage !== null}
+        selectedMessageTags={selectedMessageTags}
+        onAddTag={props.onAddTag}
         onApplySearch={props.onApplySearch}
         onArchive={props.onArchive}
         onClose={props.onCloseCommandPalette}
@@ -74,6 +79,7 @@ function CommandPaletteOverlay(props: MailClientViewProps) {
         onOpenSettings={props.onOpenSettings}
         onOpenShortcuts={props.onShowShortcuts}
         onPlaceholderAction={props.onPlaceholderAction}
+        onRemoveTag={props.onRemoveTag}
         onReply={props.onReply}
         onSelectMessage={props.onSelectMessageRef}
         onSelectSmartMailbox={props.onSelectSmartMailbox}
