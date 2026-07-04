@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 
 import { applyDomainEvent } from '../src/domainCache'
-import { EVENT_TOPICS } from '../src/domainVocabulary'
+import { EVENT_TOPICS } from '../src/api/events.gen'
 import { mailKeys } from '../src/mailState'
 import { queryKeys } from '../src/queryKeys'
 import {

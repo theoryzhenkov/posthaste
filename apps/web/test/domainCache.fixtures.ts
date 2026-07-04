@@ -7,7 +7,7 @@ import type {
   MessagePage,
   MessageSummary,
 } from '../src/api/types'
-import { EVENT_TOPICS } from '../src/domainVocabulary'
+import { EVENT_TOPICS } from '../src/api/events.gen'
 import type { queryKeys } from '../src/queryKeys'
 
 export function createQueryClient() {
