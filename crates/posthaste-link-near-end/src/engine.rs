@@ -125,6 +125,42 @@ struct State {
     shutdown: bool,
 }
 
+/// How a stream-open error's HTTP status maps to the reconnect policy (D110a).
+/// The status band alone drives this — a stream error carries only the status
+/// the host saw at `onopen`, never a typed error envelope (the runtime returns
+/// the 4xx *before* the SSE body), so this is the grounded, not guessed, rule.
+enum StreamErrorAction {
+    /// `404`/`410`: the link the stream targeted is **gone** server-side — idle-
+    /// reaped at `SESSION_IDLE_TTL` (every laptop sleep >5min) or dropped by a
+    /// daemon restart. This is NOT an auth refusal: clear the baked prepared
+    /// state and re-run the prepare handshake against a FRESH link, with the
+    /// jittered reconnect backoff between attempts (no tight re-prepare storm).
+    RePrepare,
+    /// Any other 4xx (`401`/`403` auth refusal, `400`/`409`/`422` …): the
+    /// request as written cannot succeed — stop the loop. `Permanent` is
+    /// reserved for exactly this.
+    Permanent,
+    /// `5xx`, or a statusless mid-stream drop: reconnect the SAME link after
+    /// backoff — the link is still valid, the far end merely blipped.
+    Reconnect,
+}
+
+/// Classify a stream-open error status into its reconnect action (D110a).
+///
+/// The runtime returns `RuntimeError::not_found` → HTTP **404** for a subscribe
+/// against a link it no longer holds — whether reaped or never-existed; it does
+/// not distinguish the two (the smallest correct contract). `410 Gone` is folded
+/// in for forward-compatibility should the server ever start distinguishing a
+/// reaped link. An expired/invalid *auth* token surfaces as `401`/`403`
+/// (`RuntimeError::unauthorized`), which stays `Permanent`.
+fn classify_stream_error(status: Option<u16>) -> StreamErrorAction {
+    match status {
+        Some(404) | Some(410) => StreamErrorAction::RePrepare,
+        Some(status) if classify_status(status).is_permanent() => StreamErrorAction::Permanent,
+        _ => StreamErrorAction::Reconnect,
+    }
+}
+
 /// What the frame loop does after handling one stream message.
 enum MessageOutcome {
     /// Keep reading the current stream.
@@ -200,6 +236,21 @@ impl<W: Wire> NearEnd<W> {
 
     fn is_prepared(&self) -> bool {
         self.state.borrow().prepared
+    }
+
+    /// Clear the prepared connection so [`Self::run`]'s loop re-executes the
+    /// prepare handshake against a **fresh** link (D110a). Called when the server
+    /// reports the current link is stale/absent (404/410): the link token AND the
+    /// resume cursor both belong to the dead link — the cursor is a seq in that
+    /// link's now-defunct seq space, so it must be dropped rather than carried
+    /// into the fresh subscribe. `reconnect_attempt` is deliberately left intact
+    /// so the jittered backoff keeps growing across repeated re-prepare failures
+    /// (no tight re-prepare storm); a clean stream `Open` resets it.
+    fn clear_prepared(&self) {
+        let mut state = self.state.borrow_mut();
+        state.prepared = false;
+        state.token = None;
+        state.cursor = None;
     }
 
     // ---- connection prepare --------------------------------------------------
@@ -357,11 +408,24 @@ impl<W: Wire> NearEnd<W> {
                     },
                     StreamEvent::Closed => break,
                     StreamEvent::Error { status, message } => {
-                        if status.map(classify_status) == Some(Terminality::Permanent) {
-                            self.sink.on_status(ConnectionStatus::PermanentError(message));
-                            permanent = true;
-                        } else {
-                            self.sink.on_status(ConnectionStatus::TransientError(message));
+                        // D110a — level-triggered link lifecycle. A stale/absent
+                        // link (404/410) is NOT permanent: clear the dead link's
+                        // prepared state so the loop re-runs the prepare handshake
+                        // (a fresh link) rather than halting `run()` forever — the
+                        // fix for "every laptop sleep >5min freezes live updates".
+                        // Permanent stays reserved for a genuine auth refusal.
+                        match classify_stream_error(status) {
+                            StreamErrorAction::RePrepare => {
+                                self.clear_prepared();
+                                self.sink.on_status(ConnectionStatus::TransientError(message));
+                            }
+                            StreamErrorAction::Permanent => {
+                                self.sink.on_status(ConnectionStatus::PermanentError(message));
+                                permanent = true;
+                            }
+                            StreamErrorAction::Reconnect => {
+                                self.sink.on_status(ConnectionStatus::TransientError(message));
+                            }
                         }
                         break;
                     }
