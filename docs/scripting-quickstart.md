@@ -206,6 +206,48 @@ explicit **gap frame** (never a silent drop) and resumes from the live head.
 > that reconnects after a rule fired still sees it (or the gap frame, never a
 > silent drop) exactly like any other fact.
 
+## Always-on: register a watch as a service
+
+A foreground `watch --exec` stops when your terminal closes. For always-on
+laptop automation — the shape between the ad-hoc foreground run and the in-app
+rules engine — wrap it in a **user service unit** with
+`posthaste-wizard ctl register-watch` (RFC-L2-scripting ruling 12). It renders
+and installs a `systemd --user` unit (Linux) or a launchd LaunchAgent (macOS)
+that runs `posthastectl watch` with your flags, restarts on failure, and points
+at the `posthastectl` the wizard installed (it locates it via the install
+manifest, the install dir, then `PATH`):
+
+```sh
+posthaste-wizard ctl register-watch \
+  --exec 'sh ./handler.sh' --topic rule.fired --rule flag-for-edge --name agent
+```
+
+> **Consent (RFC-L2-scripting ruling 20b).** Registering a watch means local
+> code runs on your machine in response to **server-controlled events** (mail /
+> rule firings), on attacker-influenced input. So the command prints a one-time
+> warning and **requires you to type `yes`** (or pass `--yes`) before it
+> installs anything. Only register a handler you trust, and keep the rule
+> sender-scoped — see [scripting-security.md](scripting-security.md).
+
+The `--serve-hook` variant wraps `posthastectl hook serve` instead (ruling 17),
+for an always-on webhook receiver behind a GUI/`rules.toml` `webhook` rule:
+
+```sh
+posthaste-wizard ctl register-watch --serve-hook ./handler.sh --port 8787 --name hook
+```
+
+- Filters (`--topic`, `--rule`, `--keyword`, `--account`) pass straight through
+  to `watch`; `--name <suffix>` names the unit (defaults to the rule/keyword/
+  topic). `--serve-hook` takes `--port`.
+- The unit passes discovery environment through (`POSTHASTE_STATE_ROOT`,
+  `POSTHASTE_API_URL`, `POSTHASTE_TOKEN` if set), so the service finds
+  `daemon.json` exactly as the foreground command would.
+- Remove one with `posthaste-wizard ctl unregister-watch [--name <suffix>]`
+  (omit `--name` when there is only one). List what's registered any time with
+  `posthaste-wizard ctl status`.
+- Like everything the wizard does, this is a **user** unit and it **never
+  sudos** — if the unit directory isn't writable it refuses and explains.
+
 ## Snapshot-attach: read state, then tail from that point
 
 For a level-triggered script (reconcile current state, then follow changes),
@@ -550,10 +592,63 @@ above) run in the authority server with no client at all; the **agent-native
 MCP surface** ([Agent via MCP](#agent-via-mcp) above) is the level-"agent-native"
 rung — trigger + capability over one connection.
 
+## Keeping it updated (headless / self-host)
+
+Desktop machines update through the app's own updater. A **headless or
+self-hosted** node — role binaries, `posthastectl`, and the wizard itself —
+updates through `posthaste-wizard update` (RFC-L2-scripting ruling 14). The
+wizard is the only actor that owns the service units, so it is the one actor
+that can stop a service, swap its binary, and start it again correctly.
+
+Every install records what it placed in an **install manifest** at
+`$XDG_STATE_HOME/posthaste/wizard-manifest.toml` (else
+`~/.local/state/posthaste/wizard-manifest.toml`) — one entry per component with
+its path, version, and channel. `ctl install` and the role `install` populate
+it automatically; a host that installed before the manifest existed reads back
+as empty and `update` simply reports there is nothing tracked (re-install to
+start tracking).
+
+```sh
+# See what's out of date (resolves each channel's latest; changes nothing):
+posthaste-wizard update --check
+```
+
+```
+component updates:
+  ↑ posthaste-authority-server [nightly] 0.2.0-nightly.44 → 0.2.0-nightly.50
+  ✓ posthastectl               [nightly] up to date
+```
+
+```sh
+# Apply — download + verify (the release SHA256SUMS), stop the service, swap the
+# binary (keeping the old one as <path>.bak), restart, record the new version:
+posthaste-wizard update --yes
+```
+
+- The wizard updates **its own binary last**, in the same pass — on unix a
+  rename over a running executable is safe (the running process keeps its open
+  inode; the next launch is the new binary).
+- **Roll back** a bad update with `posthaste-wizard update --rollback
+  <component>` — it swaps the kept `.bak` back and restores the recorded
+  version.
+- **Opt into auto-updates** with `posthaste-wizard update --install-timer`: it
+  renders a user timer (systemd `.timer` / launchd interval agent) that runs
+  `update --yes` on a daily schedule. It is a rendered unit, never a
+  daemon-resident self-updater, and — like all wizard unit writes — refuses
+  rather than sudo if the unit directory isn't writable.
+
 ## Reference
 
 - Tap: `GET /v1/events` (SSE) — `--after-seq`, `--topic`, `--account`,
   `--mailbox`.
+- `posthaste-wizard ctl register-watch --exec <script> [--topic <t>] [--rule
+  <r>] [--keyword <k>] [--account <id>] [--name <suffix>] [--yes]` — wrap
+  `watch` in a user service (ruling 12); `--serve-hook <script> [--port <n>]`
+  wraps `hook serve` (ruling 17). `ctl unregister-watch [--name <suffix>]`
+  removes; `ctl status` lists. Requires consent (ruling 20b); never sudos.
+- `posthaste-wizard update [--check] [--yes] [--rollback <component>]
+  [--install-timer]` — the headless updater (ruling 14): manifest-tracked,
+  checksum-verified swap keeping `<path>.bak`, wizard self-update last.
 - `watch` filters (client-side, convenience — not an auth boundary, ruling
   20e): `--account`, `--topic` (default `message.updated`), `--mailbox`,
   `--keyword`, `--rule` (pair with `--topic rule.fired`), `--all-updates`.
