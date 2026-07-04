@@ -23,4 +23,5 @@ pub use primitives::{
 };
 pub use resource_types::{
     CacheFetchLease, CacheMaintenanceFeedback, CacheMaintenanceLease, CacheResourcePolicy,
+    BODY_CACHE_BATCH_BUDGET,
 };

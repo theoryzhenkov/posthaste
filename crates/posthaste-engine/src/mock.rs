@@ -26,6 +26,12 @@ use state::{
 /// internal state and bump a revision counter to simulate JMAP state strings.
 pub struct MockJmapGateway {
     state: Mutex<MockState>,
+    /// Test seam: when set, every `fetch_message_body` on this instance sleeps
+    /// for the delay first — a slow/hung body source for cache-worker tests.
+    body_fetch_delay: Mutex<Option<Duration>>,
+    /// Test seam: count of `fetch_message_body` calls on this instance, so a
+    /// test can assert a backed-off cache tick does NOT re-hit the provider.
+    body_fetch_attempts: AtomicUsize,
 }
 
 /// Mutable inner state behind the `MockJmapGateway` mutex.
@@ -47,6 +53,40 @@ impl MockJmapGateway {
             state.rejected.insert(message_id);
         }
     }
+
+    /// Test hook: make every subsequent `fetch_message_body` on this instance
+    /// sleep for `delay` before answering — a slow or (with a large delay)
+    /// effectively hung body source.
+    pub fn set_body_fetch_delay_for_tests(&self, delay: Duration) {
+        if let Ok(mut slot) = self.body_fetch_delay.lock() {
+            *slot = Some(delay);
+        }
+    }
+
+    /// Clear the per-instance body-fetch delay (the source "recovers").
+    pub fn clear_body_fetch_delay_for_tests(&self) {
+        if let Ok(mut slot) = self.body_fetch_delay.lock() {
+            *slot = None;
+        }
+    }
+
+    /// Number of `fetch_message_body` calls observed on this instance.
+    pub fn body_fetch_attempts_for_tests(&self) -> usize {
+        self.body_fetch_attempts.load(Ordering::SeqCst)
+    }
+
+    /// Test hook: strip the inline bodies from every mock message so a sync
+    /// seeds body-cache candidates in the `wanted` state (messages that carry
+    /// inline bodies are cached on arrival and generate no fetch work).
+    pub fn strip_message_bodies_for_tests(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            for message in &mut state.messages {
+                message.body_html = None;
+                message.body_text = None;
+                message.raw_mime = None;
+            }
+        }
+    }
 }
 
 impl Default for MockJmapGateway {
@@ -58,6 +98,8 @@ impl Default for MockJmapGateway {
                 messages: sample_messages(),
                 rejected: HashSet::new(),
             }),
+            body_fetch_delay: Mutex::new(None),
+            body_fetch_attempts: AtomicUsize::new(0),
         }
     }
 }
@@ -289,6 +331,15 @@ impl MailGateway for MockJmapGateway {
         _account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<FetchedBody, GatewayError> {
+        self.body_fetch_attempts.fetch_add(1, Ordering::SeqCst);
+        let delay = self
+            .body_fetch_delay
+            .lock()
+            .ok()
+            .and_then(|slot| *slot);
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
         let state = self
             .state
             .lock()

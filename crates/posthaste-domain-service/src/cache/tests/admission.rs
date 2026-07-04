@@ -49,6 +49,82 @@ fn cache_resource_governor_backs_off_after_failed_fetches() {
     assert!(governor.network_rate_multiplier() < 1.0);
 }
 
+// spec: docs/eph/RFC-L2-provider-reliability (cache_maintenance arm wedge)
+#[test]
+fn cache_resource_governor_escalates_backoff_across_consecutive_no_progress_batches() {
+    let start = Instant::now();
+    let mut governor = CacheResourceGovernor::new(start, CacheResourcePolicy::default());
+
+    // Batch 1: cut short with no caching progress → 5 s backoff.
+    let lease = governor.grant(start, 0.0);
+    governor.record_feedback(
+        start,
+        &lease,
+        CacheMaintenanceFeedback {
+            fetch_attempted: 1,
+            fetch_failed: 1,
+            ..Default::default()
+        },
+    );
+    assert!(governor.is_in_backoff(start + Duration::from_secs(4)));
+    assert!(!governor.is_in_backoff(start + Duration::from_secs(6)));
+
+    // Batch 2 (after the first backoff expired) also makes no progress →
+    // the backoff DOUBLES (10 s), spacing consecutive slow batches further.
+    let later = start + Duration::from_secs(6);
+    let lease = governor.grant(later, 0.0);
+    governor.record_feedback(
+        later,
+        &lease,
+        CacheMaintenanceFeedback {
+            fetch_attempted: 1,
+            fetch_failed: 1,
+            ..Default::default()
+        },
+    );
+    assert!(governor.is_in_backoff(later + Duration::from_secs(9)));
+    assert!(!governor.is_in_backoff(later + Duration::from_secs(11)));
+
+    // A later successful batch clears the backoff and failure streak.
+    let recovered = later + Duration::from_secs(11);
+    let lease = governor.grant(recovered, 0.0);
+    governor.record_feedback(
+        recovered,
+        &lease,
+        CacheMaintenanceFeedback {
+            fetch_attempted: 1,
+            fetch_cached: 1,
+            ..Default::default()
+        },
+    );
+    assert!(!governor.is_in_backoff(recovered + Duration::from_secs(1)));
+}
+
+// spec: docs/eph/RFC-L2-provider-reliability (cache_maintenance arm wedge)
+#[test]
+fn cache_resource_governor_records_cancelled_slice_as_no_progress_failure() {
+    let start = Instant::now();
+    let mut governor = CacheResourceGovernor::new(start, CacheResourcePolicy::default());
+    let _lease = governor.grant(start, 0.0);
+
+    // The supervisor arm budget dropped the batch future: record_feedback
+    // never ran. The cancelled-slice hook must engage backoff on its own so
+    // the 2 s cache tick cannot immediately re-hit the slow provider.
+    governor.record_cancelled_slice(start);
+    assert!(governor.is_in_backoff(start + Duration::from_secs(4)));
+    assert!(governor.network_rate_multiplier() < 1.0);
+    let backoff_lease = governor.grant(start + Duration::from_secs(1), 0.0);
+    assert!(backoff_lease.in_backoff);
+    assert_eq!(backoff_lease.fetch.request_limit, 0);
+
+    // Consecutive cancellations escalate: 5 s, then 10 s.
+    assert!(!governor.is_in_backoff(start + Duration::from_secs(6)));
+    let later = start + Duration::from_secs(6);
+    governor.record_cancelled_slice(later);
+    assert!(governor.is_in_backoff(later + Duration::from_secs(9)));
+    assert!(!governor.is_in_backoff(later + Duration::from_secs(11)));
+}
+
 #[test]
 fn cache_resource_governor_does_not_network_backoff_for_local_errors() {
     let now = Instant::now();

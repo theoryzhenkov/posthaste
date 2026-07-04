@@ -71,7 +71,7 @@ pub(crate) async fn fetch_message_body(
         ])
         .fetch_all_body_values(true);
 
-    let mut response = gateway.send_request(request).await?;
+    let mut response = send_body_request(gateway, request).await?;
     let mut emails = required_method_response(response.pop_method_response(), "Email/get")?
         .unwrap_get_email()
         .map_err(map_gateway_error)?
@@ -135,6 +135,55 @@ pub(crate) async fn fetch_message_body(
         raw_mime: Some(raw_mime),
         attachments,
     })
+}
+
+/// Dispatch a body-shaped `Email/get` (full `bodyValues`) with a *blob-class*
+/// deadline instead of the metadata total.
+///
+/// A body fetch can carry megabytes of inline `bodyValues`, so the metadata
+/// path's fixed 30 s total (jmap-client's own HTTP client timeout) has the F2
+/// shape: it deterministically fails a large-but-progressing body on a slow
+/// link, while a genuinely stalled read still gets to sit out the full total.
+/// Routing the HTTP dispatch through the provider-call envelope as
+/// `CallClass::Blob` gives it the between-chunks byte-progress stall guard
+/// (M31/M34, `BLOB_STALL`) and no total — parity with `download_blob` below.
+///
+/// WebSocket, when connected, is preferred unchanged: its liveness is owned by
+/// the keepalive/read-deadline machinery (D88), and the cache worker's
+/// batch-level deadline bounds a hung WS reply at the call site. Falls back to
+/// the plain metadata-class send if the shared executor failed to build.
+async fn send_body_request(
+    gateway: &LiveJmapGateway,
+    request: jmap_client::core::request::Request<'_>,
+) -> Result<
+    jmap_client::core::response::Response<jmap_client::core::response::TaggedMethodResponse>,
+    GatewayError,
+> {
+    if let Some(ws) = gateway.ws() {
+        if ws.is_connected().await {
+            return ws.send(request).await;
+        }
+    }
+    if let Some(executor) = gateway.executor() {
+        // Serializing our own request is an internal codec fault, not a
+        // network error (mirrors the raw JMAP POST path in live_mutation).
+        let body = serde_json::to_vec(&request)
+            .map_err(|error| GatewayError::Internal(error.to_string()))?;
+        let spec = HttpRequestSpec::post(
+            gateway.client().session().api_url(),
+            gateway.client().headers().clone(),
+            body,
+        );
+        let bytes = executor
+            .execute(gateway.account_key(), CallClass::Blob, spec)
+            .await
+            .map_err(map_provider_error)?
+            .body;
+        // The bytes arrived; a decode failure is a codec fault, not transient.
+        return serde_json::from_slice(&bytes)
+            .map_err(|error| GatewayError::Internal(error.to_string()));
+    }
+    gateway.send_request(request).await
 }
 
 pub(crate) async fn download_blob(

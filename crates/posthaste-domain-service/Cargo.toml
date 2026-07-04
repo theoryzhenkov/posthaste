@@ -19,6 +19,11 @@ tokio = { workspace = true }
 utoipa = { workspace = true, optional = true }
 uuid = { workspace = true }
 
+[dev-dependencies]
+# `test-util` for `start_paused` virtual-time tests (the cache-worker batch
+# deadline suite drives multi-minute provider stalls without real waits).
+tokio = { workspace = true, features = ["test-util"] }
+
 [features]
 # Derive `utoipa::ToSchema` on wire-facing domain types so the server can emit
 # OpenAPI without coupling the domain crate to the web stack by default.

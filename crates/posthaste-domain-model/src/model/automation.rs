@@ -64,6 +64,10 @@ pub struct CacheWorkerBatchOutcome {
     pub failed: usize,
     pub skipped: usize,
     pub events: Vec<DomainEvent>,
+    /// True when the batch stopped early because it hit its own wall-clock
+    /// budget (`BODY_CACHE_BATCH_BUDGET`) — partial work was done and the
+    /// remaining candidates stay `wanted` for a later, backed-off batch.
+    pub deadline_exceeded: bool,
 }
 
 /// Result of one optional-content cache re-score batch.
