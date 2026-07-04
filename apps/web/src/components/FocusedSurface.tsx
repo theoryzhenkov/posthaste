@@ -126,6 +126,12 @@ export function FocusedSurface({
             until,
           )
         }
+        onDiscardDraft={() =>
+          actions.discardDraft({
+            sourceId: surface.params.sourceId,
+            messageId: surface.params.messageId,
+          })
+        }
         onEditDraft={() =>
           editDraft(surface.params.sourceId, surface.params.messageId)
         }

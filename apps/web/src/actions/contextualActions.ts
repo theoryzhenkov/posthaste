@@ -23,6 +23,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { MessageSummary, SourceMessageRef } from '../api/types'
+import { SYSTEM_KEYWORDS } from '../domainVocabulary'
 import type { EmailActions } from '../hooks/useEmailActions'
 
 /** Visual grouping; a separator is drawn between adjacent groups. */
@@ -123,7 +124,18 @@ export function buildMessageContextActions(
     })
   }
 
-  if (viewRole !== 'trash') {
+  if (message.keywords.includes(SYSTEM_KEYWORDS.Draft)) {
+    // D127: a draft is discarded (hard delete via the draft-delete op), never
+    // trashed. The trash / delete-permanently actions are not offered on drafts.
+    list.push({
+      id: 'builtin.discard-draft',
+      group: 'move',
+      title: 'Discard draft',
+      icon: Trash2,
+      destructive: true,
+      run: () => actions.discardDraft(target),
+    })
+  } else if (viewRole !== 'trash') {
     list.push({
       id: 'builtin.move-to-trash',
       group: 'move',

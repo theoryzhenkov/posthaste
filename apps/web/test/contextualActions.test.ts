@@ -39,6 +39,7 @@ function makeActions(calls: string[]): EmailActions {
     setUserTags: () => calls.push('setUserTags'),
     archive: () => calls.push('archive'),
     trash: () => calls.push('trash'),
+    discardDraft: () => calls.push('discardDraft'),
     moveToInbox: () => calls.push('moveToInbox'),
     deletePermanently: () => calls.push('deletePermanently'),
     clearError: () => calls.push('clearError'),
@@ -173,5 +174,35 @@ describe('contextual message actions', () => {
       'moveToInbox',
       'deletePermanently',
     ])
+  })
+
+  it('routes a draft row to discard — never trash or delete-permanently (D127)', () => {
+    const calls: string[] = []
+    const draftMessage: MessageSummary = { ...message, keywords: ['$draft'] }
+    const actions = buildMessageContextActions(
+      makeActions(calls),
+      {
+        message: draftMessage,
+        target,
+        viewRole: 'drafts',
+        surface: 'context-menu',
+      },
+      {
+        onOpen: () => calls.push('open'),
+        onViewConversation: () => calls.push('viewConversation'),
+      },
+    )
+
+    const ids = actions.map((action) => action.id)
+    expect(ids).toContain('builtin.discard-draft')
+    expect(ids).not.toContain('builtin.move-to-trash')
+    expect(ids).not.toContain('builtin.delete-permanently')
+
+    const discard = actions.find((a) => a.id === 'builtin.discard-draft')
+    expect(discard?.title).toBe('Discard draft')
+    expect(discard?.destructive).toBe(true)
+
+    runAction(actions, 'builtin.discard-draft')
+    expect(calls).toEqual(['discardDraft'])
   })
 })

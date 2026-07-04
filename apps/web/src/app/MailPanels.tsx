@@ -123,6 +123,7 @@ function MessagePanels(props: MailClientViewProps) {
                 selection={props.selectedMessage}
                 onArchive={props.onArchive}
                 onSnooze={props.onSnooze}
+                onDiscardDraft={props.onDiscardDraft}
                 onEditDraft={props.onEditDraft}
                 onForward={props.onForward}
                 onOpenFocusedMessage={props.onOpenFocusedMessage}

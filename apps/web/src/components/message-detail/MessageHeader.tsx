@@ -32,6 +32,7 @@ export function MessageHeader({
   conversationSubject,
   message,
   onArchive,
+  onDiscardDraft,
   onEditDraft,
   onForward,
   onOpenFocusedMessage,
@@ -47,6 +48,7 @@ export function MessageHeader({
   conversationSubject: string | null | undefined
   message: MessageDetail
   onArchive: () => void
+  onDiscardDraft?: () => void
   onEditDraft?: () => void
   onForward: () => void
   onOpenFocusedMessage?: () => void
@@ -100,6 +102,7 @@ export function MessageHeader({
               isDraft={isDraft}
               isFlagged={message.isFlagged}
               onArchive={onArchive}
+              onDiscardDraft={onDiscardDraft}
               onEditDraft={onEditDraft}
               onForward={onForward}
               onOpenFocusedMessage={onOpenFocusedMessage}
@@ -160,6 +163,7 @@ function HeaderActions({
   isDraft,
   isFlagged,
   onArchive,
+  onDiscardDraft,
   onEditDraft,
   onForward,
   onOpenFocusedMessage,
@@ -173,6 +177,7 @@ function HeaderActions({
   isDraft: boolean
   isFlagged: boolean
   onArchive: () => void
+  onDiscardDraft?: () => void
   onEditDraft?: () => void
   onForward: () => void
   onOpenFocusedMessage?: () => void
@@ -184,21 +189,35 @@ function HeaderActions({
   onTrash?: () => void
 }) {
   const [snoozeOpen, setSnoozeOpen] = useState(false)
-  if (isDraft && onEditDraft) {
+  if (isDraft) {
+    // D129: drafts get a draft-appropriate action set in the standard action
+    // row — edit + discard as icons, never trash.
     return (
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          aria-label="Edit draft"
-          onClick={onEditDraft}
-          size="sm"
-          title="Edit draft"
-          type="button"
-          variant="ghost"
-          className="gap-1.5"
-        >
-          <Pencil size={14} strokeWidth={1.6} />
-          Edit draft
-        </Button>
+        {onEditDraft && (
+          <Button
+            aria-label="Edit draft"
+            onClick={onEditDraft}
+            size="icon-sm"
+            title="Edit draft"
+            type="button"
+            variant="ghost"
+          >
+            <Pencil size={14} strokeWidth={1.6} />
+          </Button>
+        )}
+        {onDiscardDraft && (
+          <Button
+            aria-label="Discard draft"
+            onClick={onDiscardDraft}
+            size="icon-sm"
+            title="Discard draft"
+            type="button"
+            variant="ghost"
+          >
+            <Trash2 size={14} strokeWidth={1.6} />
+          </Button>
+        )}
       </div>
     )
   }
