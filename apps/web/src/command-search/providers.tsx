@@ -7,6 +7,7 @@ import { createMailboxProvider } from './providers/mailboxes'
 import { createMessageProvider } from './providers/messages'
 import { createQueryCompletionProvider } from './providers/queryCompletions'
 import { createTagProvider } from './providers/tags'
+import { createTagActionProvider } from './providers/tagActions'
 
 export function createCommandProviders(input: {
   readModels: Pick<
@@ -14,12 +15,15 @@ export function createCommandProviders(input: {
     'smartMailboxes' | 'sources' | 'tags'
   >
   recentMessages: MessageSummary[]
+  /** User tags on the selected message; drives the selection-scoped tag actions. */
+  selectedMessageTags: readonly string[]
 }): SearchProvider[] {
   return [
     createCommandProvider(),
     createQueryCompletionProvider(input),
     createMailboxProvider(input),
     createTagProvider(input),
+    createTagActionProvider(input),
     createMessageProvider(input),
   ]
 }

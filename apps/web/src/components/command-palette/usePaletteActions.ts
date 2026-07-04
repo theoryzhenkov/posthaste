@@ -5,9 +5,11 @@ import type { MailSelection } from '@/mailState'
 import type { SettingsSurfaceCategory as SettingsCategory } from '@/surfaces'
 
 export interface PaletteActionHandlers {
+  onAddTag: (tag: string) => void
   onApplySearch: (query: string) => void
   onArchive: () => void
   onCompose: () => void
+  onRemoveTag: (tag: string) => void
   onOpenSettings: (category?: SettingsCategory) => void
   onOpenShortcuts: () => void
   onPlaceholderAction: (label: string) => void
@@ -68,6 +70,12 @@ export function usePaletteActions(handlers: PaletteActionHandlers) {
           break
         case 'open-contact':
           handlers.onApplySearch(action.query)
+          break
+        case 'add-tag-to-message':
+          handlers.onAddTag(action.tag)
+          break
+        case 'remove-tag-from-message':
+          handlers.onRemoveTag(action.tag)
           break
         case 'noop':
           handlers.onPlaceholderAction(action.label)

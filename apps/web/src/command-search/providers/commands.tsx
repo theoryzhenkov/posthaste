@@ -149,6 +149,20 @@ export function createCommandProvider(): SearchProvider {
           action: { kind: 'open-settings', category: 'mailboxes' },
         },
         {
+          id: 'manageTags',
+          kind: 'command',
+          label: 'Manage tags',
+          keywords: 'manage tags rename delete labels',
+          icon: (
+            <Tag
+              size={15}
+              strokeWidth={1.7}
+              className="text-muted-foreground"
+            />
+          ),
+          action: { kind: 'open-settings', category: 'tags' },
+        },
+        {
           id: 'settings',
           kind: 'command',
           label: 'Open Settings',
