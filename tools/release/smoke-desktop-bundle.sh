@@ -52,9 +52,23 @@ largest_executable() {
 # Run the binary's self-report and assert it matches the expected channel.
 check_channel() {
   local bin="$1"
-  local reported
-  reported="$("$bin" --print-release-channel 2>/dev/null || true)"
-  [ -n "$reported" ] || fail "binary did not report a release channel: $bin"
+  local reported rc stderr_file
+  stderr_file="$(mktemp)"
+  reported="$("$bin" --print-release-channel 2>"$stderr_file")" && rc=0 || rc=$?
+  if [ -z "$reported" ]; then
+    # Diagnostic dump: exit code + stderr + (macOS) the actual signed
+    # entitlements — distinguishes "flag not implemented / not stamped" from
+    # "binary killed by the hardened runtime (missing JIT entitlements)".
+    echo "--- diagnostic for $bin (exit=$rc):" >&2
+    sed 's/^/    stderr: /' "$stderr_file" >&2 || true
+    if [ "$(uname -s)" = "Darwin" ]; then
+      echo "    signed entitlements:" >&2
+      codesign -d --entitlements - "$bin" 2>&1 | sed 's/^/      /' >&2 || true
+    fi
+    rm -f "$stderr_file"
+    fail "binary did not report a release channel: $bin"
+  fi
+  rm -f "$stderr_file"
   if [ "$reported" != "$channel" ]; then
     fail "binary channel mismatch: expected '$channel', binary reports '$reported'"
   fi
