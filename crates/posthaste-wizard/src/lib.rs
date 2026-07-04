@@ -16,7 +16,10 @@ mod ctl;
 mod fetch;
 mod install;
 mod interactive;
+mod manifest;
 mod render;
+mod update;
+mod watch;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,10 +29,22 @@ pub use ctl::{
     CheckResult, CtlInstallOptions, CtlInstalled, CtlSource, RegisterReport,
 };
 pub use fetch::{Channel, GithubSource, ReleaseSource, Version};
-pub use install::{apply_join, detect_platform, install, InstallOptions, Installed, ServiceScope};
+pub use install::{
+    apply_join, detect_platform, install, launch_agents_dir_pub, start_service, stop_service,
+    unit_name, InstallOptions, Installed, ServiceScope,
+};
 pub use interactive::{guided_install, GuidedInstall};
+pub use manifest::{manifest_path, now_rfc3339, Component, Manifest};
 pub use render::{
     client_profile_json, launchd_label, render_app_toml, render_launchd_plist, render_systemd_unit,
+};
+pub use update::{
+    apply_update, format_status_table, install_update_timer, plan_updates, record_install,
+    record_self_wizard, rollback_component, ApplyOutcome, ComponentStatus, UpdateState,
+};
+pub use watch::{
+    confirm_consent, discovery_env, list_watches, locate_ctl, register_watch, sanitize_name,
+    unregister_watch, WatchCommand, CONSENT_WARNING,
 };
 
 /// The role a node plays — selects which binary it runs and which config the
@@ -65,6 +80,17 @@ impl Role {
             Role::Daemon => "posthaste-authority-runtime-server",
             Role::AuthorityServer => "posthaste-authority-server",
             Role::Runtime => "posthaste-runtime",
+        }
+    }
+
+    /// The inverse of [`binary`](Self::binary): recover the role from an
+    /// installed binary name (used by `update` to re-fetch a manifest entry).
+    pub fn from_binary(binary: &str) -> Option<Role> {
+        match binary {
+            "posthaste-authority-runtime-server" => Some(Role::Daemon),
+            "posthaste-authority-server" => Some(Role::AuthorityServer),
+            "posthaste-runtime" => Some(Role::Runtime),
+            _ => None,
         }
     }
 }
