@@ -253,9 +253,9 @@ posthaste-wizard ctl register-watch \
 Confirm once when it asks, and you're done. Remove it later with
 `posthaste-wizard ctl unregister-watch --name summarize`.
 
-> Because this handler **replies**, keep the [reply caveat](automations.md#writing-back-tag-or-reply-from-a-script)
-> in mind: a rare double-delivery could, today, send the summary twice. For a
-> personal `todo` triage that's harmless; just know it's possible.
+> This handler **replies**, and that's safe on a redelivery: the app
+> de-duplicates `reply`/`send` (as it does `tag`/`move`), so a rare
+> double-delivery of the trigger still sends the summary only once.
 
 ---
 
