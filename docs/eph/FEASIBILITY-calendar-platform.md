@@ -1,5 +1,11 @@
 # Feasibility: Posthaste → multi-domain platform (Calendar)
 
+> **Status: EVIDENCE/FEASIBILITY — NOT STARTED.** Read-only survey (owner
+> question, 2026-07-03), not a plan. Verdict: the substrate is ~60–70% of the
+> distributed-systems *difficulty* but only ~30–40% of the *lines*.
+> Recommendation: start with an integration shim (days), extract a domain layer
+> only with a committed second domain. No calendar work has begun.
+
 Owner question (2026-07-03): how hard to build a Calendar app on Posthaste's
 structure, integrate mail+calendar, and write cross-domain agent automations
 (`tag:schedule → agent → calendar MCP → add event`)? Evidence-based survey

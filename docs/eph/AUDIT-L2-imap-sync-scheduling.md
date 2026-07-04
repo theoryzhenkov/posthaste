@@ -16,6 +16,11 @@ Both subagents delivered. I have complete firsthand coverage of the supervisor/s
 
 # IMAP Gateway & Sync Scheduling/Supervision — Robustness Audit
 
+> **Status: EVIDENCE/AUDIT (evidence-complete).** Read-only investigation, not a
+> plan. This is the evidence base for RFC-L2-provider-reliability; the fixes it
+> motivated (the P1 data-loss window, connection envelope, task supervision, the
+> P5 idle-claim flake) shipped as M34–M36. Findings preserved as provenance.
+
 Workspace: `/home/usr.prj_posthaste/src/.workspaces/architecture-cleanup`. Every claim carries file:line evidence. Raw findings only.
 
 ## Findings table

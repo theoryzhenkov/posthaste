@@ -17,6 +17,11 @@ All five deep-audits are in. Here is the consolidated lifecycle & resource-robus
 
 # L2 Lifecycle/Resource Robustness Audit — re-verified register + new rows
 
+> **Status: EVIDENCE/AUDIT (evidence-complete).** Read-only investigation, not a
+> plan. This is the N1–N22 + top-10 evidence base for
+> RFC-L2-lifecycle-and-errors, whose M20–M31 fixes shipped. Paths are current as
+> of the M8 tip (M9 in flight at audit time). Findings preserved as provenance.
+
 Scope honored the writer-agent exclusions (`link-far-end`, `far_end/`, `transport.rs`, `read.rs`, `link_wire`, `runtime_registry`, `local_authority_server` were not deep-audited; where a finding touches their *ownership seam* it is flagged). Paths are relative to `/home/usr.prj_posthaste/src/.workspaces/architecture-cleanup`. The register's old paths (`build.rs:281`, `supervisor/manager.rs:95`, `authority-runtime/push.rs`) moved in the M0–M8 refactor; re-verified against current code.
 
 ## Part A — Re-verification of the existing register

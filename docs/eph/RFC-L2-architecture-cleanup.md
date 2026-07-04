@@ -12,6 +12,14 @@ dependents: []
 
 # RFC — Architecture Cleanup (crate topology, typed operations, link/replica seams)
 
+> **Status (2026-07-04): SHIPPED.** M0–M10 (incl. M3b) all landed; the M9 wave
+> completed (V14–V16 closed) and M10 is done. Delivered: the crate-topology
+> split, the typed `MailOperation` vocabulary, the frame/id renames, and the
+> replica/link/outbox trait seams. The companion DEVIATION ledger's rows are all
+> closed. **[Update 2026-07-04]:** the "5 Execute — pending" phase line and
+> `state: planned` in the frontmatter below are historical — execution completed;
+> see DEVIATION-L2-architecture-cleanup and the M0–M10 commit history.
+
 Status: **drained — ready to execute** (`state: planned`; code untouched). This
 is the **drain/outbox** for a large navigability refactor. It is the single
 place refactor decisions accumulate; they drain into durable specs before any

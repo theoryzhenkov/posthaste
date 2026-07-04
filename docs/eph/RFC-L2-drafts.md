@@ -1,5 +1,12 @@
 # RFC-L2-drafts — the draft lifecycle, done properly
 
+> **Status (2026-07-04): SHIPPED.** Ratified (owner, 2026-07-04) and fully
+> landed: M60 (send consumes the draft — settlement effect, both providers, incl.
+> the Gmail Sent-copy rider), M61 (discard = hard-delete + the edit-draft
+> action-row icon), M62 (idempotent draft saves + the canonical-id twin fix).
+> **[Update 2026-07-04]:** the execution notes below ("M61 launched; M60 queued;
+> M62 after M60") are historical — all three steps landed.
+
 Status: RATIFIED (owner, 2026-07-04). Execution: M61 launched immediately; M60 queued behind the in-flight archive fix (shared IMAP gateway surface); M62 after M60. Owner reports: sending a
 draft leaves it in Drafts; deleting a draft lands it in Trash; edit-draft is an
 ad-hoc button. Survey evidence below; each mechanism confirmed in code.

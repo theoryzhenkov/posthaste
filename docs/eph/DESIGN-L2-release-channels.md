@@ -19,6 +19,12 @@ dependents: []
 
 # Release channel design
 
+> **Status: REFERENCE (design note) — machinery realized.** The channel policy
+> table this describes is in use: the tools/release/* machinery (channel-policy,
+> resolve-channel, updater-manifest, smoke-desktop-bundle, rolling-tag) ships and
+> was exercised through the scripting distribution wave (nightly.59
+> channel-stamping). Kept as the design reference for that shipped machinery.
+
 ## Principle
 
 The channel is a **first-class concept the product carries**, not a side-effect
