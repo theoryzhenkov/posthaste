@@ -60,7 +60,10 @@ fn full_snapshot_protects_a_pending_local_create_from_prune() -> Result<(), Stor
 #[test]
 fn full_snapshot_still_prunes_unprotected_messages_absent_from_remote() -> Result<(), StoreError> {
     // No over-protection: a message with no unsettled op is pruned exactly as
-    // before once it is genuinely absent from a full remote snapshot.
+    // before once it is genuinely absent from a full remote snapshot. The remote
+    // set here is non-empty and only slightly smaller than local (message-3 is
+    // still present), so the DS1 floor guard does NOT trip and the ordinary
+    // single-message deletion prunes normally.
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -72,6 +75,7 @@ fn full_snapshot_still_prunes_unprotected_messages_absent_from_remote() -> Resul
             messages: vec![
                 sample_message("message-1", "inbox", Some("mime-1")),
                 sample_message("message-2", "inbox", Some("mime-2")),
+                sample_message("message-3", "inbox", Some("mime-3")),
             ],
             ..SyncBatch::default()
         },
@@ -79,11 +83,13 @@ fn full_snapshot_still_prunes_unprotected_messages_absent_from_remote() -> Resul
 
     // message-2 is unsettled and protected; message-1 has no op and is simply
     // gone from the remote snapshot (deleted remotely) — it must still prune.
+    // message-3 remains present remotely, keeping the remote set non-empty and
+    // above the floor.
     let protected = HashSet::from(["message-2".to_string()]);
     store.apply_sync_batch_protected(
         &account,
         &SyncBatch {
-            messages: Vec::new(),
+            messages: vec![sample_message("message-3", "inbox", Some("mime-3"))],
             replace_all_messages: true,
             cursors: vec![message_cursor("state-1", "2026-03-31T10:05:00Z")],
             ..SyncBatch::default()
@@ -92,8 +98,16 @@ fn full_snapshot_still_prunes_unprotected_messages_absent_from_remote() -> Resul
     )?;
 
     let messages = store.list_messages(&account, None)?;
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].id, MessageId::from("message-2"));
+    let ids: std::collections::BTreeSet<_> = messages.iter().map(|m| m.id.clone()).collect();
+    assert_eq!(
+        ids,
+        std::collections::BTreeSet::from([
+            MessageId::from("message-2"),
+            MessageId::from("message-3"),
+        ]),
+        "the unprotected, remotely-absent message-1 is pruned; \
+         protected message-2 and still-present message-3 survive",
+    );
     Ok(())
 }
 

@@ -1,6 +1,14 @@
 use super::*;
 use crate::sql_cache::CachedSql;
 
+/// DS1 mail-loss floor guard threshold. A full-snapshot prune-by-absence that
+/// would delete more than this fraction of the local message store is refused
+/// (unless an explicit full-resync signal is set), so a transiently-empty or
+/// still-incomplete remote id set cannot silently wipe local mail. Ordinary
+/// deletions (a few messages gone from an otherwise-matching remote set) fall
+/// far below this and prune normally.
+const MAX_ABSENCE_PRUNE_FRACTION: f64 = 0.5;
+
 pub(crate) fn stage_sync_bodies(
     store: &DatabaseStore,
     account_id: &AccountId,
@@ -92,6 +100,9 @@ fn apply_sync_batch_tx_impl(
             account_id,
             &remote_message_ids,
             protected_message_ids,
+            // No wired explicit-full-resync signal today; the floor guard is
+            // always active on this path (DS1).
+            false,
             &mut affected,
             &mut events,
         )?;
@@ -307,11 +318,22 @@ pub(crate) fn prune_mailboxes_absent_from_remote_tx(
 /// because it folded to removed (pending Destroy), must survive this pass and
 /// reconcile once its op settles. Rows the guard *did* fold into the snapshot
 /// are present in `remote_message_ids`, so they are not pruned regardless.
+///
+/// DS1 mail-loss floor guard: unless `force_full_prune` is set (an explicit
+/// full-resync signal), this refuses to run when `remote_message_ids` is empty
+/// or would delete more than [`MAX_ABSENCE_PRUNE_FRACTION`] of the local store.
+/// A transiently-empty-but-`Ok` remote query, or a still-incomplete remote id
+/// set that slipped past the caller's completeness check, must never silently
+/// wipe local mail. A single ordinary deletion (remote only slightly smaller
+/// than local) stays well under the floor and prunes normally; a legitimate
+/// mass deletion must arrive through `force_full_prune`, not an unbounded
+/// absence-prune.
 pub(crate) fn prune_messages_absent_from_remote_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     remote_message_ids: &BTreeSet<MessageId>,
     protected_message_ids: &HashSet<String>,
+    force_full_prune: bool,
     affected: &mut ProjectionInputs,
     events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
@@ -326,6 +348,33 @@ pub(crate) fn prune_messages_absent_from_remote_tx(
         .into_iter()
         .map(MessageId)
         .collect::<BTreeSet<_>>();
+
+    if !force_full_prune {
+        let local_count = local_message_ids.len();
+        if local_count > 0 {
+            // Count only the rows this pass would actually DELETE: locals absent
+            // from remote and not exempted by the protected set (protected rows
+            // never prune, so they must not inflate the floor fraction).
+            let would_prune = local_message_ids
+                .difference(remote_message_ids)
+                .filter(|id| !protected_message_ids.contains(id.as_str()))
+                .count();
+            let over_floor =
+                (would_prune as f64) > (local_count as f64) * MAX_ABSENCE_PRUNE_FRACTION;
+            if remote_message_ids.is_empty() || over_floor {
+                ph_warn!(
+                    posthaste_observability::events::STORE_SYNC_ABSENCE_PRUNE_REFUSED,
+                    account_id = %account_id.as_str(),
+                    local_count,
+                    remote_count = remote_message_ids.len(),
+                    would_prune,
+                    "refusing prune-by-absence: remote set empty or drastically \
+                     smaller than local store; local mail preserved"
+                );
+                return Ok(());
+            }
+        }
+    }
 
     for message_id in local_message_ids.difference(remote_message_ids) {
         if protected_message_ids.contains(message_id.as_str()) {
@@ -403,6 +452,9 @@ fn reconcile_sync_tx_impl(
             account_id,
             &remote_message_ids,
             protected_message_ids,
+            // No wired explicit-full-resync signal today; the floor guard is
+            // always active on this path (DS1).
+            false,
             &mut affected,
             &mut events,
         )?;
