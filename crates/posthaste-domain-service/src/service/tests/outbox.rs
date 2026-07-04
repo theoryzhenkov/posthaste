@@ -510,6 +510,10 @@ async fn enqueue_send_queues_then_flushes_once() {
         *gateway.send_calls.lock().unwrap(),
         vec!["Outgoing".to_string()]
     );
+    assert!(
+        gateway.delete_draft_calls.lock().unwrap().is_empty(),
+        "a send without draft_id must not touch any draft (D126 is opt-in)"
+    );
     assert!(service
         .list_pending_operations(&account)
         .unwrap()
@@ -634,6 +638,212 @@ async fn s1_dispatch_uncertain_send_never_duplicates_across_reflush_and_retry() 
             .is_empty(),
         "the settled send is removed"
     );
+}
+
+/// A send request that names the saved draft it originates from (D126).
+fn send_request_consuming(subject: &str, draft_key: &str) -> SendMessageRequest {
+    SendMessageRequest {
+        draft_id: Some(draft_key.to_string()),
+        ..draft_request(subject)
+    }
+}
+
+/// D126: a settled-successful send consumes its originating draft — the draft
+/// delete is enqueued as a settlement effect and flushed by the follow-up pass
+/// of the SAME `flush_account` call, against the provider-assigned draft id.
+#[tokio::test]
+async fn send_settlement_consumes_the_saved_draft_in_one_flush() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-stable");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .expect("save draft");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush draft");
+
+    service
+        .enqueue_send(&account, send_request_consuming("Outgoing", key.as_str()))
+        .expect("send queues");
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush send");
+
+    assert_eq!(gateway.send_calls.lock().unwrap().len(), 1);
+    assert_eq!(
+        gateway.delete_draft_calls.lock().unwrap().as_slice(),
+        &[MessageId::from("provider-draft-1")],
+        "the settled send must destroy the provider draft it originated from"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        2,
+        "both the send and its follow-up draft delete settle in one flush call"
+    );
+    assert!(
+        service
+            .list_pending_operations(&account)
+            .unwrap()
+            .is_empty(),
+        "no operation is left behind"
+    );
+}
+
+/// D125: a send parked `DispatchUncertain` KEEPS the draft — it is the user's
+/// recovery artifact. Destruction happens only when an explicit retry settles
+/// the send successfully.
+#[tokio::test]
+async fn parked_send_keeps_the_draft_until_settled_success() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-parked");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .expect("save draft");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush draft");
+
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::DispatchUncertain(
+            "send timed out; delivery uncertain".to_string(),
+        )));
+    let send = service
+        .enqueue_send(&account, send_request_consuming("Outgoing", key.as_str()))
+        .expect("send queues");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush parks");
+
+    // Parked: the draft is untouched — no destroy pushed, no delete enqueued.
+    assert!(
+        gateway.delete_draft_calls.lock().unwrap().is_empty(),
+        "a parked send must not destroy its draft"
+    );
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1, "only the parked send remains queued");
+    assert_eq!(pending[0].state, OperationState::DispatchUncertain);
+
+    // Explicit user retry settles the send (deduplicated) — only now is the
+    // draft consumed.
+    assert!(service.retry_operation(&send.id).expect("retry"));
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush retry");
+    assert_eq!(
+        gateway.delete_draft_calls.lock().unwrap().as_slice(),
+        &[MessageId::from("provider-draft-1")]
+    );
+    assert!(service
+        .list_pending_operations(&account)
+        .unwrap()
+        .is_empty());
+}
+
+/// Ruling 24 / D126 idempotency: a redelivered send (same operation id) that
+/// settles again must not double-destroy the already-consumed draft or error.
+#[tokio::test]
+async fn redelivered_send_settlement_does_not_double_destroy() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-redelivered");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .expect("save draft");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush draft");
+    let send = service
+        .enqueue_send(&account, send_request_consuming("Outgoing", key.as_str()))
+        .expect("send queues");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush send");
+    assert_eq!(gateway.delete_draft_calls.lock().unwrap().len(), 1);
+
+    // Redelivery: the same send operation re-enqueued under its original id
+    // (the settled original was pruned). The gateway dedups the submission;
+    // the settlement effect finds the draft already consumed (alias gone, no
+    // projected message) and enqueues nothing.
+    service.enqueue_operation(send).expect("redelivered send");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush redelivery");
+
+    assert_eq!(
+        gateway.committed_send_keys.lock().unwrap().len(),
+        1,
+        "the redelivered send is deduplicated, not resubmitted"
+    );
+    assert_eq!(
+        gateway.delete_draft_calls.lock().unwrap().len(),
+        1,
+        "the consumed draft must not be destroyed a second time"
+    );
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert!(
+        pending.is_empty(),
+        "the redelivered settlement leaves no failed/queued ops: {pending:?}"
+    );
+}
+
+/// A send whose `draft_id` resolves to no alias and no projected message (a
+/// never-saved compose) settles without enqueueing any destroy.
+#[tokio::test]
+async fn send_with_an_unknown_draft_id_settles_without_a_destroy() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    service
+        .enqueue_send(
+            &account,
+            send_request_consuming("Outgoing", "draft-never-saved"),
+        )
+        .expect("send queues");
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush send");
+
+    assert_eq!(gateway.send_calls.lock().unwrap().len(), 1);
+    assert!(gateway.delete_draft_calls.lock().unwrap().is_empty());
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        1
+    );
+    assert!(service
+        .list_pending_operations(&account)
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]

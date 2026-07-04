@@ -22,8 +22,9 @@ mod stalwart;
 
 pub use fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
 pub use gmail::{
-    serve as serve_mock_gmail, GmailImapFixture, MAILBOX_ALL_MAIL, MAILBOX_INBOX, MAILBOX_SPAM,
-    MAILBOX_STARRED, MAILBOX_TRASH, SEEDED_FROM_EMAIL, SEEDED_LABELS, SEEDED_SUBJECT,
+    serve as serve_mock_gmail, GmailImapFixture, MAILBOX_ALL_MAIL, MAILBOX_DRAFTS, MAILBOX_INBOX,
+    MAILBOX_SENT, MAILBOX_SPAM, MAILBOX_STARRED, MAILBOX_TRASH, SEEDED_FROM_EMAIL, SEEDED_LABELS,
+    SEEDED_SUBJECT,
 };
 pub use guard::TempDirGuard;
 pub use harness::Harness;

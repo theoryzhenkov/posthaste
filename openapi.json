@@ -7739,7 +7739,7 @@
               "string",
               "null"
             ],
-            "description": "Stable draft identity stamped as `X-Posthaste-Draft-Id` when this request\nsaves a draft. The domain layer injects it from the draft key before\nqueuing; `save_draft` writes it as a header so the id survives provider\nid rotation. Ignored by `send` (a sent message is a fresh message).\n\n@spec docs/L1-outbox#temp-id-reconciliation"
+            "description": "Stable draft identity stamped as `X-Posthaste-Draft-Id` when this request\nsaves a draft. The domain layer injects it from the draft key before\nqueuing; `save_draft` writes it as a header so the id survives provider\nid rotation. On a `send`, it names the originating draft: the sent\nmessage is still a fresh message (no header is stamped), but the draft\nis destroyed as a settlement effect once the send settles success\n(D126) — and kept when the send parks `DispatchUncertain` (D125).\n\n@spec docs/L1-outbox#temp-id-reconciliation\n@spec docs/eph/RFC-L2-drafts#3-decisions-proposed"
           },
           "from": {
             "oneOf": [
