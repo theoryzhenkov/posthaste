@@ -207,11 +207,31 @@ export const runtimeMutations = {
     }): Promise<OkResponse> {
       return getRuntimeAdapter().sendMessage(request)
     },
-    saveDraft(request: {
+    /**
+     * Save (create or update) a draft through the optimistic runtime-mutation
+     * path (M65/D130) instead of the fire-and-forget REST POST. A save carries
+     * NO optimistic fold — the fold vocabulary has no upsert and holds no draft
+     * content — so this is not a "blink"; the win is the typed, idempotent
+     * runMutation path (per-mutation dedup on redelivery) replacing the silent
+     * POST, plus the reconciling `message.updated` the draft settlement emits
+     * (D132). The stable draft key rides as `messageId`; the far node uses it as
+     * the draft id and re-stamps `X-Posthaste-Draft-Id` (D131).
+     */
+    async saveDraft(request: {
       sourceId: string
       input: SaveDraftInput
-    }): Promise<Operation> {
-      return getRuntimeAdapter().saveDraft(request)
+    }): Promise<MessageCommandResult> {
+      const receipt = await runtimeLinkClient.runMutation({
+        name: 'message.saveDraft',
+        args: {
+          sourceId: request.sourceId,
+          // The stable draft key: autosave always supplies it as `draftId`.
+          messageId: request.input.draftId ?? '',
+          request: request.input.message,
+        },
+        sourceId: request.sourceId,
+      })
+      return confirmedMessageCommandResult(receipt)
     },
     deleteDraft(request: {
       sourceId: string
