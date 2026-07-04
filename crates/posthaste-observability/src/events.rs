@@ -139,6 +139,8 @@ pub const IMAP_SESSION_CONNECT_FAILED: LogEvent = LogEvent::new("imap.session.co
 pub const IMAP_SESSION_DROPPED: LogEvent = LogEvent::new("imap.session.dropped");
 pub const IMAP_SESSION_POISONED: LogEvent = LogEvent::new("imap.session.poisoned");
 pub const IMAP_DISCOVERY_COMPLETED: LogEvent = LogEvent::new("imap.discovery_completed");
+pub const IMAP_DRAFT_DELETE_ALREADY_GONE: LogEvent =
+    LogEvent::new("imap.draft.delete_already_gone");
 pub const IMAP_MAILBOX_HEADER_FETCH_COMPLETED: LogEvent =
     LogEvent::new("imap.mailbox.header_fetch_completed");
 pub const IMAP_MAILBOX_HEADER_FETCH_PROGRESS: LogEvent =
