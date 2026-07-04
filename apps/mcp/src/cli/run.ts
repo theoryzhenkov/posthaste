@@ -462,8 +462,10 @@ declare const POSTHASTE_BUILD_CHANNEL: string | undefined;
 export async function run(argv: string[], deps: RunDeps): Promise<number> {
   if (argv[0] === "--print-release-channel") {
     const channel =
-      typeof POSTHASTE_BUILD_CHANNEL === "string" ? POSTHASTE_BUILD_CHANNEL : "";
-    if (channel === "") return ExitCode.UsageError;
+      typeof POSTHASTE_BUILD_CHANNEL === "string"
+        ? POSTHASTE_BUILD_CHANNEL
+        : "";
+    if (channel === "") return ExitCode.Usage;
     deps.stdout(`${channel}\n`);
     return ExitCode.Ok;
   }
