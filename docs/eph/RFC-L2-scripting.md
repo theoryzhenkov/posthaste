@@ -14,6 +14,20 @@ dependents: []
 
 # RFC — Scripting & Automation (draft, deferred)
 
+> **Status (2026-07-04): MOSTLY SHIPPED.** Un-deferred and ratified for beta
+> (owner, 2026-07-03). Landed: S1–S6 (the tap + FactLog port, `/v1/events`
+> reborn on the tap, AS tap mount, `apply` idempotency, the rules engine levels
+> 0–1, the MCP surface), the `posthaste-query-grammar` crate, posthastectl-as-SDK
+> (ruling 21), the MCP agent path (ruling 22), the safe-actions Automations GUI
+> (ruling 23), and the full distribution wave (nightly.59 — sidecar signing
+> proven, wizard update, register-watch). **Remaining:** the Linux AppImage
+> sidecar (DEFERRED — linuxdeploy's ldd sweep aborts on the Bun binary; precise
+> follow-up recorded in "Distribution wave — DONE" below; Linux uses the wizard
+> tarball) and the ruling-24 `/commands/send` idempotency tail (queued with the
+> reliability tail). **[Update 2026-07-04]:** the "(draft, deferred)" title and
+> the frontmatter "DEFERRED" summary are historical — the RFC shipped through the
+> distribution wave; see §7 Rulings and the commit history.
+
 Companion to RFC-L2-architecture-cleanup (decisions D1–D51 there; D52+ here).
 Everything below builds on the M9-wave substrate: the node anatomy (topology
 §2.1b), the far-end sub-stores, the near-end engine, `MailOperation`/`apply`,
@@ -97,6 +111,10 @@ cannot exceed the grant; the deterministic idempotency key makes redelivery
 safe. User code: one rule, one prompt.
 
 ## 10. Migration steps (execution deferred)
+
+> **[Update 2026-07-04]:** no longer deferred — S1–S6 all landed (see the
+> `feat(S1)`…`feat(S5)`, `feat(mcp)`/`feat(scripting): MCP agent path` commits;
+> S1 absorbed lifecycle-M28). The "Client tap" row remains deferred as written.
 
 | Step | Content | Depends |
 |---|---|---|

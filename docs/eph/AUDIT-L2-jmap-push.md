@@ -12,6 +12,11 @@ dependents: []
 
 # JMAP Provider Engine & Push Pipeline — Robustness Audit
 
+> **Status: EVIDENCE/AUDIT (evidence-complete).** Read-only investigation, not a
+> plan. This is the evidence base for RFC-L2-provider-reliability; the defects it
+> found (S1 duplicate-send, A1 OAuth lockout, PP1 silent push death, PP2 reconnect
+> reset) shipped fixes as M32/M33/M37. Findings preserved as provenance.
+
 All paths are under the absolute root `R = /home/usr.prj_posthaste/src/.workspaces/architecture-cleanup/crates`; the external dependency `J = /home/usr.prj_posthaste/.cargo/git/checkouts/jmap-client-e74666a6eb3f96cd/26414bb/src` (the pinned `jmap-client` fork, branch `feat/ws-correlation`, which is effectively first-party transport code here).
 
 ## Findings table
