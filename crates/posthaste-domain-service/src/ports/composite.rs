@@ -17,6 +17,7 @@ pub trait MailStore:
     + SyncStateStore
     + ImapSyncStateStore
     + ImapMessageLocationStore
+    + ImapMessageLocationWriteStore
     + MessageMailboxStore
     + SyncWriteStore
     + CacheStore
@@ -43,6 +44,7 @@ impl<T> MailStore for T where
         + SyncStateStore
         + ImapSyncStateStore
         + ImapMessageLocationStore
+        + ImapMessageLocationWriteStore
         + MessageMailboxStore
         + SyncWriteStore
         + CacheStore

@@ -285,6 +285,28 @@ impl ImapMessageLocationStore for TestStore {
     }
 }
 
+/// The IMAP location write side is part of the `MailStore` composite (the draft
+/// save path registers the appended UID's location under its canonical id, D128).
+/// The domain-service tests don't observe the location store, so the double is a
+/// no-op writer.
+impl ImapMessageLocationWriteStore for TestStore {
+    fn put_imap_message_location(
+        &self,
+        _account_id: &AccountId,
+        _location: &ImapMessageLocation,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn delete_imap_message_locations(
+        &self,
+        _account_id: &AccountId,
+        _message_id: &MessageId,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
 /// Phase 2: the `RevLog` store is part of the `MailStore` composite (a supertrait
 /// of `MailStore`). The domain service tests don't exercise undo/redo history, so
 /// the test double stubs the three methods as empty/no-op (an empty snapshot,

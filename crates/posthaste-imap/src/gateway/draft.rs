@@ -1,8 +1,12 @@
+use std::num::NonZeroU32;
+
 use imap_client::imap_types::flag::Flag;
 use posthaste_domain_model::RFC3339_EPOCH;
 use posthaste_domain_service::imap_message_id;
 
 use crate::build_smtp_message;
+use crate::fetch::fetch_selected_mailbox_headers;
+use crate::provider::ImapAdapterProviderProfile;
 
 use super::*;
 
@@ -20,21 +24,32 @@ fn drafts_mailbox(gateway: &LiveImapSmtpGateway) -> Result<&DiscoveredImapMailbo
 
 /// Persist a draft by APPENDing it to the Drafts mailbox with the `\Draft` flag.
 ///
-/// The returned [`MessageId`] is encoded with [`imap_message_id`] exactly as the
-/// IMAP sync path encodes message ids for UID-identity providers, so the
-/// runtime's draft alias reconciles to the real message on the next sync.
+/// The returned [`MessageId`] is the SAME canonical id the next sync will derive
+/// for the appended message, and its location is registered under that id at
+/// save time (D128, closing the transient-twin wart). Immediately after the
+/// APPEND we FETCH the new UID exactly as sync does — pulling Gmail `X-GM-MSGID`
+/// metadata when the provider canonicalizes by it — and run the same provider
+/// projection ([`ImapAdapterProviderProfile::project_headers`]) to obtain the id
+/// and location sync would compute. That location is written through the
+/// sync-owned location store, so sync's own upsert of the identical key is a
+/// no-op and its delete-by-absence prune leaves it untouched: a save followed by
+/// a sync yields exactly ONE Drafts row under a stable identity, never a
+/// provider-canonical row surfacing as a duplicate beside an orphaned UID-based
+/// one. For a UID-identity provider the projected id equals the plain
+/// [`imap_message_id`] encoding (the pre-existing happy path); the Gmail case —
+/// previously the documented limitation — now reconciles too.
 ///
 /// When `replace` is set, the prior draft is deleted after the new one is
-/// appended (append-then-delete preserves the old draft if the append fails).
+/// appended (append-then-delete preserves the old draft if the append fails);
+/// the old version's location is pruned by sync once its UID vanishes.
 ///
-/// LIMITATION: providers that canonicalize message ids by a provider key rather
-/// than UIDVALIDITY/UID (currently only Gmail, via `X-GM-MSGID`) will sync the
-/// appended draft under a different canonical id than the UID-based id returned
-/// here, so the alias cannot reconcile and an edited draft may leave a duplicate
-/// in the Drafts mailbox. This is acceptable for the JMAP-first beta where IMAP
-/// support targets standard UID-identity providers (Generic/Outlook/iCloud).
+/// The UID-based encoding remains the fallback id when the post-APPEND FETCH
+/// yields no header (the draft was expunged out from under us between APPEND and
+/// FETCH) or when no store is wired (the storeless gateway has no sync to agree
+/// with).
 ///
 /// @spec docs/L1-outbox#operation-model
+/// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
 pub(crate) async fn save_imap_draft(
     gateway: &LiveImapSmtpGateway,
     client: &mut ImapClient,
@@ -84,13 +99,62 @@ pub(crate) async fn save_imap_draft(
         GatewayError::Rejected("IMAP APPEND did not yield a draft UID".to_string())
     })?;
 
-    let new_message_id = imap_message_id(&drafts_id, uid_validity, ImapUid(uid.get()));
+    let uid_fallback_id = imap_message_id(&drafts_id, uid_validity, ImapUid(uid.get()));
+    let new_message_id =
+        register_saved_draft_location(gateway, client, &selected, account_id, uid, uid_fallback_id)
+            .await?;
 
     if let Some(replace) = replace {
         delete_imap_draft(gateway, client, account_id, replace).await?;
     }
 
     Ok(new_message_id)
+}
+
+/// Resolve the canonical id + location the next sync will derive for a
+/// just-APPENDed draft (`uid`) and register it under that id in the sync-owned
+/// location store, returning the canonical id. Falls back to `uid_fallback_id`
+/// (the plain [`imap_message_id`] encoding) when no store is wired or the FETCH
+/// yields no header for the UID. See [`save_imap_draft`] for why this closes the
+/// transient-twin wart.
+async fn register_saved_draft_location(
+    gateway: &LiveImapSmtpGateway,
+    client: &mut ImapClient,
+    selected: &posthaste_domain_model::ImapSelectedMailbox,
+    account_id: &AccountId,
+    uid: NonZeroU32,
+    uid_fallback_id: MessageId,
+) -> Result<MessageId, GatewayError> {
+    let Some(store) = gateway.store.as_ref() else {
+        return Ok(uid_fallback_id);
+    };
+    let capabilities = &gateway.discovery.capabilities;
+    let updated_at = now_iso8601().map_err(GatewayError::Rejected)?;
+    let headers = fetch_selected_mailbox_headers(
+        client,
+        selected,
+        &[uid],
+        capabilities.supports_condstore(),
+        capabilities.supports_gmail_extensions(),
+        updated_at,
+    )
+    .await
+    .map_err(imap_error_to_gateway)?;
+    // Run the SAME provider projection sync runs, so the canonical id (and the
+    // location's own `message_id`) match sync's exactly — this is what makes the
+    // registered location the identical key sync will re-observe.
+    let projected =
+        ImapAdapterProviderProfile::from_discovery(&gateway.discovery).project_headers(headers);
+    let Some(header) = projected
+        .into_iter()
+        .find(|header| header.location.uid.0 == uid.get())
+    else {
+        return Ok(uid_fallback_id);
+    };
+    store
+        .put_imap_message_location(account_id, &header.location)
+        .map_err(store_error_to_gateway)?;
+    Ok(header.location.message_id)
 }
 
 /// Delete a draft message from the Drafts mailbox.
