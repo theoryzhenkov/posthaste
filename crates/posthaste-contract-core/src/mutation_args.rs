@@ -7,7 +7,7 @@
 //! them. They were factored out of `authority server.rs` for exactly this reason.
 
 use crate::{RuntimeError, RuntimeErrorCode};
-use posthaste_domain_model::SetKeywordsCommand;
+use posthaste_domain_model::{SendMessageRequest, SetKeywordsCommand};
 use posthaste_replica_core::MessageChangeDiff;
 use serde::{Deserialize, Serialize};
 
@@ -119,6 +119,37 @@ pub struct MessageDeleteDraftArgs {
     pub source_id: String,
     pub message_id: String,
     pub draft_id: String,
+}
+
+/// `message.saveDraft`: save (create or update) a draft through the optimistic
+/// runtime-mutation path (M65/D130) rather than the fire-and-forget REST POST.
+/// `message_id` is the stable draft key (D131) the far node uses as the
+/// `draft_id` for the create/update; `request` is the full compose payload. The
+/// operation is **not** locally foldable (the fold vocabulary has no upsert and
+/// carries no draft content — see [`crate::MailOperation::fold_effect`]); its
+/// value is the typed, idempotent path + the reconciling `message.updated`
+/// emitted on the draft settlement (D132), not an optimistic fold.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSaveDraftArgs {
+    pub source_id: String,
+    pub message_id: String,
+    pub request: SendMessageRequest,
+}
+
+/// `message.send`: send a message through the optimistic runtime-mutation path
+/// (M66/D130). `message_id` is the originating draft's row id: the optimistic
+/// fold is a `Destroy` on it ("it left Drafts"), reverted if the send parks
+/// (D125) or fails, confirmed on a real ack. `request` is the full compose
+/// payload (its `draft_id` names the draft the send consumes on ack, D126). A
+/// fresh compose that was never saved uses its client draft key here — the
+/// `Destroy` is then a deferred no-op (no base row), which is harmless.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSendArgs {
+    pub source_id: String,
+    pub message_id: String,
+    pub request: SendMessageRequest,
 }
 
 /// `message.snooze`: move a message to the Snoozed mailbox + record the return

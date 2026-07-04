@@ -220,6 +220,27 @@ function deleteDraft(
   }
 }
 
+/**
+ * A `message.saveDraft` runtime mutation (M65/D130). Not locally foldable
+ * (`fold_effect` = None): no optimistic blink, no pending-set record — the value
+ * is the typed, idempotent forwarded path replacing the fire-and-forget POST.
+ */
+function saveDraft(
+  messageId: string,
+  clientMutationId: string,
+): RuntimeRunMutationRequest {
+  return {
+    linkId: 'sess',
+    name: 'message.saveDraft',
+    args: {
+      sourceId: 's',
+      messageId,
+      request: { to: [], cc: [], bcc: [], subject: 'hi', body: 'draft body' },
+    },
+    clientMutationId,
+  }
+}
+
 function keywordsOf(
   frames: RuntimeFrame<RuntimeMailListViewState>[],
   messageId: string,
@@ -454,6 +475,34 @@ describe('entityStoreAdapter', () => {
     // regression this fixes).
     expect(rowIds(frames)).toEqual(['m1', 'm2'])
     expect(await pendingSet.all()).toHaveLength(0)
+  })
+
+  it('save (M65/D130): forwards through the typed runMutation path with NO optimistic fold + NO pending-set record', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
+    const opened = await adapter.openRuntimeLinkMessageListView(viewRequest)
+    expect(
+      opened.snapshot.data.rows.map((r) => (r.projection as { id: string }).id),
+    ).toEqual(['m1', 'm2'])
+    const framesBefore = frames.length
+
+    const receipt = await adapter.runRuntimeMutation(
+      saveDraft('draft-local-1', 's1'),
+    )
+
+    // A save has no expressible optimistic fold (the vocabulary has no upsert):
+    // nothing is folded, so the store never re-projects — no view frame is
+    // emitted (no blink).
+    expect(frames.length).toBe(framesBefore)
+    // It forwarded as a real, typed runtime mutation (not a fire-and-forget
+    // POST), so redelivery dedups at the seam and errors surface.
+    expect(harness.mutations.map((m) => m.name)).toEqual(['message.saveDraft'])
+    expect(harness.mutations[0]?.args).toMatchObject({
+      messageId: 'draft-local-1',
+      request: { subject: 'hi' },
+    })
+    // Foldless ops carry no optimism to settle/revert → no pending-set record.
+    expect(await pendingSet.all()).toHaveLength(0)
+    expect(receipt.clientMutationId).toBe('s1')
   })
 
   it('surfaces a clear error + reverts the optimistic fold when the durable write fails (W4 quota)', async () => {
