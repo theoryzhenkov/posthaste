@@ -72,6 +72,17 @@ async function main(): Promise<void> {
     signal: controller.signal,
   };
 
+  // `posthastectl mcp` starts the stdio MCP server (this package's other
+  // front-end) — so the COMPILED binary (the app sidecar / a wizard install)
+  // can serve an agent host directly: no repo checkout, no bun. Args after
+  // `mcp` are ignored; configuration is POSTHASTE_MCP_* env (quickstart,
+  // "Agent via MCP").
+  if (process.argv[2] === "mcp") {
+    const { main } = await import("./index.js");
+    await main();
+    return;
+  }
+
   const code = await run(process.argv.slice(2), deps);
   process.exit(code);
 }
