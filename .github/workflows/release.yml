@@ -6,6 +6,10 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      only_desktop_linux:
+        description: "Probe: run only the desktop-linux job (no publish)"
+        type: boolean
+        default: false
       tag:
         description: "Existing tag to publish, for example v0.1.0"
         required: true
@@ -50,6 +54,7 @@ jobs:
 
 
   build-daemon:
+    if: ${{ !inputs.only_desktop_linux }}
     name: Build daemon ${{ matrix.platform }}
     needs: resolve-channel
     runs-on: ${{ matrix.os }}
@@ -166,6 +171,7 @@ jobs:
           path: target/distribute/PosthasteWizard*.tar.gz
 
   build-web:
+    if: ${{ !inputs.only_desktop_linux }}
     name: Build web frontend
     needs: resolve-channel
     runs-on: ubuntu-latest
@@ -277,6 +283,7 @@ jobs:
           path: target/distribute/PosthasteCTL*
 
   package-cli:
+    if: ${{ !inputs.only_desktop_linux }}
     name: Sign + notarize + package posthastectl CLI
     needs: [resolve-channel, build-cli]
     # macOS Gatekeeper hard-rejects an unsigned CLI binary as "damaged" on
@@ -480,6 +487,16 @@ jobs:
           cp "$src" "$dest"
           chmod +x "$dest"
           echo "staged Tauri sidecar: $dest"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            # Linux ships the CLI as a bundle RESOURCE (usr/lib/<Product>/binaries/),
+            # not externalBin: linuxdeploy's patchelf/ldd pass corrupts a Bun
+            # --compile binary's appended payload if it sits in usr/bin (NO_STRIP
+            # only disables strip, not patchelf — verified root cause, see the
+            # linuxdeploy research in RFC-L2-scripting distribution notes).
+            # Resources keep their name verbatim: stage triple-less.
+            cp "$src" "apps/desktop/binaries/posthastectl"
+            chmod +x "apps/desktop/binaries/posthastectl"
+          fi
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
@@ -579,8 +596,15 @@ jobs:
           # wiring to be discoverable). Linux users get the CLI via the wizard
           # tarball path. Windows injects below; macOS injects in its own step.
           sidecar_config=""
+          verbose_flag=""
           if [ "${{ runner.os }}" = "Windows" ]; then
             sidecar_config="\"externalBin\":[\"binaries/posthastectl\"],"
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            # See the staging step: resource, not externalBin, on Linux.
+            # --verbose so a linuxdeploy failure surfaces its REAL stderr
+            # (tauri-bundler swallows it at the default log level).
+            sidecar_config="\"resources\":[\"binaries/posthastectl\"],"
+            verbose_flag="--verbose"
           fi
           config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${sidecar_config}"
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
@@ -601,7 +625,7 @@ jobs:
           # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
           # have no code-signing certs configured, so code signing is a no-op
           # here regardless, while updater signatures (.sig) are now produced.
-          bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config" "${icon_config[@]}"
+          bun run tauri build --ci $devtools_flag $verbose_flag --bundles "${{ matrix.bundle_targets }}" --config "$config" "${icon_config[@]}"
 
       - name: Build macOS desktop bundles
         if: runner.os == 'macOS'
@@ -796,6 +820,7 @@ jobs:
           if-no-files-found: error
           path: target/distribute/desktop-${{ matrix.platform }}/*
   publish:
+    if: ${{ !inputs.only_desktop_linux }}
     name: Publish GitHub Release
     needs:
       - build-daemon
