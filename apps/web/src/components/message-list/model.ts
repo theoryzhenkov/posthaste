@@ -57,6 +57,25 @@ export function viewModeKey(
   return `source:${selectedView.sourceId}:${selectedView.mailboxId}${query}`
 }
 
+/**
+ * Whether a view's rows are expected to span more than one source mailbox, so
+ * the "show source mailbox" chip default should start ON. Smart mailboxes
+ * (which realize unified/aggregate views like "All Inboxes") and any search
+ * (global or mailbox-scoped) qualify; a single source mailbox with no search
+ * modifier does not, since every row would repeat the same mailbox name.
+ *
+ * @spec docs/L1-ui#messagelist
+ */
+export function isAggregateMessageView(
+  selectedView: SidebarSelection | null,
+  searchQuery: string | undefined,
+): boolean {
+  if (selectedView?.kind === 'source-mailbox') {
+    return Boolean(searchQuery && searchQuery.trim().length > 0)
+  }
+  return true
+}
+
 function serverSortField(sort: SortConfig): MessageSortField {
   switch (sort.columnId) {
     case 'date':
