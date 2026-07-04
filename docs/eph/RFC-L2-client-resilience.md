@@ -80,7 +80,7 @@ covers them); the rAF-coalescing starvation (bounded by the 256-frame cap).
 
 | Step | Scope | Gate |
 |------|-------|------|
-| M40 | Link re-prepare on stale-link 4xx (engine.rs error arm + nearEnd shim signalling) | e2e: reap/restart the link mid-session → stream resumes WITHOUT reload; a suspended-clock test for the sleep>5min shape |
+| M40 [::done 2026-07-04] | Link re-prepare on stale-link 4xx. LANDED. Residual (M42/M44): re-prepare resumes the stream + self-maintained lists; server-re-served views (smart mailboxes/search) + linkClient's cached linkId need the reconcile pass — on_reset deliberately NOT fired (false semantics for a fresh link). | e2e: reap/restart the link mid-session → stream resumes WITHOUT reload; a suspended-clock test for the sleep>5min shape |
 | M41 | enqueue failure paths (D111): catch + log + compensating invalidation at the 4 sites | test: a store op that throws triggers the invalidation, not silence |
 | M42 | Worker re-seed protocol + dead-latch removal (D110b) | test: kill the worker mid-session → views re-populate + pending set replays + counts recover |
 | M43 | Subscription readiness handshake (D110c) | test: the F5 startup interleaving now re-binds |
@@ -136,7 +136,7 @@ small; it should land first and could ship alone as a hotfix nightly.
 ### Migration
 | Step | Scope | Gate |
 |------|-------|------|
-| M46 | The reactive store (D115) + counts slice + sidebar composition (D116 counts half) | all web tests pass; no setQueryData-for-counts remains (grep); counts update end-to-end via the store |
+| M46 [::done 2026-07-04] | The reactive store LANDED (counts fully migrated; view projections dual-write — M49 residual: useRuntimeMailListView still consumes synthesized frames). | all web tests pass; no setQueryData-for-counts remains (grep); counts update end-to-end via the store |
 | M47 | Event-boundary codegen (D118) | unhandled-topic = compile error; coverage matrix generated |
 | M48 | Client testkit + boundaries lint + Playwright smoke (D119) | the 5 scenarios run deterministically |
 | M49 | Adapter decomposition + health statechart (D117, absorbs M44's FSM home) | boundaries lint enforces the seams |
