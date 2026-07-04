@@ -16,7 +16,9 @@ import type { MessageSummary } from '../api/types'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { cn } from '../lib/utils'
 import type { ConversationTreeRow } from './message-list/conversationTree'
+import { MailboxChip } from './message-list/MailboxChip'
 import { messageKey } from './message-list/model'
+import type { MailboxDirectory } from './message-list/useMailboxDirectory'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -49,6 +51,12 @@ interface MessageRowProps {
   /** Toggle one node's collapse state, keyed by message key (conversation view
    *  only). */
   onToggleCollapse?: (messageKey: string) => void
+  /** Per-view "show source mailbox" toggle state (top-bar control). */
+  showSourceMailbox: boolean
+  mailboxDirectory: MailboxDirectory
+  /** The mailbox already being viewed (single source-mailbox views), excluded
+   *  from the chip's candidate memberships when possible. */
+  excludeMailboxId: string | null
 }
 
 /** Left offset applied per reply depth. The root (depth 0) gets none, so it sits
@@ -74,8 +82,14 @@ export const MessageRow = memo(function MessageRow({
   onViewConversation,
   treeRow,
   onToggleCollapse,
+  showSourceMailbox,
+  mailboxDirectory,
+  excludeMailboxId,
 }: MessageRowProps) {
   const messageRef = { messageId: message.id, sourceId: message.sourceId }
+  const resolvedMailbox = showSourceMailbox
+    ? mailboxDirectory.resolve(message, excludeMailboxId)
+    : null
   const handleSelect = useCallback(() => {
     onSelectMessage(message)
   }, [message, onSelectMessage])
@@ -137,6 +151,20 @@ export const MessageRow = memo(function MessageRow({
           )
         })}
       </div>
+      {resolvedMailbox && (
+        <div className="flex h-full shrink-0 items-center overflow-hidden pr-2.5">
+          <MailboxChip
+            name={resolvedMailbox.mailbox.name}
+            role={resolvedMailbox.mailbox.role}
+            accountName={
+              resolvedMailbox.isMultiAccount
+                ? resolvedMailbox.accountName
+                : null
+            }
+            className="max-w-32"
+          />
+        </div>
+      )}
     </button>
   )
 
