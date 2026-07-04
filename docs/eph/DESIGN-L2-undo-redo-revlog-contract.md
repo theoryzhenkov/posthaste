@@ -34,7 +34,7 @@ works cross-device: undo on the phone what was done on the desktop. The client
 cursor stays optimistic (Phase 1 behavior preserved); the log becomes
 server-authoritative.
 
-See [`DESIGN-L2-undo-redo-synced-history`](DESIGN-L2-undo-redo-synced-history) for
+See [`DESIGN-L2-undo-redo-synced-history`](DESIGN-L2-undo-redo-synced-history.md) for
 the problem, the model, + the Phase 1 status. This doc defines the store, the
 synced view, the arbitration protocol, + the migration.
 

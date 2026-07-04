@@ -8,9 +8,9 @@ type: DESIGN
 depends:
   - path: docs/replication/L1
     section: "10. Deployment topology"
-  - path: docs/replication/backend-link/L2
+  - path: docs/replication/authority-server-link/L2
     section: "7. The build seam and role binaries"
-  - path: docs/replication/backend-link/L3
+  - path: docs/replication/authority-server-link/L3
     section: "5. Hardening (partial)"
 dependents: []
 ---
@@ -27,7 +27,7 @@ The topology mechanism is realized: the build seam (`build_backend` /
 `build_runtime`), the lean role binaries (`posthaste-backend` / `posthaste-runtime`
 / `posthaste-daemon`), config-selected transports, and authenticated remote links
 are landed and folded into [replication L1 §10](../replication/L1.md) and
-[backend-link L2](../replication/backend-link/L2.md). What remains is making it a
+[authority-server-link L2](../replication/authority-server-link/L2.md). What remains is making it a
 **default, productized deployment** rather than a dogfoodable split. When a piece
 lands, fold it into the durable section and remove its `[::state]` marker.
 
@@ -35,7 +35,7 @@ lands, fold it into the durable section and remove its `[::state]` marker.
 
 - **Client↔runtime transport selector.** The client-link transport config
   (remote runtime URL; web vs desktop client shell), reconciled with the WASM
-  replica effort. This is the symmetric twin of the backend-link `Remote`
+  replica effort. This is the symmetric twin of the authority-server-link `Remote`
   selector, on the client seam.
 - **Control pane.** The desktop UI that edits the topology config — enable/point
   each scope and link, presets as shortcuts, restart-to-apply. Topology switching
@@ -55,7 +55,7 @@ a later refinement, not built now.
 
 ## 3. Split-runtime hardening
 
-Dogfood-driven hardening of the split runtime ([backend-link L3 §5](../replication/backend-link/L3.md)):
+Dogfood-driven hardening of the split runtime ([authority-server-link L3 §5](../replication/authority-server-link/L3.md)):
 
 - eviction under storage pressure (cache bounds / LRU);
 - `RuntimeCoverage` reporting what a split runtime holds;
