@@ -6,7 +6,7 @@ use jmap_client::core::request::Request;
 use jmap_client::core::response::{Response, TaggedMethodResponse};
 use jmap_client::PushObject;
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::live::map_gateway_error;
 use posthaste_domain_model::GatewayError;
@@ -27,7 +27,62 @@ pub struct SharedWsConnection {
 
 enum WsConnectionState {
     Disconnected,
-    Connected(Arc<CorrelatedWs>),
+    Connected(ActiveWs),
+}
+
+/// A live WebSocket plus the machinery that keeps the shared connection healthy.
+///
+/// The fork's reader task multiplexes API responses and push notifications off a
+/// single socket, but delivers pushes over a *bounded* channel and **blocks**
+/// when it fills (`client_ws.rs`, `push_tx.send(..).await`). If nothing drains
+/// pushes promptly, that block also stalls API-response correlation on the same
+/// socket -- so an in-flight `send()` hangs behind a backlog of pushes (M67).
+///
+/// To decouple the two, `ActiveWs` owns a dedicated drain task that continuously
+/// pulls pushes out of the fork's channel into an unbounded engine-side queue.
+/// The fork reader therefore never blocks on push backpressure, so API responses
+/// always flow; push consumers read the engine-side queue instead.
+struct ActiveWs {
+    correlated: Arc<CorrelatedWs>,
+    /// Engine-side push queue, fed by the drain task. A `tokio::Mutex` gives the
+    /// single push consumer `&mut` access to `recv()` behind the shared `RwLock`.
+    push_rx: Arc<Mutex<mpsc::UnboundedReceiver<Result<PushObject, jmap_client::Error>>>>,
+    /// Aborts the drain task when this state is dropped/replaced (disconnect or
+    /// reconnect), so a stale drainer never lingers on an old socket.
+    _drain: DrainGuard,
+}
+
+/// Aborts the wrapped push-drain task on drop.
+struct DrainGuard(tokio::task::JoinHandle<()>);
+
+impl Drop for DrainGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+impl ActiveWs {
+    /// Wrap a freshly-connected `CorrelatedWs`, spawning the push-drain task that
+    /// keeps the fork reader from wedging on push backpressure (M67).
+    fn spawn(correlated: Arc<CorrelatedWs>) -> Self {
+        let (push_tx, push_rx) = mpsc::unbounded_channel();
+        let drain_source = correlated.clone();
+        let drain = tokio::spawn(async move {
+            // Pull pushes as fast as the fork emits them. The forward is
+            // non-blocking (unbounded), so the fork's bounded push buffer is
+            // emptied promptly and its reader never blocks -- API responses on
+            // the shared socket keep correlating. If no consumer is attached the
+            // push is dropped, but we keep draining so the reader stays live.
+            while let Some(item) = drain_source.next_push().await {
+                let _ = push_tx.send(item);
+            }
+        });
+        Self {
+            correlated,
+            push_rx: Arc::new(Mutex::new(push_rx)),
+            _drain: DrainGuard(drain),
+        }
+    }
 }
 
 impl WsConnectionState {
@@ -38,7 +93,14 @@ impl WsConnectionState {
     fn connection(&self) -> Option<Arc<CorrelatedWs>> {
         match self {
             Self::Disconnected => None,
-            Self::Connected(ws) => Some(ws.clone()),
+            Self::Connected(active) => Some(active.correlated.clone()),
+        }
+    }
+
+    fn push_queue(&self) -> Option<Arc<Mutex<mpsc::UnboundedReceiver<Result<PushObject, jmap_client::Error>>>>> {
+        match self {
+            Self::Disconnected => None,
+            Self::Connected(active) => Some(active.push_rx.clone()),
         }
     }
 }
@@ -93,7 +155,7 @@ impl SharedWsConnection {
             );
             mapped
         })?;
-        *guard = WsConnectionState::Connected(Arc::new(ws));
+        *guard = WsConnectionState::Connected(ActiveWs::spawn(Arc::new(ws)));
         ph_info!(
             events::JMAP_WEBSOCKET_CONNECTION_ESTABLISHED,
             target_url = target_url.as_deref(),
@@ -128,10 +190,17 @@ impl SharedWsConnection {
 
     /// Read the next push notification from the shared WS.
     ///
+    /// Reads from the engine-side drain queue (fed by `ActiveWs`'s drain task),
+    /// not directly from the fork -- so a slow push consumer applies backpressure
+    /// only here, never to the fork reader that also correlates API responses
+    /// (M67). The read `RwLock` is released before awaiting `recv`, so a
+    /// concurrent `send()`/`disconnect()` is never blocked by a waiting consumer.
+    ///
     /// @spec docs/L1-jmap#push
     pub async fn next_push(&self) -> Option<Result<PushObject, jmap_client::Error>> {
-        let ws = self.state.read().await.connection()?;
-        ws.next_push().await
+        let queue = self.state.read().await.push_queue()?;
+        let mut rx = queue.lock().await;
+        rx.recv().await
     }
 
     /// Enable push notifications on the WS connection for watched data types.
