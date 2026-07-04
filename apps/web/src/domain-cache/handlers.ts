@@ -1,8 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import type { DomainEvent } from '../api/types'
-import { EVENT_TOPICS, isDomainEventTopic } from '../domainVocabulary'
-import type { DomainEventTopic } from '../domainVocabulary'
+import { EVENT_TOPICS, isEventTopic } from '../api/events.gen'
+import type { EventTopic, PayloadOf } from '../api/events.gen'
 import { queryKeys } from '../queryKeys'
 import { removeAccountOverview } from './accounts'
 import {
@@ -17,10 +17,26 @@ import {
 } from './invalidations'
 import { pushNotification } from '../notifications/store'
 import { payloadString } from './payload'
-import {
-  applyResourceInvalidationsOrFallback,
-  type EventHandler,
-} from './resources'
+import { applyResourceInvalidationsOrFallback, noop } from './resources'
+
+/**
+ * A cache reaction to one topic's event. Payloads are free-form in the event
+ * contract today, so `Handler<PayloadOf<T>>` collapses to a uniform handler; the
+ * generic keeps the registry reading as the RFC's `Handler<PayloadOf<T>>` and
+ * makes per-topic payload narrowing a one-line change once the contract enriches.
+ */
+type Handler<P> = (
+  queryClient: QueryClient,
+  event: DomainEvent & { payload: P },
+) => void
+
+/**
+ * The exhaustive topic -> handler registry. Because this is a mapped type over
+ * the generated `EventTopic` union, the object below must supply an entry for
+ * EVERY topic or `tsc` fails — the audit's coverage matrix is now enforced by the
+ * type system, not by hand.
+ */
+export type DomainEventHandlers = { [T in EventTopic]: Handler<PayloadOf<T>> }
 
 const eventHandlers = {
   [EVENT_TOPICS.SettingsUpdated]: (queryClient, event) => {
@@ -86,11 +102,12 @@ const eventHandlers = {
       invalidateAccountReadModels(client, event.accountId)
     })
   },
-  [EVENT_TOPICS.AccountStatusChanged]: () => {
-    // Account status is served through the accountStatus view (queryKeys.accounts
-    // re-served on every account event), so the renderer no longer patches it
-    // here. Doing so per status delta would also storm refetches during a sync.
-  },
+  // Account status is served through the accountStatus view (queryKeys.accounts
+  // re-served on every account event), so the renderer no longer patches it here.
+  // Doing so per status delta would also storm refetches during a sync.
+  [EVENT_TOPICS.AccountStatusChanged]: noop(
+    'account.status_changed — served via the accountStatus view, no cache patch',
+  ),
   [EVENT_TOPICS.AccountUpdated]: (queryClient, event) => {
     applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
       invalidateAccountReadModels(client, event.accountId)
@@ -193,16 +210,18 @@ const eventHandlers = {
       dedupeKey: `operation.dispatch_uncertain:${id}`,
     })
   },
-  [EVENT_TOPICS.RuleFired]: () => {
-    // An automation rule fired at the authority server. Its Level-0 effects
-    // (tag/move) reach the web through the message.updated fact they emit, so
-    // this audit fact needs no additional cache reaction.
-  },
-  [EVENT_TOPICS.RuleDeliveryFailed]: () => {
-    // A rule's webhook/exec delivery was abandoned (dead-letter). Audit-only on
-    // the web side; no cache reaction.
-  },
-} satisfies Record<DomainEventTopic, EventHandler>
+  // An automation rule fired at the authority server. Its Level-0 effects
+  // (tag/move) reach the web through the message.updated fact they emit, so this
+  // audit fact needs no additional cache reaction.
+  [EVENT_TOPICS.RuleFired]: noop(
+    'rule.fired — tap-only; effects arrive via the message.updated fact',
+  ),
+  // A rule's webhook/exec delivery was abandoned (dead-letter). Audit-only on the
+  // web side; no cache reaction.
+  [EVENT_TOPICS.RuleDeliveryFailed]: noop(
+    'rule.delivery.failed — audit-only dead-letter, no cache reaction',
+  ),
+} satisfies DomainEventHandlers
 
 function payloadChangeFlag(event: DomainEvent, key: string): boolean {
   const changes = event.payload.changes
@@ -214,8 +233,15 @@ function payloadChangeFlag(event: DomainEvent, key: string): boolean {
   )
 }
 
+/**
+ * The topics the registry actually wires, for the runtime exhaustiveness test
+ * (asserting these keys equal the generated `ALL_EVENT_TOPICS`). Compile-time
+ * exhaustiveness is enforced by `satisfies DomainEventHandlers` above.
+ */
+export const registeredEventTopics = Object.keys(eventHandlers) as EventTopic[]
+
 export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
-  if (!isDomainEventTopic(event.topic)) {
+  if (!isEventTopic(event.topic)) {
     invalidateAccountReadModels(queryClient)
     return
   }
