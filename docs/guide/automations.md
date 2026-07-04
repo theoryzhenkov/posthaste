@@ -181,10 +181,10 @@ You don't have to worry about the same message being handled twice (which can
 happen after a restart) — these write commands make repeat runs safe
 automatically.
 
-> One caveat to know about `reply` and `send`: today, a rare double-delivery of
-> the same trigger could send the reply twice (unlike `tag`/`move`, which are
-> fully de-duplicated). It's uncommon, but if a duplicated reply would be
-> embarrassing, keep that in mind. Tagging and moving have no such caveat.
+`reply` and `send` are de-duplicated too: if the same trigger is delivered
+twice (which can happen after a restart), the app recognizes the repeat and
+sends only once. So every write command — tag, move, reply, send — is safe to
+run again.
 
 ### The webhook shape, and the easy listener
 
