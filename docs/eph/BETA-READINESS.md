@@ -30,4 +30,19 @@
 OAuth scopes minimal; XOAUTH2 correct; Gmail Sent-copy ProviderManaged (no dup); CONDSTORE/QRESYNC capability-gated; OAuth timeouts bounded; secret store OS-keyring, no plaintext fallback, no secret logging; server-side jittered backoff reconnect works.
 
 ## Data-safety & sync-correctness audit
-_(pending — worker a054e3cf running)_
+Backend overall unusually hardened (outbox exactly-once, drop-guards, atomic prune+cursor). Residual gaps that can LOSE or DUPLICATE mail:
+
+### BLOCKER
+- **DS1 — Full-sync prune deletes local mail against an UNPAGINATED Email/query → permanent mail loss.** The JMAP full-snapshot reconcile treats ONE unbounded Email/query id set (engine/sync/email.rs:220-227, no limit/position/loop — contrast the delta path which loops on has_more_changes email.rs:135-168) as complete remote truth, then durably prunes every local message absent from it (store/mutations/sync_batch.rs:310-343, committed atomically with the cursor 417-419). RFC 8620 §5.5 lets servers CAP Email/query (Fastmail/proxies do). Trigger: large account → delta expires (cannotCalculateChanges) → full fallback → query returns only N recent ids → every older local message PRUNED though still on server. Latent (first-sync has nothing to prune → passed on small Stalwart). Aggravator: no floor guard — a transiently-empty-but-Ok query wipes the whole store. FIX: paginate to exhaustion (read total; refuse prune if ids.len()<total) + a floor guard (never prune-by-absence on empty/drastically-smaller remote without an explicit full-resync) + audit the IMAP full-snapshot path for the same. **THE top priority — mail loss.** [WIP:ds1-prune]
+- **DS2 — Draft create/update has no deterministic provider id → lost-response retry orphans the committed write → durable TWIN.** draft.rs:37 email_set.create() is anonymous (contrast send.rs:97 create_with_id(phsend-…)); the Transient flush arm re-queues without reconciling the entity id (outbox.rs:690-705). Attempt 2 creates a second draft. FIX: derive the draft create-id from operation.id (like send) or reconcile-by-DRAFT_ID_HEADER. → folded into M65 [WIP:send-save].
+- **DS3 — save_draft never checks the destroy(replace) outcome → stale/failed replace silently leaves the old draft** (twin amplifier). draft.rs:96-107 inspects created but never destroyed(replace); the update path swallows EVERY destroy failure (the M60/D133 mask fix only covered the delete path). FIX: inspect destroyed(replace), surface failures. → folded into M65 [WIP:send-save].
+
+### SHOULD-FIX
+- **DS4 — Web send/save carry no Idempotency-Key** → keyless resubmit mints a 2nd operation → double send/draft (mutations.ts:204-215; handle.rs:822-828,887-895 bypass the ledger). FIX: stable per-compose-session Idempotency-Key through the ledger. → addressed by M65/M66 routing through runMutation [WIP:send-save].
+- **DS5 — Post-commit transport reset on send classified retryable → blind resend → double Sent** (send.rs:155-158 only parks timeouts/truncation). FIX: classify unknown-fate send transport errors as DispatchUncertain.
+- **DS6 — Failed submission / post-success Sent-move failure strands a Drafts copy + un-consumes the draft** (send.rs:97-99,174-187). FIX: destroy-on-failure; treat post-success move failure as success-with-warning.
+- **DS7 — Apply-ledger in-memory + reap-on-reserve (15min TTL, non-persistent)** → redelivery >TTL or post-restart re-executes (apply_ledger.rs:160,137-139). FIX: persist the keyed decision or dominate the TTL.
+- **DS8 — Client fold reverts only via the settlement frame, not a failed receipt** (entityStoreAdapter.ts:742-762; two backstops exist). FIX: revert on receipt state==failed too. → in the M66 bridge's territory [WIP:send-save].
+
+### Confirmed solid (no action)
+Sync cursor safety (atomic prune+cursor; mid-stream abort withholds cursor); optimistic convergence kernel (no strand paths); outbox exactly-once for send (deterministic phsend id, DispatchUncertain parking); M35 durable snapshot guard; draft delete/discard D133 mask; apply-ledger dedup LOGIC (only retention/persistence is the gap).
