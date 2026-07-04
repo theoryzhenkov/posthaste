@@ -15,6 +15,7 @@ import type {
   SmartMailboxSummary,
   TagSummary,
 } from './api/types'
+import { accountHealthFor, type AccountHealth } from './accountHealth'
 import { queryKeys } from './queryKeys'
 import { runtimeViews } from './runtime/views'
 
@@ -23,6 +24,9 @@ export interface MailboxNavigationSource {
   name: string
   appearance: AccountAppearance
   mailboxes: Mailbox[]
+  /** Classified account health, so the sidebar row can surface degraded/error
+   * state + a recovery affordance without re-deriving it (M45). */
+  health: AccountHealth
 }
 
 export interface MailboxNavigationReadModels {
@@ -174,6 +178,7 @@ export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
         name: accountDirectory.resolveAccountName(account.id, account.name),
         appearance: account.appearance,
         mailboxes: mailboxQueries[index]?.data ?? [],
+        health: accountHealthFor(account),
       })),
     [accountDirectory, enabledAccounts, mailboxQueries],
   )

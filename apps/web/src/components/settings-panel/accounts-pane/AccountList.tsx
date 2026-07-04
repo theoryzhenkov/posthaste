@@ -5,6 +5,7 @@ import { AccountMark } from '../../AccountMark'
 import { Button } from '../../ui/button'
 import { SortableList, SortableRow } from '../../ui/SortableList'
 import { useSidebarReorder } from '../../sidebar/useSidebarReorder'
+import { AccountHealthNotice } from '../AccountHealthNotice'
 import { SyncProgressMeter } from '../SyncProgressMeter'
 import { SettingsEmptyState, SettingsList, StatusDot } from '../shared'
 
@@ -12,10 +13,15 @@ export function AccountList({
   accounts,
   onCreateAccount,
   onSelectAccount,
+  onRetryAccount,
+  isRetryPending = false,
 }: {
   accounts: AccountOverview[]
   onCreateAccount: () => void
   onSelectAccount: (accountId: string) => void
+  /** Trigger a fresh sync/connection attempt for an errored account (M45). */
+  onRetryAccount?: (account: AccountOverview) => void
+  isRetryPending?: boolean
 }) {
   const { reorderAccounts } = useSidebarReorder()
   if (accounts.length === 0) {
@@ -62,6 +68,14 @@ export function AccountList({
               isDefault={account.isDefault}
               onClick={() => onSelectAccount(account.id)}
             />
+            <div className="px-4 pb-2 empty:hidden">
+              <AccountHealthNotice
+                account={account}
+                onAction={onRetryAccount}
+                isActionPending={isRetryPending}
+                compact
+              />
+            </div>
           </SortableRow>
         ))}
       </SortableList>

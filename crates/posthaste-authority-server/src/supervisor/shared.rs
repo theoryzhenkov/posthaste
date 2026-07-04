@@ -213,6 +213,13 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         error: &ServiceError,
     ) {
+        // Classify into the user-facing presentation axis (M45): the raw
+        // provider/library string (e.g. "cannot connect to TCP stream") must
+        // NEVER reach `last_sync_error` — a human message goes there instead,
+        // and the stable presentation code goes to `last_sync_error_code` for
+        // the client to re-classify (and add provider-aware phrasing + the
+        // recovery action) against.
+        let presented = error.user_facing();
         self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = match error {
                 ServiceError::Gateway(GatewayError::Auth) => AccountStatus::AuthError,
@@ -221,8 +228,8 @@ impl SupervisorShared {
                 | ServiceError::Secret(_) => AccountStatus::Offline,
                 _ => AccountStatus::Degraded,
             };
-            current.last_sync_error = Some(error.to_string());
-            current.last_sync_error_code = Some(error.code().to_string());
+            current.last_sync_error = Some(presented.message);
+            current.last_sync_error_code = Some(presented.code.to_string());
             current.sync_progress = None;
             if !matches!(current.push, PushStatus::Unsupported | PushStatus::Disabled) {
                 current.push = PushStatus::Reconnecting;
@@ -249,9 +256,14 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         reason: &str,
     ) {
+        // The raw OAuth reason (`invalid_grant`, `unauthorized_client`, …) is a
+        // provider protocol token, not user-facing; log-worthy but never shown.
+        // The status surface gets the same human "reconnect" message the sync
+        // classifier produces for `AuthError`.
+        let _ = reason;
         self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = AccountStatus::AuthError;
-            current.last_sync_error = Some(format!("OAuth token refresh failed: {reason}"));
+            current.last_sync_error = Some("Sign-in expired — reconnect your account.".to_string());
             current.last_sync_error_code = Some(ServiceErrorKind::AuthError.code().to_string());
             current.sync_progress = None;
             if !matches!(current.push, PushStatus::Unsupported | PushStatus::Disabled) {

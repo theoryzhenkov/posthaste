@@ -232,6 +232,146 @@ impl ServiceError {
     }
 }
 
+/// The small, stable set of **user-facing** account-error categories the UI
+/// groups sync/connection failures into (RFC-L2-client-resilience M45).
+///
+/// This is a third, orthogonal axis distinct from the two typed axes it sits
+/// beside:
+///
+/// * [`Terminality`] answers *retryability* (does a retry stand a chance).
+/// * [`ServiceErrorKind`] is the *wire code* for HTTP status mapping.
+/// * `AccountErrorCategory` is the *presentation* axis: what a human should be
+///   told and which recovery affordance to offer.
+///
+/// It exists so the account status surface (and any toast) can render a clear
+/// "what happened + what to do" without ever leaking a raw provider/library
+/// string (audit top-10 #7). The paired [`user_facing`](ServiceError::user_facing)
+/// classifier is the single mapping from a typed error to this axis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountErrorCategory {
+    /// A connection/transport failure: TCP connect refused, DNS, TLS, timeout,
+    /// host unreachable, provider offline. Auto-retried by the sync poll loop.
+    Network,
+    /// Sign-in failed or the grant/token expired — the user must reconnect.
+    Auth,
+    /// The provider is throttling us (HTTP 429 / "rate limit" / "too many
+    /// requests"). Auto-retried after backoff.
+    RateLimited,
+    /// The account's server settings or a request are wrong — the user should
+    /// review the account configuration.
+    Config,
+    /// The local mail database is damaged or unreadable — a repair may help.
+    Storage,
+    /// An unexpected internal fault on our side; retried automatically.
+    Internal,
+}
+
+impl AccountErrorCategory {
+    /// Whether the supervisor auto-retries this class (so the UI can say
+    /// "retrying automatically" rather than demanding user action).
+    pub fn is_auto_retrying(self) -> bool {
+        matches!(self, Self::Network | Self::RateLimited | Self::Internal)
+    }
+}
+
+/// A user-facing rendering of an account error: a coarse [category](AccountErrorCategory),
+/// a human message that NEVER contains a raw library/provider string, and the
+/// stable code carried on the account runtime overview for the client
+/// presentation layer to re-classify against.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserFacingError {
+    pub category: AccountErrorCategory,
+    pub message: String,
+    pub code: &'static str,
+}
+
+/// Case-insensitive substring scan for provider throttling signatures. The IMAP
+/// classifier flattens a rate-limit into `GatewayError::Network(message)`
+/// carrying the provider's own text, so the only signal left is the string —
+/// inspected here (and nowhere else) to split `RateLimited` out of `Network`.
+fn looks_rate_limited(detail: &str) -> bool {
+    let detail = detail.to_ascii_lowercase();
+    detail.contains("rate limit")
+        || detail.contains("ratelimit")
+        || detail.contains("throttl")
+        || detail.contains("too many requests")
+        || detail.contains("429")
+}
+
+impl ServiceError {
+    /// Classify this error into the [`UserFacingError`] presentation axis
+    /// (M45). This is the single server-side mapping from a typed error to a
+    /// human-readable category + message; it is applied where errors are
+    /// recorded onto account status so the raw error string never reaches the
+    /// UI. The client presentation layer re-classifies against the returned
+    /// `code` to add provider-aware phrasing and the recovery action.
+    pub fn user_facing(&self) -> UserFacingError {
+        let kind = self.kind();
+        match kind {
+            ServiceErrorKind::NetworkError | ServiceErrorKind::GatewayUnavailable => {
+                if looks_rate_limited(&self.to_string()) {
+                    UserFacingError {
+                        category: AccountErrorCategory::RateLimited,
+                        message: "The mail provider is throttling requests — retrying shortly."
+                            .to_string(),
+                        code: "rate_limited",
+                    }
+                } else {
+                    UserFacingError {
+                        category: AccountErrorCategory::Network,
+                        message:
+                            "Couldn't reach the mail server — check your connection. Retrying automatically."
+                                .to_string(),
+                        code: kind.code(),
+                    }
+                }
+            }
+            ServiceErrorKind::AuthError => UserFacingError {
+                category: AccountErrorCategory::Auth,
+                message: "Sign-in expired — reconnect your account.".to_string(),
+                code: kind.code(),
+            },
+            ServiceErrorKind::SecretUnavailable | ServiceErrorKind::SecretUnsupported => {
+                UserFacingError {
+                    category: AccountErrorCategory::Auth,
+                    message: "This account's saved credentials are unavailable — reconnect your account."
+                        .to_string(),
+                    code: kind.code(),
+                }
+            }
+            ServiceErrorKind::StorageCorrupted => UserFacingError {
+                category: AccountErrorCategory::Storage,
+                message: "The local mail database is damaged — a repair may be needed.".to_string(),
+                code: kind.code(),
+            },
+            ServiceErrorKind::StorageFailure => UserFacingError {
+                category: AccountErrorCategory::Storage,
+                message: "Couldn't read the local mail database — retrying.".to_string(),
+                code: kind.code(),
+            },
+            ServiceErrorKind::GatewayRejected
+            | ServiceErrorKind::StateMismatch
+            | ServiceErrorKind::CannotCalculateChanges
+            | ServiceErrorKind::ConfigValidation
+            | ServiceErrorKind::ConfigParse => UserFacingError {
+                category: AccountErrorCategory::Config,
+                message: "The mail server settings look wrong — check this account's configuration."
+                    .to_string(),
+                code: kind.code(),
+            },
+            ServiceErrorKind::NotFound
+            | ServiceErrorKind::Conflict
+            | ServiceErrorKind::ConfigIo
+            | ServiceErrorKind::Internal => UserFacingError {
+                category: AccountErrorCategory::Internal,
+                message: "Something went wrong syncing this account — retrying.".to_string(),
+                code: kind.code(),
+            },
+        }
+    }
+}
+
 /// Errors from credential storage operations.
 ///
 /// @spec docs/L1-api#secret-management
@@ -241,4 +381,90 @@ pub enum SecretStoreError {
     Unavailable(String),
     #[error("secret store does not support operation: {0}")]
     Unsupported(String),
+}
+
+#[cfg(test)]
+mod user_facing_tests {
+    use super::*;
+
+    #[test]
+    fn tcp_connect_failure_is_network_not_raw() {
+        // The real beta-critical symptom: a raw IMAP/TLS library string must
+        // never pass through. It becomes a Network category with our message.
+        let error = ServiceError::Gateway(GatewayError::Network(
+            "cannot connect to TCP stream".to_string(),
+        ));
+        let presented = error.user_facing();
+        assert_eq!(presented.category, AccountErrorCategory::Network);
+        assert_eq!(presented.code, "network_error");
+        assert!(presented.category.is_auto_retrying());
+        // No raw library text leaks into the human message.
+        assert!(!presented.message.contains("TCP stream"));
+        assert!(presented.message.contains("check your connection"));
+    }
+
+    #[test]
+    fn gateway_unavailable_is_network() {
+        let error = ServiceError::Gateway(GatewayError::Unavailable("acct-1".to_string()));
+        assert_eq!(
+            error.user_facing().category,
+            AccountErrorCategory::Network
+        );
+    }
+
+    #[test]
+    fn auth_failure_is_auth_with_reconnect_message() {
+        let presented = ServiceError::Gateway(GatewayError::Auth).user_facing();
+        assert_eq!(presented.category, AccountErrorCategory::Auth);
+        assert_eq!(presented.code, "auth_error");
+        assert!(!presented.category.is_auto_retrying());
+        assert!(presented.message.to_lowercase().contains("reconnect"));
+    }
+
+    #[test]
+    fn rate_limit_signature_splits_out_of_network() {
+        for detail in [
+            "429 Too Many Requests",
+            "provider rate limit exceeded",
+            "request throttled, retry later",
+        ] {
+            let presented =
+                ServiceError::Gateway(GatewayError::Network(detail.to_string())).user_facing();
+            assert_eq!(
+                presented.category,
+                AccountErrorCategory::RateLimited,
+                "expected rate-limited for detail {detail:?}"
+            );
+            assert_eq!(presented.code, "rate_limited");
+            assert!(presented.category.is_auto_retrying());
+            assert!(!presented.message.contains(detail));
+        }
+    }
+
+    #[test]
+    fn rejected_is_config() {
+        let presented =
+            ServiceError::Gateway(GatewayError::Rejected("bad request".to_string())).user_facing();
+        assert_eq!(presented.category, AccountErrorCategory::Config);
+        assert!(!presented.message.contains("bad request"));
+    }
+
+    #[test]
+    fn corruption_is_storage() {
+        let presented =
+            ServiceError::Store(StoreError::Corruption("disk image malformed".to_string()))
+                .user_facing();
+        assert_eq!(presented.category, AccountErrorCategory::Storage);
+        assert_eq!(presented.code, "storage_corrupted");
+        assert!(!presented.message.contains("malformed"));
+    }
+
+    #[test]
+    fn secret_unavailable_is_auth() {
+        let presented =
+            ServiceError::Secret(SecretStoreError::Unavailable("keychain locked".to_string()))
+                .user_facing();
+        assert_eq!(presented.category, AccountErrorCategory::Auth);
+        assert!(!presented.message.contains("keychain"));
+    }
 }
