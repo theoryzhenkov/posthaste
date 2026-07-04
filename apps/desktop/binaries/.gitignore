@@ -1,0 +1,7 @@
+# Tauri sidecar staging dir (RFC-L2-scripting §7 rider 9). The per-target
+# posthastectl binary (posthastectl-<target-triple>[.exe]) is built/downloaded
+# per platform and MUST NOT be committed:
+#   - CI stages the signed release binaries (see .github/workflows/release.yml).
+#   - Local builds stage a host binary via `just desktop stage-sidecar`.
+*
+!.gitignore
