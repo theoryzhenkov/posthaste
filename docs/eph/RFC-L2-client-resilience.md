@@ -101,3 +101,47 @@ small; it should land first and could ship alone as a hotfix nightly.
   windows, single-sink multi-subscriber shape, first-caller-wins link scoping,
   D49-reset invalidation gap, …) — recorded in the audit transcript; revisit
   only if symptoms persist post-M44.
+
+## Part 2 — structural revamp (owner-ratified 2026-07-04)
+
+### Decisions
+- **D115 — One TS reactive store (the dumb mirror).** The wasm replica stays the
+  sovereign source of domain truth and ALL computation (folds, counts, view
+  projection). Because the replica lives in a worker (React needs synchronous
+  getSnapshot) and infra state (connection health) is not domain state, a
+  main-thread mirror is unavoidable — today it exists informally
+  (lastProjectionJson maps, setQueryData count writes, ad-hoc subscriber sets:
+  the audit's drift seam). D115 collapses these into ONE store module with
+  useSyncExternalStore hooks: view projections (per viewKey), mailbox counts
+  (per account), connection health (the D112 FSM's home). The store holds no
+  logic — latest projected state + notify.
+- **D116 — react-query shrinks to request/response.** Mailbox STRUCTURE
+  (names/roles/hierarchy) stays a query; live COUNTS move to the store slice;
+  the sidebar composes both. No event-driven setQueryData for live state.
+- **D117 — Adapter decomposition along the node algebra.** entityStoreAdapter's
+  God-object splits into TS modules mirroring kernel/projector/link anatomy,
+  with the D112 health statechart (hand-rolled first; XState only if it grows)
+  at the center.
+- **D118 — Codegen the event boundary.** From asyncapi: topic→payload map + an
+  exhaustive handler registry (unhandled topic = compile error), extending the
+  schema.gen pipeline.
+- **D119 — Deterministic client testkit + boundary enforcement.** Fake
+  transport/worker/virtual-time harness (the client twin of posthaste-testkit);
+  promote the hand-rolled boundary check scripts to enforced layer rules
+  (eslint-plugin-boundaries or dependency-cruiser); a thin 5-scenario
+  Playwright smoke.
+- **R-rows:** external local-first frameworks (replace the verified moat),
+  Effect-TS (paradigm tax), state-library/framework migration (no evidence).
+
+### Migration
+| Step | Scope | Gate |
+|------|-------|------|
+| M46 | The reactive store (D115) + counts slice + sidebar composition (D116 counts half) | all web tests pass; no setQueryData-for-counts remains (grep); counts update end-to-end via the store |
+| M47 | Event-boundary codegen (D118) | unhandled-topic = compile error; coverage matrix generated |
+| M48 | Client testkit + boundaries lint + Playwright smoke (D119) | the 5 scenarios run deterministically |
+| M49 | Adapter decomposition + health statechart (D117, absorbs M44's FSM home) | boundaries lint enforces the seams |
+| M50 | react-query shrink completion (D116) — remaining event-driven cache patches migrate or justify | audit grep: domain-cache handlers only invalidate request/response queries |
+
+Sequencing: M40 (Part 1) ships first as the hotfix; M46 proceeds in parallel
+(owner-directed); M47/M48 next (they harden all later gates); M49/M50 ride
+with the remaining resilience steps (M42/M44).
