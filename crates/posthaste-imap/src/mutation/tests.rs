@@ -76,6 +76,34 @@ fn computes_mailbox_replacement_delta() {
     );
 }
 
+/// The Gmail archive shape: the message already lives in All Mail (label
+/// model), so archiving replaces [inbox, all, starred] with [all, starred] —
+/// a remove-only delta. The remove side must actually expunge remotely (see
+/// `gateway::mutations::remove_imap_message_from_mailbox`); a delta that adds
+/// nothing must still act.
+#[test]
+fn gmail_archive_shape_is_a_remove_only_delta() {
+    let delta = imap_mailbox_replacement_delta(
+        &[
+            MailboxId::from("imap:mailbox:inbox"),
+            MailboxId::from("imap:mailbox:allmail"),
+            MailboxId::from("imap:mailbox:starred"),
+        ],
+        &[
+            MailboxId::from("imap:mailbox:allmail"),
+            MailboxId::from("imap:mailbox:starred"),
+        ],
+    );
+
+    assert_eq!(
+        delta,
+        ImapMailboxReplacementDelta {
+            add: Vec::new(),
+            remove: vec![MailboxId::from("imap:mailbox:inbox")],
+        }
+    );
+}
+
 #[test]
 fn rejects_uid_fetch_response_without_matching_uid() {
     let error = verify_message_data_contains_uid(
