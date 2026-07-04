@@ -260,6 +260,18 @@ function buildIo() {
         handlers.onReset?.()
       }
     },
+    onLinkReestablished(linkId: string) {
+      // M44/D112 recovery edge: the engine re-prepared a FRESH link (new id)
+      // after the prior one was reaped/dropped. Fan it out so the host adopts
+      // the id + reconciles its server-served views/caches (RC1/RC2/RC3).
+      syncLogger.debug(
+        { event: LOG_EVENTS.runtimeAdapterInitialized, linkId },
+        'near-end link re-established (recovery edge)',
+      )
+      for (const handlers of frameHandlers) {
+        handlers.onLinkReestablished?.(linkId)
+      }
+    },
     onStatus(label: string, message: string) {
       switch (label) {
         case 'permanentError':

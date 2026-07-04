@@ -205,6 +205,7 @@ struct JsFrameSink {
     on_malformed: Function,
     on_reset: Function,
     on_status: Function,
+    on_link_reestablished: Function,
 }
 
 impl FrameSink<RuntimeFrame> for JsFrameSink {
@@ -243,6 +244,14 @@ impl FrameSink<RuntimeFrame> for JsFrameSink {
             &JsValue::from_str(label),
             &JsValue::from_str(&message),
         );
+    }
+
+    fn on_link_reestablished(&self, link_id: String) {
+        // M44/D112 recovery edge: a fresh link (new id) was re-prepared. The host
+        // adopts the id + reconciles its server-served views/caches against it.
+        let _ = self
+            .on_link_reestablished
+            .call1(&JsValue::NULL, &JsValue::from_str(&link_id));
     }
 }
 
@@ -382,7 +391,8 @@ impl NearEndHandle {
     /// `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
     /// status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onReset()` (D49 —
     /// re-seed the adapter), `onStatus(label, message)` (labels include
-    /// `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
+    /// `degraded`), `onLinkReestablished(linkId)` (M44 recovery edge — a fresh
+    /// re-prepared link), `neverDispatched() => Promise<string>` (a JSON array of
     /// forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
     /// Promise<string>` (a JSON array of `{linkId, clientMutationId,
     /// request?}`), and `onSettlement(receiptJson)`.
@@ -398,6 +408,7 @@ impl NearEndHandle {
             on_malformed: get_function(io, "onMalformed")?,
             on_reset: get_function(io, "onReset")?,
             on_status: get_function(io, "onStatus")?,
+            on_link_reestablished: get_function(io, "onLinkReestablished")?,
         };
         let pending_set = JsPendingSet {
             never_dispatched: get_function(io, "neverDispatched")?,

@@ -382,7 +382,8 @@ export class NearEndHandle {
      * `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
      * status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onReset()` (D49 —
      * re-seed the adapter), `onStatus(label, message)` (labels include
-     * `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
+     * `degraded`), `onLinkReestablished(linkId)` (M44 recovery edge — a fresh
+     * re-prepared link), `neverDispatched() => Promise<string>` (a JSON array of
      * forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
      * Promise<string>` (a JSON array of `{linkId, clientMutationId,
      * request?}`), and `onSettlement(receiptJson)`.
@@ -593,17 +594,17 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 226, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 228, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__ha35c10aed9720f95);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [String, String, F64], shim_idx: 137, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [String, String, F64], shim_idx: 142, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 145, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 147, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h690adb9d64021208);
             return ret;
         },

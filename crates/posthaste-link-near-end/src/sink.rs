@@ -52,4 +52,16 @@ pub trait FrameSink<Frame> {
 
     /// A connection-lifecycle transition.
     fn on_status(&self, status: ConnectionStatus);
+
+    /// The engine re-prepared a **fresh** link (a NEW link id) after the prior
+    /// one went stale/absent (404/410 → re-prepare, D110a) — the recovery edge
+    /// M44's reconcile keys off. `link_id` is the new connection token.
+    ///
+    /// Fired ONLY on a genuine re-prepare, never on a same-link reconnect (a
+    /// 5xx / network blip keeps `prepared` and re-subscribes the SAME link, so
+    /// no server-side view/cursor state was invalidated). The host adopts the
+    /// new id and re-drives its server-served views + drifted caches against it;
+    /// nothing here changes the frame stream, which the engine resumes itself.
+    /// Default: no-op (seams whose host does not reconcile are unaffected).
+    fn on_link_reestablished(&self, _link_id: String) {}
 }
