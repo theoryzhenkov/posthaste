@@ -4845,7 +4845,10 @@ export interface operations {
     delete_draft: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client-supplied idempotency key (RFC-L2-drafts D128): a redelivery under the same key returns the original operation instead of enqueuing a second deletion; reusing a key with a different operation is 409 Conflict. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Source (account) identifier */
                 source_id: string;
@@ -4865,6 +4868,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Operation"];
+                };
+            };
+            /** @description Idempotency key reused with a different operation */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
             /** @description Runtime unavailable */
@@ -5127,7 +5139,10 @@ export interface operations {
     save_draft: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client-supplied idempotency key (RFC-L2-drafts D128): a redelivery under the same key returns the original operation (same id and response) instead of enqueuing a second draft; reusing a key with a different operation is 409 Conflict. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Source (account) identifier */
                 source_id: string;
@@ -5151,6 +5166,15 @@ export interface operations {
             };
             /** @description Invalid draft request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Idempotency key reused with a different operation */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
