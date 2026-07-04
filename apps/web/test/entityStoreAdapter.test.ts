@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'bun:test'
+import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -6,6 +6,10 @@ import { QueryClient } from '@tanstack/react-query'
 
 import type { OkResponse } from '../src/api/types'
 import type { Mailbox } from '../src/api/types'
+import {
+  __resetLiveStoreForTesting,
+  getMailboxCounts,
+} from '../src/live-store/store'
 import { queryKeys } from '../src/queryKeys'
 import {
   createEntityStoreAdapter,
@@ -277,6 +281,12 @@ function build() {
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
 describe('entityStoreAdapter', () => {
+  // The live store is a module singleton; reset its slices between cases so a
+  // prior test's mirrored counts/projections can't bleed into the next.
+  beforeEach(() => {
+    __resetLiveStoreForTesting()
+  })
+
   it('returns the served base as the initial projected snapshot', async () => {
     const { adapter } = build()
     const opened = await adapter.openRuntimeLinkMessageListView(viewRequest)
@@ -691,7 +701,7 @@ describe('entityStoreAdapter', () => {
     ])
   })
 
-  it('writes the count delta straight into the React Query cache (no refetch)', async () => {
+  it('mirrors the count delta into the live store slice, NOT react-query (D116)', async () => {
     const built = build()
     const { adapter, queryClient } = built
     await adapter.openRuntimeLinkMessageListView(viewRequest)
@@ -714,10 +724,14 @@ describe('entityStoreAdapter', () => {
     )
     await tick()
 
+    // The count lands in the store's counts slice (the sidebar's read model).
+    expect(getMailboxCounts('s').inbox).toEqual({ unread: 1, total: 2 })
+    // react-query's mailbox row is NOT touched — live counts are no longer
+    // request/response cache state (the setQueryData-for-counts path is gone).
     const mailboxes = queryClient.getQueryData<Mailbox[]>(
       queryKeys.mailboxes('s'),
     )
-    expect(mailboxes?.find((m) => m.id === 'inbox')?.unreadEmails).toBe(1)
+    expect(mailboxes?.find((m) => m.id === 'inbox')?.unreadEmails).toBe(2)
   })
 
   it('exposes never-dispatched records to the engine reconciler + links receipts (D44a)', async () => {
