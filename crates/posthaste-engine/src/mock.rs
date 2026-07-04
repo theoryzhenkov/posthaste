@@ -593,6 +593,7 @@ impl MailGateway for MockJmapGateway {
         &self,
         _account_id: &AccountId,
         message_id: &MessageId,
+        _idempotent_redelivery: bool,
     ) -> Result<(), GatewayError> {
         let mut state = self
             .state

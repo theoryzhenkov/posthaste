@@ -81,11 +81,14 @@ fn message_draft_id_round_trips_through_apply_and_detail() -> Result<(), StoreEr
     let draft_detail = store
         .get_message_detail(&account, &MessageId::from("draft-1"))?
         .expect("draft detail");
-    assert_eq!(draft_detail.draft_id.as_deref(), Some("draft-local-stable"));
+    assert_eq!(
+        draft_detail.summary.draft_id.as_deref(),
+        Some("draft-local-stable")
+    );
     let plain_detail = store
         .get_message_detail(&account, &MessageId::from("message-1"))?
         .expect("message detail");
-    assert_eq!(plain_detail.draft_id, None);
+    assert_eq!(plain_detail.summary.draft_id, None);
     Ok(())
 }
 
@@ -158,7 +161,7 @@ fn message_detail_without_body_keeps_header_and_attachments() -> Result<(), Stor
         header.attachments.iter().map(|a| &a.id).collect::<Vec<_>>(),
         full.attachments.iter().map(|a| &a.id).collect::<Vec<_>>(),
     );
-    assert_eq!(header.draft_id, full.draft_id);
+    assert_eq!(header.summary.draft_id, full.summary.draft_id);
 
     assert!(store
         .get_message_detail_without_body(&account, &MessageId::from("absent"))?

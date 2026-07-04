@@ -50,7 +50,8 @@ pub(crate) fn hydrate_message_summaries(
     Ok(rows
         .into_iter()
         .map(|row| {
-            let (rfc_message_id, in_reply_to) = threading.next().unwrap_or((None, None));
+            let (rfc_message_id, in_reply_to, draft_id) =
+                threading.next().unwrap_or((None, None, None));
             MessageSummary {
                 id: row.id,
                 source_id: row.source_id,
@@ -71,6 +72,7 @@ pub(crate) fn hydrate_message_summaries(
                 version: versions.next().flatten(),
                 rfc_message_id,
                 in_reply_to,
+                draft_id,
             }
         })
         .collect())
@@ -129,20 +131,22 @@ fn fetch_versions_bulk(
     Ok(versions)
 }
 
-/// A message's threading headers: `(rfc_message_id, in_reply_to)`, both
-/// optional (`None` for a row with no stored header).
-pub(crate) type ThreadingHeaders = (Option<String>, Option<String>);
+/// A message's threading headers plus its stable draft id:
+/// `(rfc_message_id, in_reply_to, draft_id)`, each optional (`None` for a row
+/// with no stored value; `draft_id` is `Some` only for a saved draft, D131).
+pub(crate) type ThreadingHeaders = (Option<String>, Option<String>, Option<String>);
 
-/// Bulk-fetches the RFC `Message-ID` and `In-Reply-To` headers for a set of
-/// messages, row-aligned, so the conversation view can build a real reply tree.
-/// `(None, None)` for a message row with no stored headers.
+/// Bulk-fetches the RFC `Message-ID`/`In-Reply-To` headers and the stable
+/// `draft_id` for a set of messages, row-aligned, so the conversation view can
+/// build a real reply tree and a draft list row carries its stable id (D131).
+/// `(None, None, None)` for a message row with no stored values.
 fn fetch_threading_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
 ) -> Result<Vec<ThreadingHeaders>, StoreError> {
     const CHUNK_SIZE: usize = 300;
 
-    let mut threading = vec![(None, None); rows.len()];
+    let mut threading = vec![(None, None, None); rows.len()];
     for (chunk_offset, chunk) in rows.chunks(CHUNK_SIZE).enumerate() {
         let start_index = chunk_offset * CHUNK_SIZE;
         let mut params = Vec::with_capacity(chunk.len() * 3);
@@ -155,7 +159,7 @@ fn fetch_threading_bulk(
         }
         let sql = format!(
             "WITH requested(row_index, account_id, message_id) AS (VALUES {})
-             SELECT requested.row_index, m.rfc_message_id, m.in_reply_to
+             SELECT requested.row_index, m.rfc_message_id, m.in_reply_to, m.draft_id
                FROM requested
                JOIN message m
                  ON m.account_id = requested.account_id
@@ -171,12 +175,13 @@ fn fetch_threading_bulk(
                     row.get::<_, i64>(0)? as usize,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             })
             .map_err(sql_to_store_error)?;
         for entry in fetched {
-            let (row_index, rfc, reply) = entry.map_err(sql_to_store_error)?;
-            threading[row_index] = (rfc, reply);
+            let (row_index, rfc, reply, draft_id) = entry.map_err(sql_to_store_error)?;
+            threading[row_index] = (rfc, reply, draft_id);
         }
     }
 

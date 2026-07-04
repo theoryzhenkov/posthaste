@@ -73,6 +73,13 @@ pub struct MessageSummary {
     /// without the header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_reply_to: Option<String>,
+    /// Stable `X-Posthaste-Draft-Id` when this list row is a draft this client
+    /// saved; `None` otherwise. Surfaced on the summary (not just the detail) so
+    /// a list-row discard carries the stable id (D131) — the id survives the
+    /// provider id rotation a JMAP autosave causes, so the discard never targets
+    /// a stale rotating Email id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_id: Option<String>,
 }
 
 /// Column by which message lists can be sorted.
@@ -194,12 +201,6 @@ pub struct MessageDetail {
     pub body_text: Option<String>,
     pub raw_message: Option<RawMessageRef>,
     pub attachments: Vec<MessageAttachment>,
-    /// Stable `X-Posthaste-Draft-Id` for this message when it is a draft this
-    /// client saved; `None` otherwise.
-    ///
-    /// @spec docs/L1-outbox#temp-id-reconciliation
-    #[serde(default)]
-    pub draft_id: Option<String>,
 }
 
 /// All messages belonging to a single JMAP thread, ordered by `receivedAt`.

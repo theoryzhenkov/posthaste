@@ -6090,13 +6090,6 @@
                   "null"
                 ]
               },
-              "draftId": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Stable `X-Posthaste-Draft-Id` for this message when it is a draft this\nclient saved; `None` otherwise.\n\n@spec docs/L1-outbox#temp-id-reconciliation"
-              },
               "rawMessage": {
                 "oneOf": [
                   {
@@ -6178,6 +6171,13 @@
         "properties": {
           "conversationId": {
             "$ref": "#/components/schemas/ConversationId"
+          },
+          "draftId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable `X-Posthaste-Draft-Id` when this list row is a draft this client\nsaved; `None` otherwise. Surfaced on the summary (not just the detail) so\na list-row discard carries the stable id (D131) — the id survives the\nprovider id rotation a JMAP autosave causes, so the discard never targets\na stale rotating Email id."
           },
           "fromEmail": {
             "type": [
