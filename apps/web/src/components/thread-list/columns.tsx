@@ -4,6 +4,8 @@ import type { MessageSummary } from '../../api/types'
 import { cn } from '../../lib/utils'
 import { formatRelativeTime } from '../../utils/relativeTime'
 import { userTags } from '../message-detail/model'
+import { MailboxChip } from '../message-list/MailboxChip'
+import type { MailboxDirectory } from '../message-list/useMailboxDirectory'
 import { TagChip } from '../tags/TagChip'
 
 export type ColumnId =
@@ -15,7 +17,21 @@ export type ColumnId =
   | 'preview'
   | 'date'
   | 'source'
+  | 'sourceMailbox'
   | 'tags'
+
+/**
+ * Row-scoped data a cell renderer may need beyond the message itself. Most
+ * columns ignore it; the `sourceMailbox` column uses the (cache-only) mailbox
+ * directory to resolve which mailbox a row lives in, excluding the mailbox
+ * already being viewed.
+ */
+export interface ColumnRenderContext {
+  mailboxDirectory: MailboxDirectory
+  /** The mailbox already being viewed (single source-mailbox views), excluded
+   *  from the resolved candidate memberships when possible. */
+  excludeMailboxId: string | null
+}
 
 interface BaseColumnDef {
   id: ColumnId
@@ -25,7 +41,7 @@ interface BaseColumnDef {
   align?: 'left' | 'right' | 'center'
   header?: ReactNode
   resizable?: boolean
-  render: (message: MessageSummary) => ReactNode
+  render: (message: MessageSummary, context: ColumnRenderContext) => ReactNode
 }
 
 export interface FixedColumnDef extends BaseColumnDef {
@@ -182,6 +198,28 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
       )
     },
   },
+  sourceMailbox: {
+    id: 'sourceMailbox',
+    kind: 'fixed',
+    label: 'Mailbox',
+    basis: 120,
+    minWidth: 72,
+    resizable: true,
+    render: (message, { mailboxDirectory, excludeMailboxId }) => {
+      const resolved = mailboxDirectory.resolve(message, excludeMailboxId)
+      if (!resolved) {
+        return null
+      }
+      return (
+        <MailboxChip
+          name={resolved.mailbox.name}
+          role={resolved.mailbox.role}
+          accountName={resolved.isMultiAccount ? resolved.accountName : null}
+          className="max-w-full"
+        />
+      )
+    },
+  },
   tags: {
     id: 'tags',
     kind: 'stretch',
@@ -215,6 +253,7 @@ export const ALL_COLUMNS: ColumnId[] = [
   'from',
   'date',
   'source',
+  'sourceMailbox',
   'tags',
   'preview',
 ]
