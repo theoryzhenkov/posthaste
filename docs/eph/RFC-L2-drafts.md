@@ -1,6 +1,6 @@
 # RFC-L2-drafts — the draft lifecycle, done properly
 
-Status: DRAFT for owner ratification (2026-07-04). Owner reports: sending a
+Status: RATIFIED (owner, 2026-07-04). Execution: M61 launched immediately; M60 queued behind the in-flight archive fix (shared IMAP gateway surface); M62 after M60. Owner reports: sending a
 draft leaves it in Drafts; deleting a draft lands it in Trash; edit-draft is an
 ad-hoc button. Survey evidence below; each mechanism confirmed in code.
 
