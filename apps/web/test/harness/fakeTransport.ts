@@ -140,6 +140,21 @@ export interface FakeTransport {
   gapFrame(): void
   /** Re-open a severed stream so `emitFrame` flows again. */
   reconnect(): void
+  /**
+   * The M44 recovery edge: the near-end engine re-prepared a FRESH link (new
+   * id). Adopts the new id server-side, re-opens the stream, and delivers
+   * `onLinkReestablished` to the bound client handler — the shape the shim's
+   * `onLinkReestablished` callback surfaces on a genuine re-prepare.
+   */
+  reestablishLink(newLinkId: string): void
+  /** The `linkId` each view-open (mail-list + object) was issued against, in
+   *  order — proves the client adopted the fresh link (RC3): a re-open after
+   *  `reestablishLink` records the NEW id, not the dead one. */
+  viewOpenLinkIds: string[]
+  /** Script the object-view (`openRuntimeLinkView`, e.g. accountStatus) data a
+   *  re-open re-serves — used to model the sync-Ready status flip that lands in
+   *  the re-prepare gap. */
+  setObjectViewData(data: unknown): void
 }
 
 export interface FakeTransportOptions {
@@ -169,6 +184,9 @@ export function createFakeTransport(
   let handlers: RuntimeFrameHandlers | null = null
   let severed = false
   let subscribeCount = 0
+  let currentLinkId = 'sess'
+  let objectViewData: unknown = { status: 'idle' }
+  const viewOpenLinkIds: string[] = []
   const forwardedMutations: RuntimeRunMutationRequest[] = []
   const receipt: RuntimeMutationReceipt = {
     runtimeMutationId: 'r-1',
@@ -179,10 +197,22 @@ export function createFakeTransport(
   }
 
   const base = {
-    openRuntimeLinkMessageListView: async () => ({
-      viewId: 'v1',
-      snapshot: snapshot(rows),
-    }),
+    openRuntimeLink: async () => ({ linkId: currentLinkId }),
+    closeRuntimeLink: async () => ({ ok: true }),
+    openRuntimeLinkMessageListView: async (request: { linkId?: string }) => {
+      viewOpenLinkIds.push(request.linkId ?? '')
+      return { viewId: 'v1', snapshot: snapshot(rows) }
+    },
+    openRuntimeLinkView: async (request: { linkId?: string }) => {
+      viewOpenLinkIds.push(request.linkId ?? '')
+      return {
+        viewId: 'ov1',
+        snapshot: {
+          ...snapshot([]),
+          data: objectViewData,
+        },
+      }
+    },
     extendRuntimeLinkView: async () => ({
       viewId: 'v1',
       snapshot: snapshot(extendedRows),
@@ -235,6 +265,15 @@ export function createFakeTransport(
     },
     reconnect() {
       severed = false
+    },
+    reestablishLink(newLinkId) {
+      currentLinkId = newLinkId
+      severed = false
+      handlers?.onLinkReestablished?.(newLinkId)
+    },
+    viewOpenLinkIds,
+    setObjectViewData(data) {
+      objectViewData = data
     },
   }
 }

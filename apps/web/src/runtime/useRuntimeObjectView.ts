@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -37,6 +37,20 @@ export function useRuntimeObjectView<TData>({
   // The payload identifies the target object; serialize it so the effect
   // reopens the view when the target changes but not on unrelated re-renders.
   const payloadKey = JSON.stringify(payload)
+
+  // M44 recovery edge (RC1): when the near-end engine re-prepares a fresh link,
+  // this view's server-side registration is gone — re-run the open effect so it
+  // re-opens against the live link and re-serves its base (for the accountStatus
+  // view this re-serves `queryKeys.accounts`, clearing a stranded sync status).
+  const [recoveryNonce, setRecoveryNonce] = useState(0)
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
+    return runtimeLinkClient.onLinkReestablished(() => {
+      setRecoveryNonce((n) => n + 1)
+    })
+  }, [enabled])
 
   useEffect(() => {
     if (!enabled) {
@@ -107,6 +121,7 @@ export function useRuntimeObjectView<TData>({
     }
     // `payloadKey` stands in for `payload`, and `queryKey` is derived from the
     // same target, so the primitive deps fully capture the view identity.
+    // `recoveryNonce` re-runs the open on the M44 recovery edge.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, family, merge, payloadKey, queryClient, sourceId])
+  }, [enabled, family, merge, payloadKey, queryClient, recoveryNonce, sourceId])
 }

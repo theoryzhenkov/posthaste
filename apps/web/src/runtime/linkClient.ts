@@ -10,6 +10,7 @@
  * so it closes when nothing uses it.
  */
 import { LOG_EVENTS, syncLogger } from '../logger'
+import { setConnectionHealth } from '@/live-store/store'
 
 import { runtimeStream } from './runtimeStream'
 import type {
@@ -43,10 +44,23 @@ function randomRuntimeId(prefix: string): string {
 const frameHandlers = new Set<FrameHandlers>()
 const openViewIds = new Set<string>()
 
+/**
+ * Server-served views register a re-open callback here (the accountStatus view,
+ * mail-list views, message detail/conversation). On the M44 recovery edge the
+ * reconcile walks this registry so every open view re-serves its base against
+ * the FRESH link — the per-view re-open shape (RC1), which fits the existing
+ * hook lifecycle better than a central request registry (the hook already owns
+ * its open/close; re-open is one more effect trigger it drives).
+ */
+const reopenHandlers = new Set<() => void>()
+
 let linkPromise: Promise<RuntimeLinkConnection> | undefined
 let activeLink: RuntimeLinkConnection | undefined
 let activeLinkSourceId: string | null | undefined
 let unsubscribeStream: RuntimeUnsubscribe | undefined
+/** Tracks a hidden→visible transition so the reconcile fires only on a genuine
+ *  tab foreground (a hidden tab's link may have been idle-reaped). */
+let wasHidden = false
 
 function notifyPermanentError(error: unknown): void {
   for (const handlers of frameHandlers) {
@@ -146,10 +160,96 @@ function ensureStream(): void {
             handlers.onClosed?.(error)
           }
         },
+        onLinkReestablished(newLinkId) {
+          handleLinkReestablished(newLinkId)
+        },
       },
     )
   })
 }
+
+/**
+ * The M44 recovery-edge reconcile (D112). The near-end engine re-prepared a
+ * FRESH link (new id) after the prior one was idle-reaped or dropped. This is
+ * the client twin of the server's level-triggered reconciler — it converges the
+ * client to the fresh link from any state, with no reload:
+ *
+ * - RC3: adopt the fresh link id so subsequent open/extend/close stop 404-ing
+ *   against the dead link (the old id was pinned at first connect).
+ * - RC1/RC2: re-drive every open server-served view against the fresh link so
+ *   the server re-serves their base frames (mail lists, the accountStatus view
+ *   over `queryKeys.accounts`, message detail/conversation) — this replays the
+ *   frames lost in the re-prepare gap, including the terminal sync-Ready
+ *   `account.status_changed` that clears an empty mailbox's `isSyncing`.
+ */
+function handleLinkReestablished(newLinkId: string): void {
+  if (activeLink && activeLink.linkId !== newLinkId) {
+    // RC3: adopt the fresh id in place so every holder of the resolved link
+    // connection (open/extend/close, all of which read `activeLink.linkId`)
+    // targets the live link.
+    activeLink.linkId = newLinkId
+  }
+  syncLogger.debug(
+    { event: LOG_EVENTS.runtimeAdapterInitialized, linkId: newLinkId },
+    'link client adopted re-established link; reconciling open views',
+  )
+  reconcileOpenViews()
+}
+
+/** Re-serve every open server-served view (RC1) and blip connection health.
+ *  Shared by the engine recovery edge and the tab-foreground edge. */
+function reconcileOpenViews(): void {
+  setConnectionHealth('recovering')
+  for (const reopen of [...reopenHandlers]) {
+    try {
+      reopen()
+    } catch (error) {
+      // A single view's re-open failure must not strand the others.
+      syncLogger.warn(
+        {
+          event: LOG_EVENTS.runtimeAdapterInitialized,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'a view re-open failed during the recovery reconcile',
+      )
+    }
+  }
+  // The re-opens have been dispatched; return to healthy on the next microtask
+  // so a synchronous health subscriber still observes the 'recovering' blip.
+  queueMicrotask(() => setConnectionHealth('healthy'))
+}
+
+function onVisibilityChange(): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+  if (document.visibilityState === 'hidden') {
+    wasHidden = true
+    return
+  }
+  if (document.visibilityState === 'visible' && wasHidden) {
+    wasHidden = false
+    // A hidden tab's link may have been idle-reaped while the engine's stream
+    // was paused; re-serve open views defensively (level-triggered — safe even
+    // when the link is still valid). Reuses the M31 visibility wiring shape.
+    if (activeLink) {
+      reconcileOpenViews()
+    }
+  }
+}
+
+let visibilityHookInstalled = false
+
+/** Install the tab-foreground reconcile hook once (no-op outside a DOM). */
+function installLinkRecoveryVisibilityHook(): void {
+  if (visibilityHookInstalled || typeof document === 'undefined') {
+    return
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  visibilityHookInstalled = true
+}
+
+installLinkRecoveryVisibilityHook()
 
 function maybeCloseLink(): void {
   if (frameHandlers.size > 0 || openViewIds.size > 0 || !activeLink) {
@@ -253,6 +353,21 @@ export const runtimeLinkClient = {
     })
   },
 
+  /**
+   * Register a server-served view's re-open callback for the M44 recovery edge
+   * (RC1). The callback is invoked when the near-end engine re-prepares a fresh
+   * link (or a hidden tab is foregrounded), by which time `activeLink.linkId` is
+   * already the fresh id — so the callback re-opening its view targets the live
+   * link. Returns an unsubscribe. A view owner (a hook) typically re-opens by
+   * bumping the effect that owns its open/close lifecycle.
+   */
+  onLinkReestablished(callback: () => void): RuntimeUnsubscribe {
+    reopenHandlers.add(callback)
+    return () => {
+      reopenHandlers.delete(callback)
+    }
+  },
+
   closeView(viewId: string): void {
     if (!activeLink || !openViewIds.has(viewId)) {
       return
@@ -274,4 +389,6 @@ export function resetRuntimeLinkClientForTesting(): void {
   activeLinkSourceId = undefined
   frameHandlers.clear()
   openViewIds.clear()
+  reopenHandlers.clear()
+  wasHidden = false
 }

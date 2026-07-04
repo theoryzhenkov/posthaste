@@ -162,7 +162,8 @@ export class NearEndHandle {
      * `openStream(url, onEvent) => abortFn` (where `onEvent(kind, data,
      * status)`), `onFrame(json)`, `onMalformed(raw, error)`, `onReset()` (D49 —
      * re-seed the adapter), `onStatus(label, message)` (labels include
-     * `degraded`), `neverDispatched() => Promise<string>` (a JSON array of
+     * `degraded`), `onLinkReestablished(linkId)` (M44 recovery edge — a fresh
+     * re-prepared link), `neverDispatched() => Promise<string>` (a JSON array of
      * forward requests), `onReconciled(receiptJson)`, `sentUnsettled() =>
      * Promise<string>` (a JSON array of `{linkId, clientMutationId,
      * request?}`), and `onSettlement(receiptJson)`.

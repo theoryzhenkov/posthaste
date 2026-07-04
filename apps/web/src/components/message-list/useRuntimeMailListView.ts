@@ -129,6 +129,20 @@ export function useRuntimeMailListView({
     setRetryNonce((n) => n + 1)
   }, [])
 
+  // M44 recovery edge (RC1): when the near-end engine re-prepares a fresh link,
+  // this view's server-side registration is gone. Re-open it against the live
+  // link (reusing the retry path) so it re-serves its base without a reload —
+  // the fix for "open views stop updating" (and, on an empty list, the stuck
+  // Syncing state, once the fresh base re-serves the current rows/status).
+  useEffect(() => {
+    if (!enabled || !selectedView || preparedSearchQuery.isBlocked) {
+      return
+    }
+    return runtimeLinkClient.onLinkReestablished(() => {
+      setRetryNonce((n) => n + 1)
+    })
+  }, [enabled, selectedView, preparedSearchQuery.isBlocked])
+
   // The mail-list rows live in the query cache (written by this hook from view
   // frames); this read makes them reactive without a second, fetching query.
   // The view is runtime-fed, so the queryFn must never run (enabled: false);
