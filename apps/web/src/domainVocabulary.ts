@@ -64,36 +64,7 @@ export const KNOWN_SYSTEM_KEYWORDS = [
   SYSTEM_KEYWORDS.Forwarded,
 ] as const satisfies readonly SystemKeyword[]
 
-export const EVENT_TOPICS = {
-  SyncCompleted: 'sync.completed',
-  SyncFailed: 'sync.failed',
-  SettingsUpdated: 'settings.updated',
-  ConfigReloaded: 'config.reloaded',
-  SmartMailboxCreated: 'smart_mailbox.created',
-  SmartMailboxUpdated: 'smart_mailbox.updated',
-  SmartMailboxDeleted: 'smart_mailbox.deleted',
-  SmartMailboxReset: 'smart_mailbox.reset',
-  MessageUpdated: 'message.updated',
-  MessageBodyCached: 'message.body_cached',
-  MailboxUpdated: 'mailbox.updated',
-  AccountUpdated: 'account.updated',
-  AccountCreated: 'account.created',
-  AccountDeleted: 'account.deleted',
-  AccountStatusChanged: 'account.status_changed',
-  PushConnected: 'push.connected',
-  PushDisconnected: 'push.disconnected',
-  OperationSettled: 'operation.settled',
-  OperationDispatchUncertain: 'operation.dispatch_uncertain',
-  RuleFired: 'rule.fired',
-  RuleDeliveryFailed: 'rule.delivery.failed',
-} as const
-
-export type DomainEventTopic = (typeof EVENT_TOPICS)[keyof typeof EVENT_TOPICS]
-
-export const KNOWN_DOMAIN_EVENT_TOPICS: ReadonlySet<string> = new Set(
-  Object.values(EVENT_TOPICS),
-)
-
-export function isDomainEventTopic(topic: string): topic is DomainEventTopic {
-  return KNOWN_DOMAIN_EVENT_TOPICS.has(topic)
-}
+// Event topics moved to the generated `src/api/events.gen.ts` (M47 / D118): the
+// topic union, named accessors (`EVENT_TOPICS`), and `isEventTopic` guard are now
+// codegen'd from `asyncapi.json` and drift-checked, so an unhandled server-side
+// topic is a client compile error rather than a hand-mirror omission.
