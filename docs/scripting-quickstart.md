@@ -614,6 +614,43 @@ above) run in the authority server with no client at all; the **agent-native
 MCP surface** ([Agent via MCP](#agent-via-mcp) above) is the level-"agent-native"
 rung — trigger + capability over one connection.
 
+### Reference: a wake-on-event agent loop
+
+For the **wake + capability** shape, the agent is a small process you run: it
+connects to the MCP server, blocks on the notification stream, and acts. The
+server *pushes* `rule.fired`; this loop turns that push into work (a stock chat
+host would merely log it). Sketch (`@modelcontextprotocol/sdk`):
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+
+const client = new Client({ name: "my-mail-agent", version: "1.0" });
+await client.connect(new StdioClientTransport({
+  command: "/Applications/PosthasteNightly.app/Contents/MacOS/posthastectl",
+  args: ["mcp"],
+  env: { POSTHASTE_MCP_GRANTS: "tap:read,read,apply" },
+}));
+
+// THE WAKE: the server forwards each fact as a logging notification. THIS
+// handler is what makes the agent act.
+client.setNotificationHandler(LoggingMessageNotificationSchema, async (n) => {
+  const d = n.params.data as { kind: string; topic?: string; event?: any };
+  if (d.kind === "gap") { /* reconcile: re-read state */ return; }
+  if (d.topic !== "rule.fired") return;          // your emit rule is the server-side pre-filter
+  const messageId = d.event.payload.messageId;
+  await client.callTool({ name: "get_message", arguments: { messageId } });
+  // ... decide, then set_keywords / reply ...
+});
+```
+
+The token is minted fresh at connect and never needs manual refresh. Keep the
+process alive with a service unit (see `posthaste-wizard ctl register-watch`'s
+pattern) or your own supervisor. If you would rather the *server* invoke your
+agent per event instead of holding a connection, use a `webhook`/`exec` rule or
+`hook serve`.
+
 ## Keeping it updated (headless / self-host)
 
 Desktop machines update through the app's own updater. A **headless or

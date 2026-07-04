@@ -31,7 +31,7 @@ alongside the specs:
 ## Decision records and design history
 
 The durable specs above record *what is true now*. The reasoning, deviations,
-and forward plans behind them live as dated records in [`eph/`](eph/) — RFCs
+and forward plans behind them live as dated records in [`eph/`](eph/INDEX.md) — RFCs
 (the architecture-cleanup, scripting, drafts, provider-reliability, lifecycle,
 and client-resilience programs), audits, design notes, and the reality ledger
 ([DEVIATION-L2-architecture-cleanup.md](eph/DEVIATION-L2-architecture-cleanup.md)).

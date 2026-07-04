@@ -22,7 +22,7 @@ dependents: []
 > Part 2 (the reactive-store revamp) — reconcile scope before picking this up.
 
 The client↔runtime link is being unified onto the runtime↔backend
-assertion-replication shape ([backend-link L1](../replication/backend-link/L1.md)),
+assertion-replication shape ([authority-server-link L1](../replication/authority-server-link/L1.md)),
 **driven by performance**: the snapshot-push model re-sends the whole view on
 every mutation and re-queries per event. The realized half — the opt-in
 incremental mail-list delta on the wire and the replica consuming it
