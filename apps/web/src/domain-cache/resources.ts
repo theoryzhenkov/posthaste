@@ -17,6 +17,16 @@ export type EventHandler = (
   event: DomainEvent,
 ) => void
 
+/**
+ * An intentional, documented no-op handler. The registry must enumerate every
+ * topic (M47), so a topic with no cache effect declares that as a decision rather
+ * than an omission. The `reason` is documentation at the call site.
+ */
+export function noop(reason: string): EventHandler {
+  void reason
+  return () => {}
+}
+
 interface ResourceChange {
   accountId?: string
   id?: string
