@@ -36,6 +36,7 @@ export interface MailClientViewProps {
   showShortcuts: boolean
   tags: TagSummary[]
   viewRole: string | null
+  onAddTag: (tag: string) => void
   onApplySearch: (query: string) => void
   onArchive: () => void
   onSnooze: (until: number) => void
@@ -56,6 +57,7 @@ export interface MailClientViewProps {
   ) => void
   onPlaceholderAction: (label: string) => void
   onRejectSearchPreview: () => void
+  onRemoveTag: (tag: string) => void
   onReply: () => void
   onSearch: (query: string, append?: boolean) => void
   onSelectMessage: (message: MessageSummary) => void

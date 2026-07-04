@@ -74,6 +74,41 @@ export function useMailClientHandlers(input: {
     selectedView: effectiveView,
   })
 
+  const applyTagChange = useCallback(
+    (nextUserTags: (current: string[]) => string[]) => {
+      if (!selectedMessage) return
+      const keywords = selectedMessageData?.keywords ?? []
+      const currentUserTags = keywords.filter(
+        (keyword) => !keyword.startsWith('$'),
+      )
+      actions.setUserTags(
+        {
+          conversationId: selectedMessage.conversationId,
+          sourceId: selectedMessage.sourceId,
+          messageId: selectedMessage.messageId,
+          isFlagged: selectedMessageData?.isFlagged ?? false,
+          isRead: selectedMessageData?.isRead,
+          keywords,
+        },
+        nextUserTags(currentUserTags),
+      )
+    },
+    [actions, selectedMessage, selectedMessageData],
+  )
+  const handleAddTag = useCallback(
+    (tag: string) => applyTagChange((current) => [...current, tag]),
+    [applyTagChange],
+  )
+  const handleRemoveTag = useCallback(
+    (tag: string) =>
+      applyTagChange((current) =>
+        current.filter(
+          (candidate) => candidate.toLowerCase() !== tag.toLowerCase(),
+        ),
+      ),
+    [applyTagChange],
+  )
+
   const handleToggleFlag = useCallback(() => {
     if (!selectedMessage) return
     actions.toggleFlag({
@@ -117,6 +152,8 @@ export function useMailClientHandlers(input: {
   return {
     closeCompose: compose.closeCompose,
     composeIntent: compose.composeIntent,
+    handleAddTag,
+    handleRemoveTag,
     handleApplySearch: (query: string) => applySearchQuery(query),
     handleArchive,
     handleClearSelectedMessage: () => setSelectedMessage(null),
