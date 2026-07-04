@@ -23,6 +23,7 @@ posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 posthaste-store = { path = "../posthaste-store" }
 imap-codec = "2.0.0-alpha.7"
+jmap-client = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
