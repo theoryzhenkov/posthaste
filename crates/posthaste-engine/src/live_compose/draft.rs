@@ -114,8 +114,14 @@ pub(crate) async fn save_draft(
 
 /// Destroy a draft message from the Drafts mailbox via `Email/set` destroy.
 ///
+/// Idempotent (D126): a `notFound` destroy means the draft is already gone —
+/// counted as destroyed, so a redelivered send settlement (whose
+/// consume-the-draft effect re-enqueues the delete) settles clean instead of
+/// erroring.
+///
 /// @spec docs/L1-outbox#operation-model
 /// @spec docs/L1-jmap#methods-used
+/// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
 pub(crate) async fn delete_draft(
     gateway: &LiveJmapGateway,
     _account_id: &AccountId,
@@ -128,8 +134,16 @@ pub(crate) async fn delete_draft(
         required_method_response(response.pop_method_response(), "Email/set destroy")?
             .unwrap_set_email()
             .map_err(map_gateway_error)?;
-    email_set_response
-        .destroyed(message_id.as_str())
-        .map_err(map_gateway_error)?;
-    Ok(())
+    match email_set_response.destroyed(message_id.as_str()) {
+        Ok(()) => Ok(()),
+        Err(jmap_client::Error::Set(error))
+            if matches!(
+                error.error(),
+                jmap_client::core::set::SetErrorType::NotFound
+            ) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(map_gateway_error(error)),
+    }
 }

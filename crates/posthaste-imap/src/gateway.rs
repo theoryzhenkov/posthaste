@@ -58,7 +58,9 @@ use identity::{
     imap_sync_plan_name, missing_location_identities, missing_location_identities_from_uids,
     planned_imap_sync_plan_name,
 };
-use mutations::{destroy_message_by_imap, replace_message_mailboxes};
+use mutations::{
+    destroy_message_by_imap, remove_imap_message_from_mailbox, replace_message_mailboxes,
+};
 use planning::{
     plan_mailboxes, planned_mailboxes_include_full_snapshot,
     planned_mailboxes_require_partial_delta_batch, simple_imap_move_mailboxes,

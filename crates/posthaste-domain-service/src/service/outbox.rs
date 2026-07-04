@@ -57,6 +57,16 @@ enum DependencyStatus {
     Cancelled(String),
 }
 
+/// Outcome of one [`MailService::flush_pass`] over the flushable operations.
+struct FlushPass {
+    /// The drain stopped early on a transient/uncertain failure — the caller
+    /// must not re-pass; the rest retries on the next connectivity window.
+    stopped: bool,
+    /// A settlement effect enqueued a follow-up operation this pass (a settled
+    /// send consumed its draft — D126), so the caller drains once more.
+    follow_up_enqueued: bool,
+}
+
 /// Classify a gateway failure into its typed retryability verdict plus the
 /// message recorded on the operation. Exhaustive over [`GatewayError`] by design
 /// (the M29 gate): a new variant fails to compile here until its terminality is
@@ -436,14 +446,42 @@ impl MailService {
     /// retried together on the next connectivity window. Per-entity ordering is
     /// preserved: an op whose dependency has not yet applied is skipped this pass.
     ///
+    /// A settlement effect can enqueue a follow-up operation mid-pass (a settled
+    /// send consumes its draft — D126); the outer loop re-lists and drains those
+    /// follow-ups in the same call so the draft leaves the provider before this
+    /// flush's caller (the sync cycle) pulls. Bounded: it re-passes only when
+    /// this pass enqueued a follow-up, and follow-ups (draft deletes) enqueue
+    /// nothing themselves.
+    ///
     /// @spec docs/L1-outbox#state-machine
+    /// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
     pub async fn flush_account(
         &self,
         account_id: &AccountId,
         gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        let queued = self.outbox.list_flushable_operations(account_id)?;
         let mut events = Vec::new();
+        loop {
+            let pass = self.flush_pass(account_id, gateway, &mut events).await?;
+            if pass.stopped || !pass.follow_up_enqueued {
+                break;
+            }
+        }
+        Ok(events)
+    }
+
+    /// One drain pass over the currently-flushable operations. Appends the
+    /// settlement events to `events` and reports whether the drain stopped
+    /// early (transient/uncertain) and whether a settlement effect enqueued a
+    /// follow-up operation ([`Self::flush_account`] re-passes on the latter).
+    async fn flush_pass(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+        events: &mut Vec<DomainEvent>,
+    ) -> Result<FlushPass, ServiceError> {
+        let queued = self.outbox.list_flushable_operations(account_id)?;
+        let mut follow_up_enqueued = false;
         for snapshot in queued {
             // Re-fetch fresh: an earlier op in this pass may have reconciled this
             // op's entity id (temp -> provider) or changed its state.
@@ -532,6 +570,12 @@ impl MailService {
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
                     self.outbox.remove_operation(&operation.id)?;
+                    // D126: a settled send consumes its originating draft — the
+                    // destroy is enqueued as a follow-up op so it is retried
+                    // with the outbox discipline, never silently dropped.
+                    if self.consume_draft_after_send(account_id, &operation)?.is_some() {
+                        follow_up_enqueued = true;
+                    }
                 }
                 Ok(Pushed::Message { readback, rejected }) => {
                     // Settle now from the provider readback: remove the op, fold
@@ -556,7 +600,10 @@ impl MailService {
                         Some(&message),
                     )?;
                     // Offline: stop draining; the rest retries next window.
-                    break;
+                    return Ok(FlushPass {
+                        stopped: true,
+                        follow_up_enqueued,
+                    });
                 }
                 Err(FlushError {
                     disposition: FlushDisposition::Uncertain,
@@ -577,7 +624,10 @@ impl MailService {
                     )?);
                     // A send timeout signals a struggling link; stop draining so
                     // the rest retries on the next connectivity window.
-                    break;
+                    return Ok(FlushPass {
+                        stopped: true,
+                        follow_up_enqueued,
+                    });
                 }
                 Err(FlushError {
                     disposition: FlushDisposition::Permanent,
@@ -604,7 +654,59 @@ impl MailService {
                 }
             }
         }
-        Ok(events)
+        Ok(FlushPass {
+            stopped: false,
+            follow_up_enqueued,
+        })
+    }
+
+    /// D126: draft destruction is a settlement effect of the send. When a
+    /// settled-successful `Send` carries the originating draft's stable id
+    /// (`SendMessageRequest::draft_id`), enqueue the draft's delete so the
+    /// consumed draft leaves the provider's Drafts mailbox. Enqueued — not
+    /// pushed inline — so a transient destroy failure is retried with the
+    /// outbox/settlement machinery, never silent, and never re-runs the send.
+    ///
+    /// Idempotent across settlement redelivery (ruling 24): consuming the draft
+    /// removes its alias, and the gateways treat an already-gone draft as
+    /// destroyed, so a redelivered send settlement enqueues nothing (unknown
+    /// draft) or settles an at-worst harmless second delete.
+    ///
+    /// On a parked send (`DispatchUncertain`) this is never reached — the draft
+    /// is KEPT as the user's recovery artifact (D125); destruction happens only
+    /// on settled success.
+    ///
+    /// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
+    fn consume_draft_after_send(
+        &self,
+        account_id: &AccountId,
+        operation: &Operation,
+    ) -> Result<Option<Operation>, ServiceError> {
+        if operation.kind != OperationKind::Send {
+            return Ok(None);
+        }
+        // The payload decoded to push the send, so a failure here is
+        // unreachable in practice; it must not un-settle the settled send.
+        let Ok(request) = serde_json::from_value::<SendMessageRequest>(operation.payload.clone())
+        else {
+            return Ok(None);
+        };
+        let Some(key) = request
+            .draft_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+        else {
+            return Ok(None);
+        };
+        // A key that resolves to no alias and no projected message names a
+        // draft already consumed (redelivery) or never saved — nothing to do.
+        let known = self.outbox.resolve_draft_entity(account_id, key)?.is_some()
+            || self.draft_message_exists(account_id, key)?;
+        if !known {
+            return Ok(None);
+        }
+        self.delete_draft(account_id, MessageId::from(key)).map(Some)
     }
 
     /// Whether the operation this one depends on has applied, is still waiting,

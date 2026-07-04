@@ -53,7 +53,8 @@ pub(crate) async fn save_imap_draft(
     // Stamp the stable draft identity as a top-level header so a resumed edit
     // replaces this draft in place. Prepended to the existing header block
     // (header order is irrelevant) so it round-trips through the RFC822 header
-    // fetch on sync. Only drafts carry it; sends never set `draft_id`.
+    // fetch on sync. Only draft saves stamp it; the send path never writes the
+    // header (its `draft_id` names the draft to consume at settlement — D126).
     if let Some(draft_id) = request
         .draft_id
         .as_deref()
@@ -99,7 +100,16 @@ pub(crate) async fn save_imap_draft(
 /// for a draft that has been appended but not yet re-synced (the
 /// create-then-edit-while-offline case).
 ///
+/// Idempotent (D126): a draft that is already gone — the UID vanished from the
+/// mailbox, or the id resolves to no location at all — counts as deleted, so a
+/// redelivered send settlement (whose consume-the-draft effect re-enqueues the
+/// delete) settles clean instead of erroring. Removal goes through
+/// [`remove_imap_message_from_mailbox`], the UID-scoped expunge helper shared
+/// with the archive path (UID EXPUNGE under UIDPLUS, mark-`\Deleted` fallback,
+/// `MissingFetchData` tolerated as already-removed).
+///
 /// @spec docs/L1-outbox#operation-model
+/// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
 pub(crate) async fn delete_imap_draft(
     gateway: &LiveImapSmtpGateway,
     client: &mut ImapClient,
@@ -113,16 +123,24 @@ pub(crate) async fn delete_imap_draft(
         if !locations.is_empty() {
             for location in &locations {
                 let mailbox_name = gateway.mailbox_name_for_id(account_id, &location.mailbox_id)?;
-                delete_draft_by_location(gateway, client, &mailbox_name, location).await?;
+                remove_imap_message_from_mailbox(gateway, client, &mailbox_name, location).await?;
             }
             return Ok(());
         }
     }
 
     // Not yet synced: decode the UID-based id we returned from `save_imap_draft`.
-    let location = decode_imap_message_location(message_id).ok_or_else(|| {
-        GatewayError::Rejected(format!("cannot locate draft {message_id} for deletion"))
-    })?;
+    // A provider-canonical id (e.g. Gmail's msgid form) with no store location
+    // names a message that is no longer in the projection — already deleted and
+    // synced away — so deletion is an idempotent no-op, not an error.
+    let Some(location) = decode_imap_message_location(message_id) else {
+        ph_warn!(
+            events::IMAP_DRAFT_DELETE_ALREADY_GONE,
+            draft_id = %message_id,
+            "draft to delete has no IMAP location; treating as already deleted"
+        );
+        return Ok(());
+    };
     let mailbox_name = gateway
         .discovery
         .mailboxes
@@ -134,26 +152,7 @@ pub(crate) async fn delete_imap_draft(
                 "unknown IMAP mailbox for draft {message_id} deletion"
             ))
         })?;
-    delete_draft_by_location(gateway, client, &mailbox_name, &location).await
-}
-
-/// Capability-aware deletion: UID EXPUNGE under UIDPLUS, otherwise mark `\Deleted`.
-async fn delete_draft_by_location(
-    gateway: &LiveImapSmtpGateway,
-    client: &mut ImapClient,
-    mailbox_name: &str,
-    location: &ImapMessageLocation,
-) -> Result<(), GatewayError> {
-    if gateway.discovery.capabilities.supports_uidplus() {
-        expunge_imap_message_by_location(client, mailbox_name, location)
-            .await
-            .map_err(imap_error_to_gateway)?;
-    } else {
-        mark_imap_message_deleted_by_location(client, mailbox_name, location)
-            .await
-            .map_err(imap_error_to_gateway)?;
-    }
-    Ok(())
+    remove_imap_message_from_mailbox(gateway, client, &mailbox_name, &location).await
 }
 
 /// Decode a UID-identity message id (`imap:{uidvalidity}:{uid}:{hex(mailboxId)}`)
