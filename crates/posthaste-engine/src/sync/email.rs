@@ -66,9 +66,18 @@ pub(crate) enum StreamedEmailSync {
     /// carrying its explicit removals and cursors; no reconciliation pass runs.
     Delta(MessageSync),
     /// Full snapshot: metadata pages were already emitted via the sink. Carries
-    /// the complete remote id set and final cursor for the reconciliation pass.
+    /// the remote id set and final cursor for the reconciliation pass.
+    ///
+    /// `remote_ids_complete` is `true` only when the paginated `Email/query`
+    /// was proven exhaustive (the reported `total` was reached, or the server
+    /// returned a short/empty tail page). When `false`, the server capped the
+    /// query and we could NOT prove the id set is the full remote truth
+    /// (DS1 mail-loss guard): the caller must upsert what arrived but MUST NOT
+    /// prune-by-absence this cycle, or it would durably delete local mail that
+    /// still exists remotely beyond the cap.
     FullStreamed {
         remote_message_ids: Vec<MessageId>,
+        remote_ids_complete: bool,
         cursor: SyncCursor,
     },
 }
@@ -93,19 +102,22 @@ pub(crate) async fn fetch_email_sync_streamed(
                     events::JMAP_EMAIL_DELTA_UNAVAILABLE,
                     "JMAP email delta unavailable, falling back to full snapshot"
                 );
-                let (remote_message_ids, cursor) =
+                let (remote_message_ids, remote_ids_complete, cursor) =
                     fetch_email_full_streamed(client, sink).await?;
                 Ok(StreamedEmailSync::FullStreamed {
                     remote_message_ids,
+                    remote_ids_complete,
                     cursor,
                 })
             }
             Err(err) => Err(err),
         },
         None => {
-            let (remote_message_ids, cursor) = fetch_email_full_streamed(client, sink).await?;
+            let (remote_message_ids, remote_ids_complete, cursor) =
+                fetch_email_full_streamed(client, sink).await?;
             Ok(StreamedEmailSync::FullStreamed {
                 remote_message_ids,
+                remote_ids_complete,
                 cursor,
             })
         }
@@ -197,11 +209,16 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
     let mut sink = AccumulatingSink {
         messages: Vec::new(),
     };
-    let (_remote_message_ids, cursor) = fetch_email_full_streamed(client, &mut sink).await?;
+    let (_remote_message_ids, remote_ids_complete, cursor) =
+        fetch_email_full_streamed(client, &mut sink).await?;
     Ok(MessageSync {
         messages: sink.messages,
         deleted_message_ids: Vec::new(),
-        replace_all_messages: true,
+        // DS1 mail-loss guard: a full snapshot only earns `replace_all_messages`
+        // (which drives prune-by-absence) when the remote id set was proven
+        // exhaustive. A capped/incomplete query upserts what it got but never
+        // prunes, so mail beyond the server cap is not deleted locally.
+        replace_all_messages: remote_ids_complete,
         cursor,
     })
 }
@@ -215,21 +232,26 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
 async fn fetch_email_full_streamed(
     client: &Client,
     sink: &mut dyn SyncChunkSink,
-) -> Result<(Vec<MessageId>, SyncCursor), GatewayError> {
+) -> Result<(Vec<MessageId>, bool, SyncCursor), GatewayError> {
     let started = Instant::now();
-    let email_ids = client
-        .email_query(
-            None::<email::query::Filter>,
-            [email::query::Comparator::received_at().descending()].into(),
-        )
-        .await
-        .map_err(map_gateway_error)?
-        .take_ids();
+    let (email_ids, remote_ids_complete) = fetch_all_remote_email_ids(client).await?;
     ph_info!(
         events::JMAP_EMAIL_FULL_IDS_FETCHED,
         message_count = email_ids.len(),
+        remote_ids_complete,
         "JMAP full email snapshot IDs fetched"
     );
+    if !remote_ids_complete {
+        // DS1 mail-loss guard: the server capped the query and we could not
+        // prove the id set is the full remote truth. Upsert what we retrieved
+        // (below) but the caller MUST NOT prune-by-absence against this set.
+        ph_warn!(
+            events::JMAP_EMAIL_FULL_QUERY_INCOMPLETE,
+            message_count = email_ids.len(),
+            "JMAP full email snapshot query could not be proven complete; \
+             skipping prune-by-absence this cycle"
+        );
+    }
     let remote_message_ids: Vec<MessageId> = email_ids.iter().cloned().map(MessageId).collect();
     let mut state = None;
     if email_ids.is_empty() {
@@ -281,12 +303,104 @@ async fn fetch_email_full_streamed(
     );
     Ok((
         remote_message_ids,
+        remote_ids_complete,
         SyncCursor {
             object_type: SyncObject::Message,
             state: encode_email_cursor_state(&state.unwrap_or_default()),
             updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     ))
+}
+
+/// Page size requested per `Email/query` when assembling the full-snapshot
+/// remote id set. RFC 8620 §5.5 lets a server return fewer ids than requested
+/// (Fastmail and some proxies cap the result), so this is only an upper bound
+/// on one page; [`fetch_all_remote_email_ids`] pages to exhaustion regardless.
+const FULL_SNAPSHOT_EMAIL_QUERY_PAGE_SIZE: usize = 5000;
+
+/// Fetch the COMPLETE set of remote email ids by paging `Email/query`
+/// (`receivedAt DESC`) to exhaustion, mirroring the shape of the delta path's
+/// `has_more_changes` loop.
+///
+/// Returns the accumulated ids and whether the set is PROVABLY complete
+/// (DS1 mail-loss guard). A single unpaginated query is the original bug: RFC
+/// 8620 §5.5 permits a server to cap the result, and prune-by-absence against a
+/// capped set durably deletes every local message beyond the cap though it
+/// still exists remotely. Here we request `calculateTotal` and walk `position`
+/// until one of these holds:
+///   - the accumulated count reaches the server-reported `total` (complete), or
+///   - the server returns an empty or short (< applied `limit`) tail page
+///     (complete — that is the end of the result set), or
+///   - the server returns only already-seen ids, i.e. it is not honoring
+///     `position` and cannot be paged (INCOMPLETE — refuse to prune).
+///
+/// When `total` is known it is authoritative: `complete` is `ids.len() >= total`.
+async fn fetch_all_remote_email_ids(
+    client: &Client,
+) -> Result<(Vec<String>, bool), GatewayError> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut position: i32 = 0;
+    let mut reported_total: Option<usize> = None;
+    let complete: bool;
+    loop {
+        let mut request = client.build();
+        {
+            let query = request.query_email();
+            query.sort([email::query::Comparator::received_at().descending()]);
+            query.position(position);
+            query.limit(FULL_SNAPSHOT_EMAIL_QUERY_PAGE_SIZE);
+            query.calculate_total(true);
+        }
+        let mut response = request
+            .send_query_email()
+            .await
+            .map_err(map_gateway_error)?;
+        if let Some(total) = response.total() {
+            reported_total = Some(total);
+        }
+        let applied_limit = response.limit();
+        let page = response.take_ids();
+        let page_len = page.len();
+        let mut new_in_page = 0usize;
+        for id in page {
+            if seen.insert(id.clone()) {
+                ids.push(id);
+                new_in_page += 1;
+            }
+        }
+
+        // Authoritative completion: the server told us the total and we have it.
+        if let Some(total) = reported_total {
+            if ids.len() >= total {
+                complete = true;
+                break;
+            }
+        }
+        // Empty page: nothing beyond this position. Complete unless a known
+        // total says we are still short (server stopped early → not complete).
+        if page_len == 0 {
+            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            break;
+        }
+        // The server returned only ids we have already seen: it is ignoring
+        // `position` and cannot be paged. We cannot prove completeness.
+        if new_in_page == 0 {
+            complete = false;
+            break;
+        }
+        // A page shorter than the server's applied limit (or, absent that, our
+        // requested page size) is the tail of the result set.
+        let effective_limit = applied_limit.unwrap_or(FULL_SNAPSHOT_EMAIL_QUERY_PAGE_SIZE);
+        if page_len < effective_limit {
+            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            break;
+        }
+        position = position.checked_add(page_len as i32).ok_or_else(|| {
+            GatewayError::Rejected("Email/query position overflow while paginating".to_string())
+        })?;
+    }
+    Ok((ids, complete))
 }
 
 pub(crate) fn email_metadata_properties() -> [email::Property; 17] {
