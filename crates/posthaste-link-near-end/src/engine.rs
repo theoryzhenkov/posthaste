@@ -122,6 +122,12 @@ struct State {
     /// Consecutive malformed-frame count within the live stream ([3]); reset by
     /// any successfully parsed frame.
     malformed_streak: u32,
+    /// Set by [`NearEnd::clear_prepared`] on a stale-link 404/410, so the next
+    /// successful prepare in [`NearEnd::run`] surfaces the recovery edge
+    /// ([`FrameSink::on_link_reestablished`]) exactly once — the M44 signal that
+    /// distinguishes a genuine fresh link from a same-link reconnect. Consumed
+    /// (taken) when the edge fires.
+    reprepare_pending: bool,
     shutdown: bool,
 }
 
@@ -251,6 +257,18 @@ impl<W: Wire> NearEnd<W> {
         state.prepared = false;
         state.token = None;
         state.cursor = None;
+        // Arm the recovery-edge signal: the next successful prepare is a FRESH
+        // link (new id), which `run()` surfaces via `on_link_reestablished`
+        // (M44). Left armed across transient re-prepare-open failures so the
+        // edge fires once, when a fresh link finally opens.
+        state.reprepare_pending = true;
+    }
+
+    /// Take (clear) the armed re-prepare flag. Returns true when this call is
+    /// the one that consumed a pending re-prepare — i.e. the just-opened link is
+    /// a genuine fresh link, not the first connect or a same-link reconnect.
+    fn take_reprepare_pending(&self) -> bool {
+        std::mem::take(&mut self.state.borrow_mut().reprepare_pending)
     }
 
     // ---- connection prepare --------------------------------------------------
@@ -374,6 +392,17 @@ impl<W: Wire> NearEnd<W> {
                     self.sink.on_status(ConnectionStatus::TransientError(e.message));
                     self.backoff_before_reconnect().await;
                     continue;
+                }
+                // Recovery edge (M44/D112): a prepare that CONSUMED an armed
+                // re-prepare opened a fresh link (new id). Surface it once so the
+                // host adopts the id and reconciles its server-served views +
+                // drifted caches (RC1/RC2/RC3). The first connect never arms the
+                // flag, and a same-link reconnect keeps `prepared` (skips this
+                // block entirely) — so this fires only on a genuine fresh link.
+                if self.take_reprepare_pending() {
+                    if let Some(link_id) = self.token() {
+                        self.sink.on_link_reestablished(link_id);
+                    }
                 }
             }
 

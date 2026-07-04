@@ -308,6 +308,14 @@ export interface RuntimeFrameHandlers {
    */
   onReset?(): void
   onClosed?(error: unknown): void
+  /**
+   * The near-end engine re-prepared a FRESH link (a NEW link id) after the prior
+   * one went stale/absent (404/410 → re-prepare, M40) — the M44 recovery edge.
+   * The host adopts the new link id and re-drives its server-served views +
+   * drifted caches against it (RC1/RC2/RC3). Fired ONLY on a genuine re-prepare,
+   * never on a same-link reconnect. `linkId` is the new connection token.
+   */
+  onLinkReestablished?(linkId: string): void
 }
 
 export type RuntimeResourceDescriptor =

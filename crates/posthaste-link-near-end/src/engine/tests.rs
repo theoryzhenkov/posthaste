@@ -53,6 +53,9 @@ fn block_on<F: Future>(fut: F) -> F::Output {
 
 struct FakeTransport {
     link_response: PostResponse,
+    /// Scripted link-open responses (in order), falling back to `link_response`
+    /// when exhausted — lets a re-prepare test hand out a DIFFERENT link id.
+    link_responses: RefCell<VecDeque<PostResponse>>,
     mutation_responses: RefCell<VecDeque<Result<PostResponse, TransportError>>>,
     /// If set, mutation POSTs never resolve (to exercise the deadline).
     hang_mutations: bool,
@@ -71,6 +74,7 @@ impl FakeTransport {
                 status: 200,
                 body: r#"{"linkId":"link-test"}"#.to_string(),
             },
+            link_responses: RefCell::new(VecDeque::new()),
             mutation_responses: RefCell::new(VecDeque::new()),
             hang_mutations: false,
             settlement_responses: RefCell::new(VecDeque::new()),
@@ -83,6 +87,15 @@ impl FakeTransport {
 
     fn with_mutation(mut self, response: Result<PostResponse, TransportError>) -> Self {
         self.mutation_responses.get_mut().push_back(response);
+        self
+    }
+
+    /// Script the next link-open POST to return this body (a fresh link id).
+    fn with_link(mut self, body: &str) -> Self {
+        self.link_responses.get_mut().push_back(PostResponse {
+            status: 200,
+            body: body.to_string(),
+        });
         self
     }
 
@@ -123,7 +136,12 @@ impl Transport for FakeTransport {
                 .unwrap_or_else(|| ok_response(200, EMPTY_RECEIPT));
             ready(next).boxed_local()
         } else {
-            ready(Ok(self.link_response.clone())).boxed_local()
+            let next = self
+                .link_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or_else(|| self.link_response.clone());
+            ready(Ok(next)).boxed_local()
         }
     }
 
@@ -188,6 +206,8 @@ struct RecordingSink {
     malformed: RefCell<Vec<(String, String)>>,
     statuses: RefCell<Vec<String>>,
     resets: RefCell<u32>,
+    /// New link ids surfaced via `on_link_reestablished` (the M44 recovery edge).
+    reestablished: RefCell<Vec<String>>,
 }
 
 impl FrameSink<RuntimeFrame> for RecordingSink {
@@ -210,6 +230,9 @@ impl FrameSink<RuntimeFrame> for RecordingSink {
             ConnectionStatus::PermanentError(_) => "permanent",
         };
         self.statuses.borrow_mut().push(label.to_string());
+    }
+    fn on_link_reestablished(&self, link_id: String) {
+        self.reestablished.borrow_mut().push(link_id);
     }
 }
 
@@ -539,6 +562,79 @@ fn stale_link_410_stream_error_re_prepares_a_fresh_link() {
 
     assert_eq!(prepare_post_count(&h), 2, "410 also re-prepares");
     assert_eq!(h.transport.stream_urls.borrow().len(), 2);
+}
+
+// M44/D112 — the recovery-edge signal. A stale-link 404 re-prepare opens a
+// FRESH link; the engine must surface `on_link_reestablished` exactly once,
+// carrying the NEW link id, so the host adopts it + reconciles server-served
+// views/caches (the fix for "open views stop updating" + "empty mailbox stuck
+// on Syncing"). It must NOT fire on the first connect.
+#[test]
+fn re_prepare_surfaces_the_recovery_edge_with_the_new_link_id() {
+    let transport = FakeTransport::new()
+        // First link is "link-A"; then it's reaped (404).
+        .with_link(r#"{"linkId":"link-A"}"#)
+        // The re-prepared FRESH link is a DIFFERENT id.
+        .with_link(r#"{"linkId":"link-B"}"#)
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(404),
+                message: "runtime stream rejected with 404".to_string(),
+            },
+        ])
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+
+    block_on(h.engine.clone().run());
+
+    // Exactly one recovery edge, carrying the fresh link id — never the old one,
+    // never the first connect.
+    let reestablished = h.sink.reestablished.borrow();
+    assert_eq!(reestablished.len(), 1, "one recovery edge: {reestablished:?}");
+    assert_eq!(reestablished[0], "link-B", "carries the FRESH link id");
+}
+
+// M44 — the discrimination the reconcile depends on: a SAME-link reconnect (a
+// 5xx / statusless blip that keeps the link valid) resumes the stream without
+// re-preparing, so NO recovery edge fires — the host must not needlessly
+// re-serve every view on an ordinary reconnect.
+#[test]
+fn same_link_reconnect_does_not_surface_the_recovery_edge() {
+    let transport = FakeTransport::new()
+        .with_stream(vec![
+            StreamEvent::Open,
+            // A statusless mid-stream drop: reconnect the SAME link.
+            StreamEvent::Error {
+                status: None,
+                message: "network dropped".to_string(),
+            },
+        ])
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+
+    block_on(h.engine.clone().run());
+
+    // One prepare (never re-prepared), two subscribes (reconnected), and NO edge.
+    assert_eq!(prepare_post_count(&h), 1, "same link, no re-prepare");
+    assert_eq!(h.transport.stream_urls.borrow().len(), 2, "reconnected");
+    assert!(
+        h.sink.reestablished.borrow().is_empty(),
+        "a same-link reconnect must not fire the recovery edge: {:?}",
+        h.sink.reestablished.borrow()
+    );
 }
 
 // D110a — the reserved case: a genuine auth refusal (401/403) still classifies
