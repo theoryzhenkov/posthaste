@@ -245,22 +245,37 @@ pub trait RuntimeMailWriteApi: Send + Sync {
     /// Save a draft local-first, returning the enqueued operation. `draft_id` is
     /// `None` for a new draft or the existing draft's id for an edit.
     ///
+    /// `idempotency_key` (RFC-L2-drafts D128, closing the ruling-24 flag) makes a
+    /// redelivered save safe: a replay under the same key returns the ORIGINAL
+    /// operation (its id and response), never enqueuing a second draft version.
+    /// `None` keeps the pre-existing keyless behavior. A key reused with a
+    /// different operation (`draft.save` vs `draft.delete`, or a message command)
+    /// is rejected with `Conflict`.
+    ///
     /// @spec docs/L1-outbox#operation-model
+    /// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
     async fn save_draft(
         &self,
         caller: RuntimeCaller,
         account_id: AccountId,
         draft_id: Option<MessageId>,
+        idempotency_key: Option<ClientMutationId>,
         request: SendMessageRequest,
     ) -> Result<Operation, RuntimeError>;
 
     /// Delete a draft local-first, returning the enqueued operation.
     ///
+    /// `idempotency_key` (RFC-L2-drafts D128) makes a redelivered delete
+    /// idempotent — a replay re-observes the original operation instead of
+    /// enqueuing a second delete. See [`save_draft`](Self::save_draft).
+    ///
     /// @spec docs/L1-outbox#operation-model
+    /// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
     async fn delete_draft(
         &self,
         caller: RuntimeCaller,
         account_id: AccountId,
+        idempotency_key: Option<ClientMutationId>,
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError>;
 

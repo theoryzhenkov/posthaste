@@ -18,7 +18,7 @@ use posthaste_contract_core::{ClientMutationId, MailOperation};
 /// @spec docs/eph/RFC-L2-scripting#6-d53-the-action-path
 const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
 
-fn idempotency_key(headers: &HeaderMap) -> Option<ClientMutationId> {
+pub(crate) fn idempotency_key(headers: &HeaderMap) -> Option<ClientMutationId> {
     headers
         .get(IDEMPOTENCY_KEY_HEADER)
         .and_then(|value| value.to_str().ok())

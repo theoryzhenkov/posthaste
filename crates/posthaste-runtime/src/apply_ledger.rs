@@ -29,8 +29,60 @@ use posthaste_contract_core::{
     ClientMutationId, RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeErrorCode,
     Terminality,
 };
-use posthaste_domain_model::CommandAck;
+use posthaste_domain_model::{CommandAck, Operation};
 use posthaste_link_far_end::up::{Accept, DedupStore, TerminalClass};
+
+/// Canonical op-name for a keyed draft save, distinct from every `MailOperation`
+/// name and from [`DRAFT_DELETE_OP`] so a key reused across draft save/delete (or
+/// any command) Conflicts on the ledger's op-name guard (D128).
+pub(crate) const DRAFT_SAVE_OP: &str = "draft.save";
+/// Canonical op-name for a keyed draft delete (see [`DRAFT_SAVE_OP`]).
+pub(crate) const DRAFT_DELETE_OP: &str = "draft.delete";
+
+/// The payload a settled reservation carries for replay. The direct-apply
+/// command routes settle a [`CommandAck`]; the draft routes settle the enqueued
+/// [`Operation`] so a replayed save/delete returns the SAME operation id and
+/// response, not a fresh one (RFC-L2-drafts D128 — "a real unit, not a
+/// wrapper"). One ledger serves both families: a same-key-different-op reuse
+/// Conflicts on the op-name guard *before* any payload is returned, so the
+/// variant a replay yields always matches the op that stored it.
+#[derive(Clone)]
+pub(crate) enum AppliedOutcome {
+    /// A direct-apply command ack (set-keywords, mailbox add/remove/replace,
+    /// destroy).
+    Ack(CommandAck),
+    /// An enqueued draft operation (`draft.save` / `draft.delete`).
+    Draft(Operation),
+}
+
+impl AppliedOutcome {
+    /// Extract the command ack a [`Reserved::Return`] carries. The op-name guard
+    /// makes a variant mismatch impossible in practice (a key that stored an
+    /// `Ack` can only be replayed under the same command op); a mismatch is an
+    /// internal invariant break, surfaced as a `Conflict` rather than a panic.
+    pub(crate) fn into_ack(self) -> Result<CommandAck, RuntimeError> {
+        match self {
+            AppliedOutcome::Ack(ack) => Ok(ack),
+            AppliedOutcome::Draft(_) => Err(Self::variant_mismatch()),
+        }
+    }
+
+    /// Extract the draft operation a [`Reserved::Return`] carries (see
+    /// [`into_ack`](Self::into_ack) for the mismatch discipline).
+    pub(crate) fn into_draft(self) -> Result<Operation, RuntimeError> {
+        match self {
+            AppliedOutcome::Draft(operation) => Ok(operation),
+            AppliedOutcome::Ack(_) => Err(Self::variant_mismatch()),
+        }
+    }
+
+    fn variant_mismatch() -> RuntimeError {
+        RuntimeError::new(
+            RuntimeErrorCode::Conflict,
+            "idempotency key reused with a different operation",
+        )
+    }
+}
 
 /// Wall-clock seconds — the tick the ledger's TTL is measured against, matching
 /// the units the far-end sink reaper drives [`DedupStore::reap`] on.
@@ -67,7 +119,7 @@ struct AppliedRecord {
     op_name: &'static str,
     /// The terminal outcome: `Ok` (Confirmed) or `Err` (Rejected). `None` while
     /// the reserved apply is still in flight (a concurrent duplicate).
-    outcome: Option<Result<CommandAck, RuntimeAdapterError>>,
+    outcome: Option<Result<AppliedOutcome, RuntimeAdapterError>>,
 }
 
 /// The reservation verdict for one `(caller, key, op)`.
@@ -77,7 +129,7 @@ pub(crate) enum Reserved {
     /// [`settle`]: ApplyLedger::settle
     Execute,
     /// A prior outcome (or a conflict) to return WITHOUT executing.
-    Return(Result<CommandAck, RuntimeError>),
+    Return(Result<AppliedOutcome, RuntimeError>),
 }
 
 /// The apply-scoped dedup ledger held on the runtime core (one instance behind
@@ -119,7 +171,7 @@ impl ApplyLedger {
                     )));
                 }
                 match record.outcome {
-                    Some(Ok(ack)) => Reserved::Return(Ok(ack)),
+                    Some(Ok(outcome)) => Reserved::Return(Ok(outcome)),
                     Some(Err(error)) => Reserved::Return(Err(RuntimeError(error))),
                     None => Reserved::Return(Err(RuntimeError::retryable(
                         RuntimeErrorCode::Conflict,
@@ -133,23 +185,27 @@ impl ApplyLedger {
     /// Record the outcome of an executed reservation under the D47 rule: `Ok` is
     /// kept `Confirmed`, a permanent error is kept `Rejected` (re-observed), a
     /// transient error clears the record so a deliberate retry re-executes.
+    ///
+    /// The `Ok` side is taken by value (the caller clones the outcome payload it
+    /// still owns to return to its own caller); the `Err` side is borrowed so no
+    /// `RuntimeError` clone is forced on the hot path (only the envelope of a
+    /// *permanent* error is cloned, to retain it for replay).
     pub(crate) fn settle(
         &self,
         caller: &RuntimeCaller,
         key: &ClientMutationId,
-        result: &Result<CommandAck, RuntimeError>,
+        result: Result<AppliedOutcome, &RuntimeError>,
     ) {
         let scope = ApplyScope::of(caller);
         match result {
-            Ok(ack) => {
-                let ack = ack.clone();
+            Ok(outcome) => {
                 self.dedup.settle(
                     &scope,
                     key,
                     TerminalClass::Confirmed,
                     None,
                     now_secs(),
-                    move |record| record.outcome = Some(Ok(ack)),
+                    move |record| record.outcome = Some(Ok(outcome)),
                 );
             }
             Err(error) if error.envelope().terminality == Terminality::Permanent => {
@@ -173,7 +229,10 @@ mod tests {
     use super::*;
     use posthaste_contract_core::mutation_args::MessageTargetArgs;
     use posthaste_contract_core::MailOperation;
-    use posthaste_domain_model::CommandAck;
+    use posthaste_domain_model::{
+        AccountId, CommandAck, Operation, OperationEntity, OperationEntityKind, OperationId,
+        OperationKind, OperationState,
+    };
 
     fn caller() -> RuntimeCaller {
         RuntimeCaller::api()
@@ -181,8 +240,26 @@ mod tests {
     fn key(s: &str) -> ClientMutationId {
         ClientMutationId::new(s)
     }
-    fn ack() -> CommandAck {
-        CommandAck { events: vec![] }
+    fn ack_outcome() -> AppliedOutcome {
+        AppliedOutcome::Ack(CommandAck { events: vec![] })
+    }
+    fn draft_outcome(id: &str) -> AppliedOutcome {
+        AppliedOutcome::Draft(Operation {
+            id: OperationId::from(id),
+            account_id: AccountId("acct".into()),
+            entity: OperationEntity {
+                kind: OperationEntityKind::Draft,
+                id: "draft-1".into(),
+            },
+            kind: OperationKind::DraftCreate,
+            payload: serde_json::json!({}),
+            state: OperationState::Pending,
+            attempts: 0,
+            last_error: None,
+            depends_on: None,
+            created_at: "1970-01-01T00:00:00Z".to_string(),
+            updated_at: "1970-01-01T00:00:00Z".to_string(),
+        })
     }
     fn destroy() -> &'static str {
         MailOperation::Destroy(MessageTargetArgs {
@@ -202,11 +279,51 @@ mod tests {
             ledger.reserve(&c, &k, destroy()),
             Reserved::Execute
         ));
-        ledger.settle(&c, &k, &Ok(ack()));
+        ledger.settle(&c, &k, Ok(ack_outcome()));
         match ledger.reserve(&c, &k, destroy()) {
             Reserved::Return(Ok(_)) => {}
             _ => panic!("a redelivery must re-observe the stored Confirmed, not execute"),
         }
+    }
+
+    // The draft routes settle an operation-bearing outcome (D128): a redelivery
+    // under the same key re-observes the SAME operation, id and all, so the
+    // response body is byte-identical and no second draft is enqueued.
+    #[test]
+    fn draft_outcome_replays_the_same_operation_id() {
+        let ledger = ApplyLedger::new();
+        let (c, k) = (caller(), key("save-1"));
+        assert!(matches!(
+            ledger.reserve(&c, &k, "draft.save"),
+            Reserved::Execute
+        ));
+        ledger.settle(&c, &k, Ok(draft_outcome("op-abc")));
+        match ledger.reserve(&c, &k, "draft.save") {
+            Reserved::Return(result) => {
+                let operation = result.unwrap().into_draft().expect("a draft outcome");
+                assert_eq!(operation.id, OperationId::from("op-abc"));
+            }
+            Reserved::Execute => panic!("a replayed save must re-observe the stored operation"),
+        }
+    }
+
+    // A stored draft outcome extracted as an ack (the wrong family) is an
+    // internal invariant break, surfaced as Conflict rather than a panic. The
+    // op-name guard makes this unreachable in production; the check is defensive.
+    #[test]
+    fn outcome_variant_mismatch_is_a_conflict_not_a_panic() {
+        assert_eq!(
+            draft_outcome("op-abc")
+                .into_ack()
+                .unwrap_err()
+                .envelope()
+                .code,
+            RuntimeErrorCode::Conflict
+        );
+        assert_eq!(
+            ack_outcome().into_draft().unwrap_err().envelope().code,
+            RuntimeErrorCode::Conflict
+        );
     }
 
     // A permanent rejection is kept and re-observed; a redelivery never re-runs.
@@ -218,7 +335,7 @@ mod tests {
         ledger.settle(
             &c,
             &k,
-            &Err(RuntimeError::new(RuntimeErrorCode::InvalidMutation, "no")),
+            Err(&RuntimeError::new(RuntimeErrorCode::InvalidMutation, "no")),
         );
         match ledger.reserve(&c, &k, destroy()) {
             Reserved::Return(Err(error)) => {
@@ -237,7 +354,7 @@ mod tests {
         ledger.settle(
             &c,
             &k,
-            &Err(RuntimeError::retryable(
+            Err(&RuntimeError::retryable(
                 RuntimeErrorCode::TransportDisconnected,
                 "down",
             )),
@@ -254,7 +371,7 @@ mod tests {
         let ledger = ApplyLedger::new();
         let (c, k) = (caller(), key("op-1"));
         ledger.reserve(&c, &k, "message.setKeywords");
-        ledger.settle(&c, &k, &Ok(ack()));
+        ledger.settle(&c, &k, Ok(ack_outcome()));
         match ledger.reserve(&c, &k, "message.destroy") {
             Reserved::Return(Err(error)) => {
                 assert_eq!(error.envelope().code, RuntimeErrorCode::Conflict)
