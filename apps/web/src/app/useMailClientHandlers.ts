@@ -127,15 +127,21 @@ export function useMailClientHandlers(input: {
   }, [actions, selectedMessage])
   const handleDiscardDraft = useCallback(() => {
     if (selectedMessage) {
-      actions.discardDraft(selectedMessage)
+      actions.discardDraft({
+        ...selectedMessage,
+        draftId: selectedMessageData?.draftId,
+      })
     }
-  }, [actions, selectedMessage])
+  }, [actions, selectedMessage, selectedMessageData])
   const handleTrash = useCallback(() => {
     if (!selectedMessage) return
     // D127: deleting a draft is a discard (hard delete via the draft-delete op),
     // never a trash move — keeps the keyboard/`#` path coherent with the row.
     if (selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft)) {
-      actions.discardDraft(selectedMessage)
+      actions.discardDraft({
+        ...selectedMessage,
+        draftId: selectedMessageData?.draftId,
+      })
       return
     }
     actions.trash(selectedMessage)

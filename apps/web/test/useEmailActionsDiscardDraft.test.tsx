@@ -22,7 +22,11 @@ import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
 
-const draft: SourceMessageRef = { sourceId: 'acct-1', messageId: 'draft-9' }
+const draft: SourceMessageRef & { draftId?: string | null } = {
+  sourceId: 'acct-1',
+  messageId: 'draft-9',
+  draftId: 'compose-session-9',
+}
 
 function makeWrapper(qc: QueryClient) {
   return ({ children }: { children: ReactNode }) => (
@@ -57,10 +61,10 @@ describe('useEmailActions.discardDraft (D127)', () => {
     jest.useRealTimers()
   })
 
-  it('dispatches the draft-delete mutation after the grace and NEVER the trash mutation', async () => {
-    const deleteSpy = spyOn(
+  it('dispatches the optimistic discard mutation after the grace with the stable draft id and NEVER the trash mutation', async () => {
+    const discardSpy = spyOn(
       runtimeMutations.messages,
-      'deleteDraft',
+      'discardDraft',
     ).mockResolvedValue({} as never)
     const trashSpy = spyOn(
       runtimeMutations.messages,
@@ -76,31 +80,37 @@ describe('useEmailActions.discardDraft (D127)', () => {
       })
 
       // Nothing dispatched during the grace window.
-      expect(deleteSpy).not.toHaveBeenCalled()
+      expect(discardSpy).not.toHaveBeenCalled()
 
       await act(async () => {
         jest.advanceTimersByTime(DRAFT_DISCARD_GRACE_MS)
         await Promise.resolve()
       })
 
-      expect(deleteSpy).toHaveBeenCalledTimes(1)
-      expect(deleteSpy).toHaveBeenCalledWith({
-        sourceId: 'acct-1',
-        draftId: 'draft-9',
-      })
+      expect(discardSpy).toHaveBeenCalledTimes(1)
+      // D131: the optimistic fold keys on the row's messageId (the blink); the
+      // stable draftId rides along so the far node resolves the live Email.
+      expect(discardSpy).toHaveBeenCalledWith(
+        {
+          sourceId: 'acct-1',
+          messageId: 'draft-9',
+          draftId: 'compose-session-9',
+        },
+        { userInitiated: true },
+      )
       // The regression guard: a draft must never hit the trash move.
       expect(trashSpy).not.toHaveBeenCalled()
     } finally {
-      deleteSpy.mockRestore()
+      discardSpy.mockRestore()
       trashSpy.mockRestore()
       toastSpy.mockRestore()
     }
   })
 
   it('cancels the dispatch when Undo is pressed within the grace', async () => {
-    const deleteSpy = spyOn(
+    const discardSpy = spyOn(
       runtimeMutations.messages,
-      'deleteDraft',
+      'discardDraft',
     ).mockResolvedValue({} as never)
     const toastSpy = spyOn(sonner, 'toast').mockReturnValue('id' as never)
 
@@ -121,17 +131,17 @@ describe('useEmailActions.discardDraft (D127)', () => {
         await Promise.resolve()
       })
 
-      expect(deleteSpy).not.toHaveBeenCalled()
+      expect(discardSpy).not.toHaveBeenCalled()
     } finally {
-      deleteSpy.mockRestore()
+      discardSpy.mockRestore()
       toastSpy.mockRestore()
     }
   })
 
   it('coalesces repeated discards of the same draft into one dispatch', async () => {
-    const deleteSpy = spyOn(
+    const discardSpy = spyOn(
       runtimeMutations.messages,
-      'deleteDraft',
+      'discardDraft',
     ).mockResolvedValue({} as never)
     const toastSpy = spyOn(sonner, 'toast').mockReturnValue('id' as never)
 
@@ -148,9 +158,9 @@ describe('useEmailActions.discardDraft (D127)', () => {
         await Promise.resolve()
       })
 
-      expect(deleteSpy).toHaveBeenCalledTimes(1)
+      expect(discardSpy).toHaveBeenCalledTimes(1)
     } finally {
-      deleteSpy.mockRestore()
+      discardSpy.mockRestore()
       toastSpy.mockRestore()
     }
   })

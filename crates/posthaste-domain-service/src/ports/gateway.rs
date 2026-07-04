@@ -195,11 +195,17 @@ pub trait MailGateway: Send + Sync {
     ///
     /// Default transport behaviour rejects draft deletion; JMAP and IMAP override.
     ///
+    /// `idempotent_redelivery` narrows the `notFound ⇒ Ok` mask (D133): `true`
+    /// (a send-consume redelivery) treats an already-gone draft as success;
+    /// `false` (a user-initiated discard) surfaces `notFound` as a retryable
+    /// failure so the client reverts the optimistic fold and shows the error.
+    ///
     /// @spec docs/L1-outbox#operation-model
     async fn delete_draft(
         &self,
         _account_id: &AccountId,
         _message_id: &MessageId,
+        _idempotent_redelivery: bool,
     ) -> Result<(), GatewayError> {
         Err(GatewayError::Rejected(
             "draft deletion is not supported by this transport".to_string(),

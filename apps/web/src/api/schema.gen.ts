@@ -1875,13 +1875,6 @@ export interface components {
             attachments: components["schemas"]["MessageAttachment"][];
             bodyHtml?: string | null;
             bodyText?: string | null;
-            /**
-             * @description Stable `X-Posthaste-Draft-Id` for this message when it is a draft this
-             *     client saved; `None` otherwise.
-             *
-             *     @spec docs/L1-outbox#temp-id-reconciliation
-             */
-            draftId?: string | null;
             rawMessage?: null | components["schemas"]["RawMessageRef"];
         };
         /**
@@ -1921,6 +1914,14 @@ export interface components {
          */
         MessageSummary: {
             conversationId: components["schemas"]["ConversationId"];
+            /**
+             * @description Stable `X-Posthaste-Draft-Id` when this list row is a draft this client
+             *     saved; `None` otherwise. Surfaced on the summary (not just the detail) so
+             *     a list-row discard carries the stable id (D131) — the id survives the
+             *     provider id rotation a JMAP autosave causes, so the discard never targets
+             *     a stale rotating Email id.
+             */
+            draftId?: string | null;
             fromEmail?: string | null;
             fromName?: string | null;
             hasAttachment: boolean;

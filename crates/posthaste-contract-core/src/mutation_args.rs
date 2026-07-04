@@ -108,6 +108,19 @@ pub struct MessageTargetArgs {
     pub message_id: String,
 }
 
+/// `message.deleteDraft`: discard a draft through the optimistic runtime-mutation
+/// path (D130). `message_id` is the visible list-row id the client folds the
+/// optimistic destroy on (the blink); `draft_id` is the stable
+/// `X-Posthaste-Draft-Id` (D131) the gateway resolves to the current live Email
+/// id, so the discard survives the id rotation a JMAP autosave causes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageDeleteDraftArgs {
+    pub source_id: String,
+    pub message_id: String,
+    pub draft_id: String,
+}
+
 /// `message.snooze`: move a message to the Snoozed mailbox + record the return
 /// time. `until` is unix seconds (UTC). @spec docs/eph/DESIGN-L2-snooze
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
