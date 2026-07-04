@@ -219,7 +219,7 @@ as today) — "restore a trashed draft" is a move, so it is covered.
   the per-account store table + `RevLog` view; clients mirror + propose; the server
   arbitrates append/cursor/truncation. Unlocks **cross-device**. Phase 1's id
   keying + idempotent ops make this additive, not a rewrite. Contract:
-  [`DESIGN-L2-undo-redo-revlog-contract`](DESIGN-L2-undo-redo-revlog-contract).
+  [`DESIGN-L2-undo-redo-revlog-contract`](DESIGN-L2-undo-redo-revlog-contract.md).
 
 ## Edge cases
 
@@ -237,7 +237,7 @@ as today) — "restore a trashed draft" is a move, so it is covered.
 
 ## Open questions — resolved (Phase 2 contract)
 
-Resolved in [`DESIGN-L2-undo-redo-revlog-contract`](DESIGN-L2-undo-redo-revlog-contract)
+Resolved in [`DESIGN-L2-undo-redo-revlog-contract`](DESIGN-L2-undo-redo-revlog-contract.md)
 (the Phase 2 implementable contract):
 
 - **Global vs per-account ordering** → per-account.
