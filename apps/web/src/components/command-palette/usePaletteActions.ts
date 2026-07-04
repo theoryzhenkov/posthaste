@@ -12,6 +12,7 @@ export interface PaletteActionHandlers {
   onRemoveTag: (tag: string) => void
   onOpenSettings: (category?: SettingsCategory) => void
   onOpenShortcuts: () => void
+  onOpenTagEditor: () => void
   onPlaceholderAction: (label: string) => void
   onReply: () => void
   onSelectMessage: (selection: MailSelection) => void
@@ -76,6 +77,9 @@ export function usePaletteActions(handlers: PaletteActionHandlers) {
           break
         case 'remove-tag-from-message':
           handlers.onRemoveTag(action.tag)
+          break
+        case 'open-tag-editor':
+          handlers.onOpenTagEditor()
           break
         case 'noop':
           handlers.onPlaceholderAction(action.label)
