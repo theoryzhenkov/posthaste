@@ -1,6 +1,13 @@
 import { useMemo } from 'react'
-import { ChevronDown, ChevronRight, RefreshCw, Settings } from 'lucide-react'
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  RefreshCw,
+  Settings,
+} from 'lucide-react'
 
+import type { AccountHealth } from '@/accountHealth'
 import type { AccountAppearance, Mailbox } from '@/api/types'
 import { useMailboxColorLookup } from '@/hooks/useMailboxColors'
 import { useMailboxCounts } from '@/live-store/store'
@@ -31,6 +38,7 @@ export function SourceSection({
     id: string
     name: string
     mailboxes: Mailbox[]
+    health?: AccountHealth
   }
   appearance: AccountAppearance
   selectedView: SidebarSelection | null
@@ -86,6 +94,24 @@ export function SourceSection({
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">
         {source.name}
       </span>
+      {source.health?.isUnhealthy && (
+        <span
+          role="img"
+          aria-label={source.health.message ?? source.health.label}
+          title={source.health.message ?? source.health.label}
+          className="shrink-0"
+        >
+          <AlertTriangle
+            size={13}
+            strokeWidth={1.8}
+            className={
+              source.health.severity === 'error'
+                ? 'text-rose-500'
+                : 'text-amber-500'
+            }
+          />
+        </span>
+      )}
       {unreadTotal > 0 && (
         <span className="rounded-[4px] bg-signal-unread px-1.5 font-mono text-[11px] font-semibold tabular-nums text-white">
           {unreadTotal}
