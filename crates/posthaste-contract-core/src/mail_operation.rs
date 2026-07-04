@@ -20,8 +20,9 @@ use posthaste_replica_core::{MessageAssertion, MessageChangeDiff};
 use crate::mutation_args::{
     keyword_toggle, MessageApplyDiffArgs, MessageDeleteDraftArgs, MessageMailboxMembershipArgs,
     MessageMoveToMailboxArgs, MessageMoveToRoleArgs, MessageReplaceMailboxesArgs,
-    MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs, MessageSetReadStateArgs,
-    MessageSetUserTagsArgs, MessageSnoozeArgs, MessageTargetArgs, MessageUnsnoozeArgs,
+    MessageSaveDraftArgs, MessageSendArgs, MessageSetFlaggedStateArgs,
+    MessageSetKeywordsMutationArgs, MessageSetReadStateArgs, MessageSetUserTagsArgs,
+    MessageSnoozeArgs, MessageTargetArgs, MessageUnsnoozeArgs,
 };
 use crate::RevCursorArgs;
 
@@ -64,6 +65,19 @@ pub enum MailOperation {
     /// to the draft-delete gateway path (not a generic message destroy).
     #[serde(rename = "message.deleteDraft")]
     DeleteDraft(MessageDeleteDraftArgs),
+    /// Save a draft (M65/D130). Not locally foldable (`fold_effect` = `None`):
+    /// the fold vocabulary has no upsert and carries no draft content. Routed
+    /// through the typed idempotent path; the draft row reconciles via the
+    /// `message.updated` the draft settlement emits (D132).
+    #[serde(rename = "message.saveDraft")]
+    SaveDraft(MessageSaveDraftArgs),
+    /// Send a message (M66/D130). Folds as a `Destroy` on the originating
+    /// draft's row (the optimistic "it left Drafts"); the fold is reverted if the
+    /// send parks (D125) or fails and confirmed on a real ack, driven by the
+    /// async-flush → mutation settlement bridge. The Sent row itself is not
+    /// foldable (no upsert) and arrives via the settlement event on ack.
+    #[serde(rename = "message.send")]
+    Send(MessageSendArgs),
     #[serde(rename = "message.applyDiff")]
     ApplyDiff(MessageApplyDiffArgs),
     #[serde(rename = "message.snooze")]
@@ -93,6 +107,8 @@ impl MailOperation {
             MailOperation::RemoveFromMailbox(_) => "message.removeFromMailbox",
             MailOperation::Destroy(_) => "message.destroy",
             MailOperation::DeleteDraft(_) => "message.deleteDraft",
+            MailOperation::SaveDraft(_) => "message.saveDraft",
+            MailOperation::Send(_) => "message.send",
             MailOperation::ApplyDiff(_) => "message.applyDiff",
             MailOperation::Snooze(_) => "message.snooze",
             MailOperation::Unsnooze(_) => "message.unsnooze",
@@ -115,6 +131,8 @@ impl MailOperation {
             MailOperation::RemoveFromMailbox(args) => &args.source_id,
             MailOperation::Destroy(args) => &args.source_id,
             MailOperation::DeleteDraft(args) => &args.source_id,
+            MailOperation::SaveDraft(args) => &args.source_id,
+            MailOperation::Send(args) => &args.source_id,
             MailOperation::ApplyDiff(args) => &args.source_id,
             MailOperation::Snooze(args) => &args.source_id,
             MailOperation::Unsnooze(args) => &args.source_id,
@@ -137,6 +155,8 @@ impl MailOperation {
             MailOperation::RemoveFromMailbox(args) => &args.message_id,
             MailOperation::Destroy(args) => &args.message_id,
             MailOperation::DeleteDraft(args) => &args.message_id,
+            MailOperation::SaveDraft(args) => &args.message_id,
+            MailOperation::Send(args) => &args.message_id,
             MailOperation::ApplyDiff(args) => &args.message_id,
             MailOperation::Snooze(args) => &args.message_id,
             MailOperation::Unsnooze(args) => &args.message_id,
@@ -216,6 +236,18 @@ impl MailOperation {
             // A discard folds locally as a destroy (the row blinks out); the far
             // node resolves the stable id and routes to the draft-delete path.
             MailOperation::DeleteDraft(_) => Some(MessageAssertion::Destroy),
+            // A save has no expressible optimistic fold: the fold vocabulary can
+            // set keywords/mailboxes or destroy an existing row, but it cannot
+            // create a row or carry draft content (subject/body). `None` here
+            // routes save through the typed path with no optimism; the draft row
+            // reconciles via the `message.updated` its settlement emits (D132).
+            MailOperation::SaveDraft(_) => None,
+            // A send folds as a `Destroy` on the ORIGINATING draft's row — the
+            // optimistic "it left Drafts". The Sent row itself is not foldable
+            // (no upsert) and arrives via the settlement event on ack. The fold
+            // is held past enqueue and only confirmed/reverted by the async-flush
+            // settlement bridge (ack ⇒ confirm; park/fail ⇒ revert — D125).
+            MailOperation::Send(_) => Some(MessageAssertion::Destroy),
             MailOperation::ApplyDiff(args) => Some(MessageAssertion::ApplyDiff {
                 diff: args.diff.clone(),
             }),
@@ -317,6 +349,62 @@ mod tests {
                 mailbox_ids: vec!["mbx-a".into()]
             })
         );
+    }
+
+    #[test]
+    fn save_draft_is_not_locally_foldable() {
+        // The fold vocabulary has no upsert and carries no draft content, so a
+        // save routes through the typed path with no optimism (M65); the row
+        // reconciles via the settlement `message.updated` (D132).
+        let value = json!({
+            "name": "message.saveDraft",
+            "args": {
+                "sourceId": "acct",
+                "messageId": "draft-local-1",
+                "request": {
+                    "from": null, "to": [], "cc": [], "bcc": [],
+                    "subject": "hi", "body": "b",
+                    "inReplyTo": null, "references": null
+                }
+            }
+        });
+        let op: MailOperation = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(op.name(), "message.saveDraft");
+        assert_eq!(op.account_id(), "acct");
+        assert_eq!(op.message_id(), Some("draft-local-1"));
+        assert_eq!(op.fold_effect(), None);
+        // Round-trips through serde (the request re-serializes its default
+        // `attachments`/`draftId`, so compare the re-parsed op, not raw JSON).
+        let reparsed: MailOperation =
+            serde_json::from_value(serde_json::to_value(&op).unwrap()).unwrap();
+        assert_eq!(reparsed, op);
+    }
+
+    #[test]
+    fn send_folds_as_a_destroy_of_the_originating_draft_row() {
+        // Send's optimistic effect is the draft leaving Drafts — a `Destroy` on
+        // its row. The Sent row is not foldable (no upsert) and arrives via the
+        // ack settlement event. The fold is held past enqueue and settled by the
+        // async-flush bridge (ack ⇒ confirm; park/fail ⇒ revert — D125/D126).
+        let value = json!({
+            "name": "message.send",
+            "args": {
+                "sourceId": "acct",
+                "messageId": "draft-1",
+                "request": {
+                    "from": null, "to": [], "cc": [], "bcc": [],
+                    "subject": "hi", "body": "b",
+                    "inReplyTo": null, "references": null, "draftId": "draft-1"
+                }
+            }
+        });
+        let op: MailOperation = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(op.name(), "message.send");
+        assert_eq!(op.message_id(), Some("draft-1"));
+        assert_eq!(op.fold_effect(), Some(MessageAssertion::Destroy));
+        let reparsed: MailOperation =
+            serde_json::from_value(serde_json::to_value(&op).unwrap()).unwrap();
+        assert_eq!(reparsed, op);
     }
 
     #[test]
