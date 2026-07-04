@@ -680,8 +680,8 @@ posthaste-wizard update --yes
   only; default `--port 8787`, `--path /hook`.
 - Apply (write-back) commands: `POST /v1/sources/{id}/commands/messages/{mid}/…`
   (`set-keywords`, `add-to-mailbox`, `remove-from-mailbox`, `replace-mailboxes`,
-  `destroy`) — all accept the `Idempotency-Key` header. `POST
-  /v1/sources/{id}/commands/send` does not (yet).
+  `destroy`) — all accept the `Idempotency-Key` header, as does `POST
+  /v1/sources/{id}/commands/send` (RFC-L2-scripting ruling 24).
 - Write verbs (the SDK surface, RFC-L2-scripting ruling 21) — each resolves
   `--account`/`--message` from `$PH_ACCOUNT`/`$PH_ACCOUNT_ID`/`$PH_MESSAGE_ID`
   when omitted, and auto-derives `Idempotency-Key`; `<verb> --help` for the

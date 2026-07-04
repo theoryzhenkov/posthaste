@@ -755,6 +755,14 @@ impl RuntimeMailReadApi for RuntimeHandle {
     }
 }
 
+/// The canonical apply-ledger operation name for a keyed send (RFC-L2-scripting
+/// ruling 24). A send is not a [`MailOperation`], so it carries its own stable
+/// name in the shared ledger's `(scope, key) → op_name` slot; it is distinct
+/// from every `MailOperation::name()` value AND from `draft.save`/`draft.delete`,
+/// so a key reused across a send and a message-command or draft op is correctly a
+/// `Conflict`.
+const SEND_OP_NAME: &str = "message.send";
+
 #[async_trait]
 impl RuntimeMailWriteApi for RuntimeHandle {
     async fn get_identity(
@@ -802,15 +810,65 @@ impl RuntimeMailWriteApi for RuntimeHandle {
 
     async fn send_message(
         &self,
-        _caller: RuntimeCaller,
+        caller: RuntimeCaller,
         account_id: AccountId,
         request: SendMessageRequest,
+        idempotency_key: Option<ClientMutationId>,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core
-            .authority_server_link
-            .send_message(account_id, request)
-            .await
+        // Keyless send keeps the pre-existing behavior: no ledger, so idempotency
+        // is only M32's outbox-level exactly-once for a single operation retried
+        // (the header stays optional — an absent key behaves exactly as before).
+        let Some(key) = idempotency_key else {
+            return self
+                .core
+                .authority_server_link
+                .send_message(account_id, request)
+                .await;
+        };
+        // Keyed send (RFC-L2-scripting ruling 24): honor the client
+        // `Idempotency-Key` so a redelivered rule webhook / hook-serve script /
+        // retried agent that calls reply/send twice under the SAME key enqueues
+        // exactly ONE outbox send — a redelivery re-observes the first outcome
+        // instead of creating a second operation. This reuses the SAME
+        // apply-ledger the five message-command + draft routes use (D53/S4/D128),
+        // keyed by `SEND_OP_NAME`; the concurrent-duplicate race is handled by the
+        // ledger's existing reservation guarantee (a second in-flight request
+        // under the same key gets an in-flight `Conflict`, never a second send),
+        // not a new parallel mechanism.
+        //
+        // Composition with M32 (this does NOT duplicate it): this ledger guards
+        // the HTTP boundary — one `Idempotency-Key` ⇒ one outbox operation
+        // CREATED; M32's outbox-level exactly-once (deterministic
+        // `phsend-<operation-id>` identity + `DispatchUncertain`) then guards
+        // provider-side duplicates for that ONE operation retried. They stack:
+        // key → one operation (here) → one provider submission (M32).
+        match self.core.apply_ledger.reserve(&caller, &key, SEND_OP_NAME) {
+            // A send carries no events, so its ledger slot is an empty
+            // `CommandAck` (Ack-shaped, like the message commands — not an
+            // `Operation` like the draft routes); the redelivery just needs
+            // "succeeded before", which this outcome witnesses.
+            Reserved::Return(result) => result.and_then(AppliedOutcome::into_ack).map(|_ack| ()),
+            Reserved::Execute => {
+                let result = self
+                    .core
+                    .authority_server_link
+                    .send_message(account_id, request)
+                    .await;
+                // Fold the unit outcome into the ledger's `CommandAck` slot; `settle`
+                // then applies D47 retention: `Confirmed` kept, a permanent rejection
+                // re-observed, a transient failure cleared so a deliberate retry
+                // re-executes.
+                self.core.apply_ledger.settle(
+                    &caller,
+                    &key,
+                    result
+                        .as_ref()
+                        .map(|()| AppliedOutcome::Ack(CommandAck { events: vec![] })),
+                );
+                result
+            }
+        }
     }
 
     /// Save a draft local-first, returning the enqueued operation. `draft_id` is
