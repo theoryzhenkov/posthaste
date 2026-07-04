@@ -52,12 +52,6 @@ plugins:
 
 nav:
   - Home: index.md
-  - Guide:
-      - Start here: guide/index.md
-      - Automations: guide/automations.md
-      - Plug in an agent: guide/agents.md
-      - Scripting quickstart (technical): scripting-quickstart.md
-      - Security & threat model: scripting-security.md
   - Architecture:
       - Crate topology (L2): architecture/L2-crate-topology.md
   - State:
