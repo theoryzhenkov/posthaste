@@ -16,9 +16,8 @@ import {
 export function useCommandPaletteSearch(input: {
   hasSelectedMessage: boolean
   query: string
-  selectedMessageTags: readonly string[]
 }) {
-  const { hasSelectedMessage, query, selectedMessageTags } = input
+  const { hasSelectedMessage, query } = input
   const queryClient = useQueryClient()
   const readModels = useMailboxNavigationReadModels()
   const recentMessages = useMemo(
@@ -34,22 +33,11 @@ export function useCommandPaletteSearch(input: {
           mailboxes: source.mailboxes.map((mailbox) => mailbox.id),
         })),
         tags: readModels.tags.map((tag) => tag.name),
-        selectedMessageTags,
       }),
-    [
-      readModels.smartMailboxes,
-      readModels.sources,
-      readModels.tags,
-      selectedMessageTags,
-    ],
+    [readModels.smartMailboxes, readModels.sources, readModels.tags],
   )
   const providers = useMemo(
-    () =>
-      createCommandProviders({
-        readModels,
-        recentMessages,
-        selectedMessageTags,
-      }),
+    () => createCommandProviders({ readModels, recentMessages }),
     // readModelKey intentionally collapses unstable React Query wrapper arrays
     // into the domain IDs that affect provider candidates.
     // eslint-disable-next-line react-hooks/exhaustive-deps

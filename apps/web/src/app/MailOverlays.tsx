@@ -30,6 +30,10 @@ export function MailOverlays(props: MailClientViewProps) {
           knownTags={props.tags}
           message={props.selectedMessageData}
           onClose={() => props.onSetTagEditorOpen(false)}
+          onManageTags={() => {
+            props.onSetTagEditorOpen(false)
+            props.onOpenSettings('tags')
+          }}
         />
       )}
       {props.composeIntent && (
@@ -63,14 +67,10 @@ export function MailOverlays(props: MailClientViewProps) {
 }
 
 function CommandPaletteOverlay(props: MailClientViewProps) {
-  const selectedMessageTags = (
-    props.selectedMessageData?.keywords ?? []
-  ).filter((keyword) => !keyword.startsWith('$'))
   return (
     <Suspense fallback={null}>
       <CommandPalette
         hasSelectedMessage={props.selectedMessage !== null}
-        selectedMessageTags={selectedMessageTags}
         onAddTag={props.onAddTag}
         onApplySearch={props.onApplySearch}
         onArchive={props.onArchive}
@@ -78,6 +78,7 @@ function CommandPaletteOverlay(props: MailClientViewProps) {
         onCompose={props.onCompose}
         onOpenSettings={props.onOpenSettings}
         onOpenShortcuts={props.onShowShortcuts}
+        onOpenTagEditor={props.onOpenTagEditor}
         onPlaceholderAction={props.onPlaceholderAction}
         onRemoveTag={props.onRemoveTag}
         onReply={props.onReply}

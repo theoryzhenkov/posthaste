@@ -1,4 +1,4 @@
-import { Tag } from 'lucide-react'
+import { Settings2, Tag } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import type { MessageDetail, TagSummary } from '@/api/types'
@@ -13,6 +13,9 @@ interface TagEditorProps {
   knownTags: TagSummary[]
   message: MessageDetail
   onClose: () => void
+  /** Closes the tag editor and navigates to Settings → Tags. Reuses the same
+   *  open-settings('tags') mechanism as the palette's "Manage tags" command. */
+  onManageTags: () => void
 }
 
 const TAG_PANEL_STORAGE_KEY = 'posthaste.tags.panelOffset'
@@ -38,6 +41,7 @@ export function TagEditor({
   knownTags,
   message,
   onClose,
+  onManageTags,
 }: TagEditorProps) {
   const [draft, setDraft] = useState('')
   const tags = useMemo(() => userTags(message.keywords), [message.keywords])
@@ -48,8 +52,7 @@ export function TagEditor({
         .filter((tag) => {
           const query = draft.trim().toLowerCase()
           return !query || tag.name.toLowerCase().includes(query)
-        })
-        .slice(0, 6),
+        }),
     [draft, knownTags, tags],
   )
 
@@ -99,7 +102,7 @@ export function TagEditor({
       }
       onClose={onClose}
     >
-      <div className="space-y-4 p-4">
+      <div className="flex flex-col p-4">
         <form
           onSubmit={(event) => {
             event.preventDefault()
@@ -115,7 +118,7 @@ export function TagEditor({
           />
         </form>
 
-        <div className="flex min-h-7 flex-wrap gap-1.5">
+        <div className="mt-3 flex min-h-7 flex-wrap gap-1.5">
           {tags.length === 0 ? (
             <span className="text-sm text-muted-foreground">No tags</span>
           ) : (
@@ -130,28 +133,51 @@ export function TagEditor({
           )}
         </div>
 
-        {suggestions.length > 0 && (
-          <div className="space-y-1">
-            {suggestions.map((tag) => (
-              <button
-                key={tag.name}
-                type="button"
-                className={cn(
-                  'ph-focus-ring flex h-8 w-full items-center gap-2 rounded-[5px] px-2 text-left text-sm transition-colors',
-                  'hover:bg-[var(--hover-bg)]',
-                )}
-                onClick={() => addTag(tag.name)}
-              >
-                <span className="min-w-0 flex-1 truncate">{tag.name}</span>
-                {tag.unreadMessages > 0 && (
-                  <span className="font-mono text-[11px] text-muted-foreground">
-                    {tag.unreadMessages}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="mt-3 border-t border-border pt-3">
+          {suggestions.length > 0 ? (
+            <div
+              data-testid="tag-suggestions"
+              className="max-h-60 space-y-1 overflow-y-auto pr-1"
+            >
+              {suggestions.map((tag) => (
+                <button
+                  key={tag.name}
+                  type="button"
+                  className={cn(
+                    'ph-focus-ring flex h-8 w-full items-center gap-2 rounded-[5px] px-1.5 text-left text-sm transition-colors',
+                    'hover:bg-[var(--hover-bg)]',
+                  )}
+                  onClick={() => addTag(tag.name)}
+                >
+                  <TagChip
+                    name={tag.name}
+                    className="pointer-events-none min-w-0 shrink"
+                  />
+                  {tag.unreadMessages > 0 && (
+                    <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+                      {tag.unreadMessages}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="px-1.5 py-1 text-sm text-muted-foreground">
+              No more tags to suggest
+            </p>
+          )}
+        </div>
+
+        <div className="mt-3 border-t border-border pt-3">
+          <button
+            type="button"
+            onClick={onManageTags}
+            className="ph-focus-ring flex h-8 w-full items-center gap-2 rounded-[5px] px-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-[var(--hover-bg)] hover:text-foreground"
+          >
+            <Settings2 size={13} strokeWidth={1.8} className="shrink-0" />
+            <span>Manage tags…</span>
+          </button>
+        </div>
       </div>
     </FloatingPanel>
   )

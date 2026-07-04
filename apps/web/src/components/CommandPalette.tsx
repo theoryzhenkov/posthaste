@@ -28,7 +28,6 @@ import { Command, CommandInput } from './ui/command'
 
 interface CommandPaletteProps {
   hasSelectedMessage: boolean
-  selectedMessageTags: readonly string[]
   onAddTag: (tag: string) => void
   onApplySearch: (query: string) => void
   onArchive: () => void
@@ -36,6 +35,7 @@ interface CommandPaletteProps {
   onCompose: () => void
   onOpenSettings: (category?: SettingsCategory) => void
   onOpenShortcuts: () => void
+  onOpenTagEditor: () => void
   onPlaceholderAction: (label: string) => void
   onRemoveTag: (tag: string) => void
   onReply: () => void
@@ -51,7 +51,6 @@ interface CommandPaletteProps {
 
 export function CommandPalette({
   hasSelectedMessage,
-  selectedMessageTags,
   onAddTag,
   onApplySearch,
   onArchive,
@@ -59,6 +58,7 @@ export function CommandPalette({
   onCompose,
   onOpenSettings,
   onOpenShortcuts,
+  onOpenTagEditor,
   onPlaceholderAction,
   onRemoveTag,
   onReply,
@@ -69,7 +69,7 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const { activeSelectedIndex, itemRows, search, selectedValue } =
-    useCommandPaletteSearch({ hasSelectedMessage, query, selectedMessageTags })
+    useCommandPaletteSearch({ hasSelectedMessage, query })
 
   function handleQueryChange(value: string) {
     setQuery(value)
@@ -100,6 +100,7 @@ export function CommandPalette({
       onCompose,
       onOpenSettings,
       onOpenShortcuts,
+      onOpenTagEditor,
       onPlaceholderAction,
       onRemoveTag,
       onReply,
@@ -119,6 +120,7 @@ export function CommandPalette({
       onCompose,
       onOpenSettings,
       onOpenShortcuts,
+      onOpenTagEditor,
       onPlaceholderAction,
       onRemoveTag,
       onReply,

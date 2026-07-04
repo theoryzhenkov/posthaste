@@ -99,6 +99,7 @@ export type PaletteAction =
   | { kind: 'replace-query'; query: string }
   | { kind: 'add-tag-to-message'; tag: string }
   | { kind: 'remove-tag-from-message'; tag: string }
+  | { kind: 'open-tag-editor' }
   | { kind: 'noop'; label: string }
 
 export type CommandActionId =

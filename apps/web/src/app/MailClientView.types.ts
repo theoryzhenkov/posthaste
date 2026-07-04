@@ -55,6 +55,7 @@ export interface MailClientViewProps {
     category?: SettingsSurfaceCategory,
     options?: { accountId?: string | null; smartMailboxId?: string | null },
   ) => void
+  onOpenTagEditor: () => void
   onPlaceholderAction: (label: string) => void
   onRejectSearchPreview: () => void
   onRemoveTag: (tag: string) => void

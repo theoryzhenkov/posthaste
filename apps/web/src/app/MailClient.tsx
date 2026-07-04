@@ -262,6 +262,7 @@ export function MailClient({
           onOpenCommandPalette={handlers.handleOpenCommandPalette}
           onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
           onOpenSettings={handlers.handleOpenSettings}
+          onOpenTagEditor={handlers.handleOpenTagEditor}
           onPlaceholderAction={handlers.handlePlaceholderAction}
           onRejectSearchPreview={handlers.handleRejectSearchPreview}
           onRemoveTag={handlers.handleRemoveTag}
