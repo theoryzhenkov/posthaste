@@ -18,6 +18,8 @@ mod push_sse;
 mod push_ws;
 mod sync;
 mod ws_connection;
+#[cfg(test)]
+mod ws_transport_repro;
 
 pub use live::{connect_jmap_client, LiveJmapGateway};
 pub use mock::{MockJmapGateway, SyncGateGuard};
