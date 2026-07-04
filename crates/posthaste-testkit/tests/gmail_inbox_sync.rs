@@ -148,11 +148,13 @@ async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
         "the re-sync should have issued a CHANGEDSINCE (QRESYNC delta) fetch"
     );
     // Incrementality proof: the delta fetched exactly the one replacement
-    // message's header — nothing was re-fetched.
+    // message's header, once per mailbox view it appears in (the label-model
+    // mock serves an `\Inbox`-labeled message from INBOX and All Mail) —
+    // nothing else was re-fetched.
     assert_eq!(
         gmail.header_fetch_count(),
-        baseline_headers + 1,
-        "the QRESYNC delta should fetch exactly the replacement message's header"
+        baseline_headers + 2,
+        "the QRESYNC delta should fetch exactly the replacement message's header (INBOX + All Mail)"
     );
 
     let after = open_inbox_view(&harness, &account).await;
@@ -224,9 +226,13 @@ async fn condstore_only_delta_fetches_only_the_changed_messages() {
         .create_gmail_account("gmail-condstore-delta", &gmail)
         .await;
     let baseline_headers = gmail.header_fetch_count();
+    // The label-model mock serves each message once per mailbox view it
+    // appears in: the seeded message (labels \Inbox + \Starred) from INBOX,
+    // All Mail, and [Gmail]/Starred, the second (\Inbox) from INBOX and
+    // All Mail.
     assert_eq!(
-        baseline_headers, 2,
-        "the initial snapshot should have fetched both seeded headers"
+        baseline_headers, 5,
+        "the initial snapshot should have fetched both seeded headers across their mailbox views"
     );
 
     gmail.deliver_additional(NEW_SUBJECT);
@@ -238,8 +244,8 @@ async fn condstore_only_delta_fetches_only_the_changed_messages() {
     );
     assert_eq!(
         gmail.header_fetch_count(),
-        baseline_headers + 1,
-        "the CONDSTORE delta should fetch exactly the one delivered message's header"
+        baseline_headers + 2,
+        "the CONDSTORE delta should fetch exactly the one delivered message's header (INBOX + All Mail)"
     );
 
     let state = open_inbox_view(&harness, &account).await;
