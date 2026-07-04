@@ -13,10 +13,23 @@
 //!
 //! Shape — minimal and versioned; readers tolerate unknown fields so it can grow:
 //! ```json
-//! { "version": 1, "port": 3001, "url": "http://127.0.0.1:3001/v1", "token": "<macaroon>" }
+//! { "version": 1, "port": 3001, "url": "http://127.0.0.1:3001/v1", "token": "<macaroon>",
+//!   "appDir": "/Applications/Posthaste.app/Contents/MacOS" }
 //! ```
 //! - `version` — schema version (currently [`DISCOVERY_FILE_VERSION`]).
 //! - `port` / `url` — where the `/v1` API is bound (loopback).
+//! - `appDir` — **optional**, additive (RFC-L2-scripting distribution-wave
+//!   follow-up): the directory of the writer's own running executable
+//!   (`std::env::current_exe()`'s parent), best-effort (omitted entirely if
+//!   `current_exe()` fails, which is the same as an old pre-`appDir` writer).
+//!   Lets `posthaste-wizard`'s `ctl.rs` locate the bundled `posthastectl`
+//!   sidecar next to *whichever* executable is actually running — the
+//!   standalone `posthaste serve` daemon or the desktop app's embedded
+//!   server — without hardcoding per-OS install paths or requiring
+//!   `POSTHASTE_APP_DIR` to be set by hand. Old readers that only look at
+//!   `version`/`port`/`url`/`token` ignore it; an old daemon.json written
+//!   before this field existed simply lacks it, and readers must treat that
+//!   as "no hint available", not an error.
 //! - `token` — the **bootstrap capability**. NOT the server's full-scope local
 //!   macaroon (the credential injected into the webview) — that credential is
 //!   never written to disk. Instead this is that full-scope token FIRST
@@ -94,12 +107,7 @@ pub fn write_discovery_file(addr: SocketAddr, full_scope_token: &str) -> Option<
     let roots = resolve_roots();
     let path = roots.state_root.join(DISCOVERY_FILE_NAME);
     let url = format!("http://127.0.0.1:{}/v1", addr.port());
-    let body = serde_json::json!({
-        "version": DISCOVERY_FILE_VERSION,
-        "port": addr.port(),
-        "url": url,
-        "token": token,
-    });
+    let body = discovery_body(addr.port(), &url, &token, current_app_dir());
     let contents = match serde_json::to_string_pretty(&body) {
         Ok(contents) => contents,
         Err(error) => {
@@ -122,6 +130,32 @@ pub fn write_discovery_file(addr: SocketAddr, full_scope_token: &str) -> Option<
         return None;
     }
     Some(path)
+}
+
+/// The directory of the *running* executable — whichever process calls
+/// [`write_discovery_file`] (the standalone `posthaste serve` daemon or the
+/// desktop app's embedded server), each writing its own `current_exe()`'s
+/// parent. Best-effort: `None` on any failure (e.g. the exe was deleted out
+/// from under the running process), in which case `appDir` is simply omitted
+/// from the written file rather than the write failing.
+fn current_app_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(PathBuf::from)
+}
+
+/// Pure builder for the discovery file's JSON body — split out from
+/// [`write_discovery_file`] so the shape (including the optional `appDir`) is
+/// unit-testable without touching the filesystem or state-root env vars.
+fn discovery_body(port: u16, url: &str, token: &str, app_dir: Option<PathBuf>) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "version": DISCOVERY_FILE_VERSION,
+        "port": port,
+        "url": url,
+        "token": token,
+    });
+    if let Some(dir) = app_dir {
+        body["appDir"] = serde_json::Value::String(dir.display().to_string());
+    }
+    body
 }
 
 /// Remove the discovery file on clean shutdown. Best-effort; an already-absent
@@ -157,6 +191,74 @@ mod tests {
         assert_eq!(body["port"], 4321);
         assert_eq!(body["url"], "http://127.0.0.1:4321/v1");
         assert_eq!(body["token"], "macaroon-abc");
+    }
+
+    /// `appDir` is additive: when [`current_app_dir`] resolves (the normal
+    /// case for a real running process), the written body carries it.
+    #[test]
+    fn discovery_body_includes_app_dir_when_present() {
+        let body = discovery_body(4321, "http://127.0.0.1:4321/v1", "macaroon-abc", Some(PathBuf::from("/opt/posthaste")));
+        assert_eq!(body["appDir"], "/opt/posthaste");
+        assert_eq!(body["version"], 1);
+        assert_eq!(body["port"], 4321);
+    }
+
+    /// And omitted (the field simply absent, not `null`) when there is no
+    /// resolvable app dir — the same shape an old, pre-`appDir` writer
+    /// produced.
+    #[test]
+    fn discovery_body_omits_app_dir_when_absent() {
+        let body = discovery_body(4321, "http://127.0.0.1:4321/v1", "macaroon-abc", None);
+        assert!(body.get("appDir").is_none(), "appDir must be absent, not null, when unresolved: {body}");
+    }
+
+    /// Serde tolerance, direction 1: an OLD reader (a struct predating
+    /// `appDir`, `#[serde(deny_unknown_fields)]`-free like every real reader
+    /// here) must still parse a NEW daemon.json that carries `appDir` —
+    /// the whole point of "readers tolerate unknown fields".
+    #[test]
+    fn old_reader_shape_tolerates_a_new_file_with_app_dir() {
+        #[derive(serde::Deserialize)]
+        struct OldDiscoveryFile {
+            version: u32,
+            port: u16,
+            url: String,
+            token: String,
+        }
+        let body = discovery_body(4321, "http://127.0.0.1:4321/v1", "macaroon-abc", Some(PathBuf::from("/opt/posthaste")));
+        let parsed: OldDiscoveryFile =
+            serde_json::from_value(body).expect("an old reader ignores the unknown appDir field");
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.port, 4321);
+        assert_eq!(parsed.url, "http://127.0.0.1:4321/v1");
+        assert_eq!(parsed.token, "macaroon-abc");
+    }
+
+    /// Serde tolerance, direction 2: a NEW reader (one that knows about
+    /// `appDir`) must still parse an OLD daemon.json that predates the
+    /// field — `appDir` defaults to `None` rather than failing to parse.
+    #[test]
+    fn new_reader_shape_tolerates_an_old_file_without_app_dir() {
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct NewDiscoveryFile {
+            version: u32,
+            port: u16,
+            url: String,
+            token: String,
+            #[serde(default, rename = "appDir")]
+            app_dir: Option<String>,
+        }
+        let old_format_json = serde_json::json!({
+            "version": 1,
+            "port": 4321,
+            "url": "http://127.0.0.1:4321/v1",
+            "token": "macaroon-abc",
+        });
+        let parsed: NewDiscoveryFile =
+            serde_json::from_value(old_format_json).expect("an old-format file (no appDir) must still parse");
+        assert_eq!(parsed.app_dir, None);
+        assert_eq!(parsed.version, 1);
     }
 
     /// The bootstrap attenuation itself (RFC-L2-scripting §7 ruling 11): a
