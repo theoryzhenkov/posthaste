@@ -3,6 +3,7 @@ import { Edit3, MailOpen, RefreshCw, Settings } from 'lucide-react'
 
 import type { Mailbox } from '@/api/types'
 import { accentColor } from '@/design'
+import { useMailboxCounts } from '@/live-store/store'
 import { cn } from '@/lib/utils'
 import {
   mailboxRoleAccent,
@@ -110,6 +111,13 @@ export function MailboxItem({
 }) {
   const iconColor =
     colorHue != null ? accentColor(colorHue) : mailboxRoleAccent(mailbox.role)
+  // D116: STRUCTURE (name/role/hierarchy) stays request/response from the
+  // mailboxes query (the `mailbox` prop); live COUNTS come from the store slice.
+  // Fall back to the query's server count when no frame has seeded a live entry
+  // yet (bootstrap): a fresh session shows the server count before the first
+  // frame arrives, then the live mirror takes over.
+  const liveCounts = useMailboxCounts(sourceId)[mailbox.id]
+  const unread = liveCounts ? liveCounts.unread : mailbox.unreadEmails
   const button = (
     <button
       className={itemButtonClass(isSelected, depth, isPaneActive)}
@@ -121,9 +129,7 @@ export function MailboxItem({
         {roleIcon(mailbox.role)}
       </span>
       <span className="min-w-0 flex-1 truncate">{mailbox.name}</span>
-      {mailbox.unreadEmails > 0 && (
-        <UnreadCount count={mailbox.unreadEmails} isSelected={isSelected} />
-      )}
+      {unread > 0 && <UnreadCount count={unread} isSelected={isSelected} />}
     </button>
   )
 
