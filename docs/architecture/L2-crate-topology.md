@@ -1,8 +1,8 @@
 ---
 scope: L2
-summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. Realized per RFC-L2-architecture-cleanup M0–M9c; no [::state] markers remain (§2.1b records the D38 projector-merge verdict: not a fit, not forced)."
-modified: 2026-07-02
-reviewed: 2026-07-02
+summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. Realized per RFC-L2-architecture-cleanup M0–M9c plus RFC-L2-provider-reliability M30/M31 (the call-policy/provider-call split); no [::state] markers remain (§2.1b records the D38 projector-merge verdict: not a fit, not forced)."
+modified: 2026-07-04
+reviewed: 2026-07-04
 state: active
 depends:
   - path: docs/replication/L1
@@ -35,13 +35,15 @@ pattern); **`*Adapter`** = protocol translation (`HttpApiAdapter`).
 
 ## 1. The crate set (end-state)
 
-*The crate set below is REAL as of 2026-07-02 (M0–M9c: the domain/contract-core
-splits, the `RuntimeCore` and far-node trait splits, the authority-server renames,
-the typed `MailOperation`, `OptimisticReplica`, the frontier CI, the
-`LinkFarEnd`/`LinkNearEnd` engines, the opaque-id rename to `RuntimeLinkId` +
-session→link-connection vocabulary (D42), and the `replica-core`/
-`replica-projector` crate renames (D43)). Remaining lag (M9+): the D38 projector
-merge did not land — see §2.1b for the verdict.*
+*The crate set below is REAL as of 2026-07-04 (architecture-cleanup M0–M9c: the
+domain/contract-core splits, the `RuntimeCore` and far-node trait splits, the
+authority-server renames, the typed `MailOperation`, `OptimisticReplica`, the
+frontier CI, the `LinkFarEnd`/`LinkNearEnd` engines, the opaque-id rename to
+`RuntimeLinkId` + session→link-connection vocabulary (D42), and the `replica-core`/
+`replica-projector` crate renames (D43); plus provider-reliability M30/M31: the
+wasm-pure `posthaste-call-policy` and native `posthaste-provider-call` split).
+Remaining lag (M9+): the D38 projector merge did not land — see §2.1b for the
+verdict.*
 
 ### 1.1 Shared vocabulary tier (wasm-pure)
 
@@ -52,6 +54,7 @@ merge did not land — see §2.1b for the verdict.*
 | `posthaste-domain-model` | The pure domain types: ids, messages, records, commands, outbox/sync/rev-log types, smart mailboxes, account settings/overview, appearance, automation, notifications, vocab (`MailboxRole`, `SystemKeyword`), errors (`GatewayError`, `StoreError`, `ServiceError(Kind)`, `SecretStoreError`, `ConfigError`, `ValidationError`), plus the pure cache/imap/provider slices the model types' inherent impls close over: cache primitives/entities/budget, imap types/sync-state/capabilities/mailbox-roles, and the whole provider profile+policy set (RFC D30). | — |
 | `posthaste-contract-core` | The shared wire vocabulary *above* domain-model: the typed `MailOperation` enum (the one operation vocabulary, parsed once per wire), `MutationRequest`/`MutationReceipt`, `MutationSettlementState`, opaque ids (`RuntimeLinkId`, `ViewId`, `ClientMutationId`, `RuntimeMutationId`, `ViewRevision`), view models (`RuntimeFrame`, `ViewFrame`, `ViewSnapshot`, `MailListViewState`, `CoverageRange`), `RuntimeAdapterError` (+ `From<ServiceErrorKind>`), `mutation_args`, `mail_query`. | domain-model, replica-core |
 | `posthaste-query-grammar` | The one query grammar: the tokenizer + `parse_query`/`parse_query_with_scopes`/`ScopeToken` that compile human-readable search strings into `SmartMailboxRule` trees. Extracted out of domain-service (RFC-L2-scripting §7 ruling 4, D28) so both smart mailboxes (domain-service) and the rules engine's WHEN-clause grammar consume the same parser without the rules engine dragging in domain-service. Wasm-pure (frontier-capable; not frontier-listed — nothing mounts it at the wasm boundary yet). | domain-model |
+| `posthaste-call-policy` | The shared outbound-call **policy core** (RFC-L2-provider-reliability D80–D82, M30): the wasm-pure arithmetic that decides *how* an outbound provider or link call retries, backs off, deadlines, and classifies — `BackoffSchedule` (full-jitter capped exponential + `Retry-After`/429 math + `max_attempts`), the per-`CallClass` `DeadlinePolicy` table, and `classify_status`/`resolve_terminality` over the shared `Terminality` taxonomy (owned by domain-model, consumed here, never re-minted). Dependency-thin and clock/RNG-free — every entry point takes explicit `now`/`attempt`/`rand_unit` inputs — so the link engine (`link-near-end`) and the native provider executor (`provider-call`) consume one shared fact rather than forking it (tenet XIV). Frontier-listed: it rides into the browser via `link-near-end` → `client-node-wasm`. | domain-model |
 
 ### 1.2 Domain service tier
 
@@ -74,7 +77,8 @@ merge did not land — see §2.1b for the verdict.*
 | Crate | Owns | May depend on |
 |---|---|---|
 | `posthaste-store` | SQLite adapter (`DatabaseStore`, `RepairReport`). Exports only what it owns — no re-exports of domain symbols. | domain-service (+model) |
-| `posthaste-engine` | JMAP gateway/push adapters. | domain-service |
+| `posthaste-engine` | JMAP gateway/push adapters. Routes its outbound JMAP calls through `provider-call`. | domain-service, provider-call |
+| `posthaste-provider-call` | The **native** outbound-call envelope (RFC-L2-provider-reliability D83, M31): the tokio/reqwest *executor* half over the wasm-pure `call-policy` core. Owns the shared `reqwest::Client` connection pool, applies the per-class deadline (`tokio::time::timeout` total, or a between-chunks *stall* read-deadline for blobs via `stall_guard`), runs the `Retry-After`-aware jittered retry loop, and holds the per-account circuit breaker (`ProviderCallExecutor`, `CallErrorReason::CircuitOpen`). Native-only by construction — it must never enter the wasm frontier; only `engine` depends on it. | call-policy, domain-model |
 | `posthaste-imap` | IMAP gateway adapter. | domain-service |
 | `posthaste-config` | TOML config persistence (`TomlConfigRepository`, tuning schemas). | domain-service (types via domain-model) |
 | `posthaste-runtime` | The near node: runtime assembly, the far-end link registry (`LinkRegistry`, RFC D42), pending set (`AuthorityServerPendingSet` over `MessageReplica`), `ReadCache`, the remote authority-server transport (`RemoteAuthorityServer`), implements runtime-api + client-link. | runtime-api, client-link, authority-server-link, link-far-end, replica-projector, replica-core, domain-service |
@@ -105,10 +109,12 @@ names. Bin names are hyphenated, never underscored.
 replica-core ────────┐
 replica-projector ───┤            (wasm-pure tier)
 domain-model ───────┼─► contract-core
+        │           │
+        └─► call-policy                  (wasm-pure policy core)
                     │
 domain-service ─────┘            (service tier)
         │
-        ├─► store / engine / imap / config          (adapters)
+        ├─► store / engine / imap / config          (adapters; engine ─► provider-call)
         │
 contract-core ─► authority-server-link              (link surfaces)
 contract-core ─► runtime-api + client-link
@@ -182,14 +188,15 @@ re-implementing it.
 ## 3. The wasm-pure frontier
 
 `replica-core`, `replica-projector`, `domain-model`, `contract-core`,
-`posthaste-link-near-end` are serde-only: no `tokio`, `reqwest`, `rusqlite`,
-`mail-parser`, `axum`, `uuid`-free except domain-model's `generated_id`. The
-frontier is CI-enforced (`cargo check --target wasm32-unknown-unknown` for the
-five crates plus `posthaste-client-node-wasm` itself — the six-crate frontier
-list); a frontier nobody checks is a hope, not a boundary (XXIV). The wasm
-client's full dependency closure is exactly these five crates plus
-`client-node-wasm` itself (D41: the near-end engine now compiles into the wasm
-boundary, `cfg(target_arch = "wasm32")`-gated).
+`posthaste-call-policy`, `posthaste-link-near-end` are serde-only: no `tokio`,
+`reqwest`, `rusqlite`, `mail-parser`, `axum`, `uuid`-free except domain-model's
+`generated_id`. The frontier is CI-enforced (`cargo check --target
+wasm32-unknown-unknown` for the six crates plus `posthaste-client-node-wasm`
+itself — the seven-crate frontier list; `call-policy` joined at
+RFC-L2-provider-reliability M30); a frontier nobody checks is a hope, not a
+boundary (XXIV). The wasm client's full dependency closure is exactly these six
+crates plus `client-node-wasm` itself (D41: the near-end engine now compiles
+into the wasm boundary, `cfg(target_arch = "wasm32")`-gated).
 
 ## 4. Assertions
 
@@ -200,5 +207,5 @@ boundary, `cfg(target_arch = "wasm32")`-gated).
 | `binary-named-by-component` | Every role binary is named exactly after the component it runs (§1.5); hyphenated. |
 | `no-upward-deps` | The dependency graph respects §2; adding an upward edge is a spec violation, not a Cargo.toml detail. |
 | `one-operation-vocabulary` | The typed `MailOperation` in contract-core is the only operation vocabulary; no stringly `name`/`args` crosses a crate boundary. |
-| `wasm-frontier-enforced` | The six wasm-pure-or-wasm-target frontier crates build for `wasm32-unknown-unknown` in CI. |
+| `wasm-frontier-enforced` | The seven wasm-pure-or-wasm-target frontier crates (six serde-only + `client-node-wasm`) build for `wasm32-unknown-unknown` in CI. |
 | `no-parallel-namespaces` | No crate re-exports another crate's public surface (store's historical ~80-symbol domain re-export is the counterexample). Temporary migration shims carry an owner and a sunset. |
