@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "bun run typecheck && vite build",
-    "check": "bun run logging:check && bun run api:check && bun run events:check && bun run query-boundaries:check && bun run runtime-boundaries:check && eslint . && tsc -b && prettier . --check",
+    "check": "bun run logging:check && bun run api:check && bun run events:check && bun run query-boundaries:check && bun run runtime-boundaries:check && bun run layer-boundaries:check && eslint . && tsc -b && prettier . --check",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "lint": "eslint .",
@@ -14,6 +14,7 @@
     "logging:check": "bun scripts/check-logging-contract.ts",
     "query-boundaries:check": "bun scripts/check-query-boundaries.ts",
     "runtime-boundaries:check": "bun scripts/check-runtime-boundaries.ts",
+    "layer-boundaries:check": "bun scripts/check-layer-boundaries.ts",
     "api:generate": "openapi-typescript ../../openapi.json -o src/api/schema.gen.ts",
     "api:check": "bun scripts/check-openapi-types.ts",
     "events:generate": "bun scripts/gen-event-topics.ts",
