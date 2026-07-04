@@ -528,6 +528,44 @@ async fn push_terminal_event_marks_push_unsupported_with_reason() {
         .contains("polling every"));
 }
 
+// A transient sync failure must record a human message (never the raw
+// library string) and MUST NOT latch: the next successful sync — which the
+// poll loop retries automatically — clears the error and returns the account
+// to Ready. This is the beta-critical "cannot connect to TCP stream, no way to
+// recover" fix at the status layer (M45 / RFC-L2-client-resilience).
+#[tokio::test]
+async fn transient_sync_failure_is_humanized_and_clears_on_retry_success() {
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+
+    let error = ServiceError::Gateway(GatewayError::Network(
+        "cannot connect to TCP stream".to_string(),
+    ));
+    shared
+        .mark_sync_failure(&account.id, generation, &error)
+        .await;
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(overview.status, AccountStatus::Offline);
+    assert_eq!(
+        overview.last_sync_error_code.as_deref(),
+        Some("network_error")
+    );
+    let message = overview.last_sync_error.as_deref().unwrap_or_default();
+    // The raw IMAP/TLS library text never reaches status.
+    assert!(!message.contains("TCP stream"), "raw string leaked: {message}");
+    assert!(message.contains("check your connection"));
+
+    // A successful retry (the auto-retrying poll loop, or a manual sync) clears
+    // the error latch entirely — no stale error strands the account.
+    shared.mark_sync_success(&account.id, generation).await;
+    let recovered = shared.runtime_overview(&account.id).await;
+    assert_eq!(recovered.status, AccountStatus::Ready);
+    assert_eq!(recovered.last_sync_error, None);
+    assert_eq!(recovered.last_sync_error_code, None);
+}
+
 // spec: docs/L1-sync#sync-loop
 #[tokio::test]
 async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync() {

@@ -4,8 +4,10 @@
  * @spec docs/L1-api#account-crud-lifecycle
  */
 import type { UseMutationResult } from '@tanstack/react-query'
-import { useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
+import { useMemo, useState } from 'react'
 
+import { unhealthyAccounts } from '../../accountHealth'
 import type { AccountOverview } from '../../api/types'
 import { AccountEditor } from './AccountEditor'
 import { AccountList, AccountsEmptyState } from './accounts-pane/AccountList'
@@ -52,6 +54,7 @@ export function AccountsPane({
   commandError: string | null
 }) {
   const [isManualCreate, setIsManualCreate] = useState(false)
+  const needsAttention = useMemo(() => unhealthyAccounts(accounts), [accounts])
   const handleBackToAccounts = () => {
     setIsManualCreate(false)
     onBackToAccounts()
@@ -97,10 +100,26 @@ export function AccountsPane({
           description="Connect each mail source Posthaste should sync. Accounts keep their own credentials, status, and sync controls."
         />
 
+        {needsAttention.length > 0 && (
+          <div
+            role="status"
+            className="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-800"
+          >
+            <AlertTriangle size={14} strokeWidth={1.8} aria-hidden />
+            <span>
+              {needsAttention.length === 1
+                ? '1 account needs attention'
+                : `${needsAttention.length} accounts need attention`}
+            </span>
+          </div>
+        )}
+
         <AccountList
           accounts={accounts}
           onCreateAccount={onCreateAccount}
           onSelectAccount={onSelectAccount}
+          onRetryAccount={(account) => onCommand('sync', account)}
+          isRetryPending={commandMutation.isPending}
         />
       </SettingsPage>
     </section>
