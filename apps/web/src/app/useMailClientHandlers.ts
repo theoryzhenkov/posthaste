@@ -7,6 +7,7 @@ import type {
   MessageSummary,
 } from '@/api/types'
 import type { SidebarSelection } from '@/components/Sidebar'
+import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
 import { useComposeIntent } from '@/hooks/useComposeIntent'
 import type { useEmailActions } from '@/hooks/useEmailActions'
 import { openFocusedSurface } from '@/hooks/useSurfaceRouting'
@@ -89,11 +90,21 @@ export function useMailClientHandlers(input: {
       actions.archive(selectedMessage)
     }
   }, [actions, selectedMessage])
-  const handleTrash = useCallback(() => {
+  const handleDiscardDraft = useCallback(() => {
     if (selectedMessage) {
-      actions.trash(selectedMessage)
+      actions.discardDraft(selectedMessage)
     }
   }, [actions, selectedMessage])
+  const handleTrash = useCallback(() => {
+    if (!selectedMessage) return
+    // D127: deleting a draft is a discard (hard delete via the draft-delete op),
+    // never a trash move — keeps the keyboard/`#` path coherent with the row.
+    if (selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft)) {
+      actions.discardDraft(selectedMessage)
+      return
+    }
+    actions.trash(selectedMessage)
+  }, [actions, selectedMessage, selectedMessageData])
   const handleSnooze = useCallback(
     (until: number) => {
       if (selectedMessage) {
@@ -111,6 +122,7 @@ export function useMailClientHandlers(input: {
     handleClearSelectedMessage: () => setSelectedMessage(null),
     handleCloseCommandPalette: () => setIsCommandPaletteOpen(false),
     handleCompose: compose.openCompose,
+    handleDiscardDraft,
     handleEditDraft: compose.editSelectedDraft,
     handleForward: compose.forwardSelectedMessage,
     handleOpenCommandPalette: () => setIsCommandPaletteOpen(true),
