@@ -7,6 +7,7 @@ import { MessageRow } from '../src/components/MessageRow'
 import {
   buildThreadListLayout,
   DEFAULT_COLUMNS,
+  type ColumnId,
 } from '../src/components/thread-list/columns'
 import type { MailboxDirectory } from '../src/components/message-list/useMailboxDirectory'
 import { setupDomEnvironment } from './dom-env'
@@ -47,7 +48,9 @@ const actions: EmailActions = {
   isPending: false,
 }
 
-const layout = buildThreadListLayout(DEFAULT_COLUMNS)
+/** Columns including the (default-hidden) `sourceMailbox` column, so its cell
+ *  renderer is exercised. */
+const COLUMNS_WITH_MAILBOX: ColumnId[] = [...DEFAULT_COLUMNS, 'sourceMailbox']
 
 function directoryResolvingTo(
   resolved: ReturnType<MailboxDirectory['resolve']>,
@@ -56,7 +59,7 @@ function directoryResolvingTo(
 }
 
 function renderRow(overrides: {
-  showSourceMailbox: boolean
+  columns: ColumnId[]
   mailboxDirectory: MailboxDirectory
 }) {
   return render(
@@ -65,21 +68,21 @@ function renderRow(overrides: {
       isSelected={false}
       isStriped={false}
       onSelectMessage={() => {}}
-      columns={DEFAULT_COLUMNS}
-      layout={layout}
+      columns={overrides.columns}
+      layout={buildThreadListLayout(overrides.columns)}
       actions={actions}
       viewRole={null}
       onViewConversation={() => {}}
       excludeMailboxId={null}
-      {...overrides}
+      mailboxDirectory={overrides.mailboxDirectory}
     />,
   )
 }
 
-describe('MessageRow source-mailbox chip', () => {
-  it('renders the resolved mailbox name (and role icon) when the toggle is on', () => {
+describe('sourceMailbox column cell', () => {
+  it('renders the resolved mailbox name (and role icon) when the column is active', () => {
     const { queryByText } = renderRow({
-      showSourceMailbox: true,
+      columns: COLUMNS_WITH_MAILBOX,
       mailboxDirectory: directoryResolvingTo({
         mailbox: {
           id: 'mailbox-1',
@@ -97,7 +100,7 @@ describe('MessageRow source-mailbox chip', () => {
 
   it('prefixes with the account name in multi-account views', () => {
     const { queryByText } = renderRow({
-      showSourceMailbox: true,
+      columns: COLUMNS_WITH_MAILBOX,
       mailboxDirectory: directoryResolvingTo({
         mailbox: {
           id: 'mailbox-1',
@@ -113,9 +116,9 @@ describe('MessageRow source-mailbox chip', () => {
     expect(queryByText('Work · Inbox')).not.toBeNull()
   })
 
-  it('renders no chip when the toggle is off, even if a mailbox is resolvable', () => {
+  it('renders no chip when the column is not active, even if a mailbox is resolvable', () => {
     const { queryByText } = renderRow({
-      showSourceMailbox: false,
+      columns: DEFAULT_COLUMNS,
       mailboxDirectory: directoryResolvingTo({
         mailbox: {
           id: 'mailbox-1',
@@ -133,7 +136,7 @@ describe('MessageRow source-mailbox chip', () => {
 
   it('renders no chip (and does not crash) when the mailbox is unresolvable', () => {
     const { queryByText, getByText } = renderRow({
-      showSourceMailbox: true,
+      columns: COLUMNS_WITH_MAILBOX,
       mailboxDirectory: directoryResolvingTo(null),
     })
     expect(queryByText('Archive')).toBeNull()
