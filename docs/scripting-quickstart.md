@@ -541,8 +541,8 @@ every tool call and the subscription.
 {
   "mcpServers": {
     "posthaste": {
-      "command": "bun",
-      "args": ["run", "/path/to/posthaste/apps/mcp/src/index.ts"],
+      "command": "/Applications/PosthasteNightly.app/Contents/MacOS/posthastectl",
+      "args": ["mcp"],
       "env": {
         "POSTHASTE_MCP_GRANTS": "tap:read,read",
         "POSTHASTE_MCP_TOKEN_EXPIRY": "1h"
@@ -552,7 +552,11 @@ every tool call and the subscription.
 }
 ```
 
-The server auto-discovers `daemon.json` (no URL/token needed), or honors
+Any `posthastectl` works as the `command` — the app-bundled sidecar above, a
+wizard install (`~/.local/bin/posthastectl`), or from a checkout
+(`bun run apps/mcp/src/index.ts`). The server auto-discovers `daemon.json`
+(no URL/token needed — a fresh scoped token is minted at every connect, so
+tokens never need manual refreshing), or honors
 `POSTHASTE_API_URL`/`POSTHASTE_TOKEN` if you set them.
 
 Connection environment:

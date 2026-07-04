@@ -75,7 +75,7 @@ function parseAfterSeq(raw: string | undefined): number | undefined {
   return Number.isFinite(seq) && seq >= 0 ? seq : undefined;
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   let discovered: Connection;
   try {
     discovered = resolveConnection();
@@ -139,4 +139,4 @@ if (import.meta.main) {
   });
 }
 
-export { buildServer, main };
+export { buildServer };
