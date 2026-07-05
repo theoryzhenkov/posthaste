@@ -1,11 +1,14 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
   useQueries,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query'
 
+import { setMailboxCount } from './live-store/store'
+import { runtimeLinkClient } from './runtime/linkClient'
 import { createAccountDirectory } from './accountDirectory'
 import type {
   AccountAppearance,
@@ -119,6 +122,67 @@ function hydrateMailNavigationRead(
 }
 
 /**
+ * C1 / D113 (RC2): reconcile source + smart mailbox COUNTS on the M44
+ * recovery edge — the completion of M44's reconcile pass for counts.
+ *
+ * The M44 recovery-edge reconcile (`runtimeLinkClient.onLinkReestablished`)
+ * re-serves view ROWS but never counts, and REST invalidation of the counts
+ * query is disabled by design (`invalidations.ts` `skipStoreOwned`). So a count
+ * that drifted during a disconnect/missed-event stayed frozen until reload.
+ *
+ * On the recovery edge we:
+ *  1. refetch the authoritative server counts — the source `mailboxes(accountId)`
+ *     query AND the `smartMailboxes` query (the same count query keys, reused —
+ *     no new count source); then
+ *  2. RESEED the live-store counts slice from the fresh SOURCE counts. The live
+ *     slice is the sidebar's owner (`useMailboxCounts`), so a stale seeded live
+ *     count would permanently shadow the fresh server count unless the OWNER is
+ *     overwritten — writing the owner is the shadow removal, and it heals every
+ *     live-count consumer (per-mailbox rows AND the account-total header)
+ *     uniformly. Smart counts ride react-query directly (SidebarContent reads
+ *     the `smartMailboxes` query), so the refetch alone heals them.
+ *
+ * This fires ONLY on `onLinkReestablished`, never on a normal mutation, so
+ * A(1)'s steady-state live-echo count updates (the fast path) are untouched: a
+ * recovery-edge server refetch replaces a possibly-stale live count, while
+ * steady-state deltas keep flowing into the same slice.
+ */
+export async function reconcileMailboxCountsOnRecovery(
+  queryClient: QueryClient,
+  accountIds: readonly string[],
+): Promise<void> {
+  // Refetch the authoritative counts against the FRESH link. `type: 'active'`
+  // drives the mounted sidebar observers' queryFns; then we read the settled
+  // data below. (Inactive-cache callers — e.g. tests — seed the fresh data
+  // directly; the reseed still runs off `getQueryData`.)
+  await Promise.all([
+    ...accountIds.map((accountId) =>
+      queryClient.refetchQueries({
+        queryKey: queryKeys.mailboxes(accountId),
+        type: 'active',
+      }),
+    ),
+    queryClient.refetchQueries({
+      queryKey: queryKeys.smartMailboxes,
+      type: 'active',
+    }),
+    // A refetch failure on the recovery edge must not strand the reseed below
+    // (or surface as an unhandled rejection) — reseed off whatever's cached.
+  ]).catch(() => {})
+  for (const accountId of accountIds) {
+    const mailboxes = queryClient.getQueryData<Mailbox[]>(
+      queryKeys.mailboxes(accountId),
+    )
+    for (const mailbox of mailboxes ?? []) {
+      setMailboxCount(accountId, mailbox.id, {
+        unread: mailbox.unreadEmails,
+        total: mailbox.totalEmails,
+      })
+    }
+  }
+}
+
+/**
  * Domain-backed data needed by mailbox navigation/search surfaces.
  *
  * The typed read-call bootstrap seeds the caches in one request; feature code
@@ -128,6 +192,7 @@ function hydrateMailNavigationRead(
  * @spec docs/eph/DESIGN-L1-client-read-models#domain-authority
  */
 export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
+  const queryClient = useQueryClient()
   const bootstrapQuery = useMailNavigationReadBootstrap()
   // Read-only observer of the shared accounts cache (seeded by the bootstrap
   // hydrate / accountStatus view). It must use the SAME queryFn as every other
@@ -147,6 +212,23 @@ export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
   const enabledAccounts = useMemo(
     () => accountDirectory.accounts.filter((account) => account.enabled),
     [accountDirectory.accounts],
+  )
+  const enabledAccountIds = useMemo(
+    () => enabledAccounts.map((account) => account.id),
+    [enabledAccounts],
+  )
+
+  // C1/D113 (RC2): reconcile counts on the SAME M44 recovery edge the view
+  // re-open uses (`onLinkReestablished`) — no separate trigger. On a fresh link
+  // (reap/sleep/reconnect) refetch the source + smart counts and reseed the
+  // live-store owner so a count that drifted during the gap heals without a
+  // reload. Re-registers only when the enabled-account set changes.
+  useEffect(
+    () =>
+      runtimeLinkClient.onLinkReestablished(() => {
+        void reconcileMailboxCountsOnRecovery(queryClient, enabledAccountIds)
+      }),
+    [queryClient, enabledAccountIds],
   )
 
   const mailboxQueries = useQueries({
