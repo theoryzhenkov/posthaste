@@ -35,6 +35,9 @@ pub(super) struct MutationGateway {
     pub(super) delete_draft_calls: Mutex<Vec<MessageId>>,
     /// The `idempotent_redelivery` flag (D133) of each `delete_draft` call.
     pub(super) delete_draft_idempotent_calls: Mutex<Vec<bool>>,
+    /// Results returned by `delete_draft`, popped front-first; empty falls back
+    /// to `Ok(())`.
+    pub(super) delete_draft_results: Mutex<Vec<Result<(), GatewayError>>>,
     /// Subjects of each `send_message` call, in order (includes deduplicated
     /// re-forwards of an already-committed send).
     pub(super) send_calls: Mutex<Vec<String>>,
@@ -86,6 +89,7 @@ impl MutationGateway {
             committed_draft_saves: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
             delete_draft_idempotent_calls: Mutex::new(Vec::new()),
+            delete_draft_results: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
             committed_send_keys: Mutex::new(Vec::new()),
             send_results: Mutex::new(Vec::new()),
@@ -378,7 +382,15 @@ impl MailGateway for MutationGateway {
             .lock()
             .expect("delete draft idempotent calls poisoned")
             .push(idempotent_redelivery);
-        Ok(())
+        let mut results = self
+            .delete_draft_results
+            .lock()
+            .expect("delete draft results poisoned");
+        if results.is_empty() {
+            Ok(())
+        } else {
+            results.remove(0)
+        }
     }
 
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {

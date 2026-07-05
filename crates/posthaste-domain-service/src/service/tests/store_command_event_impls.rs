@@ -257,21 +257,6 @@ impl DraftRegistry for TestStore {
         Ok(())
     }
 
-    fn update_draft_alias_entity(
-        &self,
-        account_id: &AccountId,
-        from_entity_id: &str,
-        to_entity_id: &str,
-    ) -> Result<(), StoreError> {
-        let mut aliases = self.draft_aliases.lock().expect("alias lock poisoned");
-        for row in aliases.iter_mut() {
-            if row.0 == account_id.as_str() && row.2 == from_entity_id {
-                row.2 = to_entity_id.to_string();
-            }
-        }
-        Ok(())
-    }
-
     fn remove_draft_alias(
         &self,
         account_id: &AccountId,

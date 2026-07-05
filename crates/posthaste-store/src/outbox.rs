@@ -365,23 +365,6 @@ impl DraftRegistry for DatabaseStore {
         })
     }
 
-    fn update_draft_alias_entity(
-        &self,
-        account_id: &AccountId,
-        from_entity_id: &str,
-        to_entity_id: &str,
-    ) -> Result<(), StoreError> {
-        self.write_transaction(|tx| {
-            tx.execute(
-                "UPDATE draft_alias SET entity_id = ?3
-                 WHERE account_id = ?1 AND entity_id = ?2",
-                params![account_id.as_str(), from_entity_id, to_entity_id],
-            )
-            .map_err(sql_to_store_error)?;
-            Ok(())
-        })
-    }
-
     fn remove_draft_alias(
         &self,
         account_id: &AccountId,

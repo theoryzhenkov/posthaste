@@ -1,9 +1,11 @@
 //! Tier-2 (runtime <-> provider) outbox engine: enqueue and flush.
 //!
 //! Callers enqueue an [`Operation`]; pending operations form a read-time overlay
-//! and the flusher drains them to the provider, settling applied/failed outcomes,
-//! reconciling temporary entity ids to provider ids, and emitting
-//! `operation.settled` events.
+//! and the flusher drains them to the provider, settling applied/failed outcomes
+//! and emitting `operation.settled` events. Draft ops carry the STABLE draft key
+//! as their entity id and resolve it to the current live id at push time via the
+//! `DraftRegistry` (M70/D136); a provider-assigned rotation is recorded as one
+//! registry repoint at settlement.
 //!
 //! @spec docs/L1-outbox#operation-model
 //! @spec docs/L1-outbox#state-machine
@@ -110,9 +112,17 @@ fn classify_gateway_error(error: GatewayError) -> FlushError {
 /// Result of pushing one operation to the provider.
 #[allow(clippy::large_enum_variant)]
 enum Pushed {
-    /// A non-message entity op (draft/send): settle and remove; an
-    /// `assigned_entity_id` reconciles a temporary draft id to the provider id.
-    Entity { assigned_entity_id: Option<String> },
+    /// A non-message entity op (draft/send): settle and remove.
+    /// `assigned_entity_id` is the provider id a draft save returned — the
+    /// settlement repoints the op's stable draft key to it in the registry
+    /// (M70/D136: the op's entity id IS the key and never rotates).
+    /// `destroyed_entity_id` is the live id a draft destroy resolved to at
+    /// flush time, so the settlement's reconciling event names the projected
+    /// row rather than the stable key the op carries.
+    Entity {
+        assigned_entity_id: Option<String>,
+        destroyed_entity_id: Option<String>,
+    },
     /// A message state assertion: settle now via the provider readback.
     /// `rejected` is `Some(reason)` when the provider rejected the change — the
     /// readback then carries the unchanged state, so the settle write reverts.
@@ -354,10 +364,11 @@ impl MailService {
         draft_key: Option<MessageId>,
         mut request: SendMessageRequest,
     ) -> Result<Operation, ServiceError> {
-        // `draft_key` is a stable, client-chosen handle for the draft. The alias
-        // maps it to the entity id currently representing the draft (a temporary
-        // id before the first flush, a provider id after), so the client can keep
-        // using the same key across flushes without creating duplicate drafts.
+        // `draft_key` is a stable, client-chosen handle for the draft. The
+        // registry maps it to the entity id currently representing the draft (a
+        // temporary id before the first flush, a provider id after), so the
+        // client can keep using the same key across flushes without creating
+        // duplicate drafts.
         let key = draft_key
             .map(|id| id.to_string())
             .unwrap_or_else(|| format!("draft-local-{}", Id::generate()));
@@ -366,22 +377,28 @@ impl MailService {
         // rotation a JMAP draft update causes and is read back on resume, so the
         // client always keys by a stable value.
         request.draft_id = Some(key.clone());
-        let (entity_id, kind) = match self.draft_registry.resolve_draft_entity(account_id, &key)? {
-            Some(entity_id) => (entity_id, OperationKind::DraftUpdate),
+        // M70 (D136): the op carries the STABLE key as its entity id — the live
+        // id is resolved at flush, immediately before the gateway call, so the
+        // push always targets the freshest mapping the registry knows (a
+        // rotation observed between enqueue and flush cannot stale it).
+        // Enqueue-time resolution only picks the kind: a key the registry knows
+        // is an update; an unknown key registers itself (a self-mapping until
+        // the first flush assigns a provider id).
+        let kind = match self.draft_registry.resolve_draft_entity(account_id, &key)? {
+            Some(_) => OperationKind::DraftUpdate,
             None => {
                 self.draft_registry
                     .set_draft_alias(account_id, &key, &key)?;
-                // A key with no alias that already names an existing draft
-                // message is a draft resumed by its (rotating) provider id — a
-                // legacy draft saved before stable ids, or one created
+                // A key with no registry row that already names an existing
+                // draft message is a draft resumed by its (rotating) provider
+                // id — a legacy draft saved before stable ids, or one created
                 // elsewhere. Replace it in place instead of creating a
                 // duplicate; this also bootstraps a stable header onto it.
-                let kind = if self.draft_message_exists(account_id, &key)? {
+                if self.draft_message_exists(account_id, &key)? {
                     OperationKind::DraftUpdate
                 } else {
                     OperationKind::DraftCreate
-                };
-                (key.clone(), kind)
+                }
             }
         };
         let payload = encode_payload(request, "draft request")?;
@@ -389,15 +406,25 @@ impl MailService {
             account_id,
             OperationEntity {
                 kind: OperationEntityKind::Draft,
-                id: entity_id,
+                id: key,
             },
             kind,
             payload,
         )
     }
 
-    /// Delete a draft local-first: enqueue a draft delete operation for the
-    /// draft's current id (temporary or provider-assigned).
+    /// Delete a draft local-first: enqueue a draft delete operation carrying
+    /// the draft's STABLE key (M70/D136). The live entity id (temporary or
+    /// provider-assigned) is resolved at flush, immediately before the provider
+    /// destroy, so a rotation observed between enqueue and flush (an in-flight
+    /// save settling, a sync-observed other-device edit repointing the
+    /// registry) retargets the destroy to the current live draft.
+    ///
+    /// The registry mapping is NOT forgotten here (M70): identity survives
+    /// until the destruction is confirmed — at this op's settlement (the
+    /// `DraftDelete` Applied arm of [`Self::flush_pass`]) or at sync-observed
+    /// disappearance (M69's confirmed-gone prune) — so an in-flight op never
+    /// references a forgotten mapping.
     ///
     /// `idempotent_redelivery` records whether a provider `notFound` at flush
     /// time is a benign already-gone (the send-consume settlement effect, which
@@ -406,28 +433,22 @@ impl MailService {
     /// the gateway narrows its `notFound ⇒ Ok` mask to the idempotent case only.
     ///
     /// @spec docs/L1-outbox#operation-model
+    /// @spec docs/eph/RFC-L2-draft-identity#22-d136--one-seam-the-draftregistry-port-resolve-at-flush
     pub fn delete_draft(
         &self,
         account_id: &AccountId,
         draft_key: MessageId,
         idempotent_redelivery: bool,
     ) -> Result<Operation, ServiceError> {
-        let key = draft_key.to_string();
-        let entity_id = self
-            .draft_registry
-            .resolve_draft_entity(account_id, &key)?
-            .unwrap_or_else(|| key.clone());
-        let operation = self.queue_operation(
+        self.queue_operation(
             account_id,
             OperationEntity {
                 kind: OperationEntityKind::Draft,
-                id: entity_id,
+                id: draft_key.to_string(),
             },
             OperationKind::DraftDelete,
             serde_json::json!({ "idempotentRedelivery": idempotent_redelivery }),
-        )?;
-        self.draft_registry.remove_draft_alias(account_id, &key)?;
-        Ok(operation)
+        )
     }
 
     /// Discard a draft through the optimistic runtime-mutation path (D130).
@@ -565,8 +586,9 @@ impl MailService {
         let queued = self.outbox.list_flushable_operations(account_id)?;
         let mut follow_up_enqueued = false;
         for snapshot in queued {
-            // Re-fetch fresh: an earlier op in this pass may have reconciled this
-            // op's entity id (temp -> provider) or changed its state.
+            // Re-fetch fresh: an earlier op in this pass may have changed this
+            // op's state (draft entity ids no longer rotate — M70: draft ops
+            // carry the stable key and resolve it at their own push).
             let Some(operation) = self.outbox.get_operation(&snapshot.id)? else {
                 continue;
             };
@@ -625,17 +647,18 @@ impl MailService {
                 operation.last_error.as_deref(),
             )?;
             match self.push_operation(account_id, &operation, gateway).await {
-                Ok(Pushed::Entity { assigned_entity_id }) => {
+                Ok(Pushed::Entity {
+                    assigned_entity_id,
+                    destroyed_entity_id,
+                }) => {
                     if let Some(new_id) = assigned_entity_id.as_deref() {
                         if new_id != operation.entity.id {
-                            self.outbox.reconcile_operation_entity_id(
-                                account_id,
-                                &operation.entity.id,
-                                new_id,
-                            )?;
-                            // Keep the stable client draft key pointed at the
-                            // live provider draft.
-                            self.draft_registry.update_draft_alias_entity(
+                            // M70 (D136): a draft op's entity id IS the stable
+                            // key and never rotates, so a provider rotation is
+                            // recorded as ONE registry write — key → live id.
+                            // Later ops carry the key too and resolve it fresh
+                            // at their own flush; no outbox rewrite is needed.
+                            self.draft_registry.set_draft_alias(
                                 account_id,
                                 &operation.entity.id,
                                 new_id,
@@ -651,19 +674,36 @@ impl MailService {
                         error: None,
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
-                    // D132: a settled DraftDelete emits the reconciling
-                    // `message.updated{deleted:true}` so the client's fold/prune
-                    // converges without leaning on a follow-up sync (the
-                    // send-consume path has no apply-time event; the user-discard
-                    // path already emitted one — this is an idempotent backstop).
                     if operation.kind == OperationKind::DraftDelete {
+                        // M70: forget at SETTLEMENT — the provider has confirmed
+                        // the destroy, so only now does the stable key stop
+                        // naming a live draft (never at enqueue: an in-flight op
+                        // must still resolve its mapping). Converges with M69's
+                        // sync-observed forget (the confirmed-gone prune): both
+                        // are idempotent deletes of the same registry row, so
+                        // whichever observes the confirmed destruction second is
+                        // a no-op — the mapping is forgotten exactly once, on
+                        // confirmed destruction.
+                        self.draft_registry
+                            .remove_draft_alias(account_id, &operation.entity.id)?;
+                        // D132: a settled DraftDelete emits the reconciling
+                        // `message.updated{deleted:true}` so the client's
+                        // fold/prune converges without leaning on a follow-up
+                        // sync (the send-consume path has no apply-time event;
+                        // the user-discard path already emitted one — this is an
+                        // idempotent backstop). It names the LIVE id the destroy
+                        // resolved to at flush, not the stable key, so it prunes
+                        // the projected row.
+                        let deleted_id = destroyed_entity_id
+                            .as_deref()
+                            .unwrap_or(operation.entity.id.as_str());
                         events.push(self.events.append_event(
                             account_id,
                             EVENT_TOPIC_MESSAGE_UPDATED,
                             None,
-                            Some(&MessageId::from(operation.entity.id.as_str())),
+                            Some(&MessageId::from(deleted_id)),
                             serde_json::json!({
-                                "messageId": operation.entity.id.as_str(),
+                                "messageId": deleted_id,
                                 "deleted": true,
                             }),
                         )?);
@@ -775,8 +815,9 @@ impl MailService {
     /// pushed inline — so a transient destroy failure is retried with the
     /// outbox/settlement machinery, never silent, and never re-runs the send.
     ///
-    /// Idempotent across settlement redelivery (ruling 24): consuming the draft
-    /// removes its alias, and the gateways treat an already-gone draft as
+    /// Idempotent across settlement redelivery (ruling 24): once the consumed
+    /// draft's destroy settles, its registry mapping is forgotten (M70 —
+    /// settlement-time forget), and the gateways treat an already-gone draft as
     /// destroyed, so a redelivered send settlement enqueues nothing (unknown
     /// draft) or settles an at-worst harmless second delete.
     ///
@@ -838,6 +879,32 @@ impl MailService {
         }
     }
 
+    /// M70 (D136): resolve a draft op's stable key to the live entity id at
+    /// flush time — immediately before the gateway call — so the push targets
+    /// the freshest mapping the registry knows. This closes the in-flight-op
+    /// vs sync race M69 flagged: a sync chunk that repointed the registry (a
+    /// rotation observed from another device) between enqueue and flush is
+    /// reflected in the target. A key the registry no longer knows falls back
+    /// to itself — the pre-M70 enqueue-time semantics, preserved so the
+    /// provider still surfaces `notFound` per D133 (the uniform already-gone
+    /// reading is M71/D137, for which this freshness guarantee is the
+    /// prerequisite).
+    ///
+    /// @spec docs/eph/RFC-L2-draft-identity#22-d136--one-seam-the-draftregistry-port-resolve-at-flush
+    fn resolve_draft_flush_target(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+    ) -> Result<String, FlushError> {
+        Ok(self
+            .draft_registry
+            .resolve_draft_entity(account_id, draft_key)
+            .map_err(|error| {
+                FlushError::permanent(format!("draft identity resolution failed: {error}"))
+            })?
+            .unwrap_or_else(|| draft_key.to_string()))
+    }
+
     /// Push a single operation to the provider, mapping the result to a
     /// settlement or a typed flush error.
     async fn push_operation(
@@ -861,11 +928,18 @@ impl MailService {
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
                     assigned_entity_id: Some(new_id.to_string()),
+                    destroyed_entity_id: None,
                 })
             }
             OperationKind::DraftUpdate => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
-                let replace = MessageId::from(operation.entity.id.as_str());
+                // M70 (D136): the op carries the stable draft key; resolve it
+                // to the CURRENT live id here, immediately before the gateway
+                // call, so the replace targets the freshest mapping (in-session
+                // rotations and sync-observed ones alike).
+                let replace_id =
+                    self.resolve_draft_flush_target(account_id, &operation.entity.id)?;
+                let replace = MessageId::from(replace_id.as_str());
                 // DS3/D133: a re-flush of this save (attempts > 0) may have already
                 // committed the prior-draft destroy on an earlier attempt, so an
                 // already-gone replace target is benign; a first delivery's failed
@@ -889,10 +963,17 @@ impl MailService {
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
                     assigned_entity_id: Some(new_id.to_string()),
+                    destroyed_entity_id: None,
                 })
             }
             OperationKind::DraftDelete => {
-                let target = MessageId::from(operation.entity.id.as_str());
+                // M70 (D136): resolve the stable key to the live destroy target
+                // at flush (see [`Self::resolve_draft_flush_target`]) — a
+                // registry repoint between enqueue and flush retargets the
+                // destroy to the draft's current live id.
+                let target_id =
+                    self.resolve_draft_flush_target(account_id, &operation.entity.id)?;
+                let target = MessageId::from(target_id.as_str());
                 // D133: only an idempotent redelivery (a send-consume re-enqueue)
                 // masks a provider `notFound` as success; a user discard's
                 // `notFound` surfaces as a retryable failure.
@@ -907,6 +988,7 @@ impl MailService {
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
                     assigned_entity_id: None,
+                    destroyed_entity_id: Some(target_id),
                 })
             }
             OperationKind::Send => {
@@ -922,6 +1004,7 @@ impl MailService {
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
                     assigned_entity_id: None,
+                    destroyed_entity_id: None,
                 })
             }
             OperationKind::SetKeywords => {
