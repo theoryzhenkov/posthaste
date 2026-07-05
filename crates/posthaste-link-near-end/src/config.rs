@@ -18,6 +18,34 @@ use posthaste_call_policy::{BackoffSchedule, CallClass};
 /// share one schedule (D80). The near-end holds one on [`NearEndConfig`].
 pub use posthaste_call_policy::BackoffSchedule as BackoffPolicy;
 
+/// The server's SSE keep-alive cadence. Axum's `KeepAlive::default()` writes a
+/// `:\n\n` comment every **15s** on an otherwise-idle stream
+/// (`crates/posthaste-http-api-adapter/src/api/runtime_stream/links.rs:106`;
+/// `axum::response::sse::KeepAlive` default `max_interval`). The client's
+/// `fetch-event-source` shim dispatches the comment's trailing blank line as an
+/// **empty** message, so every keep-alive reaches the engine as an empty
+/// [`crate::transport::StreamEvent::Message`] — i.e. a live-but-idle stream
+/// still ticks the frame loop every 15s (proof of life), not just a busy one.
+pub(crate) const SERVER_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// W1 — the read-liveness deadline. A live link produces *bytes* (a frame OR a
+/// keep-alive) at least once per [`SERVER_KEEP_ALIVE_INTERVAL`]; total silence
+/// for **3×** that means the socket is silently half-open (laptop sleep/wake,
+/// NAT/Wi-Fi rebind, a proxy that dropped the connection with no RST) and
+/// `stream.next()` will block forever with no error. The engine arms this as a
+/// read deadline and, on expiry, re-prepares the link (the same M40/M44 path a
+/// stale-link 404 uses). 3× keep-alive → a single dropped keep-alive can never
+/// false-trip an idle-but-alive stream.
+pub(crate) const STREAM_LIVENESS_DEADLINE: Duration =
+    Duration::from_secs(3 * SERVER_KEEP_ALIVE_INTERVAL.as_secs());
+
+// The deadline must span at least a couple of keep-alives, or a genuinely
+// idle-but-alive stream (keep-alives every 15s) would false-trip the watchdog.
+const _: () = assert!(
+    STREAM_LIVENESS_DEADLINE.as_secs() >= 2 * SERVER_KEEP_ALIVE_INTERVAL.as_secs(),
+    "the liveness deadline must span >= two keep-alives or an idle-but-alive stream false-trips",
+);
+
 /// The near-end engine's policy tunables. Constructed once and held for the
 /// engine's life. Wire-shape settings (base path, link options) live on the
 /// seam's [`crate::wire::Wire`] profile, not here — this is pure policy.
@@ -45,6 +73,13 @@ pub struct NearEndConfig {
     /// it surfaces [`crate::sink::ConnectionStatus::Degraded`] and stops the loop.
     /// **Review** (default 3).
     pub max_consecutive_malformed: u32,
+    /// W1 — wall-clock ceiling on **total silence** from the frame stream (no
+    /// frame *and* no keep-alive) before the engine treats the link as silently
+    /// dead and re-prepares it. Seeded from [`STREAM_LIVENESS_DEADLINE`] (3× the
+    /// server keep-alive). The one gap the observed-`Error` recovery (M40/M44)
+    /// can never see: a half-open socket yields no error, so the read loop would
+    /// otherwise block forever. **Review** (default 45s).
+    pub stream_liveness_deadline: Duration,
 }
 
 impl Default for NearEndConfig {
@@ -60,6 +95,7 @@ impl Default for NearEndConfig {
             backoff: BackoffSchedule::default(),
             initial_cursor: None,
             max_consecutive_malformed: 3,
+            stream_liveness_deadline: STREAM_LIVENESS_DEADLINE,
         }
     }
 }

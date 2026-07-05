@@ -7,7 +7,7 @@
 //! instantiates the engine over the client seam's [`RuntimeLinkWire`]; the
 //! authority-server wire's profile is exercised natively in `posthaste-runtime`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::rc::Rc;
@@ -19,7 +19,7 @@ use futures_util::{FutureExt, StreamExt};
 
 use posthaste_contract_core::{MutationReceipt, MutationRequest, RuntimeFrame};
 
-use crate::config::NearEndConfig;
+use crate::config::{NearEndConfig, STREAM_LIVENESS_DEADLINE};
 use crate::pending_set::{PendingSetHooks, SentUnsettled};
 use crate::scheduler::Scheduler;
 use crate::sink::{ConnectionStatus, FrameSink};
@@ -61,7 +61,10 @@ struct FakeTransport {
     hang_mutations: bool,
     /// Scripted responses for settlement GETs, in order.
     settlement_responses: RefCell<VecDeque<Result<PostResponse, TransportError>>>,
-    stream_scripts: RefCell<VecDeque<Vec<StreamEvent>>>,
+    /// Scripted streams: the events to yield, plus whether the stream then goes
+    /// **silent** (blocks forever with no further event) — a half-open socket
+    /// that exercises the read-liveness watchdog.
+    stream_scripts: RefCell<VecDeque<(Vec<StreamEvent>, bool)>>,
     posts: RefCell<Vec<(String, String)>>,
     gets: RefCell<Vec<String>>,
     stream_urls: RefCell<Vec<String>>,
@@ -105,7 +108,15 @@ impl FakeTransport {
     }
 
     fn with_stream(mut self, events: Vec<StreamEvent>) -> Self {
-        self.stream_scripts.get_mut().push_back(events);
+        self.stream_scripts.get_mut().push_back((events, false));
+        self
+    }
+
+    /// Script a stream that yields `events`, then goes SILENT forever — no more
+    /// frames, no keep-alive, no `Closed`/`Error`. Models the half-open socket
+    /// the read-liveness watchdog exists to catch.
+    fn with_silent_stream(mut self, events: Vec<StreamEvent>) -> Self {
+        self.stream_scripts.get_mut().push_back((events, true));
         self
     }
 }
@@ -160,19 +171,29 @@ impl Transport for FakeTransport {
 
     fn open_stream(&self, request: StreamRequest) -> LocalBoxStream<'static, StreamEvent> {
         self.stream_urls.borrow_mut().push(request.url);
-        let events = self
+        let (events, silent) = self
             .stream_scripts
             .borrow_mut()
             .pop_front()
             // Exhausted script → a permanent error stops the reconnect loop so
             // the test's `run()` returns instead of spinning forever.
             .unwrap_or_else(|| {
-                vec![StreamEvent::Error {
-                    status: Some(403),
-                    message: "no more script".to_string(),
-                }]
+                (
+                    vec![StreamEvent::Error {
+                        status: Some(403),
+                        message: "no more script".to_string(),
+                    }],
+                    false,
+                )
             });
-        stream::iter(events).boxed_local()
+        let base = stream::iter(events);
+        if silent {
+            // Yield the events, then never again (and never end): the read loop
+            // must fall through to its liveness deadline, not block forever.
+            base.chain(stream::pending()).boxed_local()
+        } else {
+            base.boxed_local()
+        }
     }
 }
 
@@ -180,19 +201,38 @@ const EMPTY_RECEIPT: &str = r#"{"runtimeMutationId":null,"clientMutationId":"x",
 
 struct FakeScheduler {
     sleeps: RefCell<Vec<Duration>>,
+    /// Virtual-time control for the read-liveness deadline: a sleep of exactly
+    /// [`STREAM_LIVENESS_DEADLINE`] resolves (the window elapsed) only when this
+    /// is set. A test flips it to choose between a silently-dead stream
+    /// (expired = the deadline fires) and a live-but-idle one (never fires, so
+    /// arriving keep-alives always win the race). All other sleeps (backoff,
+    /// request deadline) resolve instantly as before.
+    liveness_deadline_expired: Cell<bool>,
 }
 
 impl FakeScheduler {
     fn new() -> Self {
         Self {
             sleeps: RefCell::new(Vec::new()),
+            liveness_deadline_expired: Cell::new(false),
         }
+    }
+
+    /// Advance virtual time past the read-liveness deadline (or not), so the
+    /// next armed deadline fires (or stays pending).
+    fn set_liveness_expired(&self, expired: bool) {
+        self.liveness_deadline_expired.set(expired);
     }
 }
 
 impl Scheduler for FakeScheduler {
     fn sleep(&self, duration: Duration) -> LocalBoxFuture<'static, ()> {
         self.sleeps.borrow_mut().push(duration);
+        if duration == STREAM_LIVENESS_DEADLINE && !self.liveness_deadline_expired.get() {
+            // The liveness window has NOT elapsed: this deadline must lose every
+            // race to an arriving frame/keep-alive, so it never resolves.
+            return pending().boxed_local();
+        }
         ready(()).boxed_local()
     }
     fn jitter(&self) -> f64 {
@@ -635,6 +675,121 @@ fn same_link_reconnect_does_not_surface_the_recovery_edge() {
         "a same-link reconnect must not fire the recovery edge: {:?}",
         h.sink.reestablished.borrow()
     );
+}
+
+// W1 — the read-liveness watchdog. A stream that opens then goes SILENT (no
+// frame, no keep-alive, no Closed/Error — a half-open socket) must NOT block
+// forever: past the liveness deadline the engine re-prepares a FRESH link and
+// fires the M44 recovery edge, PURELY from the deadline — no observed error was
+// ever delivered. This is the silent-death case M40/M44 alone cannot see.
+#[test]
+fn silent_dead_stream_re_prepares_from_the_liveness_deadline() {
+    let transport = FakeTransport::new()
+        // First link is "link-A"; the fresh re-prepared link is "link-B".
+        .with_link(r#"{"linkId":"link-A"}"#)
+        .with_link(r#"{"linkId":"link-B"}"#)
+        // The link opens, reconciles, then the stream goes silent forever.
+        .with_silent_stream(vec![StreamEvent::Open])
+        // The re-prepared fresh link opens, then a 403 stops the loop so the
+        // test terminates deterministically.
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    // Advance virtual time past the liveness deadline: the armed deadline fires
+    // while the stream is silent.
+    h.scheduler.set_liveness_expired(true);
+
+    block_on(h.engine.clone().run());
+
+    // The prepare handshake ran TWICE — silence alone forced a fresh link, not a
+    // permanent halt and not a blocked-forever read.
+    assert_eq!(
+        prepare_post_count(&h),
+        2,
+        "the silently-dead stream was re-prepared"
+    );
+    assert_eq!(
+        h.transport.stream_urls.borrow().len(),
+        2,
+        "re-subscribed on the fresh link"
+    );
+    // The M44 recovery edge fired exactly once, carrying the FRESH link id —
+    // the SAME outcome as an observed transient death (views/counts reconcile).
+    let reestablished = h.sink.reestablished.borrow();
+    assert_eq!(reestablished.len(), 1, "one recovery edge: {reestablished:?}");
+    assert_eq!(reestablished[0], "link-B", "carries the FRESH link id");
+    // Surfaced transient + drove the reconnect/backoff tail off the SILENT
+    // stream — never from an observed error (none was delivered on link-A). The
+    // transient recovery precedes the reconnect; the only "permanent" is the
+    // deliberate 403 that stops the fresh link so the test terminates.
+    let statuses = h.sink.statuses.borrow();
+    let transient_at = statuses.iter().position(|s| s == "transient");
+    let reconnecting_at = statuses.iter().position(|s| s == "reconnecting");
+    assert!(transient_at.is_some(), "{statuses:?}");
+    assert!(reconnecting_at.is_some(), "{statuses:?}");
+    assert!(transient_at < reconnecting_at, "the silence recovered transiently before reconnecting: {statuses:?}");
+    // No frame, no malformed report: the re-prepare came from the deadline only.
+    assert_eq!(h.sink.frames.borrow().len(), 0);
+    assert_eq!(h.sink.malformed.borrow().len(), 0);
+}
+
+// W1 — the no-false-trigger proof. While keep-alives (empty messages, the shim's
+// surfacing of axum's `:\n\n` every 15s) and real frames keep arriving, the
+// liveness deadline NEVER elapses — every arriving event wins the biased race
+// and re-arms it. So an idle-but-alive stream must NOT re-prepare, must NOT fire
+// a recovery edge, and stays on the SAME link across the whole span.
+#[test]
+fn keep_alives_and_frames_within_the_deadline_never_trip_the_watchdog() {
+    let transport = FakeTransport::new()
+        .with_stream(vec![
+            StreamEvent::Open,
+            // Empty messages ARE the keep-alives (proof of life), interleaved
+            // with one real frame.
+            StreamEvent::Message(String::new()),
+            StreamEvent::Message(String::new()),
+            StreamEvent::Message(r#"{"type":"heartbeat","linkSeq":1}"#.to_string()),
+            StreamEvent::Message(String::new()),
+            // A clean close ends the (still-live) span → a same-link reconnect.
+            StreamEvent::Closed,
+        ])
+        .with_stream(vec![
+            StreamEvent::Open,
+            StreamEvent::Error {
+                status: Some(403),
+                message: "stop".to_string(),
+            },
+        ]);
+    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    // The liveness window never elapses while events flow — the deadline stays
+    // pending and must lose every race.
+    h.scheduler.set_liveness_expired(false);
+
+    block_on(h.engine.clone().run());
+
+    // Never re-prepared: one prepare handshake; the reconnect after the clean
+    // close reused the SAME link (no recovery edge).
+    assert_eq!(
+        prepare_post_count(&h),
+        1,
+        "keep-alives/frames must not force a re-prepare"
+    );
+    assert!(
+        h.sink.reestablished.borrow().is_empty(),
+        "an idle-but-alive stream must not fire the watchdog recovery edge: {:?}",
+        h.sink.reestablished.borrow()
+    );
+    // The single real frame was delivered; empty keep-alives were skipped, and
+    // an empty keep-alive is NOT a malformed frame.
+    assert_eq!(h.sink.frames.borrow().len(), 1);
+    assert_eq!(h.sink.malformed.borrow().len(), 0);
+    assert_eq!(h.engine.cursor(), Some(1));
+    // Two subscribes: the reconnect after the clean close, on the same link.
+    assert_eq!(h.transport.stream_urls.borrow().len(), 2, "reconnected");
 }
 
 // D110a — the reserved case: a genuine auth refusal (401/403) still classifies
