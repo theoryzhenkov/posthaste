@@ -11,6 +11,20 @@ impl MailGateway for LiveImapSmtpGateway {
         sync_imap_account(self, account_id, progress).await
     }
 
+    /// Streamed, resumable sync (B4). Overrides the default single-emit so an
+    /// interrupted INITIAL sync of a large mailbox checkpoints per UID chunk and
+    /// resumes past the last committed UID on restart, rather than restarting
+    /// from UID 1. See [`super::sync_imap_account_streamed`].
+    async fn sync_streamed(
+        &self,
+        account_id: &AccountId,
+        _cursors: &[SyncCursor],
+        progress: Option<SyncProgressReporter>,
+        sink: &mut dyn SyncChunkSink,
+    ) -> Result<SyncOutcome, GatewayError> {
+        sync_imap_account_streamed(self, account_id, progress, sink).await
+    }
+
     async fn fetch_message_body(
         &self,
         account_id: &AccountId,

@@ -349,6 +349,7 @@ fn session_delta_batch(round: usize, count: usize) -> SyncBatch {
                 uid_validity: ImapUidValidity(42),
                 highest_uid: Some(ImapUid((round * count + count) as u32)),
                 highest_modseq: Some(ImapModSeq((round * count + count) as u64)),
+                partial_initial_uid: None,
                 updated_at: format!("2026-04-{:02}T10:00:00Z", (round % 28) + 1),
             },
             ImapMailboxSyncState {
@@ -357,6 +358,7 @@ fn session_delta_batch(round: usize, count: usize) -> SyncBatch {
                 uid_validity: ImapUidValidity(43),
                 highest_uid: Some(ImapUid((round * count + count / 2) as u32)),
                 highest_modseq: Some(ImapModSeq((round * count + count / 2) as u64)),
+                partial_initial_uid: None,
                 updated_at: format!("2026-04-{:02}T10:00:00Z", (round % 28) + 1),
             },
         ],

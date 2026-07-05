@@ -9,7 +9,7 @@ impl ImapSyncStateStore for DatabaseStore {
         let mut statement = connection
             .prepare_cached(
                 "SELECT mailbox_id, mailbox_name, uid_validity, highest_uid,
-                        highest_modseq, updated_at
+                        highest_modseq, partial_initial_uid, updated_at
                  FROM imap_mailbox_sync_state
                  WHERE account_id = ?1
                  ORDER BY mailbox_name, mailbox_id",
@@ -31,7 +31,7 @@ impl ImapSyncStateStore for DatabaseStore {
         connection
             .query_row(
                 "SELECT mailbox_id, mailbox_name, uid_validity, highest_uid,
-                        highest_modseq, updated_at
+                        highest_modseq, partial_initial_uid, updated_at
                  FROM imap_mailbox_sync_state
                  WHERE account_id = ?1 AND mailbox_id = ?2",
                 params![account_id.as_str(), mailbox_id.as_str()],
@@ -52,14 +52,15 @@ impl ImapSyncStateWriteStore for DatabaseStore {
             tx.execute(
                 "INSERT INTO imap_mailbox_sync_state (
                     account_id, mailbox_id, mailbox_name, uid_validity,
-                    highest_uid, highest_modseq, updated_at
+                    highest_uid, highest_modseq, partial_initial_uid, updated_at
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(account_id, mailbox_id) DO UPDATE SET
                     mailbox_name = excluded.mailbox_name,
                     uid_validity = excluded.uid_validity,
                     highest_uid = excluded.highest_uid,
                     highest_modseq = excluded.highest_modseq,
+                    partial_initial_uid = excluded.partial_initial_uid,
                     updated_at = excluded.updated_at",
                 params![
                     account_id.as_str(),
@@ -68,6 +69,7 @@ impl ImapSyncStateWriteStore for DatabaseStore {
                     state.uid_validity.0,
                     state.highest_uid.map(|uid| uid.0),
                     state.highest_modseq.map(|modseq| modseq.0.to_string()),
+                    state.partial_initial_uid.map(|uid| uid.0),
                     state.updated_at,
                 ],
             )
@@ -196,13 +198,15 @@ fn imap_mailbox_state_from_row(row: &Row<'_>) -> rusqlite::Result<ImapMailboxSyn
     let uid_validity = u32_from_row(row, 2, "uid_validity")?;
     let highest_uid = optional_u32_from_row(row, 3, "highest_uid")?.map(ImapUid);
     let highest_modseq = optional_u64_text_from_row(row, 4, "highest_modseq")?.map(ImapModSeq);
+    let partial_initial_uid = optional_u32_from_row(row, 5, "partial_initial_uid")?.map(ImapUid);
     Ok(ImapMailboxSyncState {
         mailbox_id: MailboxId(row.get(0)?),
         mailbox_name: row.get(1)?,
         uid_validity: ImapUidValidity(uid_validity),
         highest_uid,
         highest_modseq,
-        updated_at: row.get(5)?,
+        partial_initial_uid,
+        updated_at: row.get(6)?,
     })
 }
 

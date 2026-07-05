@@ -82,6 +82,7 @@ fn full_snapshot_prune_set_is_the_complete_fetched_header_set() {
             uid_validity: ImapUidValidity(9),
             highest_uid: Some(ImapUid(30)),
             highest_modseq: Some(ImapModSeq(730)),
+            partial_initial_uid: None,
             updated_at: "2026-04-25T00:00:00Z".to_string(),
         }],
         "2026-04-25T00:00:00Z".to_string(),
@@ -93,6 +94,78 @@ fn full_snapshot_prune_set_is_the_complete_fetched_header_set() {
     assert_eq!(
         batch_ids, expected_ids,
         "the full-snapshot prune set must equal the complete fetched header set",
+    );
+}
+
+/// B4 / DS1: a resumable initial-snapshot CHUNK is additive, never destructive.
+/// It carries this chunk's rows + the advancing checkpoint and must NEVER set
+/// `replace_all_messages` (which would drive prune-by-absence against an
+/// incomplete remote set), carry deletions, or re-emit mailboxes.
+#[test]
+fn initial_snapshot_chunk_is_upsert_only_and_carries_the_checkpoint() {
+    let selected = ImapSelectedMailbox {
+        mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+        mailbox_name: "INBOX".to_string(),
+        uid_validity: ImapUidValidity(9),
+        uid_next: None,
+        highest_modseq: None,
+    };
+    let mapped: Vec<_> = [10u32, 20]
+        .into_iter()
+        .map(|uid| {
+            imap_header_message_record(
+                &selected,
+                ImapFetchedHeader {
+                    mailbox_id: selected.mailbox_id.clone(),
+                    uid: ImapUid(uid),
+                    modseq: Some(ImapModSeq(700 + u64::from(uid))),
+                    flags: Vec::new(),
+                    rfc822_size: 512,
+                    has_attachment: false,
+                    headers: format!(
+                        "From: Alice <alice@example.test>\r\nSubject: Hello {uid}\r\n\r\n"
+                    )
+                    .into_bytes(),
+                    updated_at: "2026-04-25T00:00:00Z".to_string(),
+                },
+            )
+            .expect("mapped header")
+        })
+        .collect();
+
+    let checkpoint = ImapMailboxSyncState {
+        mailbox_id: selected.mailbox_id.clone(),
+        mailbox_name: "INBOX".to_string(),
+        uid_validity: ImapUidValidity(9),
+        highest_uid: None,
+        highest_modseq: None,
+        partial_initial_uid: Some(ImapUid(20)),
+        updated_at: "2026-04-25T00:00:00Z".to_string(),
+    };
+
+    let batch = crate::imap_initial_snapshot_chunk_batch(
+        &DiscoveredImapAccount {
+            capabilities: ImapCapabilities::default(),
+            mailboxes: vec![map_imap_mailbox("INBOX", ["\\Inbox"])],
+        },
+        mapped,
+        checkpoint.clone(),
+    );
+
+    assert!(
+        !batch.replace_all_messages,
+        "a mid-sync checkpoint must never drive prune-by-absence (DS1)",
+    );
+    assert!(!batch.replace_all_mailboxes);
+    assert!(batch.deleted_message_ids.is_empty());
+    assert!(batch.deleted_imap_message_locations.is_empty());
+    assert!(batch.mailboxes.is_empty(), "mailboxes are emitted separately");
+    assert_eq!(batch.messages.len(), 2, "this chunk's rows are upserted");
+    assert_eq!(batch.imap_message_locations.len(), 2);
+    assert_eq!(
+        batch.imap_mailbox_states,
+        vec![checkpoint],
+        "the advancing resume cursor is committed with the chunk",
     );
 }
 
@@ -141,6 +214,7 @@ fn full_sync_batch_carries_messages_and_imap_locations() {
             uid_validity: ImapUidValidity(9),
             highest_uid: Some(ImapUid(42)),
             highest_modseq: Some(ImapModSeq(777)),
+            partial_initial_uid: None,
             updated_at: "2026-04-25T00:00:00Z".to_string(),
         }],
         "2026-04-25T00:00:00Z".to_string(),

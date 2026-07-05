@@ -30,6 +30,13 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
         "rescore_priority",
         "ALTER TABLE cache_rescore_queue ADD COLUMN rescore_priority REAL NOT NULL DEFAULT 0",
     )?;
+    // B4: resumable partial-initial-sync checkpoint for interrupted first syncs.
+    ensure_column(
+        connection,
+        "imap_mailbox_sync_state",
+        "partial_initial_uid",
+        "ALTER TABLE imap_mailbox_sync_state ADD COLUMN partial_initial_uid INTEGER",
+    )?;
     connection
         .execute(
             "CREATE INDEX IF NOT EXISTS idx_cache_rescore_priority

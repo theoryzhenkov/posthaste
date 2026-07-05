@@ -147,6 +147,7 @@ pub(super) fn imap_gmail_flagged_delta_batch(
             uid_validity: archive.uid_validity,
             highest_uid: Some(posthaste_domain_model::ImapUid(202)),
             highest_modseq: archive.highest_modseq,
+            partial_initial_uid: None,
             updated_at: "2026-04-25T12:01:00Z".to_string(),
         }],
         locations,
