@@ -222,10 +222,23 @@ impl OperationOutboxStore for TestStore {
         account_id: &AccountId,
         draft_key: &str,
     ) -> Result<Option<String>, StoreError> {
+        // Precedence mirrors the real store (D131): the in-session alias wins;
+        // only when absent do we fall back to the `message` projection's stable
+        // `draft_id` → live Email id mapping.
         let aliases = self.draft_aliases.lock().expect("alias lock poisoned");
-        Ok(aliases
+        if let Some((_, _, entity)) = aliases
             .iter()
             .find(|(account, key, _)| account == account_id.as_str() && key == draft_key)
+        {
+            return Ok(Some(entity.clone()));
+        }
+        let projection = self
+            .draft_projection
+            .lock()
+            .expect("projection lock poisoned");
+        Ok(projection
+            .iter()
+            .find(|(account, draft_id, _)| account == account_id.as_str() && draft_id == draft_key)
             .map(|(_, _, entity)| entity.clone()))
     }
 

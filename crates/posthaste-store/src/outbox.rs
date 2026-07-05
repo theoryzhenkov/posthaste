@@ -324,10 +324,30 @@ impl OperationOutboxStore for DatabaseStore {
         draft_key: &str,
     ) -> Result<Option<String>, StoreError> {
         let connection = self.read_connection()?;
-        let mut statement = connection
+        // Precedence (D131): the in-session `draft_alias` wins — it is the
+        // freshest create/rotate mapping for a draft this runtime authored and
+        // may be mid-id-rotation. Only when no alias row exists do we fall back
+        // to the `message` projection, whose `draft_id` column carries the same
+        // stable key for a draft synced from the server, created on another
+        // device, or surviving a restart that cleared the alias. That row's PK
+        // `id` is the live/canonical server Email id, so both the queued destroy
+        // op and the provider destroy retarget the live entity.
+        let mut alias_statement = connection
             .prepare("SELECT entity_id FROM draft_alias WHERE account_id = ?1 AND draft_key = ?2")
             .map_err(sql_to_store_error)?;
-        statement
+        let alias = alias_statement
+            .query_row(params![account_id.as_str(), draft_key], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(sql_to_store_error)?;
+        if let Some(entity_id) = alias {
+            return Ok(Some(entity_id));
+        }
+        let mut projection_statement = connection
+            .prepare("SELECT id FROM message WHERE account_id = ?1 AND draft_id = ?2")
+            .map_err(sql_to_store_error)?;
+        projection_statement
             .query_row(params![account_id.as_str(), draft_key], |row| {
                 row.get::<_, String>(0)
             })
