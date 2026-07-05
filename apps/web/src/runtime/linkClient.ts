@@ -12,6 +12,10 @@
 import { LOG_EVENTS, syncLogger } from '../logger'
 import { setConnectionHealth } from '@/live-store/store'
 
+import {
+  __setRuntimeAdapterReadyGateForTesting,
+  whenRuntimeAdapterReady,
+} from './adapter'
 import { runtimeStream } from './runtimeStream'
 import type {
   RuntimeFrameHandlers,
@@ -73,14 +77,21 @@ function ensureLink(sourceId?: string | null): Promise<RuntimeLinkConnection> {
     return linkPromise
   }
   activeLinkSourceId = sourceId
-  linkPromise = runtimeStream
-    // Opt into incremental mail-list deltas (replication client-link). Both client read
-    // paths apply them: the default renderer reconciles directly, and the
-    // replica adapter folds the delta into its served base.
-    .openLink({
-      ...(sourceId === undefined ? {} : { sourceId }),
-      viewDelta: true,
-    })
+  // CL-C2 / R1: gate the first link open on the entity-store install so this
+  // link's frame subscription + view-opens bind to the entity-store adapter, not
+  // the transient base adapter that would strand the session (no ingest, counts,
+  // or synthesized viewReplace) until a reload. Bounded inside the gate, so a
+  // stuck install still lets the link open (degraded) rather than hang.
+  linkPromise = whenRuntimeAdapterReady()
+    .then(() =>
+      // Opt into incremental mail-list deltas (replication client-link). Both
+      // client read paths apply them: the default renderer reconciles directly,
+      // and the replica adapter folds the delta into its served base.
+      runtimeStream.openLink({
+        ...(sourceId === undefined ? {} : { sourceId }),
+        viewDelta: true,
+      }),
+    )
     .then((link) => {
       activeLink = link
       return link
@@ -391,4 +402,8 @@ export function resetRuntimeLinkClientForTesting(): void {
   openViewIds.clear()
   reopenHandlers.clear()
   wasHidden = false
+  // Tests wire the adapter synchronously via `setRuntimeAdapterForTesting`, so
+  // the install gate is considered satisfied; clear it back to resolved (a test
+  // modelling the CL-C2 race pins its own pending gate AFTER this reset).
+  __setRuntimeAdapterReadyGateForTesting(Promise.resolve())
 }
