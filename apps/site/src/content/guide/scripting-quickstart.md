@@ -1,11 +1,10 @@
 ---
-title: Scripting quickstart
-navLabel: Scripting quickstart
+title: Scripting quickstart — a laptop script in five minutes
 description: The five-minute technical version — mint a token, watch for mail, write back safely, with the reference agent loop.
-order: 4
+sidebar:
+  label: Scripting quickstart
+  order: 4
 ---
-
-# Scripting quickstart — a laptop script in five minutes
 
 Automate Posthaste from a shell script with **no protocol code**: subscribe to
 new mail, run a handler, and write back safely. This is the slice-1 scripting

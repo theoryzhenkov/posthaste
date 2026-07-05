@@ -47,7 +47,6 @@ in
     pkgs.tmux
     pkgs.overmind
     pkgs.python3
-    pkgs.python3Packages.mkdocs-material
   ]
   ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
     [

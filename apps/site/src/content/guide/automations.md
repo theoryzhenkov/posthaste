@@ -1,11 +1,9 @@
 ---
 title: Automations
-navLabel: Automations
 description: From zero-code built-in rules to running your own script — how to make Posthaste react to your mail.
-order: 2
+sidebar:
+  order: 2
 ---
-
-# Automations
 
 Posthaste can act on your mail automatically. This page walks you from the
 zero-code version (click a few things in Settings) up to running your own
@@ -227,7 +225,7 @@ The listener only accepts connections from your own machine.
 Automations turn incoming mail into actions. That's the whole point — and it's
 exactly why a few habits matter. Here are the three a human actually needs. For
 the full reasoning, see the
-[scripting security & threat model](../scripting-security.md).
+[scripting security & threat model](scripting-security.md).
 
 1. **Scope your triggers to senders you trust.** Anyone can email you, so any
    rule that a stranger's message can match is a rule a stranger can trigger. Add

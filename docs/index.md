@@ -1,11 +1,9 @@
 ---
-title: Posthaste
-description: Your mail, delivered at Posthaste
+title: Technical reference
+description: The durable, layered technical specs — architecture, state, runtime, replication, API, and more.
 modified: 2026-07-04
 reviewed: 2026-07-04
 ---
-
-# Posthaste specs
 
 The durable, layered technical specs live in domain directories. Each domain is
 authored at the scope levels it needs (L0 orientation → L1 contract → L2
