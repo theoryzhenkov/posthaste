@@ -19,8 +19,10 @@ import { LOG_EVENTS, syncLogger } from '../../logger'
 import type { SettlementVerdict } from './handle'
 import type { StorePort } from './storePort'
 
-/** A method name on {@link StorePort}. */
-export type StoreMethod = keyof StorePort
+/** A method name on {@link StorePort} that is dispatched across the worker
+ *  boundary. `setReseedHook` is port-local (it wires the controller's re-seed
+ *  callback) and is never sent as a worker request, so it is excluded. */
+export type StoreMethod = Exclude<keyof StorePort, 'setReseedHook'>
 
 export interface StoreWorkerRequest {
   id: number
@@ -110,6 +112,13 @@ export class WorkerStorePort implements StorePort {
    *  restart budget). Further calls reject immediately instead of hanging the
    *  controller's store queue. */
   private dead = false
+  /** The controller's re-seed callback (CL-C1), invoked on a respawn to rebuild
+   *  the fresh worker's store before the timed-out call is replayed. */
+  private reseed: (() => Promise<void>) | undefined
+  /** True while a respawn re-seed is driving its own calls on the fresh worker.
+   *  A timeout during this window means the replacement is ALSO wedged — fail
+   *  the port cleanly instead of respawn-looping (bounded, no silent emptiness). */
+  private reseeding = false
 
   constructor(worker: ReplicaWorkerLike, options: WorkerStorePortOptions = {}) {
     this.worker = worker
@@ -154,6 +163,14 @@ export class WorkerStorePort implements StorePort {
     this.pending.clear()
   }
 
+  /** CL-C1: register the controller's re-seed callback. The port owns WHEN it
+   *  runs (immediately after a respawn, before the replay); the controller owns
+   *  HOW (re-register views + re-fold the pending set from the state it holds on
+   *  the main thread). */
+  setReseedHook(reseed: () => Promise<void>): void {
+    this.reseed = reseed
+  }
+
   /** Release the worker (e.g. the host probed it unusable and fell back). */
   terminate(): void {
     this.fail(new Error('replica worker terminated'))
@@ -191,11 +208,13 @@ export class WorkerStorePort implements StorePort {
    * A `call()`'s round trip missed {@link WorkerStorePort.callTimeoutMs}: the
    * worker is presumed wedged (panicked into an unresponsive state without
    * firing the `error` event — e.g. an infinite loop in the WASM store).
-   * Terminate it, spawn a replacement, and replay the SAME request on the
-   * fresh worker (bounded by `maxRestarts`) so the caller sees a slow-but-
-   * eventually-answered call instead of an unhandled hang or a spurious
-   * failure. Exhausting the budget fails the port outright — a worker wedged
-   * this persistently is not going to recover.
+   * Terminate it, spawn a replacement, RE-SEED its store (CL-C1), and replay the
+   * SAME request on the fresh worker (bounded by `maxRestarts`) so the caller
+   * sees a slow-but-eventually-answered call against a store that still holds
+   * its views/bases/folds — instead of an unhandled hang, a spurious failure, or
+   * (the CL-C1 bug) a replay that "succeeds" against a BRAND-NEW empty store and
+   * reports row-dropping emptiness as authoritative. Exhausting the budget fails
+   * the port outright — a worker wedged this persistently is not going to recover.
    */
   private onTimeout(id: number): void {
     const entry = this.pending.get(id)
@@ -203,7 +222,15 @@ export class WorkerStorePort implements StorePort {
       return
     }
     this.pending.delete(id)
-    if (!this.spawnWorker || entry.attempt >= this.maxRestarts) {
+    // A timeout WHILE re-seeding means the just-respawned worker is also wedged.
+    // Don't respawn-loop into it: fail the port so the failure surfaces cleanly
+    // rather than churning replacements (bounded — CL-C1's "clean surfaced
+    // failure, never silent emptiness" arm).
+    if (
+      !this.spawnWorker ||
+      this.reseeding ||
+      entry.attempt >= this.maxRestarts
+    ) {
       const error = new Error(
         `replica worker call timed out (method=${entry.method}, attempt=${entry.attempt + 1})`,
       )
@@ -225,8 +252,38 @@ export class WorkerStorePort implements StorePort {
         attempt: entry.attempt + 1,
         maxRestarts: this.maxRestarts,
       },
-      'replica worker call timed out; terminated + respawned the worker and replayed the request',
+      'replica worker call timed out; respawned the worker and re-seeding its store before replaying the request',
     )
+    void this.reseedAndReplay(id, entry)
+  }
+
+  /**
+   * CL-C1: after a respawn, rebuild the fresh (empty) worker's store via the
+   * controller's re-seed hook, THEN replay the timed-out request. The store
+   * queue is parked on the timed-out call's promise (the controller serializes
+   * ops and this call has not resolved), so the re-seed's own calls run on the
+   * fresh worker with nothing else interleaving. A re-seed failure surfaces as a
+   * clean port failure rather than a replay into a half-seeded store.
+   */
+  private async reseedAndReplay(id: number, entry: PendingCall): Promise<void> {
+    if (this.reseed) {
+      this.reseeding = true
+      try {
+        await this.reseed()
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error))
+        entry.reject(err)
+        this.fail(err)
+        return
+      } finally {
+        this.reseeding = false
+      }
+      // A re-seed call may have failed the port (e.g. the fresh worker also
+      // wedged or crashed mid-seed); `entry` is already rejected by `fail`.
+      if (this.dead) {
+        return
+      }
+    }
     this.send(
       id,
       entry.method,
