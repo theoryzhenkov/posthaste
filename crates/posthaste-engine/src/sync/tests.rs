@@ -81,7 +81,11 @@ async fn empty_email_cursor_recovers_via_full_sync_and_persists_real_state() {
         .lock()
         .expect("seen methods lock poisoned")
         .clone();
-    assert_eq!(seen_methods, vec!["Email/query", "Email/get"]);
+    // DP-C2: the Email object state is captured with a zero-id `Email/get`
+    // BEFORE the first `Email/query`, so the cursor anchors to a point that
+    // precedes the snapshot window (mail arriving mid-pagination is replayed by
+    // the next delta rather than lost). The empty result needs no metadata get.
+    assert_eq!(seen_methods, vec!["Email/get", "Email/query"]);
 
     server.abort();
     let _ = server.await;
@@ -318,6 +322,272 @@ async fn capped_email_query_that_cannot_be_paged_refuses_to_prune() {
     let _ = server.await;
 }
 
+/// DP-C2 mail-loss test: a concurrent server-side EXPUNGE shifts ids across a
+/// page boundary mid-pagination. The first `Email/query` page returns `[m1, m2]`
+/// (queryState `eq-1`, total 5); before the second page `m1` is expunged, so the
+/// live ordered set becomes `[m2, m3, m4, m5]` (queryState `eq-2`, total 4). A
+/// NAIVE position-paginated fetch reads position 2 into the shifted set → `[m4,
+/// m5]`, SKIPPING the still-live `m3`, yet reaches the (now-4) total and declares
+/// the set complete → `m3` would be durably pruned as "absent". The fix detects
+/// the `queryState` shift (`eq-1` → `eq-2`) and reports the set NOT complete, so
+/// prune-by-absence is withheld and no live message is lost.
+///
+/// Fails before the fix (position paging + no queryState guard → `prune_messages`
+/// is `true` with `m3` missing); passes after (`prune_messages` is `false`).
+#[tokio::test]
+async fn full_snapshot_expunge_shifting_id_across_page_boundary_withholds_prune() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock JMAP server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let app_state = Arc::new(MockJmapState {
+        base_url: format!("http://{addr}"),
+        seen_methods: Mutex::new(Vec::new()),
+    });
+    let app = Router::new()
+        .route("/.well-known/jmap", get(mock_session))
+        .route("/api", post(mock_expunge_midpagination_full_sync_api))
+        .with_state(app_state.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve mock JMAP");
+    });
+
+    let client = connect_jmap_client(&format!("http://{addr}"), Some("dev"), "devpass")
+        .await
+        .expect("connect mock client");
+    let client = Arc::new(client);
+
+    let mut sink = RecordingSink::default();
+    let outcome = crate::live_sync::sync_account_streamed(
+        &client,
+        &posthaste_domain_model::AccountId::from("acc1"),
+        &[],
+        None,
+        &mut sink,
+    )
+    .await
+    .expect("streamed sync succeeds");
+
+    let reconciliation = outcome
+        .reconciliation
+        .expect("full snapshot reconciles in a final pass");
+    assert!(
+        !reconciliation.prune_messages,
+        "a queryState shift mid-pagination (concurrent expunge) makes the id set \
+         non-change-consistent; prune-by-absence MUST be withheld so the still-live \
+         m3 is never durably deleted",
+    );
+
+    server.abort();
+    let _ = server.await;
+}
+
+/// DP-C2 mail-loss test, new-mail symmetry: a message ARRIVES during pagination,
+/// shifting the query result and its `queryState`. The fetch must withhold
+/// prune-by-absence rather than treat the torn set as complete truth (which
+/// could otherwise delete a locally-known-but-just-shifted message).
+#[tokio::test]
+async fn full_snapshot_new_mail_during_pagination_withholds_prune() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock JMAP server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let app_state = Arc::new(MockJmapState {
+        base_url: format!("http://{addr}"),
+        seen_methods: Mutex::new(Vec::new()),
+    });
+    let app = Router::new()
+        .route("/.well-known/jmap", get(mock_session))
+        .route("/api", post(mock_new_mail_midpagination_full_sync_api))
+        .with_state(app_state.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve mock JMAP");
+    });
+
+    let client = connect_jmap_client(&format!("http://{addr}"), Some("dev"), "devpass")
+        .await
+        .expect("connect mock client");
+    let client = Arc::new(client);
+
+    let mut sink = RecordingSink::default();
+    let outcome = crate::live_sync::sync_account_streamed(
+        &client,
+        &posthaste_domain_model::AccountId::from("acc1"),
+        &[],
+        None,
+        &mut sink,
+    )
+    .await
+    .expect("streamed sync succeeds");
+
+    let reconciliation = outcome
+        .reconciliation
+        .expect("full snapshot reconciles in a final pass");
+    assert!(
+        !reconciliation.prune_messages,
+        "new mail arriving mid-pagination shifts the queryState; the snapshot is \
+         not change-consistent so prune-by-absence MUST be withheld",
+    );
+
+    server.abort();
+    let _ = server.await;
+}
+
+/// Count how many `Email/query` calls have been recorded so far (including the
+/// one just pushed), so a mock can act out a mid-pagination mutation on the
+/// second page regardless of whether the client pages by position (pre-fix) or
+/// by anchor (post-fix).
+fn email_query_call_index(state: &MockJmapState) -> usize {
+    state
+        .seen_methods
+        .lock()
+        .expect("seen methods lock poisoned")
+        .iter()
+        .filter(|method| method.as_str() == "Email/query")
+        .count()
+}
+
+/// DP-C2 expunge mock. First `Email/query` page: `[m1, m2]`, queryState `eq-1`,
+/// total 5. Second page: `m1` has been expunged so the set is now `[m2, m3, m4,
+/// m5]` (total 4, queryState `eq-2`); a position-2 read returns `[m4, m5]`,
+/// deliberately SKIPPING the still-live `m3` (the naive-paging loss). The
+/// changed queryState is what the fix keys off of.
+async fn mock_expunge_midpagination_full_sync_api(
+    State(state): State<Arc<MockJmapState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let method_calls = body["methodCalls"]
+        .as_array()
+        .expect("methodCalls array present");
+    let method = method_calls[0][0]
+        .as_str()
+        .expect("method name present")
+        .to_string();
+    state
+        .seen_methods
+        .lock()
+        .expect("seen methods lock poisoned")
+        .push(method.clone());
+
+    if let Some(response) = mock_mailbox_full_sync_response(&method) {
+        return response;
+    }
+    match method.as_str() {
+        "Email/query" => {
+            if email_query_call_index(&state) <= 1 {
+                // First page, before the expunge: newest two ids, full total.
+                Json(json!({
+                    "methodResponses": [[
+                        "Email/query",
+                        {
+                            "accountId": "acc1",
+                            "queryState": "eq-1",
+                            "canCalculateChanges": true,
+                            "position": 0,
+                            "total": 5,
+                            "limit": 2,
+                            "ids": ["m1", "m2"]
+                        },
+                        "s0"
+                    ]],
+                    "sessionState": "session-1"
+                }))
+            } else {
+                // Second page, AFTER m1 was expunged: the result mutated, so the
+                // queryState advanced. A position-2 read into [m2,m3,m4,m5]
+                // returns [m4,m5] and skips the still-live m3 — the loss a naive
+                // paginator would commit. The fix sees eq-1 != eq-2 and stops.
+                Json(json!({
+                    "methodResponses": [[
+                        "Email/query",
+                        {
+                            "accountId": "acc1",
+                            "queryState": "eq-2",
+                            "canCalculateChanges": true,
+                            "position": 2,
+                            "total": 4,
+                            "limit": 2,
+                            "ids": ["m4", "m5"]
+                        },
+                        "s0"
+                    ]],
+                    "sessionState": "session-1"
+                }))
+            }
+        }
+        "Email/get" => mock_email_get_response(&Value::Array(method_calls.clone())),
+        other => panic!("unexpected mock JMAP method: {other}"),
+    }
+}
+
+/// DP-C2 new-mail mock. First `Email/query` page: `[m2, m3]`, queryState `eq-1`,
+/// total 4. Between pages a newer message `m1` arrives (sorts to the head), so
+/// the second page reports the advanced queryState `eq-2`. The fix keys off the
+/// queryState shift and withholds prune.
+async fn mock_new_mail_midpagination_full_sync_api(
+    State(state): State<Arc<MockJmapState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let method_calls = body["methodCalls"]
+        .as_array()
+        .expect("methodCalls array present");
+    let method = method_calls[0][0]
+        .as_str()
+        .expect("method name present")
+        .to_string();
+    state
+        .seen_methods
+        .lock()
+        .expect("seen methods lock poisoned")
+        .push(method.clone());
+
+    if let Some(response) = mock_mailbox_full_sync_response(&method) {
+        return response;
+    }
+    match method.as_str() {
+        "Email/query" => {
+            if email_query_call_index(&state) <= 1 {
+                Json(json!({
+                    "methodResponses": [[
+                        "Email/query",
+                        {
+                            "accountId": "acc1",
+                            "queryState": "eq-1",
+                            "canCalculateChanges": true,
+                            "position": 0,
+                            "total": 4,
+                            "limit": 2,
+                            "ids": ["m2", "m3"]
+                        },
+                        "s0"
+                    ]],
+                    "sessionState": "session-1"
+                }))
+            } else {
+                // m1 arrived and shifted the window: queryState advanced.
+                Json(json!({
+                    "methodResponses": [[
+                        "Email/query",
+                        {
+                            "accountId": "acc1",
+                            "queryState": "eq-2",
+                            "canCalculateChanges": true,
+                            "position": 2,
+                            "total": 5,
+                            "limit": 2,
+                            "ids": ["m4", "m5"]
+                        },
+                        "s0"
+                    ]],
+                    "sessionState": "session-1"
+                }))
+            }
+        }
+        "Email/get" => mock_email_get_response(&Value::Array(method_calls.clone())),
+        other => panic!("unexpected mock JMAP method: {other}"),
+    }
+}
+
 /// Shared mailbox half of the full-sync mock: one `inbox` mailbox via
 /// `Mailbox/query` + `Mailbox/get`, recording the method for assertions.
 fn mock_mailbox_full_sync_response(method: &str) -> Option<Json<Value>> {
@@ -405,8 +675,18 @@ async fn mock_paginated_full_sync_api(
         "Email/query" => {
             const ALL: [&str; 5] = ["m1", "m2", "m3", "m4", "m5"];
             const CAP: usize = 2;
-            let position = method_calls[0][1]["position"].as_i64().unwrap_or(0);
-            let start = position.max(0) as usize;
+            // Honor anchor paging (DP-C2): `anchor` + `anchorOffset: 1` starts
+            // just past the anchor id; the first page falls back to `position`.
+            let params = &method_calls[0][1];
+            let start = if let Some(anchor) = params["anchor"].as_str() {
+                let offset = params["anchorOffset"].as_i64().unwrap_or(0);
+                ALL.iter()
+                    .position(|id| *id == anchor)
+                    .map(|p| (p as i64 + offset).max(0) as usize)
+                    .unwrap_or(0)
+            } else {
+                params["position"].as_i64().unwrap_or(0).max(0) as usize
+            };
             let page: Vec<&str> = ALL.iter().skip(start).take(CAP).copied().collect();
             Json(json!({
                 "methodResponses": [[
