@@ -72,6 +72,19 @@
 
   color-scheme: light;
 
+  /* Layering scale — single source of truth is src/layering.ts. These MUST
+     mirror the `Z` values there (guarded by test/layering.test.ts). Class-based
+     surfaces reference them via Tailwind `z-(--z-popover)` etc. */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-surface: 100;
+  --z-popover: 1000;
+  --z-window: 2000;
+  --z-overlay: 3000;
+  --z-modal: 4000;
+  --z-toast: 5000;
+  --z-tooltip: 6000;
+
   /* Surfaces */
   --background: oklch(0.985 var(--ph-surface-chroma) var(--ph-surface-hue));
   --foreground: oklch(0.22 0.01 60);
