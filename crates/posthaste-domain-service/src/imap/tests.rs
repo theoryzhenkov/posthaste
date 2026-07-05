@@ -85,6 +85,68 @@ fn planner_uses_qresync_when_server_and_state_support_it() {
 }
 
 #[test]
+fn planner_resumes_initial_snapshot_from_partial_checkpoint() {
+    // B4: a stored state carrying a partial-initial-sync checkpoint means the
+    // first sync was interrupted mid-snapshot. Even though the server + state
+    // could otherwise support a QRESYNC delta, the planner must RESUME the full
+    // snapshot from the checkpoint — a delta would trust the partial watermark
+    // and could prune the not-yet-fetched tail.
+    let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1", "ENABLE", "QRESYNC"]);
+    let provider = ProviderProfile::from_imap_capabilities(&capabilities);
+    let mut stored = ImapMailboxSyncState::new(
+        MailboxId::from("Inbox"),
+        "INBOX".to_string(),
+        ImapUidValidity(7),
+        "2026-04-25T00:00:00Z".to_string(),
+    );
+    stored.partial_initial_uid = Some(ImapUid(256));
+
+    let plan = plan_imap_mailbox_sync(
+        &capabilities,
+        &provider,
+        Some(&stored),
+        &selected_mailbox(ImapUidValidity(7)),
+    );
+
+    assert_eq!(
+        plan,
+        ImapMailboxSyncPlan::FullSnapshot {
+            reason: ImapFullSyncReason::ResumeInitialSync,
+        }
+    );
+}
+
+#[test]
+fn planner_restarts_full_snapshot_when_uidvalidity_changed_mid_initial_sync() {
+    // A partial checkpoint is only meaningful under the same UIDVALIDITY. When
+    // it changed, the committed prefix is meaningless, so the mailbox must fall
+    // back to a fresh (UidValidityChanged) full snapshot, not a resume.
+    let capabilities = ImapCapabilities::from_tokens(["ENABLE", "QRESYNC"]);
+    let provider = ProviderProfile::from_imap_capabilities(&capabilities);
+    let mut stored = ImapMailboxSyncState::new(
+        MailboxId::from("Inbox"),
+        "INBOX".to_string(),
+        ImapUidValidity(7),
+        "2026-04-25T00:00:00Z".to_string(),
+    );
+    stored.partial_initial_uid = Some(ImapUid(256));
+
+    let plan = plan_imap_mailbox_sync(
+        &capabilities,
+        &provider,
+        Some(&stored),
+        &selected_mailbox(ImapUidValidity(8)),
+    );
+
+    assert_eq!(
+        plan,
+        ImapMailboxSyncPlan::FullSnapshot {
+            reason: ImapFullSyncReason::UidValidityChanged,
+        }
+    );
+}
+
+#[test]
 fn planner_falls_back_to_full_snapshot_after_uidvalidity_change() {
     let capabilities = ImapCapabilities::from_tokens(["ENABLE", "QRESYNC"]);
     let stored = stored_state();
