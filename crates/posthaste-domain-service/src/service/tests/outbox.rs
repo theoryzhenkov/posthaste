@@ -791,6 +791,63 @@ async fn s1_dispatch_uncertain_send_never_duplicates_across_reflush_and_retry() 
     );
 }
 
+/// The phase-classification counterpart to the S1 park (DP-C5/C6): a send that
+/// fails PRE-write — a `GatewayError::Network` (connect refused / offline), the
+/// verdict the JMAP/SMTP send boundary now produces only for provably pre-write
+/// failures — is a safe retryable transient. It must go back to `Pending` (NOT
+/// park as `DispatchUncertain`, NOT fail), so a genuinely offline send still
+/// auto-retries when the link returns, and then settles.
+#[tokio::test]
+async fn pre_write_network_send_error_retries_not_parked() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    // Attempt 1 fails pre-write (offline); attempt 2 (link restored) succeeds.
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Network("connection refused".to_string())));
+
+    let send = service
+        .enqueue_send(&account, draft_request("Outgoing"))
+        .expect("send queues");
+
+    // Flush 1: transient failure -> back to Pending, never parked, no
+    // dispatch-uncertain surfaced.
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush 1");
+    assert!(
+        !events.iter().any(|e| e.topic == "operation.dispatch_uncertain"),
+        "a pre-write network error must not park the send"
+    );
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, send.id);
+    assert_eq!(
+        pending[0].state,
+        OperationState::Pending,
+        "a transient send error re-queues Pending for the next window"
+    );
+
+    // Flush 2: the link is back — the send settles Applied and is removed.
+    let events2 = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush 2");
+    assert!(events2.iter().any(|e| e.topic == "operation.settled"));
+    assert!(
+        service
+            .list_pending_operations(&account)
+            .unwrap()
+            .is_empty(),
+        "the retried send settles and is removed"
+    );
+}
+
 /// A send request that names the saved draft it originates from (D126).
 fn send_request_consuming(subject: &str, draft_key: &str) -> SendMessageRequest {
     SendMessageRequest {

@@ -371,5 +371,11 @@ pub(crate) fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         ImapAdapterError::Client(message) | ImapAdapterError::Smtp(message) => {
             GatewayError::Network(message).into()
         }
+        // A send whose fate is unknown (post-DATA transport drop): keep it
+        // dispatch-uncertain so the outbox parks it, never blind-resending it
+        // into a duplicate delivery (DP-C5/C6, O5/D86).
+        ImapAdapterError::SmtpDispatchUncertain(message) => {
+            GatewayError::DispatchUncertain(message).into()
+        }
     }
 }
