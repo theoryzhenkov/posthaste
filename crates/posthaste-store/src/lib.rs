@@ -54,11 +54,11 @@ use posthaste_domain_model::{
 };
 use posthaste_domain_service::{
     cache_signal_rescore_priority, AutomationBackfillStore, CacheStore, ConversationReadStore,
-    EventStore, ImapMessageLocationStore, ImapMessageLocationWriteStore, ImapSyncStateStore,
-    ImapSyncStateWriteStore, MailboxReadStore, MailboxRoleOverrideStore, MessageCommandStore,
-    MessageDetailStore, MessageListStore, MessageMailboxStore, OperationOutboxStore, RevLogStore,
-    SenderAddressCacheStore, SmartMailboxStore, SourceDataStore, SourceProjectionStore,
-    SyncStateStore, SyncWriteStore, TagReadStore,
+    DraftRegistry, EventStore, ImapMessageLocationStore, ImapMessageLocationWriteStore,
+    ImapSyncStateStore, ImapSyncStateWriteStore, MailboxReadStore, MailboxRoleOverrideStore,
+    MessageCommandStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
+    OperationOutboxStore, RevLogStore, SenderAddressCacheStore, SmartMailboxStore, SourceDataStore,
+    SourceProjectionStore, SyncStateStore, SyncWriteStore, TagReadStore,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 use rusqlite::types::Value as SqlValue;

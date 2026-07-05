@@ -366,10 +366,11 @@ impl MailService {
         // rotation a JMAP draft update causes and is read back on resume, so the
         // client always keys by a stable value.
         request.draft_id = Some(key.clone());
-        let (entity_id, kind) = match self.outbox.resolve_draft_entity(account_id, &key)? {
+        let (entity_id, kind) = match self.draft_registry.resolve_draft_entity(account_id, &key)? {
             Some(entity_id) => (entity_id, OperationKind::DraftUpdate),
             None => {
-                self.outbox.set_draft_alias(account_id, &key, &key)?;
+                self.draft_registry
+                    .set_draft_alias(account_id, &key, &key)?;
                 // A key with no alias that already names an existing draft
                 // message is a draft resumed by its (rotating) provider id — a
                 // legacy draft saved before stable ids, or one created
@@ -413,7 +414,7 @@ impl MailService {
     ) -> Result<Operation, ServiceError> {
         let key = draft_key.to_string();
         let entity_id = self
-            .outbox
+            .draft_registry
             .resolve_draft_entity(account_id, &key)?
             .unwrap_or_else(|| key.clone());
         let operation = self.queue_operation(
@@ -425,7 +426,7 @@ impl MailService {
             OperationKind::DraftDelete,
             serde_json::json!({ "idempotentRedelivery": idempotent_redelivery }),
         )?;
-        self.outbox.remove_draft_alias(account_id, &key)?;
+        self.draft_registry.remove_draft_alias(account_id, &key)?;
         Ok(operation)
     }
 
@@ -449,7 +450,7 @@ impl MailService {
     ) -> Result<CommandAck, ServiceError> {
         let key = draft_key.to_string();
         let entity_id = self
-            .outbox
+            .draft_registry
             .resolve_draft_entity(account_id, &key)?
             .unwrap_or_else(|| key.clone());
         let message_id = MessageId::from(entity_id.as_str());
@@ -634,7 +635,7 @@ impl MailService {
                             )?;
                             // Keep the stable client draft key pointed at the
                             // live provider draft.
-                            self.outbox.update_draft_alias_entity(
+                            self.draft_registry.update_draft_alias_entity(
                                 account_id,
                                 &operation.entity.id,
                                 new_id,
@@ -808,7 +809,10 @@ impl MailService {
         };
         // A key that resolves to no alias and no projected message names a
         // draft already consumed (redelivery) or never saved — nothing to do.
-        let known = self.outbox.resolve_draft_entity(account_id, key)?.is_some()
+        let known = self
+            .draft_registry
+            .resolve_draft_entity(account_id, key)?
+            .is_some()
             || self.draft_message_exists(account_id, key)?;
         if !known {
             return Ok(None);
