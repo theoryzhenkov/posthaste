@@ -343,9 +343,11 @@ async fn gmail_draft_save_reconciles_to_the_synced_canonical_id_with_no_twin() {
         "the synced draft row is under the Gmail canonical id, got {row_id}"
     );
 
-    // Resume the edit. The pending DraftUpdate must target the SAME canonical id
-    // the sync materialized — without the twin fix it would target the orphaned
-    // UID-based id save used to return, stranding the compose session.
+    // Resume the edit. The pending DraftUpdate carries the STABLE compose key
+    // (M70/D136); the canonical id the sync materialized is resolved at FLUSH —
+    // so the no-twin invariant is proven at the provider: flushing the edit
+    // must replace the materialized draft in place, not strand the compose
+    // session beside an orphaned UID-based twin.
     harness
         .core()
         .save_draft(
@@ -367,8 +369,26 @@ async fn gmail_draft_save_reconciles_to_the_synced_canonical_id_with_no_twin() {
         .find(|op| op.kind == OperationKind::DraftUpdate)
         .expect("the resumed edit enqueues a DraftUpdate");
     assert_eq!(
-        edit.entity.id, row_id,
-        "the resumed edit targets the synced draft id, not an orphaned UID-based twin"
+        edit.entity.id,
+        draft_key.as_str(),
+        "the resumed edit carries the stable draft key; the live id is resolved at flush (M70)"
+    );
+
+    // Flush the edit: the registry resolves the key to the synced canonical id,
+    // so the provider replace lands in place — still exactly ONE provider draft
+    // and ONE local Drafts row (no twin).
+    harness.sync_account(&account).await;
+    assert_eq!(
+        gmail.mailbox_message_count(MAILBOX_DRAFTS),
+        1,
+        "the flushed edit replaced the synced draft in place — no provider twin"
+    );
+    let drafts_after_edit = open_mailbox_view(&harness, &account, &drafts_mailbox).await;
+    assert_eq!(
+        drafts_after_edit.rows.len(),
+        1,
+        "exactly one local Drafts row after the resumed edit flushed: {:#?}",
+        drafts_after_edit.rows
     );
 }
 
