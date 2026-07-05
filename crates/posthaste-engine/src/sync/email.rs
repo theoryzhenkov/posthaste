@@ -228,12 +228,24 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
 /// `sink` as it arrives. Returns the complete remote id set and the final
 /// cursor for the reconciliation pass. Bodies are omitted (fetched lazily).
 ///
+/// DP-C2 change-consistency: the delta cursor is anchored to the Email object
+/// `state` captured BEFORE the first `Email/query` (a get-state anchor), not to
+/// the `Email/get` state observed afterwards. Because the cursor predates the
+/// query window, any message that arrived or changed DURING pagination is
+/// replayed by the next `Email/changes` delta rather than silently skipped
+/// (the "invisible new mail" half of DP-C2). The id-set consistency across
+/// pages is enforced separately by [`fetch_all_remote_email_ids`] via the
+/// per-page `queryState` guard.
+///
 /// @spec docs/L1-sync#sync-granularity
 async fn fetch_email_full_streamed(
     client: &Client,
     sink: &mut dyn SyncChunkSink,
 ) -> Result<(Vec<MessageId>, bool, SyncCursor), GatewayError> {
     let started = Instant::now();
+    // DP-C2: capture the Email object state BEFORE paginating `Email/query`, so
+    // the cursor is anchored to a point that precedes the entire snapshot window.
+    let state_before = fetch_email_state(client).await?;
     let (email_ids, remote_ids_complete) = fetch_all_remote_email_ids(client).await?;
     ph_info!(
         events::JMAP_EMAIL_FULL_IDS_FETCHED,
@@ -242,29 +254,21 @@ async fn fetch_email_full_streamed(
         "JMAP full email snapshot IDs fetched"
     );
     if !remote_ids_complete {
-        // DS1 mail-loss guard: the server capped the query and we could not
-        // prove the id set is the full remote truth. Upsert what we retrieved
-        // (below) but the caller MUST NOT prune-by-absence against this set.
+        // DS1/DP-C2 mail-loss guard: either the server capped the query and we
+        // could not prove the id set is the full remote truth, or the query
+        // result mutated mid-pagination (a `queryState` shift from a concurrent
+        // expunge/new mail) so the paginated set is not change-consistent.
+        // Upsert what we retrieved (below) but the caller MUST NOT prune-by-
+        // absence against this set.
         ph_warn!(
             events::JMAP_EMAIL_FULL_QUERY_INCOMPLETE,
             message_count = email_ids.len(),
-            "JMAP full email snapshot query could not be proven complete; \
+            "JMAP full email snapshot query could not be proven complete/consistent; \
              skipping prune-by-absence this cycle"
         );
     }
     let remote_message_ids: Vec<MessageId> = email_ids.iter().cloned().map(MessageId).collect();
-    let mut state = None;
-    if email_ids.is_empty() {
-        let mut request = client.build();
-        request.get_email().ids(std::iter::empty::<&str>());
-        state = Some(
-            request
-                .send_get_email()
-                .await
-                .map_err(map_gateway_error)?
-                .take_state(),
-        );
-    } else {
+    if !email_ids.is_empty() {
         let chunk_count = email_ids.len().div_ceil(100);
         let mut fetched_count = 0usize;
         for (chunk_index, chunk) in email_ids.chunks(100).enumerate() {
@@ -274,9 +278,6 @@ async fn fetch_email_full_streamed(
                 .ids(chunk.iter().map(String::as_str))
                 .properties(email_metadata_properties());
             let mut response = request.send_get_email().await.map_err(map_gateway_error)?;
-            if state.is_none() {
-                state = Some(response.take_state());
-            }
             let page: Vec<MessageRecord> =
                 response.take_list().iter().map(to_message_record).collect();
             fetched_count += page.len();
@@ -306,10 +307,24 @@ async fn fetch_email_full_streamed(
         remote_ids_complete,
         SyncCursor {
             object_type: SyncObject::Message,
-            state: encode_email_cursor_state(&state.unwrap_or_default()),
+            state: encode_email_cursor_state(&state_before),
             updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     ))
+}
+
+/// Fetch the Email object `state` token with a zero-id `Email/get`. Used as the
+/// DP-C2 pre-pagination cursor anchor: capturing it before the first
+/// `Email/query` guarantees the next delta replays everything that changed
+/// during the snapshot window, so mail arriving mid-pagination is never lost.
+async fn fetch_email_state(client: &Client) -> Result<String, GatewayError> {
+    let mut request = client.build();
+    request.get_email().ids(std::iter::empty::<&str>());
+    Ok(request
+        .send_get_email()
+        .await
+        .map_err(map_gateway_error)?
+        .take_state())
 }
 
 /// Page size requested per `Email/query` when assembling the full-snapshot
@@ -322,23 +337,46 @@ const FULL_SNAPSHOT_EMAIL_QUERY_PAGE_SIZE: usize = 5000;
 /// (`receivedAt DESC`) to exhaustion, mirroring the shape of the delta path's
 /// `has_more_changes` loop.
 ///
-/// Returns the accumulated ids and whether the set is PROVABLY complete
-/// (DS1 mail-loss guard). A single unpaginated query is the original bug: RFC
-/// 8620 §5.5 permits a server to cap the result, and prune-by-absence against a
-/// capped set durably deletes every local message beyond the cap though it
-/// still exists remotely. Here we request `calculateTotal` and walk `position`
-/// until one of these holds:
+/// Returns the accumulated ids and whether the set is PROVABLY complete AND
+/// change-consistent (DS1 + DP-C2 mail-loss guards). Two failure modes are
+/// defended here:
+///
+///   - **DS1 (capped query):** RFC 8620 §5.5 permits a server to cap the result,
+///     and prune-by-absence against a capped set durably deletes every local
+///     message beyond the cap though it still exists remotely. We request
+///     `calculateTotal` and page to exhaustion, only declaring `complete` when
+///     the accumulated count reaches the reported `total` or a short/empty tail
+///     page proves we reached the end.
+///
+///   - **DP-C2 (mid-pagination mutation):** a concurrent server-side expunge or
+///     new delivery shifts ids across a page boundary, so a position-paginated
+///     set can skip a still-live id (durable loss) or miss new mail while still
+///     *looking* complete. We defend this two ways: (a) page by ANCHOR id
+///     (`anchor` = last id seen, `anchorOffset` = 1) rather than by numeric
+///     position, so the window is pinned to a stable id instead of a count that
+///     a concurrent expunge silently shifts; and (b) compare the `queryState`
+///     returned on every page against the first page's — any change means the
+///     query result mutated mid-pagination, so the accumulated set is NOT a
+///     consistent snapshot and we report `complete = false` (withhold prune)
+///     rather than prune against a torn set. RFC 8620 §5.5 mandates a stable
+///     `queryState` for an unchanged result, so this is the spec-blessed signal.
+///
+/// The completion terminators are otherwise:
 ///   - the accumulated count reaches the server-reported `total` (complete), or
 ///   - the server returns an empty or short (< applied `limit`) tail page
 ///     (complete — that is the end of the result set), or
-///   - the server returns only already-seen ids, i.e. it is not honoring
-///     `position` and cannot be paged (INCOMPLETE — refuse to prune).
+///   - the server returns only already-seen ids, i.e. it is not honoring the
+///     anchor and cannot be paged (INCOMPLETE — refuse to prune), or
+///   - the `queryState` changed across pages (INCOMPLETE — refuse to prune).
 ///
 /// When `total` is known it is authoritative: `complete` is `ids.len() >= total`.
 async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, bool), GatewayError> {
     let mut ids: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut position: i32 = 0;
+    // DP-C2: page by anchor id, not numeric position. `None` on the first page
+    // (start at the head via `position(0)`); thereafter the last id we saw.
+    let mut anchor: Option<String> = None;
+    let mut first_query_state: Option<String> = None;
     let mut reported_total: Option<usize> = None;
     let complete: bool;
     loop {
@@ -346,7 +384,17 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
         {
             let query = request.query_email();
             query.sort([email::query::Comparator::received_at().descending()]);
-            query.position(position);
+            match &anchor {
+                // Anchor the window to the last id retrieved and start just past
+                // it, so a concurrent expunge cannot silently shift the window.
+                Some(anchor_id) => {
+                    query.anchor(anchor_id.clone());
+                    query.anchor_offset(1);
+                }
+                None => {
+                    query.position(0);
+                }
+            }
             query.limit(FULL_SNAPSHOT_EMAIL_QUERY_PAGE_SIZE);
             query.calculate_total(true);
         }
@@ -354,12 +402,35 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
             .send_query_email()
             .await
             .map_err(map_gateway_error)?;
+
+        // DP-C2 change-consistency guard: the query result must not mutate
+        // across pages. A `queryState` shift means a concurrent expunge/new
+        // delivery changed the set, so the accumulated ids are not a coherent
+        // snapshot — refuse to prune against them this cycle.
+        let page_query_state = response.take_query_state();
+        match &first_query_state {
+            None => first_query_state = Some(page_query_state),
+            Some(first) if *first != page_query_state => {
+                ph_warn!(
+                    events::JMAP_EMAIL_FULL_QUERY_INCOMPLETE,
+                    ids_so_far = ids.len(),
+                    "JMAP Email/query queryState changed mid-pagination \
+                     (concurrent expunge/new mail); snapshot not change-consistent, \
+                     withholding prune-by-absence this cycle"
+                );
+                complete = false;
+                break;
+            }
+            Some(_) => {}
+        }
+
         if let Some(total) = response.total() {
             reported_total = Some(total);
         }
         let applied_limit = response.limit();
         let page = response.take_ids();
         let page_len = page.len();
+        let page_last = page.last().cloned();
         let mut new_in_page = 0usize;
         for id in page {
             if seen.insert(id.clone()) {
@@ -375,14 +446,14 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
                 break;
             }
         }
-        // Empty page: nothing beyond this position. Complete unless a known
-        // total says we are still short (server stopped early → not complete).
+        // Empty page: nothing beyond this anchor. Complete unless a known total
+        // says we are still short (server stopped early → not complete).
         if page_len == 0 {
             complete = reported_total.is_none_or(|total| ids.len() >= total);
             break;
         }
-        // The server returned only ids we have already seen: it is ignoring
-        // `position` and cannot be paged. We cannot prove completeness.
+        // The server returned only ids we have already seen: it is ignoring the
+        // anchor and cannot be paged. We cannot prove completeness.
         if new_in_page == 0 {
             complete = false;
             break;
@@ -394,9 +465,8 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
             complete = reported_total.is_none_or(|total| ids.len() >= total);
             break;
         }
-        position = position.checked_add(page_len as i32).ok_or_else(|| {
-            GatewayError::Rejected("Email/query position overflow while paginating".to_string())
-        })?;
+        // Advance the window to just past the last id the server returned.
+        anchor = page_last;
     }
     Ok((ids, complete))
 }
