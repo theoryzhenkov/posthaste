@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MessageDetail, Recipient } from '@/api/types'
 import { buildRecipientSuggestionOptions } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
+import type { CachedMessageBody } from '@/hooks/useMessageBody'
 import { mailKeys } from '@/mailState'
 import { queryKeys } from '@/queryKeys'
 import { runtimeViews } from '@/runtime/views'
@@ -72,21 +73,42 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
         : undefined,
     [draftSeedQuery.data],
   )
-  // FIX2 — seed the reply composer's quote from the detail-pane cache the user
-  // just had open, so the quoted body + reply recipient + subject appear
-  // INSTANTLY instead of blocking on the fresh `replyContext` Email/get. Only a
-  // PLAIN reply is cache-seedable (the cache lacks the References header + Cc
-  // list a reply-all/send needs); the authoritative fetch still runs and
+  // FIX2 — seed the reply composer's quote from the caches the detail pane the
+  // user just had open populated, so the quoted body + reply recipient + subject
+  // appear INSTANTLY instead of blocking on the fresh `replyContext` Email/get.
+  //
+  // The detail read surface is body-free (`get_message_detail_without_body`): the
+  // header/subject/from/rfcMessageId live in the `mailKeys.message` cache, but
+  // the body is a separate lazy resource the reader loads into
+  // `mailKeys.messageBody` (via `useMessageBody`). So the seed merges the two —
+  // the cached detail for threading-headers-minus-References, the cached body for
+  // the text the `>`-quote is built from.
+  //
+  // Only a PLAIN reply is cache-seedable (the cache lacks the References header +
+  // Cc list a reply-all/send needs); the authoritative fetch still runs and
   // supplies those before send (the composer gates that on `isPlaceholderData`).
   const plainReplyMessageId = intent.kind === 'reply' ? intent.messageId : null
   const replyContextPlaceholder = useMemo(() => {
     if (!plainReplyMessageId) {
       return undefined
     }
-    const cached = queryClient.getQueryData<MessageDetail>(
+    const detail = queryClient.getQueryData<MessageDetail>(
       mailKeys.message(intent.sourceId, plainReplyMessageId),
     )
-    return cached ? replyContextFromCachedMessage(cached) : undefined
+    if (!detail) {
+      return undefined
+    }
+    // The body rarely rides the detail payload; prefer the separately-cached
+    // body the reader warmed. Falls through to `undefined` (no placeholder → the
+    // authoritative fetch streams the quote in) when neither carries the text.
+    const cachedBody = queryClient.getQueryData<CachedMessageBody>(
+      mailKeys.messageBody(intent.sourceId, plainReplyMessageId),
+    )
+    const bodyText = detail.bodyText ?? cachedBody?.bodyText ?? null
+    if (!bodyText) {
+      return undefined
+    }
+    return replyContextFromCachedMessage({ ...detail, bodyText })
   }, [intent.sourceId, plainReplyMessageId, queryClient])
   const replyContextQuery = useQuery({
     queryKey: requiresMessageContext
