@@ -96,6 +96,8 @@ fn full_mailbox_snapshot_removes_stale_local_mailboxes() -> Result<(), StoreErro
             imap_message_locations: Vec::new(),
             deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
+            absence_deleted_imap_message_locations: Vec::new(),
+            absence_deleted_message_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: true,
             replace_all_messages: false,
@@ -122,6 +124,8 @@ fn full_mailbox_snapshot_removes_stale_local_mailboxes() -> Result<(), StoreErro
             imap_message_locations: Vec::new(),
             deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
+            absence_deleted_imap_message_locations: Vec::new(),
+            absence_deleted_message_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: true,
             replace_all_messages: false,
@@ -136,5 +140,122 @@ fn full_mailbox_snapshot_removes_stale_local_mailboxes() -> Result<(), StoreErro
     let mailboxes = store.list_mailboxes(&account)?;
     assert_eq!(mailboxes.len(), 1);
     assert_eq!(mailboxes[0].id, MailboxId::from("inbox"));
+    Ok(())
+}
+
+// spec: docs/eph/AUDIT-L2-architecture-health (DP-C3 / H2)
+// DP-C3 mail-loss: a capped/transiently-empty `Mailbox/query` snapshot must not
+// cascade-delete every local mailbox (membership loss makes messages
+// unreachable). The store's `prune_mailboxes_absent_from_remote_tx` floor guard
+// refuses an empty or drastically-smaller remote mailbox set.
+fn mailbox(id: &str, name: &str) -> posthaste_domain_model::MailboxRecord {
+    posthaste_domain_model::MailboxRecord {
+        id: MailboxId::from(id),
+        name: name.to_string(),
+        role: None,
+        unread_emails: 0,
+        total_emails: 0,
+    }
+}
+
+fn seed_mailboxes(
+    store: &DatabaseStore,
+    account: &AccountId,
+    ids: &[&str],
+) -> Result<(), StoreError> {
+    store.apply_sync_batch(
+        account,
+        &SyncBatch {
+            mailboxes: ids.iter().map(|id| mailbox(id, id)).collect(),
+            replace_all_mailboxes: true,
+            ..SyncBatch::default()
+        },
+    )?;
+    Ok(())
+}
+
+#[test]
+fn mailbox_prune_floor_guard_refuses_empty_remote_set() -> Result<(), StoreError> {
+    // A transiently-empty `Mailbox/query` reaching prune-by-absence must NOT wipe
+    // every local mailbox.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    seed_mailboxes(&store, &account, &["inbox", "archive", "sent", "spam"])?;
+
+    // replace_all_mailboxes with an EMPTY mailbox list would prune all four.
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            mailboxes: Vec::new(),
+            replace_all_mailboxes: true,
+            ..SyncBatch::default()
+        },
+    )?;
+
+    assert_eq!(
+        store.list_mailboxes(&account)?.len(),
+        4,
+        "an empty remote mailbox set must not prune local mailboxes",
+    );
+    Ok(())
+}
+
+#[test]
+fn mailbox_prune_floor_guard_refuses_drastic_shrink() -> Result<(), StoreError> {
+    // A capped listing returning only 1 of 4 mailboxes would prune 3 (> 50%).
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    seed_mailboxes(&store, &account, &["inbox", "archive", "sent", "spam"])?;
+
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            mailboxes: vec![mailbox("inbox", "inbox")],
+            replace_all_mailboxes: true,
+            ..SyncBatch::default()
+        },
+    )?;
+
+    assert_eq!(
+        store.list_mailboxes(&account)?.len(),
+        4,
+        "a drastic mailbox shrink must not prune past the floor",
+    );
+    Ok(())
+}
+
+#[test]
+fn mailbox_prune_allows_legitimate_single_deletion() -> Result<(), StoreError> {
+    // The guard must not over-correct: a complete listing missing one mailbox
+    // (a genuine deletion, under the floor) still prunes it.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    seed_mailboxes(&store, &account, &["inbox", "archive", "sent", "spam"])?;
+
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            mailboxes: vec![
+                mailbox("inbox", "inbox"),
+                mailbox("archive", "archive"),
+                mailbox("sent", "sent"),
+            ],
+            replace_all_mailboxes: true,
+            ..SyncBatch::default()
+        },
+    )?;
+
+    let remaining = store.list_mailboxes(&account)?;
+    assert_eq!(remaining.len(), 3, "a single genuine mailbox deletion still prunes");
+    assert!(
+        !remaining.iter().any(|m| m.id == MailboxId::from("spam")),
+        "the deleted mailbox is pruned",
+    );
     Ok(())
 }

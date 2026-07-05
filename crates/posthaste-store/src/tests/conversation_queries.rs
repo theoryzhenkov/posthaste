@@ -22,6 +22,8 @@ fn list_conversations_preserves_source_names_with_commas() -> Result<(), StoreEr
             imap_message_locations: Vec::new(),
             deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
+            absence_deleted_imap_message_locations: Vec::new(),
+            absence_deleted_message_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
             replace_all_messages: false,

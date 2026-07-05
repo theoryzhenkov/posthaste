@@ -124,12 +124,41 @@ fn apply_sync_batch_tx_impl(
         )?;
     }
 
-    let deleted_message_ids = batch
+    // DP-C4 mail-loss floor guard for IMAP absence-derived deletions. The
+    // authoritative (server-asserted VANISHED) removals in
+    // `deleted_imap_message_locations` / `deleted_message_ids` always apply; the
+    // absence-derived removals (inferred from a possibly-truncated
+    // `UID SEARCH UNDELETED` / header listing) apply only when they do not
+    // drastically shrink the local store. A dropped/empty search makes the whole
+    // local set look "absent", so refusing here preserves local mail while the
+    // VANISHED path still deletes what the server actually reported gone.
+    let absence_prunable_count = batch
+        .absence_deleted_message_ids
+        .iter()
+        .filter(|id| !protected_message_ids.contains(id.as_str()))
+        .count();
+    let apply_absence_deletions =
+        imap_absence_prune_allowed_tx(tx, account_id, absence_prunable_count)?;
+
+    let mut deleted_message_ids = batch
         .deleted_message_ids
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    for location in &batch.deleted_imap_message_locations {
+    let mut deleted_locations: Vec<&ImapMessageLocationKey> =
+        batch.deleted_imap_message_locations.iter().collect();
+    if apply_absence_deletions {
+        deleted_message_ids.extend(
+            batch
+                .absence_deleted_message_ids
+                .iter()
+                .filter(|id| !protected_message_ids.contains(id.as_str()))
+                .cloned(),
+        );
+        deleted_locations.extend(batch.absence_deleted_imap_message_locations.iter());
+    }
+
+    for location in deleted_locations {
         if deleted_message_ids.contains(&location.message_id) {
             continue;
         }
@@ -141,7 +170,7 @@ fn apply_sync_batch_tx_impl(
         )?;
     }
 
-    for message_id in &batch.deleted_message_ids {
+    for message_id in &deleted_message_ids {
         // Capture the message's mailboxes before the delete so we can report the
         // (now decremented) counts; the store handles the row via `deleted:true`
         // but needs countDeltas to keep the sidebar live (was projection-less).
@@ -276,11 +305,70 @@ fn apply_sync_batch_tx_impl(
     Ok(events.into_events())
 }
 
+/// DP-C4 mail-loss floor guard for the IMAP explicit-delete loop. Decide whether
+/// the batch's absence-derived (inferred) message deletions may apply: they are
+/// refused when they would delete more than [`MAX_ABSENCE_PRUNE_FRACTION`] of the
+/// local message store (a truncated/empty `UID SEARCH UNDELETED` makes the whole
+/// local set look "absent"). This mirrors the `prune_messages_absent_from_remote_tx`
+/// floor, applied to the explicit-deletion path the server-assertion (VANISHED)
+/// deletions bypass. Returns `true` when the absence deletions are safe to apply.
+///
+/// Single-deletion carve-out: a LONE inferred deletion is allowed even past the
+/// fraction. The catastrophe this guards is a mailbox-scale wipe (many messages
+/// vanishing at once because a search was dropped/truncated); a single absent UID
+/// is indistinguishable from — and overwhelmingly is — a legitimate expunge (a
+/// CONDSTORE-only delta reconciles exactly this way), and blocking it forever
+/// would leave real deletions stuck in the view. Worst case is one wrongly-lost
+/// message for a mailbox whose entire local set is a single row, never the
+/// mailbox-scale loss the guard exists to prevent. Multi-message drastic prunes
+/// (the actual catastrophe) are still refused.
+fn imap_absence_prune_allowed_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    absence_deleted_message_count: usize,
+) -> Result<bool, StoreError> {
+    if absence_deleted_message_count <= 1 {
+        return Ok(true);
+    }
+    let local_count = tx
+        .query_row_cached(
+            "SELECT COUNT(*) FROM message WHERE account_id = ?1",
+            params![account_id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sql_to_store_error)? as usize;
+    if local_count == 0 {
+        return Ok(true);
+    }
+    let over_floor =
+        (absence_deleted_message_count as f64) > (local_count as f64) * MAX_ABSENCE_PRUNE_FRACTION;
+    if over_floor {
+        ph_warn!(
+            posthaste_observability::events::STORE_SYNC_ABSENCE_PRUNE_REFUSED,
+            account_id = %account_id.as_str(),
+            local_count,
+            would_prune = absence_deleted_message_count,
+            "refusing IMAP absence-derived deletions: inferred removals would \
+             drastically shrink the local store (possible truncated/empty search); \
+             local mail preserved, server-asserted VANISHED deletions still applied"
+        );
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 /// Delete every local mailbox whose id is absent from the complete remote set,
 /// recording a `deleted` mailbox event for each. Shared by the in-batch
 /// `replace_all_mailboxes` snapshot path and the streamed final-reconciliation
 /// pass, which both prune by difference against the authoritative remote ids.
 ///
+/// DP-C3 mail-loss floor guard: like `prune_messages_absent_from_remote_tx`, this
+/// refuses to run when `remote_mailbox_ids` is empty (while locals exist) or when
+/// it would delete more than [`MAX_ABSENCE_PRUNE_FRACTION`] of the local
+/// mailboxes. A capped/transiently-empty `Mailbox/query` must never cascade-delete
+/// every local mailbox (membership loss makes messages unreachable). The engine
+/// additionally only sets the prune flag when the remote listing was PROVEN
+/// exhaustive (paginated to completion); this store guard is the durable backstop.
 pub(crate) fn prune_mailboxes_absent_from_remote_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -298,6 +386,25 @@ pub(crate) fn prune_mailboxes_absent_from_remote_tx(
         .into_iter()
         .map(MailboxId)
         .collect::<BTreeSet<_>>();
+
+    let local_count = local_mailbox_ids.len();
+    if local_count > 0 {
+        let would_prune = local_mailbox_ids.difference(remote_mailbox_ids).count();
+        let over_floor = (would_prune as f64) > (local_count as f64) * MAX_ABSENCE_PRUNE_FRACTION;
+        if remote_mailbox_ids.is_empty() || over_floor {
+            ph_warn!(
+                posthaste_observability::events::STORE_SYNC_ABSENCE_PRUNE_REFUSED,
+                account_id = %account_id.as_str(),
+                local_count,
+                remote_count = remote_mailbox_ids.len(),
+                would_prune,
+                "refusing mailbox prune-by-absence: remote mailbox set empty or \
+                 drastically smaller than local (possible capped Mailbox/query); \
+                 local mailboxes preserved"
+            );
+            return Ok(());
+        }
+    }
 
     for mailbox_id in local_mailbox_ids.difference(remote_mailbox_ids) {
         delete_mailbox_and_track_projection_inputs(tx, account_id, mailbox_id, events)?;

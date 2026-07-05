@@ -113,23 +113,35 @@ async fn fetch_mailbox_delta(
 
 /// Full mailbox snapshot via `Mailbox/query` + `Mailbox/get`.
 ///
-/// Sets `replace_all_mailboxes = true` so the store prunes stale local
-/// mailboxes that no longer exist on the server.
+/// Sets `replace_all_mailboxes = true` (so the store prunes stale local
+/// mailboxes) ONLY when the `Mailbox/query` was paginated to exhaustion and
+/// proven complete. DP-C3 mail-loss guard: a single unpaginated `Mailbox/query`
+/// is the original DS1 bug shape one object type over — RFC 8620 §5.5 lets a
+/// server cap the result, and prune-by-absence against a capped/transiently-empty
+/// listing would delete EVERY local mailbox (a membership cascade that makes
+/// messages unreachable and forces IMAP into a full re-sync). When the listing
+/// cannot be proven complete we still upsert what arrived but do NOT drive
+/// prune-by-absence this cycle.
 ///
 /// @spec docs/L1-sync#full-snapshot-reconciliation
 /// @spec docs/L0-sync#full-snapshot-reconciliation
 async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError> {
     let started = Instant::now();
-    let mailbox_ids = client
-        .mailbox_query(None::<mailbox::query::Filter>, None::<Vec<_>>)
-        .await
-        .map_err(map_gateway_error)?
-        .take_ids();
+    let (mailbox_ids, remote_ids_complete) = fetch_all_remote_mailbox_ids(client).await?;
     ph_info!(
         events::JMAP_MAILBOX_FULL_IDS_FETCHED,
         mailbox_count = mailbox_ids.len(),
+        remote_ids_complete,
         "JMAP full mailbox snapshot IDs fetched"
     );
+    if !remote_ids_complete {
+        ph_warn!(
+            events::JMAP_MAILBOX_FULL_QUERY_INCOMPLETE,
+            mailbox_count = mailbox_ids.len(),
+            "JMAP full mailbox snapshot query could not be proven complete; \
+             skipping mailbox prune-by-absence this cycle"
+        );
+    }
     let mut request = client.build();
     request
         .get_mailbox()
@@ -155,11 +167,89 @@ async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError
     Ok(MailboxSync {
         mailboxes: response.take_list().iter().map(to_mailbox_record).collect(),
         deleted_mailbox_ids: Vec::new(),
-        replace_all_mailboxes: true,
+        // Only an exhaustively-paginated listing earns prune-by-absence.
+        replace_all_mailboxes: remote_ids_complete,
         cursor: SyncCursor {
             object_type: SyncObject::Mailbox,
             state,
             updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     })
+}
+
+/// Page size requested per `Mailbox/query` when assembling the full-snapshot
+/// remote id set. Mailboxes rarely exceed a few dozen, but RFC 8620 §5.5 still
+/// lets a server cap the result, so [`fetch_all_remote_mailbox_ids`] pages to
+/// exhaustion regardless.
+const FULL_SNAPSHOT_MAILBOX_QUERY_PAGE_SIZE: usize = 1000;
+
+/// Fetch the COMPLETE set of remote mailbox ids by paging `Mailbox/query`
+/// (sorted by name for a stable `position` walk) to exhaustion, mirroring
+/// [`super::email::fetch_all_remote_email_ids`].
+///
+/// Returns the accumulated ids and whether the set is PROVABLY complete (DP-C3
+/// mail-loss guard): a capped/transiently-empty result must never drive a
+/// mailbox prune-by-absence. Completion holds when the accumulated count reaches
+/// the server-reported `total`, or the server returns an empty/short tail page;
+/// a server that ignores `position` (only ever returns already-seen ids) is
+/// INCOMPLETE and refuses to prune.
+async fn fetch_all_remote_mailbox_ids(
+    client: &Client,
+) -> Result<(Vec<String>, bool), GatewayError> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut position: i32 = 0;
+    let mut reported_total: Option<usize> = None;
+    let complete: bool;
+    loop {
+        let mut request = client.build();
+        {
+            let query = request.query_mailbox();
+            query.sort([mailbox::query::Comparator::name()]);
+            query.position(position);
+            query.limit(FULL_SNAPSHOT_MAILBOX_QUERY_PAGE_SIZE);
+            query.calculate_total(true);
+        }
+        let mut response = request
+            .send_query_mailbox()
+            .await
+            .map_err(map_gateway_error)?;
+        if let Some(total) = response.total() {
+            reported_total = Some(total);
+        }
+        let applied_limit = response.limit();
+        let page = response.take_ids();
+        let page_len = page.len();
+        let mut new_in_page = 0usize;
+        for id in page {
+            if seen.insert(id.clone()) {
+                ids.push(id);
+                new_in_page += 1;
+            }
+        }
+
+        if let Some(total) = reported_total {
+            if ids.len() >= total {
+                complete = true;
+                break;
+            }
+        }
+        if page_len == 0 {
+            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            break;
+        }
+        if new_in_page == 0 {
+            complete = false;
+            break;
+        }
+        let effective_limit = applied_limit.unwrap_or(FULL_SNAPSHOT_MAILBOX_QUERY_PAGE_SIZE);
+        if page_len < effective_limit {
+            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            break;
+        }
+        position = position.checked_add(page_len as i32).ok_or_else(|| {
+            GatewayError::Rejected("Mailbox/query position overflow while paginating".to_string())
+        })?;
+    }
+    Ok((ids, complete))
 }
