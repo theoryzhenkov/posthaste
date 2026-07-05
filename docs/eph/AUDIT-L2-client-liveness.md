@@ -1,6 +1,6 @@
 ---
 scope: L2
-summary: "Foundational client-liveness audit — traces the complete live-update path (new-message row + unread counter) server→link→WASM store→React. Verdict: the push architecture IS continuous and correct end-to-end in the bundled topology; non-liveness comes from the LINK/RECOVERY layer being edge-triggered only. Two decisive gaps: (W1) the near-end engine has no stream-liveness watchdog — a silently-dead SSE freezes the client forever with no recovery edge; (C1) mailbox counts have no level-triggered reconcile at all (RFC D112-RC2/D113 never landed) and a stale live count permanently shadows the server count. Plus a bounded adapter-install race (R1) and a structural split-topology hole (T1). Fix direction: level-triggered liveness, not a subscription redesign."
+summary: "Client-liveness audit. PRIMARY (owner's daily pain, §0): steady-state OPTIMISTIC-COVERAGE lag — a user's own mark-read decrements the SMART mailbox counter instantly but the SOURCE folder counter lags ~10-15s, and a draft edit shows in Drafts ~10-15s late. Root cause: the M46/D116 migration moved source-mailbox counts onto the live-store/countDelta channel, but (a) the optimistic fold emits no count delta (count optimism explicitly deferred — 'mutation-id-end-to-end') and (b) the client-mutation echo message.updated carries NO countDeltas/projection (the store command computes them, the service discards them and hand-builds a bare event), while smart counts kept working by accident because they still ride react-query invalidation off the synchronously-written canonical row. Draft edits have no optimistic upsert (M65 fold_effect=None, deferred D132). SECONDARY (recovery, §4): W1 silent-dead-stream watchdog gap, C1 counts have no recovery-edge reconcile. Fix: one coverage model — every message.updated (sync AND optimistic echo) carries projection+countDeltas, and/or optimistic count deltas on the fold."
 modified: 2026-07-05
 reviewed: 2026-07-05
 lifecycle: ephemeral
@@ -18,8 +18,204 @@ dependents: []
 > and the landed parts of M44 (recovery-edge reconcile, RC1/RC3). Cross-links
 > RFC-L2-client-resilience (M40–M50, D112). All paths absolute under
 > `/home/usr.prj_posthaste/src/.workspaces/web-tags` (elided below as `R/`).
+>
+> **[Priority update 2026-07-05]** The owner reframed the actual daily pain: it
+> is NOT primarily the silent-stream recovery freeze (W1/C1, kept below as §3–§5)
+> — it is a STEADY-STATE lag on the owner's OWN mutations (mark-read source
+> counter, draft edit). That is a **distinct** finding, traced fresh in **§0**,
+> and it is the bigger UX win. The recovery findings (W1/C1) remain valid but are
+> secondary.
 
-## Executive summary
+## §0. Steady-state optimistic-coverage lag (the primary finding)
+
+**Symptom (owner):** (1) mark-read a message shown in a smart mailbox → the SMART
+mailbox unread counter drops instantly, but the SOURCE/physical folder counter
+(which also counted it unread) lags ~10-15s; (2) edit a draft → the new version
+appears in Drafts only ~10-15s later. Both should be instant.
+
+**Root cause in one line:** the M46/D116 count migration moved *source-mailbox*
+counts off react-query onto the live-store slice, which is fed **only** by
+server `countDeltas` on the stream — but neither the optimistic fold nor the
+client-mutation *echo* event ever produces a `countDelta`, so the source counter
+cannot move until a later **sync/flush** cycle re-emits a countDelta-carrying
+`message.updated`. Smart-mailbox counts were **not** migrated (still react-query),
+so they kept a working live path — a react-query invalidation that refetches the
+**synchronously-written canonical row**. The asymmetry is a migration seam, not a
+smart-vs-source computation difference.
+
+### A. Mark-read: why smart is instant and source lags
+
+Trace of a client mark-read (`setKeywords` remove `$seen` → via `runMutation`):
+
+1. **Client optimistic fold — updates the ROW, never a COUNT.** The entity-store
+   adapter folds `acceptMutation`
+   (`R/apps/web/src/runtime/replica/entityStoreAdapter.ts:632-732`) →
+   `EntityStore::accept_mutation`
+   (`R/crates/posthaste-replica-projector/src/entity_store.rs:162-172`) only
+   re-derives the message projection + view membership. **Counts are explicitly
+   NOT touched by the fold** — the store's own contract:
+   `entity_store.rs:42-45` ("Counts are **not** derived… a count delta from the
+   authority is the only path. Optimism for counts is a later concern
+   (mutation-id-end-to-end)"). Count scalars move only via `apply_count_delta`
+   (`R/crates/posthaste-replica-projector/src/projection.rs:303-307`), fed only
+   by ingested `countDeltas` (`entity_store.rs:148-152`). So the fold moves no
+   counter — neither smart nor source.
+
+2. **The client-mutation ECHO `message.updated` carries NO countDeltas and NO
+   projection.** The mutation reaches the authority server's `set_keywords`
+   (`R/crates/posthaste-authority-server/src/authority_server/commands.rs:150-163`)
+   → `MailService::set_keywords`
+   (`R/crates/posthaste-domain-service/src/service/mutation.rs:153-171`) →
+   `queue_then_emit_message_operation` (`mutation.rs:37-91`). That function
+   applies the change to the canonical SQLite row synchronously
+   (`apply_assertion_to_canonical`, `mutation.rs:61-74, 98-144`) — but it
+   **discards** the store command's `CommandResult` (which *does* build
+   `countDeltas`: `R/crates/posthaste-store/src/mutations/commands.rs:94-110`;
+   the `offload(...).await?` at `mutation.rs:111-114` throws the events away) and
+   instead hand-builds its own event `{ messageId, changes:{ keywords:true } }`
+   with **no `projection`, no `countDeltas`** (`mutation.rs:75-90`, payload from
+   `:165-168`). This is what `publish_events` broadcasts
+   (`authority_server/commands.rs:160`).
+
+3. **The client store drops that echo.** `storeUpdateFromEvent` returns `null`
+   for a non-deleted event with no projection
+   (`entityStoreAdapter.ts:918-925`), so the echo materializes nothing and no
+   `countDelta` is applied → the **source** live-store count
+   (`useMailboxCounts`, `R/apps/web/src/components/sidebar/SidebarItems.tsx:119-120`,
+   `SourceSection.tsx:61-68`; slice `R/apps/web/src/live-store/store.ts:113-132`)
+   does not move.
+
+4. **Smart mailboxes ride a different, still-live channel.** The same echo drives
+   the M47 boundary handler (`R/apps/web/src/domain-cache/handlers.ts:130-161`):
+   the `keywords` branch calls `invalidateMailboxReadModels`
+   (`:153-161`) which invalidates **`queryKeys.smartMailboxes`**
+   (`R/apps/web/src/domain-cache/invalidations.ts:106`) → the `smartMailboxes`
+   query refetches (`R/apps/web/src/mailboxNavigationReadModels.ts:161-163`) →
+   reads the **server-computed** unread from the canonical row that step 2 already
+   wrote synchronously → the sidebar's `smartMailbox.unreadMessages`
+   (`R/apps/web/src/components/sidebar/SidebarContent.tsx:86`) updates in ~one
+   local round-trip = "instant." **Crucially, the same `invalidateMailboxReadModels`
+   SKIPS `queryKeys.mailboxes(accountId)`** — the source-folder counts —
+   `{ skipStoreOwned:true }` (`invalidations.ts:101-105`), because "the store owns
+   counts." So the source counter gets neither a countDelta (step 3) nor a
+   refetch. Nothing updates it.
+
+5. **The source counter finally moves on the next SYNC/FLUSH.** The mark-read
+   triggers an immediate follow-up sync
+   (`trigger_outbox_flush` → `SyncTrigger::Manual`,
+   `authority_server/commands.rs:135-148, 161`). The **sync apply path** —
+   distinct from the optimistic echo — emits `message.updated` **with** projection
+   + countDeltas (`R/crates/posthaste-store/src/mutations/message_apply.rs:45-54`
+   → `projection_tracking.rs:72-106`, projection at `:98-100`, countDeltas at
+   `:104`). That event the client store *does* ingest → `writeMailboxCount`
+   (`entityStoreAdapter.ts:1004-1006, 1067-1083`) → source counter drops. The wait
+   is that sync's connect + provider round-trip.
+
+**Confirm/refute the hypothesis:** *Refined, partly refuted.* Both smart and
+source counts are **server-authoritative** (smart is not "client-computed from
+the entity store"). The real asymmetry is the **delivery channel**: smart counts
+still ride react-query invalidation (which refetches from the synchronously-
+written canonical row → fast), while source counts were migrated to the
+live-store/countDelta channel — and **the optimistic path (fold and echo) emits
+no countDelta**, so source counts are stranded until a sync re-emits one.
+Confirmed: the fold applies no source-mailbox count delta; confirmed: the echo
+event omits countDeltas/projection; confirmed: the counts query is deliberately
+not invalidated for source (`skipStoreOwned`).
+
+### B. Draft-edit lag
+
+Confirmed as the coordinator described. `SaveDraft` is routed through
+`runMutation` with **no optimistic fold** (M65 `fold_effect=None` — "the fold
+vocabulary can't express an upsert":
+`authority_server/commands.rs:730-738`; client note
+`R/apps/web/src/runtime/mutations.ts:236-238`). The authority `save_draft`
+**only enqueues an outbox op and triggers a flush — it publishes NO event
+synchronously** (`authority_server/commands.rs:267-276`; service side just
+`queue_operation`, `R/crates/posthaste-domain-service/src/service/outbox.rs:351-397`).
+Contrast `discard_draft` (D130), which *does* `publish_events` immediately
+(`commands.rs:294-303`) — that is why discard blinks instantly but save does not.
+The draft's optimistic existence lives **only in the outbox, with no projection
+row** (RFC-L2-draft-identity:164-166). So the Drafts list updates only when the
+flush pushes the draft to the provider and the resulting create/update is
+observed and re-emitted as the D132 reconciling `message.updated` — i.e. on the
+**flush/sync**, NOT on save-settlement. The M65 worker deferred exactly this as
+"a latency cost, reconciles via sync."
+
+### C. What the ~10-15s actually is
+
+It is **the triggered follow-up sync's flush + provider round-trip**, not the
+poll interval. Both A(5) and B fire `trigger_outbox_flush` →
+`trigger_account_sync(SyncTrigger::Manual)` immediately
+(`authority_server/commands.rs:135-148`); the wait is that sync acquiring a slot
+from the global concurrency governor (`sync_flow.rs:163`), connecting, pushing
+the op, re-observing the provider, and emitting the countDelta/projection-carrying
+`message.updated`. The 60s `poll_interval` default
+(`R/crates/posthaste-config/src/daemon.rs:97`) is only the **fallback ceiling**
+if the triggered flush fails. So the user is waiting on **one IMAP/JMAP
+connect+round-trip**, typically several-to-~15s — not a fixed timer. (Other loops
+nearby for reference: `CACHE_WORKER_INTERVAL` 2s, `AUTOMATION_BACKFILL_INTERVAL`
+15s, `R/crates/posthaste-authority-server/src/supervisor/types.rs:5-13` — none of
+these drive the count; the flush-sync does.)
+
+### D. Fix direction (one coverage model, not a patch)
+
+The principle: **every `message.updated` must carry the same enriched payload
+(projection + countDeltas) regardless of origin**, so the client entity store is
+the single coverage model for counts — sync events and optimistic-echo events
+alike. Today the sync path is enriched and the optimistic-echo path is not; that
+split IS the bug.
+
+- **A — two layers, do the first now:**
+  1. *Stop discarding the countDeltas the store already computes.* The
+     `MessageCommandStore::set_keywords`/`replace_mailboxes` `CommandResult`
+     already contains a projection+countDelta-carrying event
+     (`store/mutations/commands.rs:94-110`, `write_store.rs:20-26`); route THAT
+     event through `publish_events` instead of hand-building a bare
+     `{changes:{keywords:true}}` one in `queue_then_emit_message_operation`
+     (`mutation.rs:75-90`). The canonical row is already written synchronously,
+     so these counts are correct-now. This alone collapses the source-counter lag
+     from ~10-15s to **sub-second** (local echo), with no new optimism machinery —
+     and it unifies the echo with the sync path (one payload shape). This is the
+     recommended immediate fix.
+  2. *(Optional, for true zero-round-trip instant)* implement the deferred
+     "optimism for counts (mutation-id-end-to-end)" the store contract names
+     (`entity_store.rs:44`): on the fold, apply an optimistic ±1 unread delta to
+     each of the message's source mailboxes, settled/reverted with the mutation
+     like row optimism. Needed only if (1)'s sub-second echo is still judged too
+     slow; (1) is the 90% win.
+  - *Also correct the seam:* once (1) lands, the smart-vs-source asymmetry
+     disappears at the source (both move on the echo); the `skipStoreOwned` skip
+     of `queryKeys.mailboxes` becomes correct rather than lag-inducing.
+
+- **B — the D132 optimistic draft upsert is the right fix, and the draft-identity
+  refactor already scopes its prerequisite.** The blocker is real (the fold
+  vocabulary has no upsert). But RFC-L2-draft-identity's stable `draft_key` +
+  `draft_registry` (M63–M69, esp. the M69/D135 sync write-through) is exactly the
+  identity that makes an optimistic draft-upsert *reconcilable*: materialize the
+  saved draft version into the entity store immediately under the stable key, and
+  let the D132 reconciling `message.updated` (flush-observed, provider id rotated)
+  converge it. That is a bounded fold-vocabulary extension (add a draft-upsert
+  assertion) done *principled* under the draft-identity model — not an ad-hoc
+  Drafts-list patch. Recommend it be scheduled as the "deferred D132 optimistic
+  upsert" follow-up the M65 worker explicitly parked, gated on M69 landing.
+
+**Classification:** A(1) and B are bounded gaps that restore the *single coverage
+model the M46/D116 migration intended* (every count update rides projection+
+countDeltas on the stream). Neither is a redesign; both close a migration seam.
+
+### E. §0 vs W1/C1 — which is the bigger UX win
+
+**§0 is the bigger win.** It fires on **every** ordinary interaction the owner
+performs (mark-read, move, draft edit) in the **healthy steady state**, on
+**every** session — a guaranteed multi-second lag on the most common actions.
+W1/C1 fire only on a **failure edge** (a silently-dead socket / a missed-event
+recovery gap) that many sessions never hit. §0 also has the cheaper fix: A(1) is
+a server-side event-payload change (publish the countDeltas the store already
+computes) with no new client machinery, versus W1's engine watchdog. Recommend
+sequencing A(1) first (highest value / lowest cost), then B (gated on the M69
+draft-identity work), then W1, then C1.
+
+
 
 **The architecture is NOT snapshot-on-open + periodic-resync.** There is a real,
 continuous push of new-message rows *and* count deltas during steady state: every
