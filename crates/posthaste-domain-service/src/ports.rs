@@ -19,6 +19,7 @@ use posthaste_domain_model::{
 
 mod cache_store;
 mod composite;
+mod draft_registry;
 mod gateway;
 mod progress;
 mod read_store;
@@ -29,6 +30,7 @@ pub use cache_store::CacheStore;
 pub use composite::{
     MailStore, SecretCasOutcome, SecretStore, ServiceResultExt, SharedGateway, SharedSecretStore,
 };
+pub use draft_registry::DraftRegistry;
 pub use gateway::{MailGateway, SyncChunkSink};
 pub use progress::SyncProgressReporter;
 pub use read_store::{
