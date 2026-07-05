@@ -4,10 +4,12 @@ import type { AccountOverview } from '../src/api/types'
 import type { ExistingAccountEditorModel } from '../src/components/settings-panel/accountEditorModel'
 import {
   EMPTY_FORM,
+  applyImapDefaults,
   buildAccountAppearanceInput,
   buildCreateAccountPayload,
   buildSecretInput,
   buildUpdateAccountPayload,
+  imapDefaultsForEmail,
   normalizeAccountInitials,
   parseEmailPatterns,
   syncProgressLabel,
@@ -155,6 +157,102 @@ describe('account form helpers', () => {
     expect(payload.enabled).toBe(true)
     expect(payload.emailPatterns).toEqual(['me@x.com', '*@x.com'])
     expect(payload.secret).toEqual({ mode: 'replace', password: 'secret' })
+  })
+
+  it('builds a complete IMAP/SMTP transport when the driver is imapSmtp', () => {
+    const payload = buildCreateAccountPayload({
+      ...EMPTY_FORM,
+      name: 'Fastmail',
+      driver: 'imapSmtp',
+      emailPatternsText: 'me@fastmail.com',
+      username: 'me@fastmail.com',
+      password: 'app-pw',
+      imapHost: 'imap.fastmail.com',
+      imapPort: '993',
+      imapSecurity: 'tls',
+      smtpHost: 'smtp.fastmail.com',
+      smtpPort: '465',
+      smtpSecurity: 'tls',
+    })
+    expect(payload.driver).toBe('imapSmtp')
+    expect(payload.transport).toEqual({
+      provider: 'generic',
+      auth: 'appPassword',
+      baseUrl: '',
+      username: 'me@fastmail.com',
+      imap: { host: 'imap.fastmail.com', port: 993, security: 'tls' },
+      smtp: { host: 'smtp.fastmail.com', port: 465, security: 'tls' },
+    })
+    expect(payload.secret).toEqual({ mode: 'replace', password: 'app-pw' })
+  })
+
+  it('falls back to default ports when the IMAP/SMTP port fields are invalid', () => {
+    const payload = buildCreateAccountPayload({
+      ...EMPTY_FORM,
+      driver: 'imapSmtp',
+      username: 'me@example.com',
+      emailPatternsText: 'me@example.com',
+      imapHost: 'imap.example.com',
+      imapPort: 'not-a-number',
+      smtpHost: 'smtp.example.com',
+      smtpPort: '',
+    })
+    expect(payload.transport.imap?.port).toBe(993)
+    expect(payload.transport.smtp?.port).toBe(465)
+  })
+
+  it('infers IMAP/SMTP defaults from a known provider email domain', () => {
+    const fastmail = imapDefaultsForEmail('user@fastmail.com')
+    expect(fastmail?.imap).toEqual({
+      host: 'imap.fastmail.com',
+      port: 993,
+      security: 'tls',
+    })
+    expect(fastmail?.smtp).toEqual({
+      host: 'smtp.fastmail.com',
+      port: 465,
+      security: 'tls',
+    })
+    expect(fastmail?.auth).toBe('appPassword')
+    expect(fastmail?.appPasswordHint).toContain('Fastmail')
+
+    const icloud = imapDefaultsForEmail('user@icloud.com')
+    expect(icloud?.provider).toBe('icloud')
+    expect(icloud?.smtp).toEqual({
+      host: 'smtp.mail.me.com',
+      port: 587,
+      security: 'startTls',
+    })
+  })
+
+  it('guesses generic imap./smtp. hosts for an unknown domain', () => {
+    const defaults = imapDefaultsForEmail('person@acme.example')
+    expect(defaults?.imap.host).toBe('imap.acme.example')
+    expect(defaults?.smtp.host).toBe('smtp.acme.example')
+    expect(defaults?.auth).toBe('password')
+    expect(imapDefaultsForEmail('')).toBeNull()
+  })
+
+  it('prefills empty endpoint fields from defaults but keeps user edits', () => {
+    const prefilled = applyImapDefaults({
+      ...EMPTY_FORM,
+      driver: 'imapSmtp',
+      username: 'me@fastmail.com',
+      imapHost: '',
+      smtpHost: '',
+    })
+    expect(prefilled.imapHost).toBe('imap.fastmail.com')
+    expect(prefilled.smtpHost).toBe('smtp.fastmail.com')
+
+    const edited = applyImapDefaults({
+      ...EMPTY_FORM,
+      driver: 'imapSmtp',
+      username: 'me@fastmail.com',
+      imapHost: 'mail.custom.test',
+      smtpHost: 'send.custom.test',
+    })
+    expect(edited.imapHost).toBe('mail.custom.test')
+    expect(edited.smtpHost).toBe('send.custom.test')
   })
 
   it('omits transport/secret on managed-OAuth updates but includes them for manual credentials', () => {

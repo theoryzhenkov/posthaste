@@ -6,15 +6,19 @@
  */
 export {
   EMPTY_FORM,
+  applyImapDefaults,
   buildAccountAppearanceInput,
   buildCreateAccountPayload,
   buildSecretInput,
+  buildTransportInput,
   buildUpdateAccountPayload,
   emptyAccountForm,
   formFromAccount,
+  imapDefaultsForEmail,
   normalizeAccountInitials,
   parseEmailPatterns,
 } from './helpers/accountForms'
+export type { ImapProviderDefaults } from './helpers/accountForms'
 export {
   statusTone,
   syncProgressLabel,

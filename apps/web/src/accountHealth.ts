@@ -12,6 +12,7 @@
  *
  * @spec docs/eph/RFC-L2-client-resilience.md#m45
  */
+import { ApiError } from './api/errors'
 import type { AccountOverview, AccountRuntime } from './api/types'
 
 export type AccountErrorCategory =
@@ -227,6 +228,94 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 /** Best-effort human provider name for phrasing (falls back to account name). */
 export function providerDisplayName(account: AccountOverview): string {
   return PROVIDER_DISPLAY_NAMES[account.connection.providerKind] ?? account.name
+}
+
+/**
+ * Classification of an add/edit/verify-account failure into the same coarse
+ * {@link AccountErrorCategory} space used by the runtime health surface, so the
+ * onboarding form speaks the recovery-UX vocabulary instead of a raw string.
+ *
+ * The create/verify routes return an {@link ApiError} whose `code` overlaps the
+ * runtime `lastSyncErrorCode` space (`auth_error`, `network_error`, …) plus a
+ * few setup-only validation codes (`account_*_required`, `invalid_*`). We map
+ * both, then re-phrase for the setup context (e.g. "check the host/port" rather
+ * than "reconnect").
+ */
+export interface AccountSetupError {
+  category: AccountErrorCategory
+  message: string
+}
+
+const SETUP_CONFIG_CODES = new Set([
+  'account_base_url_required',
+  'account_username_required',
+  'account_secret_required',
+  'account_sender_required',
+  'invalid_account',
+  'invalid_secret',
+  'invalid_provider',
+  'invalid_compose',
+])
+
+function setupCategoryForCode(code: string | null): AccountErrorCategory {
+  if (code !== null && SETUP_CONFIG_CODES.has(code)) {
+    return 'config'
+  }
+  return presentationForCode(code).category
+}
+
+const SETUP_MESSAGES: Record<AccountErrorCategory, string> = {
+  auth: 'Sign-in was rejected — check the username and password.',
+  network:
+    "Couldn't reach the mail server — check the host, port, and your connection.",
+  rateLimited: 'The mail server is throttling requests — try again shortly.',
+  config:
+    'The server settings look wrong — check the host, port, and security.',
+  storage: 'A local database problem blocked saving this account.',
+  internal: 'Something went wrong setting up this account — try again.',
+}
+
+/**
+ * Turn a create/verify failure into a classified, human setup message. Reuses
+ * the runtime classification and never surfaces a raw provider/library string.
+ * `appPasswordHint`, when provided, is appended to auth failures (e.g. the
+ * Fastmail/iCloud/Gmail app-password reminder).
+ */
+export function classifyAccountSetupError(
+  error: unknown,
+  appPasswordHint?: string | null,
+): AccountSetupError {
+  const code = error instanceof ApiError ? (error.code ?? null) : null
+  const category = setupCategoryForCode(code)
+  let message = SETUP_MESSAGES[category]
+
+  // A few setup codes deserve a more specific instruction than the category
+  // default, since they name the exact missing field.
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'account_sender_required':
+        message =
+          'Add your email address in the Email addresses field — IMAP accounts need a concrete sender.'
+        break
+      case 'account_username_required':
+        message = 'A username is required for an IMAP/SMTP account.'
+        break
+      case 'account_secret_required':
+      case 'invalid_secret':
+        message = 'A password is required for this account.'
+        break
+      case 'account_base_url_required':
+        message = 'A JMAP base URL is required for this account.'
+        break
+      default:
+        break
+    }
+  }
+
+  if (category === 'auth' && appPasswordHint) {
+    message = `${message} ${appPasswordHint}`
+  }
+  return { category, message }
 }
 
 /** The subset of enabled accounts currently needing attention (M45 global). */
