@@ -214,12 +214,14 @@ fn remove_deletes_the_operation() -> Result<(), StoreError> {
 }
 
 #[test]
-fn resolve_draft_entity_falls_back_to_projection_when_no_alias() -> Result<(), StoreError> {
-    // The owner repro (DS2/D131): a draft synced from the server / created on
-    // another device / surviving a restart has a `message` row keyed by its
-    // live server Email id and carrying the stable `draft_id`, but NO
-    // `draft_alias` (that is only populated by a create/save in THIS runtime).
-    // The stable-id list-row discard must still resolve to the live Email id.
+fn sync_write_through_registers_a_synced_draft_for_registry_only_resolution() -> Result<(), StoreError> {
+    // The owner repro (DS2/D131), M69 shape: a draft synced from the server /
+    // created on another device / surviving a restart has a `message` row keyed
+    // by its live server Email id and carrying the stable `draft_id`, with no
+    // prior in-session registry row. Sync's in-transaction write-through (D135)
+    // registers stable key → live Email id, so the stable-id list-row discard
+    // resolves to the live id via the registry ALONE — the projection fallback
+    // is deleted.
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -235,19 +237,29 @@ fn resolve_draft_entity_falls_back_to_projection_when_no_alias() -> Result<(), S
         },
     )?;
 
-    // No alias row exists, so resolution falls back to the projection and
-    // returns the live/canonical server Email id.
     assert_eq!(
         store.resolve_draft_entity(&account, "draft-local-X")?,
-        Some("E1".to_string())
+        Some("E1".to_string()),
+        "sync write-through must register the synced draft in the registry"
+    );
+
+    // Prove resolution consults the registry ALONE: with the registry row
+    // removed, the surviving `message.draft_id` projection row must NOT be
+    // consulted (the D131 alias-then-projection fallback is gone).
+    store.remove_draft_alias(&account, "draft-local-X")?;
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-X")?,
+        None,
+        "no projection fallback: resolution is one SELECT against the registry"
     );
     Ok(())
 }
 
 #[test]
-fn resolve_draft_entity_prefers_alias_over_projection() -> Result<(), StoreError> {
-    // Precedence: an in-session `draft_alias` is the freshest create/rotate
-    // mapping (possibly mid-id-rotation) and MUST win over the projection.
+fn in_session_save_and_sync_write_the_same_registry() -> Result<(), StoreError> {
+    // In-session saves and sync now share ONE table (M69): a later in-session
+    // save (possibly mid-id-rotation, mapping the key to a temp entity id)
+    // overwrites the sync-written row, and resolution returns the latest write.
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -267,15 +279,160 @@ fn resolve_draft_entity_prefers_alias_over_projection() -> Result<(), StoreError
     assert_eq!(
         store.resolve_draft_entity(&account, "draft-local-X")?,
         Some("draft-temp-live".to_string()),
-        "the in-session alias wins over the projection row"
+        "the in-session save is the latest registry write and wins"
     );
     Ok(())
 }
 
 #[test]
-fn resolve_draft_entity_none_when_absent_everywhere() -> Result<(), StoreError> {
-    // A genuinely-absent draft (no alias, no projection row) still resolves to
-    // None so the D133 NotFound guard fires and the client reverts.
+fn sync_observed_rotation_repoints_the_registry() -> Result<(), StoreError> {
+    // Rotation observed by sync (another device / a past session saved the
+    // draft, rotating its provider id E1 → E2): the write-through repoints the
+    // registry to the new live id — in the same batch (delete + upsert) and
+    // across batches (upsert first, stale-row delete later).
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    let mut draft_v1 = sample_message("E1", "inbox", Some("draft-mime"));
+    draft_v1.draft_id = Some("draft-local-X".to_string());
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![draft_v1],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    // Same batch: sync reports E1 deleted and delivers the successor E2.
+    let mut draft_v2 = sample_message("E2", "inbox", Some("draft-mime-2"));
+    draft_v2.draft_id = Some("draft-local-X".to_string());
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            deleted_message_ids: vec![MessageId::from("E1")],
+            messages: vec![draft_v2],
+            ..SyncBatch::default()
+        },
+    )?;
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-X")?,
+        Some("E2".to_string()),
+        "an observed rotation repoints the registry to the new live id"
+    );
+
+    // Across batches: the successor E3 arrives first; the stale E2 delete in a
+    // later batch must not clobber the already-repointed mapping.
+    let mut draft_v3 = sample_message("E3", "inbox", Some("draft-mime-3"));
+    draft_v3.draft_id = Some("draft-local-X".to_string());
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![draft_v3],
+            ..SyncBatch::default()
+        },
+    )?;
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            deleted_message_ids: vec![MessageId::from("E2")],
+            ..SyncBatch::default()
+        },
+    )?;
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-X")?,
+        Some("E3".to_string()),
+        "a stale-row delete after the successor synced leaves the mapping fresh"
+    );
+    Ok(())
+}
+
+#[test]
+fn sync_confirmed_gone_forgets_the_registry_mapping() -> Result<(), StoreError> {
+    // Confirmed-gone: sync deletes the draft row and no projected row carries
+    // the key anymore — the registry forgets, so the key resolves to None and
+    // the D133 NotFound guard fires on a subsequent discard.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    let mut draft = sample_message("E1", "inbox", Some("draft-mime"));
+    draft.draft_id = Some("draft-local-X".to_string());
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![draft],
+            ..SyncBatch::default()
+        },
+    )?;
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            deleted_message_ids: vec![MessageId::from("E1")],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-X")?,
+        None,
+        "a sync-confirmed deletion forgets the registry mapping"
+    );
+    Ok(())
+}
+
+#[test]
+fn snapshot_prune_forgets_a_pruned_drafts_registry_mapping() -> Result<(), StoreError> {
+    // The prune-by-absence path (replace_all_messages snapshot) is a sync
+    // deletion too: a draft absent from the authoritative remote set is pruned
+    // AND its registry mapping is forgotten in the same transaction.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    let mut draft = sample_message("E1", "inbox", Some("draft-mime"));
+    draft.draft_id = Some("draft-local-X".to_string());
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![
+                draft,
+                sample_message("M2", "inbox", Some("mime-2")),
+                sample_message("M3", "inbox", Some("mime-3")),
+            ],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    // Full snapshot without the draft: E1 is pruned (1 of 3 locals — under the
+    // DS1 floor), M2/M3 survive.
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            replace_all_messages: true,
+            messages: vec![
+                sample_message("M2", "inbox", Some("mime-2")),
+                sample_message("M3", "inbox", Some("mime-3")),
+            ],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-X")?,
+        None,
+        "a snapshot prune of the draft row forgets its registry mapping"
+    );
+    Ok(())
+}
+
+#[test]
+fn resolve_draft_entity_none_when_absent() -> Result<(), StoreError> {
+    // A genuinely-absent draft (no registry row) resolves to None so the D133
+    // NotFound guard fires and the client reverts.
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");

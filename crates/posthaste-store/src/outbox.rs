@@ -319,9 +319,12 @@ impl OperationOutboxStore for DatabaseStore {
     }
 }
 
-/// M68: the draft-identity methods, extracted from `OperationOutboxStore` into
-/// the dedicated `DraftRegistry` port — same SQL, same behavior, still backed
-/// by the `draft_alias` table (the schema rename is M73).
+/// M68/M69: the draft-identity methods behind the `DraftRegistry` port, backed
+/// by the `draft_alias` table (the schema rename to `draft_registry` is M73).
+/// Since M69 the table is the SINGLE authority for the stable-key → live-entity
+/// mapping: sync writes through to it in the same transaction as every message
+/// upsert/prune (`mutations/sync_batch.rs`), so resolution is one SELECT — the
+/// D131 alias-then-projection fallback is gone.
 impl DraftRegistry for DatabaseStore {
     fn resolve_draft_entity(
         &self,
@@ -329,30 +332,14 @@ impl DraftRegistry for DatabaseStore {
         draft_key: &str,
     ) -> Result<Option<String>, StoreError> {
         let connection = self.read_connection()?;
-        // Precedence (D131): the in-session `draft_alias` wins — it is the
-        // freshest create/rotate mapping for a draft this runtime authored and
-        // may be mid-id-rotation. Only when no alias row exists do we fall back
-        // to the `message` projection, whose `draft_id` column carries the same
-        // stable key for a draft synced from the server, created on another
-        // device, or surviving a restart that cleared the alias. That row's PK
-        // `id` is the live/canonical server Email id, so both the queued destroy
-        // op and the provider destroy retarget the live entity.
-        let mut alias_statement = connection
+        // M69 (D135): ONE authority, ONE lookup. The registry is fresh in every
+        // regime — this runtime's save/rotate paths write it at enqueue/flush,
+        // and sync writes through in the same transaction as the projection —
+        // so there is no fallback and no precedence to arbitrate.
+        let mut statement = connection
             .prepare("SELECT entity_id FROM draft_alias WHERE account_id = ?1 AND draft_key = ?2")
             .map_err(sql_to_store_error)?;
-        let alias = alias_statement
-            .query_row(params![account_id.as_str(), draft_key], |row| {
-                row.get::<_, String>(0)
-            })
-            .optional()
-            .map_err(sql_to_store_error)?;
-        if let Some(entity_id) = alias {
-            return Ok(Some(entity_id));
-        }
-        let mut projection_statement = connection
-            .prepare("SELECT id FROM message WHERE account_id = ?1 AND draft_id = ?2")
-            .map_err(sql_to_store_error)?;
-        projection_statement
+        statement
             .query_row(params![account_id.as_str(), draft_key], |row| {
                 row.get::<_, String>(0)
             })
