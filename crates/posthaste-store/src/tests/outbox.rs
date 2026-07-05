@@ -213,6 +213,81 @@ fn remove_deletes_the_operation() -> Result<(), StoreError> {
     Ok(())
 }
 
+#[test]
+fn resolve_draft_entity_falls_back_to_projection_when_no_alias() -> Result<(), StoreError> {
+    // The owner repro (DS2/D131): a draft synced from the server / created on
+    // another device / surviving a restart has a `message` row keyed by its
+    // live server Email id and carrying the stable `draft_id`, but NO
+    // `draft_alias` (that is only populated by a create/save in THIS runtime).
+    // The stable-id list-row discard must still resolve to the live Email id.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    let mut draft = sample_message("E1", "inbox", Some("draft-mime"));
+    draft.draft_id = Some("draft-local-X".to_string());
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![draft],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    // No alias row exists, so resolution falls back to the projection and
+    // returns the live/canonical server Email id.
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-X")?,
+        Some("E1".to_string())
+    );
+    Ok(())
+}
+
+#[test]
+fn resolve_draft_entity_prefers_alias_over_projection() -> Result<(), StoreError> {
+    // Precedence: an in-session `draft_alias` is the freshest create/rotate
+    // mapping (possibly mid-id-rotation) and MUST win over the projection.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    let mut draft = sample_message("E1", "inbox", Some("draft-mime"));
+    draft.draft_id = Some("draft-local-X".to_string());
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![draft],
+            ..SyncBatch::default()
+        },
+    )?;
+    store.set_draft_alias(&account, "draft-local-X", "draft-temp-live")?;
+
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-X")?,
+        Some("draft-temp-live".to_string()),
+        "the in-session alias wins over the projection row"
+    );
+    Ok(())
+}
+
+#[test]
+fn resolve_draft_entity_none_when_absent_everywhere() -> Result<(), StoreError> {
+    // A genuinely-absent draft (no alias, no projection row) still resolves to
+    // None so the D133 NotFound guard fires and the client reverts.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    assert_eq!(
+        store.resolve_draft_entity(&account, "draft-local-gone")?,
+        None
+    );
+    Ok(())
+}
+
 // spec: docs/eph/RFC-L2-lifecycle-and-errors#d67 (N15 / M27 sub-unit (b))
 #[test]
 fn flushable_operations_are_limited_and_drain_across_cycles() -> Result<(), StoreError> {
