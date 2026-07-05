@@ -378,7 +378,7 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
         // Empty page: nothing beyond this position. Complete unless a known
         // total says we are still short (server stopped early → not complete).
         if page_len == 0 {
-            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            complete = reported_total.is_none_or(|total| ids.len() >= total);
             break;
         }
         // The server returned only ids we have already seen: it is ignoring
@@ -391,7 +391,7 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
         // requested page size) is the tail of the result set.
         let effective_limit = applied_limit.unwrap_or(FULL_SNAPSHOT_EMAIL_QUERY_PAGE_SIZE);
         if page_len < effective_limit {
-            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            complete = reported_total.is_none_or(|total| ids.len() >= total);
             break;
         }
         position = position.checked_add(page_len as i32).ok_or_else(|| {

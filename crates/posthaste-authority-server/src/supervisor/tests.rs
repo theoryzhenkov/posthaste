@@ -1065,10 +1065,6 @@ async fn hung_provider_sync_degrades_the_account_but_the_loop_stays_responsive()
 // spec: docs/eph/RFC-L2-lifecycle-and-errors#d67
 #[tokio::test]
 async fn stale_sync_cycle_write_after_arm_abandonment_cannot_revive_syncing_over_degraded() {
-    let account = test_account("primary");
-    let (shared, _root) = test_shared(&account);
-    let generation = shared.next_runtime_generation(&account.id).await;
-
     fn connecting_progress(sync_id: &str) -> SyncProgress {
         SyncProgress {
             sync_id: sync_id.to_string(),
@@ -1083,6 +1079,10 @@ async fn stale_sync_cycle_write_after_arm_abandonment_cannot_revive_syncing_over
             total_count: None,
         }
     }
+
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
 
     // Cycle 1 starts (mirrors `process_sync_trigger_inner` minting its own
     // token) and writes its initial `Connecting` progress, settling status

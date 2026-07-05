@@ -84,6 +84,7 @@ pub async fn submit_smtp_message(
 ///     live-socket i/o (`Kind::Network`, which can drop mid/post-DATA) into kinds
 ///     with no public discriminator, so the pre-write cases are told apart by
 ///     their stable `Display` tag.
+///
 /// Everything left — live-socket i/o, a mid-exchange response error, or a read
 /// timeout with no completion code — is unknown-fate ⇒ dispatch-uncertain.
 ///

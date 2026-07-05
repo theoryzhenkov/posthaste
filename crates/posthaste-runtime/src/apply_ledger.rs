@@ -128,8 +128,10 @@ pub(crate) enum Reserved {
     ///
     /// [`settle`]: ApplyLedger::settle
     Execute,
-    /// A prior outcome (or a conflict) to return WITHOUT executing.
-    Return(Result<AppliedOutcome, RuntimeError>),
+    /// A prior outcome (or a conflict) to return WITHOUT executing. The `Ok`
+    /// payload is boxed: [`AppliedOutcome`] is large (an `Ack`/`Draft` union) and
+    /// would otherwise dominate this two-variant enum's size.
+    Return(Result<Box<AppliedOutcome>, RuntimeError>),
 }
 
 /// The apply-scoped dedup ledger held on the runtime core (one instance behind
@@ -171,7 +173,7 @@ impl ApplyLedger {
                     )));
                 }
                 match record.outcome {
-                    Some(Ok(outcome)) => Reserved::Return(Ok(outcome)),
+                    Some(Ok(outcome)) => Reserved::Return(Ok(Box::new(outcome))),
                     Some(Err(error)) => Reserved::Return(Err(RuntimeError(error))),
                     None => Reserved::Return(Err(RuntimeError::retryable(
                         RuntimeErrorCode::Conflict,
@@ -306,7 +308,7 @@ mod tests {
         ledger.settle(&c, &k, Ok(draft_outcome("op-abc")));
         match ledger.reserve(&c, &k, "draft.save") {
             Reserved::Return(result) => {
-                let operation = result.unwrap().into_draft().expect("a draft outcome");
+                let operation = (*result.unwrap()).into_draft().expect("a draft outcome");
                 assert_eq!(operation.id, OperationId::from("op-abc"));
             }
             Reserved::Execute => panic!("a replayed save must re-observe the stored operation"),

@@ -153,7 +153,9 @@ pub(crate) fn spawn_settlement_bridge(
                     };
                     authority_server.route_async_settlement(&event);
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // Lag: skip the missed frame and keep looping (the match is the
+                // loop's tail, so falling through re-iterates).
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }

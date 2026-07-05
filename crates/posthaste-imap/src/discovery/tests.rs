@@ -90,7 +90,7 @@ async fn spawn_stalling_imap() -> std::net::SocketAddr {
 // deadline).
 #[tokio::test]
 async fn a_hung_imap_server_surfaces_as_a_typed_timeout() {
-    let _seam = crate::timeout::seam_test_lock();
+    let _seam = crate::timeout::seam_test_lock().await;
     let _restore = crate::timeout::set_op_timeout_ms_for_testing(150);
     let addr = spawn_stalling_imap().await;
 

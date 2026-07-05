@@ -116,7 +116,7 @@ impl Harness {
                 supervisor.clone(),
             ),
             account_logo_root: state_root.join("account-assets/logos"),
-            config_root: state_root.to_path_buf(),
+            config_root: state_root.clone(),
             auth_token: mint_full_scope_token(&root),
             macaroon_root_key: root.clone(),
             require_auth: true,

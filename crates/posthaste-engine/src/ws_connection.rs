@@ -11,6 +11,10 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use crate::live::map_gateway_error;
 use posthaste_domain_model::GatewayError;
 
+/// Shared, mutex-guarded engine-side push queue. A `tokio::Mutex` gives the
+/// single push consumer `&mut` access to `recv()` behind the shared `RwLock`.
+type PushQueue = Arc<Mutex<mpsc::UnboundedReceiver<Result<PushObject, jmap_client::Error>>>>;
+
 /// A shared WebSocket connection that supports both API calls and push.
 ///
 /// Created once per account when the server advertises WebSocket push support.
@@ -44,9 +48,8 @@ enum WsConnectionState {
 /// always flow; push consumers read the engine-side queue instead.
 struct ActiveWs {
     correlated: Arc<CorrelatedWs>,
-    /// Engine-side push queue, fed by the drain task. A `tokio::Mutex` gives the
-    /// single push consumer `&mut` access to `recv()` behind the shared `RwLock`.
-    push_rx: Arc<Mutex<mpsc::UnboundedReceiver<Result<PushObject, jmap_client::Error>>>>,
+    /// Engine-side push queue, fed by the drain task.
+    push_rx: PushQueue,
     /// Aborts the drain task when this state is dropped/replaced (disconnect or
     /// reconnect), so a stale drainer never lingers on an old socket.
     _drain: DrainGuard,
@@ -97,9 +100,7 @@ impl WsConnectionState {
         }
     }
 
-    fn push_queue(
-        &self,
-    ) -> Option<Arc<Mutex<mpsc::UnboundedReceiver<Result<PushObject, jmap_client::Error>>>>> {
+    fn push_queue(&self) -> Option<PushQueue> {
         match self {
             Self::Disconnected => None,
             Self::Connected(active) => Some(active.push_rx.clone()),

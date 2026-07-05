@@ -1,8 +1,8 @@
 //! The one reusable RAII tempdir guard for this crate's test suites (P6).
 //!
 //! `atomic::tests`, `repository::io::lossless_write_tests`, and
-//! `repository::tests` each used to hand-roll their own `std::env::temp_dir()`
-//! + pid/nanos/counter unique-naming helper and never clean up the directory.
+//! `repository::tests` each used to hand-roll their own `std::env::temp_dir()` +
+//! pid/nanos/counter unique-naming helper and never clean up the directory.
 //! All now share [`temp_root`] from here instead.
 //!
 //! Backed by [`tempfile::TempDir`] rather than reinventing unique-name
