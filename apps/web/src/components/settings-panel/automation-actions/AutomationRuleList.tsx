@@ -154,7 +154,7 @@ function AutomationRuleEditorPortal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[2150] bg-background text-card-foreground">
+    <div className="fixed inset-0 z-(--z-surface) bg-background text-card-foreground">
       <div className="ph-scroll h-full min-h-0 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8">
         <div className="mx-auto flex max-w-[1040px] flex-col">{children}</div>
       </div>

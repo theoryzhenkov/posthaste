@@ -1,10 +1,11 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import {
   type FloatingPanelSizePreset,
   floatingPanelSizeStyle,
 } from '@/floatingPanelLayout'
+import { nextWindowZIndex, Z } from '@/layering'
 import { cn } from '@/lib/utils'
 
 import { FloatingPanelGuides } from './floating-panel/FloatingPanelGuides'
@@ -22,10 +23,18 @@ interface FloatingPanelProps {
   closeIgnoreSelector?: string
   header: ReactNode
   headerClassName?: string
+  /**
+   * Which layering tier this panel lives in.
+   *  - `'window'` (default): a peer window in the WINDOW band. Multiple such
+   *    panels bring-to-front on open/focus (last-touched on top) while staying
+   *    bounded below the OVERLAY tier.
+   *  - `'overlay'`: a global overlay (the command palette) pinned above all
+   *    windows but below dialogs/toasts. Does not participate in the band.
+   */
+  layer?: 'window' | 'overlay'
   panelLabel: string
   sizePreset?: FloatingPanelSizePreset
   storageKey: string
-  zIndexClassName?: string
   onClose: () => void
   onOpenInWindow?: () => void
 }
@@ -36,13 +45,23 @@ export function FloatingPanel({
   closeIgnoreSelector,
   header,
   headerClassName,
+  layer = 'window',
   panelLabel,
   sizePreset,
   storageKey,
-  zIndexClassName = 'z-[70]',
   onClose,
   onOpenInWindow,
 }: FloatingPanelProps) {
+  // WINDOW-tier panels claim a fresh z within the band on mount (newest above
+  // its peers) and re-claim it on any pointer interaction (focus raises). The
+  // OVERLAY tier is a single fixed value above the whole band.
+  const [zIndex, setZIndex] = useState(() =>
+    layer === 'overlay' ? Z.OVERLAY : nextWindowZIndex(),
+  )
+  const bringToFront = useCallback(() => {
+    if (layer === 'overlay') return
+    setZIndex(nextWindowZIndex())
+  }, [layer])
   const [isPinned, setIsPinned] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const {
@@ -91,8 +110,8 @@ export function FloatingPanel({
       className={cn(
         'pointer-events-none fixed inset-0 flex items-start justify-center px-4',
         isExpanded ? 'pt-4' : 'pt-[54px]',
-        zIndexClassName,
       )}
+      style={{ zIndex }}
       aria-live="polite"
     >
       <FloatingPanelGuides
@@ -106,6 +125,7 @@ export function FloatingPanel({
       />
       <div
         ref={panelRef}
+        onPointerDownCapture={bringToFront}
         className={cn(
           'pointer-events-auto relative w-full overflow-hidden rounded-[14px] border [border-color:color-mix(in_oklab,var(--brand-coral)_22%,var(--border))] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--brand-coral)_14%,var(--panel))_0%,color-mix(in_oklab,var(--ring)_7%,var(--panel))_50%,var(--panel)_100%)] text-foreground shadow-[0_28px_80px_rgb(0_0_0/0.24)] backdrop-blur-[24px] backdrop-saturate-150 dark:shadow-[0_28px_80px_rgb(0_0_0/0.48)]',
           className,

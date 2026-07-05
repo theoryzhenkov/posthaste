@@ -235,6 +235,7 @@ export function CommandPalette({
     >
       <FloatingPanel
         panelLabel="command palette"
+        layer="overlay"
         storageKey={COMMAND_PANEL_STORAGE_KEY}
         closeIgnoreSelector="[data-command-search-trigger='true']"
         sizePreset="command"
