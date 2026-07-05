@@ -188,6 +188,24 @@ impl SharedWsConnection {
         ws.send(request).await.map_err(map_gateway_error)
     }
 
+    /// Like [`send`](Self::send) but surfaces the raw `jmap_client::Error` so the
+    /// send path can apply phase-based dispatch classification (the duplicate-send
+    /// fix) instead of the transport-blind [`map_gateway_error`]. A "not
+    /// connected" state is a pre-write condition (nothing was sent), reported as
+    /// an internal error the send classifier maps to a safe retryable transient.
+    pub async fn send_raw(
+        &self,
+        request: Request<'_>,
+    ) -> Result<Response<TaggedMethodResponse>, jmap_client::Error> {
+        let ws = self
+            .state
+            .read()
+            .await
+            .connection()
+            .ok_or_else(|| jmap_client::Error::Internal("WebSocket not connected".to_string()))?;
+        ws.send(request).await
+    }
+
     /// Read the next push notification from the shared WS.
     ///
     /// Reads from the engine-side drain queue (fed by `ActiveWs`'s drain task),
