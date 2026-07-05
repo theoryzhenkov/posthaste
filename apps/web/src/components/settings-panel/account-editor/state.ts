@@ -38,8 +38,15 @@ export function accountFieldsSignature(
   }
   return JSON.stringify({
     ...signature,
+    driver: form.driver,
     baseUrl: form.baseUrl.trim(),
     username: form.username.trim(),
+    imapHost: form.imapHost.trim(),
+    imapPort: form.imapPort.trim(),
+    imapSecurity: form.imapSecurity,
+    smtpHost: form.smtpHost.trim(),
+    smtpPort: form.smtpPort.trim(),
+    smtpSecurity: form.smtpSecurity,
     passwordChanged: form.password.trim().length > 0,
   })
 }
