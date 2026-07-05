@@ -36,6 +36,10 @@ pub(super) struct TestStore {
     pub(super) outbox_operations: Mutex<Vec<Operation>>,
     /// (account_id, draft_key, entity_id) alias rows.
     pub(super) draft_aliases: Mutex<Vec<(String, String, String)>>,
+    /// (account_id, draft_id, message_id) projection rows — the `message`
+    /// table's stable `draft_id` → live server Email id mapping consulted when
+    /// no alias exists (the synced/other-device/post-restart draft, D131).
+    pub(super) draft_projection: Mutex<Vec<(String, String, String)>>,
     /// Snooze return rows for the scheduler: (message_id, until_unix_secs).
     pub(super) snoozes: Mutex<Vec<(MessageId, i64)>>,
 }
@@ -69,6 +73,7 @@ impl Default for TestStore {
             applied_messages: Mutex::new(Vec::new()),
             outbox_operations: Mutex::new(Vec::new()),
             draft_aliases: Mutex::new(Vec::new()),
+            draft_projection: Mutex::new(Vec::new()),
             snoozes: Mutex::new(Vec::new()),
         }
     }

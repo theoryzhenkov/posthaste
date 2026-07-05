@@ -972,6 +972,48 @@ async fn discard_draft_removes_the_row_emits_deleted_and_queues_a_non_idempotent
 }
 
 #[tokio::test]
+async fn discard_of_a_synced_draft_without_alias_resolves_via_projection() {
+    // The owner repro (DS2/D131): a draft synced from the server / created on
+    // another device / surviving a restart has its `message` row keyed by the
+    // live server Email id ("E1") and carrying the stable `draft_id`
+    // ("draft-local-X"), but NO `draft_alias` (that is only written by a
+    // create/save in THIS runtime). A stable-id list-row discard must resolve
+    // draft-local-X → E1 via the projection, NOT surface a spurious NotFound,
+    // and target the LIVE Email id in the queued provider destroy.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("E1", &["drafts"]));
+    store.draft_projection.lock().unwrap().push((
+        account.to_string(),
+        "draft-local-X".to_string(),
+        "E1".to_string(),
+    ));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    let ack = service
+        .discard_draft(&account, MessageId::from("draft-local-X"))
+        .await
+        .expect("synced-draft discard resolves via the projection, no NotFound");
+    let reconciling = ack
+        .events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MESSAGE_UPDATED)
+        .expect("discard emits message.updated");
+    // The reconciling event names the resolved LIVE Email id.
+    assert_eq!(reconciling.payload["messageId"], "E1");
+    assert_eq!(reconciling.payload["deleted"], true);
+
+    // The provider destroy is queued against the resolved live Email id (E1),
+    // so the JMAP Email/set destroy actually removes the server draft.
+    let pending = service.list_pending_operations(&account).unwrap();
+    let delete = pending
+        .iter()
+        .find(|op| op.kind == OperationKind::DraftDelete)
+        .expect("a DraftDelete op is queued");
+    assert_eq!(delete.entity.id, "E1");
+    assert_eq!(delete.payload["idempotentRedelivery"], false);
+}
+
+#[tokio::test]
 async fn discard_of_an_unknown_draft_surfaces_not_found() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
