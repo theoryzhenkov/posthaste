@@ -19,10 +19,22 @@ function AlertDialogTrigger({
 }
 
 function AlertDialogPortal({
+  container,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
+  // Default the portal target to `document.body` explicitly. That is Radix's
+  // browser default already (no behavior change), but passing a live reference
+  // also makes the portal resolve under the test DOM, where the lazy default
+  // does not.
   return (
-    <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
+    <AlertDialogPrimitive.Portal
+      data-slot="alert-dialog-portal"
+      container={
+        container ??
+        (typeof document !== 'undefined' ? document.body : undefined)
+      }
+      {...props}
+    />
   )
 }
 
