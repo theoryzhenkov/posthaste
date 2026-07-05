@@ -129,12 +129,13 @@ async fn stable_draft_key_reuses_provider_id_across_flush() {
         .expect("first flush");
 
     // Editing with the SAME stable key targets the provider draft (an update),
-    // not a brand-new create -- this is what prevents duplicate drafts.
+    // not a brand-new create -- this is what prevents duplicate drafts. The op
+    // carries the STABLE key (M70); the provider id is resolved at flush.
     let edit = service
-        .save_draft(&account, Some(key), draft_request("Edited"))
+        .save_draft(&account, Some(key.clone()), draft_request("Edited"))
         .expect("edit");
     assert_eq!(edit.kind, OperationKind::DraftUpdate);
-    assert_eq!(edit.entity.id, "provider-draft-1");
+    assert_eq!(edit.entity.id, key.as_str());
 
     service
         .flush_account(&account, &gateway)
@@ -1108,15 +1109,26 @@ async fn discard_of_a_synced_draft_resolves_via_the_sync_written_registry() {
     assert_eq!(reconciling.payload["messageId"], "E1");
     assert_eq!(reconciling.payload["deleted"], true);
 
-    // The provider destroy is queued against the resolved live Email id (E1),
-    // so the JMAP Email/set destroy actually removes the server draft.
+    // The provider destroy is queued carrying the STABLE key (M70); the live
+    // Email id is resolved at FLUSH, so the JMAP Email/set destroy targets E1.
     let pending = service.list_pending_operations(&account).unwrap();
     let delete = pending
         .iter()
         .find(|op| op.kind == OperationKind::DraftDelete)
         .expect("a DraftDelete op is queued");
-    assert_eq!(delete.entity.id, "E1");
+    assert_eq!(delete.entity.id, "draft-local-X");
     assert_eq!(delete.payload["idempotentRedelivery"], false);
+
+    let gateway = MutationGateway::with_revision(1);
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush the discard");
+    assert_eq!(
+        gateway.delete_draft_calls.lock().unwrap().as_slice(),
+        &[MessageId::from("E1")],
+        "the flush resolves the stable key to the live Email id before the destroy"
+    );
 }
 
 #[tokio::test]
@@ -1132,4 +1144,232 @@ async fn discard_of_an_unknown_draft_surfaces_not_found() {
         .discard_draft(&account, MessageId::from("ghost-draft"))
         .await;
     assert!(result.is_err(), "unknown-draft discard must surface an error");
+}
+
+/// M70 (D136) — the in-flight-op-vs-sync race M69 flagged. A `DraftDelete` is
+/// enqueued carrying the STABLE key; before it flushes, a sync chunk observes a
+/// rotation (another device re-saved the draft: the old id destroyed, a new one
+/// live) and repoints the registry. The flush must resolve the key at PUSH time
+/// and destroy the post-rotation live id — not the id that was live at enqueue.
+#[tokio::test]
+async fn draft_delete_resolves_the_post_rotation_live_id_at_flush() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-race");
+
+    // Save + flush: the registry maps the key to provider-draft-1.
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .expect("save");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("save flush");
+
+    // Enqueue the delete. It carries the stable key, not a resolved snapshot.
+    let delete = service
+        .delete_draft(&account, key.clone(), false)
+        .expect("delete enqueues");
+    assert_eq!(
+        delete.entity.id,
+        key.as_str(),
+        "the op carries the stable key, not an enqueue-time resolved id"
+    );
+
+    // A sync chunk repoints the registry before the flush — the M69 write-
+    // through observing the rotation another device caused.
+    store
+        .set_draft_alias(&account, key.as_str(), "provider-draft-rotated")
+        .expect("sync repoints the registry");
+
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("delete flush");
+    assert_eq!(
+        gateway.delete_draft_calls.lock().unwrap().as_slice(),
+        &[MessageId::from("provider-draft-rotated")],
+        "the destroy targets the live id the registry knew at FLUSH, not at enqueue"
+    );
+}
+
+/// M70 — forget at SETTLEMENT: the registry mapping survives the delete's
+/// ENQUEUE (an in-flight op must still resolve it at flush) and is forgotten
+/// only once the provider confirms the destroy.
+#[tokio::test]
+async fn draft_mapping_survives_enqueue_and_is_forgotten_at_settlement() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-settle");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .expect("save");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("save flush");
+
+    service
+        .delete_draft(&account, key.clone(), false)
+        .expect("delete enqueues");
+    assert_eq!(
+        store
+            .resolve_draft_entity(&account, key.as_str())
+            .expect("resolve"),
+        Some("provider-draft-1".to_string()),
+        "the mapping survives enqueue while the destroy is pending"
+    );
+
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("delete flush settles");
+    assert_eq!(
+        store
+            .resolve_draft_entity(&account, key.as_str())
+            .expect("resolve"),
+        None,
+        "the mapping is forgotten at the destroy's settlement"
+    );
+    assert_eq!(
+        gateway.delete_draft_calls.lock().unwrap().as_slice(),
+        &[MessageId::from("provider-draft-1")],
+        "the settled destroy targeted the live id the key resolved to at flush"
+    );
+}
+
+/// M70 — a destroy that FAILS permanently does not forget the mapping: the
+/// forget is tied to confirmed destruction, so identity survives the failure
+/// (a retry or a later save still resolves it).
+#[tokio::test]
+async fn failed_draft_delete_keeps_the_mapping() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-failed-destroy");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .expect("save");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("save flush");
+
+    service
+        .delete_draft(&account, key.clone(), false)
+        .expect("delete enqueues");
+    gateway
+        .delete_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("destroy rejected".to_string())));
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush surfaces the failure as a settlement");
+
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].state, OperationState::Failed);
+    assert_eq!(
+        store
+            .resolve_draft_entity(&account, key.as_str())
+            .expect("resolve"),
+        Some("provider-draft-1".to_string()),
+        "a failed (unconfirmed) destroy must NOT forget the draft's identity"
+    );
+}
+
+/// M70 + M69 convergence — no double-forget: the settlement forget and the
+/// sync-observed forget are idempotent deletes of the same registry row. When
+/// sync confirms the destruction first (forgetting the mapping while the
+/// DraftDelete is still pending), the flush falls back to the key itself
+/// (pre-M71 semantics), settles, and its own forget is a harmless no-op —
+/// the mapping ends forgotten exactly once, with nothing resurrected.
+#[tokio::test]
+async fn settlement_forget_converges_with_the_sync_observed_forget() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-converge");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .expect("save");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("save flush");
+    service
+        .delete_draft(&account, key.clone(), true)
+        .expect("delete enqueues");
+
+    // Sync observes the draft confirmed-gone FIRST (M69's prune-half forget).
+    store
+        .remove_draft_alias(&account, key.as_str())
+        .expect("sync-observed forget");
+
+    // The flush still settles: resolution falls back to the key, the gateway
+    // treats the already-gone draft as destroyed (idempotent redelivery), and
+    // the settlement's forget finds nothing to do.
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("delete flush settles after the sync forget");
+    assert_eq!(
+        store
+            .resolve_draft_entity(&account, key.as_str())
+            .expect("resolve"),
+        None,
+        "the mapping stays forgotten — the second forget neither errors nor resurrects"
+    );
+    assert!(
+        service
+            .list_pending_operations(&account)
+            .expect("pending")
+            .is_empty(),
+        "the destroy settled cleanly despite the earlier sync-observed forget"
+    );
+}
+
+/// M70 — the reconciling D132 event a settled `DraftDelete` emits names the
+/// LIVE entity id the destroy resolved to at flush (what the client's rows are
+/// keyed by), not the stable key the op carries.
+#[tokio::test]
+async fn settled_draft_delete_event_names_the_resolved_live_id() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-eventid");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .expect("save");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("save flush");
+    service
+        .delete_draft(&account, key.clone(), false)
+        .expect("delete enqueues");
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("delete flush");
+    let reconciling = events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MESSAGE_UPDATED)
+        .expect("DraftDelete settlement emits message.updated");
+    assert_eq!(reconciling.payload["messageId"], "provider-draft-1");
+    assert_eq!(reconciling.payload["deleted"], true);
 }
