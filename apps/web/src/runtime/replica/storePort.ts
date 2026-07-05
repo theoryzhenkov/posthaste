@@ -44,6 +44,16 @@ export interface StorePort {
   drainDirtyJson(): Promise<string>
   /** Drain the ids of ops retired since the last drain (JSON string array). */
   drainRetiredJson(): Promise<string>
+  /**
+   * Register a re-seed callback the port invokes after it respawns the backing
+   * store (CL-C1): a fresh worker starts with a BRAND-NEW empty store (no views,
+   * bases, or folds), so before the timed-out call is replayed the controller
+   * must rebuild that state on it — otherwise the replay "succeeds" against
+   * emptiness and reports row-dropping frames as authoritative. The callback
+   * re-registers + re-seeds every open view and re-folds the pending set. No-op
+   * for a store that never respawns (the in-process store omits it).
+   */
+  setReseedHook?(reseed: () => Promise<void>): void
 }
 
 /**
