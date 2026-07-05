@@ -4,16 +4,18 @@
  * @spec docs/L1-ui#component-hierarchy
  * @spec docs/L1-compose#mime-structure
  */
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import type { ComposeIntent } from '@/composeIntent'
 
 import { FloatingPanel } from './FloatingPanel'
 import { ComposeAttachmentList } from './compose-overlay/ComposeAttachmentList'
 import { ComposeBodyEditor } from './compose-overlay/ComposeBodyEditor'
+import { ComposeCloseConfirmDialog } from './compose-overlay/ComposeCloseConfirmDialog'
 import { ComposeFields } from './compose-overlay/ComposeFields'
 import { ComposeFooter } from './compose-overlay/ComposeFooter'
 import { ComposeHeader } from './compose-overlay/ComposeHeader'
+import { shouldPromptBeforeClose } from './compose-overlay/composeCloseGuard'
 import { useComposeAutosave } from './compose-overlay/useComposeAutosave'
 import { useComposeFormState } from './compose-overlay/useComposeFormState'
 import { useComposeQueries } from './compose-overlay/useComposeQueries'
@@ -110,8 +112,6 @@ export function ComposeOverlay({
 
   const autosave = useComposeAutosave({
     form: formState.form,
-    ready: !isPreparingMessage,
-    hasUserEdited: formState.hasUserEdited,
     resetKey: formState.formResetKey,
     // Resume keys by the draft's stable identity once loaded, falling back to
     // its provider id (legacy drafts without the header, or before load). The
@@ -120,6 +120,9 @@ export function ComposeOverlay({
       intent.kind === 'draft'
         ? (queries.draftSeedDraftId ?? intent.messageId)
         : undefined,
+    // The account a resumed draft already lives in, so a send can delete it.
+    existingDraftSourceId:
+      intent.kind === 'draft' ? intent.sourceId : undefined,
     intentKind: intent.kind,
     replyContext: queries.replyContextQuery.data,
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
@@ -136,6 +139,62 @@ export function ComposeOverlay({
     setErrorMessage: formState.setErrorMessage,
     setIsReadingAttachments: formState.setIsReadingAttachments,
   })
+  // Traditional close flow: closing a dirty compose without sending prompts to
+  // save it as a draft. Empty/unchanged composes (and the post-send close, which
+  // the send path invokes directly) close with no prompt.
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const requestClose = useCallback(() => {
+    if (
+      shouldPromptBeforeClose({
+        form: formState.form,
+        hasUserEdited: formState.hasUserEdited,
+        isSending,
+      })
+    ) {
+      setShowCloseConfirm(true)
+      return
+    }
+    onClose()
+  }, [formState.form, formState.hasUserEdited, isSending, onClose])
+  const handleKeepEditing = useCallback(() => setShowCloseConfirm(false), [])
+  // While the confirm dialog is up the panel's own dismissal is disabled so it
+  // does not race Radix's overlay/Escape handling (a panel pointerdown fires
+  // before a dialog button's click and would tear the dialog down first).
+  const ignoreClose = useCallback(() => {}, [])
+  const handleDiscardOnClose = useCallback(() => {
+    // Discard the unsaved edits — for a resumed draft the existing draft is left
+    // untouched (this is not the trash/discard-draft action).
+    setShowCloseConfirm(false)
+    onClose()
+  }, [onClose])
+  const handleSaveAsDraft = useCallback(() => {
+    setShowCloseConfirm(false)
+    void (async () => {
+      await autosave.saveDraft()
+      onClose()
+    })()
+  }, [autosave, onClose])
+
+  // Safety net: warn on a full tab/app close while a dirty compose is open. The
+  // traditional model has no continuous autosave, so this is the only guard
+  // against losing content to a hard navigation.
+  useEffect(() => {
+    const isDirty = shouldPromptBeforeClose({
+      form: formState.form,
+      hasUserEdited: formState.hasUserEdited,
+      isSending: false,
+    })
+    if (!isDirty) {
+      return
+    }
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [formState.form, formState.hasUserEdited])
+
   const { isOpeningWindow, openInitialComposeInWindow } =
     useComposeWindowElevation({
       editedResetKeyRef: formState.editedResetKeyRef,
@@ -211,10 +270,20 @@ export function ComposeOverlay({
               : 'Ready'
         }
         onAttachFiles={formState.handleAttachFiles}
-        onClose={onClose}
+        onClose={requestClose}
         onSubmit={handleSubmit}
       />
     </>
+  )
+
+  const closeConfirmDialog = (
+    <ComposeCloseConfirmDialog
+      open={showCloseConfirm}
+      intentKind={intent.kind}
+      onKeepEditing={handleKeepEditing}
+      onDiscard={handleDiscardOnClose}
+      onSaveAsDraft={handleSaveAsDraft}
+    />
   )
 
   if (shell === 'document') {
@@ -224,26 +293,32 @@ export function ComposeOverlay({
           {header}
         </div>
         {content}
+        {closeConfirmDialog}
       </div>
     )
   }
 
   return (
-    <FloatingPanel
-      panelLabel={panelLabel}
-      storageKey="posthaste.compose.panelOffset"
-      zIndexClassName="z-[80]"
-      sizePreset="compose"
-      className="flex flex-col"
-      header={header}
-      onClose={onClose}
-      onOpenInWindow={
-        !formState.hasUserEdited && !isOpeningWindow
-          ? openInitialComposeInWindow
-          : undefined
-      }
-    >
-      {content}
-    </FloatingPanel>
+    <>
+      <FloatingPanel
+        panelLabel={panelLabel}
+        storageKey="posthaste.compose.panelOffset"
+        zIndexClassName="z-[80]"
+        sizePreset="compose"
+        className="flex flex-col"
+        header={header}
+        // While the confirm dialog is up, Radix owns dismissal (Escape / overlay)
+        // — disable the panel's own Escape/click-away so the two don't fight.
+        onClose={showCloseConfirm ? ignoreClose : requestClose}
+        onOpenInWindow={
+          !formState.hasUserEdited && !isOpeningWindow
+            ? openInitialComposeInWindow
+            : undefined
+        }
+      >
+        {content}
+      </FloatingPanel>
+      {closeConfirmDialog}
+    </>
   )
 }

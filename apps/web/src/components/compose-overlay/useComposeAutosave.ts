@@ -4,71 +4,44 @@ import type { Recipient, ReplyContext } from '@/api/types'
 import type { ComposeIntent } from '@/composeIntent'
 import { runtimeMutations } from '@/runtime/mutations'
 
-import {
-  buildSendInput,
-  readAttachmentForSend,
-  type ComposeForm,
-} from '../composeFormHelpers'
-
-const AUTOSAVE_DEBOUNCE_MS = 800
-
-/** Whether the form holds anything worth persisting as a draft. */
-function formHasContent(form: ComposeForm): boolean {
-  return Boolean(
-    form.to.trim() ||
-    form.cc.trim() ||
-    form.bcc.trim() ||
-    form.subject.trim() ||
-    form.body.trim() ||
-    form.attachments.length > 0,
-  )
-}
-
-/** A change key that excludes attachment bytes (compared by id, not content). */
-function formSignature(form: ComposeForm): string {
-  return JSON.stringify({
-    from: form.from,
-    to: form.to,
-    cc: form.cc,
-    bcc: form.bcc,
-    subject: form.subject,
-    body: form.body,
-    attachments: form.attachments.map((attachment) => attachment.id),
-  })
-}
+import { buildSendInput, readAttachmentForSend } from '../composeFormHelpers'
+import type { ComposeForm } from '../composeFormHelpers'
 
 function mintDraftKey(): string {
   return `draft-local-${crypto.randomUUID()}`
 }
 
 /**
- * Local-first compose autosave.
+ * Compose draft persistence — traditional email-client model.
  *
- * Persists the in-progress message as a provider draft (debounced) so it is not
- * lost on close/crash and is editable offline. A single stable `draftKey` per
- * compose session is sent on every save; the runtime's durable alias maps it to
- * the live provider draft, so repeated edits update one draft rather than
- * creating duplicates.
+ * There is NO continuous background autosave. The in-progress message is
+ * persisted as a provider draft ONLY on an explicit user action: the
+ * close-without-send prompt's "Save as draft" calls {@link saveDraft} once. A
+ * single stable `draftKey` per compose session is sent on that save; when
+ * resuming an existing draft its id is reused as the key so the save UPDATES
+ * that draft (via the runtime's durable alias) rather than spawning a twin
+ * (M69). {@link discardDraft} deletes the draft after the message is sent
+ * (send-consumes-draft) — for a resumed draft the server copy is deleted, and
+ * for a compose saved via the close-prompt the created draft is deleted.
  *
  * @spec docs/L1-outbox#temp-id-reconciliation
  */
 export function useComposeAutosave({
-  form,
-  ready,
-  hasUserEdited,
   resetKey,
   fixedDraftKey,
+  existingDraftSourceId,
   intentKind,
   replyContext,
+  form,
   resolveSubmissionSourceId,
 }: {
   form: ComposeForm
-  ready: boolean
-  hasUserEdited: boolean
   resetKey: string
-  // When resuming an existing draft, its id is reused as the key so edits update
-  // that draft instead of creating a new one.
+  // When resuming an existing draft, its id is reused as the key so a save
+  // updates that draft instead of creating a new one.
   fixedDraftKey: string | undefined
+  // The account a resumed draft already lives in, so a send can delete it.
+  existingDraftSourceId: string | undefined
   intentKind: ComposeIntent['kind']
   replyContext: ReplyContext | undefined
   resolveSubmissionSourceId: (from: Recipient | null) => string
@@ -80,16 +53,17 @@ export function useComposeAutosave({
     () => fixedDraftKey ?? mintDraftKey(),
   )
   const seenResetKeyRef = useRef(resetKey)
-  const savedSourceIdRef = useRef<string | null>(null)
-  const savedSignatureRef = useRef<string | null>(null)
+  // The account the draft lives in (for the send-time delete). Seeded from the
+  // resumed draft's account; overwritten by the source of an explicit save.
+  const savedSourceIdRef = useRef<string | null>(existingDraftSourceId ?? null)
+  // Whether a server draft exists for this compose that a send should consume:
+  // true when resuming an existing draft, or once a close-prompt save succeeds.
+  const serverDraftExistsRef = useRef(Boolean(fixedDraftKey))
+  // Whether an explicit save has already run this session — gates the late
+  // adoption of the resumed draft's stable id (below).
+  const savedOnceRef = useRef(false)
   const savingRef = useRef(false)
-  const pendingRef = useRef(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // The latest signature that has been queued (debounced) but not yet persisted.
-  // Drives the flush-on-close so an edit made within the debounce window is not
-  // lost when the compose window is closed before the timer fires.
-  const pendingSignatureRef = useRef<string | null>(null)
-  // Set once the draft is finalized (sent/discarded) so the close flush no-ops.
+  // Set once the draft is finalized (sent/discarded) so a later discard no-ops.
   const finalizedRef = useRef(false)
 
   // Latest form/context read by the (otherwise stable) save closure. Updated in
@@ -104,30 +78,29 @@ export function useComposeAutosave({
       return
     }
     seenResetKeyRef.current = resetKey
-    savedSignatureRef.current = null
-    savedSourceIdRef.current = null
+    savedSourceIdRef.current = existingDraftSourceId ?? null
+    serverDraftExistsRef.current = Boolean(fixedDraftKey)
+    savedOnceRef.current = false
+    finalizedRef.current = false
     setDraftKey(fixedDraftKey ?? mintDraftKey())
-  }, [resetKey, fixedDraftKey])
+  }, [resetKey, fixedDraftKey, existingDraftSourceId])
 
   // When resuming a draft, its stable id only arrives once the draft content
   // loads (after the initial fallback to the provider id). Adopt it before the
   // first save — the form cannot be edited until it is seeded, so no save has
-  // keyed by the fallback id yet — so edits coalesce onto one draft.
+  // keyed by the fallback id yet — so a later save coalesces onto one draft.
   useEffect(() => {
-    if (
-      fixedDraftKey &&
-      fixedDraftKey !== draftKey &&
-      savedSignatureRef.current === null
-    ) {
+    if (fixedDraftKey && fixedDraftKey !== draftKey && !savedOnceRef.current) {
       setDraftKey(fixedDraftKey)
     }
   }, [fixedDraftKey, draftKey])
 
-  // Plain functions (not useCallback): the React Compiler memoizes them, and
-  // they read mutable refs the compiler must not see manually memoized.
-  const saveNow = async (): Promise<void> => {
-    if (savingRef.current) {
-      pendingRef.current = true
+  // Plain function (not useCallback): the React Compiler memoizes it, and it
+  // reads mutable refs the compiler must not see manually memoized. Persists the
+  // current form as a provider draft under the stable key — one save, invoked
+  // explicitly by the close-without-send prompt.
+  const saveDraft = async (): Promise<void> => {
+    if (savingRef.current || finalizedRef.current) {
       return
     }
     savingRef.current = true
@@ -147,79 +120,28 @@ export function useComposeAutosave({
         sourceId,
         input: { draftId: draftKey, message: input },
       })
+      savedOnceRef.current = true
+      serverDraftExistsRef.current = true
     } catch {
-      // Best-effort: leave the content in the form and retry on the next edit.
-      savedSignatureRef.current = null
+      // Best-effort: leave the content in the form. The compose is closing, so
+      // there is no retry; the unsaved content is simply not persisted.
     } finally {
       savingRef.current = false
-      if (pendingRef.current) {
-        pendingRef.current = false
-        void saveNow()
-      }
     }
   }
 
-  // Computed during render (pure) so the autosave effect depends on a primitive
-  // signature rather than the whole form object.
-  const signature =
-    ready && hasUserEdited && formHasContent(form) ? formSignature(form) : null
-
-  useEffect(() => {
-    if (signature === null || signature === savedSignatureRef.current) {
-      return
-    }
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-    }
-    pendingSignatureRef.current = signature
-    timerRef.current = setTimeout(() => {
-      savedSignatureRef.current = signature
-      pendingSignatureRef.current = null
-      void saveNow()
-    }, AUTOSAVE_DEBOUNCE_MS)
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-      }
-    }
-    // Re-run only when the form signature changes; `saveNow` reads the latest
-    // state through refs and is stabilized by the React Compiler.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature])
-
-  // Flush a pending edit when the compose session ends (unmount / close). The
-  // debounce timer is cleared on unmount, so without this an edit made within
-  // the last `AUTOSAVE_DEBOUNCE_MS` would be lost on close. Skipped once the
-  // draft has been finalized (sent/discarded). Fire-and-forget: the saveDraft
-  // mutation outlives the component.
-  useEffect(() => {
-    return () => {
-      if (!finalizedRef.current && pendingSignatureRef.current !== null) {
-        savedSignatureRef.current = pendingSignatureRef.current
-        pendingSignatureRef.current = null
-        void saveNow()
-      }
-    }
-    // Unmount-only: `saveNow` reads the latest state through refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   /**
-   * Delete the autosaved draft (after the message is sent, or on explicit
-   * discard). No-op if nothing was ever saved.
+   * Delete the draft (after the message is sent, or on explicit discard). A
+   * no-op when no server draft exists for this compose (e.g. a brand-new
+   * compose that was never saved).
    */
   const discardDraft = async (): Promise<void> => {
     finalizedRef.current = true
-    pendingSignatureRef.current = null
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
     const sourceId = savedSourceIdRef.current
-    if (savedSignatureRef.current === null || !sourceId) {
+    if (!serverDraftExistsRef.current || !sourceId) {
       return
     }
-    savedSignatureRef.current = null
+    serverDraftExistsRef.current = false
     try {
       await runtimeMutations.messages.deleteDraft({
         sourceId,
@@ -230,5 +152,5 @@ export function useComposeAutosave({
     }
   }
 
-  return { discardDraft }
+  return { saveDraft, discardDraft }
 }
