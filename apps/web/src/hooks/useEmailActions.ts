@@ -48,6 +48,17 @@ export type EmailActions = ReturnType<typeof useEmailActions>
  */
 export const DRAFT_DISCARD_GRACE_MS = 5000
 
+/** A stable client id shared by a deferred discard's immediate optimistic fold
+ *  and its deferred server dispatch, so the commit re-runs the SAME mutation
+ *  (idempotent fold, no second blink) and Undo reverts exactly that fold. */
+function makeDiscardFoldId(): string {
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2)
+  return `discard_${random}`
+}
+
 function toSourceMessageRef(
   message: SourceMessageRef | MessageSummary | MailSelection,
 ): SourceMessageRef {
@@ -223,13 +234,20 @@ export function useEmailActions({ undo }: { undo: () => void }) {
    * far node resolves the current live Email even after a JMAP autosave
    * rotates the id.
    *
-   * Undo shape (D134): a short {@link DRAFT_DISCARD_GRACE_MS} pre-commit grace
-   * gates the dispatch — the "Undo" toast cancels the pending timer so nothing
-   * is ever dispatched and the draft survives (the SAFE direction). Once the
-   * grace elapses the optimistic destroy is dispatched and is itself
-   * reversible via the settlement (a rejected destroy reverts the fold). Tab
-   * close during the grace drops the timer with the page, so the draft is
-   * kept. We deliberately do NOT force-flush on unload.
+   * Undo shape (D134, FIX1) — the two phases are SPLIT:
+   *
+   * 1. The optimistic fold fires INSTANTLY on click (the blink): the row is
+   *    removed client-side right away, with no durable record and nothing
+   *    dispatched to the server.
+   * 2. A short {@link DRAFT_DISCARD_GRACE_MS} grace defers only the SERVER
+   *    destroy dispatch/settlement. The "Undo" toast cancels the pending timer
+   *    AND reverts the already-folded row (it reappears) — no server round-trip,
+   *    so nothing is ever dispatched (the SAFE direction). Once the grace
+   *    elapses the destroy is dispatched under the SAME id (idempotent re-fold,
+   *    no second blink) and is itself reversible via the settlement (a rejected
+   *    destroy reverts the fold + surfaces the error, M64). Tab close during the
+   *    grace drops the timer AND the (non-durable) fold with the page, so the
+   *    draft is kept. We deliberately do NOT force-flush on unload.
    */
   const discardDraft = useCallback(
     (target: SourceMessageRef & { draftId?: string | null }) => {
@@ -242,6 +260,21 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       // The stable draft id (D131) resolves the live Email across id rotation;
       // fall back to the row's messageId for a legacy row without one.
       const draftId = target.draftId ?? target.messageId
+      // One stable id for the whole discard: the immediate fold, the deferred
+      // commit, and the Undo revert all key on it.
+      const foldId = makeDiscardFoldId()
+      // Phase 1 — fold NOW (the instant blink): remove the row client-side, no
+      // dispatch, no durable record. Failures here are non-fatal (the commit
+      // still folds+dispatches); swallow so an unhandled rejection can't leak.
+      void runtimeMutations.messages
+        .foldDiscard({
+          sourceId: target.sourceId,
+          messageId: target.messageId,
+          draftId,
+          clientMutationId: foldId,
+        })
+        .catch(() => null)
+      // Phase 2 — defer only the SERVER destroy dispatch/settlement.
       const timer = setTimeout(() => {
         discardTimersRef.current.delete(key)
         setPending(1)
@@ -251,6 +284,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
               sourceId: target.sourceId,
               messageId: target.messageId,
               draftId,
+              clientMutationId: foldId,
             },
             { userInitiated: true },
           )
@@ -271,6 +305,8 @@ export function useEmailActions({ undo }: { undo: () => void }) {
               clearTimeout(pending)
               discardTimersRef.current.delete(key)
             }
+            // Revert the already-folded row (it reappears) — no server round-trip.
+            void runtimeMutations.messages.revertDiscard(foldId).catch(() => {})
           },
         },
         duration: DRAFT_DISCARD_GRACE_MS,

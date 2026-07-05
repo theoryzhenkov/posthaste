@@ -96,45 +96,19 @@ export function useComposeFormState({
           }
         : EMPTY_FORM
     }
-    if (intentKind === 'new' || !replyContext) {
-      return EMPTY_FORM
-    }
-    const seed =
-      intentKind === 'forward'
-        ? replyContext.forwardedBody
-        : replyContext.quotedBody
-    // Reply-all derives the full recipient set (original From + To, plus the
-    // original Cc) with the user's own address excluded. A plain reply uses the
-    // original From only; forward starts empty.
-    const { to, cc } =
-      intentKind === 'forward'
-        ? { to: [], cc: [] }
-        : intentKind === 'replyAll'
-          ? replyAllRecipients(
-              replyContext.to,
-              replyContext.originalTo,
-              replyContext.cc,
-              identity?.email,
-            )
-          : { to: replyContext.to, cc: [] }
-    return {
-      from: '',
-      to: formatRecipients(to),
-      cc: formatRecipients(cc),
-      bcc: '',
-      subject:
-        intentKind === 'forward'
-          ? replyContext.forwardSubject
-          : replyContext.replySubject,
-      body: seed ? `\n\n${seed}` : '',
-      attachments: [],
-    }
-  }, [draftSeed, identity, intentKind, replyContext])
-  const contextReady =
-    intentKind === 'draft' ? Boolean(draftSeed) : Boolean(replyContext)
-  const formResetKey = isMessageBasedCompose
-    ? `${composeKey}:${contextReady ? 'ready' : 'loading'}`
-    : composeKey
+    // FIX2 — a reply/forward starts EMPTY and streams its quoted body +
+    // recipients + subject in via the seed effect below (keyed to a STABLE
+    // reset key), so the editor is usable the instant it opens and a late
+    // `replyContext` never resets the form out from under early typing.
+    return EMPTY_FORM
+  }, [draftSeed, intentKind])
+  // Only a DRAFT resume flips loading→ready (its loaded content REPLACES the
+  // empty form). A reply/forward keeps a stable reset key: its quote streams in
+  // via an effect, so the form must not reset (which would clobber early edits).
+  const formResetKey =
+    intentKind === 'draft'
+      ? `${composeKey}:${draftSeed ? 'ready' : 'loading'}`
+      : composeKey
   const [composeState, setComposeState] = useState(() => ({
     errorMessage: null as string | null,
     form: initialForm,
@@ -257,6 +231,56 @@ export function useComposeFormState({
         : { ...current, attachments: forwardAttachments },
     )
   }, [intentKind, forwardAttachments, formResetKey, setForm])
+
+  const seededReplyContextKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    // FIX2 — stream the reply/forward quote + recipients + subject into the form
+    // once `replyContext` is available (from the cache placeholder or the served
+    // fetch), WITHOUT resetting the form: the editor was interactive from the
+    // start, so this only FILLS fields the user hasn't touched and APPENDS the
+    // quote below any early-typed text. Ref-guarded to seed once per session.
+    if (intentKind === 'new' || intentKind === 'draft' || !replyContext) {
+      return
+    }
+    // Reply-all excludes self from the recipient set — wait for the identity so
+    // the seeded recipients are correct.
+    if (intentKind === 'replyAll' && !identity) {
+      return
+    }
+    if (seededReplyContextKeyRef.current === formResetKey) {
+      return
+    }
+    seededReplyContextKeyRef.current = formResetKey
+    const seed =
+      intentKind === 'forward'
+        ? replyContext.forwardedBody
+        : replyContext.quotedBody
+    // Reply-all derives the full recipient set (original From + To, plus the
+    // original Cc) with the user's own address excluded. A plain reply uses the
+    // original From only; forward starts empty.
+    const { to, cc } =
+      intentKind === 'forward'
+        ? { to: [], cc: [] }
+        : intentKind === 'replyAll'
+          ? replyAllRecipients(
+              replyContext.to,
+              replyContext.originalTo,
+              replyContext.cc,
+              identity?.email,
+            )
+          : { to: replyContext.to, cc: [] }
+    const subject =
+      intentKind === 'forward'
+        ? replyContext.forwardSubject
+        : replyContext.replySubject
+    setForm((current) => ({
+      ...current,
+      to: current.to.trim() ? current.to : formatRecipients(to),
+      cc: current.cc.trim() ? current.cc : formatRecipients(cc),
+      subject: current.subject.trim() ? current.subject : subject,
+      body: seed ? `${current.body}\n\n${seed}` : current.body,
+    }))
+  }, [intentKind, replyContext, identity, formResetKey, setForm])
 
   useEffect(() => {
     // Seed the account's signature into the body once per fresh composition

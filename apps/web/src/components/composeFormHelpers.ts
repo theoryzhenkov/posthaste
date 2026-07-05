@@ -10,7 +10,9 @@
 import type {
   AccountOverview,
   CachedSenderAddress,
+  MessageDetail,
   Recipient,
+  ReplyContext,
 } from '@/api/types'
 
 export type { ComposeAttachment, ComposeForm } from '@/composeMessage'
@@ -63,6 +65,66 @@ export function optionLabel(option: FromAddressOption): string {
  * @spec docs/L1-compose#sender-selection */
 export function appendSignature(body: string, signature: string): string {
   return `${body}\n\n-- \n${signature}`
+}
+
+/** `>`-prefix every line of a body for reply quoting. Mirrors the engine's
+ *  `reply.rs::quote_body` so a cache-seeded quote matches the served one. */
+function quoteBodyLines(body: string): string {
+  return body
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n')
+}
+
+/** Prefix a subject unless it already carries the prefix (case-insensitive).
+ *  Mirrors the engine's `compose.rs::prefix_subject`. */
+function prefixSubject(prefix: string, subject: string): string {
+  return subject.toLowerCase().startsWith(prefix.toLowerCase())
+    ? subject
+    : `${prefix} ${subject}`
+}
+
+/**
+ * FIX2 — build a PLAIN-reply {@link ReplyContext} from a message already in the
+ * detail-pane cache ({@link MessageDetail}), so the reply composer can show the
+ * quoted body + reply recipient + subject INSTANTLY without waiting on the fresh
+ * `replyContext` Email/get round-trip.
+ *
+ * Only safe for a plain reply: the cached detail carries the text body, the
+ * original From (→ the reply recipient) + To, and the source `Message-ID`
+ * (→ `In-Reply-To`), but NOT the `References` header or the `Cc` list. So this
+ * seeds a provisional context for DISPLAY only; the authoritative fetch still
+ * runs and supplies `references` (+ `cc`) for the actual send/save — which the
+ * composer gates on (`isPlaceholderData`). Returns undefined when the body is
+ * not cached (the composer then streams the served quote in instead).
+ */
+export function replyContextFromCachedMessage(
+  detail: MessageDetail,
+): ReplyContext | undefined {
+  const bodyText = detail.bodyText
+  if (typeof bodyText !== 'string' || bodyText.length === 0) {
+    return undefined
+  }
+  const subject = detail.subject ?? '(no subject)'
+  const originalFrom: Recipient[] = detail.fromEmail
+    ? [{ name: detail.fromName ?? null, email: detail.fromEmail }]
+    : []
+  return {
+    // A plain reply addresses the original sender.
+    to: originalFrom,
+    // Not in the cache; the authoritative fetch fills it (and a plain reply
+    // does not use Cc anyway).
+    cc: [],
+    originalTo: detail.to ?? [],
+    replySubject: prefixSubject('Re:', subject),
+    forwardSubject: prefixSubject('Fwd:', subject),
+    quotedBody: quoteBodyLines(bodyText),
+    // Forward isn't cache-seeded (it needs the served forwarded-body block).
+    forwardedBody: null,
+    inReplyTo: detail.rfcMessageId ?? null,
+    // Not in the cache; the served context supplies real threading before send.
+    references: null,
+  }
 }
 
 export function accountFromOptions(
