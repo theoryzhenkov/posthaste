@@ -50,6 +50,12 @@ pub(crate) fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         ImapAdapterError::Client(message) | ImapAdapterError::Smtp(message) => {
             GatewayError::Network(message)
         }
+        // A send whose fate is unknown (post-DATA transport drop): park it, never
+        // blind-resend (the duplicate-send fix — O5/D86). The send-phase decision
+        // was already made at the SMTP send boundary; this only routes it.
+        ImapAdapterError::SmtpDispatchUncertain(message) => {
+            GatewayError::DispatchUncertain(message)
+        }
     }
 }
 

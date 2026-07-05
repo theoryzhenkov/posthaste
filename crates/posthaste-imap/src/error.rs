@@ -55,6 +55,14 @@ pub enum ImapAdapterError {
     BuildSmtpMessage(String),
     #[error("SMTP transport error: {0}")]
     Smtp(String),
+    /// A **send** whose delivery outcome is unknown: the SMTP transport dropped
+    /// at or after the message body (DATA + terminating `.`) was written, so the
+    /// MTA may already have accepted it. Kept distinct from [`Self::Smtp`] (a
+    /// provably pre-write connect/greeting failure, safe to retry) so the outbox
+    /// parks it as dispatch-uncertain and NEVER blind-resends — the duplicate-send
+    /// fix (O5 at-most-once-on-uncertainty / RFC-L2 D86).
+    #[error("SMTP send dispatch uncertain: {0}")]
+    SmtpDispatchUncertain(String),
     #[error("IMAP {operation} did not complete within the deadline")]
     Timeout { operation: &'static str },
 }

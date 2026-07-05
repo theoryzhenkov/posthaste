@@ -148,11 +148,17 @@ pub(crate) async fn send_message(
         .mailbox_id(drafts_mailbox_id.as_str(), false)
         .mailbox_id(sent_mailbox_id.as_str(), true);
 
-    // Bound the dispatch by the send-class deadline. A send that times out may
-    // already have committed server-side: classify it dispatch-uncertain so the
-    // outbox parks it rather than blind-resending (the S1 fix — F2's 10s
-    // total-request timeout was the trigger).
-    let response = match tokio::time::timeout(SEND_TOTAL, gateway.send_request(request)).await {
+    // Bound the dispatch by the send-class deadline AND classify any failure by
+    // PHASE via `send_request_dispatch`: a transport error at/after the request
+    // write (incl. jmap-client's inner request timeout that fires before this
+    // outer guard, or a mid-response reset) is dispatch-uncertain, so the outbox
+    // parks it rather than blind-resending it into a duplicate delivery
+    // (DP-C5/C6). Only a provably pre-write connect failure stays retryable, so a
+    // genuinely offline send still auto-retries. The outer timeout remains as a
+    // wall-clock backstop, also classified uncertain.
+    let response = match tokio::time::timeout(SEND_TOTAL, gateway.send_request_dispatch(request))
+        .await
+    {
         Ok(result) => result?,
         Err(_elapsed) => return Err(dispatch_uncertain("send timed out; delivery uncertain")),
     };

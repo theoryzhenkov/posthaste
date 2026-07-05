@@ -164,6 +164,32 @@ impl LiveJmapGateway {
         request.send().await.map_err(map_gateway_error)
     }
 
+    /// Route a **send** JMAP request, classifying any failure by dispatch PHASE
+    /// via [`classify_send_dispatch_error`] rather than the transport-blind
+    /// [`map_gateway_error`] used by [`Self::send_request`]. Used only by the
+    /// send path, so a possibly-committed submission is never blind-resent (the
+    /// duplicate-send fix); read paths keep [`Self::send_request`], so a
+    /// safe-to-retry read timeout stays `Network`.
+    ///
+    /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+    pub(crate) async fn send_request_dispatch(
+        &self,
+        request: jmap_client::core::request::Request<'_>,
+    ) -> Result<
+        jmap_client::core::response::Response<jmap_client::core::response::TaggedMethodResponse>,
+        GatewayError,
+    > {
+        if let Some(ref ws) = self.ws {
+            if ws.is_connected().await {
+                return ws
+                    .send_raw(request)
+                    .await
+                    .map_err(classify_send_dispatch_error);
+            }
+        }
+        request.send().await.map_err(classify_send_dispatch_error)
+    }
+
     pub(crate) async fn fetch_mailbox_id_by_role(
         &self,
         role: mailbox::Role,
@@ -276,6 +302,54 @@ pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
             _ => GatewayError::Network(message.clone()),
         },
         other => GatewayError::Network(other.to_string()),
+    }
+}
+
+/// Classify a JMAP failure raised while dispatching a **send** by dispatch
+/// PHASE, not error type — the duplicate-send fix (DP-C5/C6). Lives at the send
+/// call site (it knows it is a `Send`) so it never leaks into read
+/// classification: a safe-to-retry read timeout keeps its ordinary `Network`
+/// verdict via [`map_gateway_error`].
+///
+/// A send is at-most-once-on-uncertainty (O5/D86): once the `EmailSubmission`
+/// request bytes reach the socket, a later failure leaves the submission's fate
+/// UNKNOWN — it may already have committed — so it must be
+/// [`GatewayError::DispatchUncertain`] and the outbox parks it, never
+/// blind-resending. This is what closes the real bug: jmap-client's own inner
+/// request timeout ([`METADATA_TOTAL`], 30 s) fires *before* the outer 60 s
+/// send-class guard, and a connection reset while reading the response of an
+/// already-executed submission both surface here as a `Transport` error — and
+/// are now classified uncertain instead of a blind-retryable `Network`.
+///
+/// Only a PROVABLY pre-write transport failure — DNS, TCP connect, or the TLS
+/// handshake (`reqwest::Error::is_connect`) — is a safe transient, so a genuinely
+/// offline send still auto-retries when the link returns. A structured
+/// problem/method/set/server response means the server *answered* the request,
+/// so the outcome is determined by that answer (not unknown) and keeps its
+/// ordinary classification.
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+pub(crate) fn classify_send_dispatch_error(error: jmap_client::Error) -> GatewayError {
+    match &error {
+        // Connection-phase transport failure (DNS / TCP connect / TLS handshake):
+        // the request was never written, so the send provably did not commit.
+        jmap_client::Error::Transport(transport) if transport.is_connect() => {
+            GatewayError::Network(error.to_string())
+        }
+        // Any other transport failure is at or after the write — a response read
+        // timeout (including the inner jmap-client request timeout that pre-empts
+        // the outer send guard) or a mid-response connection reset. Unknown fate.
+        jmap_client::Error::Transport(_) => GatewayError::DispatchUncertain(format!(
+            "send transport lost after request; delivery uncertain: {error}"
+        )),
+        // A send over an already-established WebSocket that fails mid-exchange is
+        // likewise post-write with unknown fate.
+        jmap_client::Error::WebSocket(_) => GatewayError::DispatchUncertain(format!(
+            "send websocket lost after request; delivery uncertain: {error}"
+        )),
+        // The server answered (problem / method / set / HTTP status): the send's
+        // outcome is determined, so classify as usual.
+        _ => map_gateway_error(error),
     }
 }
 

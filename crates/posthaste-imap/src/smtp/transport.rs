@@ -53,9 +53,56 @@ pub async fn submit_smtp_message(
 ) -> Result<SubmittedSmtpMessage, ImapAdapterError> {
     let message = build_smtp_message(config, request, message_id)?;
     let raw_message = message.formatted();
-    smtp_transport(config)?.send(message).await?;
+    // Classify the send failure by PHASE, not error type (the duplicate-send
+    // fix): a drop after the message body was written is dispatch-uncertain, not
+    // a blind-retryable transient. `build_smtp_message` / `smtp_transport` above
+    // are provably pre-write (message construction / connection config), so they
+    // keep their ordinary `?`-mapping.
+    smtp_transport(config)?
+        .send(message)
+        .await
+        .map_err(classify_smtp_send_error)?;
 
     Ok(SubmittedSmtpMessage { raw_message })
+}
+
+/// Classify a lettre SMTP send failure by dispatch PHASE, not error type — the
+/// duplicate-send fix (DP-C5/C6). A send is at-most-once-on-uncertainty (O5):
+/// once the message body (DATA + terminating `.`) has been written, a transport
+/// drop before the final `250` is read leaves delivery UNKNOWN (the MTA may
+/// already have accepted the message), so it must park as dispatch-uncertain and
+/// never be blind-resent — a stable Message-ID does NOT dedup at recipient MTAs.
+///
+/// Only a provably pre-write or known-outcome failure is a safe retryable
+/// transient:
+///   * a server completion code (4xx/5xx) — the MTA explicitly answered a
+///     command, so the message was NOT silently accepted (outcome known);
+///   * an internal client-config error or a shut-down pooled transport — before
+///     any message byte is written;
+///   * connection setup (DNS / TCP connect / TLS handshake): lettre 0.11 folds
+///     these (`Kind::Connection` / `Kind::Tls`, both pre-write and safe) and
+///     live-socket i/o (`Kind::Network`, which can drop mid/post-DATA) into kinds
+///     with no public discriminator, so the pre-write cases are told apart by
+///     their stable `Display` tag.
+/// Everything left — live-socket i/o, a mid-exchange response error, or a read
+/// timeout with no completion code — is unknown-fate ⇒ dispatch-uncertain.
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+fn classify_smtp_send_error(error: lettre::transport::smtp::Error) -> ImapAdapterError {
+    let text = error.to_string();
+    let safe_to_retry = error.is_permanent()
+        || error.is_transient()
+        || error.is_client()
+        || error.is_transport_shutdown()
+        // `Kind::Connection` / `Kind::Tls` (connection setup) have no public
+        // predicate in lettre 0.11; their `Display` tags are the only signal.
+        || text.starts_with("Connection error")
+        || text.starts_with("tls error");
+    if safe_to_retry {
+        ImapAdapterError::Smtp(text)
+    } else {
+        ImapAdapterError::SmtpDispatchUncertain(text)
+    }
 }
 
 /// Append the accepted outbound message to an IMAP Sent mailbox.
