@@ -11,6 +11,16 @@ pub struct ImapMailboxSyncState {
     pub uid_validity: ImapUidValidity,
     pub highest_uid: Option<ImapUid>,
     pub highest_modseq: Option<ImapModSeq>,
+    /// Resumable checkpoint for an interrupted INITIAL full sync (B4). While an
+    /// initial snapshot is being committed in chunks, this holds the highest UID
+    /// durably committed so far; `highest_uid`/`highest_modseq` stay `None` until
+    /// the snapshot completes. A restart that sees `Some(uid)` here RESUMES the
+    /// snapshot from UIDs above this watermark (upsert-only, no prune) instead of
+    /// restarting from UID 1. `None` means no initial sync is in progress — the
+    /// mailbox has either never started or has fully completed one.
+    ///
+    /// @spec docs/L0-providers#imap-delta-fallback
+    pub partial_initial_uid: Option<ImapUid>,
     pub updated_at: String,
 }
 
@@ -77,6 +87,12 @@ pub struct ImapSelectedMailbox {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ImapFullSyncReason {
     InitialSync,
+    /// An initial full sync that was interrupted mid-snapshot and must RESUME
+    /// from its durable partial-sync checkpoint (`partial_initial_uid`) rather
+    /// than restart from UID 1 (B4). Distinguished from [`InitialSync`] so the
+    /// executor fetches only UIDs above the committed watermark and commits
+    /// upsert-only chunks (never a prune) until the snapshot completes.
+    ResumeInitialSync,
     UidValidityChanged,
     MissingUidWatermark,
     FlagDeltaUnavailable,
@@ -128,6 +144,7 @@ impl ImapMailboxSyncState {
             uid_validity,
             highest_uid: None,
             highest_modseq: None,
+            partial_initial_uid: None,
             updated_at,
         }
     }

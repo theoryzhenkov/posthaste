@@ -164,6 +164,7 @@ mod concurrency;
 mod conversation_queries;
 mod conversation_threads_events;
 mod fts_search;
+mod imap_resume;
 mod imap_snapshots;
 mod imap_state_locations;
 mod mailbox_role_overrides;

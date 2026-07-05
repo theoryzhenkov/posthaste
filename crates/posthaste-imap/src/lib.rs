@@ -55,6 +55,6 @@ pub use smtp::{
 };
 pub use sync::{
     imap_condstore_delta_sync_batch, imap_delta_sync_batch, imap_full_sync_batch,
-    imap_mailbox_state_from_changed_since_snapshot, imap_mailbox_state_from_header_snapshot,
-    imap_mailbox_sync_batch,
+    imap_initial_snapshot_chunk_batch, imap_mailbox_state_from_changed_since_snapshot,
+    imap_mailbox_state_from_header_snapshot, imap_mailbox_sync_batch,
 };

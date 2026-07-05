@@ -26,6 +26,18 @@ pub fn plan_imap_mailbox_sync(
         };
     }
 
+    // An interrupted initial sync left a durable partial-sync checkpoint (B4).
+    // UIDVALIDITY still matches (checked above), so the committed prefix is
+    // sound: resume the snapshot from the checkpoint instead of taking any delta
+    // path (a delta would trust the partial watermark and could prune the
+    // not-yet-fetched tail). The executor reads `stored.partial_initial_uid` for
+    // the resume point.
+    if stored.partial_initial_uid.is_some() {
+        return ImapMailboxSyncPlan::FullSnapshot {
+            reason: ImapFullSyncReason::ResumeInitialSync,
+        };
+    }
+
     if let Some(reason) = provider.imap().required_full_sync_reason() {
         return ImapMailboxSyncPlan::FullSnapshot { reason };
     }

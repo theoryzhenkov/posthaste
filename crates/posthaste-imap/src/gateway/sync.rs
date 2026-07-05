@@ -18,28 +18,36 @@ pub(crate) async fn sync_imap_account(
     lease.finish_gateway(result)
 }
 
-async fn sync_imap_account_with_client(
+/// Shared sync prelude: refresh capabilities on the live session, re-plan every
+/// selectable mailbox from stored per-mailbox state, and compute the fetch
+/// flags. Produced once and consumed by both the batch path
+/// ([`sync_imap_account_with_client`]) and the streamed resumable-initial-sync
+/// path ([`super::sync_imap_account_streamed`]).
+pub(crate) struct PlannedSync {
+    pub(crate) discovery: DiscoveredImapAccount,
+    pub(crate) planned_mailboxes: Vec<PlannedImapMailbox>,
+    pub(crate) fetch_modseq: bool,
+    pub(crate) fetch_gmail_metadata: bool,
+    pub(crate) account_full_message_snapshot: bool,
+    pub(crate) updated_at: String,
+    pub(crate) sync_started: Instant,
+}
+
+pub(crate) async fn prepare_planned_sync(
     gateway: &LiveImapSmtpGateway,
     client: &mut ImapClient,
     account_id: &AccountId,
-    progress: Option<SyncProgressReporter>,
-) -> Result<SyncBatch, GatewayError> {
+    progress: &Option<SyncProgressReporter>,
+) -> Result<PlannedSync, GatewayError> {
     let sync_started = Instant::now();
     report_sync_progress(
-        &progress,
+        progress,
         ImapSyncProgressUpdate::new(SyncProgressStage::Discovering, "Checking IMAP capabilities"),
     );
     let mut discovery = gateway.discovery.clone();
-    // Re-read capabilities on the live session for planning: CONDSTORE/QRESYNC
-    // may only appear post-auth, and advertisements can change between
-    // discovery and sync. Deadline-bounded (C1) unlike the pre-M34 call.
     crate::timeout::with_deadline("refresh_capabilities", client.refresh_capabilities())
         .await
         .map_err(imap_error_to_gateway)?;
-
-    // Use the capabilities advertised on this connection for planning, not the
-    // cached discovery snapshot. CONDSTORE/QRESYNC may only appear post-auth, or
-    // the server's advertisement may change between discovery and sync.
     discovery.capabilities = normalize_imap_capabilities(
         client
             .state
@@ -74,9 +82,36 @@ async fn sync_imap_account_with_client(
         &discovery,
         store,
         selectable_mailbox_count,
-        &progress,
+        progress,
     )
     .await?;
+
+    Ok(PlannedSync {
+        discovery,
+        planned_mailboxes,
+        fetch_modseq,
+        fetch_gmail_metadata,
+        account_full_message_snapshot,
+        updated_at,
+        sync_started,
+    })
+}
+
+async fn sync_imap_account_with_client(
+    gateway: &LiveImapSmtpGateway,
+    client: &mut ImapClient,
+    account_id: &AccountId,
+    progress: Option<SyncProgressReporter>,
+) -> Result<SyncBatch, GatewayError> {
+    let PlannedSync {
+        discovery,
+        planned_mailboxes,
+        fetch_modseq,
+        fetch_gmail_metadata,
+        account_full_message_snapshot,
+        updated_at,
+        sync_started,
+    } = prepare_planned_sync(gateway, client, account_id, &progress).await?;
     let has_full_mailbox_snapshot = account_full_message_snapshot
         || planned_mailboxes_include_full_snapshot(&planned_mailboxes);
     let requires_partial_delta_batch =
