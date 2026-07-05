@@ -48,24 +48,6 @@ export interface ReleaseEntry {
   gpgKey?: string
 }
 
-/** A single migrated documentation page, rendered from `content/docs/*.md`. */
-export interface DocEntry {
-  /** Route slug derived from the filename (`index` → the /docs landing). */
-  slug: string
-  /** Root-absolute route, e.g. `/docs` or `/docs/automations`. */
-  href: string
-  /** Page title (browser tab + article heading fallback). */
-  title: string
-  /** Short label shown in the sidebar nav. */
-  navLabel: string
-  /** One-line summary for the page description meta and landing cards. */
-  description: string
-  /** Sort order within the sidebar. */
-  order: number
-  /** Rendered HTML body (headings carry ids; cross-links resolve to /docs). */
-  html: string
-}
-
 export interface HomeContent {
   messages: SiteMessage[]
   openSource: TitledHtmlPiece

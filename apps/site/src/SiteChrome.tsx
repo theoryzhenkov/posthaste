@@ -3,7 +3,7 @@ import type { HomeContent } from './content/types'
 
 export const GITHUB_URL = 'https://github.com/theoryzhenkov/posthaste'
 export const DISCORD_URL = 'https://discord.gg/8ARFrDa2Gv'
-export const DOCS_URL = 'https://theoryzhenkov.github.io/posthaste/'
+export const DOCS_URL = '/docs/'
 export const BUY_ME_A_COFFEE_URL = 'https://buymeacoffee.com/theoryzhenkov'
 
 function GithubMark() {
