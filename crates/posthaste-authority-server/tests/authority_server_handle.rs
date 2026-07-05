@@ -2967,6 +2967,172 @@ async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
     assert_eq!(row.projection["isFlagged"], true);
 }
 
+/// A(1) client-liveness (AUDIT-L2-client-liveness §0): the OPTIMISTIC client
+/// echo for a mark-read now carries the store command's ENRICHED
+/// `message.updated` — projection + absolute `countDeltas` — instead of a bare
+/// `{changes:{keywords:true}}` event. That makes a SOURCE (physical) mailbox's
+/// live unread counter move on the echo, sub-second, without waiting for the
+/// follow-up sync/flush round-trip that used to be the only carrier of the
+/// countDeltas (the ~10-15s lag). Because the counts are ABSOLUTE (the current
+/// mailbox row value, maintained by the `is_read` trigger), the echo and the
+/// later sync re-emit are idempotent — no double-count.
+#[tokio::test]
+async fn mark_read_echo_carries_enriched_source_mailbox_count_deltas() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_server(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("mark-read-echo-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+
+    // Seed one UNREAD message in a source mailbox (unread_emails = 1), so a
+    // mark-read has a source count to move.
+    let mut message = seeded_message("mr-001", "mb-inbox");
+    message.keywords = Vec::new();
+    build
+        .api_bridge
+        .store
+        .apply_sync_batch(
+            &account.id,
+            &SyncBatch {
+                // Counts are maintained by the store's mailbox-counter triggers
+                // as the (unread) message is inserted; seed the mailbox at 0 and
+                // let the trigger raise unread to 1.
+                mailboxes: vec![MailboxRecord {
+                    id: MailboxId::from("mb-inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 0,
+                }],
+                messages: vec![message],
+                imap_mailbox_states: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "mr-state-1".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )
+        .expect("unread message batch should apply");
+
+    let caller = scoped_test_caller(account.id.as_str());
+    let link = build
+        .handle
+        .open_link(caller.clone())
+        .await
+        .expect("link should open");
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(caller.clone(), link.link_id.clone(), Some(RuntimeLinkSeq::new(0)))
+        .await
+        .expect("runtime frames should subscribe");
+
+    // Baseline the SOURCE mailbox's unread count directly from the store (the
+    // mock account may seed sibling messages, so use a relative assertion). The
+    // seeded mr-001 is unread, so mb-inbox has at least one unread.
+    let unread_before = build
+        .api_bridge
+        .store
+        .list_mailboxes(&account.id)
+        .expect("list mailboxes")
+        .into_iter()
+        .find(|mailbox| mailbox.id == MailboxId::from("mb-inbox"))
+        .expect("mb-inbox exists")
+        .unread_emails;
+    assert!(
+        unread_before >= 1,
+        "the seeded message leaves mb-inbox with an unread to clear",
+    );
+
+    // Mark the (unread) message read through the catalog mutation path — the
+    // client echo path — by adding `$seen`.
+    let receipt = build
+        .handle
+        .forward_mutation(
+            caller,
+            MutationRequest {
+                link_id: Some(link.link_id.clone()),
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.setKeywords",
+                    "args": serde_json::json!({
+                        "sourceId": account.id.as_str(),
+                        "messageId": "mr-001",
+                        "command": {"add": ["$seen"], "remove": []}
+                    }),
+                }))
+                .expect("typed operation parses"),
+                client_mutation_id: ClientMutationId::new("mark-read"),
+                context: None,
+            },
+        )
+        .await
+        .expect("mark-read mutation should run");
+    assert_eq!(receipt.name, "message.setKeywords");
+
+    // The optimistic echo — emitted before the follow-up sync — is a
+    // `message.updated` Notification carrying the enriched countDeltas for the
+    // SOURCE mailbox. Break on the first such frame (the echo).
+    let payload = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if let RuntimeFrame::Notification { kind, payload, .. } = frame {
+                if kind == EVENT_TOPIC_MESSAGE_UPDATED {
+                    break payload;
+                }
+            }
+        }
+    })
+    .await
+    .expect("a message.updated echo should arrive on the optimistic path");
+
+    let inner = &payload["payload"];
+    assert_eq!(inner["messageId"], "mr-001");
+    assert!(
+        inner["projection"].is_object(),
+        "the echo carries the message projection — the same enriched shape the sync path emits",
+    );
+    let count_deltas = inner["countDeltas"]
+        .as_array()
+        .expect("the echo carries countDeltas (not the old bare event)");
+    let inbox = count_deltas
+        .iter()
+        .find(|delta| delta["mailboxId"] == "mb-inbox")
+        .expect("countDeltas include the source mailbox");
+    assert_eq!(
+        inbox["unreadCount"],
+        serde_json::json!(unread_before - 1),
+        "mark-read drops the source mailbox unread count by one on the echo — no sync wait",
+    );
+    assert_eq!(
+        inner["projection"]["isRead"], true,
+        "the echoed projection reflects the applied mark-read",
+    );
+}
+
 /// A sync trigger that arrives while a provider sync is in flight must still run
 /// a follow-up cycle once that sync finishes — it is coalesced, never dropped.
 ///

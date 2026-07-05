@@ -1,7 +1,7 @@
 use posthaste_domain_model::{
-    AccountId, AddToMailboxCommand, CommandAck, MailboxId, MessageId, Operation, OperationEntity,
-    OperationEntityKind, OperationKind, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ServiceError, SetKeywordsCommand, StoreError, EVENT_TOPIC_MESSAGE_UPDATED,
+    AccountId, AddToMailboxCommand, CommandAck, DomainEvent, MailboxId, MessageId, Operation,
+    OperationEntity, OperationEntityKind, OperationKind, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, StoreError,
 };
 
 use super::{decode_payload, encode_payload, offload, MailService};
@@ -40,59 +40,55 @@ impl MailService {
         message_id: &MessageId,
         kind: OperationKind,
         payload: serde_json::Value,
-        event_payload: serde_json::Value,
     ) -> Result<CommandAck, ServiceError> {
-        // A state assertion acknowledges the change; it does not read or return
-        // the message body. The synced mailbox memberships are both the
-        // existence check (a known message has them) and the event's mailbox
-        // hint; the body + attachments a full `get_message_detail` would load are
-        // never needed here. Membership and counts propagate through the appended
-        // event + server-side view recompute, which keys on the change flags (see
-        // `event_affects_view`), not on this hint, and every caller discards
-        // the command result for state assertions. Reading the body here made
-        // archive/delete/keyword ops pay a load + serialize + transfer tax
-        // proportional to body size on attachment-shaped messages — regression-
-        // gated by `message_mutation_settlement_payload_excludes_the_message_body`.
+        // Echo the store command's ENRICHED `message.updated` (projection +
+        // absolute `countDeltas`) instead of a bare `{changes:{keywords:true}}`
+        // one. The write-through store command
+        // (`set_keywords`/`replace_mailboxes`/`destroy_message`, `posthaste-store`
+        // `mutations/commands.rs`) already computes and appends that event to the
+        // log inside its transaction and hands it back in the `CommandResult`;
+        // we now publish it rather than discarding it. This is the SAME event
+        // shape the sync-apply path emits, so the client entity store ingests the
+        // echo identically → the source-mailbox live count moves on the echo
+        // (sub-second), not only when a later sync re-emits the countDeltas.
         //
-        // @spec docs/replication/client-link/L3#5-the-failure-path-and-remaining-gaps
-        let projected_mailboxes = self
-            .message_mailboxes
-            .get_message_mailboxes(account_id, message_id)?;
-        let operation = self.queue_message_operation(account_id, message_id, kind, payload)?;
-        // Write-through: apply the assertion to the canonical row so SQLite
-        // reflects the optimistic state directly. The read overlay still folds
-        // the same assertion idempotently until S4, so reads are unchanged this
-        // slice. On a local write failure, retract the op (as for an event-
-        // append failure) so the outbox and canonical do not diverge.
+        // No double-count: `countDeltas` carry ABSOLUTE mailbox counts (the
+        // current row value, not a ±delta — `mailbox_counts_json_tx`), and the
+        // client applies them by assignment (`apply_count_delta`), so this echo
+        // and the follow-up sync's re-emitted event are idempotent — both set the
+        // same value. Revert on failure rides the existing settlement path: a
+        // rejected assertion settles from the provider readback, which rewrites
+        // canonical to the unchanged state and re-emits an enriched
+        // `message.updated` with the reverted absolute counts.
+        //
+        // The projection is the body-free `MessageSummary` (no HTML/text body),
+        // so the settlement payload stays small — regression-gated by
+        // `message_mutation_settlement_payload_excludes_the_message_body`.
+        //
+        // On a local write failure, retract the op so the outbox and canonical do
+        // not diverge.
         //
         // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
-        if let Err(error) = self
+        let operation = self.queue_message_operation(account_id, message_id, kind, payload)?;
+        let events = match self
             .apply_assertion_to_canonical(account_id, message_id, &operation)
             .await
         {
-            return Err(self.remove_operation_after_local_failure(&operation, error));
-        }
-        let event = match self.events.append_event(
-            account_id,
-            EVENT_TOPIC_MESSAGE_UPDATED,
-            projected_mailboxes.first(),
-            Some(message_id),
-            event_payload,
-        ) {
-            Ok(event) => event,
+            Ok(events) => events,
             Err(error) => {
-                return Err(self
-                    .remove_operation_after_local_failure(&operation, ServiceError::from(error)));
+                return Err(self.remove_operation_after_local_failure(&operation, error));
             }
         };
-        Ok(CommandAck {
-            events: vec![event],
-        })
+        Ok(CommandAck { events })
     }
 
     /// Apply a message assertion's effect to the canonical row (optimistic
-    /// write-through), deserializing the operation payload by kind. Reuses the
-    /// `MessageCommandStore` local-write methods.
+    /// write-through), deserializing the operation payload by kind, and return
+    /// the store command's enriched `message.updated` events (projection +
+    /// absolute `countDeltas`) so the caller can echo them to clients. Reuses the
+    /// `MessageCommandStore` local-write methods; the `CommandResult` those
+    /// return already carries the enriched event, so the optimistic echo and the
+    /// sync-apply path share one event shape.
     ///
     /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
     async fn apply_assertion_to_canonical(
@@ -100,8 +96,8 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         operation: &Operation,
-    ) -> Result<(), ServiceError> {
-        match operation.kind {
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let result = match operation.kind {
             OperationKind::SetKeywords => {
                 let command: SetKeywordsCommand =
                     decode_payload(operation.payload.clone(), "setKeywords payload")?;
@@ -111,7 +107,7 @@ impl MailService {
                 offload(move || {
                     message_commands.set_keywords(&owned_account_id, &owned_message_id, None, &command)
                 })
-                .await?;
+                .await?
             }
             OperationKind::ReplaceMailboxes => {
                 let command: ReplaceMailboxesCommand =
@@ -127,7 +123,7 @@ impl MailService {
                         &command,
                     )
                 })
-                .await?;
+                .await?
             }
             OperationKind::Destroy => {
                 let message_commands = self.message_commands.clone();
@@ -136,11 +132,11 @@ impl MailService {
                 offload(move || {
                     message_commands.destroy_message(&owned_account_id, &owned_message_id, None)
                 })
-                .await?;
+                .await?
             }
-            _ => {}
-        }
-        Ok(())
+            _ => return Ok(Vec::new()),
+        };
+        Ok(result.events)
     }
 
     /// Add/remove JMAP keywords on a message, local-first.
@@ -162,10 +158,6 @@ impl MailService {
             message_id,
             OperationKind::SetKeywords,
             payload,
-            serde_json::json!({
-                "messageId": message_id.as_str(),
-                "changes": { "keywords": true },
-            }),
         )
         .await
     }
@@ -231,20 +223,6 @@ impl MailService {
             message_id,
             OperationKind::ReplaceMailboxes,
             payload,
-            serde_json::json!({
-                "messageId": message_id.as_str(),
-                "changes": { "mailboxes": true, "arrived": true },
-                "mailboxIds": command
-                    .mailbox_ids
-                    .iter()
-                    .map(MailboxId::as_str)
-                    .collect::<Vec<_>>(),
-                "arrivedMailboxIds": command
-                    .mailbox_ids
-                    .iter()
-                    .map(MailboxId::as_str)
-                    .collect::<Vec<_>>(),
-            }),
         )
         .await
     }
@@ -306,7 +284,6 @@ impl MailService {
             message_id,
             OperationKind::Destroy,
             serde_json::json!({}),
-            serde_json::json!({ "messageId": message_id.as_str(), "deleted": true }),
         )
         .await
     }
