@@ -11,6 +11,11 @@ on:
     branches: [main]
     paths:
       - 'apps/site/**'
+      # The Starlight docs collection renders the repo-root specs in place, so a
+      # spec edit must rebuild the site too (docs/eph + docs/issues are internal
+      # and excluded from the published collection, but a change there is cheap
+      # to rebuild and harmless).
+      - 'docs/**'
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/site-publish.yml'
