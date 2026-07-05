@@ -7,8 +7,10 @@
 import { useMutation } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
+import { classifyAccountSetupError } from '../../accountHealth'
 import type { AccountOverview, VerificationResponse } from '../../api/types'
 import { runtimeMutations } from '../../runtime/mutations'
+import { imapDefaultsForEmail } from './helpers'
 import { AccountMark } from '../AccountMark'
 import { Button } from '../ui/button'
 import {
@@ -72,6 +74,10 @@ export function AccountEditor({
   const [form, setForm] = useState(() =>
     editingAccount ? formFromAccount(editingAccount) : emptyAccountForm(),
   )
+  const appPasswordHint =
+    form.driver === 'imapSmtp'
+      ? (imapDefaultsForEmail(setupPrimaryEmail(form))?.appPasswordHint ?? null)
+      : null
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [verification, setVerification] = useState<VerificationResponse | null>(
     null,
@@ -102,7 +108,7 @@ export function AccountEditor({
       await onSaved(account)
     },
     onError: (error: Error) => {
-      setErrorMessage(error.message)
+      setErrorMessage(classifyAccountSetupError(error, appPasswordHint).message)
     },
   })
 
@@ -116,7 +122,7 @@ export function AccountEditor({
     },
     onError: (error: Error) => {
       setVerification(null)
-      setErrorMessage(error.message)
+      setErrorMessage(classifyAccountSetupError(error, appPasswordHint).message)
     },
   })
 
@@ -247,6 +253,15 @@ export function AccountEditor({
       )}
     </div>
   )
+}
+
+/** The concrete email an IMAP setup will connect as, for app-password hints. */
+function setupPrimaryEmail(form: AccountFormState): string {
+  const fromPatterns = form.emailPatternsText
+    .split(/[\n,]/)
+    .map((pattern) => pattern.trim())
+    .find((pattern) => !pattern.includes('*') && pattern.includes('@'))
+  return fromPatterns ?? form.username.trim()
 }
 
 function IdentitySection({

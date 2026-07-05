@@ -3,8 +3,10 @@ import { describe, expect, it } from 'bun:test'
 import {
   accountHealth,
   accountHealthFor,
+  classifyAccountSetupError,
   unhealthyAccounts,
 } from '../src/accountHealth'
+import { ApiError } from '../src/api/errors'
 import type { AccountOverview, AccountRuntime } from '../src/api/types'
 
 function runtime(overrides: Partial<AccountRuntime> = {}): AccountRuntime {
@@ -151,5 +153,57 @@ describe('account health presentation (M45)', () => {
     expect(
       unhealthyAccounts([healthy, broken, disabledBroken]).map((a) => a.id),
     ).toEqual(['b'])
+  })
+})
+
+describe('account setup error classification', () => {
+  it('classifies an auth failure and appends the app-password hint', () => {
+    const error = new ApiError(
+      401,
+      'Unauthorized',
+      'authentication failed: LOGIN rejected',
+      'auth_error',
+    )
+    const result = classifyAccountSetupError(
+      error,
+      'Fastmail requires an app password.',
+    )
+    expect(result.category).toBe('auth')
+    expect(result.message).toContain('username and password')
+    expect(result.message).toContain('Fastmail requires an app password.')
+    // Never leaks the raw provider/library string.
+    expect(result.message).not.toContain('LOGIN rejected')
+  })
+
+  it('classifies a network failure as a connection issue', () => {
+    const error = new ApiError(502, 'Bad Gateway', 'boom', 'network_error')
+    expect(classifyAccountSetupError(error).category).toBe('network')
+    expect(classifyAccountSetupError(error).message).toContain('mail server')
+  })
+
+  it('maps setup validation codes to specific config guidance', () => {
+    const sender = new ApiError(
+      400,
+      'Bad Request',
+      'sender required',
+      'account_sender_required',
+    )
+    const senderResult = classifyAccountSetupError(sender)
+    expect(senderResult.category).toBe('config')
+    expect(senderResult.message).toContain('Email addresses')
+
+    const username = new ApiError(
+      400,
+      'Bad Request',
+      'username required',
+      'account_username_required',
+    )
+    expect(classifyAccountSetupError(username).message).toContain('username')
+  })
+
+  it('falls back to an internal message for a non-API error', () => {
+    const result = classifyAccountSetupError(new Error('kaboom'))
+    expect(result.category).toBe('internal')
+    expect(result.message).not.toContain('kaboom')
   })
 })
