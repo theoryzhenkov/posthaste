@@ -25,6 +25,10 @@ import type {
 } from '../api/types'
 import { getRuntimeAdapter } from './adapter'
 import { runtimeLinkClient } from './linkClient'
+import {
+  foldOptimisticMailMutation,
+  revertOptimisticMailMutation,
+} from './replica/entityStoreAdapter'
 import type {
   RuntimeMessageCommandRequest,
   RuntimeMoveMessageToMailboxRoleRequest,
@@ -261,15 +265,59 @@ export const runtimeMutations = {
       return getRuntimeAdapter().deleteDraft(request)
     },
     /**
+     * FIX1 / D134 — the FOLD phase of a deferred discard. Applies the optimistic
+     * destroy fold on the row (the instant blink) client-side under
+     * `clientMutationId`, WITHOUT dispatching to the server or persisting a
+     * durable record. The caller (`useEmailActions.discardDraft`) reuses the
+     * SAME `clientMutationId` for the deferred {@link discardDraft} commit
+     * (idempotent re-fold, no second blink) or reverts it via
+     * {@link revertDiscard} on Undo. Returns the foldId, or null when no store is
+     * active (the row removal then happens at commit, unchanged).
+     */
+    foldDiscard(request: {
+      sourceId: string
+      messageId: string
+      draftId: string
+      clientMutationId: string
+    }): Promise<string | null> {
+      return foldOptimisticMailMutation({
+        name: 'message.deleteDraft',
+        args: {
+          sourceId: request.sourceId,
+          messageId: request.messageId,
+          draftId: request.draftId,
+        },
+        clientMutationId: request.clientMutationId,
+        sourceId: request.sourceId,
+      })
+    },
+    /**
+     * FIX1 / D134 — revert a {@link foldDiscard} that was never committed (Undo
+     * within the grace): the folded row returns, with no server round-trip.
+     */
+    revertDiscard(foldId: string): Promise<void> {
+      return revertOptimisticMailMutation(foldId)
+    },
+    /**
      * Discard a draft through the optimistic runtime-mutation path (D130) —
      * unlike {@link deleteDraft} (a fire-and-forget POST) this folds an
      * optimistic destroy on the row's `messageId` (the blink), settles on the
      * runtime notification, and reverts + surfaces the error on failure. The
      * stable `draftId` (D131) rides along so the far node resolves the current
      * live Email even after a JMAP autosave rotates the id.
+     *
+     * FIX1 / D134: when the row was already folded by {@link foldDiscard}, the
+     * caller threads that fold's `clientMutationId` here so this COMMIT re-runs
+     * the same mutation (idempotent fold — no second blink) and simply adds the
+     * durable record + server dispatch.
      */
     async discardDraft(
-      request: { sourceId: string; messageId: string; draftId: string },
+      request: {
+        sourceId: string
+        messageId: string
+        draftId: string
+        clientMutationId?: string
+      },
       options?: { userInitiated?: boolean },
     ): Promise<MessageCommandResult> {
       const receipt = await runtimeLinkClient.runMutation({
@@ -279,6 +327,9 @@ export const runtimeMutations = {
           messageId: request.messageId,
           draftId: request.draftId,
         },
+        ...(request.clientMutationId
+          ? { clientMutationId: request.clientMutationId }
+          : {}),
         sourceId: request.sourceId,
         ...(options?.userInitiated ? { context: { userInitiated: true } } : {}),
       })

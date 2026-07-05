@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 
-import type { AccountOverview, CachedSenderAddress } from '../src/api/types'
+import type {
+  AccountOverview,
+  CachedSenderAddress,
+  MessageDetail,
+} from '../src/api/types'
 import {
   EMPTY_FORM,
   accountFromOptions,
@@ -11,8 +15,38 @@ import {
   optionLabel,
   parseRecipients,
   parseSender,
+  replyContextFromCachedMessage,
   wildcardMatchesEmail,
 } from '../src/components/composeFormHelpers'
+
+/** A cached MessageDetail as the detail pane leaves it in react-query. */
+function cachedDetail(overrides: Partial<MessageDetail> = {}): MessageDetail {
+  return {
+    id: 'em-1',
+    sourceId: 'acct-1',
+    sourceName: 'Work',
+    sourceThreadId: 'thread-1',
+    conversationId: 'conv-1',
+    subject: 'Hello',
+    fromName: 'Ada',
+    fromEmail: 'ada@example.com',
+    to: [{ name: 'You', email: 'me@example.com' }],
+    preview: null,
+    receivedAt: '2026-01-01T00:00:00Z',
+    hasAttachment: false,
+    isRead: true,
+    isFlagged: false,
+    mailboxIds: ['inbox'],
+    keywords: [],
+    rfcMessageId: '<orig@example.com>',
+    inReplyTo: null,
+    bodyHtml: null,
+    bodyText: 'line one\nline two',
+    rawMessage: null,
+    attachments: [],
+    ...overrides,
+  }
+}
 
 describe('compose form helpers', () => {
   // spec: docs/L1-compose#mime-structure
@@ -144,5 +178,42 @@ describe('compose form helpers', () => {
       (o) => o.sourceId === 'acct-1' && o.email === 'ada@work.com',
     )
     expect(adaOnAcct1).toHaveLength(1)
+  })
+
+  // FIX2 — cache-seeded plain-reply context.
+  describe('replyContextFromCachedMessage', () => {
+    it('builds the quote, reply recipient, subject and In-Reply-To from a cached detail', () => {
+      const ctx = replyContextFromCachedMessage(cachedDetail())
+      expect(ctx).toBeDefined()
+      // Quote mirrors the engine: every line `> ` prefixed.
+      expect(ctx?.quotedBody).toBe('> line one\n> line two')
+      // The reply addresses the original sender.
+      expect(ctx?.to).toEqual([{ name: 'Ada', email: 'ada@example.com' }])
+      expect(ctx?.originalTo).toEqual([
+        { name: 'You', email: 'me@example.com' },
+      ])
+      expect(ctx?.replySubject).toBe('Re: Hello')
+      // The original message's Message-ID becomes the reply's In-Reply-To.
+      expect(ctx?.inReplyTo).toBe('<orig@example.com>')
+      // Not in the cache — the authoritative fetch supplies these before send.
+      expect(ctx?.references).toBeNull()
+      expect(ctx?.cc).toEqual([])
+    })
+
+    it('does not double-prefix a subject that already starts with Re:', () => {
+      const ctx = replyContextFromCachedMessage(
+        cachedDetail({ subject: 'RE: Hello' }),
+      )
+      expect(ctx?.replySubject).toBe('RE: Hello')
+    })
+
+    it('returns undefined when the body is not cached (fall back to the fetch)', () => {
+      expect(
+        replyContextFromCachedMessage(cachedDetail({ bodyText: null })),
+      ).toBeUndefined()
+      expect(
+        replyContextFromCachedMessage(cachedDetail({ bodyText: '' })),
+      ).toBeUndefined()
+    })
   })
 })

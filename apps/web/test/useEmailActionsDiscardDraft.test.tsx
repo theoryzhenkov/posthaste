@@ -61,7 +61,11 @@ describe('useEmailActions.discardDraft (D127)', () => {
     jest.useRealTimers()
   })
 
-  it('dispatches the optimistic discard mutation after the grace with the stable draft id and NEVER the trash mutation', async () => {
+  it('folds the discard optimistically IMMEDIATELY on click, then dispatches the server destroy only after the grace (never the trash mutation)', async () => {
+    const foldSpy = spyOn(
+      runtimeMutations.messages,
+      'foldDiscard',
+    ).mockResolvedValue('discard_fold_id' as never)
     const discardSpy = spyOn(
       runtimeMutations.messages,
       'discardDraft',
@@ -79,7 +83,18 @@ describe('useEmailActions.discardDraft (D127)', () => {
         result.current.discardDraft(draft)
       })
 
-      // Nothing dispatched during the grace window.
+      // FIX1: the optimistic fold (the blink) fires SYNCHRONOUSLY on click —
+      // the row is removed immediately, not after the grace.
+      expect(foldSpy).toHaveBeenCalledTimes(1)
+      const foldId = foldSpy.mock.calls[0]?.[0]?.clientMutationId as string
+      expect(foldId).toBeTruthy()
+      expect(foldSpy).toHaveBeenCalledWith({
+        sourceId: 'acct-1',
+        messageId: 'draft-9',
+        draftId: 'compose-session-9',
+        clientMutationId: foldId,
+      })
+      // Nothing dispatched to the server during the grace window.
       expect(discardSpy).not.toHaveBeenCalled()
 
       await act(async () => {
@@ -88,26 +103,36 @@ describe('useEmailActions.discardDraft (D127)', () => {
       })
 
       expect(discardSpy).toHaveBeenCalledTimes(1)
-      // D131: the optimistic fold keys on the row's messageId (the blink); the
-      // stable draftId rides along so the far node resolves the live Email.
+      // D131 + FIX1: the commit re-runs the SAME mutation under the fold's id
+      // (idempotent re-fold, no second blink); the stable draftId rides along.
       expect(discardSpy).toHaveBeenCalledWith(
         {
           sourceId: 'acct-1',
           messageId: 'draft-9',
           draftId: 'compose-session-9',
+          clientMutationId: foldId,
         },
         { userInitiated: true },
       )
       // The regression guard: a draft must never hit the trash move.
       expect(trashSpy).not.toHaveBeenCalled()
     } finally {
+      foldSpy.mockRestore()
       discardSpy.mockRestore()
       trashSpy.mockRestore()
       toastSpy.mockRestore()
     }
   })
 
-  it('cancels the dispatch when Undo is pressed within the grace', async () => {
+  it('Undo within the grace reverts the folded row and NEVER dispatches to the server', async () => {
+    const foldSpy = spyOn(
+      runtimeMutations.messages,
+      'foldDiscard',
+    ).mockResolvedValue('discard_fold_id' as never)
+    const revertSpy = spyOn(
+      runtimeMutations.messages,
+      'revertDiscard',
+    ).mockResolvedValue(undefined as never)
     const discardSpy = spyOn(
       runtimeMutations.messages,
       'discardDraft',
@@ -120,25 +145,38 @@ describe('useEmailActions.discardDraft (D127)', () => {
       act(() => {
         result.current.discardDraft(draft)
       })
+
+      const foldId = foldSpy.mock.calls[0]?.[0]?.clientMutationId as string
 
       // Press Undo before the grace elapses.
       act(() => {
         undoFromLastToast(toastSpy)()
       })
 
+      // The folded row is restored client-side (same id), with no round-trip.
+      expect(revertSpy).toHaveBeenCalledTimes(1)
+      expect(revertSpy).toHaveBeenCalledWith(foldId)
+
       await act(async () => {
         jest.advanceTimersByTime(DRAFT_DISCARD_GRACE_MS * 2)
         await Promise.resolve()
       })
 
+      // Nothing was ever dispatched to the server.
       expect(discardSpy).not.toHaveBeenCalled()
     } finally {
+      foldSpy.mockRestore()
+      revertSpy.mockRestore()
       discardSpy.mockRestore()
       toastSpy.mockRestore()
     }
   })
 
-  it('coalesces repeated discards of the same draft into one dispatch', async () => {
+  it('coalesces repeated discards of the same draft into one fold + one dispatch', async () => {
+    const foldSpy = spyOn(
+      runtimeMutations.messages,
+      'foldDiscard',
+    ).mockResolvedValue('discard_fold_id' as never)
     const discardSpy = spyOn(
       runtimeMutations.messages,
       'discardDraft',
@@ -152,6 +190,9 @@ describe('useEmailActions.discardDraft (D127)', () => {
         result.current.discardDraft(draft)
         result.current.discardDraft(draft)
       })
+
+      // The second click is coalesced: exactly one fold (one blink).
+      expect(foldSpy).toHaveBeenCalledTimes(1)
 
       await act(async () => {
         jest.advanceTimersByTime(DRAFT_DISCARD_GRACE_MS)
@@ -160,6 +201,7 @@ describe('useEmailActions.discardDraft (D127)', () => {
 
       expect(discardSpy).toHaveBeenCalledTimes(1)
     } finally {
+      foldSpy.mockRestore()
       discardSpy.mockRestore()
       toastSpy.mockRestore()
     }

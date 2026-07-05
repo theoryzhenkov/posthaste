@@ -1,9 +1,10 @@
 import { useCallback, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { Recipient } from '@/api/types'
+import type { MessageDetail, Recipient } from '@/api/types'
 import { buildRecipientSuggestionOptions } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
+import { mailKeys } from '@/mailState'
 import { queryKeys } from '@/queryKeys'
 import { runtimeViews } from '@/runtime/views'
 
@@ -11,10 +12,12 @@ import {
   accountFromOptions,
   formatRecipient,
   formatRecipients,
+  replyContextFromCachedMessage,
   wildcardMatchesEmail,
 } from '../composeFormHelpers'
 
 export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
+  const queryClient = useQueryClient()
   const identityQuery = useQuery({
     queryKey: queryKeys.identity(intent.sourceId),
     queryFn: () => runtimeViews.compose.identity(intent.sourceId),
@@ -69,6 +72,22 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
         : undefined,
     [draftSeedQuery.data],
   )
+  // FIX2 — seed the reply composer's quote from the detail-pane cache the user
+  // just had open, so the quoted body + reply recipient + subject appear
+  // INSTANTLY instead of blocking on the fresh `replyContext` Email/get. Only a
+  // PLAIN reply is cache-seedable (the cache lacks the References header + Cc
+  // list a reply-all/send needs); the authoritative fetch still runs and
+  // supplies those before send (the composer gates that on `isPlaceholderData`).
+  const plainReplyMessageId = intent.kind === 'reply' ? intent.messageId : null
+  const replyContextPlaceholder = useMemo(() => {
+    if (!plainReplyMessageId) {
+      return undefined
+    }
+    const cached = queryClient.getQueryData<MessageDetail>(
+      mailKeys.message(intent.sourceId, plainReplyMessageId),
+    )
+    return cached ? replyContextFromCachedMessage(cached) : undefined
+  }, [intent.sourceId, plainReplyMessageId, queryClient])
   const replyContextQuery = useQuery({
     queryKey: requiresMessageContext
       ? ['reply-context', intent.sourceId, intent.messageId]
@@ -79,6 +98,11 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
         messageId: isMessageBasedCompose ? intent.messageId : '',
       }),
     enabled: requiresMessageContext,
+    // A cache-built placeholder unblocks the quote immediately; react-query
+    // still fetches the authoritative context in the background and replaces it.
+    ...(replyContextPlaceholder
+      ? { placeholderData: replyContextPlaceholder }
+      : {}),
   })
   const composeKey = isMessageBasedCompose
     ? `${intent.kind}:${intent.sourceId}:${intent.messageId}`

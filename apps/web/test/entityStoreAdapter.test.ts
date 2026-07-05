@@ -14,6 +14,8 @@ import { queryKeys } from '../src/queryKeys'
 import {
   createEntityStoreAdapter,
   flushActiveEntityStore,
+  foldOptimisticMailMutation,
+  revertOptimisticMailMutation,
 } from '../src/runtime/replica/entityStoreAdapter'
 import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 import { MemoryPendingSetStore } from '../src/runtime/replica/pendingSetStore'
@@ -504,6 +506,82 @@ describe('entityStoreAdapter', () => {
     // The row comes back (the reverting settlement) and the pending op clears —
     // a user discard's failure is surfaced, never a silent success (the M60
     // regression this fixes).
+    expect(rowIds(frames)).toEqual(['m1', 'm2'])
+    expect(await pendingSet.all()).toHaveLength(0)
+  })
+
+  it('deferred discard (FIX1/D134): fold removes the row immediately, WITHOUT dispatching or a durable record', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
+    const opened = await adapter.openRuntimeLinkMessageListView(viewRequest)
+    expect(
+      opened.snapshot.data.rows.map((r) => (r.projection as { id: string }).id),
+    ).toEqual(['m1', 'm2'])
+
+    const foldId = await foldOptimisticMailMutation(deleteDraft('m1', 'fold-1'))
+
+    // The instant blink: the draft row is gone from the projected view.
+    expect(foldId).toBe('fold-1')
+    expect(rowIds(frames)).toEqual(['m2'])
+    // Nothing hit the server, and no durable pending-set record was written —
+    // a tab close during the grace drops the fold with the page (draft kept).
+    expect(harness.mutations).toHaveLength(0)
+    expect(await pendingSet.all()).toHaveLength(0)
+  })
+
+  it('deferred discard (FIX1/D134): revert restores the folded row with no server round-trip', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+
+    await foldOptimisticMailMutation(deleteDraft('m1', 'fold-1'))
+    expect(rowIds(frames)).toEqual(['m2'])
+
+    await revertOptimisticMailMutation('fold-1')
+
+    // The row comes back purely client-side; nothing was dispatched.
+    expect(rowIds(frames)).toEqual(['m1', 'm2'])
+    expect(harness.mutations).toHaveLength(0)
+    expect(await pendingSet.all()).toHaveLength(0)
+  })
+
+  it('deferred discard (FIX1/D134): committing under the SAME id dispatches once with no second blink + one durable record', async () => {
+    const { adapter, pendingSet, frames, harness } = build()
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+
+    // Phase 1: fold NOW (the blink), client-only.
+    await foldOptimisticMailMutation(deleteDraft('m1', 'fold-1'))
+    expect(rowIds(frames)).toEqual(['m2'])
+
+    // Phase 2 (grace elapsed): commit by re-running the SAME mutation under the
+    // fold's id — idempotent re-fold (no second blink / no flip), plus dispatch
+    // + exactly one durable record.
+    const receipt = await adapter.runRuntimeMutation(
+      deleteDraft('m1', 'fold-1'),
+    )
+    expect(rowIds(frames)).toEqual(['m2'])
+    expect(harness.mutations.map((m) => m.name)).toEqual([
+      'message.deleteDraft',
+    ])
+    expect((await pendingSet.all()).map((r) => r.clientMutationId)).toEqual([
+      'fold-1',
+    ])
+    expect(receipt.clientMutationId).toBe('fold-1')
+
+    // And a rejected settlement still reverts the fold + surfaces (M64): the row
+    // returns and the record clears.
+    harness.push({
+      type: 'mutationNotification',
+      linkSeq: 5,
+      clientMutationId: 'fold-1',
+      notification: {
+        type: 'rejected',
+        error: {
+          code: 'notFound',
+          message: 'draft not found',
+          terminality: 'permanent',
+        },
+      },
+    })
+    await tick()
     expect(rowIds(frames)).toEqual(['m1', 'm2'])
     expect(await pendingSet.all()).toHaveLength(0)
   })

@@ -55,16 +55,45 @@ export function ComposeOverlay({
     fromOptions: queries.fromOptions,
   })
 
-  const isWaitingForMessageContext =
-    (queries.requiresMessageContext && !queries.replyContextQuery.data) ||
-    (queries.isDraftEdit && !queries.draftSeed)
-  const isPreparingMessage =
-    (isWaitingForMessageContext &&
-      !queries.replyContextQuery.isError &&
-      !queries.draftSeedQuery.isError) ||
+  // A DRAFT resume still gates the composer (its loaded content replaces the
+  // form). A reply/forward no longer does (FIX2): the editor + fields are usable
+  // immediately and the quoted body streams in when `replyContext` settles.
+  const isWaitingForDraftSeed = queries.isDraftEdit && !queries.draftSeed
+  // The reply/forward quote is still being prepared: no served context yet, or
+  // only a cache PLACEHOLDER so far (the authoritative fetch is still in flight).
+  const isQuotePending =
+    queries.requiresMessageContext &&
+    (!queries.replyContextQuery.data ||
+      queries.replyContextQuery.isPlaceholderData) &&
+    !queries.replyContextQuery.isError
+  // Only a draft resume (or a forward-attachment read) blocks the editor/fields.
+  const isEditorPreparing =
+    (isWaitingForDraftSeed && !queries.draftSeedQuery.isError) ||
     forwardAttachments.isLoading
-  const fieldsDisabled =
-    isWaitingForMessageContext || forwardAttachments.isLoading
+  // The gated content itself failed to load (draft seed / forward attachments) —
+  // a full error, not the subtle quote-notice a reply shows.
+  const isEditorPreparingError =
+    (queries.isDraftEdit && queries.draftSeedQuery.isError) ||
+    forwardAttachments.isError
+  const fieldsDisabled = isEditorPreparing || isEditorPreparingError
+  // SEND / autosave readiness: the message must be AUTHORITATIVELY prepared
+  // (real In-Reply-To/References + Cc), not a cache placeholder — so a send
+  // never uses provisional threading. This gates submission + autosave, not the
+  // editor. A quote-fetch error clears it (send degrades to no-quote rather than
+  // blocking forever).
+  const isPreparingMessage =
+    (isWaitingForDraftSeed || isQuotePending || forwardAttachments.isLoading) &&
+    !queries.replyContextQuery.isError &&
+    !queries.draftSeedQuery.isError
+  // A subtle, non-blocking banner above the (already-usable) reply/forward
+  // editor while the served quote streams in — or if it failed to load.
+  const quoteNoticeLabel = isQuotePending
+    ? intent.kind === 'forward'
+      ? 'Adding forwarded text...'
+      : 'Adding quoted text...'
+    : queries.replyContextQuery.isError && queries.requiresMessageContext
+      ? 'Could not load the quoted text; you can still send your reply.'
+      : null
   const preparingLabel =
     intent.kind === 'forward'
       ? 'Preparing forward...'
@@ -154,10 +183,9 @@ export function ComposeOverlay({
       />
       <ComposeBodyEditor
         bodyRef={formState.bodyRef}
-        isPreparingMessage={isPreparingMessage}
-        isReplyContextError={
-          queries.replyContextQuery.isError || forwardAttachments.isError
-        }
+        isPreparingMessage={isEditorPreparing}
+        isPreparingError={isEditorPreparingError}
+        noticeLabel={quoteNoticeLabel}
         preparingLabel={preparingLabel}
         value={formState.form.body}
         onChange={formState.handleBodyChange}
@@ -175,7 +203,13 @@ export function ComposeOverlay({
         fileInputRef={formState.fileInputRef}
         isReadingAttachments={formState.isReadingAttachments}
         isSending={isSending}
-        statusLabel={isPreparingMessage ? preparingLabel : 'Ready'}
+        statusLabel={
+          isEditorPreparing
+            ? preparingLabel
+            : isQuotePending
+              ? (quoteNoticeLabel ?? 'Ready')
+              : 'Ready'
+        }
         onAttachFiles={formState.handleAttachFiles}
         onClose={onClose}
         onSubmit={handleSubmit}
