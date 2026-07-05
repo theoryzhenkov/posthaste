@@ -235,7 +235,7 @@ async fn fetch_all_remote_mailbox_ids(
             }
         }
         if page_len == 0 {
-            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            complete = reported_total.is_none_or(|total| ids.len() >= total);
             break;
         }
         if new_in_page == 0 {
@@ -244,7 +244,7 @@ async fn fetch_all_remote_mailbox_ids(
         }
         let effective_limit = applied_limit.unwrap_or(FULL_SNAPSHOT_MAILBOX_QUERY_PAGE_SIZE);
         if page_len < effective_limit {
-            complete = reported_total.map_or(true, |total| ids.len() >= total);
+            complete = reported_total.is_none_or(|total| ids.len() >= total);
             break;
         }
         position = position.checked_add(page_len as i32).ok_or_else(|| {

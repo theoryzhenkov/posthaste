@@ -404,7 +404,7 @@ async fn token_rotation_keeps_the_live_session_and_reauths_on_reconnect() {
 // deterministic route).
 #[tokio::test]
 async fn idle_reissues_before_the_server_timeout_on_one_session() {
-    let _seam = crate::timeout::seam_test_lock();
+    let _seam = crate::timeout::seam_test_lock().await;
     let restore = set_idle_reissue_ms_for_testing(200);
     let _restore = scopeguard(restore);
     let server = MockImap::spawn().await;
@@ -429,7 +429,7 @@ async fn idle_reissues_before_the_server_timeout_on_one_session() {
 // again (half-open socket) must trip the bounded hold, not hang forever.
 #[tokio::test]
 async fn a_half_open_idle_socket_times_out_instead_of_hanging() {
-    let _seam = crate::timeout::seam_test_lock();
+    let _seam = crate::timeout::seam_test_lock().await;
     let restore_reissue = set_idle_reissue_ms_for_testing(150);
     let _restore_reissue = scopeguard(restore_reissue);
     let restore_op = crate::timeout::set_op_timeout_ms_for_testing(150);

@@ -765,6 +765,12 @@ mod tests {
 
     #[test]
     fn install_locates_the_sidecar_via_discovery_app_dir_with_no_env_var_set() {
+        struct NoopSource;
+        impl ReleaseSource for NoopSource {
+            fn fetch(&self, _tag: &str, _asset: &str) -> Result<Vec<u8>, FetchError> {
+                panic!("must not fetch when a discovery-appDir sidecar is found");
+            }
+        }
         let dir = tempfile::tempdir().unwrap();
         let state_dir = dir.path().join("state");
         std::fs::create_dir_all(&state_dir).unwrap();
@@ -788,13 +794,6 @@ mod tests {
         )
         .unwrap();
         let to_dir = dir.path().join("bin");
-
-        struct NoopSource;
-        impl ReleaseSource for NoopSource {
-            fn fetch(&self, _tag: &str, _asset: &str) -> Result<Vec<u8>, FetchError> {
-                panic!("must not fetch when a discovery-appDir sidecar is found");
-            }
-        }
 
         temp_env(
             &[
@@ -823,21 +822,20 @@ mod tests {
 
     #[test]
     fn install_prefers_explicit_from_over_sidecar_and_download() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = dir.path().join("my-ctl");
-        std::fs::write(&from, b"EXPLICIT-BYTES").unwrap();
-        let to_dir = dir.path().join("bin");
-
         struct NoopSource;
         impl ReleaseSource for NoopSource {
             fn fetch(&self, _tag: &str, _asset: &str) -> Result<Vec<u8>, FetchError> {
                 panic!("must not fetch when --from is given");
             }
         }
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("my-ctl");
+        std::fs::write(&from, b"EXPLICIT-BYTES").unwrap();
+        let to_dir = dir.path().join("bin");
 
         let opts = CtlInstallOptions {
             from: Some(from),
-            to_dir: to_dir.clone(),
+            to_dir,
             version: Version::Channel(Channel::Nightly),
             platform: None,
         };
@@ -860,19 +858,18 @@ mod tests {
 
     #[test]
     fn install_falls_back_to_sidecar_when_no_from_given() {
-        let dir = tempfile::tempdir().unwrap();
-        let app_dir = dir.path().join("app");
-        std::fs::create_dir_all(&app_dir).unwrap();
-        let sidecar = app_dir.join(ctl_binary_name());
-        std::fs::write(&sidecar, b"SIDECAR-BYTES").unwrap();
-        let to_dir = dir.path().join("bin");
-
         struct NoopSource;
         impl ReleaseSource for NoopSource {
             fn fetch(&self, _tag: &str, _asset: &str) -> Result<Vec<u8>, FetchError> {
                 panic!("must not fetch when a sidecar is found");
             }
         }
+        let dir = tempfile::tempdir().unwrap();
+        let app_dir = dir.path().join("app");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let sidecar = app_dir.join(ctl_binary_name());
+        std::fs::write(&sidecar, b"SIDECAR-BYTES").unwrap();
+        let to_dir = dir.path().join("bin");
 
         temp_env(
             &[("POSTHASTE_APP_DIR", Some(app_dir.to_str().unwrap()))],
@@ -895,13 +892,6 @@ mod tests {
 
     #[test]
     fn install_downloads_and_verifies_when_nothing_else_found() {
-        let dir = tempfile::tempdir().unwrap();
-        let to_dir = dir.path().join("bin");
-
-        let asset_name = "PosthasteCTLNightly-linux-x64";
-        let bytes = b"DOWNLOADED-CTL-BYTES".to_vec();
-        let sums = format!("{}  {}\n", sha256_hex(&bytes), asset_name);
-
         struct MapSource {
             asset_name: String,
             bytes: Vec<u8>,
@@ -919,6 +909,13 @@ mod tests {
                 }
             }
         }
+        let dir = tempfile::tempdir().unwrap();
+        let to_dir = dir.path().join("bin");
+
+        let asset_name = "PosthasteCTLNightly-linux-x64";
+        let bytes = b"DOWNLOADED-CTL-BYTES".to_vec();
+        let sums = format!("{}  {}\n", sha256_hex(&bytes), asset_name);
+
         let source = MapSource {
             asset_name: asset_name.to_string(),
             bytes: bytes.clone(),
@@ -942,12 +939,6 @@ mod tests {
 
     #[test]
     fn download_rejects_a_tampered_binary() {
-        let dir = tempfile::tempdir().unwrap();
-        let to_dir = dir.path().join("bin");
-        let asset_name = "PosthasteCTLNightly-linux-x64";
-        let good = b"GOOD-CTL".to_vec();
-        let sums = format!("{}  {}\n", sha256_hex(&good), asset_name);
-
         struct MapSource {
             sums: String,
         }
@@ -960,6 +951,12 @@ mod tests {
                 }
             }
         }
+        let dir = tempfile::tempdir().unwrap();
+        let to_dir = dir.path().join("bin");
+        let asset_name = "PosthasteCTLNightly-linux-x64";
+        let good = b"GOOD-CTL".to_vec();
+        let sums = format!("{}  {}\n", sha256_hex(&good), asset_name);
+
         let source = MapSource { sums };
 
         temp_env(&[("POSTHASTE_APP_DIR", None)], || {

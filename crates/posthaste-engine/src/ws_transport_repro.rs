@@ -181,6 +181,9 @@ async fn spawn_mock(behavior: WsBehavior) -> String {
 async fn handle_ws(stream: tokio::net::TcpStream, behavior: WsBehavior) {
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
     // Echo the `jmap` subprotocol the client offers, as a real JMAP server does.
+    // The `Result<Response, _>` shape is dictated by tungstenite's `accept_hdr_async`
+    // callback contract; the large `Ok` variant is not ours to box away.
+    #[allow(clippy::result_large_err)]
     let with_subprotocol = |_req: &Request, mut response: Response| {
         response.headers_mut().insert(
             "Sec-WebSocket-Protocol",
@@ -208,13 +211,10 @@ async fn handle_ws(stream: tokio::net::TcpStream, behavior: WsBehavior) {
                     Err(_) => continue,
                 };
                 let ty = value.get("@type").and_then(Value::as_str).unwrap_or("");
-                match ty {
-                    "Request" => {
-                        let _ = tx.send(response_for(&value)).await;
-                    }
-                    // WebSocketPushEnable / WebSocketPushDisable: acknowledge by
-                    // doing nothing (no push subscription needed for the repro).
-                    _ => {}
+                // WebSocketPushEnable / WebSocketPushDisable: acknowledge by
+                // doing nothing (no push subscription needed for the repro).
+                if ty == "Request" {
+                    let _ = tx.send(response_for(&value)).await;
                 }
             }
             Message::Ping(payload) => {

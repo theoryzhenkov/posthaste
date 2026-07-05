@@ -208,16 +208,16 @@ impl Harness {
         std::fs::write(&bootstrap_path, "").unwrap();
         std::fs::write(config_root.join("rules.toml"), rules_toml).unwrap();
 
-        let _config_guard = EnvVarGuard::set("POSTHASTE_CONFIG_ROOT", &config_root);
-        let _state_guard = EnvVarGuard::set("POSTHASTE_STATE_ROOT", &state_root);
-        let _xdg_config_guard = EnvVarGuard::set("XDG_CONFIG_HOME", &xdg_config_root);
-        let _bootstrap_guard = EnvVarGuard::set("POSTHASTE_BOOTSTRAP_PATH", &bootstrap_path);
-        let _bind_guard = EnvVarGuard::set_value("POSTHASTE_BIND", "127.0.0.1:0");
-        let _cors_guard = EnvVarGuard::set_value("POSTHASTE_CORS_ORIGIN", "http://127.0.0.1:5173");
-        let _poll_guard = EnvVarGuard::set_value("POSTHASTE_POLL_INTERVAL", "60");
-        let _log_guard = EnvVarGuard::set_value("POSTHASTE_LOG_LEVEL", "warn");
-        let _auth_guard = EnvVarGuard::set_value("POSTHASTE_REQUIRE_AUTH", "true");
-        let _root_key_guard = EnvVarGuard::set_value(
+        let config_guard = EnvVarGuard::set("POSTHASTE_CONFIG_ROOT", &config_root);
+        let state_guard = EnvVarGuard::set("POSTHASTE_STATE_ROOT", &state_root);
+        let xdg_config_guard = EnvVarGuard::set("XDG_CONFIG_HOME", &xdg_config_root);
+        let bootstrap_guard = EnvVarGuard::set("POSTHASTE_BOOTSTRAP_PATH", &bootstrap_path);
+        let bind_guard = EnvVarGuard::set_value("POSTHASTE_BIND", "127.0.0.1:0");
+        let cors_guard = EnvVarGuard::set_value("POSTHASTE_CORS_ORIGIN", "http://127.0.0.1:5173");
+        let poll_guard = EnvVarGuard::set_value("POSTHASTE_POLL_INTERVAL", "60");
+        let log_guard = EnvVarGuard::set_value("POSTHASTE_LOG_LEVEL", "warn");
+        let auth_guard = EnvVarGuard::set_value("POSTHASTE_REQUIRE_AUTH", "true");
+        let root_key_guard = EnvVarGuard::set_value(
             "POSTHASTE_MACAROON_ROOT_KEY",
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         );
@@ -236,16 +236,16 @@ impl Harness {
             base,
             full_scope_token,
             root,
-            _config_guard,
-            _state_guard,
-            _xdg_config_guard,
-            _bootstrap_guard,
-            _bind_guard,
-            _cors_guard,
-            _poll_guard,
-            _log_guard,
-            _auth_guard,
-            _root_key_guard,
+            _config_guard: config_guard,
+            _state_guard: state_guard,
+            _xdg_config_guard: xdg_config_guard,
+            _bootstrap_guard: bootstrap_guard,
+            _bind_guard: bind_guard,
+            _cors_guard: cors_guard,
+            _poll_guard: poll_guard,
+            _log_guard: log_guard,
+            _auth_guard: auth_guard,
+            _root_key_guard: root_key_guard,
             handle: Some(handle),
         }
     }

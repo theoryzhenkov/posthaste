@@ -83,7 +83,7 @@ pub(super) fn build_state() -> Arc<AppState> {
             supervisor,
         ),
         account_logo_root: state_root.join("account-assets/logos"),
-        config_root: state_root.to_path_buf(),
+        config_root: state_root.clone(),
         auth_token: full_scope(),
         macaroon_root_key: test_root_key(),
         require_auth: true,

@@ -4,8 +4,8 @@
 //! [`GmailImapFixture`] spawns a stateful, multi-connection mock Gmail IMAP
 //! server on a loopback port. Unlike the focused single-shot protocol mock in
 //! `posthaste-imap`'s discovery tests (which asserts capability negotiation and
-//! FETCH parsing in isolation), this fixture answers the full discovery + sync
-//! + mutation command set the real gateway drives across several connections,
+//! FETCH parsing in isolation), this fixture answers the full discovery + sync +
+//! mutation command set the real gateway drives across several connections,
 //! so a `create_gmail_account` -> sync -> store -> mailList view test exercises
 //! the Gmail IMAP path end to end (mirroring the JMAP live test).
 //!
@@ -1435,8 +1435,8 @@ async fn send_select(
 }
 
 /// Encode one message's FETCH response via the forked `imap-codec`: UID +
-/// RFC822.SIZE + RFC822.HEADER (literal) and, for the Gmail flavor, X-GM-MSGID
-/// + X-GM-THRID + X-GM-LABELS + MODSEQ. Multi-word labels are pre-quoted
+/// RFC822.SIZE + RFC822.HEADER (literal) and, for the Gmail flavor, X-GM-MSGID +
+/// X-GM-THRID + X-GM-LABELS + MODSEQ. Multi-word labels are pre-quoted
 /// because the fork's `Text` encode emits raw bytes with no quoting.
 ///
 /// MODSEQ is **spliced in** rather than encoded: the fork's encoder emits

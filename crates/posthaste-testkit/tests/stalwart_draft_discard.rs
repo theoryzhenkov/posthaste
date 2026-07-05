@@ -225,7 +225,7 @@ async fn local_draft_row_ids(
         .open_link_view(caller, link, view)
         .await
         .expect("Drafts view should open");
-    serde_json::from_value::<MailListViewState>(snapshot.data.clone())
+    serde_json::from_value::<MailListViewState>(snapshot.data)
         .expect("snapshot data should be mail list state")
         .rows
         .iter()

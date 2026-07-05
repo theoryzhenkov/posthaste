@@ -161,7 +161,8 @@ fn extract_body(buf: &[u8]) -> Option<&[u8]> {
 
 async fn wait_for_webhook(captured: &Arc<Mutex<Vec<Value>>>) -> Option<Value> {
     for _ in 0..100 {
-        if let Some(payload) = captured.lock().unwrap().first().cloned() {
+        let next = captured.lock().unwrap().first().cloned();
+        if let Some(payload) = next {
             return Some(payload);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

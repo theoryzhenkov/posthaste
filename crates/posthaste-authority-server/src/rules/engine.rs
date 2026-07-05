@@ -171,7 +171,7 @@ impl ManagedRulesHandle {
         // Conflict if the id is already used ANYWHERE in the merged ruleset — a
         // managed file or a hand-authored `rules.toml` rule (no shadowing).
         if self.existing_rule_ids().contains(&rule.id) {
-            return Err(super::writer::RuleWriteError::Conflict(rule.id.clone()));
+            return Err(super::writer::RuleWriteError::Conflict(rule.id));
         }
         super::writer::write_managed_rule(&self.inner.config_root, &rule)?;
         self.reload_locked();
@@ -184,7 +184,7 @@ impl ManagedRulesHandle {
     pub fn update(&self, rule: Rule) -> Result<Rule, super::writer::RuleWriteError> {
         let _guard = self.inner.write_lock.lock().expect("write lock poisoned");
         if !super::writer::managed_rule_exists(&self.inner.config_root, &rule.id) {
-            return Err(super::writer::RuleWriteError::NotFound(rule.id.clone()));
+            return Err(super::writer::RuleWriteError::NotFound(rule.id));
         }
         super::writer::write_managed_rule(&self.inner.config_root, &rule)?;
         self.reload_locked();
@@ -277,13 +277,15 @@ pub(crate) fn spawn(
                 Ok(event) => {
                     let _ = tx.try_send(event);
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // Lag: skip the dropped fact and keep looping (the match is the
+                // loop's tail, so falling through re-iterates).
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });
 
-    let eval_ctx = ctx.clone();
+    let eval_ctx = ctx;
     let evaluator = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             eval_ctx.handle_event(event).await;
