@@ -68,10 +68,24 @@
 ## Passive channels (submit once, trickle stars for months)
 Awesome-list PRs: **awesome-rust** (Applications → Email), **awesome-email**, **awesome-local-first-software**, **awesome-selfhosted** ⚠(only if you lean the self-host/JMAP-server angle). Same one-line as Post 1.
 
+## Mail- & JMAP-specific channels (high fit — do NOT skip these)
+
+**JMAP authorities (the most credible, best-fit directory — Tier 1):**
+- **jmap.io software/clients list** — THE official JMAP directory, maintained by the JMAP/Fastmail community. Anyone evaluating a JMAP client lands here, and a real native JMAP desktop client is exactly what it's short on. The site source is on GitHub (`jmapio/*`) → open a PR adding Posthaste under clients, or email the JMAP community. **Do this early** — it's passive, authoritative, and dead-on-audience.
+- **Stalwart community** (`github.com/stalwartlabs` + their Discord) — Stalwart is a JMAP server Posthaste already works with (it's our integration-test server). A client that pairs with their server is welcome; lead with "works great with self-hosted Stalwart."
+- The IETF JMAP working group / mailing list exists but is protocol-dev, not user acquisition — skip.
+
+**Mail / privacy subreddits** (check each sub's self-promo rules; participate genuinely — most ban drive-by promo, so comment/be present first):
+- **r/fastmail** — Fastmail is the flagship JMAP provider; a good *native JMAP desktop client* is genuinely wanted here. **Highest-fit mail subreddit for us.**
+- **r/email** — general email + client discussion.
+- **r/selfhosted** — the self-hosted IMAP/JMAP (Stalwart) angle; large audience, frame as "works with your self-hosted mail," not a front-page launch.
+- **r/privacy / r/degoogle** — the local-first, no-credentials-to-a-third-party angle; large and self-promo-sensitive, tread carefully.
+- **r/opensource**, **r/coolgithubprojects** — project-announcement friendly, good for stars.
+
 ## Sequencing
 1. Prep done (this file) → fill the ⚠ items.
 2. Cut a **stable, installable beta** + Starlight docs live.
-3. Fire **Tier-1** (MCP directories + awesome-lists) — passive, warm, low-risk.
+3. Fire **Tier-1 passive/authoritative** (MCP directories + **jmap.io clients list** + awesome-lists + a nod in the Stalwart community) — warm, on-audience, low-risk.
 4. Then **r/rust `[Media]` + This Week in Rust + Bluesky/Mastodon** (one push each).
 5. **Hold** Show HN / Product Hunt for the proven build (one shot each).
 
