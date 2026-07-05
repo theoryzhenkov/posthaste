@@ -71,10 +71,7 @@ fn fetched_header_extracts_typed_gmail_metadata() {
             MessageDataItem::Uid(NonZeroU32::new(42).expect("uid")),
             MessageDataItem::GmailMessageId(1278455344230334865),
             MessageDataItem::GmailThreadId(1266894439832287888),
-            MessageDataItem::GmailLabels(vec![
-                Cow::from("INBOX"),
-                Cow::from("\\Important"),
-            ]),
+            MessageDataItem::GmailLabels(vec![Cow::from("INBOX"), Cow::from("\\Important")]),
         ],
         "2026-04-25T00:00:00Z".to_string(),
     )

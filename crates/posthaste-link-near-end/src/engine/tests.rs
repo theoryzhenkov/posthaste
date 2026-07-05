@@ -325,7 +325,11 @@ struct Harness {
     pending_set: Rc<FakePendingSet>,
 }
 
-fn harness(transport: FakeTransport, pending_set: FakePendingSet, config: NearEndConfig) -> Harness {
+fn harness(
+    transport: FakeTransport,
+    pending_set: FakePendingSet,
+    config: NearEndConfig,
+) -> Harness {
     let transport = Rc::new(transport);
     let scheduler = Rc::new(FakeScheduler::new());
     let sink = Rc::new(RecordingSink::default());
@@ -356,7 +360,11 @@ fn harness(transport: FakeTransport, pending_set: FakePendingSet, config: NearEn
 fn forward_returns_receipt_and_stamps_session() {
     let transport =
         FakeTransport::new().with_mutation(ok_response(200, &confirmed_receipt("op-1")));
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     let receipt = block_on(async {
         h.engine.open().await.unwrap();
@@ -368,8 +376,14 @@ fn forward_returns_receipt_and_stamps_session() {
     assert_eq!(receipt.name, "message.setReadState");
     // The forward body stamped the opened link id and round-tripped the op.
     let posts = h.transport.posts.borrow();
-    let (url, body) = posts.iter().find(|(u, _)| u.contains("/mutations")).unwrap();
-    assert!(url.contains("/runtime/sessions/link-test/mutations"), "{url}");
+    let (url, body) = posts
+        .iter()
+        .find(|(u, _)| u.contains("/mutations"))
+        .unwrap();
+    assert!(
+        url.contains("/runtime/sessions/link-test/mutations"),
+        "{url}"
+    );
     assert!(body.contains("\"linkId\":\"link-test\""), "{body}");
     assert!(body.contains("\"name\":\"message.setReadState\""), "{body}");
 }
@@ -379,7 +393,11 @@ fn forward_retries_transient_then_succeeds() {
     let transport = FakeTransport::new()
         .with_mutation(ok_response(503, "unavailable"))
         .with_mutation(ok_response(200, &confirmed_receipt("op-2")));
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     let receipt = block_on(async {
         h.engine.open().await.unwrap();
@@ -387,7 +405,10 @@ fn forward_retries_transient_then_succeeds() {
     })
     .expect("forward ok after retry");
 
-    assert_eq!(receipt.state, posthaste_contract_core::MutationSettlementState::Confirmed);
+    assert_eq!(
+        receipt.state,
+        posthaste_contract_core::MutationSettlementState::Confirmed
+    );
     // Two mutation POSTs (503 then 200) and one backoff sleep between them.
     let mutation_posts = h
         .transport
@@ -397,14 +418,23 @@ fn forward_retries_transient_then_succeeds() {
         .filter(|(u, _)| u.contains("/mutations"))
         .count();
     assert_eq!(mutation_posts, 2);
-    assert!(h.scheduler.sleeps.borrow().iter().any(|d| *d > Duration::ZERO));
+    assert!(h
+        .scheduler
+        .sleeps
+        .borrow()
+        .iter()
+        .any(|d| *d > Duration::ZERO));
 }
 
 #[test]
 fn forward_4xx_is_permanent_with_envelope() {
     let body = r#"{"code":"invalid_mutation","message":"nope","terminality":"permanent","correlationId":null,"details":null}"#;
     let transport = FakeTransport::new().with_mutation(ok_response(422, body));
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     let err = block_on(async {
         h.engine.open().await.unwrap();
@@ -437,7 +467,11 @@ fn forward_respects_envelope_terminality_over_status_band() {
     let transport = FakeTransport::new()
         .with_mutation(ok_response(422, body))
         .with_mutation(ok_response(200, &confirmed_receipt("op-tt")));
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     let receipt = block_on(async {
         h.engine.open().await.unwrap();
@@ -497,7 +531,11 @@ fn stream_reconnects_and_carries_the_resume_cursor() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -507,8 +545,16 @@ fn stream_reconnects_and_carries_the_resume_cursor() {
     // Two subscribe URLs; the second resumes from the cursor.
     let urls = h.transport.stream_urls.borrow();
     assert_eq!(urls.len(), 2, "expected a reconnect");
-    assert!(!urls[0].contains("afterSeq"), "first has no cursor: {}", urls[0]);
-    assert!(urls[1].contains("afterSeq=5"), "reconnect resumes: {}", urls[1]);
+    assert!(
+        !urls[0].contains("afterSeq"),
+        "first has no cursor: {}",
+        urls[0]
+    );
+    assert!(
+        urls[1].contains("afterSeq=5"),
+        "reconnect resumes: {}",
+        urls[1]
+    );
     assert!(h.sink.statuses.borrow().iter().any(|s| s == "reconnecting"));
 }
 
@@ -551,7 +597,11 @@ fn stale_link_404_stream_error_re_prepares_a_fresh_link() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -574,7 +624,12 @@ fn stale_link_404_stream_error_re_prepares_a_fresh_link() {
     assert!(statuses.iter().any(|s| s == "transient"), "{statuses:?}");
     assert!(statuses.iter().any(|s| s == "reconnecting"), "{statuses:?}");
     // A jittered backoff sleep ran between the re-prepare attempts (no tight storm).
-    assert!(h.scheduler.sleeps.borrow().iter().any(|d| *d > Duration::ZERO));
+    assert!(h
+        .scheduler
+        .sleeps
+        .borrow()
+        .iter()
+        .any(|d| *d > Duration::ZERO));
 }
 
 // D110a — 410 Gone is treated identically to 404 (forward-compatibility for a
@@ -596,7 +651,11 @@ fn stale_link_410_stream_error_re_prepares_a_fresh_link() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -630,14 +689,22 @@ fn re_prepare_surfaces_the_recovery_edge_with_the_new_link_id() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
     // Exactly one recovery edge, carrying the fresh link id — never the old one,
     // never the first connect.
     let reestablished = h.sink.reestablished.borrow();
-    assert_eq!(reestablished.len(), 1, "one recovery edge: {reestablished:?}");
+    assert_eq!(
+        reestablished.len(),
+        1,
+        "one recovery edge: {reestablished:?}"
+    );
     assert_eq!(reestablished[0], "link-B", "carries the FRESH link id");
 }
 
@@ -663,7 +730,11 @@ fn same_link_reconnect_does_not_surface_the_recovery_edge() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -699,7 +770,11 @@ fn silent_dead_stream_re_prepares_from_the_liveness_deadline() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
     // Advance virtual time past the liveness deadline: the armed deadline fires
     // while the stream is silent.
     h.scheduler.set_liveness_expired(true);
@@ -721,7 +796,11 @@ fn silent_dead_stream_re_prepares_from_the_liveness_deadline() {
     // The M44 recovery edge fired exactly once, carrying the FRESH link id —
     // the SAME outcome as an observed transient death (views/counts reconcile).
     let reestablished = h.sink.reestablished.borrow();
-    assert_eq!(reestablished.len(), 1, "one recovery edge: {reestablished:?}");
+    assert_eq!(
+        reestablished.len(),
+        1,
+        "one recovery edge: {reestablished:?}"
+    );
     assert_eq!(reestablished[0], "link-B", "carries the FRESH link id");
     // Surfaced transient + drove the reconnect/backoff tail off the SILENT
     // stream — never from an observed error (none was delivered on link-A). The
@@ -732,7 +811,10 @@ fn silent_dead_stream_re_prepares_from_the_liveness_deadline() {
     let reconnecting_at = statuses.iter().position(|s| s == "reconnecting");
     assert!(transient_at.is_some(), "{statuses:?}");
     assert!(reconnecting_at.is_some(), "{statuses:?}");
-    assert!(transient_at < reconnecting_at, "the silence recovered transiently before reconnecting: {statuses:?}");
+    assert!(
+        transient_at < reconnecting_at,
+        "the silence recovered transiently before reconnecting: {statuses:?}"
+    );
     // No frame, no malformed report: the re-prepare came from the deadline only.
     assert_eq!(h.sink.frames.borrow().len(), 0);
     assert_eq!(h.sink.malformed.borrow().len(), 0);
@@ -764,7 +846,11 @@ fn keep_alives_and_frames_within_the_deadline_never_trip_the_watchdog() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
     // The liveness window never elapses while events flow — the deadline stays
     // pending and must lose every race.
     h.scheduler.set_liveness_expired(false);
@@ -804,7 +890,11 @@ fn auth_refused_stream_error_stays_permanent() {
                 message: "auth refused".to_string(),
             },
         ]);
-        let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+        let h = harness(
+            transport,
+            FakePendingSet::default(),
+            NearEndConfig::default(),
+        );
 
         block_on(h.engine.clone().run());
 
@@ -812,7 +902,10 @@ fn auth_refused_stream_error_stays_permanent() {
         assert_eq!(prepare_post_count(&h), 1, "{status} must not re-prepare");
         assert_eq!(h.transport.stream_urls.borrow().len(), 1, "{status}");
         let statuses = h.sink.statuses.borrow();
-        assert!(statuses.iter().any(|s| s == "permanent"), "{status}: {statuses:?}");
+        assert!(
+            statuses.iter().any(|s| s == "permanent"),
+            "{status}: {statuses:?}"
+        );
         assert!(
             !statuses.iter().any(|s| s == "reconnecting"),
             "{status}: an auth refusal must not reconnect: {statuses:?}"
@@ -829,7 +922,11 @@ fn permanent_stream_error_stops_the_loop() {
             message: "forbidden".to_string(),
         },
     ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -849,7 +946,11 @@ fn malformed_frame_is_reported_not_cast() {
             message: "stop".to_string(),
         },
     ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -877,7 +978,11 @@ fn a_seq_gap_reseeds_and_resubscribes_from_the_cursor() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -889,7 +994,11 @@ fn a_seq_gap_reseeds_and_resubscribes_from_the_cursor() {
     // Immediate resubscribe from the cursor, and NO reconnect-backoff sleep.
     let urls = h.transport.stream_urls.borrow();
     assert_eq!(urls.len(), 2, "gap forces a resubscribe");
-    assert!(urls[1].contains("afterSeq=1"), "resumes from the cursor: {}", urls[1]);
+    assert!(
+        urls[1].contains("afterSeq=1"),
+        "resumes from the cursor: {}",
+        urls[1]
+    );
     assert!(
         !h.sink.statuses.borrow().iter().any(|s| s == "reconnecting"),
         "a gap resubscribe is not a reconnect"
@@ -907,7 +1016,11 @@ fn consecutive_malformed_frames_degrade_and_stop() {
         StreamEvent::Message("garbage-2".to_string()),
         StreamEvent::Message("garbage-3".to_string()),
     ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -938,7 +1051,11 @@ fn a_good_frame_resets_the_malformed_streak() {
                 message: "stop".to_string(),
             },
         ]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
 
     block_on(h.engine.clone().run());
 
@@ -1016,7 +1133,12 @@ fn reconciler_settles_sent_but_unsettled_from_a_terminal_query() {
     );
     // Settled locally; never re-forwarded.
     assert_eq!(h.pending_set.settled.borrow().len(), 1);
-    assert_eq!(h.pending_set.settled.borrow()[0].client_mutation_id.as_str(), "sent-1");
+    assert_eq!(
+        h.pending_set.settled.borrow()[0]
+            .client_mutation_id
+            .as_str(),
+        "sent-1"
+    );
     let mutation_posts = h
         .transport
         .posts
@@ -1091,7 +1213,11 @@ fn reconciler_leaves_a_still_pending_record_alone() {
 #[test]
 fn shutdown_prevents_reconnect() {
     let transport = FakeTransport::new().with_stream(vec![StreamEvent::Open, StreamEvent::Closed]);
-    let h = harness(transport, FakePendingSet::default(), NearEndConfig::default());
+    let h = harness(
+        transport,
+        FakePendingSet::default(),
+        NearEndConfig::default(),
+    );
     // Request shutdown before running; the loop opens once then exits at the
     // clean close without a reconnect.
     block_on(async {

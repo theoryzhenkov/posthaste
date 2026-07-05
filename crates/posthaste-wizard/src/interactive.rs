@@ -146,8 +146,14 @@ pub fn guided_install<R: BufRead, W: Write>(
 fn ask_role<R: BufRead, W: Write>(input: &mut R, out: &mut W) -> Result<Role, String> {
     let roles = [
         (Role::Daemon, "daemon — all-in-one on one machine"),
-        (Role::AuthorityServer, "authority-server — far node, serves the link only"),
-        (Role::Runtime, "runtime — near node over a remote authority server"),
+        (
+            Role::AuthorityServer,
+            "authority-server — far node, serves the link only",
+        ),
+        (
+            Role::Runtime,
+            "runtime — near node over a remote authority server",
+        ),
     ];
     writeln!(out, "Which role is this node?").map_err(io_err)?;
     for (i, (_, desc)) in roles.iter().enumerate() {

@@ -64,11 +64,7 @@ pub trait Wire {
     /// The settlement-query GET for a sent-but-unsettled record (D44b), or
     /// `None` when this seam has no cross-link settlement query (the
     /// reconciler then skips that step).
-    fn settlement_request(
-        &self,
-        link_id: &str,
-        client_mutation_id: &str,
-    ) -> Option<GetRequest>;
+    fn settlement_request(&self, link_id: &str, client_mutation_id: &str) -> Option<GetRequest>;
 }
 
 /// The client↔runtime wire profile: link-prepared, `RuntimeFrame` down,
@@ -114,8 +110,7 @@ impl Wire for RuntimeLinkWire {
         token: Option<&str>,
         request: &MutationRequest,
     ) -> Result<PostRequest, EngineError> {
-        let link_id =
-            token.ok_or_else(|| EngineError::transient("forward before link open"))?;
+        let link_id = token.ok_or_else(|| EngineError::transient("forward before link open"))?;
         // Stamp the engine-held link onto the typed request (parse in,
         // serialize out — the mutation crosses the wire as a validated
         // `MailOperation`, never a raw cast).
@@ -172,11 +167,7 @@ impl Wire for RuntimeLinkWire {
         })
     }
 
-    fn settlement_request(
-        &self,
-        link_id: &str,
-        client_mutation_id: &str,
-    ) -> Option<GetRequest> {
+    fn settlement_request(&self, link_id: &str, client_mutation_id: &str) -> Option<GetRequest> {
         let mut query = Vec::new();
         if let Some(source) = &self.source_id {
             query.push(format!("sourceId={source}"));

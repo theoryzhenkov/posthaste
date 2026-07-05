@@ -73,7 +73,8 @@ pub struct RuntimeFrameSubscription {
 /// identity, lives in `posthaste-contract-core`).
 #[async_trait]
 pub trait RuntimeLink: Send + Sync {
-    async fn open_link(&self, caller: RuntimeCaller) -> Result<RuntimeLinkConnection, RuntimeError>;
+    async fn open_link(&self, caller: RuntimeCaller)
+        -> Result<RuntimeLinkConnection, RuntimeError>;
 
     async fn close_link(
         &self,

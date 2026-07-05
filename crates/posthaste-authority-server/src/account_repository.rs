@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use posthaste_contract_core::{RuntimeError, SecretWriteMode, SecretWriteMutation};
 use posthaste_domain_model::{AccountId, AccountSettings, SecretKind, SecretRef, ServiceError};
 use posthaste_domain_service::{MailService, SecretStore};
 use posthaste_observability::{events, ph_error, ph_warn};
-use posthaste_contract_core::{RuntimeError, SecretWriteMode, SecretWriteMutation};
 
 pub(crate) struct AccountRepository {
     service: Arc<MailService>,
@@ -285,9 +285,12 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::test_support::{temp_root, TempDirGuard};
-    use posthaste_domain_model::{AccountDriver, AccountTransportSettings, AppSettings, ConfigError, SecretStoreError, SmartMailbox, SmartMailboxId, RFC3339_EPOCH};
-use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
     use posthaste_contract_core::RuntimeErrorCode;
+    use posthaste_domain_model::{
+        AccountDriver, AccountTransportSettings, AppSettings, ConfigError, SecretStoreError,
+        SmartMailbox, SmartMailboxId, RFC3339_EPOCH,
+    };
+    use posthaste_domain_service::{ConfigDiff, ConfigRepository, ConfigSnapshot};
     use posthaste_store::DatabaseStore;
 
     #[derive(Default)]

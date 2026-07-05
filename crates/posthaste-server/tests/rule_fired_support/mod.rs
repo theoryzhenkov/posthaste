@@ -151,7 +151,9 @@ async fn read_sse_until(
             Ok(Some(Err(error))) => panic!("sse stream error: {error}"),
             Ok(None) => panic!("sse stream ended before {needles:?} appeared:\n{collected}"),
             Err(_) => {
-                panic!("timed out waiting for {needles:?} in the SSE stream; got so far:\n{collected}")
+                panic!(
+                    "timed out waiting for {needles:?} in the SSE stream; got so far:\n{collected}"
+                )
             }
         }
     }

@@ -749,7 +749,9 @@ async fn s1_dispatch_uncertain_send_never_duplicates_across_reflush_and_retry() 
         1,
         "exactly one submission after the timeout"
     );
-    assert!(events.iter().any(|e| e.topic == "operation.dispatch_uncertain"));
+    assert!(events
+        .iter()
+        .any(|e| e.topic == "operation.dispatch_uncertain"));
     let pending = service.list_pending_operations(&account).expect("pending");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].id, send.id);
@@ -821,7 +823,9 @@ async fn pre_write_network_send_error_retries_not_parked() {
         .await
         .expect("flush 1");
     assert!(
-        !events.iter().any(|e| e.topic == "operation.dispatch_uncertain"),
+        !events
+            .iter()
+            .any(|e| e.topic == "operation.dispatch_uncertain"),
         "a pre-write network error must not park the send"
     );
     let pending = service.list_pending_operations(&account).expect("pending");
@@ -1200,7 +1204,10 @@ async fn discard_of_an_unknown_draft_surfaces_not_found() {
     let result = service
         .discard_draft(&account, MessageId::from("ghost-draft"))
         .await;
-    assert!(result.is_err(), "unknown-draft discard must surface an error");
+    assert!(
+        result.is_err(),
+        "unknown-draft discard must surface an error"
+    );
 }
 
 /// M70 (D136) — the in-flight-op-vs-sync race M69 flagged. A `DraftDelete` is

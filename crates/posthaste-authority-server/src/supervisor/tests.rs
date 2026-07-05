@@ -554,7 +554,10 @@ async fn transient_sync_failure_is_humanized_and_clears_on_retry_success() {
     );
     let message = overview.last_sync_error.as_deref().unwrap_or_default();
     // The raw IMAP/TLS library text never reaches status.
-    assert!(!message.contains("TCP stream"), "raw string leaked: {message}");
+    assert!(
+        !message.contains("TCP stream"),
+        "raw string leaked: {message}"
+    );
     assert!(message.contains("check your connection"));
 
     // A successful retry (the auto-retrying poll loop, or a manual sync) clears
@@ -725,7 +728,9 @@ async fn stop_all_joins_cooperative_accounts_and_escalates_a_straggler() {
         .spawn_supervised_for_test(
             AccountId::from("cooperative"),
             WatchdogPolicy::production(),
-            Arc::new(|cancel: CancellationToken| tokio::spawn(async move { cancel.cancelled().await })),
+            Arc::new(|cancel: CancellationToken| {
+                tokio::spawn(async move { cancel.cancelled().await })
+            }),
         )
         .await;
 
@@ -923,7 +928,11 @@ async fn watchdog_backoff_prevents_restart_storm() {
     run_watchdog(account_id, shared, cancel, spawn, policy, first).await;
 
     let times = spawn_times.lock().expect("times mutex").clone();
-    assert_eq!(times.len(), 4, "1 original run + 3 capped restarts before halt");
+    assert_eq!(
+        times.len(),
+        4,
+        "1 original run + 3 capped restarts before halt"
+    );
     let gaps: Vec<Duration> = times
         .windows(2)
         .map(|pair| pair[1].duration_since(pair[0]))
@@ -1537,15 +1546,19 @@ async fn boot_storm_never_exceeds_the_global_concurrent_sync_cap() {
 fn startup_splay_delay_stays_within_the_configured_window() {
     // (a) A zero window disables the splay entirely (the interactive path).
     let seed = test_account("splay");
-    let (immediate, _root0) =
-        test_shared_with_governor(&seed, SyncGovernor::for_test(GLOBAL_CONCURRENT_SYNC_LIMIT, Duration::ZERO));
+    let (immediate, _root0) = test_shared_with_governor(
+        &seed,
+        SyncGovernor::for_test(GLOBAL_CONCURRENT_SYNC_LIMIT, Duration::ZERO),
+    );
     assert_eq!(immediate.startup_splay_delay(), Duration::ZERO);
 
     // (b) A non-zero window yields a jittered delay strictly inside it, so N
     // accounts do not all splay to the same instant.
     let window = Duration::from_secs(4);
-    let (splayed, _root1) =
-        test_shared_with_governor(&seed, SyncGovernor::for_test(GLOBAL_CONCURRENT_SYNC_LIMIT, window));
+    let (splayed, _root1) = test_shared_with_governor(
+        &seed,
+        SyncGovernor::for_test(GLOBAL_CONCURRENT_SYNC_LIMIT, window),
+    );
     for _ in 0..64 {
         assert!(
             splayed.startup_splay_delay() < window,
@@ -1598,7 +1611,12 @@ impl CountingSecretStore {
     }
 
     fn current(&self, key: &str) -> String {
-        self.values.lock().unwrap().get(key).cloned().unwrap_or_default()
+        self.values
+            .lock()
+            .unwrap()
+            .get(key)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -1682,10 +1700,7 @@ async fn oauth_refresh_tick_flips_autherror_on_invalid_grant() {
         AccountStatus::AuthError,
         "a revoked grant must surface as AuthError immediately from the refresh tick",
     );
-    assert_eq!(
-        overview.last_sync_error_code.as_deref(),
-        Some("auth_error"),
-    );
+    assert_eq!(overview.last_sync_error_code.as_deref(), Some("auth_error"),);
 }
 
 /// A2 negative: a *transient* refresh failure (a network blip) must NOT flip

@@ -122,9 +122,7 @@ impl AuthorityServer {
     /// Read channel: the cheap `event_log` seq bounds for the fact-carrying tap's
     /// head/truncation queries (RFC-L2-scripting S2). `None` when the log is
     /// empty.
-    pub(crate) fn event_log_bounds(
-        &self,
-    ) -> Result<Option<EventLogBounds>, RuntimeError> {
+    pub(crate) fn event_log_bounds(&self) -> Result<Option<EventLogBounds>, RuntimeError> {
         Ok(self.service.event_log_bounds()?)
     }
 

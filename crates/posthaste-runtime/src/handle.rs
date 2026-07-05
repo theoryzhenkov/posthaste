@@ -14,16 +14,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_client_link::{
-    RuntimeEventSubscription, RuntimeEventStream, RuntimeFrameSubscription, RuntimeLink,
+    RuntimeEventStream, RuntimeEventSubscription, RuntimeFrameSubscription, RuntimeLink,
 };
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, ClientMutationId, CreateAccountMutation,
-    MailOperation,
-    MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
-    MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller,
-    RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes,
-    RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, RuntimeStatus, ViewDescriptor, ViewId,
+    MailOperation, MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt,
+    MutationRequest, MutationSettlementState, PatchAccountMutation, RuntimeAccountList,
+    RuntimeCaller, RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeLinkConnection,
+    RuntimeLinkId, RuntimeLinkSeq, RuntimeMutationId, RuntimeResourceBytes, RuntimeStatus,
+    ViewDescriptor, ViewId,
 };
 use posthaste_domain_model::{
     AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, CommandResult,
@@ -31,7 +32,6 @@ use posthaste_domain_model::{
     Operation, OperationId, ReplyContext, SendMessageRequest, SmartMailbox, SmartMailboxId,
     SmartMailboxSummary, SyncMode, TagSummary,
 };
-use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_replica_core::{MutationId, PendingMessageMutation};
 use posthaste_runtime_api::{
     RuntimeAccountApi, RuntimeMailReadApi, RuntimeMailWriteApi, RuntimeSettingsApi,
@@ -40,12 +40,10 @@ use tokio::sync::broadcast;
 
 use posthaste_link_far_end::down::{Sequenced, Tap, TapResume};
 
-use crate::apply_ledger::{
-    AppliedOutcome, ApplyLedger, Reserved, DRAFT_DELETE_OP, DRAFT_SAVE_OP,
-};
+use crate::apply_ledger::{AppliedOutcome, ApplyLedger, Reserved, DRAFT_DELETE_OP, DRAFT_SAVE_OP};
+use crate::far_end::links::{LinkRegistry, MutationAcceptance};
 use crate::near_node::{named_message_assertion, AuthorityServerPendingSet};
 use crate::read::{EventLogFactLog, ReadCache};
-use crate::far_end::links::{MutationAcceptance, LinkRegistry};
 
 /// One tap subscriber's opaque server-side identity (RFC-L2-scripting §5.4): the
 /// key of its reaper-managed registry entry. Each `/v1/events` (re)subscription
@@ -229,9 +227,10 @@ impl RuntimeHandle {
     where
         Fut: std::future::Future<Output = Result<MutationReceipt, RuntimeError>>,
     {
-        let link_id = request.link_id.clone().ok_or_else(|| {
-            RuntimeError::invalid_mutation("runtime mutation requires a link id")
-        })?;
+        let link_id = request
+            .link_id
+            .clone()
+            .ok_or_else(|| RuntimeError::invalid_mutation("runtime mutation requires a link id"))?;
         let mutation_id = match self.core.links.accept_mutation(caller, request)? {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
@@ -447,7 +446,10 @@ impl RuntimeHandle {
             id
         });
         // Up-channel: forward the named mutation to the authority server far node.
-        let forward = self.core.authority_server_link.forward_mutation(request.clone());
+        let forward = self
+            .core
+            .authority_server_link
+            .forward_mutation(request.clone());
         let result = self.run_message_mutation(caller, &request, forward).await;
         if let Some(id) = optimistic {
             // An authority server rejection settles as `Ok(receipt)` carrying a `Failed`
@@ -479,7 +481,10 @@ impl RuntimeHandle {
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
         Self::ensure_account_in_scope(&account_id, link_scope)?;
-        let forward = self.core.authority_server_link.forward_mutation(request.clone());
+        let forward = self
+            .core
+            .authority_server_link
+            .forward_mutation(request.clone());
         self.run_message_mutation(caller, &request, forward).await
     }
 }
@@ -542,7 +547,10 @@ impl RuntimeAccountApi for RuntimeHandle {
         mutation: CreateAccountMutation,
     ) -> Result<AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.create_account(mutation).await
+        self.core
+            .authority_server_link
+            .create_account(mutation)
+            .await
     }
 
     async fn patch_account(
@@ -564,7 +572,10 @@ impl RuntimeAccountApi for RuntimeHandle {
         account_id: AccountId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.delete_account(account_id).await
+        self.core
+            .authority_server_link
+            .delete_account(account_id)
+            .await
     }
 
     async fn verify_account(
@@ -573,7 +584,10 @@ impl RuntimeAccountApi for RuntimeHandle {
         account_id: AccountId,
     ) -> Result<AccountVerificationResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.verify_account(account_id).await
+        self.core
+            .authority_server_link
+            .verify_account(account_id)
+            .await
     }
 
     async fn set_account_enabled(
@@ -601,7 +615,10 @@ impl RuntimeAccountApi for RuntimeHandle {
         mode: SyncMode,
     ) -> Result<usize, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.sync_account(account_id, mode).await
+        self.core
+            .authority_server_link
+            .sync_account(account_id, mode)
+            .await
     }
 }
 
@@ -618,7 +635,10 @@ impl RuntimeSettingsApi for RuntimeHandle {
         mutation: posthaste_contract_core::PatchAppSettingsMutation,
     ) -> Result<AppSettings, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.patch_app_settings(mutation).await
+        self.core
+            .authority_server_link
+            .patch_app_settings(mutation)
+            .await
     }
 
     async fn preview_automation_rule(
@@ -640,10 +660,7 @@ impl RuntimeMailReadApi for RuntimeHandle {
         &self,
         _caller: RuntimeCaller,
         scope: AccountScopeRequest,
-    ) -> Result<
-        std::collections::BTreeMap<AccountId, Vec<MailboxSummary>>,
-        RuntimeError,
-    > {
+    ) -> Result<std::collections::BTreeMap<AccountId, Vec<MailboxSummary>>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.reads.list_mailboxes(scope).await
     }
@@ -685,7 +702,10 @@ impl RuntimeMailReadApi for RuntimeHandle {
         mutation: posthaste_contract_core::CreateSmartMailboxMutation,
     ) -> Result<SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.create_smart_mailbox(mutation).await
+        self.core
+            .authority_server_link
+            .create_smart_mailbox(mutation)
+            .await
     }
 
     async fn patch_smart_mailbox(
@@ -718,7 +738,10 @@ impl RuntimeMailReadApi for RuntimeHandle {
         _caller: RuntimeCaller,
     ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.reset_default_smart_mailboxes().await
+        self.core
+            .authority_server_link
+            .reset_default_smart_mailboxes()
+            .await
     }
 
     async fn list_tags(
@@ -957,7 +980,11 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         };
         // Keyed delete (D128): idempotent under redelivery; `draft.delete` is a
         // distinct op-name from `draft.save` so cross-op key reuse Conflicts.
-        match self.core.apply_ledger.reserve(&caller, &key, DRAFT_DELETE_OP) {
+        match self
+            .core
+            .apply_ledger
+            .reserve(&caller, &key, DRAFT_DELETE_OP)
+        {
             Reserved::Return(result) => result.and_then(AppliedOutcome::into_draft),
             Reserved::Execute => {
                 let result = self
@@ -997,7 +1024,10 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         operation_id: OperationId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.authority_server_link.discard_operation(operation_id).await
+        self.core
+            .authority_server_link
+            .discard_operation(operation_id)
+            .await
     }
 
     /// Re-arm a failed outbox operation so the next flush re-attempts it.
@@ -1059,7 +1089,10 @@ impl RuntimeMailWriteApi for RuntimeHandle {
 
 #[async_trait]
 impl RuntimeLink for RuntimeHandle {
-    async fn open_link(&self, caller: RuntimeCaller) -> Result<RuntimeLinkConnection, RuntimeError> {
+    async fn open_link(
+        &self,
+        caller: RuntimeCaller,
+    ) -> Result<RuntimeLinkConnection, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.links.open_link(caller)
     }
@@ -1093,10 +1126,7 @@ impl RuntimeLink for RuntimeHandle {
         descriptor: ViewDescriptor,
     ) -> Result<posthaste_contract_core::ViewSnapshot, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core
-            .links
-            .open_view(caller, link_id, descriptor)
-            .await
+        self.core.links.open_view(caller, link_id, descriptor).await
     }
 
     async fn close_link_view(
@@ -1131,17 +1161,17 @@ impl RuntimeLink for RuntimeHandle {
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
         self.ensure_runtime_active()?;
-        let link_id = request.link_id.clone().ok_or_else(|| {
-            RuntimeError::invalid_mutation("runtime mutation requires a link id")
-        })?;
+        let link_id = request
+            .link_id
+            .clone()
+            .ok_or_else(|| RuntimeError::invalid_mutation("runtime mutation requires a link id"))?;
         // Undo/redo history is client-owned: an undo or redo arrives as an
         // ordinary `message.applyDiff` mutation and flows through the same
         // dispatch path as any user action — no runtime-owned history stack to
         // navigate.
         //
         // @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-        self.dispatch_named_mutation(caller, link_id, request)
-            .await
+        self.dispatch_named_mutation(caller, link_id, request).await
     }
 
     async fn mutation_settlement(
@@ -1177,7 +1207,10 @@ impl RuntimeLink for RuntimeHandle {
         // One opaque subscriber id + a `now` tick drive the tap's reaper-managed
         // registry entry (§5.4). The cursor rides the `after_seq` slot.
         let id = TapSubscriberId(self.core.tap_subscriber_seq.fetch_add(1, Ordering::Relaxed));
-        let after = filter.after_seq.filter(|seq| *seq >= 0).map(|seq| seq as u64);
+        let after = filter
+            .after_seq
+            .filter(|seq| *seq >= 0)
+            .map(|seq| seq as u64);
         let resume = self
             .core
             .event_tap
@@ -1201,8 +1234,10 @@ impl RuntimeLink for RuntimeHandle {
             // Durable replay: the facts after the cursor, seq-ordered.
             TapResume::Replay(frames) => {
                 let last = frames.last().map(Sequenced::seq).map(|seq| seq as i64);
-                let replay: Vec<DomainEvent> =
-                    frames.into_iter().filter_map(sequenced_into_event).collect();
+                let replay: Vec<DomainEvent> = frames
+                    .into_iter()
+                    .filter_map(sequenced_into_event)
+                    .collect();
                 (replay, None, last.or(filter.after_seq))
             }
             // The cursor fell before the log's oldest retained seq (§3, N8):
@@ -1218,7 +1253,11 @@ impl RuntimeLink for RuntimeHandle {
                 replay_filter.after_seq = after.map(|seq| seq as i64).or(filter.after_seq);
                 let retained = self.core.reads.replay_events(replay_filter).await?;
                 let last = retained.last().map(|event| event.seq);
-                (retained, Some(highest_seq), last.or(Some(highest_seq as i64)))
+                (
+                    retained,
+                    Some(highest_seq),
+                    last.or(Some(highest_seq as i64)),
+                )
             }
         };
 
@@ -1281,10 +1320,10 @@ impl Drop for TapUnsubscribeGuard {
 #[cfg(test)]
 mod pending_set_lifecycle_tests {
     use super::*;
+    use crate::far_end::view_registry::ViewRegistry;
+    use posthaste_authority_server_link::AuthorityServerApi;
     use posthaste_contract_core::ClientMutationId;
     use posthaste_domain_model::MessageSummary;
-    use posthaste_authority_server_link::AuthorityServerApi;
-    use crate::far_end::view_registry::ViewRegistry;
 
     // A never-invoked authority-server Api half: the pending-set-lifecycle paths
     // under test touch only the link registry, never the authority server,
@@ -1362,9 +1401,7 @@ mod pending_set_lifecycle_tests {
     async fn cancelled_dispatch_guard_settles_failed_not_accepted() {
         let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let link = links
-            .open_link(caller.clone())
-            .expect("link opens");
+        let link = links.open_link(caller.clone()).expect("link opens");
         let link_id = link.link_id;
         let client_mutation_id = ClientMutationId::new("cancel-cmid");
         let mutation_id = accept(&links, &caller, &link_id, &client_mutation_id);
@@ -1401,9 +1438,7 @@ mod pending_set_lifecycle_tests {
     async fn retryable_failure_clears_the_ledger_so_a_retry_re_executes() {
         let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let link = links
-            .open_link(caller.clone())
-            .expect("link opens");
+        let link = links.open_link(caller.clone()).expect("link opens");
         let link_id = link.link_id;
         let cmid = ClientMutationId::new("retry-cmid");
         let mid = accept(&links, &caller, &link_id, &cmid);
@@ -1440,9 +1475,7 @@ mod pending_set_lifecycle_tests {
     async fn rejected_verdict_survives_the_confirmed_eviction_window() {
         let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let link = links
-            .open_link(caller.clone())
-            .expect("link opens");
+        let link = links.open_link(caller.clone()).expect("link opens");
         let link_id = link.link_id;
 
         let rejected_cmid = ClientMutationId::new("rej-1");
@@ -1489,9 +1522,7 @@ mod pending_set_lifecycle_tests {
     async fn the_rejected_ledger_is_unbounded_at_the_client_seam() {
         let links = test_link_registry();
         let caller = RuntimeCaller::test();
-        let link = links
-            .open_link(caller.clone())
-            .expect("link opens");
+        let link = links.open_link(caller.clone()).expect("link opens");
         let link_id = link.link_id;
 
         // Bury the first rejection under well over any bounded window's cap

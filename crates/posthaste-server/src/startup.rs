@@ -54,7 +54,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         supervisor_stop,
         store_close,
         rules_managed,
-    ) = if matches!(authority_server_transport, AuthorityServerTransportConfig::Remote { .. }) {
+    ) = if matches!(
+        authority_server_transport,
+        AuthorityServerTransportConfig::Remote { .. }
+    ) {
         // A lean near node: no in-process supervisor or store to tear down (they
         // live in the remote authority server), so those teardown seams are absent.
         // No local authority server ⇒ no rule engine and no rule write surface.
@@ -90,7 +93,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         // deterministically from the same secret store + state root that
         // `build_app_state` uses below, so the keys match). Only spawned when
         // `rules.toml` has enabled rules; the handle is dropped at shutdown.
-        let macaroon_root_key = token::resolve_root_key(build.secret_store.as_ref(), &roots.state_root);
+        let macaroon_root_key =
+            token::resolve_root_key(build.secret_store.as_ref(), &roots.state_root);
         let minter = Arc::new(MacaroonMinter::new(macaroon_root_key));
         // Always spawns (even with zero rules) so the REST write surface's
         // ManagedRulesHandle can hot-reload a GUI-created rule into the live
@@ -144,7 +148,9 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // M27(a): the periodic pending-flow sweep (defense-in-depth beside
     // prune-on-insert); stops with the shutdown token.
     let flow_sweep_cancel = CancellationToken::new();
-    oauth_flows.clone().spawn_sweep_task(flow_sweep_cancel.clone());
+    oauth_flows
+        .clone()
+        .spawn_sweep_task(flow_sweep_cancel.clone());
     let oauth_state = Arc::new(OAuthState {
         app: state.clone(),
         oauth_flows,
@@ -157,7 +163,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         // The automation-rules surface (bundled-only): read-only list of the
         // merged ruleset, plus the safe write routes (create/update/delete) when
         // a local rule engine exists (RFC-L2-scripting ruling 23).
-        .merge(crate::rules_api::build_rules_router(state.clone(), rules_managed))
+        .merge(crate::rules_api::build_rules_router(
+            state.clone(),
+            rules_managed,
+        ))
         .merge(crate::openapi::openapi_router(crate::openapi::document()));
 
     // Authority server role: serve the runtime↔authority-server link for a remote runtime, with

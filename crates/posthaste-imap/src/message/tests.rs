@@ -1,5 +1,5 @@
-use posthaste_domain_model::{GmailMessageId, GmailThreadId, ImapUidValidity};
 use posthaste_domain_model::MailboxId;
+use posthaste_domain_model::{GmailMessageId, GmailThreadId, ImapUidValidity};
 
 use super::*;
 

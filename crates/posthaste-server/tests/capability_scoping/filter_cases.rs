@@ -144,14 +144,8 @@ async fn runtime_link_routes_filter_on_source_id() {
     for (method, path) in [
         ("POST", "/v1/runtime/sessions?sourceId=acct-a"),
         ("DELETE", "/v1/runtime/sessions/link-1?sourceId=acct-a"),
-        (
-            "GET",
-            "/v1/runtime/sessions/link-1/stream?sourceId=acct-a",
-        ),
-        (
-            "POST",
-            "/v1/runtime/sessions/link-1/views?sourceId=acct-a",
-        ),
+        ("GET", "/v1/runtime/sessions/link-1/stream?sourceId=acct-a"),
+        ("POST", "/v1/runtime/sessions/link-1/views?sourceId=acct-a"),
         (
             "DELETE",
             "/v1/runtime/sessions/link-1/views/view-1?sourceId=acct-a",
@@ -166,14 +160,8 @@ async fn runtime_link_routes_filter_on_source_id() {
     for (method, path) in [
         ("POST", "/v1/runtime/sessions?sourceId=acct-b"),
         ("DELETE", "/v1/runtime/sessions/link-1?sourceId=acct-b"),
-        (
-            "GET",
-            "/v1/runtime/sessions/link-1/stream?sourceId=acct-b",
-        ),
-        (
-            "POST",
-            "/v1/runtime/sessions/link-1/views?sourceId=acct-b",
-        ),
+        ("GET", "/v1/runtime/sessions/link-1/stream?sourceId=acct-b"),
+        ("POST", "/v1/runtime/sessions/link-1/views?sourceId=acct-b"),
         (
             "DELETE",
             "/v1/runtime/sessions/link-1/views/view-1?sourceId=acct-b",

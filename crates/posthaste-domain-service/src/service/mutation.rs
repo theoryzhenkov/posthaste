@@ -105,7 +105,12 @@ impl MailService {
                 let owned_account_id = account_id.clone();
                 let owned_message_id = message_id.clone();
                 offload(move || {
-                    message_commands.set_keywords(&owned_account_id, &owned_message_id, None, &command)
+                    message_commands.set_keywords(
+                        &owned_account_id,
+                        &owned_message_id,
+                        None,
+                        &command,
+                    )
                 })
                 .await?
             }

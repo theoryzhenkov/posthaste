@@ -334,11 +334,7 @@ impl MailGateway for MockJmapGateway {
         message_id: &MessageId,
     ) -> Result<FetchedBody, GatewayError> {
         self.body_fetch_attempts.fetch_add(1, Ordering::SeqCst);
-        let delay = self
-            .body_fetch_delay
-            .lock()
-            .ok()
-            .and_then(|slot| *slot);
+        let delay = self.body_fetch_delay.lock().ok().and_then(|slot| *slot);
         if let Some(delay) = delay {
             tokio::time::sleep(delay).await;
         }

@@ -88,8 +88,10 @@ impl EngineError {
         // The envelope-over-status precedence rule (D82) is the shared policy
         // core's `resolve_terminality`: the typed envelope verdict wins when
         // present, the status band is the fallback.
-        let disposition =
-            posthaste_call_policy::resolve_terminality(error.as_ref().map(|e| e.terminality), status);
+        let disposition = posthaste_call_policy::resolve_terminality(
+            error.as_ref().map(|e| e.terminality),
+            status,
+        );
         Self {
             disposition,
             message,
@@ -386,10 +388,12 @@ impl<W: Wire> NearEnd<W> {
                 self.sink.on_status(ConnectionStatus::Connecting);
                 if let Err(e) = self.open().await {
                     if e.is_permanent() {
-                        self.sink.on_status(ConnectionStatus::PermanentError(e.message));
+                        self.sink
+                            .on_status(ConnectionStatus::PermanentError(e.message));
                         return;
                     }
-                    self.sink.on_status(ConnectionStatus::TransientError(e.message));
+                    self.sink
+                        .on_status(ConnectionStatus::TransientError(e.message));
                     self.backoff_before_reconnect().await;
                     continue;
                 }
@@ -409,7 +413,8 @@ impl<W: Wire> NearEnd<W> {
             self.sink.on_status(ConnectionStatus::Connecting);
             let request = {
                 let state = self.state.borrow();
-                self.wire.stream_request(state.token.as_deref(), state.cursor)
+                self.wire
+                    .stream_request(state.token.as_deref(), state.cursor)
             };
             let mut stream = self.transport.open_stream(request);
 
@@ -481,14 +486,17 @@ impl<W: Wire> NearEnd<W> {
                         match classify_stream_error(status) {
                             StreamErrorAction::RePrepare => {
                                 self.clear_prepared();
-                                self.sink.on_status(ConnectionStatus::TransientError(message));
+                                self.sink
+                                    .on_status(ConnectionStatus::TransientError(message));
                             }
                             StreamErrorAction::Permanent => {
-                                self.sink.on_status(ConnectionStatus::PermanentError(message));
+                                self.sink
+                                    .on_status(ConnectionStatus::PermanentError(message));
                                 permanent = true;
                             }
                             StreamErrorAction::Reconnect => {
-                                self.sink.on_status(ConnectionStatus::TransientError(message));
+                                self.sink
+                                    .on_status(ConnectionStatus::TransientError(message));
                             }
                         }
                         break;
@@ -584,7 +592,10 @@ impl<W: Wire> NearEnd<W> {
             state.reconnect_attempt = state.reconnect_attempt.saturating_add(1);
             a
         };
-        let dur = self.config.backoff.delay_for(attempt, self.scheduler.jitter());
+        let dur = self
+            .config
+            .backoff
+            .delay_for(attempt, self.scheduler.jitter());
         self.scheduler.sleep(dur).await;
     }
 
@@ -643,7 +654,9 @@ impl<W: Wire> NearEnd<W> {
                 None => {
                     // The runtime has no record (link-continuity loss):
                     // re-forward, if the host still holds the original request.
-                    let Some(request) = record.request else { continue };
+                    let Some(request) = record.request else {
+                        continue;
+                    };
                     if let Ok(receipt) = self.forward(request).await {
                         self.pending_set.on_reconciled(receipt).await;
                     }

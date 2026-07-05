@@ -34,7 +34,10 @@ impl RuleHarness {
         );
         let config: Arc<dyn ConfigRepository> = Arc::new(config_repo);
         let service = Arc::new(MailService::new(store, config));
-        Self { _root: root, service }
+        Self {
+            _root: root,
+            service,
+        }
     }
 
     pub(super) fn save_account(&self, id: &str, name: &str) {

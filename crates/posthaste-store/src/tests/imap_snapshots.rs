@@ -299,10 +299,7 @@ fn imap_absence_floor_guard_refuses_drastic_absence_deletion() -> Result<(), Sto
                 .iter()
                 .map(|(_, location)| location.key())
                 .collect(),
-            absence_deleted_message_ids: seeded[0..3]
-                .iter()
-                .map(|(id, _)| id.clone())
-                .collect(),
+            absence_deleted_message_ids: seeded[0..3].iter().map(|(id, _)| id.clone()).collect(),
             ..SyncBatch::default()
         },
     )?;
@@ -372,9 +369,7 @@ fn imap_absence_deletion_below_floor_still_prunes() -> Result<(), StoreError> {
         "a single genuine absence deletion still prunes",
     );
     assert!(
-        store
-            .get_message_detail(&account, &seeded[0].0)?
-            .is_none(),
+        store.get_message_detail(&account, &seeded[0].0)?.is_none(),
         "the absent message is pruned",
     );
     Ok(())

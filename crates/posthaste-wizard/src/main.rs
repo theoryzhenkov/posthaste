@@ -29,10 +29,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use posthaste_wizard::{
-    apply_join, confirm_consent, discovery_env, format_status_table, guided_install, install,
-    install_ctl, install_update_timer, list_watches, locate_ctl, manifest_path, plan_updates,
-    provision, record_install, register, register_watch, rollback_component, sanitize_name,
-    unit_name, unregister_watch, apply_update, Channel, CtlInstallOptions, CtlSource,
+    apply_join, apply_update, confirm_consent, discovery_env, format_status_table, guided_install,
+    install, install_ctl, install_update_timer, list_watches, locate_ctl, manifest_path,
+    plan_updates, provision, record_install, register, register_watch, rollback_component,
+    sanitize_name, unit_name, unregister_watch, Channel, CtlInstallOptions, CtlSource,
     GithubSource, InstallOptions, Manifest, Plan, Role, ServiceScope, Version, WatchCommand,
 };
 
@@ -282,7 +282,9 @@ fn run_update(args: &[String]) -> ExitCode {
         };
         return match install_update_timer(&exe) {
             Ok(paths) => {
-                println!("installed the auto-update timer running `posthaste-wizard update --yes`:");
+                println!(
+                    "installed the auto-update timer running `posthaste-wizard update --yes`:"
+                );
                 for p in paths {
                     println!("  {}", p.display());
                 }
@@ -339,7 +341,10 @@ fn run_update(args: &[String]) -> ExitCode {
     };
     let mut order = actionable.clone();
     order.sort_by_key(|name| {
-        manifest.get(name).map(|c| c.kind == "wizard").unwrap_or(false)
+        manifest
+            .get(name)
+            .map(|c| c.kind == "wizard")
+            .unwrap_or(false)
     });
 
     let mut failed = false;
@@ -403,7 +408,13 @@ fn run_rollback(manifest: &mut Manifest, mpath: &std::path::Path, component: &st
             if let Err(e) = manifest.save(mpath) {
                 eprintln!("warning: could not persist manifest after rollback: {e}");
             }
-            println!("rolled {component} back to {}", manifest.get(component).map(|c| c.version.as_str()).unwrap_or("?"));
+            println!(
+                "rolled {component} back to {}",
+                manifest
+                    .get(component)
+                    .map(|c| c.version.as_str())
+                    .unwrap_or("?")
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -471,7 +482,9 @@ fn run_register_watch(args: &[String]) -> ExitCode {
         let flag = args[i].as_str();
         let mut val = || -> Result<String, String> {
             i += 1;
-            args.get(i).cloned().ok_or_else(|| format!("{flag} requires a value"))
+            args.get(i)
+                .cloned()
+                .ok_or_else(|| format!("{flag} requires a value"))
         };
         let r = (|| -> Result<(), String> {
             match flag {
@@ -484,7 +497,10 @@ fn run_register_watch(args: &[String]) -> ExitCode {
                 "--name" => name = Some(val()?),
                 "--port" => {
                     let raw = val()?;
-                    port = Some(raw.parse().map_err(|_| format!("--port must be 0-65535, got '{raw}'"))?);
+                    port = Some(
+                        raw.parse()
+                            .map_err(|_| format!("--port must be 0-65535, got '{raw}'"))?,
+                    );
                 }
                 "--to" => bin_dir = Some(PathBuf::from(val()?)),
                 "--yes" | "-y" => yes = true,
@@ -499,7 +515,9 @@ fn run_register_watch(args: &[String]) -> ExitCode {
     }
 
     let command = match (exec, serve_hook) {
-        (Some(_), Some(_)) => return arg_error("pass either --exec (watch) or --serve-hook, not both"),
+        (Some(_), Some(_)) => {
+            return arg_error("pass either --exec (watch) or --serve-hook, not both")
+        }
         (Some(exec), None) => WatchCommand::Watch {
             exec,
             topic,
@@ -508,7 +526,9 @@ fn run_register_watch(args: &[String]) -> ExitCode {
             account,
         },
         (None, Some(exec)) => WatchCommand::HookServe { exec, port },
-        (None, None) => return arg_error("register-watch requires --exec <script> or --serve-hook <script>"),
+        (None, None) => {
+            return arg_error("register-watch requires --exec <script> or --serve-hook <script>")
+        }
     };
 
     // Consent (ruling 20b): registering runs local code on server-controlled
@@ -540,7 +560,9 @@ fn run_register_watch(args: &[String]) -> ExitCode {
             println!("registered watch `{unit_name}`:");
             println!("  unit: {}", path.display());
             println!("  runs: {}", argv.join(" "));
-            println!("\nremove it with `posthaste-wizard ctl unregister-watch --name {unit_name}`.");
+            println!(
+                "\nremove it with `posthaste-wizard ctl unregister-watch --name {unit_name}`."
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {

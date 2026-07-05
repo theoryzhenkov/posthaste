@@ -141,8 +141,7 @@ impl Deref for ReadConnection<'_> {
 
 impl Drop for ReadConnection<'_> {
     fn drop(&mut self) {
-        let (Some(connection), Some(permit)) = (self.connection.take(), self.permit.take())
-        else {
+        let (Some(connection), Some(permit)) = (self.connection.take(), self.permit.take()) else {
             return;
         };
         let mut pool = lock_read_pool(self.pool);

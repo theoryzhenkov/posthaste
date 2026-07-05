@@ -139,7 +139,10 @@ pub(crate) fn resolve_latest_version(
 ) -> Result<String, FetchError> {
     let bytes = source.fetch(channel.rolling_tag(), channel.updater_manifest())?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
-        FetchError::Http(channel.updater_manifest().to_string(), format!("not JSON: {e}"))
+        FetchError::Http(
+            channel.updater_manifest().to_string(),
+            format!("not JSON: {e}"),
+        )
     })?;
     value
         .get("version")
@@ -234,7 +237,11 @@ pub(crate) fn artifact_base_name(role: Role, channel: Channel) -> String {
 /// reuses this to verify the (non-tarball) `posthastectl` binary asset against
 /// the very same release's `SHA256SUMS` — the release publish job checksums
 /// every flat asset uniformly, tarball or not.
-pub(crate) fn verify_checksum(tarball: &[u8], tarball_name: &str, sums: &[u8]) -> Result<(), FetchError> {
+pub(crate) fn verify_checksum(
+    tarball: &[u8],
+    tarball_name: &str,
+    sums: &[u8],
+) -> Result<(), FetchError> {
     let sums = String::from_utf8_lossy(sums);
     let expected = sums
         .lines()
@@ -396,7 +403,12 @@ mod tests {
     fn installs_a_verified_binary() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("posthaste-authority-server");
-        let source = source_with(Role::AuthorityServer, Channel::Nightly, "nightly", b"AUTHORITY_SERVER-BYTES");
+        let source = source_with(
+            Role::AuthorityServer,
+            Channel::Nightly,
+            "nightly",
+            b"AUTHORITY_SERVER-BYTES",
+        );
 
         let out = fetch_and_install(
             &source,

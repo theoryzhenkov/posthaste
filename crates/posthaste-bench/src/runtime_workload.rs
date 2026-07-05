@@ -19,14 +19,17 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
 use posthaste_authority_server::build_authority_server;
-use posthaste_domain_model::{AccountDriver, AccountId, MessageId, MessageSortField, SecretRef, SecretStoreError, SetKeywordsCommand, SortDirection};
-use posthaste_domain_service::{SecretStore};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeLink};
 use posthaste_contract_core::{
     AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
     MailQueryRequest, RuntimeCaller, RuntimeFrame, RuntimeLinkId, RuntimeLinkSeq,
     SecretWriteMutation, ViewDescriptor, ViewId,
 };
+use posthaste_domain_model::{
+    AccountDriver, AccountId, MessageId, MessageSortField, SecretRef, SecretStoreError,
+    SetKeywordsCommand, SortDirection,
+};
+use posthaste_domain_service::SecretStore;
 use posthaste_runtime::RuntimeBuildConfig;
 use posthaste_runtime_api::RuntimeAccountApi;
 use tempfile::TempDir;

@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use posthaste_domain_service::StaticSecretResolver;
 use posthaste_domain_model::{
-    AccountDriver, AccountId, ProviderAuthKind, ProviderHint, Recipient,
-    ReplaceMailboxesCommand, SendMessageRequest, SetKeywordsCommand, TransportSecurity,
+    AccountDriver, AccountId, ProviderAuthKind, ProviderHint, Recipient, ReplaceMailboxesCommand,
+    SendMessageRequest, SetKeywordsCommand, TransportSecurity,
 };
+use posthaste_domain_service::StaticSecretResolver;
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::{ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig};
 

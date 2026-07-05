@@ -94,7 +94,9 @@ fn daemon_node_has_no_link_section() {
 fn systemd_unit_references_the_exec_and_roots() {
     let tmp = tempfile::tempdir().unwrap();
     let mut plan = base_plan(Role::Daemon, tmp.path());
-    plan.exec_path = Some(PathBuf::from("/usr/local/bin/posthaste-authority-runtime-server"));
+    plan.exec_path = Some(PathBuf::from(
+        "/usr/local/bin/posthaste-authority-runtime-server",
+    ));
     plan.systemd_unit_path = Some(tmp.path().join("posthaste.service"));
 
     let out = provision(&plan).expect("provision");

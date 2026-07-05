@@ -165,8 +165,8 @@ pub(crate) fn authorize_presented_caveats(
     let Some(presented) = presented else {
         return Err(unauthorized());
     };
-    let caveats = token::verify_authenticity(&presented.0, macaroon_root_key)
-        .map_err(|_| unauthorized())?;
+    let caveats =
+        token::verify_authenticity(&presented.0, macaroon_root_key).map_err(|_| unauthorized())?;
     if caveats.is_empty() {
         return Ok(());
     }

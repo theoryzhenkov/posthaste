@@ -1,6 +1,6 @@
 use imap_client::imap_types::{flag::Flag, IntoStatic};
-use posthaste_domain_model::SystemKeyword;
 use posthaste_domain_model::MailboxId;
+use posthaste_domain_model::SystemKeyword;
 
 use crate::ImapAdapterError;
 

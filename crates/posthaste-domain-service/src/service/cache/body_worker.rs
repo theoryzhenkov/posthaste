@@ -199,8 +199,7 @@ impl MailService {
             // arm budget. The per-call provider envelopes (IMAP 60 s per-op,
             // JMAP per-class deadline/stall) usually fire first; this is the
             // batch-shaped ceiling over them.
-            let remaining_budget =
-                BODY_CACHE_BATCH_BUDGET.saturating_sub(batch_started.elapsed());
+            let remaining_budget = BODY_CACHE_BATCH_BUDGET.saturating_sub(batch_started.elapsed());
             let fetch_result = match tokio::time::timeout(
                 remaining_budget,
                 gateway.fetch_message_body(account_id, &message_id),

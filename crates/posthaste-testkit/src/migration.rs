@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use posthaste_authority_server::{AccountSupervisor, AuthorityServerApiMigrationBridge};
-use posthaste_domain_model::{DomainEvent};
+use posthaste_domain_model::DomainEvent;
 use posthaste_domain_service::{MailService, MailStore, SecretStore};
 use posthaste_runtime::RuntimeHandle;
 

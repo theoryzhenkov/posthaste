@@ -118,8 +118,8 @@ impl Manifest {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("create manifest dir {}: {e}", parent.display()))?;
         }
-        let body = toml::to_string_pretty(self)
-            .map_err(|e| format!("serialize wizard manifest: {e}"))?;
+        let body =
+            toml::to_string_pretty(self).map_err(|e| format!("serialize wizard manifest: {e}"))?;
         std::fs::write(path, body).map_err(|e| format!("write {}: {e}", path.display()))
     }
 }
@@ -204,8 +204,15 @@ mod tests {
         let mut m = Manifest::default();
         m.record(entry("posthaste-runtime", "0.2.0-nightly.44"));
         m.record(entry("posthaste-runtime", "0.2.0-nightly.50"));
-        assert_eq!(m.components.len(), 1, "same component upserts, not duplicates");
-        assert_eq!(m.get("posthaste-runtime").unwrap().version, "0.2.0-nightly.50");
+        assert_eq!(
+            m.components.len(),
+            1,
+            "same component upserts, not duplicates"
+        );
+        assert_eq!(
+            m.get("posthaste-runtime").unwrap().version,
+            "0.2.0-nightly.50"
+        );
     }
 
     #[test]

@@ -43,7 +43,8 @@ pub(crate) fn op_timeout() -> Duration {
 #[cfg(test)]
 pub(crate) fn seam_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Test-only: shrink the per-op deadline so a stalling server triggers a

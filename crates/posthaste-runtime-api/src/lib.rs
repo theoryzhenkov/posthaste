@@ -20,11 +20,10 @@
 use async_trait::async_trait;
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
-    AutomationRulePreviewResult, ClientMutationId, CreateAccountMutation, CreateSmartMailboxMutation,
-    MailOperation,
-    MailQueryPage, MailQueryRequest, MessageResourceKind, PatchAccountMutation,
-    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller,
-    RuntimeError, RuntimeResourceBytes, RuntimeStatus,
+    AutomationRulePreviewResult, ClientMutationId, CreateAccountMutation,
+    CreateSmartMailboxMutation, MailOperation, MailQueryPage, MailQueryRequest,
+    MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation,
+    RuntimeAccountList, RuntimeCaller, RuntimeError, RuntimeResourceBytes, RuntimeStatus,
 };
 use posthaste_domain_model::{
     AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, CommandResult,
@@ -40,7 +39,10 @@ use std::collections::BTreeMap;
 /// the one `get_account` caller takes `&dyn RuntimeAccountApi`.
 #[async_trait]
 pub trait RuntimeAccountApi: Send + Sync {
-    async fn list_accounts(&self, caller: RuntimeCaller) -> Result<RuntimeAccountList, RuntimeError>;
+    async fn list_accounts(
+        &self,
+        caller: RuntimeCaller,
+    ) -> Result<RuntimeAccountList, RuntimeError>;
 
     async fn get_account(
         &self,
@@ -350,7 +352,12 @@ pub trait RuntimeMailWriteApi: Send + Sync {
 /// (and test wrappers) get it for free. Lets a caller hold the whole surface as
 /// one object (`Arc<dyn RuntimeApi>`) when it needs all of it (e.g. `AppState`),
 /// while subset consumers depend on the narrow facet they use (XVI).
-pub trait RuntimeApi: RuntimeAccountApi + RuntimeSettingsApi + RuntimeMailReadApi + RuntimeMailWriteApi {}
+pub trait RuntimeApi:
+    RuntimeAccountApi + RuntimeSettingsApi + RuntimeMailReadApi + RuntimeMailWriteApi
+{
+}
 
 impl<T> RuntimeApi for T where
-    T: RuntimeAccountApi + RuntimeSettingsApi + RuntimeMailReadApi + RuntimeMailWriteApi {}
+    T: RuntimeAccountApi + RuntimeSettingsApi + RuntimeMailReadApi + RuntimeMailWriteApi
+{
+}

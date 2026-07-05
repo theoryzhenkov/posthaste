@@ -112,8 +112,9 @@ pub(crate) async fn build_snapshot(
             crate::near_node::apply_pending_set_overlay(&mut state, &pending_set.snapshot());
             let read_watermark = state.read_watermark.clone();
             let coverage = state.coverage.clone();
-            let data = serde_json::to_value(state)
-                .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error.to_string()))?;
+            let data = serde_json::to_value(state).map_err(|error| {
+                RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+            })?;
             (data, read_watermark, coverage)
         }
         ViewKind::MessageDetail {
@@ -130,16 +131,18 @@ pub(crate) async fn build_snapshot(
                 )
                 .await?
                 .ok_or_else(|| RuntimeError::not_found("message not found"))?;
-            let data = serde_json::to_value(detail)
-                .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error.to_string()))?;
+            let data = serde_json::to_value(detail).map_err(|error| {
+                RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+            })?;
             (data, local_watermark(), complete_coverage())
         }
         ViewKind::Conversation { conversation_id } => {
             let conversation = reads
                 .conversation(&ConversationId::from(conversation_id.clone()))
                 .await?;
-            let data = serde_json::to_value(conversation)
-                .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error.to_string()))?;
+            let data = serde_json::to_value(conversation).map_err(|error| {
+                RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+            })?;
             (data, local_watermark(), complete_coverage())
         }
         ViewKind::AccountStatus { account_id } => {
@@ -147,7 +150,9 @@ pub(crate) async fn build_snapshot(
             // as every other view), so an authority-server-less runtime serves it too.
             let data = match account_id {
                 Some(account_id) => {
-                    let overview = reads.get_account(AccountId::from(account_id.clone())).await?;
+                    let overview = reads
+                        .get_account(AccountId::from(account_id.clone()))
+                        .await?;
                     serde_json::to_value(overview).map_err(|error| {
                         RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
                     })?
@@ -165,8 +170,9 @@ pub(crate) async fn build_snapshot(
             let snapshot = reads
                 .rev_log_snapshot(&AccountId::from(account_id.clone()))
                 .await?;
-            let data = serde_json::to_value(snapshot)
-                .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error.to_string()))?;
+            let data = serde_json::to_value(snapshot).map_err(|error| {
+                RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+            })?;
             (data, local_watermark(), complete_coverage())
         }
     };

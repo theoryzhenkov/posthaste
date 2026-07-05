@@ -41,7 +41,9 @@ pub use stall::{stall_guard, StallError};
 
 // Re-export the policy vocabulary callers need so a downstream crate can route a
 // call without also depending on `posthaste-call-policy` directly.
-pub use posthaste_call_policy::{BackoffSchedule, CallClass, BLOB_STALL, METADATA_TOTAL, SEND_TOTAL};
+pub use posthaste_call_policy::{
+    BackoffSchedule, CallClass, BLOB_STALL, METADATA_TOTAL, SEND_TOTAL,
+};
 
 #[cfg(test)]
 mod tests;

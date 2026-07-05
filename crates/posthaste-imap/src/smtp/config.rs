@@ -1,5 +1,8 @@
 use lettre::Address;
-use posthaste_domain_model::{AccountSettings, AccountTransportSettings, ProviderAuthKind, ProviderHint, ProviderProfile, SmtpSentCopyPolicy, TransportSecurity};
+use posthaste_domain_model::{
+    AccountSettings, AccountTransportSettings, ProviderAuthKind, ProviderHint, ProviderProfile,
+    SmtpSentCopyPolicy, TransportSecurity,
+};
 
 use crate::ImapAdapterError;
 

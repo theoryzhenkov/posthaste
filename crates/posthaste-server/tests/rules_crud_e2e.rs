@@ -304,7 +304,11 @@ async fn created_rule_fires_without_restart_and_write_surface_is_locked_down() {
         }),
     )
     .await;
-    assert_eq!(status, reqwest::StatusCode::CONFLICT, "duplicate id must 409");
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CONFLICT,
+        "duplicate id must 409"
+    );
 
     // --- Seed an account + a message ------------------------------------------
     let account_id = "crud-acct";
@@ -364,7 +368,11 @@ async fn created_rule_fires_without_restart_and_write_surface_is_locked_down() {
         .send()
         .await
         .expect("delete sends");
-    assert_eq!(resp.status(), reqwest::StatusCode::OK, "delete should 200 ok");
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "delete should 200 ok"
+    );
     let listing = get_json(&client, &format!("{base}/rules"), &full).await;
     assert_eq!(
         listing["rules"].as_array().map(|r| r.len()),

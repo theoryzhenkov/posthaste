@@ -14,21 +14,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 
-use posthaste_domain_model::{
-    AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, ConversationId,
-    ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity, MailboxId,
-    MailboxSummary,
-    MessageDetail, MessageId, MessageSummary, Operation, OperationId, ReplyContext,
-    RevLogSnapshot, SendMessageRequest, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    SyncMode, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
-};
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkId,
     BaseAssertion, BaseUpdate, DownStream, LinkCoverage, MailCommandRequest, SequencedFrame,
 };
-use posthaste_link_far_end::down::Resume;
-use tracing::warn;
-use posthaste_replica_core::MessageFoldState;
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
@@ -36,6 +25,16 @@ use posthaste_contract_core::{
     PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList,
     RuntimeError, RuntimeResourceBytes,
 };
+use posthaste_domain_model::{
+    AccountId, AccountOverview, AppSettings, CachedSenderAddress, CommandAck, ConversationId,
+    ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity, MailboxId,
+    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId, ReplyContext,
+    RevLogSnapshot, SendMessageRequest, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    SyncMode, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
+};
+use posthaste_link_far_end::down::Resume;
+use posthaste_replica_core::MessageFoldState;
+use tracing::warn;
 
 use crate::authority_server::AuthorityServer;
 
@@ -61,13 +60,19 @@ impl LocalAuthorityServer {
 /// fold state), or `None` if the event yields no assertion. Reads the current
 /// state from the authority server so the assertion carries the *complete* post-state
 /// ([replication authority-server-link L1 §3](../replication/authority-server-link/L1.md)).
-pub(crate) fn base_frame_from_event(authority_server: &AuthorityServer, event: &DomainEvent) -> Option<AuthorityServerFrame> {
-    let current = event
-        .message_id
-        .as_ref()
-        .and_then(|message_id| authority_server.current_fold_state(&event.account_id, message_id).ok().flatten());
-    message_event_to_assertion(event, current)
-        .map(|assertion| AuthorityServerFrame::Base { assertions: vec![assertion] })
+pub(crate) fn base_frame_from_event(
+    authority_server: &AuthorityServer,
+    event: &DomainEvent,
+) -> Option<AuthorityServerFrame> {
+    let current = event.message_id.as_ref().and_then(|message_id| {
+        authority_server
+            .current_fold_state(&event.account_id, message_id)
+            .ok()
+            .flatten()
+    });
+    message_event_to_assertion(event, current).map(|assertion| AuthorityServerFrame::Base {
+        assertions: vec![assertion],
+    })
 }
 
 /// How a message domain event names its message's authoritative base change —
@@ -132,7 +137,9 @@ impl AuthorityServerLink for LocalAuthorityServer {
         runtime_id: &AuthorityServerLinkId,
         mutation: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        self.authority_server.forward_mutation_for(runtime_id, mutation).await
+        self.authority_server
+            .forward_mutation_for(runtime_id, mutation)
+            .await
     }
 
     /// Down-channel: the ordered stream of authoritative base assertions. Each
@@ -179,7 +186,9 @@ impl AuthorityServerLink for LocalAuthorityServer {
         account_id: AccountId,
         operation_id: OperationId,
     ) -> Result<(), RuntimeError> {
-        self.authority_server.retry_operation(account_id, operation_id).await
+        self.authority_server
+            .retry_operation(account_id, operation_id)
+            .await
     }
 }
 
@@ -233,7 +242,9 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError> {
-        self.authority_server.current_summary(&account_id, &message_id).await
+        self.authority_server
+            .current_summary(&account_id, &message_id)
+            .await
     }
 
     async fn message_detail(
@@ -241,7 +252,8 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        self.authority_server.message_detail(&account_id, &message_id)
+        self.authority_server
+            .message_detail(&account_id, &message_id)
     }
 
     async fn conversation(
@@ -315,7 +327,9 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<ReplyContext, RuntimeError> {
-        self.authority_server.get_reply_context(account_id, message_id).await
+        self.authority_server
+            .get_reply_context(account_id, message_id)
+            .await
     }
 
     async fn list_sender_addresses(&self) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
@@ -342,7 +356,9 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<DraftContent, RuntimeError> {
-        self.authority_server.get_draft_content(account_id, message_id).await
+        self.authority_server
+            .get_draft_content(account_id, message_id)
+            .await
     }
 
     async fn get_message_resource(
@@ -386,7 +402,9 @@ impl AuthorityServerApi for LocalAuthorityServer {
         draft_id: Option<MessageId>,
         request: SendMessageRequest,
     ) -> Result<Operation, RuntimeError> {
-        self.authority_server.save_draft(account_id, draft_id, request).await
+        self.authority_server
+            .save_draft(account_id, draft_id, request)
+            .await
     }
 
     async fn delete_draft(
@@ -394,7 +412,9 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
-        self.authority_server.delete_draft(account_id, draft_id).await
+        self.authority_server
+            .delete_draft(account_id, draft_id)
+            .await
     }
 
     async fn sync_account(
@@ -431,7 +451,8 @@ impl AuthorityServerApi for LocalAuthorityServer {
         smart_mailbox_id: SmartMailboxId,
         mutation: PatchSmartMailboxMutation,
     ) -> Result<SmartMailbox, RuntimeError> {
-        self.authority_server.patch_smart_mailbox(smart_mailbox_id, mutation)
+        self.authority_server
+            .patch_smart_mailbox(smart_mailbox_id, mutation)
     }
 
     async fn delete_smart_mailbox(
@@ -459,7 +480,9 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         mutation: PatchAccountMutation,
     ) -> Result<AccountOverview, RuntimeError> {
-        self.authority_server.patch_account(account_id, mutation).await
+        self.authority_server
+            .patch_account(account_id, mutation)
+            .await
     }
 
     async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
@@ -478,7 +501,9 @@ impl AuthorityServerApi for LocalAuthorityServer {
         account_id: AccountId,
         enabled: bool,
     ) -> Result<(), RuntimeError> {
-        self.authority_server.set_account_enabled(account_id, enabled).await
+        self.authority_server
+            .set_account_enabled(account_id, enabled)
+            .await
     }
 
     async fn reload_config(&self) -> Result<(), RuntimeError> {

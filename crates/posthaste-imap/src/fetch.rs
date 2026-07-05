@@ -16,7 +16,10 @@ use imap_client::imap_types::search::SearchKey;
 use imap_client::imap_types::sequence::SequenceSet;
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
-use posthaste_domain_model::{GmailLabel, GmailMessageId, GmailThreadId, ImapGmailMetadata, ImapModSeq, ImapSelectedMailbox, ImapUid};
+use posthaste_domain_model::{
+    GmailLabel, GmailMessageId, GmailThreadId, ImapGmailMetadata, ImapModSeq, ImapSelectedMailbox,
+    ImapUid,
+};
 use posthaste_observability::{events, ph_debug, ph_info};
 
 use crate::mailbox::examine_selected_mailbox;

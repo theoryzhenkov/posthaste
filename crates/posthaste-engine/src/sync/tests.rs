@@ -774,7 +774,11 @@ async fn complete_mailbox_query_earns_prune() {
                 |State(state): State<Arc<MockJmapState>>, Json(body): Json<Value>| async move {
                     let method_calls = body["methodCalls"].as_array().expect("methodCalls");
                     let method = method_calls[0][0].as_str().expect("method").to_string();
-                    state.seen_methods.lock().expect("lock").push(method.clone());
+                    state
+                        .seen_methods
+                        .lock()
+                        .expect("lock")
+                        .push(method.clone());
                     mock_mailbox_full_sync_response(&method)
                         .unwrap_or_else(|| panic!("unexpected method {method}"))
                 },

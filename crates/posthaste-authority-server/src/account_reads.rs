@@ -2,9 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use posthaste_domain_model::{AccountAppearance, AccountConnectionOverview, AccountId, AccountOverview, AccountRuntimeOverview, AccountSettings, AppSettings, MailboxSummary, ProviderAuthKind, SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError, SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, TagSummary};
-use posthaste_domain_service::{MailService};
 use posthaste_contract_core::{AccountScopeRequest, RuntimeAccountList};
+use posthaste_domain_model::{
+    AccountAppearance, AccountConnectionOverview, AccountId, AccountOverview,
+    AccountRuntimeOverview, AccountSettings, AppSettings, MailboxSummary, ProviderAuthKind,
+    SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError, SmartMailbox, SmartMailboxId,
+    SmartMailboxSummary, StoreError, TagSummary,
+};
+use posthaste_domain_service::MailService;
 
 use crate::supervisor::AccountSupervisor;
 

@@ -245,7 +245,12 @@ async fn stream_initial_mailbox_snapshot(
         committed += headers.len();
         let is_last = chunk_index + 1 == chunk_count;
         let state = if is_last {
-            finalized_state(&selected, overall_highest, highest_modseq_seen, ctx.updated_at)
+            finalized_state(
+                &selected,
+                overall_highest,
+                highest_modseq_seen,
+                ctx.updated_at,
+            )
         } else {
             // Highest UID committed so far. Ascending chunks make this chunk's
             // max the running max; a restart resumes strictly above it.
@@ -270,7 +275,12 @@ async fn stream_initial_mailbox_snapshot(
         sink.emit(imap_initial_snapshot_chunk_batch(
             discovery,
             Vec::new(),
-            finalized_state(&selected, overall_highest, highest_modseq_seen, ctx.updated_at),
+            finalized_state(
+                &selected,
+                overall_highest,
+                highest_modseq_seen,
+                ctx.updated_at,
+            ),
         ))
         .await?;
     }
