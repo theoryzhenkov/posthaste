@@ -17,8 +17,8 @@ pub(crate) fn compile(
     service: &MailService,
     query: &str,
 ) -> Result<SmartMailboxRule, RuntimeError> {
-    let (remainder, scopes) = parse_query_with_scopes(query, SCOPE_PREFIXES)
-        .map_err(RuntimeError::invalid_descriptor)?;
+    let (remainder, scopes) =
+        parse_query_with_scopes(query, SCOPE_PREFIXES).map_err(RuntimeError::invalid_descriptor)?;
 
     let mut rules = Vec::new();
     for scope in scopes {

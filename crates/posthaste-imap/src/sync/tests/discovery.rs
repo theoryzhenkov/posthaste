@@ -159,7 +159,10 @@ fn initial_snapshot_chunk_is_upsert_only_and_carries_the_checkpoint() {
     assert!(!batch.replace_all_mailboxes);
     assert!(batch.deleted_message_ids.is_empty());
     assert!(batch.deleted_imap_message_locations.is_empty());
-    assert!(batch.mailboxes.is_empty(), "mailboxes are emitted separately");
+    assert!(
+        batch.mailboxes.is_empty(),
+        "mailboxes are emitted separately"
+    );
     assert_eq!(batch.messages.len(), 2, "this chunk's rows are upserted");
     assert_eq!(batch.imap_message_locations.len(), 2);
     assert_eq!(

@@ -76,7 +76,11 @@ pub(crate) async fn save_imap_draft(
         .map(str::trim)
         .filter(|id| !id.is_empty())
     {
-        let header_line = format!("{}: {}\r\n", posthaste_domain_model::DRAFT_ID_HEADER, draft_id);
+        let header_line = format!(
+            "{}: {}\r\n",
+            posthaste_domain_model::DRAFT_ID_HEADER,
+            draft_id
+        );
         let mut prefixed = header_line.into_bytes();
         prefixed.extend_from_slice(&raw_message);
         raw_message = prefixed;
@@ -95,9 +99,7 @@ pub(crate) async fn save_imap_draft(
     )
     .await
     .map_err(imap_error_to_gateway)?
-    .ok_or_else(|| {
-        GatewayError::Rejected("IMAP APPEND did not yield a draft UID".to_string())
-    })?;
+    .ok_or_else(|| GatewayError::Rejected("IMAP APPEND did not yield a draft UID".to_string()))?;
 
     let uid_fallback_id = imap_message_id(&drafts_id, uid_validity, ImapUid(uid.get()));
     let new_message_id =

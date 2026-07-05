@@ -42,7 +42,11 @@ pub const DEFAULT_BACKLOG_CAPACITY: usize = 512;
 ///   the far-end's current cursor the subscriber adopts, so it stops gap-detecting
 ///   against the lost seqs. Emitted as the first stream element on a Collapse.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Sequenced<Frame> {
     /// A stamped down-frame carrying its monotonic per-subscriber seq.
     Frame { seq: u64, frame: Frame },
@@ -307,7 +311,10 @@ mod tests {
         // Round-trips through the internally-tagged wire shape.
         let json = serde_json::to_string(&reset).unwrap();
         assert_eq!(json, r#"{"kind":"reset","highestSeq":7}"#);
-        assert_eq!(serde_json::from_str::<Sequenced<char>>(&json).unwrap(), reset);
+        assert_eq!(
+            serde_json::from_str::<Sequenced<char>>(&json).unwrap(),
+            reset
+        );
     }
 
     #[test]
@@ -326,10 +333,16 @@ mod tests {
         match store.resume(&"s", Some(1)) {
             Resume::Replay(frames) => {
                 assert_eq!(
-                    frames.iter().map(|s| *s.frame().unwrap()).collect::<Vec<_>>(),
+                    frames
+                        .iter()
+                        .map(|s| *s.frame().unwrap())
+                        .collect::<Vec<_>>(),
                     vec!['b', 'c']
                 );
-                assert_eq!(frames.iter().map(|s| s.seq()).collect::<Vec<_>>(), vec![2, 3]);
+                assert_eq!(
+                    frames.iter().map(|s| s.seq()).collect::<Vec<_>>(),
+                    vec![2, 3]
+                );
             }
             _ => panic!("resume within the backlog must replay"),
         }
@@ -365,8 +378,14 @@ mod tests {
         let store: ReplayStore<&str, u32> = ReplayStore::new();
         store.record(&"s", 1);
         store.record(&"s", 2); // highest = 2
-        assert!(matches!(store.resume(&"s", Some(2)), Resume::Replay(_)), "at head");
-        assert!(matches!(store.resume(&"s", Some(3)), Resume::Collapse), "past head");
+        assert!(
+            matches!(store.resume(&"s", Some(2)), Resume::Replay(_)),
+            "at head"
+        );
+        assert!(
+            matches!(store.resume(&"s", Some(3)), Resume::Collapse),
+            "past head"
+        );
     }
 
     #[test]
@@ -377,8 +396,14 @@ mod tests {
         store.record(&"s", 1);
         store.record(&"s", 2);
         assert_eq!(store.highest_seq(&"s"), 2);
-        assert!(matches!(store.resume(&"s", Some(2)), Resume::Replay(_)), "at head");
-        assert!(matches!(store.resume(&"s", Some(1)), Resume::Collapse), "stale");
+        assert!(
+            matches!(store.resume(&"s", Some(2)), Resume::Replay(_)),
+            "at head"
+        );
+        assert!(
+            matches!(store.resume(&"s", Some(1)), Resume::Collapse),
+            "stale"
+        );
         assert!(matches!(store.resume(&"s", None), Resume::Fresh));
     }
 

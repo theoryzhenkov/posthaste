@@ -326,9 +326,20 @@ mod tests {
         let start = tokio::time::Instant::now();
         sequence.run().await;
 
-        assert!(token.is_cancelled(), "run must cancel the token to start the drain");
-        assert_eq!(supervisor_calls.load(Ordering::SeqCst), 1, "supervisor stop runs once");
-        assert_eq!(store_calls.load(Ordering::SeqCst), 1, "store close runs once");
+        assert!(
+            token.is_cancelled(),
+            "run must cancel the token to start the drain"
+        );
+        assert_eq!(
+            supervisor_calls.load(Ordering::SeqCst),
+            1,
+            "supervisor stop runs once"
+        );
+        assert_eq!(
+            store_calls.load(Ordering::SeqCst),
+            1,
+            "store close runs once"
+        );
         assert!(
             start.elapsed() < TOTAL_SHUTDOWN_BUDGET,
             "a clean teardown completes well inside the budget"
@@ -349,8 +360,8 @@ mod tests {
         // process is never hung; with the clock paused the timeout is virtual.
         let token = CancellationToken::new();
         let server_join = tokio::spawn(async {});
-        let sequence = ShutdownSequence::new(token, server_join)
-            .with_store_close(Box::new(HangingStore));
+        let sequence =
+            ShutdownSequence::new(token, server_join).with_store_close(Box::new(HangingStore));
         // Completes (does not hang) — the phase timeout fires on the paused clock.
         sequence.run().await;
     }

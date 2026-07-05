@@ -35,13 +35,11 @@ use tokio::sync::{mpsc, oneshot};
 use posthaste_authority_server_link::{
     LinkCoverage, SequencedFrame, LINK_FORWARD_MUTATION_PATH, LINK_SUBSCRIBE_PATH,
 };
-use posthaste_contract_core::{
-    MutationReceipt, MutationRequest, RuntimeError, RuntimeErrorCode,
-};
+use posthaste_contract_core::{MutationReceipt, MutationRequest, RuntimeError, RuntimeErrorCode};
 use posthaste_link_near_end::{
-    ConnectionStatus, EngineError, FrameSink, GetRequest, NearEnd, NearEndConfig, PendingSetHooks,
-    ParsedFrame, PostRequest, PostResponse, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
-    Transport, TransportError, Wire,
+    ConnectionStatus, EngineError, FrameSink, GetRequest, NearEnd, NearEndConfig, ParsedFrame,
+    PendingSetHooks, PostRequest, PostResponse, Scheduler, SentUnsettled, StreamEvent,
+    StreamRequest, Transport, TransportError, Wire,
 };
 
 // ---- SSE framing -------------------------------------------------------------
@@ -138,10 +136,8 @@ impl Transport for NativeLinkTransport {
             builder = builder.header(name, value);
         }
         let builder = builder.body(request.body);
-        async move {
-            into_post_response(builder.send().await.map_err(transport_error)?).await
-        }
-        .boxed_local()
+        async move { into_post_response(builder.send().await.map_err(transport_error)?).await }
+            .boxed_local()
     }
 
     fn get_json(
@@ -152,10 +148,8 @@ impl Transport for NativeLinkTransport {
         for (name, value) in &request.headers {
             builder = builder.header(name, value);
         }
-        async move {
-            into_post_response(builder.send().await.map_err(transport_error)?).await
-        }
-        .boxed_local()
+        async move { into_post_response(builder.send().await.map_err(transport_error)?).await }
+            .boxed_local()
     }
 
     fn open_stream(&self, request: StreamRequest) -> LocalBoxStream<'static, StreamEvent> {
@@ -308,11 +302,7 @@ impl Wire for AuthorityLinkWire {
         })
     }
 
-    fn settlement_request(
-        &self,
-        _link_id: &str,
-        _client_mutation_id: &str,
-    ) -> Option<GetRequest> {
+    fn settlement_request(&self, _link_id: &str, _client_mutation_id: &str) -> Option<GetRequest> {
         // The runtime's own forwards settle on the receipt + down-channel
         // absorption; this seam has no cross-link settlement query.
         None
@@ -428,11 +418,7 @@ pub(crate) struct NativeNearEnd {
 }
 
 impl NativeNearEnd {
-    pub(crate) fn spawn(
-        client: reqwest::Client,
-        base_url: String,
-        token: Option<String>,
-    ) -> Self {
+    pub(crate) fn spawn(client: reqwest::Client, base_url: String, token: Option<String>) -> Self {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (frames_tx, frames_rx) = mpsc::unbounded_channel();
         std::thread::Builder::new()
@@ -464,9 +450,7 @@ impl NativeNearEnd {
 
     /// Take the down-channel frame receiver and start the engine's reconnect
     /// loop. `None` after the first take (one consumer owns the channel).
-    pub(crate) fn take_down_channel(
-        &self,
-    ) -> Option<mpsc::UnboundedReceiver<SequencedFrame>> {
+    pub(crate) fn take_down_channel(&self) -> Option<mpsc::UnboundedReceiver<SequencedFrame>> {
         let receiver = self
             .down_channel
             .lock()
@@ -499,7 +483,10 @@ fn engine_error_to_runtime(error: EngineError) -> RuntimeError {
     } else {
         RuntimeError::retryable(
             RuntimeErrorCode::TransportDisconnected,
-            format!("runtime↔authority-server link transport error: {}", error.message),
+            format!(
+                "runtime↔authority-server link transport error: {}",
+                error.message
+            ),
         )
     }
 }
@@ -580,8 +567,9 @@ mod tests {
             Ok(b"\n\ndata: tw".as_slice()),
             Ok(b"o\n\n: keep-alive\n\n".as_slice()),
         ];
-        let payloads: Vec<String> =
-            sse_payloads(futures_util::stream::iter(chunks)).collect().await;
+        let payloads: Vec<String> = sse_payloads(futures_util::stream::iter(chunks))
+            .collect()
+            .await;
         assert_eq!(payloads, vec!["one".to_string(), "two".to_string()]);
     }
 

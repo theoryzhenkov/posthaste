@@ -13,7 +13,7 @@ mod entities;
 mod primitives;
 mod resource_types;
 
-pub use budget::{CacheBudget, clamp_unit};
+pub use budget::{clamp_unit, CacheBudget};
 pub use entities::{
     CacheCandidate, CacheCandidateSignals, CacheFetchCandidate, CacheMessageSignals, CacheObject,
     CachePriorityUpdate, CacheRescoreCandidate, CacheScore, CacheSearchSignals, CacheSignalUpdate,

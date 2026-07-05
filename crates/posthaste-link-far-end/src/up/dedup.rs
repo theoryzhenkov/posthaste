@@ -166,7 +166,9 @@ where
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<LinkId, LinkLedger<R>>> {
-        self.links.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.links
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Reserve a pending slot for `(link, client_mutation_id)` if absent,
@@ -411,7 +413,14 @@ mod tests {
             store.accept(&"link", &cid("op-1"), || "verdict-a".to_string()),
             Accept::New
         ));
-        store.settle(&"link", &cid("op-1"), TerminalClass::Failed, None, 0, |_| {});
+        store.settle(
+            &"link",
+            &cid("op-1"),
+            TerminalClass::Failed,
+            None,
+            0,
+            |_| {},
+        );
         assert!(store.verdict(&"link", &cid("op-1")).is_none());
         assert!(matches!(
             store.accept(&"link", &cid("op-1"), || "verdict-b".to_string()),
@@ -428,9 +437,16 @@ mod tests {
             store.accept(&"link", &cid("op-1"), || "pending".to_string()),
             Accept::New
         ));
-        store.settle(&"link", &cid("op-1"), TerminalClass::Rejected, Some(1), 0, |record| {
-            *record = "rejected-verdict".to_string();
-        });
+        store.settle(
+            &"link",
+            &cid("op-1"),
+            TerminalClass::Rejected,
+            Some(1),
+            0,
+            |record| {
+                *record = "rejected-verdict".to_string();
+            },
+        );
         match store.accept(&"link", &cid("op-1"), || "should-not-run".to_string()) {
             Accept::Duplicate(record) => assert_eq!(record, "rejected-verdict"),
             Accept::New => panic!("a Rejected duplicate must not re-accept"),
@@ -470,9 +486,18 @@ mod tests {
         // Ack up to seq 5: op-1 (seq 3) and op-2 (seq 5) are seen and reclaimed;
         // op-3 (seq 9) is not yet acked and is still re-observable.
         store.ack(&"link", 5);
-        assert!(store.verdict(&"link", &cid("op-1")).is_none(), "acked, reclaimed");
-        assert!(store.verdict(&"link", &cid("op-2")).is_none(), "acked (== cursor)");
-        assert!(store.verdict(&"link", &cid("op-3")).is_some(), "not yet acked");
+        assert!(
+            store.verdict(&"link", &cid("op-1")).is_none(),
+            "acked, reclaimed"
+        );
+        assert!(
+            store.verdict(&"link", &cid("op-2")).is_none(),
+            "acked (== cursor)"
+        );
+        assert!(
+            store.verdict(&"link", &cid("op-3")).is_some(),
+            "not yet acked"
+        );
     }
 
     // D48 (a) uniform: a Rejected verdict with a settlement seq is acked-evicted
@@ -482,11 +507,19 @@ mod tests {
     fn acked_cursor_evicts_rejected_too() {
         let store: DedupStore<&str, String> = DedupStore::new();
         store.accept(&"link", &cid("rej"), || String::new());
-        store.settle(&"link", &cid("rej"), TerminalClass::Rejected, Some(4), 0, |r| {
-            *r = "no".into()
-        });
+        store.settle(
+            &"link",
+            &cid("rej"),
+            TerminalClass::Rejected,
+            Some(4),
+            0,
+            |r| *r = "no".into(),
+        );
         store.ack(&"link", 4);
-        assert!(store.verdict(&"link", &cid("rej")).is_none(), "acked rejection reclaimed");
+        assert!(
+            store.verdict(&"link", &cid("rej")).is_none(),
+            "acked rejection reclaimed"
+        );
     }
 
     // D48: a Rejected with no settlement frame (settlement_seq None — the AS
@@ -495,12 +528,20 @@ mod tests {
     fn a_frameless_rejection_survives_acks_until_ttl() {
         let store: DedupStore<&str, String> = DedupStore::with_capacity(4096).with_ttl(10);
         store.accept(&"link", &cid("rej"), || String::new());
-        store.settle(&"link", &cid("rej"), TerminalClass::Rejected, None, 100, |r| {
-            *r = "no".into()
-        });
+        store.settle(
+            &"link",
+            &cid("rej"),
+            TerminalClass::Rejected,
+            None,
+            100,
+            |r| *r = "no".into(),
+        );
         // No cursor can ack a frameless rejection.
         store.ack(&"link", u64::MAX);
-        assert!(store.verdict(&"link", &cid("rej")).is_some(), "no seq → ack cannot evict");
+        assert!(
+            store.verdict(&"link", &cid("rej")).is_some(),
+            "no seq → ack cannot evict"
+        );
         // Within TTL it survives; past TTL it is reaped.
         assert_eq!(store.reap(105), 0, "within ttl");
         assert!(store.verdict(&"link", &cid("rej")).is_some());
@@ -513,7 +554,14 @@ mod tests {
     fn ttl_reaps_stale_terminals() {
         let store: DedupStore<&str, String> = DedupStore::with_capacity(4096).with_ttl(10);
         store.accept(&"link", &cid("op"), || String::new());
-        store.settle(&"link", &cid("op"), TerminalClass::Confirmed, Some(1), 100, |_| {});
+        store.settle(
+            &"link",
+            &cid("op"),
+            TerminalClass::Confirmed,
+            Some(1),
+            100,
+            |_| {},
+        );
         assert_eq!(store.reap(109), 0, "within ttl");
         assert_eq!(store.reap(110), 1, "at ttl boundary (110 - 100 >= 10)");
         assert!(store.verdict(&"link", &cid("op")).is_none());
@@ -527,7 +575,14 @@ mod tests {
         for i in 0..10u64 {
             let c = cid(&format!("cf-{i}"));
             store.accept(&"link", &c, || i);
-            store.settle(&"link", &c, TerminalClass::Confirmed, Some(i + 1), 0, |_| {});
+            store.settle(
+                &"link",
+                &c,
+                TerminalClass::Confirmed,
+                Some(i + 1),
+                0,
+                |_| {},
+            );
         }
         store.ack(&"link", u64::MAX);
         store.reap(u64::MAX);
@@ -542,20 +597,50 @@ mod tests {
         for i in 0..9u64 {
             let c = cid(&format!("op-{i}"));
             store.accept(&"link", &c, || i);
-            store.settle(&"link", &c, TerminalClass::Confirmed, Some(i + 1), 0, |_| {});
+            store.settle(
+                &"link",
+                &c,
+                TerminalClass::Confirmed,
+                Some(i + 1),
+                0,
+                |_| {},
+            );
         }
-        assert!(store.verdict(&"link", &cid("op-0")).is_none(), "oldest flooded out");
-        assert!(store.verdict(&"link", &cid("op-8")).is_some(), "newest kept");
-        assert!(store.records_for(&"link").len() <= 4, "cap bounds the window");
+        assert!(
+            store.verdict(&"link", &cid("op-0")).is_none(),
+            "oldest flooded out"
+        );
+        assert!(
+            store.verdict(&"link", &cid("op-8")).is_some(),
+            "newest kept"
+        );
+        assert!(
+            store.records_for(&"link").len() <= 4,
+            "cap bounds the window"
+        );
     }
 
     #[test]
     fn per_link_ledgers_are_independent() {
         let store: DedupStore<&str, u64> = DedupStore::with_capacity(4096).with_ttl(10);
         store.accept(&"a", &cid("a-0"), || 0);
-        store.settle(&"a", &cid("a-0"), TerminalClass::Confirmed, Some(1), 100, |_| {});
+        store.settle(
+            &"a",
+            &cid("a-0"),
+            TerminalClass::Confirmed,
+            Some(1),
+            100,
+            |_| {},
+        );
         store.accept(&"b", &cid("b-0"), || 0);
-        store.settle(&"b", &cid("b-0"), TerminalClass::Confirmed, Some(1), 100, |_| {});
+        store.settle(
+            &"b",
+            &cid("b-0"),
+            TerminalClass::Confirmed,
+            Some(1),
+            100,
+            |_| {},
+        );
         // Acking link "a" leaves link "b" untouched.
         store.ack(&"a", 1);
         assert!(store.verdict(&"a", &cid("a-0")).is_none());
@@ -567,7 +652,10 @@ mod tests {
         let store: DedupStore<&str, u64> = DedupStore::new();
         store.accept(&"link", &cid("op"), || 1);
         store.clear(&"link", &cid("op"));
-        assert!(matches!(store.accept(&"link", &cid("op"), || 2), Accept::New));
+        assert!(matches!(
+            store.accept(&"link", &cid("op"), || 2),
+            Accept::New
+        ));
     }
 
     #[test]

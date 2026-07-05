@@ -50,8 +50,8 @@ pub use mutation::{
 pub use session::{ImapSessionManager, IMAP_MAX_SESSIONS_PER_ACCOUNT};
 pub use smtp::{
     build_smtp_message, render_smtp_markdown, send_smtp_message, send_smtp_messages,
-    smtp_mailbox_for_recipient, smtp_sent_copy_strategy, submit_smtp_message,
-    SmtpConnectionConfig, SmtpSentCopyStrategy, SubmittedSmtpMessage,
+    smtp_mailbox_for_recipient, smtp_sent_copy_strategy, submit_smtp_message, SmtpConnectionConfig,
+    SmtpSentCopyStrategy, SubmittedSmtpMessage,
 };
 pub use sync::{
     imap_condstore_delta_sync_batch, imap_delta_sync_batch, imap_full_sync_batch,

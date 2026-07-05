@@ -21,12 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use posthaste_authority_server::{build_authority_server, build_authority_server_node};
-use posthaste_domain_model::{
-    AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
-    SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject,
-    ThreadId,
-};
-use posthaste_domain_service::SecretStore;
+use posthaste_authority_server::{link_router, LinkAuth};
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkId,
     LinkCoverage,
@@ -38,9 +33,16 @@ use posthaste_contract_core::{
     MailOperation, MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest,
     RuntimeCaller, SecretWriteMutation, ViewDescriptor,
 };
-use posthaste_runtime::{build_remote_runtime, AuthorityServerTransportConfig, RemoteAuthorityServer, RuntimeBuildConfig};
+use posthaste_domain_model::{
+    AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
+    SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject,
+    ThreadId,
+};
+use posthaste_domain_service::SecretStore;
+use posthaste_runtime::{
+    build_remote_runtime, AuthorityServerTransportConfig, RemoteAuthorityServer, RuntimeBuildConfig,
+};
 use posthaste_runtime_api::{RuntimeAccountApi, RuntimeMailReadApi};
-use posthaste_authority_server::{link_router, LinkAuth};
 
 use futures_util::StreamExt;
 
@@ -137,7 +139,10 @@ fn seed_inbox_message(
 }
 
 async fn serve_link(authority_server: &posthaste_authority_server::AuthorityServerBuild) -> String {
-    let router = link_router(authority_server.authority_server_link.clone(), LinkAuth::Disabled);
+    let router = link_router(
+        authority_server.authority_server_link.clone(),
+        LinkAuth::Disabled,
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -225,12 +230,14 @@ async fn remote_runtime_serves_a_mail_list_view_from_the_authority_server() {
     let base_url = serve_link(&authority_server).await;
 
     let _root_b = posthaste_testkit::temp_root("ph-link-split");
-    let remote = build_authority_server(build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
-        AuthorityServerTransportConfig::Remote {
-            base_url: base_url.clone(),
-            token: None,
-        },
-    ))
+    let remote = build_authority_server(
+        build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
+            AuthorityServerTransportConfig::Remote {
+                base_url: base_url.clone(),
+                token: None,
+            },
+        ),
+    )
     .await
     .expect("remote runtime builds");
 
@@ -306,7 +313,10 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
         .expect("seed applies");
 
     // Serve the authority server's in-process link over the wire.
-    let router = link_router(authority_server.authority_server_link.clone(), LinkAuth::Disabled);
+    let router = link_router(
+        authority_server.authority_server_link.clone(),
+        LinkAuth::Disabled,
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -315,12 +325,14 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
 
     // A separate runtime configured to reach that authority server remotely.
     let _root_b = posthaste_testkit::temp_root("ph-link-split");
-    let remote = build_authority_server(build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
-        AuthorityServerTransportConfig::Remote {
-            base_url: format!("http://{addr}"),
-            token: None,
-        },
-    ))
+    let remote = build_authority_server(
+        build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
+            AuthorityServerTransportConfig::Remote {
+                base_url: format!("http://{addr}"),
+                token: None,
+            },
+        ),
+    )
     .await
     .expect("remote runtime builds");
     let link = remote
@@ -339,7 +351,10 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
         )
         .await
         .expect("detail read");
-    assert!(before.detail.is_some(), "the authority server message exists before");
+    assert!(
+        before.detail.is_some(),
+        "the authority server message exists before"
+    );
 
     // The remote runtime forwards a destroy across the HTTP link. (Destroy
     // skips undo-history, so it needs no local read — isolating the write path;
@@ -485,7 +500,8 @@ async fn link_auth_requires_a_matching_bearer_token() {
     );
 
     // Wrong token → rejected.
-    let wrong = RemoteAuthorityServer::with_token(base_url.clone(), Some("not-the-token".to_string()));
+    let wrong =
+        RemoteAuthorityServer::with_token(base_url.clone(), Some("not-the-token".to_string()));
     assert!(
         wrong.list_accounts().await.is_err(),
         "a request with the wrong bearer token must be rejected"
@@ -563,12 +579,14 @@ async fn lean_remote_runtime_drives_the_authority_server_over_the_link() {
 
     // An authority-server-less runtime pointed at it.
     let _root_b = posthaste_testkit::temp_root("ph-link-split");
-    let runtime = build_remote_runtime(build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
-        AuthorityServerTransportConfig::Remote {
-            base_url: format!("http://{addr}"),
-            token: None,
-        },
-    ))
+    let runtime = build_remote_runtime(
+        build_config(_root_b.path().to_path_buf()).with_authority_server_transport(
+            AuthorityServerTransportConfig::Remote {
+                base_url: format!("http://{addr}"),
+                token: None,
+            },
+        ),
+    )
     .expect("lean remote runtime builds");
 
     // Drive it through the normal client-facing handle: a write, then a read,
@@ -683,7 +701,10 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
     for _ in 0..64 {
         match tokio::time::timeout(Duration::from_secs(2), down.next()).await {
             Ok(Some(sequenced))
-                if matches!(sequenced.frame(), Some(AuthorityServerFrame::Settlement { .. })) =>
+                if matches!(
+                    sequenced.frame(),
+                    Some(AuthorityServerFrame::Settlement { .. })
+                ) =>
             {
                 saw_settlement = true;
                 break;

@@ -216,8 +216,7 @@ fn interrupted_initial_sync_resumes_from_committed_cursor_without_dup_or_skip(
     );
     assert_eq!(
         store2.get_imap_mailbox_state(&account, &MailboxId::from(INBOX))?,
-        store
-            .get_imap_mailbox_state(&account, &MailboxId::from(INBOX))?,
+        store.get_imap_mailbox_state(&account, &MailboxId::from(INBOX))?,
         "resumed and uninterrupted syncs converge on the same mailbox state",
     );
 

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+use super::*;
 use posthaste_domain_model::{
     MessageRecord, Recipient, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue, SyncCursor,
 };
-use super::*;
 
 use crate::test_support::temp_root;
 

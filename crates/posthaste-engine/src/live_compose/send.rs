@@ -156,12 +156,11 @@ pub(crate) async fn send_message(
     // (DP-C5/C6). Only a provably pre-write connect failure stays retryable, so a
     // genuinely offline send still auto-retries. The outer timeout remains as a
     // wall-clock backstop, also classified uncertain.
-    let response = match tokio::time::timeout(SEND_TOTAL, gateway.send_request_dispatch(request))
-        .await
-    {
-        Ok(result) => result?,
-        Err(_elapsed) => return Err(dispatch_uncertain("send timed out; delivery uncertain")),
-    };
+    let response =
+        match tokio::time::timeout(SEND_TOTAL, gateway.send_request_dispatch(request)).await {
+            Ok(result) => result?,
+            Err(_elapsed) => return Err(dispatch_uncertain("send timed out; delivery uncertain")),
+        };
     let mut responses = response.unwrap_method_responses();
     // A submission whose response is missing/truncated (P3: a server that
     // reorders or omits a method response) leaves the send's fate unknown — park

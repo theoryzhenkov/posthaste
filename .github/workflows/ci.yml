@@ -46,18 +46,29 @@ jobs:
   # tools/dev/stalwart/{config.toml,seed.sh}.
   stalwart-integration:
     runs-on: ubuntu-latest
+    # Best-effort guardrail: runs the env-gated Stalwart integration tests so they
+    # are not dead coverage (AUDIT-L2-architecture-health). SOFT (continue-on-error)
+    # until the runner Stalwart provisioning is verified end-to-end — the private
+    # nix flake is unreachable from the runner, so we fetch the release binary
+    # directly. Harden to a required check once a green run is confirmed.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-stalwart
           cache-on-failure: true
+      - name: Provision Stalwart binary
+        run: |
+          set -eux
+          TAG=$(curl -fsSL https://api.github.com/repos/stalwartlabs/stalwart/releases/latest | jq -r .tag_name)
+          curl -fsSL "https://github.com/stalwartlabs/stalwart/releases/download/${TAG}/stalwart-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/stalwart.tar.gz
+          mkdir -p /tmp/stalwart && tar -xzf /tmp/stalwart.tar.gz -C /tmp/stalwart
+          echo "POSTHASTE_STALWART_BIN=$(find /tmp/stalwart -name stalwart -type f | head -1)" >> "$GITHUB_ENV"
       - name: Run live Stalwart integration tests
         env:
           POSTHASTE_STALWART_INTEGRATION: "1"
-        run: nix develop --command cargo test -p posthaste-testkit -p posthaste-server
+        run: cargo test -p posthaste-testkit -p posthaste-server
 
   # The frontier set grows as wasm-pure policy is extracted (RFC-L2-architecture-cleanup D15/M8;
   # RFC-L2-provider-reliability M30 adds posthaste-call-policy — seven crates).

@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 use axum::routing::get;
 use axum::Router;
-use posthaste_http_api_adapter::tls::{build_tls_acceptor, TlsListener};
 use posthaste_config::TlsConfig;
+use posthaste_http_api_adapter::tls::{build_tls_acceptor, TlsListener};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -13,9 +13,7 @@ use posthaste_domain_model::{
     SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome, SyncProgress,
     SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
-use posthaste_domain_model::{
-    DomainEvent, EventLogBounds, GatewayError, ServiceError, StoreError,
-};
+use posthaste_domain_model::{DomainEvent, EventLogBounds, GatewayError, ServiceError, StoreError};
 
 mod cache_store;
 mod composite;

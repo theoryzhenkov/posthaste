@@ -76,7 +76,9 @@ pub(crate) fn replace_attachments_tx(
     Ok(())
 }
 
-pub(crate) fn synthesize_raw_mime(message: &posthaste_domain_model::MessageRecord) -> Option<String> {
+pub(crate) fn synthesize_raw_mime(
+    message: &posthaste_domain_model::MessageRecord,
+) -> Option<String> {
     if message.body_html.is_none() && message.body_text.is_none() {
         return None;
     }

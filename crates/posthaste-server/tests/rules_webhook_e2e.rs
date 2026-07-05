@@ -342,7 +342,11 @@ action = {{ kind = "tag", tag = "$disabled-must-not-appear" }}
         .iter()
         .find(|item| item["id"].as_str() == Some(message_id.as_str()))
         .and_then(|item| item["keywords"].as_array())
-        .map(|ks| ks.iter().filter_map(|k| k.as_str().map(String::from)).collect())
+        .map(|ks| {
+            ks.iter()
+                .filter_map(|k| k.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     assert!(
         keywords.iter().any(|k| k == "$agent-reply"),

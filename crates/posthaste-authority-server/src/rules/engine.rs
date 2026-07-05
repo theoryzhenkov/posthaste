@@ -10,9 +10,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
-use posthaste_contract_core::mutation_args::{
-    MessageReplaceMailboxesArgs, MessageSetUserTagsArgs,
-};
+use posthaste_authority_server_link::AuthorityServerApi;
+use posthaste_contract_core::mutation_args::{MessageReplaceMailboxesArgs, MessageSetUserTagsArgs};
 use posthaste_contract_core::MailOperation;
 use posthaste_domain_model::{
     now_iso8601, AccountId, DomainEvent, MailboxId, MessageId, MessageSortField, MessageSummary,
@@ -21,10 +20,9 @@ use posthaste_domain_model::{
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection,
     EVENT_TOPIC_RULE_DELIVERY_FAILED, EVENT_TOPIC_RULE_FIRED,
 };
+use posthaste_link_far_end::down::FactLog;
 use posthaste_observability::{events, ph_info, ph_warn};
 use posthaste_provider_call::{ExecutorConfig, ProviderCallExecutor};
-use posthaste_authority_server_link::AuthorityServerApi;
-use posthaste_link_far_end::down::FactLog;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::authority_server::AuthorityServer;
@@ -97,10 +95,7 @@ impl EngineContext {
     /// A cheap `Arc`-clone snapshot of the active rules — the evaluator's
     /// consistent view for one event.
     fn rules_snapshot(&self) -> Arc<Vec<Rule>> {
-        self.rules
-            .read()
-            .expect("rules lock poisoned")
-            .clone()
+        self.rules.read().expect("rules lock poisoned").clone()
     }
 
     /// Atomically replace the active rules (the reload swap). Only the pointer
@@ -641,7 +636,10 @@ mod tests {
             name: id.into(),
             when: when_subject_contains("subject:x"),
             on: Vec::new(),
-            action: RuleAction::Notify { title: "t".into(), body: None },
+            action: RuleAction::Notify {
+                title: "t".into(),
+                body: None,
+            },
             enabled: true,
         }
     }
@@ -652,7 +650,10 @@ mod tests {
         // fails, the deleted rule must still be evicted from the live snapshot.
         let rules = vec![rule_with_id("a"), rule_with_id("b"), rule_with_id("c")];
         let kept = rules_without(&rules, "b").expect("b was present");
-        assert_eq!(kept.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a", "c"]);
+        assert_eq!(
+            kept.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["a", "c"]
+        );
         // Absent id → None (no needless swap).
         assert!(rules_without(&rules, "missing").is_none());
     }
@@ -719,10 +720,7 @@ mod tests {
     #[test]
     fn idempotency_key_is_deterministic() {
         assert_eq!(idempotency_key("tagger", 42), "rule:tagger:42");
-        assert_eq!(
-            idempotency_key("tagger", 42),
-            idempotency_key("tagger", 42)
-        );
+        assert_eq!(idempotency_key("tagger", 42), idempotency_key("tagger", 42));
         assert_ne!(idempotency_key("tagger", 42), idempotency_key("tagger", 43));
     }
 }

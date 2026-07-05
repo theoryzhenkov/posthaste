@@ -639,7 +639,8 @@ pub(crate) async fn handle_oauth_refresh_tick(
                     "OAuth access token refreshed; rebuilding gateway"
                 );
                 connection.disconnect();
-                if let Err(error) = ensure_connection(shared, account, generation, connection).await {
+                if let Err(error) = ensure_connection(shared, account, generation, connection).await
+                {
                     ph_warn!(
                         events::SUPERVISOR_OAUTH_REFRESH_FAILED,
                         account_id = %account_id,

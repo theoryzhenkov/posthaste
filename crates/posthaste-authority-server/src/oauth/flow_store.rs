@@ -132,7 +132,10 @@ impl OAuthFlowStore {
     /// `begin_completion` to trigger an inline sweep. Runs until `cancel` is
     /// cancelled, so the caller can tie its lifetime to the server's shutdown
     /// sequence like every other supervisor-owned periodic task.
-    pub fn spawn_sweep_task(self: Arc<Self>, cancel: CancellationToken) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_sweep_task(
+        self: Arc<Self>,
+        cancel: CancellationToken,
+    ) -> tokio::task::JoinHandle<()> {
         let store = self;
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(OAUTH_FLOW_SWEEP_INTERVAL);

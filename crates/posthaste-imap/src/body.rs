@@ -2,8 +2,8 @@ use imap_client::imap_types::fetch::{
     MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName,
 };
 use mail_parser::{MessageParser, MimeHeaders};
-use posthaste_domain_model::{FetchedBody, ImapMessageLocation, MessageAttachment};
 use posthaste_domain_model::{BlobId, MessageId};
+use posthaste_domain_model::{FetchedBody, ImapMessageLocation, MessageAttachment};
 
 use imap_client::client::tokio::Client as ImapClient;
 

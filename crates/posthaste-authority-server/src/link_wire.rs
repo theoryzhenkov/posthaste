@@ -34,26 +34,26 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
-use tower_http::timeout::TimeoutLayer;
-use posthaste_config::DaemonSettings;
-use posthaste_domain_model::{
-    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
-};
-use posthaste_domain_model::CommandAck;
 use posthaste_authority_server_link::{
-    AddToMailboxRequest, AuthorityServerApi, AuthorityServerLink,
-    AuthorityServerLinkHandle, AuthorityServerLinkId, DestroyMessageRequest, LinkCoverage,
-    RemoveFromMailboxRequest, ReplaceMailboxesRequest, SequencedFrame, SetKeywordsRequest,
-    LINK_ADD_TO_MAILBOX_PATH, LINK_CONVERSATION_PATH, LINK_DESTROY_MESSAGE_PATH, LINK_DETAIL_PATH,
+    AddToMailboxRequest, AuthorityServerApi, AuthorityServerLink, AuthorityServerLinkHandle,
+    AuthorityServerLinkId, DestroyMessageRequest, LinkCoverage, RemoveFromMailboxRequest,
+    ReplaceMailboxesRequest, SequencedFrame, SetKeywordsRequest, LINK_ADD_TO_MAILBOX_PATH,
+    LINK_CONVERSATION_PATH, LINK_DESTROY_MESSAGE_PATH, LINK_DETAIL_PATH,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_REMOVE_FROM_MAILBOX_PATH,
     LINK_REPLACE_MAILBOXES_PATH, LINK_SET_KEYWORDS_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
+use posthaste_config::DaemonSettings;
 use posthaste_contract_core::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeAdapterError,
     RuntimeError, RuntimeErrorCode, Terminality,
 };
-use serde::Serialize;
+use posthaste_domain_model::CommandAck;
+use posthaste_domain_model::{
+    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+};
 use serde::Deserialize;
+use serde::Serialize;
+use tower_http::timeout::TimeoutLayer;
 
 /// The wire's shared state: the two trait halves of the one config-selected
 /// transport (D33) — Api ops route through `api`, the replication channels and
@@ -147,7 +147,9 @@ impl LinkAuth {
             match &daemon.link_runtimes {
                 Some(map) if !map.is_empty() => LinkAuth::PerRuntime(
                     map.iter()
-                        .map(|(token, rid)| (token.clone(), AuthorityServerLinkId::new(rid.clone())))
+                        .map(|(token, rid)| {
+                            (token.clone(), AuthorityServerLinkId::new(rid.clone()))
+                        })
                         .collect(),
                 ),
                 _ => panic!(
@@ -263,11 +265,15 @@ fn runtime_error_status(code: &RuntimeErrorCode) -> (StatusCode, &'static str) {
         RuntimeErrorCode::AccountBaseUrlRequired => {
             (StatusCode::BAD_REQUEST, "account_base_url_required")
         }
-        RuntimeErrorCode::AccountSecretRequired => (StatusCode::BAD_REQUEST, "account_secret_required"),
+        RuntimeErrorCode::AccountSecretRequired => {
+            (StatusCode::BAD_REQUEST, "account_secret_required")
+        }
         RuntimeErrorCode::AccountUsernameRequired => {
             (StatusCode::BAD_REQUEST, "account_username_required")
         }
-        RuntimeErrorCode::AccountSenderRequired => (StatusCode::BAD_REQUEST, "account_sender_required"),
+        RuntimeErrorCode::AccountSenderRequired => {
+            (StatusCode::BAD_REQUEST, "account_sender_required")
+        }
         RuntimeErrorCode::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
         RuntimeErrorCode::NotFound => (StatusCode::NOT_FOUND, "not_found"),
         RuntimeErrorCode::ProviderUnavailable => {
@@ -276,9 +282,10 @@ fn runtime_error_status(code: &RuntimeErrorCode) -> (StatusCode, &'static str) {
         RuntimeErrorCode::Conflict => (StatusCode::CONFLICT, "conflict"),
         RuntimeErrorCode::NetworkError => (StatusCode::BAD_GATEWAY, "network_error"),
         RuntimeErrorCode::StateMismatch => (StatusCode::CONFLICT, "state_mismatch"),
-        RuntimeErrorCode::CannotCalculateChanges => {
-            (StatusCode::INTERNAL_SERVER_ERROR, "cannot_calculate_changes")
-        }
+        RuntimeErrorCode::CannotCalculateChanges => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cannot_calculate_changes",
+        ),
         RuntimeErrorCode::GatewayRejected => (StatusCode::BAD_REQUEST, "gateway_rejected"),
         RuntimeErrorCode::SecretUnavailable => (StatusCode::BAD_REQUEST, "secret_unavailable"),
         RuntimeErrorCode::SecretUnsupported => (StatusCode::BAD_REQUEST, "secret_unsupported"),

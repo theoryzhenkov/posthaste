@@ -7,19 +7,19 @@ use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 
-use posthaste_config::TomlConfigRepository;
-use posthaste_domain_model::{DomainEvent};
-use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_authority_server_link::AuthorityServerLinkHandle;
+use posthaste_config::TomlConfigRepository;
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
+use posthaste_domain_model::DomainEvent;
+use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_observability::{events, ph_warn};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 
 use posthaste_runtime::{
-    assemble_runtime, AuthorityServerTransportConfig, AuthorityServerTransportDecorator, ReadCache, RemoteAuthorityServer,
-    RuntimeAssembly, RuntimeBuildConfig, RuntimeBuildError, RuntimeHandle, RuntimeShutdownHandle,
-    SystemSecretStore,
+    assemble_runtime, AuthorityServerTransportConfig, AuthorityServerTransportDecorator, ReadCache,
+    RemoteAuthorityServer, RuntimeAssembly, RuntimeBuildConfig, RuntimeBuildError, RuntimeHandle,
+    RuntimeShutdownHandle, SystemSecretStore,
 };
 
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
@@ -284,7 +284,10 @@ pub(crate) async fn build_authority_server_parts(
     }
     let store: Arc<dyn MailStore> = database_store.clone();
     let config_repo: Arc<dyn ConfigRepository> = Arc::new(config_repo);
-    let service = Arc::new(MailService::new(database_store.clone(), config_repo.clone()));
+    let service = Arc::new(MailService::new(
+        database_store.clone(),
+        config_repo.clone(),
+    ));
 
     service.sync_source_projections()?;
     let account_count = service.list_sources()?.len();
@@ -449,9 +452,9 @@ fn build_read_cache(
         AuthorityServerTransportConfig::Remote { .. } => {
             ReadCache::retaining(authority_server_link.api().clone())
         }
-        AuthorityServerTransportConfig::InProcess => {
-            ReadCache::passthrough(Arc::new(LocalAuthorityServer::new(authority_server.clone())))
-        }
+        AuthorityServerTransportConfig::InProcess => ReadCache::passthrough(Arc::new(
+            LocalAuthorityServer::new(authority_server.clone()),
+        )),
     }
 }
 
@@ -595,7 +598,8 @@ fn migration_runtime(
         },
         account_count,
     };
-    let authority_server_link = AuthorityServerLinkHandle::new(Arc::new(LocalAuthorityServer::new(authority_server)));
+    let authority_server_link =
+        AuthorityServerLinkHandle::new(Arc::new(LocalAuthorityServer::new(authority_server)));
     let composed = assemble_runtime(RuntimeAssembly {
         authority_server_link,
         reads,

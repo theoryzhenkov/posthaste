@@ -396,7 +396,8 @@ impl ImapSessionManager {
             }
             Err(error) => {
                 let attempt = slot.consecutive_connect_failures;
-                slot.consecutive_connect_failures = slot.consecutive_connect_failures.saturating_add(1);
+                slot.consecutive_connect_failures =
+                    slot.consecutive_connect_failures.saturating_add(1);
                 let delay = reconnect_backoff().delay_for(attempt, jitter_unit());
                 slot.next_connect_at = Some(tokio::time::Instant::now() + delay);
                 ph_warn!(

@@ -319,7 +319,10 @@ mod tests {
             action: RuleAction::Tag { tag: "x".into() },
             enabled: true,
         };
-        assert_eq!(rule.trigger_topics(), vec![EVENT_TOPIC_MESSAGE_UPDATED.to_string()]);
+        assert_eq!(
+            rule.trigger_topics(),
+            vec![EVENT_TOPIC_MESSAGE_UPDATED.to_string()]
+        );
     }
 
     /// The security gate (ruling 23): a `{"kind":"exec",…}` body is

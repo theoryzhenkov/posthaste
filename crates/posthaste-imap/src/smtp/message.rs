@@ -95,7 +95,9 @@ fn smtp_attachment_part(
     )
 }
 
-fn normalized_attachment_mime_type(attachment: &posthaste_domain_model::SendMessageAttachment) -> &str {
+fn normalized_attachment_mime_type(
+    attachment: &posthaste_domain_model::SendMessageAttachment,
+) -> &str {
     let mime_type = attachment.mime_type.trim();
     if mime_type.is_empty() {
         "application/octet-stream"

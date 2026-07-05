@@ -33,10 +33,11 @@ async fn main() {
         )
     });
 
-    let build_config = build_config.with_authority_server_transport(AuthorityServerTransportConfig::Remote {
-        base_url,
-        token: daemon.link_token.clone(),
-    });
+    let build_config =
+        build_config.with_authority_server_transport(AuthorityServerTransportConfig::Remote {
+            base_url,
+            token: daemon.link_token.clone(),
+        });
 
     let build = build_remote_runtime(build_config).expect("failed to build remote runtime");
 
@@ -59,9 +60,11 @@ async fn main() {
     let handle = serve(ServeOptions {
         // The lean near node serves the OAuth-free near OpenAPI document (it has
         // no provider machinery to run the OAuth flow).
-        v1_router: build_api_router(state.clone()).merge(posthaste_http_api_adapter::openapi::openapi_router(
-            posthaste_http_api_adapter::openapi::document(),
-        )),
+        v1_router: build_api_router(state.clone()).merge(
+            posthaste_http_api_adapter::openapi::openapi_router(
+                posthaste_http_api_adapter::openapi::document(),
+            ),
+        ),
         root_merges: Vec::new(),
         bind_address,
         cors_origins,

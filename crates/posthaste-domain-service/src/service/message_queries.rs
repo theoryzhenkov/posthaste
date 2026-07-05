@@ -154,9 +154,11 @@ impl MailService {
         let sync_writer = self.sync_writer.clone();
         let owned_account_id = account_id.clone();
         let owned_message_id = message_id.clone();
-        offload(move || sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched))
-            .await
-            .map_err(Into::into)
+        offload(move || {
+            sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched)
+        })
+        .await
+        .map_err(Into::into)
     }
 
     /// Fetch compose-ready content for resuming an existing provider draft.

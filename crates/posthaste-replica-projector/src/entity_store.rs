@@ -167,7 +167,8 @@ impl EntityStore {
     ) {
         self.mechanism.accept(mutation_id, message_id, assertion);
         if self.mechanism.is_held(message_id) {
-            self.projection.rederive_message(&self.mechanism, message_id);
+            self.projection
+                .rederive_message(&self.mechanism, message_id);
         }
     }
 
@@ -207,7 +208,9 @@ impl EntityStore {
         match self.mechanism.apply_base(message_id, projection, deleted) {
             BaseApplied::RejectedStale => return,
             BaseApplied::Removed => self.projection.remove_message_from_views(message_id),
-            BaseApplied::Updated => self.projection.rederive_message(&self.mechanism, message_id),
+            BaseApplied::Updated => self
+                .projection
+                .rederive_message(&self.mechanism, message_id),
         }
         self.projection.mark_message_dirty(message_id);
     }

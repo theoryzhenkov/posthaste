@@ -6,10 +6,21 @@ use std::time::Duration;
 use std::time::Instant;
 
 use futures_util::{future::pending, StreamExt};
-use posthaste_domain_model::{AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, CacheMaintenanceFeedback, CacheResourcePolicy, DomainEvent, GatewayError, Id, Identity, ProviderAuthKind, PushNotification, PushStatus, RemoteIdleScope, RemoteObservationPolicy, ServiceError, ServiceErrorKind, SyncMode, SyncProgress, SyncProgressStage, SyncTrigger, BODY_CACHE_BATCH_BUDGET, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED};
-use posthaste_domain_service::{CacheResourceGovernor, MailService, MailStore, PushEventStream, PushStreamEvent, ResilientPushConfig, SecretCasOutcome, SecretResolver, SecretStore, SharedGateway, StaticSecretResolver, SyncProgressReporter};
-use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_call_policy::BackoffSchedule as BackoffPolicy;
+use posthaste_domain_model::{
+    AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus,
+    CacheMaintenanceFeedback, CacheResourcePolicy, DomainEvent, GatewayError, Id, Identity,
+    ProviderAuthKind, PushNotification, PushStatus, RemoteIdleScope, RemoteObservationPolicy,
+    ServiceError, ServiceErrorKind, SyncMode, SyncProgress, SyncProgressStage, SyncTrigger,
+    BODY_CACHE_BATCH_BUDGET, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED,
+    EVENT_TOPIC_PUSH_DISCONNECTED,
+};
+use posthaste_domain_service::{
+    CacheResourceGovernor, MailService, MailStore, PushEventStream, PushStreamEvent,
+    ResilientPushConfig, SecretCasOutcome, SecretResolver, SecretStore, SharedGateway,
+    StaticSecretResolver, SyncProgressReporter,
+};
+use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_imap::{
     ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig,
 };

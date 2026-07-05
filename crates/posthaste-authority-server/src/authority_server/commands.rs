@@ -506,7 +506,9 @@ impl AuthorityServer {
             // never re-executes (the old path always re-executed — the AS-seam
             // half of D47's fix).
             ForwardAcceptance::Rejected(error) => Err(RuntimeError(error)),
-            ForwardAcceptance::New { runtime_mutation_id } => {
+            ForwardAcceptance::New {
+                runtime_mutation_id,
+            } => {
                 let outcome = match self.apply_operation(&mutation).await {
                     Ok(outcome) => outcome,
                     Err(error) => {
@@ -714,11 +716,10 @@ impl AuthorityServer {
                     .await
             }
             MailOperation::Unsnooze(_) => {
-                self.unsnooze_message(account.clone(), message.clone()).await
+                self.unsnooze_message(account.clone(), message.clone())
+                    .await
             }
-            MailOperation::Destroy(_) => {
-                self.destroy(account.clone(), message.clone()).await
-            }
+            MailOperation::Destroy(_) => self.destroy(account.clone(), message.clone()).await,
             // Discard (D130): resolve the stable `draftId` to the live Email and
             // route to the draft-delete path (not a generic destroy) so the
             // optimistic fold, the reconciling event, and the mask-narrowing all
@@ -748,7 +749,8 @@ impl AuthorityServer {
             }
             // `message.applyDiff` is the undo/redo vehicle — see `apply_diff`.
             MailOperation::ApplyDiff(args) => {
-                self.apply_diff(account.clone(), message.clone(), args.diff).await
+                self.apply_diff(account.clone(), message.clone(), args.diff)
+                    .await
             }
             MailOperation::RevCursor(_) => unreachable!("handled above"),
         }?;
@@ -801,7 +803,11 @@ impl AuthorityServer {
             }
             mailbox_ids.retain(|id| !diff.mailboxes.removed.iter().any(|r| r == id.as_str()));
             let ack = self
-                .replace_mailboxes(account_id, message_id, ReplaceMailboxesCommand { mailbox_ids })
+                .replace_mailboxes(
+                    account_id,
+                    message_id,
+                    ReplaceMailboxesCommand { mailbox_ids },
+                )
                 .await?;
             events.extend(ack.events);
         }

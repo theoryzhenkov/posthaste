@@ -97,7 +97,9 @@ impl WsConnectionState {
         }
     }
 
-    fn push_queue(&self) -> Option<Arc<Mutex<mpsc::UnboundedReceiver<Result<PushObject, jmap_client::Error>>>>> {
+    fn push_queue(
+        &self,
+    ) -> Option<Arc<Mutex<mpsc::UnboundedReceiver<Result<PushObject, jmap_client::Error>>>>> {
         match self {
             Self::Disconnected => None,
             Self::Connected(active) => Some(active.push_rx.clone()),
@@ -197,12 +199,10 @@ impl SharedWsConnection {
         &self,
         request: Request<'_>,
     ) -> Result<Response<TaggedMethodResponse>, jmap_client::Error> {
-        let ws = self
-            .state
-            .read()
-            .await
-            .connection()
-            .ok_or_else(|| jmap_client::Error::Internal("WebSocket not connected".to_string()))?;
+        let ws =
+            self.state.read().await.connection().ok_or_else(|| {
+                jmap_client::Error::Internal("WebSocket not connected".to_string())
+            })?;
         ws.send(request).await
     }
 

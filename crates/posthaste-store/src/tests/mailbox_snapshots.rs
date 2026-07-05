@@ -252,7 +252,11 @@ fn mailbox_prune_allows_legitimate_single_deletion() -> Result<(), StoreError> {
     )?;
 
     let remaining = store.list_mailboxes(&account)?;
-    assert_eq!(remaining.len(), 3, "a single genuine mailbox deletion still prunes");
+    assert_eq!(
+        remaining.len(),
+        3,
+        "a single genuine mailbox deletion still prunes"
+    );
     assert!(
         !remaining.iter().any(|m| m.id == MailboxId::from("spam")),
         "the deleted mailbox is pruned",

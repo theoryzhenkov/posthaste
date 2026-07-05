@@ -29,6 +29,5 @@ pub mod projection;
 pub use entity_store::{EntityStore, StoreUpdate};
 pub use mechanism::{apply_fold_to_projection, fold_state_from_projection, project_optimistic};
 pub use projection::{
-    CountDelta, DirtyKey, MailboxEntity, SortDirection, SortKey, ViewEntity, ViewPredicate,
-    ViewRow,
+    CountDelta, DirtyKey, MailboxEntity, SortDirection, SortKey, ViewEntity, ViewPredicate, ViewRow,
 };

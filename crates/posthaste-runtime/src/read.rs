@@ -22,13 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use std::collections::BTreeMap;
 
-use posthaste_domain_model::{
-    now_iso8601, AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId,
-    ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity,
-    MailboxSummary,
-    MessageDetail, MessageId, MessageSummary, Operation, ReplyContext, RevLogSnapshot,
-    SmartMailbox, SmartMailboxId, SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
-};
+use async_trait::async_trait;
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, BaseAssertion, BaseUpdate,
 };
@@ -36,7 +30,13 @@ use posthaste_contract_core::{
     AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
     RuntimeError, RuntimeResourceBytes,
 };
-use async_trait::async_trait;
+use posthaste_domain_model::{
+    now_iso8601, AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId,
+    ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity,
+    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, ReplyContext,
+    RevLogSnapshot, SmartMailbox, SmartMailboxId, SmartMailboxSummary, TagSummary,
+    EVENT_TOPIC_MESSAGE_UPDATED,
+};
 use posthaste_link_far_end::down::{FactLog, FactLogError, Sequenced};
 use tokio::sync::broadcast;
 
@@ -112,7 +112,9 @@ impl ReadCache {
         &self,
         conversation_id: &ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
-        self.authority_server.conversation(conversation_id.clone()).await
+        self.authority_server
+            .conversation(conversation_id.clone())
+            .await
     }
 
     /// Read the authority server's live account count (passthrough; status metadata).
@@ -126,7 +128,9 @@ impl ReadCache {
         &self,
         account_id: &AccountId,
     ) -> Result<RevLogSnapshot, RuntimeError> {
-        self.authority_server.rev_log_snapshot(account_id.clone()).await
+        self.authority_server
+            .rev_log_snapshot(account_id.clone())
+            .await
     }
 
     /// Account/config reads through the authority server (passthrough; not cached — these
@@ -170,7 +174,9 @@ impl ReadCache {
         &self,
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<SmartMailbox, RuntimeError> {
-        self.authority_server.get_smart_mailbox(smart_mailbox_id).await
+        self.authority_server
+            .get_smart_mailbox(smart_mailbox_id)
+            .await
     }
 
     pub(crate) async fn list_tags(
@@ -194,7 +200,9 @@ impl ReadCache {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<ReplyContext, RuntimeError> {
-        self.authority_server.get_reply_context(account_id, message_id).await
+        self.authority_server
+            .get_reply_context(account_id, message_id)
+            .await
     }
 
     pub(crate) async fn list_sender_addresses(
@@ -207,7 +215,9 @@ impl ReadCache {
         &self,
         account_id: AccountId,
     ) -> Result<Vec<Operation>, RuntimeError> {
-        self.authority_server.list_pending_operations(account_id).await
+        self.authority_server
+            .list_pending_operations(account_id)
+            .await
     }
 
     pub(crate) async fn replay_events(
@@ -221,9 +231,7 @@ impl ReadCache {
     /// head/truncation queries (RFC-L2-scripting S2). Passthrough; `None` when the
     /// log is empty. Errors (e.g. a transport without the read channel) are
     /// surfaced so [`EventLogFactLog`] can fall back to a replay scan.
-    pub(crate) async fn event_log_bounds(
-        &self,
-    ) -> Result<Option<EventLogBounds>, RuntimeError> {
+    pub(crate) async fn event_log_bounds(&self) -> Result<Option<EventLogBounds>, RuntimeError> {
         self.authority_server.event_log_bounds().await
     }
 
@@ -232,7 +240,9 @@ impl ReadCache {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<DraftContent, RuntimeError> {
-        self.authority_server.get_draft_content(account_id, message_id).await
+        self.authority_server
+            .get_draft_content(account_id, message_id)
+            .await
     }
 
     pub(crate) async fn get_message_resource(
@@ -502,10 +512,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use async_trait::async_trait;
+    use posthaste_authority_server_link::{BaseAssertion, BaseUpdate, SequencedFrame};
     use posthaste_domain_model::MessagePage;
-    use posthaste_authority_server_link::{
-        BaseAssertion, BaseUpdate, SequencedFrame,
-    };
     use posthaste_replica_core::MessageFoldState;
     use serde_json::json;
 
@@ -701,7 +709,8 @@ mod tests {
             ))
             .expect("frame enqueues");
         drop(frames_tx);
-        run_authority_server_down_channel(frames_rx, cache.clone(), events, pending_set.clone()).await;
+        run_authority_server_down_channel(frames_rx, cache.clone(), events, pending_set.clone())
+            .await;
 
         // The base now carries the flag: the held op is retired by absorption.
         assert!(
@@ -764,8 +773,16 @@ mod tests {
             events: vec![event(1), event(2), event(3)],
         })));
         let log = EventLogFactLog::new(reads);
-        assert_eq!(log.highest_seq().await.unwrap(), 3, "head is the newest seq");
-        assert_eq!(log.truncation_point().await.unwrap(), 1, "oldest retained seq");
+        assert_eq!(
+            log.highest_seq().await.unwrap(),
+            3,
+            "head is the newest seq"
+        );
+        assert_eq!(
+            log.truncation_point().await.unwrap(),
+            1,
+            "oldest retained seq"
+        );
         let frames = log.replay(1, None).await.unwrap();
         assert_eq!(
             frames.iter().map(|f| f.seq()).collect::<Vec<_>>(),
@@ -782,7 +799,10 @@ mod tests {
             events: vec![],
         })));
         let log = EventLogFactLog::new(reads);
-        assert!(matches!(log.append(event(1)).await, Err(FactLogError::ReadOnly)));
+        assert!(matches!(
+            log.append(event(1)).await,
+            Err(FactLogError::ReadOnly)
+        ));
         assert_eq!(log.highest_seq().await.unwrap(), 0, "empty log head is 0");
     }
 
@@ -812,16 +832,25 @@ mod tests {
     #[tokio::test]
     async fn head_and_truncation_use_the_cheap_bounds_query() {
         let reads = Arc::new(ReadCache::passthrough(Arc::new(BoundsOnlyStub {
-            bounds: Some(EventLogBounds { oldest: 5, newest: 9 }),
+            bounds: Some(EventLogBounds {
+                oldest: 5,
+                newest: 9,
+            }),
         })));
         let log = EventLogFactLog::new(reads);
         assert_eq!(log.highest_seq().await.unwrap(), 9, "MAX(seq) is the head");
-        assert_eq!(log.truncation_point().await.unwrap(), 5, "MIN(seq) is the oldest");
+        assert_eq!(
+            log.truncation_point().await.unwrap(),
+            5,
+            "MIN(seq) is the oldest"
+        );
     }
 
     #[tokio::test]
     async fn empty_bounds_report_zero() {
-        let reads = Arc::new(ReadCache::passthrough(Arc::new(BoundsOnlyStub { bounds: None })));
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(BoundsOnlyStub {
+            bounds: None,
+        })));
         let log = EventLogFactLog::new(reads);
         assert_eq!(log.highest_seq().await.unwrap(), 0);
         assert_eq!(log.truncation_point().await.unwrap(), 0);
@@ -835,7 +864,10 @@ mod tests {
         use posthaste_link_far_end::down::Tap;
         // Bounds say the oldest retained seq is 5 (seqs 1..=4 truncated).
         let reads = Arc::new(ReadCache::passthrough(Arc::new(BoundsOnlyStub {
-            bounds: Some(EventLogBounds { oldest: 5, newest: 9 }),
+            bounds: Some(EventLogBounds {
+                oldest: 5,
+                newest: 9,
+            }),
         })));
         let tap: Tap<EventLogFactLog, &'static str> =
             Tap::new(Arc::new(EventLogFactLog::new(reads)));
@@ -844,7 +876,10 @@ mod tests {
         assert!(resume.is_gap(), "a cursor before truncation opens a gap");
         match resume {
             posthaste_link_far_end::down::TapResume::Gap { highest_seq } => {
-                assert_eq!(highest_seq, 9, "the gap carries the live head as the re-attach cursor");
+                assert_eq!(
+                    highest_seq, 9,
+                    "the gap carries the live head as the re-attach cursor"
+                );
             }
             other => panic!("expected a gap, got {other:?}"),
         }
