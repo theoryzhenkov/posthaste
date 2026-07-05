@@ -946,7 +946,9 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         // draft version. `draft.save` is a distinct op-name so reusing a key for
         // a delete (or any other command) Conflicts on the op-name guard.
         match self.core.apply_ledger.reserve(&caller, &key, DRAFT_SAVE_OP) {
-            Reserved::Return(result) => result.map(|outcome| *outcome).and_then(AppliedOutcome::into_draft),
+            Reserved::Return(result) => result
+                .map(|outcome| *outcome)
+                .and_then(AppliedOutcome::into_draft),
             Reserved::Execute => {
                 let result = self
                     .core
@@ -988,7 +990,9 @@ impl RuntimeMailWriteApi for RuntimeHandle {
             .apply_ledger
             .reserve(&caller, &key, DRAFT_DELETE_OP)
         {
-            Reserved::Return(result) => result.map(|outcome| *outcome).and_then(AppliedOutcome::into_draft),
+            Reserved::Return(result) => result
+                .map(|outcome| *outcome)
+                .and_then(AppliedOutcome::into_draft),
             Reserved::Execute => {
                 let result = self
                     .core
@@ -1076,7 +1080,9 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         // Keyed direct-apply (D53 / P8 fix): dedupe at-least-once write-back so a
         // redelivery re-observes the first outcome instead of re-executing.
         match self.core.apply_ledger.reserve(&caller, &key, op.name()) {
-            Reserved::Return(result) => result.map(|outcome| *outcome).and_then(AppliedOutcome::into_ack),
+            Reserved::Return(result) => result
+                .map(|outcome| *outcome)
+                .and_then(AppliedOutcome::into_ack),
             Reserved::Execute => {
                 let result = self.core.authority_server_link.apply(op).await;
                 self.core.apply_ledger.settle(
