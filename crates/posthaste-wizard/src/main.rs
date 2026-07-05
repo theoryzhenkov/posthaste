@@ -339,7 +339,7 @@ fn run_update(args: &[String]) -> ExitCode {
             .map(|s| s.latest.clone())
             .unwrap_or_default()
     };
-    let mut order = actionable.clone();
+    let mut order = actionable;
     order.sort_by_key(|name| {
         manifest
             .get(name)
@@ -369,7 +369,7 @@ fn run_update(args: &[String]) -> ExitCode {
                 if let Err(e) = manifest.save(&mpath) {
                     eprintln!("  warning: could not persist manifest after {name}: {e}");
                 }
-                println!("  done ({} kept as .bak)", format!("{}.bak", entry.path));
+                println!("  done ({}.bak kept as .bak)", entry.path);
             }
             Err(e) => {
                 eprintln!("  update of {name} failed: {e}");
@@ -642,7 +642,7 @@ fn run_ctl_install(args: &[String]) -> ExitCode {
         from: raw.from.clone(),
         to_dir: to_dir.clone(),
         version,
-        platform: raw.platform.clone(),
+        platform: raw.platform,
     };
     let source = GithubSource::posthaste();
 
@@ -713,7 +713,7 @@ fn run_ctl_checks(args: &[String]) -> ExitCode {
         Ok(raw) => raw,
         Err(e) => return arg_error(&e),
     };
-    let bin_dir = match raw.bin_dir.clone() {
+    let bin_dir = match raw.bin_dir {
         Some(dir) => dir,
         None => match default_bin_dir() {
             Ok(dir) => dir,

@@ -86,7 +86,7 @@ async fn open_mailbox_view(
         .open_link_view(caller, link, view)
         .await
         .expect("mailbox view should open");
-    serde_json::from_value::<MailListViewState>(snapshot.data.clone())
+    serde_json::from_value::<MailListViewState>(snapshot.data)
         .expect("snapshot data should be mail list state")
 }
 

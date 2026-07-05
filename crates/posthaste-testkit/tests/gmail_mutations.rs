@@ -150,7 +150,7 @@ fn commands_in(commands: &[String], mailbox: &str, needle: &str) -> Vec<usize> {
 fn assert_no_mailbox_wide_expunge(commands: &[String]) {
     for line in commands {
         assert!(
-            !(line.contains("EXPUNGE") && !line.contains("UID EXPUNGE")),
+            !line.contains("EXPUNGE") || line.contains("UID EXPUNGE"),
             "plain EXPUNGE must never be issued, got: {line}"
         );
         assert!(

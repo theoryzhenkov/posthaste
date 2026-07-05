@@ -480,7 +480,7 @@ mod tests {
     fn acked_cursor_evicts_terminals_it_has_passed() {
         let store: DedupStore<&str, String> = DedupStore::new();
         for (op, seq) in [("op-1", 3u64), ("op-2", 5), ("op-3", 9)] {
-            store.accept(&"link", &cid(op), || String::new());
+            store.accept(&"link", &cid(op), String::new);
             settle_confirmed(&store, &"link", &cid(op), seq);
         }
         // Ack up to seq 5: op-1 (seq 3) and op-2 (seq 5) are seen and reclaimed;
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn acked_cursor_evicts_rejected_too() {
         let store: DedupStore<&str, String> = DedupStore::new();
-        store.accept(&"link", &cid("rej"), || String::new());
+        store.accept(&"link", &cid("rej"), String::new);
         store.settle(
             &"link",
             &cid("rej"),
@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn a_frameless_rejection_survives_acks_until_ttl() {
         let store: DedupStore<&str, String> = DedupStore::with_capacity(4096).with_ttl(10);
-        store.accept(&"link", &cid("rej"), || String::new());
+        store.accept(&"link", &cid("rej"), String::new);
         store.settle(
             &"link",
             &cid("rej"),
@@ -553,7 +553,7 @@ mod tests {
     #[test]
     fn ttl_reaps_stale_terminals() {
         let store: DedupStore<&str, String> = DedupStore::with_capacity(4096).with_ttl(10);
-        store.accept(&"link", &cid("op"), || String::new());
+        store.accept(&"link", &cid("op"), String::new);
         store.settle(
             &"link",
             &cid("op"),

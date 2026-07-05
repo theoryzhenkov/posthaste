@@ -202,12 +202,14 @@ impl MailGateway for MutationGateway {
         if let Some(delay) = delay {
             tokio::time::sleep(delay).await;
         }
-        if let Some(result) = self
+        // Bind the taken value first so the `MutexGuard` temporary drops at the
+        // end of this statement rather than living for the whole `if let`.
+        let fetch_body_result = self
             .fetch_body_result
             .lock()
             .expect("fetch body result lock poisoned")
-            .take()
-        {
+            .take();
+        if let Some(result) = fetch_body_result {
             return result;
         }
         self.fetch_body_fallback

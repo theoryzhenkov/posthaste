@@ -368,7 +368,7 @@ mod tests {
                 }
             }
         });
-        let op: MailOperation = serde_json::from_value(value.clone()).unwrap();
+        let op: MailOperation = serde_json::from_value(value).unwrap();
         assert_eq!(op.name(), "message.saveDraft");
         assert_eq!(op.account_id(), "acct");
         assert_eq!(op.message_id(), Some("draft-local-1"));
@@ -398,7 +398,7 @@ mod tests {
                 }
             }
         });
-        let op: MailOperation = serde_json::from_value(value.clone()).unwrap();
+        let op: MailOperation = serde_json::from_value(value).unwrap();
         assert_eq!(op.name(), "message.send");
         assert_eq!(op.message_id(), Some("draft-1"));
         assert_eq!(op.fold_effect(), Some(MessageAssertion::Destroy));
