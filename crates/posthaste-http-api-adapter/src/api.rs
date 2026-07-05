@@ -10,6 +10,15 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use posthaste_client_link::RuntimeLink;
+use posthaste_contract_core::{
+    AccountScopeRequest, AccountTransportMutation, AutomationRulePreviewMutation,
+    CreateAccountMutation, CreateSmartMailboxMutation, MailPresentationRequest, MailQueryPage,
+    MailQueryRequest, MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation,
+    PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller, RuntimeError, RuntimeErrorCode,
+    RuntimeResourceBytes, SearchVisibilityRequest, SecretWriteMode as RuntimeSecretWriteMode,
+    SecretWriteMutation,
+};
 #[cfg(test)]
 use posthaste_domain_model::AccountTransportSettings;
 #[allow(unused_imports)]
@@ -29,15 +38,6 @@ use posthaste_domain_model::{
     SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncMode,
     TagAppearance, TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_ACCOUNT_UPDATED,
-};
-use posthaste_client_link::RuntimeLink;
-use posthaste_contract_core::{
-    AccountScopeRequest, AccountTransportMutation, AutomationRulePreviewMutation,
-    CreateAccountMutation, CreateSmartMailboxMutation, MailPresentationRequest, MailQueryPage,
-    MailQueryRequest, MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation,
-    PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller, RuntimeError, RuntimeErrorCode,
-    RuntimeResourceBytes, SearchVisibilityRequest, SecretWriteMode as RuntimeSecretWriteMode,
-    SecretWriteMutation,
 };
 use posthaste_runtime_api::{
     RuntimeAccountApi, RuntimeMailReadApi, RuntimeMailWriteApi, RuntimeSettingsApi,
@@ -71,6 +71,14 @@ pub mod smart_mailboxes;
 mod support;
 pub(crate) mod sync_events;
 
+#[cfg(test)]
+use account_support::apply_account_patch;
+#[cfg(test)]
+#[allow(unused_imports)]
+use account_support::{
+    append_and_publish_account_event, normalize_account_appearance, validate_account_settings,
+};
+use account_support::{internal_error, validate_logo_image_id};
 pub use accounts::{
     create_account, delete_account, disable_account, enable_account, get_account, get_account_logo,
     list_accounts, patch_account, reload_config, upload_account_logo, verify_account,
@@ -79,6 +87,10 @@ pub use accounts::{
     StartProviderOAuthRequest,
 };
 pub use auth_tokens::{create_auth_token, CreateAuthTokenRequest, CreateAuthTokenResponse};
+use cursor_support::{
+    conversation_limit, conversation_page_response, event_to_sse, gap_to_sse, message_limit,
+    message_page_response, parse_conversation_cursor, parse_message_cursor,
+};
 pub use errors::{ApiError, ApiErrorBody, ApiErrorCode};
 pub use mailboxes::{list_mailboxes, patch_mailbox, PatchMailboxRequest};
 pub use message_commands::{
@@ -97,6 +109,12 @@ pub use read_calls::{
     ReadOperation, ReadRequest, ReadResponse, ReadResult, SmartMailboxListReadResult,
     TagListReadResult,
 };
+use search_support::{
+    account_query, expect_conversation_page, expect_message_page, join_query, mailbox_query,
+    optional_user_query, smart_mailbox_query, visibility_for_search,
+};
+#[cfg(test)]
+use search_support::{parse_optional_search_rule, source_message_scope_rule};
 pub use settings::{
     get_settings, patch_settings, preview_automation_rule, AutomationRulePreviewResponse,
     PatchSettingsRequest, PreviewAutomationRuleRequest,
@@ -106,28 +124,10 @@ pub use smart_mailboxes::{
     list_smart_mailbox_conversations, list_smart_mailbox_messages, list_smart_mailboxes,
     patch_smart_mailbox, reset_default_smart_mailboxes,
 };
+use support::ensure_account_exists;
 pub use sync_events::{
     stream_events, trigger_sync, EventsQuery, TriggerSyncRequest, TriggerSyncResponse,
 };
-#[cfg(test)]
-use account_support::apply_account_patch;
-#[cfg(test)]
-#[allow(unused_imports)]
-use account_support::{
-    append_and_publish_account_event, normalize_account_appearance, validate_account_settings,
-};
-use account_support::{internal_error, validate_logo_image_id};
-use cursor_support::{
-    conversation_limit, conversation_page_response, event_to_sse, gap_to_sse, message_limit,
-    message_page_response, parse_conversation_cursor, parse_message_cursor,
-};
-use search_support::{
-    account_query, expect_conversation_page, expect_message_page, join_query, mailbox_query,
-    optional_user_query, smart_mailbox_query, visibility_for_search,
-};
-#[cfg(test)]
-use search_support::{parse_optional_search_rule, source_message_scope_rule};
-use support::ensure_account_exists;
 
 /// Product API readiness response.
 ///

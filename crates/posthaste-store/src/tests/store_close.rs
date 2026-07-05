@@ -145,7 +145,10 @@ fn double_close_is_idempotent() -> Result<(), StoreError> {
 
     let wal_path = root.join("mail.sqlite-wal");
     let truncated = !wal_path.exists() || fs::metadata(&wal_path).unwrap().len() == 0;
-    assert!(truncated, "WAL should remain truncated after a double close");
+    assert!(
+        truncated,
+        "WAL should remain truncated after a double close"
+    );
     Ok(())
 }
 

@@ -1,6 +1,9 @@
 use imap_client::imap_types::flag::Flag;
 use mail_parser::MessageParser;
-use posthaste_domain_model::{GmailLabel, ImapGmailMetadata, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid, MessageRecord, RFC3339_EPOCH, Recipient, SystemKeyword};
+use posthaste_domain_model::{
+    GmailLabel, ImapGmailMetadata, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid,
+    MessageRecord, Recipient, SystemKeyword, RFC3339_EPOCH,
+};
 use posthaste_domain_model::{MailboxId, MessageId, ThreadId};
 use posthaste_domain_service::{gmail_message_id, gmail_thread_id, imap_message_id};
 

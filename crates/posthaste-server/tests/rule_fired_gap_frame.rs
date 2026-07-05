@@ -41,7 +41,11 @@ async fn rule_fired_survives_the_gap_frame_as_a_retained_tail() {
     let sse = harness
         .events_containing(
             0,
-            &["event: gap", "\"kind\":\"reset\"", "\"topic\":\"rule.fired\""],
+            &[
+                "event: gap",
+                "\"kind\":\"reset\"",
+                "\"topic\":\"rule.fired\"",
+            ],
         )
         .await;
 

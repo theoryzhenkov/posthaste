@@ -3,9 +3,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use posthaste_domain_model::{
-    AccountId, Appearance, AppSettings, AutomationAction, AutomationBackfillJobStatus,
-    CachePolicy, GlassBloom, GlassTheme, MailboxColor, MailboxId, TagAppearance, ThemeColors,
-    ThemeMode, UiDensity,
+    AccountId, AppSettings, Appearance, AutomationAction, AutomationBackfillJobStatus, CachePolicy,
+    GlassBloom, GlassTheme, MailboxColor, MailboxId, TagAppearance, ThemeColors, ThemeMode,
+    UiDensity,
 };
 use posthaste_http_api_adapter::api::{patch_settings, PatchSettingsRequest};
 

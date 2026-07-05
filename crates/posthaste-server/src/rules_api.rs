@@ -242,7 +242,10 @@ fn write_error(error: RuleWriteError) -> ApiError {
         RuleWriteError::UnsafeId(_) | RuleWriteError::Invalid(_) => {
             (StatusCode::BAD_REQUEST, ApiErrorCode::ConfigValidation)
         }
-        RuleWriteError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, ApiErrorCode::InternalError),
+        RuleWriteError::Io(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiErrorCode::InternalError,
+        ),
     };
     ApiError::new(status, code, error.to_string())
 }

@@ -214,7 +214,8 @@ fn remove_deletes_the_operation() -> Result<(), StoreError> {
 }
 
 #[test]
-fn sync_write_through_registers_a_synced_draft_for_registry_only_resolution() -> Result<(), StoreError> {
+fn sync_write_through_registers_a_synced_draft_for_registry_only_resolution(
+) -> Result<(), StoreError> {
     // The owner repro (DS2/D131), M69 shape: a draft synced from the server /
     // created on another device / surviving a restart has a `message` row keyed
     // by its live server Email id and carrying the stable `draft_id`, with no

@@ -574,8 +574,8 @@ mod tests {
         // claims a fresh cycle instead of coalescing into a dead one.
         let state = SyncTriggerState::new();
         state.begin_cycle().await; // cycle starts...
-        // ...its future is dropped before finish_cycle (the timeout). A trigger
-        // arriving now would coalesce (active is stuck).
+                                   // ...its future is dropped before finish_cycle (the timeout). A trigger
+                                   // arriving now would coalesce (active is stuck).
         assert!(
             state.claim_or_coalesce(SyncTrigger::Manual).await,
             "with active stuck, a trigger coalesces (the bug)"

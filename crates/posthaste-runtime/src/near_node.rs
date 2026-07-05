@@ -22,9 +22,11 @@
 use std::sync::{Mutex, MutexGuard};
 
 use posthaste_authority_server_link::BaseUpdate;
-use posthaste_replica_core::{MessageAssertion, MessageReplica, MutationId, PendingMessageMutation};
-use posthaste_replica_projector::{fold_state_from_projection, project_optimistic};
 use posthaste_contract_core::{MailListViewState, MutationRequest};
+use posthaste_replica_core::{
+    MessageAssertion, MessageReplica, MutationId, PendingMessageMutation,
+};
+use posthaste_replica_projector::{fold_state_from_projection, project_optimistic};
 use serde_json::Value;
 
 /// The runtime's pending set toward the authority server: forwarded-but-unconfirmed message

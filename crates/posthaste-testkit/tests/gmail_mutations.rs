@@ -21,11 +21,11 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_domain_model::AccountId;
 use posthaste_client_link::RuntimeLink;
 use posthaste_contract_core::{
     AccountScopeRequest, MailListViewState, MutationRequest, RuntimeCaller, ViewSnapshot,
 };
+use posthaste_domain_model::AccountId;
 use posthaste_runtime_api::RuntimeMailReadApi;
 use posthaste_testkit::{
     GmailImapFixture, Harness, RuntimeHarness, MAILBOX_ALL_MAIL, MAILBOX_INBOX, MAILBOX_STARRED,
@@ -41,11 +41,7 @@ fn mail_list_rows(snapshot: &ViewSnapshot) -> MailListViewState {
 }
 
 /// Resolve the fixture-served mailbox's runtime `MailboxId` by its IMAP name.
-async fn mailbox_id_by_name(
-    harness: &RuntimeHarness,
-    account: &AccountId,
-    name: &str,
-) -> String {
+async fn mailbox_id_by_name(harness: &RuntimeHarness, account: &AccountId, name: &str) -> String {
     let mailboxes = harness
         .core()
         .list_mailboxes(
@@ -182,7 +178,14 @@ async fn gmail_archive_expunges_the_removed_inbox_location() {
     let starred = mailbox_id_by_name(&harness, &account, MAILBOX_STARRED).await;
     let message_id = seeded_message_id(&harness, &account, &inbox).await;
 
-    settle_replace(&harness, &account, &message_id, &[&all_mail, &starred], &inbox).await;
+    settle_replace(
+        &harness,
+        &account,
+        &message_id,
+        &[&all_mail, &starred],
+        &inbox,
+    )
+    .await;
 
     // The wire: mark + UID EXPUNGE in INBOX, in that order, and no
     // mailbox-wide expunge anywhere.
@@ -286,7 +289,11 @@ async fn gmail_simple_move_to_trash_uses_uid_move() {
     let inbox_view = open_mailbox_view(&harness, &account, &inbox).await;
     assert_eq!(inbox_view.rows.len(), 0, "INBOX view should be empty");
     let trash_view = open_mailbox_view(&harness, &account, &trash).await;
-    assert_eq!(trash_view.rows.len(), 1, "Trash view should hold the message");
+    assert_eq!(
+        trash_view.rows.len(),
+        1,
+        "Trash view should hold the message"
+    );
 }
 
 /// The app-shaped trash flow (`moveToRole("trash")` resolves to
@@ -335,7 +342,11 @@ async fn gmail_trash_flow_tolerates_gmail_stripping_labels_on_copy() {
     let inbox_view = open_mailbox_view(&harness, &account, &inbox).await;
     assert_eq!(inbox_view.rows.len(), 0, "INBOX view should be empty");
     let trash_view = open_mailbox_view(&harness, &account, &trash).await;
-    assert_eq!(trash_view.rows.len(), 1, "Trash view should hold the message");
+    assert_eq!(
+        trash_view.rows.len(),
+        1,
+        "Trash view should hold the message"
+    );
 }
 
 /// Generic IMAP (UIDPLUS, no MOVE, no Gmail label magic): a non-simple move

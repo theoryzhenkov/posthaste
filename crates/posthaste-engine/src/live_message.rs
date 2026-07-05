@@ -5,7 +5,9 @@ use posthaste_domain_model::{
 };
 use posthaste_provider_call::{CallClass, HttpRequestSpec};
 
-use crate::live::{map_gateway_error, map_provider_error, required_method_response, LiveJmapGateway};
+use crate::live::{
+    map_gateway_error, map_provider_error, required_method_response, LiveJmapGateway,
+};
 
 /// Read a single message's authoritative metadata record via `Email/get` — the
 /// `get` half of a mutation's set+get. Returns the provider's current state of

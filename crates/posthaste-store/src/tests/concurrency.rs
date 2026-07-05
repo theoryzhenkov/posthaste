@@ -19,8 +19,7 @@ use tokio::sync::oneshot;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn slow_write_does_not_block_concurrent_read() {
     let root = crate::test_support::temp_root();
-    let store =
-        Arc::new(DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap());
+    let store = Arc::new(DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap());
     let account = AccountId::from("primary");
     setup_source(&store, &account, "Primary").unwrap();
     seed_messages(
@@ -62,8 +61,10 @@ async fn slow_write_does_not_block_concurrent_read() {
     let count = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         reader.read_async(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM message", [], |row| row.get::<_, i64>(0))
-                .map_err(|err| StoreError::Failure(err.to_string()))
+            conn.query_row("SELECT COUNT(*) FROM message", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(|err| StoreError::Failure(err.to_string()))
         }),
     )
     .await
@@ -94,8 +95,7 @@ fn read_connection_pool_bounds_peak_concurrency() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let root = crate::test_support::temp_root();
-    let store =
-        Arc::new(DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap());
+    let store = Arc::new(DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap());
 
     // 3x the cap: enough concurrent contenders that, without the semaphore,
     // every thread would open its own fresh SQLite connection at once (N16's

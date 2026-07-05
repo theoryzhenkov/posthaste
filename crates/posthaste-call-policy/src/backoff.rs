@@ -152,7 +152,10 @@ mod tests {
         let b = schedule();
         assert_eq!(b.retry_delay(4, 0.5, None), RetryDecision::GiveUp);
         assert_eq!(b.retry_delay(5, 0.5, None), RetryDecision::GiveUp);
-        assert!(matches!(b.retry_delay(3, 0.5, None), RetryDecision::Retry(_)));
+        assert!(matches!(
+            b.retry_delay(3, 0.5, None),
+            RetryDecision::Retry(_)
+        ));
     }
 
     #[test]

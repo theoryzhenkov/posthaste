@@ -196,7 +196,10 @@ async fn m30_internal_error_body_is_sanitized_and_cause_is_logged() {
         "5xx body must not carry io/sql cause text: {body}"
     );
     let parsed: serde_json::Value = serde_json::from_str(&body).expect("body is JSON");
-    assert_eq!(parsed["message"], "internal error", "generic message on the wire");
+    assert_eq!(
+        parsed["message"], "internal error",
+        "generic message on the wire"
+    );
     let correlation_id = parsed["details"]["correlationId"]
         .as_str()
         .expect("body carries a correlation id")
@@ -205,7 +208,10 @@ async fn m30_internal_error_body_is_sanitized_and_cause_is_logged() {
 
     // The operator log carries the real cause AND the correlation id that is on
     // the wire — the join key between a 500 body and its cause.
-    assert!(logs.contains(cause), "cause must reach the server log: {logs}");
+    assert!(
+        logs.contains(cause),
+        "cause must reach the server log: {logs}"
+    );
     assert!(
         logs.contains("http.internal_error"),
         "5xx construction must emit the typed error event: {logs}"

@@ -1,4 +1,7 @@
-use posthaste_domain_model::{GmailMessageId, GmailThreadId, ImapCapabilities, ImapGmailMetadata, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid, ImapUidValidity};
+use posthaste_domain_model::{
+    GmailMessageId, GmailThreadId, ImapCapabilities, ImapGmailMetadata, ImapMessageLocation,
+    ImapModSeq, ImapSelectedMailbox, ImapUid, ImapUidValidity,
+};
 use posthaste_domain_model::{MailboxId, MessageId};
 
 use crate::{

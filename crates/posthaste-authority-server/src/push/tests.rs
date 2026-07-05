@@ -194,7 +194,11 @@ async fn accept_then_drop_escalates_backoff_and_falls_back() {
     // The primary was retried exactly `fallback_threshold` times (the counter
     // accumulated across opens — no per-open reset) ...
     let opens = primary_opens.lock().unwrap().clone();
-    assert_eq!(opens.len(), 3, "primary opened once per accumulated failure");
+    assert_eq!(
+        opens.len(),
+        3,
+        "primary opened once per accumulated failure"
+    );
     // ... and the gaps between opens strictly grow (backoff escalates).
     assert!(
         opens[1] - opens[0] < opens[2] - opens[1],
@@ -258,7 +262,9 @@ async fn permanent_open_failure_goes_terminal_without_infinite_cycle() {
     let opens_ = opens.clone();
     let primary = Box::new(MockTransport::new("primary", move || {
         opens_.fetch_add(1, Ordering::SeqCst);
-        Err(GatewayError::Rejected("404 eventsource not found".to_string()))
+        Err(GatewayError::Rejected(
+            "404 eventsource not found".to_string(),
+        ))
     }));
 
     let config = ResilientPushConfig {

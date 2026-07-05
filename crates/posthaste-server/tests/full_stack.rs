@@ -149,10 +149,22 @@ async fn events_replay_preserves_the_domain_event_wire_shape() {
     // The unchanged DomainEvent wire shape: an `id:` (the seq) and a `data:`
     // carrying the event JSON with its `seq`/`topic`. Crucially NOT the new gap
     // frame (`event: gap` / `{"kind":"reset"}`), which a replay never emits.
-    assert!(frame.contains("id:"), "a replayed event carries its seq as the SSE id: {frame}");
-    assert!(frame.contains("data:"), "a replayed event carries a data payload: {frame}");
-    assert!(frame.contains("\"seq\""), "the data payload is a DomainEvent: {frame}");
-    assert!(frame.contains("\"topic\""), "the data payload is a DomainEvent: {frame}");
+    assert!(
+        frame.contains("id:"),
+        "a replayed event carries its seq as the SSE id: {frame}"
+    );
+    assert!(
+        frame.contains("data:"),
+        "a replayed event carries a data payload: {frame}"
+    );
+    assert!(
+        frame.contains("\"seq\""),
+        "the data payload is a DomainEvent: {frame}"
+    );
+    assert!(
+        frame.contains("\"topic\""),
+        "the data payload is a DomainEvent: {frame}"
+    );
     assert!(
         !frame.contains("event: gap") && !frame.contains("\"kind\":\"reset\""),
         "a replay must not emit the gap frame: {frame}"

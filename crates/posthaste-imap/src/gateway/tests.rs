@@ -9,10 +9,14 @@ async fn fetch_identity_uses_configured_sender_identity() {
             mailboxes: Vec::new(),
         },
         store: None,
-        secret_resolver: Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+        secret_resolver: Arc::new(posthaste_domain_service::StaticSecretResolver::new(
+            "secret",
+        )),
         sessions: crate::session::ImapSessionManager::new(
             test_config(),
-            Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+            Arc::new(posthaste_domain_service::StaticSecretResolver::new(
+                "secret",
+            )),
         ),
     };
 
@@ -189,10 +193,14 @@ async fn fetch_body_reports_clear_unsupported_error() {
             mailboxes: Vec::new(),
         },
         store: None,
-        secret_resolver: Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+        secret_resolver: Arc::new(posthaste_domain_service::StaticSecretResolver::new(
+            "secret",
+        )),
         sessions: crate::session::ImapSessionManager::new(
             test_config(),
-            Arc::new(posthaste_domain_service::StaticSecretResolver::new("secret")),
+            Arc::new(posthaste_domain_service::StaticSecretResolver::new(
+                "secret",
+            )),
         ),
     };
 

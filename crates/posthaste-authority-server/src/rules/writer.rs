@@ -145,7 +145,9 @@ fn atomic_write(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use posthaste_domain_model::{RuleGrant, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxRule};
+    use posthaste_domain_model::{
+        RuleGrant, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxRule,
+    };
 
     fn rule(id: &str, action: RuleAction) -> Rule {
         Rule {

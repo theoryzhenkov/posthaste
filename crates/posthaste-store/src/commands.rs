@@ -200,9 +200,7 @@ impl SyncWriteStore for DatabaseStore {
                     .map(|raw_mime| store.store_raw_message(account_id, raw_mime, staged))
                     .transpose()
             },
-            |tx, raw_ref| {
-                apply_message_body_tx(tx, account_id, message_id, body, raw_ref.as_ref())
-            },
+            |tx, raw_ref| apply_message_body_tx(tx, account_id, message_id, body, raw_ref.as_ref()),
         )
     }
 }

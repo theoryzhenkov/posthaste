@@ -40,16 +40,6 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeMap;
 
-use posthaste_domain_model::{
-    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
-    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds,
-    Identity, MailboxId,
-    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot,
-    SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    SyncMode, TagSummary,
-};
-use posthaste_replica_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
@@ -57,6 +47,15 @@ use posthaste_contract_core::{
     PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList,
     RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
+use posthaste_domain_model::{
+    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
+    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds,
+    Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation,
+    OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot,
+    SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    SyncMode, TagSummary,
+};
+use posthaste_replica_core::{MessageFoldState, MutationId, SettlementOutcome};
 
 /// Wire path for the link up-channel: a remote near node `POST`s a
 /// [`MutationRequest`] (JSON) here and receives a [`MutationReceipt`]. Shared by
@@ -780,7 +779,10 @@ impl AuthorityServerLinkHandle {
     /// Build a handle from separately held halves — the decorator seam: a test
     /// wrapper may intercept one half (e.g. gate the up-channel) while the
     /// other keeps pointing at the real transport.
-    pub fn from_parts(api: Arc<dyn AuthorityServerApi>, link: Arc<dyn AuthorityServerLink>) -> Self {
+    pub fn from_parts(
+        api: Arc<dyn AuthorityServerApi>,
+        link: Arc<dyn AuthorityServerLink>,
+    ) -> Self {
         Self { api, link }
     }
 
@@ -1049,18 +1051,18 @@ macro_rules! for_each_link_lifecycle_op {
 /// expands the table (`posthaste_contract_core` may not be a direct dependency
 /// name everywhere, but `posthaste_authority_server_link` always is).
 pub mod reexport {
+    pub use posthaste_contract_core::{
+        AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
+        AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,
+        MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation,
+        PatchSmartMailboxMutation, RuntimeAccountList, RuntimeResourceBytes,
+    };
     pub use posthaste_domain_model::{
         AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress,
         CommandAck, DomainEvent, DraftContent, EventFilter, Identity, MailboxId, MailboxSummary,
         MessageId, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
         ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
         SmartMailboxSummary, SyncMode, TagSummary,
-    };
-    pub use posthaste_contract_core::{
-        AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
-        AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,
-        MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation,
-        PatchSmartMailboxMutation, RuntimeAccountList, RuntimeResourceBytes,
     };
 }
 

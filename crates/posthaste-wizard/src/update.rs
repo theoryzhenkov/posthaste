@@ -168,9 +168,8 @@ pub fn atomic_swap(path: &Path, new_path: &Path) -> Result<Option<PathBuf>, Stri
     } else {
         None
     };
-    std::fs::rename(new_path, path).map_err(|e| {
-        format!("move {} into {}: {e}", new_path.display(), path.display())
-    })?;
+    std::fs::rename(new_path, path)
+        .map_err(|e| format!("move {} into {}: {e}", new_path.display(), path.display()))?;
     Ok(bak)
 }
 
@@ -249,7 +248,10 @@ fn download_component(
             crate::ctl::fetch_ctl(source, &Version::Channel(channel), &platform)
                 .map_err(|e| e.to_string())
         }
-        other => Err(format!("component `{}` has unknown kind `{other}`", entry.component)),
+        other => Err(format!(
+            "component `{}` has unknown kind `{other}`",
+            entry.component
+        )),
     }
 }
 
@@ -437,9 +439,11 @@ pub fn install_update_timer(wizard_exe: &Path) -> Result<Vec<PathBuf>, String> {
                 .output();
             Ok(vec![plist_path])
         }
-        _ => Err("no supported user init system on this host (systemd --user or launchd); \
+        _ => Err(
+            "no supported user init system on this host (systemd --user or launchd); \
                   cannot install an auto-update timer"
-            .to_string()),
+                .to_string(),
+        ),
     }
 }
 
@@ -716,7 +720,10 @@ mod tests {
 
         let mut assets = HashMap::new();
         assets.insert(("nightly".to_string(), tarball_name), tarball);
-        assets.insert(("nightly".to_string(), "SHA256SUMS".to_string()), sums.into_bytes());
+        assets.insert(
+            ("nightly".to_string(), "SHA256SUMS".to_string()),
+            sums.into_bytes(),
+        );
         let source = MockSource {
             latest: HashMap::new(),
             assets,

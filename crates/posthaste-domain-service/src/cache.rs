@@ -2,13 +2,13 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use posthaste_domain_model::CacheFetchUnit;
 use posthaste_domain_model::{
     clamp_unit, CacheBudget, CacheCandidateSignals, CacheFetchLease, CacheLayer,
     CacheMaintenanceFeedback, CacheMaintenanceLease, CacheMessageSignals, CacheResourcePolicy,
     CacheScore, CacheScoringWeights, CacheSearchSignals, CacheSignalUpdate,
 };
-#[cfg(test)]
-use posthaste_domain_model::CacheFetchUnit;
 
 const MIB: f64 = 1024.0 * 1024.0;
 const MIN_BILLABLE_BYTES: f64 = 4.0 * 1024.0;
@@ -27,7 +27,7 @@ pub use scoring::{
     score_cache_candidate_with_weights, CacheAdmission,
 };
 
-pub(crate) use scoring::{lerp};
+pub(crate) use scoring::lerp;
 
 #[cfg(test)]
 mod tests;

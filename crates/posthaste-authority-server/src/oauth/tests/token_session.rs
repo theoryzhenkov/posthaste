@@ -98,7 +98,10 @@ fn oauth_refresh_terminality_marks_auth_permanent() {
         oauth_refresh_terminality(&oauth_request_error("error: unauthorized_client")),
         Terminality::Permanent,
     );
-    assert_eq!(oauth_refresh_terminality(&GatewayError::Auth), Terminality::Permanent);
+    assert_eq!(
+        oauth_refresh_terminality(&GatewayError::Auth),
+        Terminality::Permanent
+    );
     assert_eq!(
         oauth_refresh_terminality(&GatewayError::Network("connection reset".to_string())),
         Terminality::Transient,

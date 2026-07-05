@@ -77,7 +77,10 @@ async fn a_reaped_link_streams_404_while_an_auth_failure_streams_401() {
 
     // Reap it server-side (the sleep>5min / restart shape).
     let (close_status, _) = harness
-        .delete_json(&token, &format!("/v1/runtime/sessions/{link_id}?sourceId=primary"))
+        .delete_json(
+            &token,
+            &format!("/v1/runtime/sessions/{link_id}?sourceId=primary"),
+        )
         .await;
     assert_eq!(close_status, StatusCode::OK);
 
@@ -110,7 +113,10 @@ async fn a_fresh_link_after_a_reap_delivers_a_live_notification() {
     // The reaped old link (the sleep window).
     let old_link = open_link(&harness, &token).await;
     harness
-        .delete_json(&token, &format!("/v1/runtime/sessions/{old_link}?sourceId=primary"))
+        .delete_json(
+            &token,
+            &format!("/v1/runtime/sessions/{old_link}?sourceId=primary"),
+        )
         .await;
 
     // The engine's D110a response: prepare a FRESH link and carry on.
@@ -171,7 +177,10 @@ async fn a_re_opened_view_on_the_fresh_link_serves_its_base_snapshot() {
 
     let old_link = open_link(&harness, &token).await;
     harness
-        .delete_json(&token, &format!("/v1/runtime/sessions/{old_link}?sourceId=primary"))
+        .delete_json(
+            &token,
+            &format!("/v1/runtime/sessions/{old_link}?sourceId=primary"),
+        )
         .await;
 
     let fresh_link = open_link(&harness, &token).await;

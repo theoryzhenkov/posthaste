@@ -29,8 +29,8 @@ use wasm_bindgen_futures::{future_to_promise, spawn_local, JsFuture};
 use posthaste_contract_core::{MutationReceipt, MutationRequest, RuntimeFrame};
 use posthaste_link_near_end::{
     ConnectionStatus, FrameSink, GetRequest, NearEnd, NearEndConfig, PendingSetHooks, PostRequest,
-    PostResponse, RuntimeLinkWire, Scheduler, SentUnsettled, StreamEvent, StreamRequest,
-    Transport, TransportError,
+    PostResponse, RuntimeLinkWire, Scheduler, SentUnsettled, StreamEvent, StreamRequest, Transport,
+    TransportError,
 };
 
 fn js_error_string(value: &JsValue) -> String {
@@ -154,7 +154,11 @@ impl Transport for JsTransport {
                 "message" => StreamEvent::Message(data),
                 "closed" => StreamEvent::Closed,
                 _ => StreamEvent::Error {
-                    status: if status >= 0.0 { Some(status as u16) } else { None },
+                    status: if status >= 0.0 {
+                        Some(status as u16)
+                    } else {
+                        None
+                    },
                     message: data,
                 },
             };
@@ -211,7 +215,9 @@ struct JsFrameSink {
 impl FrameSink<RuntimeFrame> for JsFrameSink {
     fn on_frame(&self, frame: RuntimeFrame) {
         if let Ok(json) = serde_json::to_string(&frame) {
-            let _ = self.on_frame.call1(&JsValue::NULL, &JsValue::from_str(&json));
+            let _ = self
+                .on_frame
+                .call1(&JsValue::NULL, &JsValue::from_str(&json));
         }
     }
 

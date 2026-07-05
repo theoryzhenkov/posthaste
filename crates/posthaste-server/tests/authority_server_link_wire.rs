@@ -15,17 +15,17 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use posthaste_authority_server::{link_router, LinkAuth};
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerFrame, AuthorityServerLink, AuthorityServerLinkHandle,
     AuthorityServerLinkId, BaseAssertion, BaseUpdate, DownStream, LinkCoverage, SequencedFrame,
 };
-use posthaste_replica_core::MessageFoldState;
 use posthaste_contract_core::{
     ClientMutationId, MutationReceipt, MutationRequest, MutationSettlementState, RuntimeError,
     RuntimeMutationId,
 };
+use posthaste_replica_core::MessageFoldState;
 use posthaste_runtime::RemoteAuthorityServer;
-use posthaste_authority_server::{link_router, LinkAuth};
 
 /// A far node that records the forwarded mutation and serves one base assertion.
 /// The Api half is all defaults (this stub carries no read channel); every real

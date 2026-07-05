@@ -86,9 +86,8 @@ pub async fn stream_runtime_link(
     // stream is supposed to live long), so the SETUP await — the runtime call
     // that produces the subscription/catch-up — takes its own explicit
     // deadline instead. The streaming phase after this point is unbounded.
-    let subscription = crate::deadlines::with_stream_setup_deadline(
-        "runtime frame subscription",
-        async {
+    let subscription =
+        crate::deadlines::with_stream_setup_deadline("runtime frame subscription", async {
             state
                 .runtime
                 .subscribe_runtime_frames(
@@ -98,9 +97,8 @@ pub async fn stream_runtime_link(
                 )
                 .await
                 .map_err(ApiError::from_runtime_error)
-        },
-    )
-    .await?;
+        })
+        .await?;
     let catch_up_stream = tokio_stream::iter(subscription.catch_up.into_iter().map(frame_to_sse));
     let live_stream = subscription.live.map(frame_to_sse);
     Ok(Sse::new(catch_up_stream.chain(live_stream)).keep_alive(KeepAlive::default()))

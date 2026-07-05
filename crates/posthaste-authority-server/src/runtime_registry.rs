@@ -92,7 +92,9 @@ pub(crate) enum ForwardAcceptance {
     /// First time this `(AuthorityServerLinkId, ClientMutationId)` was seen: the
     /// authority server assigned `RuntimeMutationId` and reserved a pending entry
     /// the caller must settle.
-    New { runtime_mutation_id: RuntimeMutationId },
+    New {
+        runtime_mutation_id: RuntimeMutationId,
+    },
     /// Already accepted (pending or `Confirmed`): return the stored receipt
     /// (idempotent — never apply the user intent twice).
     Existing(MutationReceipt),
@@ -194,12 +196,7 @@ impl RuntimeRegistry {
                 outcome: WireSettlementOutcome::Confirmed,
             },
         );
-        self.settle_confirmed(
-            &origin.runtime_id,
-            &origin.client_mutation_id,
-            output,
-            seq,
-        );
+        self.settle_confirmed(&origin.runtime_id, &origin.client_mutation_id, output, seq);
     }
 
     /// Send-bridge terminal `DispatchUncertain`/`Failed` → routed
@@ -228,7 +225,9 @@ impl RuntimeRegistry {
         );
     }
 
-    fn lock_down_streams(&self) -> std::sync::MutexGuard<'_, HashMap<AuthorityServerLinkId, DownStreamHandle>> {
+    fn lock_down_streams(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<AuthorityServerLinkId, DownStreamHandle>> {
         self.down_streams
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -254,7 +253,9 @@ impl RuntimeRegistry {
             error: None,
         };
         match self.dedup.accept(runtime_id, client_mutation_id, || record) {
-            Accept::New => ForwardAcceptance::New { runtime_mutation_id },
+            Accept::New => ForwardAcceptance::New {
+                runtime_mutation_id,
+            },
             Accept::Duplicate(stored) => match stored.error {
                 Some(error) => ForwardAcceptance::Rejected(error),
                 None => ForwardAcceptance::Existing(stored.receipt()),
@@ -452,7 +453,9 @@ mod tests {
         let registry = RuntimeRegistry::new();
         let (r, c) = (rid("rt-A"), cid("op-1"));
         let runtime_mutation_id = match registry.accept(&r, &c, "message.setKeywords") {
-            ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
+            ForwardAcceptance::New {
+                runtime_mutation_id,
+            } => runtime_mutation_id,
             _ => panic!("first accept must be New"),
         };
         registry.settle_confirmed(&r, &c, serde_json::json!({ "events": [] }), 1);
@@ -470,11 +473,15 @@ mod tests {
         let registry = RuntimeRegistry::new();
         let c = cid("op-1");
         let a = match registry.accept(&rid("rt-A"), &c, "message.destroy") {
-            ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
+            ForwardAcceptance::New {
+                runtime_mutation_id,
+            } => runtime_mutation_id,
             _ => panic!("rt-A first accept must be New"),
         };
         let b = match registry.accept(&rid("rt-B"), &c, "message.destroy") {
-            ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
+            ForwardAcceptance::New {
+                runtime_mutation_id,
+            } => runtime_mutation_id,
             _ => panic!("rt-B first accept must be New (distinct runtime)"),
         };
         assert_ne!(a, b, "distinct runtimes get distinct RuntimeMutationIds");
@@ -524,11 +531,17 @@ mod tests {
         // but cannot touch the frameless rejection (still re-observed).
         let _ = registry.replay_resume(&r, Some(5));
         assert!(
-            matches!(registry.accept(&r, &cc, "message.setKeywords"), ForwardAcceptance::New { .. }),
+            matches!(
+                registry.accept(&r, &cc, "message.setKeywords"),
+                ForwardAcceptance::New { .. }
+            ),
             "an acked confirmed record is reclaimed"
         );
         assert!(
-            matches!(registry.accept(&r, &cr, "message.setKeywords"), ForwardAcceptance::Rejected(_)),
+            matches!(
+                registry.accept(&r, &cr, "message.setKeywords"),
+                ForwardAcceptance::Rejected(_)
+            ),
             "a frameless rejection is not acked away — re-observed until TTL"
         );
     }
@@ -543,7 +556,9 @@ mod tests {
         let (r, c) = (rid("rt-A"), cid("send-1"));
         let mut ch = registry.register_down_stream(&r);
         let runtime_mutation_id = match registry.accept(&r, &c, "message.send") {
-            ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
+            ForwardAcceptance::New {
+                runtime_mutation_id,
+            } => runtime_mutation_id,
             _ => panic!("first accept must be New"),
         };
         let op = OperationId::from("op-send-1");
@@ -558,20 +573,36 @@ mod tests {
         // Enqueue emitted no verdict — the origin's settlement stream is empty.
         assert!(ch.settlement.try_recv().is_err(), "no verdict at enqueue");
         // The async flush settles Applied → routed Settlement{Confirmed}.
-        let origin = registry.take_send_origin(&op).expect("origin was registered");
+        let origin = registry
+            .take_send_origin(&op)
+            .expect("origin was registered");
         registry.settle_async_confirmed(&origin, serde_json::json!({ "events": [] }));
-        match ch.settlement.try_recv().expect("confirmed settlement routed").frame() {
-            Some(AuthorityServerFrame::Settlement { mutation_id, outcome }) => {
+        match ch
+            .settlement
+            .try_recv()
+            .expect("confirmed settlement routed")
+            .frame()
+        {
+            Some(AuthorityServerFrame::Settlement {
+                mutation_id,
+                outcome,
+            }) => {
                 assert_eq!(mutation_id.0, runtime_mutation_id.as_str());
                 assert!(matches!(outcome, WireSettlementOutcome::Confirmed));
             }
             other => panic!("expected a Settlement frame, got {other:?}"),
         }
         assert!(
-            matches!(registry.accept(&r, &c, "message.send"), ForwardAcceptance::Existing(_)),
+            matches!(
+                registry.accept(&r, &c, "message.send"),
+                ForwardAcceptance::Existing(_)
+            ),
             "a confirmed deferred send dedups on retry"
         );
-        assert!(registry.take_send_origin(&op).is_none(), "origin drained once");
+        assert!(
+            registry.take_send_origin(&op).is_none(),
+            "origin drained once"
+        );
     }
 
     // Send-bridge (step 3): a parked (DispatchUncertain) or failed flush routes a
@@ -584,7 +615,9 @@ mod tests {
         let (r, c) = (rid("rt-A"), cid("send-2"));
         let mut ch = registry.register_down_stream(&r);
         let runtime_mutation_id = match registry.accept(&r, &c, "message.send") {
-            ForwardAcceptance::New { runtime_mutation_id } => runtime_mutation_id,
+            ForwardAcceptance::New {
+                runtime_mutation_id,
+            } => runtime_mutation_id,
             _ => panic!("first accept must be New"),
         };
         let op = OperationId::from("op-send-2");
@@ -596,17 +629,30 @@ mod tests {
                 client_mutation_id: c.clone(),
             },
         );
-        let origin = registry.take_send_origin(&op).expect("origin was registered");
+        let origin = registry
+            .take_send_origin(&op)
+            .expect("origin was registered");
         registry.settle_async_failed(&origin, rejection());
-        match ch.settlement.try_recv().expect("failed settlement routed").frame() {
-            Some(AuthorityServerFrame::Settlement { mutation_id, outcome }) => {
+        match ch
+            .settlement
+            .try_recv()
+            .expect("failed settlement routed")
+            .frame()
+        {
+            Some(AuthorityServerFrame::Settlement {
+                mutation_id,
+                outcome,
+            }) => {
                 assert_eq!(mutation_id.0, runtime_mutation_id.as_str());
                 assert!(matches!(outcome, WireSettlementOutcome::Failed));
             }
             other => panic!("expected a Settlement frame, got {other:?}"),
         }
         assert!(
-            matches!(registry.accept(&r, &c, "message.send"), ForwardAcceptance::Rejected(_)),
+            matches!(
+                registry.accept(&r, &c, "message.send"),
+                ForwardAcceptance::Rejected(_)
+            ),
             "a parked/failed deferred send is kept + re-observed on retry"
         );
     }
@@ -642,7 +688,10 @@ mod tests {
         assert!(
             matches!(ch_a.settlement.try_recv(), Ok(frame) if frame.frame().map(|f| matches!(f, AuthorityServerFrame::Settlement { .. })).unwrap_or(false)),
         );
-        assert!(ch_b.settlement.try_recv().is_err(), "rt-B must not receive rt-A's settlement");
+        assert!(
+            ch_b.settlement.try_recv().is_err(),
+            "rt-B must not receive rt-A's settlement"
+        );
     }
 
     // D49 [8]: a new down-stream supersedes the prior one — the generation stamp
@@ -655,7 +704,11 @@ mod tests {
         let second = registry.register_down_stream(&rt);
         assert_ne!(first.generation, second.generation);
         assert_eq!(registry.current_generation(&rt), second.generation);
-        assert_ne!(registry.current_generation(&rt), first.generation, "the first is superseded");
+        assert_ne!(
+            registry.current_generation(&rt),
+            first.generation,
+            "the first is superseded"
+        );
     }
 
     // D49 [0]: a base frame is recorded at emission into every subscribed
@@ -677,7 +730,10 @@ mod tests {
         }
         // A runtime with no down-stream registered records nothing.
         registry.record_base(AuthorityServerFrame::Heartbeat);
-        assert!(matches!(registry.replay_resume(&rid("rt-B"), Some(0)), Resume::Fresh));
+        assert!(matches!(
+            registry.replay_resume(&rid("rt-B"), Some(0)),
+            Resume::Fresh
+        ));
     }
 
     // D49 [6]: when the sink reaper reaps a departed runtime, ALL its per-link
@@ -692,15 +748,26 @@ mod tests {
         registry.settle_rejected(&rt, &cid("op"), rejection());
         registry.record_base(AuthorityServerFrame::Heartbeat);
         drop(ch); // subscriber gone
-        // Drive the reaper past the sink TTL: departure purges everything.
+                  // Drive the reaper past the sink TTL: departure purges everything.
         let ttl = posthaste_link_far_end::up::DEFAULT_SINK_TTL;
         registry.reap(1); // starts the countdown
         registry.reap(ttl + 3); // past TTL → reaped + purged
         assert!(
-            matches!(registry.accept(&rt, &cid("op"), "message.setKeywords"), ForwardAcceptance::New { .. }),
+            matches!(
+                registry.accept(&rt, &cid("op"), "message.setKeywords"),
+                ForwardAcceptance::New { .. }
+            ),
             "dedup purged on departure"
         );
-        assert_eq!(registry.highest_seq(&rt), 0, "replay backlog purged on departure");
-        assert_eq!(registry.current_generation(&rt), 0, "down-stream registration purged");
+        assert_eq!(
+            registry.highest_seq(&rt),
+            0,
+            "replay backlog purged on departure"
+        );
+        assert_eq!(
+            registry.current_generation(&rt),
+            0,
+            "down-stream registration purged"
+        );
     }
 }

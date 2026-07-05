@@ -65,9 +65,9 @@ pub(crate) fn store_error_to_gateway(error: StoreError) -> GatewayError {
     // a provider rejection (audit top-10 #4). Exhaustive: a new `StoreError`
     // variant must be classified here before it compiles.
     match &error {
-        StoreError::Corruption(_) => {
-            GatewayError::Corruption(format!("IMAP local state lookup hit a corrupt store: {error}"))
-        }
+        StoreError::Corruption(_) => GatewayError::Corruption(format!(
+            "IMAP local state lookup hit a corrupt store: {error}"
+        )),
         StoreError::NotFound(_) | StoreError::Conflict(_) | StoreError::Failure(_) => {
             GatewayError::Rejected(format!("IMAP local state lookup failed: {error}"))
         }

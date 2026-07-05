@@ -1,9 +1,9 @@
+#[cfg(feature = "embedded-server")]
+use posthaste_http_api_adapter::ServerConfig;
 use posthaste_observability::{
     events, ph_forwarded_debug, ph_forwarded_error, ph_forwarded_info, ph_forwarded_trace,
     ph_forwarded_warn, ph_info,
 };
-#[cfg(feature = "embedded-server")]
-use posthaste_http_api_adapter::ServerConfig;
 use serde::Deserialize;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuBuilder, SubmenuBuilder};

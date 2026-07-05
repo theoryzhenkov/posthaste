@@ -4,20 +4,20 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
-use posthaste_domain_model::{
-    DomainEvent, Id, OperationDispatchUncertain, OperationId, OperationOutcome, OperationSettlement,
-    EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN, EVENT_TOPIC_OPERATION_SETTLED,
-};
-use posthaste_link_far_end::down::{ReplayStore, Resume};
-use posthaste_link_far_end::up::{Accept, DedupStore, TerminalClass};
 use posthaste_client_link::{RuntimeFrameSubscription, RuntimeViewSubscription};
 use posthaste_contract_core::{
     ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MailOperation,
     MutationNotification, MutationReceipt, MutationRequest, MutationSettlementState,
-    RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeMutationId,
-    RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, ViewDescriptor, ViewFrame, ViewId,
+    RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeLinkConnection,
+    RuntimeLinkId, RuntimeLinkSeq, RuntimeMutationId, ViewDescriptor, ViewFrame, ViewId,
     ViewSnapshot,
 };
+use posthaste_domain_model::{
+    DomainEvent, Id, OperationDispatchUncertain, OperationId, OperationOutcome,
+    OperationSettlement, EVENT_TOPIC_OPERATION_DISPATCH_UNCERTAIN, EVENT_TOPIC_OPERATION_SETTLED,
+};
+use posthaste_link_far_end::down::{ReplayStore, Resume};
+use posthaste_link_far_end::up::{Accept, DedupStore, TerminalClass};
 use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
@@ -297,8 +297,7 @@ impl LinkRegistry {
             let link = links
                 .get_mut(&link_id)
                 .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
-            let needs_initial_frames =
-                !link.latest_snapshots.is_empty() || !mutations.is_empty();
+            let needs_initial_frames = !link.latest_snapshots.is_empty() || !mutations.is_empty();
             match resume {
                 // Current (fresh or at-head): re-serve initial state on a first
                 // subscribe, else nothing to catch up.
@@ -520,9 +519,10 @@ impl LinkRegistry {
         caller: RuntimeCaller,
         request: &MutationRequest,
     ) -> Result<MutationAcceptance, RuntimeError> {
-        let link_id = request.link_id.as_ref().ok_or_else(|| {
-            RuntimeError::invalid_mutation("runtime mutation requires a link id")
-        })?;
+        let link_id = request
+            .link_id
+            .as_ref()
+            .ok_or_else(|| RuntimeError::invalid_mutation("runtime mutation requires a link id"))?;
         {
             // Caller-scope (auth) check up front; the dedup ledger is the shared
             // sub-store below (released before it is touched).
@@ -724,7 +724,9 @@ impl LinkRegistry {
                         &settlement.id,
                         false,
                         Some(deferred_send_error(
-                            settlement.error.unwrap_or_else(|| "send failed".to_string()),
+                            settlement
+                                .error
+                                .unwrap_or_else(|| "send failed".to_string()),
                         )),
                     ),
                 }
@@ -794,8 +796,7 @@ impl LinkRegistry {
             .get_mut(link_id)
             .ok_or_else(|| RuntimeError::not_found("runtime link not found"))?;
         link.open_views.insert(snapshot.view_id.clone());
-        link
-            .latest_snapshots
+        link.latest_snapshots
             .insert(snapshot.view_id.clone(), snapshot);
         Ok(())
     }
@@ -949,10 +950,7 @@ impl LinkRegistry {
     /// notification forwarder's recovery from an event-bus lag (it silently
     /// dropped events; the client resyncs from the collapsed snapshot). No
     /// caller-scope check: the forwarder is the link's own component.
-    fn collapse_link_into_stream(
-        &self,
-        link_id: &RuntimeLinkId,
-    ) -> Result<(), RuntimeError> {
+    fn collapse_link_into_stream(&self, link_id: &RuntimeLinkId) -> Result<(), RuntimeError> {
         let mutations = self.dedup.records_for(link_id);
         let mut links = self.lock_links();
         let link = links
@@ -1072,8 +1070,7 @@ fn view_frame_to_runtime(
             let link_seq = next();
             let view_id = snapshot.view_id.clone();
             let revision = snapshot.revision;
-            link
-                .latest_snapshots
+            link.latest_snapshots
                 .insert(view_id.clone(), snapshot.clone());
             Some(RuntimeFrame::ViewSnapshot {
                 link_seq,
@@ -1132,10 +1129,7 @@ fn view_frame_to_runtime(
             }
             link.latest_snapshots.remove(&view_id);
             let link_seq = next();
-            Some(RuntimeFrame::ViewClosed {
-                link_seq,
-                view_id,
-            })
+            Some(RuntimeFrame::ViewClosed { link_seq, view_id })
         }
     }
 }
@@ -1197,7 +1191,10 @@ fn terminal_class_for(
     match state {
         MutationSettlementState::Confirmed => TerminalClass::Confirmed,
         MutationSettlementState::Failed => {
-            if error.map(|error| error.terminality.is_transient()).unwrap_or(false) {
+            if error
+                .map(|error| error.terminality.is_transient())
+                .unwrap_or(false)
+            {
                 TerminalClass::Failed
             } else {
                 TerminalClass::Rejected
@@ -1318,7 +1315,6 @@ mod delta_tests {
     }
 }
 
-
 #[cfg(test)]
 mod race_tests {
     //! Deterministic interleaving tests for the two links.rs ordering races
@@ -1368,7 +1364,8 @@ mod race_tests {
         let reg2 = reg.clone();
         let sid2 = sid.clone();
         *reg.accept_barrier.lock().unwrap() = Some(Box::new(move || {
-            reg2.close_link(RuntimeCaller::test(), sid2.clone()).unwrap();
+            reg2.close_link(RuntimeCaller::test(), sid2.clone())
+                .unwrap();
         }));
 
         let result = reg.accept_mutation(RuntimeCaller::test(), &request(&sid, "op-race"));
@@ -1398,15 +1395,14 @@ mod race_tests {
         let reg2 = reg.clone();
         let sid2 = sid.clone();
         *reg.subscribe_barrier.lock().unwrap() = Some(Box::new(move || {
-            reg2
-                .settle_mutation(
-                    &sid2,
-                    &mutation_id,
-                    MutationSettlementState::Confirmed,
-                    None,
-                    Value::Null,
-                )
-                .unwrap();
+            reg2.settle_mutation(
+                &sid2,
+                &mutation_id,
+                MutationSettlementState::Confirmed,
+                None,
+                Value::Null,
+            )
+            .unwrap();
         }));
 
         // A fresh subscribe (no prior cursor).
@@ -1456,7 +1452,10 @@ mod race_tests {
         // Disconnect WITHOUT a DELETE: dropping the subscription drops the live
         // stream (and its receiver), but no `close_link` ran → the entry leaks.
         drop(subscription);
-        assert!(reg.lock_links().contains_key(&sid), "leaks without a reaper");
+        assert!(
+            reg.lock_links().contains_key(&sid),
+            "leaks without a reaper"
+        );
 
         // Within the TTL the reaper spares it.
         reg.reap_idle_sessions(last_active + 1);
@@ -1465,7 +1464,10 @@ mod race_tests {
         // Past the TTL it is reaped: the registry entry is released.
         let reaped = reg.reap_idle_sessions(last_active + SESSION_IDLE_TTL + 1);
         assert_eq!(reaped, vec![sid.clone()], "idle session reaped past ttl");
-        assert!(!reg.lock_links().contains_key(&sid), "registry entry released");
+        assert!(
+            !reg.lock_links().contains_key(&sid),
+            "registry entry released"
+        );
     }
 
     // A live down-stream is never reaped — the held receiver spares the link at
@@ -1665,7 +1667,10 @@ mod collapse_tests {
             .iter()
             .filter(|f| matches!(f, RuntimeFrame::MutationNotification { .. }))
             .count();
-        assert_eq!(mutation_frames, 3, "one settlement frame per terminal mutation");
+        assert_eq!(
+            mutation_frames, 3,
+            "one settlement frame per terminal mutation"
+        );
     }
 
     #[test]
@@ -1689,6 +1694,9 @@ mod collapse_tests {
                 streamed += 1;
             }
         }
-        assert_eq!(streamed, 3, "collapse streamed the mutation window into the stream");
+        assert_eq!(
+            streamed, 3,
+            "collapse streamed the mutation window into the stream"
+        );
     }
 }

@@ -19,16 +19,14 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_domain_model::{AccountId, MessageId, OperationKind, Recipient, SendMessageRequest};
 use posthaste_client_link::RuntimeLink;
 use posthaste_contract_core::{
     AccountScopeRequest, ClientMutationId, MailListViewState, RuntimeCaller, RuntimeErrorCode,
     ViewSnapshot,
 };
+use posthaste_domain_model::{AccountId, MessageId, OperationKind, Recipient, SendMessageRequest};
 use posthaste_runtime_api::{RuntimeMailReadApi, RuntimeMailWriteApi};
-use posthaste_testkit::{
-    GmailImapFixture, Harness, RuntimeHarness, MAILBOX_DRAFTS, MAILBOX_SENT,
-};
+use posthaste_testkit::{GmailImapFixture, Harness, RuntimeHarness, MAILBOX_DRAFTS, MAILBOX_SENT};
 
 /// A compose-shaped request: `draft_id` names the originating draft on a send
 /// (None while saving the draft itself — the runtime stamps the stable key).
@@ -138,7 +136,9 @@ fn append_commands_into(commands: &[String], mailbox: &str) -> Vec<String> {
 async fn gmail_send_consumes_the_draft_with_exactly_one_sent_copy() {
     let gmail = GmailImapFixture::start_condstore_only().await;
     let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("gmail-send-draft", &gmail).await;
+    let account = harness
+        .create_gmail_account("gmail-send-draft", &gmail)
+        .await;
 
     let draft_key = save_and_flush_draft(&harness, &account, &gmail, "Quarterly reply").await;
 
@@ -156,7 +156,11 @@ async fn gmail_send_consumes_the_draft_with_exactly_one_sent_copy() {
 
     // The submission happened exactly once, and the settled send consumed the
     // draft on the server.
-    assert_eq!(gmail.smtp_submission_count(), 1, "exactly one SMTP submission");
+    assert_eq!(
+        gmail.smtp_submission_count(),
+        1,
+        "exactly one SMTP submission"
+    );
     assert_eq!(
         gmail.mailbox_message_count(MAILBOX_DRAFTS),
         0,
@@ -226,7 +230,11 @@ async fn generic_send_consumes_the_draft_and_appends_the_single_sent_copy() {
         .expect("send should queue");
     harness.sync_account(&account).await;
 
-    assert_eq!(imap.smtp_submission_count(), 1, "exactly one SMTP submission");
+    assert_eq!(
+        imap.smtp_submission_count(),
+        1,
+        "exactly one SMTP submission"
+    );
     assert_eq!(
         imap.mailbox_message_count(MAILBOX_DRAFTS),
         0,
@@ -317,7 +325,9 @@ async fn send_without_draft_id_leaves_saved_drafts_untouched() {
 async fn gmail_draft_save_reconciles_to_the_synced_canonical_id_with_no_twin() {
     let gmail = GmailImapFixture::start_condstore_only().await;
     let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("gmail-draft-twin", &gmail).await;
+    let account = harness
+        .create_gmail_account("gmail-draft-twin", &gmail)
+        .await;
 
     // Save + flush + sync (asserts one provider Drafts message internally).
     let draft_key = save_and_flush_draft(&harness, &account, &gmail, "Draft v1").await;

@@ -553,7 +553,9 @@ fn write_through_draft_registry_on_message_delete_tx(
     message_id: &MessageId,
 ) -> Result<(), StoreError> {
     let mut keys_statement = tx
-        .prepare_cached("SELECT draft_key FROM draft_alias WHERE account_id = ?1 AND entity_id = ?2")
+        .prepare_cached(
+            "SELECT draft_key FROM draft_alias WHERE account_id = ?1 AND entity_id = ?2",
+        )
         .map_err(sql_to_store_error)?;
     let draft_keys = keys_statement
         .query_map(params![account_id.as_str(), message_id.as_str()], |row| {
