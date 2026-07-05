@@ -130,6 +130,63 @@ syncLogger.info(
 let entityStoreInstall: Promise<void> | undefined
 
 /**
+ * How long the link layer waits for the entity-store install to settle before
+ * opening the first link (CL-C2 / R1). Generous — the install is self-bounding
+ * (the worker probe falls back to the in-process store within
+ * `WORKER_READY_TIMEOUT_MS`, then loads the WASM) — this is only a backstop so a
+ * pathologically stuck install can't wedge the link open forever. On the (rare,
+ * logged) timeout the base adapter serves, the documented degraded mode.
+ */
+export const RUNTIME_ADAPTER_READY_GATE_TIMEOUT_MS = 15_000
+
+/**
+ * Resolves once the entity-store adapter is the active adapter — or the install
+ * has failed / timed out and the base adapter is what serves. Never rejects.
+ *
+ * The link layer awaits this before the FIRST `openRuntimeLink`, so the one
+ * shared frame subscription and the first view-open bind to the ENTITY-STORE
+ * adapter, not the transient base adapter (CL-C2 / R1). Without it, a subscribe
+ * or view-open that wins the race against the async WASM/worker install strands
+ * the whole session on the base adapter — no ingest, no counts, no synthesized
+ * `viewReplace` — until a reload. Bounded so it can never block the link.
+ */
+let adapterReadyGate: Promise<void> = Promise.resolve()
+
+export function whenRuntimeAdapterReady(): Promise<void> {
+  return adapterReadyGate
+}
+
+/** Resolve when `settling` settles OR `timeoutMs` elapses, whichever first;
+ *  never rejects. Closes the install race in the common case without letting a
+ *  stuck install wedge the link (CL-C2). */
+function boundedReadyGate(
+  settling: Promise<unknown>,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    // Don't keep the process alive purely for this backstop timer.
+    ;(timer as { unref?: () => void }).unref?.()
+    settling.then(finish, finish)
+  })
+}
+
+/** Test-only: pin the adapter-ready gate (e.g. a still-pending install, to
+ *  model the CL-C2 race) or clear it back to resolved. */
+export function __setRuntimeAdapterReadyGateForTesting(
+  gate: Promise<void>,
+): void {
+  adapterReadyGate = gate
+}
+
+/**
  * Load the WASM entity store, wrap the active adapter with the
  * entityStoreAdapter, and make it the active runtime adapter. Idempotent; the
  * renderer keeps using the base adapter until the WASM finishes loading. The
@@ -190,7 +247,8 @@ export function installEntityStoreAdapter(): Promise<void> {
 // from view frames, but without the store's optimism + count ownership — so the
 // failure is logged at error level rather than swallowed. Until the WASM finishes
 // loading the base HTTP adapter serves (bootstrap only).
-void installEntityStoreAdapter().catch((error) => {
+const bootEntityStoreInstall = installEntityStoreAdapter()
+bootEntityStoreInstall.catch((error) => {
   syncLogger.error(
     {
       event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
@@ -199,6 +257,13 @@ void installEntityStoreAdapter().catch((error) => {
     'entity store failed to load — no REST fallback; the mail list will not update optimistically',
   )
 })
+// CL-C2: the link layer awaits this before opening the first link, so the frame
+// subscription + first view-open bind to the entity-store adapter rather than
+// racing ahead onto the base adapter and stranding the session (R1).
+adapterReadyGate = boundedReadyGate(
+  bootEntityStoreInstall,
+  RUNTIME_ADAPTER_READY_GATE_TIMEOUT_MS,
+)
 
 // W3 / N18: flush any queued durable write on visibilitychange-hidden/pagehide
 // so a tab close can't strand it mid-flight. Installed unconditionally (a

@@ -181,6 +181,10 @@ export interface EntityStoreAdapterDeps {
 interface ViewEntry {
   /** The store predicate this view was registered with. */
   predicate: ViewPredicate
+  /** The exact `registerViewJson` args the view was seeded with, replayed
+   *  verbatim on a worker-respawn re-seed (CL-C1) — its `watermark` is then
+   *  corrected to the current base by the `setViewRowsJson` that follows. */
+  registerArgsJson: string
   lastSnapshot: RuntimeViewSnapshot<RuntimeMailListViewState>
   /** The last projected-rows JSON, to emit `viewReplace` only when it moved. */
   lastProjectionJson: string
@@ -268,6 +272,68 @@ class EntityStoreController {
     // Wire the durable pending set into the engine's level-triggered reconciler
     // (D44): the engine decides WHEN (every connect); these hooks are HOW.
     this.nearEnd.setPendingSetHooks(this.buildPendingSetHooks())
+    // CL-C1: a `WorkerStorePort` respawns an EMPTY store on a wedge; give it the
+    // re-seed hook so a respawn rebuilds the store's views/bases/folds from the
+    // state we hold here (the view registry + the durable pending set) before it
+    // replays the timed-out call, rather than replaying into emptiness.
+    this.store.setReseedHook?.(() => this.reseedStore())
+  }
+
+  /**
+   * CL-C1 — rebuild a freshly-respawned (empty) worker store to the state it
+   * held before the wedge, driven by the {@link WorkerStorePort}'s respawn.
+   *
+   * Re-registers + re-seeds every open view from its held `lastSnapshot`, then
+   * re-folds the whole durable pending set (every unsettled optimistic mutation
+   * — never-dispatched AND sent-but-unsettled, since the re-seeded base reflects
+   * neither on a fresh worker). Reuses the same view-registry + pending-set
+   * machinery `seedOpenedView` uses — no parallel re-seed system.
+   *
+   * Runs OUTSIDE `enqueue`: the port invokes it while the store queue is parked
+   * on the timed-out call (which has not resolved), so nothing else interleaves;
+   * going through `enqueue` would deadlock on that same blocked op.
+   */
+  private async reseedStore(): Promise<void> {
+    for (const [viewId, entry] of this.views) {
+      const snapshot = entry.lastSnapshot
+      const rows = snapshot.data.rows
+      // Re-register with the original predicate/sort; `setViewRowsJson` below
+      // corrects the watermark to the current base.
+      await this.store.registerViewJson(viewId, entry.registerArgsJson)
+      await this.store.ingestBatchJson(
+        JSON.stringify(projectionBatchFromRows(rows)),
+      )
+      await this.store.setViewRowsJson(
+        viewId,
+        JSON.stringify(rows.map(toStoreRow)),
+        JSON.stringify(watermarkFromSnapshot(snapshot, rows)),
+      )
+    }
+    const records = await this.deps.pendingSet.all()
+    for (const record of records) {
+      try {
+        await this.store.acceptMutationJson(
+          JSON.stringify({
+            mutationId: record.clientMutationId,
+            messageId: record.messageId,
+            assertion: record.assertion,
+          }),
+        )
+      } catch (error) {
+        // A single un-re-foldable record must not abort the whole re-seed (it
+        // would leave the store partially rebuilt). Skip + log, like the
+        // view-open rehydration path.
+        syncLogger.error(
+          {
+            event: LOG_EVENTS.outboxRehydrateSkipped,
+            clientMutationId: record.clientMutationId,
+            messageId: record.messageId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'skipped an un-re-foldable pending-set record during worker-respawn re-seed',
+        )
+      }
+    }
   }
 
   /**
@@ -389,15 +455,13 @@ class EntityStoreController {
       request.view.sort,
       buildMailListPredicateContext(this.queryClient),
     )
-    await this.store.registerViewJson(
-      viewId,
-      JSON.stringify({
-        predicate,
-        sortField: request.view.sort ?? 'date',
-        sortDirection: request.view.sortDir ?? 'desc',
-        watermark: watermarkFromSnapshot(snapshot, rows),
-      }),
-    )
+    const registerArgsJson = JSON.stringify({
+      predicate,
+      sortField: request.view.sort ?? 'date',
+      sortDirection: request.view.sortDir ?? 'desc',
+      watermark: watermarkFromSnapshot(snapshot, rows),
+    })
+    await this.store.registerViewJson(viewId, registerArgsJson)
     // P1: seed the rows' message bases + place the rows in one atomic batch.
     await this.store.ingestBatchJson(
       JSON.stringify(projectionBatchFromRows(rows)),
@@ -469,6 +533,7 @@ class EntityStoreController {
     const projected = await this.projectView(viewId)
     const entry: ViewEntry = {
       predicate,
+      registerArgsJson,
       lastSnapshot: snapshot,
       lastProjectionJson: projected.json,
     }

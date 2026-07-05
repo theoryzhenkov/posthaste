@@ -10,9 +10,12 @@
  * sees a slow-but-answered call, not a hang. Also pins the F4 dead-latch: a
  * post-restart-budget failure and a crash `error` event fail fast.
  *
- * The M42 re-seed protocol (re-register views + replay the pending set on the
- * fresh worker) is NOT landed, so this asserts the PORT-level guarantee (the
- * seam M31 fixed), not full store recovery — the honest current baseline.
+ * This kit wires NO re-seed hook (the port is driven bare), so it asserts the
+ * PORT-level guarantee (the seam M31 fixed): the timed-out call is replayed to
+ * completion on the fresh worker. Full store recovery — re-register views +
+ * re-fold the pending set on respawn (CL-C1) — is now landed and is exercised
+ * end-to-end in `workerRespawnReseed.test.ts` (full harness) and at the port
+ * seam in `workerStorePort.test.ts` (the re-seed hook).
  *
  * @spec docs/eph/RFC-L2-client-resilience.md (F3, M31 / F4)
  */

@@ -165,6 +165,78 @@ describe('WorkerStorePort', () => {
     expect(workers[0]?.terminated).toBe(true)
   })
 
+  it('runs the re-seed hook on the fresh worker BEFORE replaying the timed-out call (CL-C1)', async () => {
+    let spawnCount = 0
+    const workers: LoopbackWorker[] = []
+    const spawnWorker = () => {
+      spawnCount += 1
+      const isFirst = spawnCount === 1
+      const worker = new LoopbackWorker((request) =>
+        isFirst
+          ? // The first worker wedges on the timed-out call.
+            new Promise<StoreWorkerResponse>(() => {})
+          : { id: request.id, ok: true, result: 'ok' },
+      )
+      workers.push(worker)
+      return worker
+    }
+    const port = new WorkerStorePort(spawnWorker(), {
+      spawnWorker,
+      callTimeoutMs: 20,
+      maxRestarts: 1,
+    })
+
+    // The controller's re-seed: it drives its own calls (registerViewJson) on
+    // the fresh worker. Record the ORDER of methods the fresh worker sees to
+    // prove the re-seed lands before the replayed call.
+    const reseedCalls: string[] = []
+    port.setReseedHook(async () => {
+      await port.registerViewJson('v1', '{"sortField":"date"}')
+      reseedCalls.push('reseed:registerViewJson')
+    })
+
+    // projectViewJson wedges worker #1 → respawn → re-seed → replay on worker #2.
+    const result = await port.projectViewJson('v1')
+
+    expect(result).toBe('ok')
+    expect(spawnCount).toBe(2)
+    // The fresh (2nd) worker saw the re-seed's registerViewJson FIRST, then the
+    // replayed projectViewJson — never a replay into an un-seeded store.
+    expect(workers[1]?.received.map((r) => r.method)).toEqual([
+      'registerViewJson',
+      'projectViewJson',
+    ])
+    expect(reseedCalls).toEqual(['reseed:registerViewJson'])
+  })
+
+  it('fails the port cleanly if the re-seed itself times out (fresh worker also wedged) — never a replay into emptiness (CL-C1)', async () => {
+    let spawnCount = 0
+    const spawnWorker = () => {
+      spawnCount += 1
+      // Every worker wedges — the initial call AND the re-seed's calls.
+      return new LoopbackWorker(
+        () => new Promise<StoreWorkerResponse>(() => {}),
+      )
+    }
+    const port = new WorkerStorePort(spawnWorker(), {
+      spawnWorker,
+      callTimeoutMs: 20,
+      maxRestarts: 1,
+    })
+    port.setReseedHook(async () => {
+      // Times out on the fresh (also-wedged) worker → fails the port.
+      await port.registerViewJson('v1', '{}')
+    })
+
+    // The original call rejects rather than resolving against an empty store or
+    // respawn-looping.
+    await expect(port.projectViewJson('v1')).rejects.toThrow()
+    // Initial + one respawn; the re-seed's timeout latched the port dead, so no
+    // further respawn churned.
+    expect(spawnCount).toBe(2)
+    await expect(port.drainDirtyJson()).rejects.toThrow(/no longer available/)
+  })
+
   it('fails (not hangs) once the restart budget is exhausted, and fails fast afterward', async () => {
     let spawnCount = 0
     const spawnWorker = () => {
