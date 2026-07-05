@@ -691,6 +691,15 @@ impl MailService {
                     disposition: FlushDisposition::Transient,
                     message,
                 }) => {
+                    // Re-queue Pending WITHOUT reconciling the entity id: a
+                    // DraftCreate/DraftUpdate whose create+destroy committed but
+                    // whose response was lost (e.g. GatewayError::Network) lands
+                    // here with its entity id un-reconciled. That is safe now (DS2):
+                    // the create-id is derived from `operation.id` — preserved
+                    // across this re-queue (only the state + attempts change, never
+                    // the op id) — so the retry re-issues the SAME create-id and the
+                    // server no-ops the duplicate create instead of orphaning a twin
+                    // draft. Rotating the op id here would break that idempotency.
                     self.outbox.update_operation_state(
                         &operation.id,
                         OperationState::Pending,
@@ -837,9 +846,13 @@ impl MailService {
             OperationKind::DraftCreate => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
                 // A create has no replace target, so the DS3 redelivery flag is
-                // irrelevant (no destroy outcome to mask).
+                // irrelevant (no destroy outcome to mask). The operation id is the
+                // stable create identity (constant across retries): the gateway
+                // derives a deterministic `Email/set` create-id from it (DS2), so a
+                // lost-response redelivery re-creates under the same id and cannot
+                // orphan a twin draft.
                 let new_id = gateway
-                    .save_draft(account_id, &request, None, false)
+                    .save_draft(account_id, &request, None, false, operation.id.as_str())
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
@@ -855,8 +868,19 @@ impl MailService {
                 // replace-destroy surfaces so the save is retried rather than
                 // silently leaving the old draft behind (the twin).
                 let idempotent_redelivery = operation.attempts > 0;
+                // The operation id is the stable create identity (constant across
+                // retries): the gateway derives a deterministic `Email/set`
+                // create-id from it (DS2), so a redelivery whose create+destroy
+                // committed but whose response was lost re-creates under the same
+                // id and cannot orphan a twin draft.
                 let new_id = gateway
-                    .save_draft(account_id, &request, Some(&replace), idempotent_redelivery)
+                    .save_draft(
+                        account_id,
+                        &request,
+                        Some(&replace),
+                        idempotent_redelivery,
+                        operation.id.as_str(),
+                    )
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {

@@ -292,6 +292,111 @@ async fn transient_failure_keeps_op_pending_and_stops_draining() {
     assert_eq!(pending[0].last_error.as_deref(), Some("offline"));
 }
 
+// DS2: a `DraftCreate` whose create COMMITTED server-side but whose response was
+// lost (Network → Transient) must not orphan a twin draft. The retry re-issues
+// the create under the SAME deterministic create-id (derived from the stable op
+// id), so the server no-ops the duplicate — exactly ONE provider draft results.
+#[tokio::test]
+async fn draft_create_lost_response_retry_yields_one_draft() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    // Attempt 1 commits the create server-side, then the response is lost.
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Network("wifi dropped".to_string())));
+
+    service
+        .queue_operation(
+            &account,
+            draft_entity("draft-temp"),
+            OperationKind::DraftCreate,
+            serde_json::to_value(draft_request("Hello")).unwrap(),
+        )
+        .expect("queue create");
+
+    // Attempt 1: transient, op re-Pends with the committed identity un-lost.
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("first flush stops on the transient");
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].state, OperationState::Pending);
+    assert_eq!(pending[0].attempts, 1);
+
+    // Attempt 2: the retry re-issues the SAME create-id → the mock dedups to the
+    // id minted on attempt 1 → settles.
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("retry flush settles");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].topic, "operation.settled");
+    assert!(service
+        .list_pending_operations(&account)
+        .expect("pending")
+        .is_empty());
+
+    // Two save attempts, but exactly ONE provider draft was minted (no twin).
+    assert_eq!(gateway.save_draft_calls.lock().unwrap().len(), 2);
+    assert_eq!(gateway.committed_draft_saves.lock().unwrap().len(), 1);
+}
+
+// DS2: the primary scenario — a `DraftUpdate` (create-new + destroy-old) whose
+// create+destroy COMMITTED but whose response was lost. The retry re-issues the
+// same deterministic create-id → one provider draft, not a twin (the orphaned P9
+// + P10 the DS2 audit found).
+#[tokio::test]
+async fn draft_update_lost_response_retry_yields_one_draft() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-stable");
+
+    // Create + flush → provider-draft-1.
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .expect("create");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("create flush");
+
+    // Edit → a DraftUpdate. Attempt 1 commits the create+destroy, then loses the
+    // response.
+    service
+        .save_draft(&account, Some(key), draft_request("v2"))
+        .expect("edit");
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Network("wifi dropped".to_string())));
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("first update flush stops on the transient");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("retry flush settles");
+
+    assert!(service
+        .list_pending_operations(&account)
+        .expect("pending")
+        .is_empty());
+    // Three save attempts (create, update-1, update-2) but exactly TWO provider
+    // drafts minted — one per distinct operation id. The lost-response update
+    // retry re-used its committed id rather than orphaning a second draft.
+    assert_eq!(gateway.save_draft_calls.lock().unwrap().len(), 3);
+    assert_eq!(gateway.committed_draft_saves.lock().unwrap().len(), 2);
+}
+
 #[tokio::test]
 async fn permanent_failure_marks_op_failed_and_settles() {
     let account = AccountId::from("primary");

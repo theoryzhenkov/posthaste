@@ -184,6 +184,13 @@ pub trait MailGateway: Send + Sync {
     /// retryable failure rather than a clean save that silently left the old
     /// draft behind (the twin).
     ///
+    /// `idempotency_key` is the outbox operation id — stable across retries. The
+    /// JMAP gateway derives a **deterministic** `Email/set` create-id from it (an
+    /// analogue of the send path's `EmailSubmission` create-id — DS2), so a
+    /// redelivered save whose create+destroy committed but whose response was
+    /// lost re-issues the create with the *same* id: an idempotent server-side
+    /// create-with-id no-ops the second create rather than minting a twin draft.
+    ///
     /// Default transport behaviour rejects draft writes; JMAP and IMAP override.
     ///
     /// @spec docs/L1-outbox#operation-model
@@ -193,6 +200,7 @@ pub trait MailGateway: Send + Sync {
         _request: &SendMessageRequest,
         _replace: Option<&MessageId>,
         _idempotent_redelivery: bool,
+        _idempotency_key: &str,
     ) -> Result<MessageId, GatewayError> {
         Err(GatewayError::Rejected(
             "draft writes are not supported by this transport".to_string(),

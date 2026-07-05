@@ -550,6 +550,10 @@ impl MailGateway for MockJmapGateway {
         // `notFound` discrimination has no distinct outcome here — the live JMAP
         // `Email/set` `destroyed` check is where it bites.
         _idempotent_redelivery: bool,
+        // The mock never loses a response, so the deterministic create-id (DS2)
+        // has no twin to dedup here — it is the live JMAP create-with-id that
+        // enforces idempotent redelivery.
+        _idempotency_key: &str,
     ) -> Result<MessageId, GatewayError> {
         let mut state = self
             .state

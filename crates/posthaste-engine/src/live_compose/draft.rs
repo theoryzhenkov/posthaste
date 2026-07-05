@@ -6,6 +6,24 @@ use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 use crate::live_compose::attachments::upload_send_attachments;
 use crate::live_compose::identity::fetch_draft_sender;
 
+/// Derive the JMAP `Email/set` create-id for a draft from the outbox operation
+/// id, so every retry of the same save carries the *same* create identity. A
+/// redelivered `DraftCreate`/`DraftUpdate` whose create+destroy committed but
+/// whose response was lost then re-issues the create with this same id: an
+/// idempotent server-side create-with-id no-ops the second create rather than
+/// minting a twin draft (DS2 — the draft analogue of `send`'s deterministic
+/// `EmailSubmission` create-id). Sanitized to the JMAP creation-id charset with
+/// a leading letter so it stays a valid id on strict servers.
+///
+/// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+fn draft_create_id(idempotency_key: &str) -> String {
+    let sanitized: String = idempotency_key
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    format!("phdraft-{sanitized}-email")
+}
+
 /// Persist a draft to the Drafts mailbox via `Email/set` create, returning the
 /// created provider Email id.
 ///
@@ -21,6 +39,7 @@ pub(crate) async fn save_draft(
     request_data: &SendMessageRequest,
     replace: Option<&MessageId>,
     idempotent_redelivery: bool,
+    idempotency_key: &str,
 ) -> Result<MessageId, GatewayError> {
     // A draft create carries no `identityId`, only the `from` address, so resolve
     // the sender tolerantly: a provider with an empty `Identity/get` must not
@@ -32,10 +51,15 @@ pub(crate) async fn save_draft(
     let html_body = render_markdown(&request_data.body);
     let uploaded_attachments = upload_send_attachments(gateway, &request_data.attachments).await?;
 
+    // A deterministic create-id derived from the outbox op id makes a
+    // lost-response retry idempotent server-side (DS2): re-issuing the create
+    // under the same id no-ops rather than orphaning a twin draft.
+    let email_create_id = draft_create_id(idempotency_key);
+
     let mut request = gateway.client().build();
     let email_set = request.set_email();
     {
-        let email_obj = email_set.create();
+        let email_obj = email_set.create_with_id(email_create_id.as_str());
         email_obj.mailbox_ids([drafts_mailbox_id.as_str()]);
         email_obj.keyword("$draft", true);
         // Your own draft is not "unread" to you (IMAP/JMAP convention: drafts
@@ -104,7 +128,7 @@ pub(crate) async fn save_draft(
             .unwrap_set_email()
             .map_err(map_gateway_error)?;
     let created = email_set_response
-        .created("c0")
+        .created(email_create_id.as_str())
         .map_err(map_gateway_error)?;
     let new_id = created
         .id()
