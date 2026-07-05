@@ -416,7 +416,42 @@ impl<W: Wire> NearEnd<W> {
             let mut permanent = false;
             // An immediate (no-backoff) resubscribe to bridge a detected seq gap.
             let mut resubscribe = false;
-            while let Some(event) = stream.next().await {
+            // The read-liveness watchdog (W1). A live link produces *bytes* — a
+            // frame OR a 15s keep-alive (an empty `Message`) — well within
+            // `stream_liveness_deadline`. A silently-dead socket (laptop
+            // sleep/wake, NAT/Wi-Fi rebind, a proxy that dropped the connection
+            // with no RST) yields no `Error`: `stream.next()` would block here
+            // forever, freezing the whole client until reload — the failure the
+            // observed-error recovery (M40/M44) can never see. So race every read
+            // against a fresh deadline; ANY arriving event (keep-alive included —
+            // proof of life, not merely skipped) re-arms it on the next
+            // iteration. On expiry, drop the dead stream into the SAME re-prepare
+            // + M44 recovery-edge machinery a stale-link 404 uses — silence now
+            // self-heals like an observed transient death, never a permanent stop.
+            loop {
+                let deadline = self.scheduler.sleep(self.config.stream_liveness_deadline);
+                // `select` is future1-biased: a ready frame/keep-alive always
+                // wins over the deadline, so a busy or idle-but-alive stream
+                // never trips it — only genuine silence past the window does.
+                let event = match select(stream.next(), deadline).await {
+                    Either::Left((Some(event), _)) => event,
+                    // Stream ended (host closed the reader / EOF) — reconnect,
+                    // exactly as the prior `while let Some` did on `None`.
+                    Either::Left((None, _)) => break,
+                    Either::Right(((), _)) => {
+                        // Deadline won: total silence past the liveness window =
+                        // a silently-dead link. Re-prepare a fresh link (clears
+                        // the dead cursor + arms the M44 recovery edge) exactly as
+                        // the 404 `RePrepare` branch does, and surface it as
+                        // transient — a silent death is never a permanent refusal.
+                        self.clear_prepared();
+                        self.sink.on_status(ConnectionStatus::TransientError(
+                            "stream liveness deadline exceeded (no frame or keep-alive); re-preparing"
+                                .to_string(),
+                        ));
+                        break;
+                    }
+                };
                 match event {
                     StreamEvent::Open => {
                         self.state.borrow_mut().reconnect_attempt = 0;
