@@ -10,6 +10,7 @@ import { useEffect, type ReactNode } from 'react'
 import { Toaster } from 'sonner'
 
 import { MailClient } from './app/MailClient'
+import { Z } from './layering'
 import { queryClient } from './app/queryClient'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { FocusedSurfaceDocument } from './components/FocusedSurface'
@@ -106,6 +107,9 @@ export default function App() {
           </ErrorBoundary>
           <Toaster
             position="bottom-center"
+            // TOAST tier: above windows/overlay/modals, below tooltips. Overrides
+            // sonner's very-high default so it sits inside the app's scale.
+            style={{ zIndex: Z.TOAST }}
             toastOptions={{ className: 'font-sans text-sm' }}
           />
         </ActiveConnectionProvider>

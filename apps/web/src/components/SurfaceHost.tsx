@@ -60,7 +60,7 @@ export function SurfaceHost({
   if (surface.kind === 'settings' || surface.kind === 'compose') {
     return (
       <div
-        className="fixed inset-0 z-[2100] bg-background text-foreground"
+        className="fixed inset-0 z-(--z-surface) bg-background text-foreground"
         data-posthaste-state={`state.surface.${surface.kind}.ready.test`}
         data-posthaste-surface-kind={surface.kind}
       >
@@ -90,7 +90,7 @@ export function SurfaceHost({
 
   return (
     <div
-      className="fixed inset-0 z-[2200] flex min-h-0 flex-col bg-background text-foreground"
+      className="fixed inset-0 z-(--z-surface) flex min-h-0 flex-col bg-background text-foreground"
       data-posthaste-state={`state.surface.${surface.kind}.ready.test`}
       data-posthaste-surface-kind={surface.kind}
     >

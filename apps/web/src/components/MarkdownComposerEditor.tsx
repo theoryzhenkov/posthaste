@@ -174,7 +174,7 @@ export const MarkdownComposerEditor = forwardRef<
       <div ref={containerRef} className="h-full min-h-[220px]" />
       {contextMenu && (
         <div
-          className="fixed z-[120] flex overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          className="fixed z-(--z-popover) flex overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {FORMAT_COMMANDS.map((command) => (
