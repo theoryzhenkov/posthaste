@@ -208,8 +208,7 @@ pub(crate) async fn fetch_mailbox_condstore_delta_snapshot_with_client(
 async fn enable_qresync(client: &mut ImapClient) -> Result<bool, ImapAdapterError> {
     let capability = CapabilityEnable::try_from("QRESYNC")
         .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
-    let enabled = crate::timeout::with_deadline("enable", client.enable([capability]))
-        .await?;
+    let enabled = crate::timeout::with_deadline("enable", client.enable([capability])).await?;
 
     Ok(enabled
         .unwrap_or_default()

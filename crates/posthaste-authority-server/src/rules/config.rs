@@ -357,7 +357,12 @@ tag = "managed"
         let rules = load_rules(dir.path()).expect("load");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].name, "authored-wins");
-        assert_eq!(rules[0].action, RuleAction::Tag { tag: "authored".into() });
+        assert_eq!(
+            rules[0].action,
+            RuleAction::Tag {
+                tag: "authored".into()
+            }
+        );
     }
 
     /// A hand-dropped exec action in `rules.d` is skipped (never runs from the

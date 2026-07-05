@@ -20,7 +20,9 @@ use axum::Router;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
+use posthaste_authority_server::AccountSupervisor;
 use posthaste_config::TomlConfigRepository;
+use posthaste_contract_core::{RuntimeAccountList, RuntimeCaller, RuntimeStatus};
 use posthaste_domain_model::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings, MailboxId,
     MailboxRecord, MessageId, MessageRecord, Recipient, SecretRef, SecretStoreError, SyncBatch,
@@ -29,11 +31,11 @@ use posthaste_domain_model::{
 use posthaste_domain_service::{
     ConfigRepository, MailService, MailStore, SecretStore, SourceProjectionStore, SyncWriteStore,
 };
-use posthaste_contract_core::{RuntimeAccountList, RuntimeCaller, RuntimeStatus};
-use posthaste_runtime_api::{RuntimeAccountApi, RuntimeSettingsApi};
-use posthaste_authority_server::AccountSupervisor;
-use posthaste_http_api_adapter::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
+use posthaste_http_api_adapter::token::{
+    attenuate, mint_full_scope_token, mint_with_caveats, RootKey,
+};
 use posthaste_http_api_adapter::{build_api_router, AppState};
+use posthaste_runtime_api::{RuntimeAccountApi, RuntimeSettingsApi};
 use posthaste_store::DatabaseStore;
 use posthaste_testkit::temp_root;
 use tokio::sync::broadcast;

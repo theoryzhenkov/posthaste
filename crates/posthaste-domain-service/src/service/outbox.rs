@@ -712,7 +712,10 @@ impl MailService {
                     // D126: a settled send consumes its originating draft — the
                     // destroy is enqueued as a follow-up op so it is retried
                     // with the outbox discipline, never silently dropped.
-                    if self.consume_draft_after_send(account_id, &operation)?.is_some() {
+                    if self
+                        .consume_draft_after_send(account_id, &operation)?
+                        .is_some()
+                    {
                         follow_up_enqueued = true;
                     }
                 }
@@ -765,11 +768,7 @@ impl MailService {
                         operation.attempts + 1,
                         Some(&message),
                     )?;
-                    events.push(self.emit_dispatch_uncertain(
-                        account_id,
-                        &operation,
-                        message,
-                    )?);
+                    events.push(self.emit_dispatch_uncertain(account_id, &operation, message)?);
                     // A send timeout signals a struggling link; stop draining so
                     // the rest retries on the next connectivity window.
                     return Ok(FlushPass {

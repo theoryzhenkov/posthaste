@@ -43,8 +43,14 @@ pub(crate) struct AuthorityServerFactLog {
 }
 
 impl AuthorityServerFactLog {
-    pub(crate) fn new(store: Arc<dyn MailStore>, event_sender: broadcast::Sender<DomainEvent>) -> Self {
-        Self { store, event_sender }
+    pub(crate) fn new(
+        store: Arc<dyn MailStore>,
+        event_sender: broadcast::Sender<DomainEvent>,
+    ) -> Self {
+        Self {
+            store,
+            event_sender,
+        }
     }
 }
 

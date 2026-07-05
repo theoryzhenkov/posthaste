@@ -132,9 +132,8 @@ fn send_server_answer_keeps_ordinary_classification() {
     // A structured server response means the server ANSWERED the send request:
     // the outcome is determined, not unknown, so it keeps its ordinary mapping
     // (here a permanent 4xx → Rejected) rather than being parked uncertain.
-    let classified = classify_send_dispatch_error(jmap_client::Error::Server(
-        "404 Not Found".to_string(),
-    ));
+    let classified =
+        classify_send_dispatch_error(jmap_client::Error::Server("404 Not Found".to_string()));
     assert!(
         matches!(classified, GatewayError::Rejected(_)),
         "a server answer is a known outcome, got {classified:?}"
@@ -142,9 +141,7 @@ fn send_server_answer_keeps_ordinary_classification() {
 
     // A non-transport error is likewise not a lost-response condition, so it
     // keeps its ordinary mapping rather than being parked uncertain.
-    let internal = classify_send_dispatch_error(jmap_client::Error::Internal(
-        "decode".to_string(),
-    ));
+    let internal = classify_send_dispatch_error(jmap_client::Error::Internal("decode".to_string()));
     assert!(
         matches!(internal, GatewayError::Network(_)),
         "a non-transport internal error keeps its ordinary mapping, got {internal:?}"

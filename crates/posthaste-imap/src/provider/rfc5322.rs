@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use posthaste_domain_model::MessageRecord;
 use posthaste_domain_model::MessageId;
+use posthaste_domain_model::MessageRecord;
 
 use crate::ImapMappedHeader;
 

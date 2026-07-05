@@ -71,7 +71,8 @@ pub(super) fn imap_gmail_label_sync_batch() -> SyncBatch {
         highest_modseq: Some(posthaste_domain_model::ImapModSeq(901)),
     };
     let inbox_header = imap_label_header(&inbox, posthaste_domain_model::ImapUid(101), &["\\Seen"]);
-    let archive_header = imap_label_header(&archive, posthaste_domain_model::ImapUid(202), &["\\Seen"]);
+    let archive_header =
+        imap_label_header(&archive, posthaste_domain_model::ImapUid(202), &["\\Seen"]);
     let inbox_snapshot = ImapMailboxHeaderSnapshot {
         selected: inbox,
         headers: vec![inbox_header.clone()],

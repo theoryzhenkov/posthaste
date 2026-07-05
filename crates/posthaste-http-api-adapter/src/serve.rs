@@ -17,9 +17,9 @@ use tracing::{field, info_span, Span};
 use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::ResolvedRoots;
-use posthaste_config::DaemonSettings;
 use crate::shutdown::{StoreClose, SupervisorStop};
 use crate::{auth, logging, observability, token, AppState, ServerConfig, ServerHandle};
+use posthaste_config::DaemonSettings;
 
 /// The shared node-assembly preamble (RFC D27): resolve roots, read daemon
 /// settings (`app.toml` + `POSTHASTE_*` env), init logging, and build the base

@@ -95,10 +95,7 @@ fn response_for(request: &Value) -> Message {
     let method_responses: Vec<Value> = calls
         .iter()
         .map(|call| {
-            let name = call
-                .get(0)
-                .and_then(Value::as_str)
-                .unwrap_or("Core/echo");
+            let name = call.get(0).and_then(Value::as_str).unwrap_or("Core/echo");
             let call_id = call.get(2).and_then(Value::as_str).unwrap_or("c0");
             let body = match name {
                 "Mailbox/get" => json!({

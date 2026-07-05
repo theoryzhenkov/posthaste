@@ -4,6 +4,7 @@ use std::time::Duration;
 use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use posthaste_authority_server::AccountSupervisor;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, MailboxId, MailboxRecord,
@@ -13,7 +14,6 @@ use posthaste_domain_service::{
     ConfigRepository, MailService, MailStore, SecretStore, SyncWriteStore,
 };
 use posthaste_http_api_adapter::api::{ApiError, ListSourceMessagesQuery};
-use posthaste_authority_server::AccountSupervisor;
 use posthaste_http_api_adapter::AppState;
 use posthaste_store::DatabaseStore;
 use posthaste_testkit::temp_root;
@@ -89,7 +89,9 @@ impl ApiHarness {
                 account_logo_root: state_root.join("account-assets/logos"),
                 config_root: state_root.to_path_buf(),
                 auth_token: "test-token".to_string(),
-                macaroon_root_key: posthaste_http_api_adapter::token::RootKey::from_test_bytes([0u8; 32]),
+                macaroon_root_key: posthaste_http_api_adapter::token::RootKey::from_test_bytes(
+                    [0u8; 32],
+                ),
                 require_auth: false,
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),

@@ -19,7 +19,9 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 
-use posthaste_wizard::{install_ctl, register, CtlInstallOptions, CtlSource, GithubSource, Version};
+use posthaste_wizard::{
+    install_ctl, register, CtlInstallOptions, CtlSource, GithubSource, Version,
+};
 use sha2::{Digest, Sha256};
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -86,7 +88,10 @@ fn serve_app_probe(expected_token: &str) -> (u16, thread::JoinHandle<()>) {
         let mut buf = [0u8; 4096];
         let n = stream.read(&mut buf).unwrap();
         let req = String::from_utf8_lossy(&buf[..n]);
-        assert!(req.contains(&expected), "probe must carry the discovery token: {req}");
+        assert!(
+            req.contains(&expected),
+            "probe must carry the discovery token: {req}"
+        );
         let body = b"{}";
         let resp = format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -221,8 +226,14 @@ fn register_table_finds_the_installed_binary_on_path_and_probes_the_running_app(
     assert!(report.all_ok());
 
     let table = report.format();
-    assert!(table.contains('\u{2713}'), "the table shows a pass mark:\n{table}");
-    assert!(!table.contains('\u{2717}'), "no failure marks expected:\n{table}");
+    assert!(
+        table.contains('\u{2713}'),
+        "the table shows a pass mark:\n{table}"
+    );
+    assert!(
+        !table.contains('\u{2717}'),
+        "no failure marks expected:\n{table}"
+    );
 }
 
 #[cfg(unix)]

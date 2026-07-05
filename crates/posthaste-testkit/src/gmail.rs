@@ -50,12 +50,14 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use posthaste_domain_model::{AccountDriver, AccountId, ImapTransportSettings, SmtpTransportSettings};
-use posthaste_domain_model::{ProviderAuthKind, ProviderHint, TransportSecurity};
 use posthaste_contract_core::{
     AccountTransportMutation, CreateAccountMutation, RuntimeCaller, SecretWriteMode,
     SecretWriteMutation,
 };
+use posthaste_domain_model::{
+    AccountDriver, AccountId, ImapTransportSettings, SmtpTransportSettings,
+};
+use posthaste_domain_model::{ProviderAuthKind, ProviderHint, TransportSecurity};
 use posthaste_runtime_api::RuntimeAccountApi;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -236,7 +238,10 @@ impl MailModel {
     /// flavor seeds `\Inbox` only.
     fn baseline(gmail: bool) -> Self {
         let labels: BTreeSet<String> = if gmail {
-            SEEDED_LABELS.iter().map(|label| label.to_string()).collect()
+            SEEDED_LABELS
+                .iter()
+                .map(|label| label.to_string())
+                .collect()
         } else {
             BTreeSet::from(["\\Inbox".to_string()])
         };
@@ -688,7 +693,11 @@ impl GmailImapFixture {
     /// selected mailbox at the time (`-` before any SELECT), e.g.
     /// `INBOX: a5 UID EXPUNGE 1`. The wire-assertion log for mutation tests.
     pub fn commands(&self) -> Vec<String> {
-        self.state.lock().expect("mail model mutex").commands.clone()
+        self.state
+            .lock()
+            .expect("mail model mutex")
+            .commands
+            .clone()
     }
 
     /// Whether the message with `uid` is currently a member of `mailbox` on
@@ -879,11 +888,9 @@ async fn handle_connection(
         let cmd = line.trim_end_matches(['\r', '\n']).to_string();
         {
             let mut model = state.lock().expect("mail model mutex");
-            model.commands.push(format!(
-                "{}: {}",
-                selected.as_deref().unwrap_or("-"),
-                cmd
-            ));
+            model
+                .commands
+                .push(format!("{}: {}", selected.as_deref().unwrap_or("-"), cmd));
         }
         let upper = cmd.to_ascii_uppercase();
         let mut parts = cmd.split_whitespace();
@@ -976,9 +983,7 @@ async fn handle_connection(
                         send(&mut writer, &format!("* SEARCH {hits}\r\n")).await
                             && send(&mut writer, &format!("{tag} OK SEARCH completed\r\n")).await
                     }
-                    "FETCH" => {
-                        send_fetch(&mut writer, &tag, &cmd, &mailbox, &state, flavor).await
-                    }
+                    "FETCH" => send_fetch(&mut writer, &tag, &cmd, &mailbox, &state, flavor).await,
                     "STORE" => {
                         let uids = uid_set_arg(&cmd, &state);
                         if upper.contains("\\DELETED") {
@@ -1032,8 +1037,11 @@ async fn handle_connection(
                 // here.
                 let mailbox = normalized_mailbox(mailbox_arg(&cmd));
                 let Some(size) = literal_size_arg(&cmd) else {
-                    let _ = send(&mut writer, &format!("{tag} BAD APPEND without a literal\r\n"))
-                        .await;
+                    let _ = send(
+                        &mut writer,
+                        &format!("{tag} BAD APPEND without a literal\r\n"),
+                    )
+                    .await;
                     continue;
                 };
                 // The caps never advertise LITERAL+, so the literal is always
@@ -1139,7 +1147,9 @@ async fn handle_smtp_connection(
                     break;
                 }
                 // Undo SMTP dot-stuffing (RFC 5321 §4.5.2).
-                let unstuffed = trimmed.strip_prefix('.').filter(|_| trimmed.starts_with(".."));
+                let unstuffed = trimmed
+                    .strip_prefix('.')
+                    .filter(|_| trimmed.starts_with(".."));
                 raw.extend_from_slice(unstuffed.unwrap_or(trimmed).as_bytes());
                 raw.extend_from_slice(b"\r\n");
             }
@@ -1208,11 +1218,7 @@ async fn send_fetch(
     if wants_vanished && !flavor.qresync() {
         // RFC 7162: the VANISHED fetch modifier requires QRESYNC to be
         // enabled; a CONDSTORE-only server rejects it.
-        return send(
-            writer,
-            &format!("{tag} BAD VANISHED requires QRESYNC\r\n"),
-        )
-        .await;
+        return send(writer, &format!("{tag} BAD VANISHED requires QRESYNC\r\n")).await;
     }
     let wants_header = upper_cmd.contains("RFC822.HEADER");
     let requested = uid_set_arg(cmd, state);

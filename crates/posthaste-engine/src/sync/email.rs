@@ -335,9 +335,7 @@ const FULL_SNAPSHOT_EMAIL_QUERY_PAGE_SIZE: usize = 5000;
 ///     `position` and cannot be paged (INCOMPLETE — refuse to prune).
 ///
 /// When `total` is known it is authoritative: `complete` is `ids.len() >= total`.
-async fn fetch_all_remote_email_ids(
-    client: &Client,
-) -> Result<(Vec<String>, bool), GatewayError> {
+async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, bool), GatewayError> {
     let mut ids: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut position: i32 = 0;

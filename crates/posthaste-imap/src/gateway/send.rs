@@ -15,17 +15,19 @@ pub(crate) async fn send_message_via_smtp(
     // so it is classified dispatch-uncertain — parked, never blind-resent (D86;
     // O5: at-most-once-on-uncertainty is the accepted SMTP contract).
     let message_id = smtp_stable_message_id(idempotency_key, smtp_config);
-    let submitted =
-        match tokio::time::timeout(SEND_TOTAL, submit_smtp_message(smtp_config, request, Some(&message_id)))
-            .await
-        {
-            Ok(result) => result.map_err(imap_error_to_gateway)?,
-            Err(_elapsed) => {
-                return Err(GatewayError::DispatchUncertain(
-                    "SMTP send timed out; delivery uncertain".to_string(),
-                ))
-            }
-        };
+    let submitted = match tokio::time::timeout(
+        SEND_TOTAL,
+        submit_smtp_message(smtp_config, request, Some(&message_id)),
+    )
+    .await
+    {
+        Ok(result) => result.map_err(imap_error_to_gateway)?,
+        Err(_elapsed) => {
+            return Err(GatewayError::DispatchUncertain(
+                "SMTP send timed out; delivery uncertain".to_string(),
+            ))
+        }
+    };
 
     if smtp_sent_copy_strategy(&smtp_config.provider) == SmtpSentCopyStrategy::AppendToSentMailbox {
         if let Some(sent_mailbox) = gateway
@@ -36,9 +38,12 @@ pub(crate) async fn send_message_via_smtp(
         {
             let append_result = match gateway.sessions.acquire("append_sent_copy").await {
                 Ok(mut lease) => {
-                    let result =
-                        append_smtp_sent_copy(lease.client(), &sent_mailbox.name, &submitted.raw_message)
-                            .await;
+                    let result = append_smtp_sent_copy(
+                        lease.client(),
+                        &sent_mailbox.name,
+                        &submitted.raw_message,
+                    )
+                    .await;
                     lease.finish(result)
                 }
                 Err(error) => Err(error),

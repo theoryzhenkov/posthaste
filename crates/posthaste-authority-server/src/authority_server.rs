@@ -22,18 +22,26 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use posthaste_domain_model::{now_iso8601, AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck, ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, EventLogBounds, Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, RevLogSnapshot, SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger, TagSummary, EVENT_TOPIC_REV_LOG_APPENDED};
-use posthaste_domain_service::{MailService, MailStore, SharedGateway};
-use posthaste_replica_core::{MessageChangeDiff, MessageFoldState};
-use posthaste_observability::{events, ph_warn};
 use posthaste_contract_core::{
     AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
     MutationSettlementState, PatchAccountMutation, PatchAppSettingsMutation,
-    PatchSmartMailboxMutation, RevCursorArgs, RevStepInput, RuntimeAccountList,
-    RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
+    PatchSmartMailboxMutation, RevCursorArgs, RevStepInput, RuntimeAccountList, RuntimeError,
+    RuntimeErrorCode, RuntimeResourceBytes,
 };
+use posthaste_domain_model::{
+    now_iso8601, AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress,
+    CommandAck, ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter,
+    EventLogBounds, Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
+    Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
+    RevLogSnapshot, SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SmartMailbox,
+    SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger, TagSummary,
+    EVENT_TOPIC_REV_LOG_APPENDED,
+};
+use posthaste_domain_service::{MailService, MailStore, SharedGateway};
+use posthaste_observability::{events, ph_warn};
+use posthaste_replica_core::{MessageChangeDiff, MessageFoldState};
 use tokio::sync::broadcast;
 
 use crate::account_reads::AccountReadService;
@@ -105,7 +113,6 @@ mod pubsub;
 mod reads;
 
 pub(crate) use pubsub::spawn_settlement_bridge;
-
 
 /// Map a store-layer failure to an internal runtime error — the shape the
 /// runtime handle used before these reads moved to the far node.

@@ -17,8 +17,8 @@ pub use mail_query::*;
 use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, Appearance, AutomationRule,
     CachePolicy, ImapTransportSettings, MailboxColor, MessageAttachment, MessageSummary,
-    Notifications, ProviderAuthKind, ProviderHint, ServiceError, ServiceErrorKind,
-    SmartMailboxId, SmartMailboxRule, SmtpTransportSettings, TagAppearance, ValidationError,
+    Notifications, ProviderAuthKind, ProviderHint, ServiceError, ServiceErrorKind, SmartMailboxId,
+    SmartMailboxRule, SmtpTransportSettings, TagAppearance, ValidationError,
 };
 
 // Re-exported so the shared retryability vocabulary is reachable as

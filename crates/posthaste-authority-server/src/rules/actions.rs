@@ -5,7 +5,9 @@
 
 use std::time::Duration;
 
-use posthaste_domain_model::{DomainEvent, MessageSummary, Rule, RuleAction, RuleGrant, RuleOutcome};
+use posthaste_domain_model::{
+    DomainEvent, MessageSummary, Rule, RuleAction, RuleGrant, RuleOutcome,
+};
 use posthaste_observability::{events, ph_info};
 use posthaste_provider_call::{CallClass, HttpRequestSpec};
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
@@ -47,7 +49,8 @@ impl EngineContext {
         let token = match self.mint_token(summary, grants, expiry_seconds) {
             Ok(token) => token,
             Err(reason) => {
-                self.emit_delivery_failed(rule, event.seq, reason, 0, summary).await;
+                self.emit_delivery_failed(rule, event.seq, reason, 0, summary)
+                    .await;
                 return RuleOutcome::Failed;
             }
         };
@@ -69,7 +72,8 @@ impl EngineContext {
 
         match &rule.action {
             RuleAction::Webhook { url, .. } => {
-                self.deliver_webhook(rule, event, summary, url, &payload).await
+                self.deliver_webhook(rule, event, summary, url, &payload)
+                    .await
             }
             RuleAction::Exec { command, .. } => {
                 self.deliver_exec(rule, event, summary, command, &token, &key, &payload)
@@ -290,10 +294,7 @@ fn exec_env_vars(
         ("PH_ACCOUNT", summary.source_id.to_string()),
         ("PH_MESSAGE_ID", summary.id.to_string()),
         ("PH_FROM", from),
-        (
-            "PH_SUBJECT",
-            summary.subject.clone().unwrap_or_default(),
-        ),
+        ("PH_SUBJECT", summary.subject.clone().unwrap_or_default()),
         ("PH_KEYWORDS", summary.keywords.join(",")),
         ("PH_EVENT_SEQ", event.seq.to_string()),
         ("PH_TOPIC", event.topic.clone()),

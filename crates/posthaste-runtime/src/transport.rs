@@ -14,18 +14,18 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
 
-use posthaste_domain_model::{
-    AccountId, CommandAck, ConversationId, ConversationView, MessageDetail, MessageId,
-    MessageSummary,
-};
 use posthaste_authority_server_link::{
     AuthorityServerApi, AuthorityServerLink, DownStream, LinkCoverage, MailCommandRequest,
-    SequencedFrame, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_QUERY_PATH,
-    LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
+    SequencedFrame, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH,
+    LINK_SUMMARY_PATH,
 };
 use posthaste_contract_core::{
     MailOperation, MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
     RuntimeAdapterError, RuntimeError, RuntimeErrorCode, Terminality,
+};
+use posthaste_domain_model::{
+    AccountId, CommandAck, ConversationId, ConversationView, MessageDetail, MessageId,
+    MessageSummary,
 };
 use tokio::sync::mpsc;
 
@@ -365,8 +365,8 @@ mod tests {
     use posthaste_authority_server_link::{
         AuthorityServerFrame, BaseAssertion, BaseUpdate, LINK_FORWARD_MUTATION_PATH,
     };
-    use posthaste_replica_core::MessageFoldState;
     use posthaste_contract_core::{MutationSettlementState, RuntimeMutationId};
+    use posthaste_replica_core::MessageFoldState;
     use serde_json::json;
 
     fn fold(keywords: &[&str], mailboxes: &[&str]) -> MessageFoldState {

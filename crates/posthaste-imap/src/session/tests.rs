@@ -46,7 +46,9 @@ impl MockImap {
     }
 
     async fn spawn_with(stall_in_idle: bool) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock imap");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock imap");
         let addr = listener.local_addr().expect("mock imap addr");
         let observed = Arc::new(MockObservations::default());
         let idle_seen = Arc::new(tokio::sync::Notify::new());
@@ -96,7 +98,11 @@ impl MockImap {
     }
 
     fn auth_secrets(&self) -> Vec<String> {
-        self.observed.auth_secrets.lock().expect("auth secrets").clone()
+        self.observed
+            .auth_secrets
+            .lock()
+            .expect("auth secrets")
+            .clone()
     }
 
     /// Server-side kill switch: every live connection closes at its next
@@ -303,10 +309,16 @@ async fn multiple_operations_reuse_a_single_authenticated_session() {
     let manager = manager_for(&server, resolver);
 
     for _ in 0..5 {
-        run_examine_op(&manager).await.expect("operation on shared session");
+        run_examine_op(&manager)
+            .await
+            .expect("operation on shared session");
     }
 
-    assert_eq!(manager.connect_count(), 1, "one connect for five operations");
+    assert_eq!(
+        manager.connect_count(),
+        1,
+        "one connect for five operations"
+    );
     assert_eq!(server.connections(), 1, "server saw a single connection");
     assert_eq!(server.auth_secrets().len(), 1, "authenticated exactly once");
 }
@@ -353,9 +365,13 @@ async fn token_rotation_keeps_the_live_session_and_reauths_on_reconnect() {
     let resolver = RotatingResolver::new("token-old");
     let manager = manager_for(&server, Arc::clone(&resolver));
 
-    run_examine_op(&manager).await.expect("operation before rotation");
+    run_examine_op(&manager)
+        .await
+        .expect("operation before rotation");
     resolver.rotate_to("token-new");
-    run_examine_op(&manager).await.expect("operation after rotation");
+    run_examine_op(&manager)
+        .await
+        .expect("operation after rotation");
 
     assert_eq!(
         manager.connect_count(),
@@ -369,7 +385,9 @@ async fn token_rotation_keeps_the_live_session_and_reauths_on_reconnect() {
     server.kill_connections();
     let _ = run_examine_op(&manager).await;
     server.revive();
-    run_examine_op(&manager).await.expect("reconnect after rotation");
+    run_examine_op(&manager)
+        .await
+        .expect("reconnect after rotation");
 
     assert_eq!(
         server.auth_secrets(),

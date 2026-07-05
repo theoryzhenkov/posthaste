@@ -1,5 +1,7 @@
 use mail_parser::{Address, MessageParser};
-use posthaste_domain_model::{ImapMessageLocation, Recipient, ReplyContext, format_forwarded_body, recipients_to_header};
+use posthaste_domain_model::{
+    format_forwarded_body, recipients_to_header, ImapMessageLocation, Recipient, ReplyContext,
+};
 
 use imap_client::client::tokio::Client as ImapClient;
 

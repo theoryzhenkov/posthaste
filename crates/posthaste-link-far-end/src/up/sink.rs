@@ -94,7 +94,9 @@ where
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<LinkId, Sink<Frame>>> {
-        self.sinks.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.sinks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Route `frame` onto `link`'s sink, creating it lazily. The send only fails
@@ -206,7 +208,10 @@ mod tests {
         let mut rx_a = store.subscribe(&"a", 0);
         let mut rx_b = store.subscribe(&"b", 0);
         assert_eq!(rx_a.try_recv().ok(), Some(1), "a receives its settlement");
-        assert!(rx_b.try_recv().is_err(), "b must not receive a's settlement");
+        assert!(
+            rx_b.try_recv().is_err(),
+            "b must not receive a's settlement"
+        );
     }
 
     #[test]
@@ -232,9 +237,21 @@ mod tests {
         let store: SettlementSinkStore<&str, u32> = SettlementSinkStore::with_ttl(10);
         let rx = store.subscribe(&"a", 0);
         drop(rx); // subscriber vanished
-        assert_eq!(store.reap(5).len(), 0, "first observation starts the countdown");
-        assert_eq!(store.reap(12).len(), 0, "still within ttl (12 - 5 = 7 <= 10)");
-        assert_eq!(store.reap(20), vec!["a"], "20 - 5 = 15 > 10 → reaped, id reported");
+        assert_eq!(
+            store.reap(5).len(),
+            0,
+            "first observation starts the countdown"
+        );
+        assert_eq!(
+            store.reap(12).len(),
+            0,
+            "still within ttl (12 - 5 = 7 <= 10)"
+        );
+        assert_eq!(
+            store.reap(20),
+            vec!["a"],
+            "20 - 5 = 15 > 10 → reaped, id reported"
+        );
         assert!(store.is_empty());
     }
 
@@ -245,7 +262,11 @@ mod tests {
         drop(rx);
         store.reap(5); // countdown starts
         let _rx2 = store.subscribe(&"a", 8); // reconnect clears dead_since
-        assert_eq!(store.reap(100).len(), 0, "a live subscriber is never reaped");
+        assert_eq!(
+            store.reap(100).len(),
+            0,
+            "a live subscriber is never reaped"
+        );
         assert_eq!(store.len(), 1);
     }
 
@@ -259,7 +280,11 @@ mod tests {
         assert_eq!(store.reap(5).len(), 0, "within ttl (5 - 0 <= 10)");
         store.emit(&"a", 2, 8); // fresh activity refreshes the age
         assert_eq!(store.reap(15).len(), 0, "15 - 8 = 7 <= 10 → spared");
-        assert_eq!(store.reap(20), vec!["a"], "20 - 8 = 12 > 10 → reaped on age");
+        assert_eq!(
+            store.reap(20),
+            vec!["a"],
+            "20 - 8 = 12 > 10 → reaped on age"
+        );
         assert!(store.is_empty());
     }
 }

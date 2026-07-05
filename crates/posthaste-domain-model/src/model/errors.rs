@@ -335,8 +335,9 @@ impl ServiceError {
             ServiceErrorKind::SecretUnavailable | ServiceErrorKind::SecretUnsupported => {
                 UserFacingError {
                     category: AccountErrorCategory::Auth,
-                    message: "This account's saved credentials are unavailable — reconnect your account."
-                        .to_string(),
+                    message:
+                        "This account's saved credentials are unavailable — reconnect your account."
+                            .to_string(),
                     code: kind.code(),
                 }
             }
@@ -356,8 +357,9 @@ impl ServiceError {
             | ServiceErrorKind::ConfigValidation
             | ServiceErrorKind::ConfigParse => UserFacingError {
                 category: AccountErrorCategory::Config,
-                message: "The mail server settings look wrong — check this account's configuration."
-                    .to_string(),
+                message:
+                    "The mail server settings look wrong — check this account's configuration."
+                        .to_string(),
                 code: kind.code(),
             },
             ServiceErrorKind::NotFound
@@ -406,10 +408,7 @@ mod user_facing_tests {
     #[test]
     fn gateway_unavailable_is_network() {
         let error = ServiceError::Gateway(GatewayError::Unavailable("acct-1".to_string()));
-        assert_eq!(
-            error.user_facing().category,
-            AccountErrorCategory::Network
-        );
+        assert_eq!(error.user_facing().category, AccountErrorCategory::Network);
     }
 
     #[test]

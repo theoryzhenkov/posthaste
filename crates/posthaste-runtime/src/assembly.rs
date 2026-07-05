@@ -7,20 +7,20 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
 
+use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_domain_model::DomainEvent;
 use posthaste_domain_service::SecretStore;
-use posthaste_authority_server_link::AuthorityServerLinkHandle;
 use tokio::sync::broadcast;
 
+use crate::far_end::links::LinkRegistry;
+use crate::far_end::view_registry::ViewRegistry;
 use crate::handle::{RuntimeCoreState, RuntimeHandle};
 use crate::near_node::AuthorityServerPendingSet;
 use crate::read::ReadCache;
 use crate::secret::SystemSecretStore;
-use crate::far_end::links::LinkRegistry;
 use crate::shutdown::RuntimeShutdownHandle;
 use crate::transport::RemoteAuthorityServer;
-use crate::far_end::view_registry::ViewRegistry;
 
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
 
@@ -101,7 +101,10 @@ impl RuntimeBuildConfig {
     }
 
     /// Select the runtime↔authority-server link transport (default in-process).
-    pub fn with_authority_server_transport(mut self, authority_server_transport: AuthorityServerTransportConfig) -> Self {
+    pub fn with_authority_server_transport(
+        mut self,
+        authority_server_transport: AuthorityServerTransportConfig,
+    ) -> Self {
         self.authority_server_transport = authority_server_transport;
         self
     }
@@ -249,8 +252,9 @@ pub struct RuntimeAssembly {
     /// spawned over it (and pending-set retirement becomes absorption-gated).
     /// In-process the runtime shares the authority server's bus, so no bridge
     /// is needed — pass `None`.
-    pub down_channel:
-        Option<tokio::sync::mpsc::UnboundedReceiver<posthaste_authority_server_link::SequencedFrame>>,
+    pub down_channel: Option<
+        tokio::sync::mpsc::UnboundedReceiver<posthaste_authority_server_link::SequencedFrame>,
+    >,
 }
 
 /// The handle + shutdown produced by [`assemble_runtime`].

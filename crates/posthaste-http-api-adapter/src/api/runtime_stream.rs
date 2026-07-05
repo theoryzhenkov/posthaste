@@ -1,7 +1,7 @@
 use super::*;
 use posthaste_contract_core::{
-    MutationReceipt, MutationRequest, RuntimeError, RuntimeFrame, RuntimeMutationSettlement,
-    RuntimeLinkConnection, RuntimeLinkId, RuntimeLinkSeq, ViewDescriptor, ViewId, ViewSnapshot,
+    MutationReceipt, MutationRequest, RuntimeError, RuntimeFrame, RuntimeLinkConnection,
+    RuntimeLinkId, RuntimeLinkSeq, RuntimeMutationSettlement, ViewDescriptor, ViewId, ViewSnapshot,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -44,15 +44,13 @@ pub struct ExtendRuntimeLinkViewRequest {
     pub count: usize,
 }
 
-pub(crate) mod mutations;
 pub(crate) mod links;
+pub(crate) mod mutations;
 pub(crate) mod views;
 
-pub use mutations::{run_runtime_link_mutation, runtime_link_mutation_settlement};
 pub use links::{close_runtime_link, open_runtime_link, stream_runtime_link};
-pub use views::{
-    close_runtime_link_view, extend_runtime_link_view, open_runtime_link_view,
-};
+pub use mutations::{run_runtime_link_mutation, runtime_link_mutation_settlement};
+pub use views::{close_runtime_link_view, extend_runtime_link_view, open_runtime_link_view};
 
 fn runtime_caller(source_id: Option<&str>) -> RuntimeCaller {
     let mut caller = RuntimeCaller::api();

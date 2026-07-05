@@ -296,7 +296,13 @@ mod tests {
         }
 
         async fn highest_seq(&self) -> Result<u64, FactLogError> {
-            Ok(self.facts.lock().unwrap().last().map(|f| f.seq()).unwrap_or(0))
+            Ok(self
+                .facts
+                .lock()
+                .unwrap()
+                .last()
+                .map(|f| f.seq())
+                .unwrap_or(0))
         }
 
         async fn truncation_point(&self) -> Result<u64, FactLogError> {
@@ -323,7 +329,10 @@ mod tests {
         match tap.subscribe(&"s", Some(1), None, 0).await.unwrap() {
             TapResume::Replay(frames) => {
                 assert_eq!(
-                    frames.iter().map(|f| *f.frame().unwrap()).collect::<Vec<_>>(),
+                    frames
+                        .iter()
+                        .map(|f| *f.frame().unwrap())
+                        .collect::<Vec<_>>(),
                     vec!['b', 'c']
                 );
             }
@@ -359,7 +368,10 @@ mod tests {
         // The gap frame on the wire is the reinterpreted Reset carrying the head.
         let frames = resume.into_frames();
         assert_eq!(frames, vec![Sequenced::gap(5)]);
-        assert!(frames[0].is_reset(), "gap rides the Reset wire element (§3)");
+        assert!(
+            frames[0].is_reset(),
+            "gap rides the Reset wire element (§3)"
+        );
     }
 
     // The boundary: a cursor exactly at the truncation point is still
@@ -372,7 +384,10 @@ mod tests {
         // Cursor at 2 wants 3, which is retained → replay, no gap.
         match tap.subscribe(&"s", Some(2), None, 0).await.unwrap() {
             TapResume::Replay(frames) => {
-                assert_eq!(frames.iter().map(|f| f.seq()).collect::<Vec<_>>(), vec![3, 4]);
+                assert_eq!(
+                    frames.iter().map(|f| f.seq()).collect::<Vec<_>>(),
+                    vec![3, 4]
+                );
             }
             other => panic!("boundary must replay, got {other:?}"),
         }

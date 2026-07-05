@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
-use posthaste_domain_model::{ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxRecord, SyncBatch, SyncCursor, SyncObject};
 use posthaste_domain_model::{AccountId, MailboxId};
+use posthaste_domain_model::{
+    ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxRecord, SyncBatch,
+    SyncCursor, SyncObject,
+};
 
 use crate::{
     DiscoveredImapAccount, ImapChangedSinceSnapshot, ImapMailboxHeaderSnapshot, ImapMappedHeader,
@@ -216,17 +219,15 @@ pub fn imap_condstore_delta_sync_batch(
         .cloned()
         .chain(absence_keys.iter().cloned())
         .collect::<Vec<_>>();
-    let fully_gone = deleted_message_ids_for_deleted_locations(
-        &local_locations,
-        &union_keys,
-        &locations,
-    );
-    let (deleted_message_ids, absence_deleted_message_ids) = partition_deleted_message_ids_by_origin(
-        &local_locations,
-        &fully_gone,
-        &authoritative_key_set,
-        &absence_key_set,
-    );
+    let fully_gone =
+        deleted_message_ids_for_deleted_locations(&local_locations, &union_keys, &locations);
+    let (deleted_message_ids, absence_deleted_message_ids) =
+        partition_deleted_message_ids_by_origin(
+            &local_locations,
+            &fully_gone,
+            &authoritative_key_set,
+            &absence_key_set,
+        );
 
     preserve_delta_mailboxes_from_locations(
         &mut messages,

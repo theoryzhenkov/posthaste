@@ -478,10 +478,19 @@ mod tests {
 
     #[test]
     fn unit_names_are_role_scoped() {
-        assert_eq!(unit_name(Role::Daemon), "posthaste-authority-runtime-server.service");
-        assert_eq!(unit_name(Role::AuthorityServer), "posthaste-authority-server.service");
+        assert_eq!(
+            unit_name(Role::Daemon),
+            "posthaste-authority-runtime-server.service"
+        );
+        assert_eq!(
+            unit_name(Role::AuthorityServer),
+            "posthaste-authority-server.service"
+        );
         assert_eq!(unit_name(Role::Runtime), "posthaste-runtime.service");
-        assert_eq!(plist_name(Role::AuthorityServer), "com.posthaste.authority-server.plist");
+        assert_eq!(
+            plist_name(Role::AuthorityServer),
+            "com.posthaste.authority-server.plist"
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -588,7 +597,8 @@ mod tests {
             systemd_unit_path: None,
             client_profile_json: String::new(),
         };
-        let join = emit_join(&authority_server, &provisioned).expect("authority_server emits a join string");
+        let join = emit_join(&authority_server, &provisioned)
+            .expect("authority_server emits a join string");
 
         let mut runtime = base_plan(Role::Runtime, dir.path());
         let ca = apply_join(&mut runtime, &join).unwrap();

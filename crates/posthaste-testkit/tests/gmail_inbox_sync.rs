@@ -15,11 +15,11 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_domain_model::AccountId;
 use posthaste_client_link::RuntimeLink;
 use posthaste_contract_core::{
     AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot,
 };
+use posthaste_domain_model::AccountId;
 use posthaste_runtime_api::RuntimeMailReadApi;
 use posthaste_testkit::{GmailImapFixture, Harness, RuntimeHarness, SEEDED_SUBJECT};
 

@@ -101,7 +101,9 @@ pub fn bootstrap_capability(full_scope: &str) -> Option<String> {
 /// enabled: never persist an unused credential.
 pub fn write_discovery_file(addr: SocketAddr, full_scope_token: &str) -> Option<PathBuf> {
     let Some(token) = bootstrap_capability(full_scope_token) else {
-        tracing::error!("failed to attenuate the discovery bootstrap token; daemon.json not written");
+        tracing::error!(
+            "failed to attenuate the discovery bootstrap token; daemon.json not written"
+        );
         return None;
     };
     let roots = resolve_roots();
@@ -145,7 +147,12 @@ fn current_app_dir() -> Option<PathBuf> {
 /// Pure builder for the discovery file's JSON body — split out from
 /// [`write_discovery_file`] so the shape (including the optional `appDir`) is
 /// unit-testable without touching the filesystem or state-root env vars.
-fn discovery_body(port: u16, url: &str, token: &str, app_dir: Option<PathBuf>) -> serde_json::Value {
+fn discovery_body(
+    port: u16,
+    url: &str,
+    token: &str,
+    app_dir: Option<PathBuf>,
+) -> serde_json::Value {
     let mut body = serde_json::json!({
         "version": DISCOVERY_FILE_VERSION,
         "port": port,
@@ -197,7 +204,12 @@ mod tests {
     /// case for a real running process), the written body carries it.
     #[test]
     fn discovery_body_includes_app_dir_when_present() {
-        let body = discovery_body(4321, "http://127.0.0.1:4321/v1", "macaroon-abc", Some(PathBuf::from("/opt/posthaste")));
+        let body = discovery_body(
+            4321,
+            "http://127.0.0.1:4321/v1",
+            "macaroon-abc",
+            Some(PathBuf::from("/opt/posthaste")),
+        );
         assert_eq!(body["appDir"], "/opt/posthaste");
         assert_eq!(body["version"], 1);
         assert_eq!(body["port"], 4321);
@@ -209,7 +221,10 @@ mod tests {
     #[test]
     fn discovery_body_omits_app_dir_when_absent() {
         let body = discovery_body(4321, "http://127.0.0.1:4321/v1", "macaroon-abc", None);
-        assert!(body.get("appDir").is_none(), "appDir must be absent, not null, when unresolved: {body}");
+        assert!(
+            body.get("appDir").is_none(),
+            "appDir must be absent, not null, when unresolved: {body}"
+        );
     }
 
     /// Serde tolerance, direction 1: an OLD reader (a struct predating
@@ -225,7 +240,12 @@ mod tests {
             url: String,
             token: String,
         }
-        let body = discovery_body(4321, "http://127.0.0.1:4321/v1", "macaroon-abc", Some(PathBuf::from("/opt/posthaste")));
+        let body = discovery_body(
+            4321,
+            "http://127.0.0.1:4321/v1",
+            "macaroon-abc",
+            Some(PathBuf::from("/opt/posthaste")),
+        );
         let parsed: OldDiscoveryFile =
             serde_json::from_value(body).expect("an old reader ignores the unknown appDir field");
         assert_eq!(parsed.version, 1);
@@ -255,8 +275,8 @@ mod tests {
             "url": "http://127.0.0.1:4321/v1",
             "token": "macaroon-abc",
         });
-        let parsed: NewDiscoveryFile =
-            serde_json::from_value(old_format_json).expect("an old-format file (no appDir) must still parse");
+        let parsed: NewDiscoveryFile = serde_json::from_value(old_format_json)
+            .expect("an old-format file (no appDir) must still parse");
         assert_eq!(parsed.app_dir, None);
         assert_eq!(parsed.version, 1);
     }

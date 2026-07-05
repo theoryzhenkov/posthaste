@@ -75,7 +75,9 @@ impl SecretStore for SystemSecretStore {
     ) -> Result<SecretCasOutcome, SecretStoreError> {
         // Serialize the read-compare-write against other in-process CAS callers;
         // the keyring/env backing has no native atomic CAS (see `CAS_GUARD`).
-        let _guard = CAS_GUARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = CAS_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let current = self.resolve(secret_ref)?;
         if current != expected_current {
             return Ok(SecretCasOutcome::Mismatch { current });

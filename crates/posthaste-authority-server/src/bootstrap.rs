@@ -2,7 +2,10 @@ use std::fs;
 use std::path::Path;
 
 use posthaste_config::{default_smart_mailboxes, validate_safe_config_id, TomlConfigRepository};
-use posthaste_domain_model::{now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings, AccountTransportSettings, AppSettings, SecretRef};
+use posthaste_domain_model::{
+    now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings, AccountTransportSettings,
+    AppSettings, SecretRef,
+};
 use posthaste_domain_service::{validate_snapshot, ConfigRepository, ConfigSnapshot};
 use posthaste_runtime::RuntimeBuildError;
 use serde::Deserialize;

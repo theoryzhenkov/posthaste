@@ -11,19 +11,20 @@
 
 mod apply_ledger;
 mod assembly;
+mod far_end;
 mod handle;
 mod link_near_end;
 mod near_node;
 mod read;
 mod secret;
-mod far_end;
 mod shutdown;
 mod transport;
 mod views;
 
 pub use assembly::{
-    assemble_runtime, build_remote_runtime, AuthorityServerTransportConfig, AuthorityServerTransportDecorator,
-    ComposedRuntime, RemoteRuntimeBuild, RuntimeAssembly, RuntimeBuildConfig,
+    assemble_runtime, build_remote_runtime, AuthorityServerTransportConfig,
+    AuthorityServerTransportDecorator, ComposedRuntime, RemoteRuntimeBuild, RuntimeAssembly,
+    RuntimeBuildConfig,
 };
 pub use handle::RuntimeHandle;
 pub use read::ReadCache;

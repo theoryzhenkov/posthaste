@@ -80,9 +80,7 @@ fn guard_unsettled(
             // Server truth with the un-acked local mutation re-layered on top;
             // `None` means it folded to removed (pending Destroy) — leave it out
             // so the snapshot upsert cannot resurrect it.
-            if let Some(record) =
-                super::message_queries::project_record(message, unsettled_ops)?
-            {
+            if let Some(record) = super::message_queries::project_record(message, unsettled_ops)? {
                 folded.push(record);
             }
         } else {
@@ -398,7 +396,11 @@ impl MailService {
         let owned_unsettled = unsettled.clone();
         events.extend(
             offload(move || {
-                sync_writer.apply_sync_batch_protected(&owned_account_id, &owned_batch, &owned_unsettled)
+                sync_writer.apply_sync_batch_protected(
+                    &owned_account_id,
+                    &owned_batch,
+                    &owned_unsettled,
+                )
             })
             .await?,
         );
@@ -457,7 +459,11 @@ mod guard_tests {
         }
     }
 
-    fn batch(messages: Vec<MessageRecord>, deletes: &[&str], replace_all_messages: bool) -> SyncBatch {
+    fn batch(
+        messages: Vec<MessageRecord>,
+        deletes: &[&str],
+        replace_all_messages: bool,
+    ) -> SyncBatch {
         SyncBatch {
             mailboxes: Vec::new(),
             messages,

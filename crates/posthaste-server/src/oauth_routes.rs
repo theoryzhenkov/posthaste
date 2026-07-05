@@ -13,21 +13,21 @@ use axum::middleware;
 use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use posthaste_domain_model::{AccountConnectionOverview, AccountId, ServiceError};
 use posthaste_contract_core::{RuntimeCaller, RuntimeError};
+use posthaste_domain_model::{AccountConnectionOverview, AccountId, ServiceError};
 use posthaste_runtime_api::RuntimeAccountApi;
 
 use axum::http::StatusCode;
-use posthaste_http_api_adapter::api::{
-    ApiError, ApiErrorBody, ApiErrorCode, OAuthCallbackQuery, StartOAuthRequest,
-    StartOAuthResponse, StartProviderOAuthRequest,
-};
-use posthaste_http_api_adapter::AppState;
 use posthaste_authority_server::oauth::{
     OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthFlowCompletion, OAuthFlowStore,
     OAuthProviderProfile, OAuthTokenService, OAuthTokenSet, PendingOAuthFlow,
 };
 use posthaste_authority_server::AccountMutationService;
+use posthaste_http_api_adapter::api::{
+    ApiError, ApiErrorBody, ApiErrorCode, OAuthCallbackQuery, StartOAuthRequest,
+    StartOAuthResponse, StartProviderOAuthRequest,
+};
+use posthaste_http_api_adapter::AppState;
 
 pub(crate) mod handlers;
 mod support;

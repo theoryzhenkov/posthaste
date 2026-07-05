@@ -22,7 +22,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::fetch::{verify_checksum, write_executable, Channel, FetchError, ReleaseSource, Version};
+use crate::fetch::{
+    verify_checksum, write_executable, Channel, FetchError, ReleaseSource, Version,
+};
 
 // -- Locate + install --------------------------------------------------
 
@@ -139,7 +141,10 @@ pub fn sidecar_candidates() -> Vec<PathBuf> {
 /// is unit-testable via explicit env values regardless of host OS (no
 /// Windows machine available for this verification — see the doc comment
 /// below for the citations backing the NSIS default install dir).
-fn windows_candidates(local_appdata: Option<PathBuf>, program_files: Option<PathBuf>) -> Vec<PathBuf> {
+fn windows_candidates(
+    local_appdata: Option<PathBuf>,
+    program_files: Option<PathBuf>,
+) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(local) = local_appdata {
         // Tauri's NSIS bundle in the default `currentUser` install mode
@@ -186,7 +191,10 @@ pub fn find_sidecar() -> Option<PathBuf> {
 fn discovery_app_dir() -> Option<PathBuf> {
     let raw = std::fs::read_to_string(daemon_json_path()).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    value.get("appDir").and_then(|v| v.as_str()).map(PathBuf::from)
+    value
+        .get("appDir")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
 }
 
 /// Everything `install_ctl` needs.
@@ -212,12 +220,16 @@ pub struct CtlInstalled {
 /// Locate (a → b → c, in order) and install `posthastectl` into
 /// `opts.to_dir`. Never escalates privilege: a permission error explains
 /// itself rather than retrying with sudo.
-pub fn install_ctl(opts: &CtlInstallOptions, release: &dyn ReleaseSource) -> Result<CtlInstalled, String> {
+pub fn install_ctl(
+    opts: &CtlInstallOptions,
+    release: &dyn ReleaseSource,
+) -> Result<CtlInstalled, String> {
     let dest = opts.to_dir.join(ctl_binary_name());
     let mut warnings = Vec::new();
 
     let (bytes, source) = if let Some(from) = &opts.from {
-        let bytes = std::fs::read(from).map_err(|e| format!("read --from {}: {e}", from.display()))?;
+        let bytes =
+            std::fs::read(from).map_err(|e| format!("read --from {}: {e}", from.display()))?;
         (bytes, CtlSource::Explicit)
     } else if let Some(sidecar) = find_sidecar() {
         let bytes = std::fs::read(&sidecar)
@@ -235,12 +247,14 @@ pub fn install_ctl(opts: &CtlInstallOptions, release: &dyn ReleaseSource) -> Res
 
     write_executable(&dest, &bytes).map_err(|e| {
         let hint = match &e {
-            FetchError::Io(_, io_err) if io_err.kind() == std::io::ErrorKind::PermissionDenied => format!(
-                " — refusing to sudo; install into a directory you own (e.g. --to {}), \
+            FetchError::Io(_, io_err) if io_err.kind() == std::io::ErrorKind::PermissionDenied => {
+                format!(
+                    " — refusing to sudo; install into a directory you own (e.g. --to {}), \
                  or fix the ownership of {} yourself",
-                default_bin_dir_hint(),
-                opts.to_dir.display()
-            ),
+                    default_bin_dir_hint(),
+                    opts.to_dir.display()
+                )
+            }
             _ => String::new(),
         };
         format!("write {}: {e}{hint}", dest.display())
@@ -295,10 +309,18 @@ fn ctl_artifact_base_name(channel: Channel) -> &'static str {
 /// with the signed bare binary as the sole entry; releases up to
 /// v0.2.0-nightly.49 shipped the bare binary directly, so `--version` against
 /// an older tag falls back to the unwrapped asset name.
-pub(crate) fn fetch_ctl(source: &dyn ReleaseSource, version: &Version, platform: &str) -> Result<Vec<u8>, FetchError> {
+pub(crate) fn fetch_ctl(
+    source: &dyn ReleaseSource,
+    version: &Version,
+    platform: &str,
+) -> Result<Vec<u8>, FetchError> {
     let tag = version.tag();
     let base = ctl_artifact_base_name(version.channel());
-    let exe = if platform.starts_with("windows") { ".exe" } else { "" };
+    let exe = if platform.starts_with("windows") {
+        ".exe"
+    } else {
+        ""
+    };
     let inner_name = format!("{base}-{platform}{exe}");
     let tarball_name = format!("{base}-{platform}.tar.gz");
 
@@ -363,10 +385,16 @@ pub struct CheckResult {
 
 impl CheckResult {
     fn ok(detail: impl Into<String>) -> Self {
-        CheckResult { ok: true, detail: detail.into() }
+        CheckResult {
+            ok: true,
+            detail: detail.into(),
+        }
     }
     fn fail(detail: impl Into<String>) -> Self {
-        CheckResult { ok: false, detail: detail.into() }
+        CheckResult {
+            ok: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -450,7 +478,11 @@ fn check_path(dir: &Path) -> CheckResult {
     if on_path {
         CheckResult::ok(format!("{} is on PATH", dir.display()))
     } else {
-        CheckResult::fail(format!("{} is not on PATH — {}", dir.display(), shell_hint(dir)))
+        CheckResult::fail(format!(
+            "{} is not on PATH — {}",
+            dir.display(),
+            shell_hint(dir)
+        ))
     }
 }
 
@@ -513,10 +545,21 @@ fn check_discovery(path: &Path) -> (CheckResult, Option<Discovered>) {
     };
     let value: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
-        Err(e) => return (CheckResult::fail(format!("daemon.json is not valid JSON: {e}")), None),
+        Err(e) => {
+            return (
+                CheckResult::fail(format!("daemon.json is not valid JSON: {e}")),
+                None,
+            )
+        }
     };
-    let url = value.get("url").and_then(|v| v.as_str()).map(str::to_string);
-    let token = value.get("token").and_then(|v| v.as_str()).map(str::to_string);
+    let url = value
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let token = value
+        .get("token")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     match (url, token) {
         (Some(url), Some(token)) => {
             let version = value.get("version").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -558,10 +601,16 @@ mod tests {
 
     #[test]
     fn app_dir_override_wins_and_is_checked_first() {
-        temp_env(&[("POSTHASTE_APP_DIR", Some("/opt/custom-posthaste"))], || {
-            let candidates = sidecar_candidates();
-            assert_eq!(candidates[0], PathBuf::from("/opt/custom-posthaste").join(ctl_binary_name()));
-        });
+        temp_env(
+            &[("POSTHASTE_APP_DIR", Some("/opt/custom-posthaste"))],
+            || {
+                let candidates = sidecar_candidates();
+                assert_eq!(
+                    candidates[0],
+                    PathBuf::from("/opt/custom-posthaste").join(ctl_binary_name())
+                );
+            },
+        );
     }
 
     #[test]
@@ -569,13 +618,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join(ctl_binary_name());
         std::fs::write(&bin, b"stand-in").unwrap();
-        temp_env(&[("POSTHASTE_APP_DIR", Some(dir.path().to_str().unwrap()))], || {
-            assert_eq!(find_sidecar(), Some(bin.clone()));
-        });
+        temp_env(
+            &[("POSTHASTE_APP_DIR", Some(dir.path().to_str().unwrap()))],
+            || {
+                assert_eq!(find_sidecar(), Some(bin.clone()));
+            },
+        );
         // No candidate exists: None.
         let empty_dir = tempfile::tempdir().unwrap();
         temp_env(
-            &[("POSTHASTE_APP_DIR", Some(empty_dir.path().to_str().unwrap()))],
+            &[(
+                "POSTHASTE_APP_DIR",
+                Some(empty_dir.path().to_str().unwrap()),
+            )],
             || {
                 assert_eq!(find_sidecar(), None);
             },
@@ -590,12 +645,28 @@ mod tests {
 
         // The NSIS `currentUser` default (no `\Programs\`), for both product
         // names, listed ahead of every other guess.
-        assert_eq!(candidates[0], local.join("Posthaste").join(ctl_binary_name()));
-        assert_eq!(candidates[1], local.join("PosthasteNightly").join(ctl_binary_name()));
+        assert_eq!(
+            candidates[0],
+            local.join("Posthaste").join(ctl_binary_name())
+        );
+        assert_eq!(
+            candidates[1],
+            local.join("PosthasteNightly").join(ctl_binary_name())
+        );
 
         // Existing candidates are preserved: the `\Programs\` guess...
-        assert!(candidates.contains(&local.join("Programs").join("Posthaste").join(ctl_binary_name())));
-        assert!(candidates.contains(&local.join("Programs").join("PosthasteNightly").join(ctl_binary_name())));
+        assert!(candidates.contains(
+            &local
+                .join("Programs")
+                .join("Posthaste")
+                .join(ctl_binary_name())
+        ));
+        assert!(candidates.contains(
+            &local
+                .join("Programs")
+                .join("PosthasteNightly")
+                .join(ctl_binary_name())
+        ));
         // ...and the perMachine Program Files guess.
         assert!(candidates.contains(&pf.join("Posthaste").join(ctl_binary_name())));
         assert!(candidates.contains(&pf.join("PosthasteNightly").join(ctl_binary_name())));
@@ -647,7 +718,10 @@ mod tests {
             ],
             || {
                 let candidates = sidecar_candidates();
-                assert_eq!(candidates[0], PathBuf::from("/opt/explicit-override").join(ctl_binary_name()));
+                assert_eq!(
+                    candidates[0],
+                    PathBuf::from("/opt/explicit-override").join(ctl_binary_name())
+                );
                 assert_eq!(candidates[1], discovered_app_dir.join(ctl_binary_name()));
             },
         );
@@ -677,7 +751,11 @@ mod tests {
                 ("POSTHASTE_APP_DIR", None),
             ],
             || {
-                assert_eq!(discovery_app_dir(), None, "an old daemon.json has no appDir hint");
+                assert_eq!(
+                    discovery_app_dir(),
+                    None,
+                    "an old daemon.json has no appDir hint"
+                );
                 // Must not panic or otherwise misbehave building the rest of
                 // the candidate list.
                 let _ = sidecar_candidates();
@@ -692,7 +770,11 @@ mod tests {
         std::fs::create_dir_all(&state_dir).unwrap();
         let discovered_app_dir = dir.path().join("discovered-app");
         std::fs::create_dir_all(&discovered_app_dir).unwrap();
-        std::fs::write(discovered_app_dir.join(ctl_binary_name()), b"SIDECAR-VIA-DISCOVERY").unwrap();
+        std::fs::write(
+            discovered_app_dir.join(ctl_binary_name()),
+            b"SIDECAR-VIA-DISCOVERY",
+        )
+        .unwrap();
         std::fs::write(
             state_dir.join("daemon.json"),
             serde_json::json!({
@@ -726,7 +808,8 @@ mod tests {
                     version: Version::Channel(Channel::Nightly),
                     platform: None,
                 };
-                let installed = install_ctl(&opts, &NoopSource).expect("install via discovery appDir");
+                let installed =
+                    install_ctl(&opts, &NoopSource).expect("install via discovery appDir");
                 assert_eq!(installed.source, CtlSource::Sidecar);
                 assert_eq!(
                     std::fs::read(&installed.binary_path).unwrap(),
@@ -767,7 +850,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&installed.binary_path).unwrap().permissions().mode();
+            let mode = std::fs::metadata(&installed.binary_path)
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o111, 0o111, "installed ctl must be executable");
         }
     }
@@ -788,20 +874,23 @@ mod tests {
             }
         }
 
-        temp_env(&[("POSTHASTE_APP_DIR", Some(app_dir.to_str().unwrap()))], || {
-            let opts = CtlInstallOptions {
-                from: None,
-                to_dir: to_dir.clone(),
-                version: Version::Channel(Channel::Nightly),
-                platform: None,
-            };
-            let installed = install_ctl(&opts, &NoopSource).expect("install from sidecar");
-            assert_eq!(installed.source, CtlSource::Sidecar);
-            assert_eq!(
-                std::fs::read(&installed.binary_path).unwrap(),
-                b"SIDECAR-BYTES"
-            );
-        });
+        temp_env(
+            &[("POSTHASTE_APP_DIR", Some(app_dir.to_str().unwrap()))],
+            || {
+                let opts = CtlInstallOptions {
+                    from: None,
+                    to_dir: to_dir.clone(),
+                    version: Version::Channel(Channel::Nightly),
+                    platform: None,
+                };
+                let installed = install_ctl(&opts, &NoopSource).expect("install from sidecar");
+                assert_eq!(installed.source, CtlSource::Sidecar);
+                assert_eq!(
+                    std::fs::read(&installed.binary_path).unwrap(),
+                    b"SIDECAR-BYTES"
+                );
+            },
+        );
     }
 
     #[test]
@@ -881,7 +970,10 @@ mod tests {
                 platform: Some("linux-x64".into()),
             };
             let err = install_ctl(&opts, &source).unwrap_err();
-            assert!(err.contains("checksum"), "expected a checksum error, got: {err}");
+            assert!(
+                err.contains("checksum"),
+                "expected a checksum error, got: {err}"
+            );
             assert!(!to_dir.exists(), "must not install an unverified binary");
         });
     }
@@ -927,16 +1019,29 @@ mod tests {
     #[test]
     fn path_check_detects_containment_and_hints_when_absent() {
         let dir = tempfile::tempdir().unwrap();
-        temp_env(&[("PATH", Some(dir.path().to_str().unwrap())), ("SHELL", Some("/bin/zsh"))], || {
-            assert!(check_path(dir.path()).ok);
-        });
+        temp_env(
+            &[
+                ("PATH", Some(dir.path().to_str().unwrap())),
+                ("SHELL", Some("/bin/zsh")),
+            ],
+            || {
+                assert!(check_path(dir.path()).ok);
+            },
+        );
         let other = tempfile::tempdir().unwrap();
         temp_env(
-            &[("PATH", Some(other.path().to_str().unwrap())), ("SHELL", Some("/bin/zsh"))],
+            &[
+                ("PATH", Some(other.path().to_str().unwrap())),
+                ("SHELL", Some("/bin/zsh")),
+            ],
             || {
                 let result = check_path(dir.path());
                 assert!(!result.ok);
-                assert!(result.detail.contains(".zshrc"), "zsh gets a .zshrc hint: {}", result.detail);
+                assert!(
+                    result.detail.contains(".zshrc"),
+                    "zsh gets a .zshrc hint: {}",
+                    result.detail
+                );
             },
         );
     }
@@ -961,7 +1066,10 @@ mod tests {
                 assert!(!report.all_ok());
                 let table = report.format();
                 assert!(table.contains("app running"));
-                assert!(table.contains('\u{2717}'), "at least one row is a failure mark");
+                assert!(
+                    table.contains('\u{2717}'),
+                    "at least one row is a failure mark"
+                );
             },
         );
     }
@@ -981,7 +1089,10 @@ mod tests {
             let mut buf = [0u8; 4096];
             let n = stream.read(&mut buf).unwrap();
             let req = String::from_utf8_lossy(&buf[..n]);
-            assert!(req.contains("Bearer mock-bootstrap-token"), "probe must send the discovery token: {req}");
+            assert!(
+                req.contains("Bearer mock-bootstrap-token"),
+                "probe must send the discovery token: {req}"
+            );
             assert!(
                 req.starts_with("GET /v1/openapi.json"),
                 "probe must hit <discovery url>/openapi.json: {req}"
@@ -1002,8 +1113,11 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(bin_dir.join(ctl_binary_name()), std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(
+                bin_dir.join(ctl_binary_name()),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
         }
         let state_dir = dir.path().join("state");
         std::fs::create_dir_all(&state_dir).unwrap();

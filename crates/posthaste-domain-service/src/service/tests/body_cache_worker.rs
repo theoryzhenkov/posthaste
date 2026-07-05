@@ -214,7 +214,10 @@ async fn body_cache_worker_keeps_partial_work_from_a_slow_but_progressing_source
     assert!(outcome.deadline_exceeded);
     assert_eq!(outcome.cached, 2, "work done before the deadline is kept");
     assert_eq!(outcome.failed, 1, "the cut-short candidate is failed");
-    assert_eq!(outcome.attempted, 3, "the batch stops; it does not start more");
+    assert_eq!(
+        outcome.attempted, 3,
+        "the batch stops; it does not start more"
+    );
 }
 
 #[tokio::test]

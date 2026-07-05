@@ -55,15 +55,11 @@ pub(crate) fn event_log_bounds(
     connection: &Connection,
 ) -> Result<Option<EventLogBounds>, StoreError> {
     connection
-        .query_row(
-            "SELECT MIN(seq), MAX(seq) FROM event_log",
-            [],
-            |row| {
-                let oldest: Option<i64> = row.get(0)?;
-                let newest: Option<i64> = row.get(1)?;
-                Ok(oldest.zip(newest))
-            },
-        )
+        .query_row("SELECT MIN(seq), MAX(seq) FROM event_log", [], |row| {
+            let oldest: Option<i64> = row.get(0)?;
+            let newest: Option<i64> = row.get(1)?;
+            Ok(oldest.zip(newest))
+        })
         .map_err(sql_to_store_error)
         .map(|bounds| bounds.map(|(oldest, newest)| EventLogBounds { oldest, newest }))
 }

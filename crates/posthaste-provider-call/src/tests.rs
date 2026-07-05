@@ -61,7 +61,10 @@ async fn slow_but_progressing_blob_completes() {
         }
     };
     let drained = drain_with_stall(body, BLOB_STALL).await;
-    assert_eq!(drained.expect("blob should complete").len(), chunks as usize);
+    assert_eq!(
+        drained.expect("blob should complete").len(),
+        chunks as usize
+    );
 }
 
 /// A stalled blob (a gap ≫ the stall window) **errors** — the read is dead, not
@@ -90,7 +93,10 @@ async fn stall_guard_yields_stalled_then_ends() {
     let guarded = stall_guard(inner, BLOB_STALL);
     futures_util::pin_mut!(guarded);
     assert!(matches!(guarded.next().await, Some(Ok(1))));
-    assert!(matches!(guarded.next().await, Some(Err(StallError::Stalled))));
+    assert!(matches!(
+        guarded.next().await,
+        Some(Err(StallError::Stalled))
+    ));
     assert!(guarded.next().await.is_none(), "adapter ends after a stall");
 }
 
@@ -214,7 +220,11 @@ async fn breaker_opens_fast_fails_then_half_open_probe_closes() {
         breaker_run(&exec, &attempts).await.is_ok(),
         "half-open probe succeeds"
     );
-    assert_eq!(attempts.load(Ordering::SeqCst), 4, "probe invoked the attempt");
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        4,
+        "probe invoked the attempt"
+    );
     assert_eq!(exec.breaker_phase("acct"), BreakerPhaseView::Closed(0));
 }
 
@@ -234,13 +244,17 @@ async fn breaker_half_open_probe_failure_reopens() {
     let exec = executor(schedule, breaker);
 
     for _ in 0..2 {
-        let _ = exec.run("acct", || async { Err::<(), _>(permanent()) }).await;
+        let _ = exec
+            .run("acct", || async { Err::<(), _>(permanent()) })
+            .await;
     }
     assert_eq!(exec.breaker_phase("acct"), BreakerPhaseView::Open);
 
     tokio::time::advance(Duration::from_secs(30)).await;
     // The admitted probe fails ⇒ breaker re-opens rather than closing.
-    let _ = exec.run("acct", || async { Err::<(), _>(permanent()) }).await;
+    let _ = exec
+        .run("acct", || async { Err::<(), _>(permanent()) })
+        .await;
     assert_eq!(exec.breaker_phase("acct"), BreakerPhaseView::Open);
 }
 
@@ -260,11 +274,16 @@ async fn breaker_is_per_account_not_global() {
     let exec = executor(schedule, breaker);
 
     for _ in 0..2 {
-        let _ = exec.run("bad", || async { Err::<(), _>(permanent()) }).await;
+        let _ = exec
+            .run("bad", || async { Err::<(), _>(permanent()) })
+            .await;
     }
     assert_eq!(exec.breaker_phase("bad"), BreakerPhaseView::Open);
     // A healthy account is unaffected and its call runs.
-    assert!(exec.run("good", || async { Ok::<_, ProviderCallError>(()) }).await.is_ok());
+    assert!(exec
+        .run("good", || async { Ok::<_, ProviderCallError>(()) })
+        .await
+        .is_ok());
     assert_eq!(exec.breaker_phase("good"), BreakerPhaseView::Closed(0));
 }
 
@@ -279,6 +298,9 @@ fn per_class_deadline_table_is_consumed() {
     assert_eq!(metadata.stall, None);
 
     let blob = CallClass::Blob.deadline_policy();
-    assert_eq!(blob.total, None, "F2: a total on a streamed body is the bug");
+    assert_eq!(
+        blob.total, None,
+        "F2: a total on a streamed body is the bug"
+    );
     assert_eq!(blob.stall, Some(BLOB_STALL));
 }

@@ -153,7 +153,10 @@ fn floor_guard_refuses_prune_on_empty_remote_set() -> Result<(), StoreError> {
         "an empty remote set must not prune the local store",
     );
     let cursor = store.get_cursor(&account, SyncObject::Message)?;
-    assert_eq!(cursor.map(|cursor| cursor.state), Some("state-final".into()));
+    assert_eq!(
+        cursor.map(|cursor| cursor.state),
+        Some("state-final".into())
+    );
     Ok(())
 }
 

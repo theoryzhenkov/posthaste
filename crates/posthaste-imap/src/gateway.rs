@@ -3,11 +3,22 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use imap_client::client::tokio::Client as ImapClient;
-use posthaste_domain_model::{FetchedBody, GatewayError, Identity, ImapCapabilities, ImapFullSyncReason, ImapMailboxSyncPlan, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapMoveStrategy, ImapSelectedMailbox, ImapUid, ImapUidValidity, MutationOutcome, ProviderProfile, ReplyContext, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncOutcome, SyncProgress, SyncProgressStage, SyncTrigger, now_iso8601};
+use posthaste_domain_model::{
+    now_iso8601, FetchedBody, GatewayError, Identity, ImapCapabilities, ImapFullSyncReason,
+    ImapMailboxSyncPlan, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapMoveStrategy,
+    ImapSelectedMailbox, ImapUid, ImapUidValidity, MutationOutcome, ProviderProfile, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncOutcome,
+    SyncProgress, SyncProgressStage, SyncTrigger,
+};
 use posthaste_domain_model::{AccountId, BlobId, MailboxId, MessageId};
-use posthaste_domain_service::{MailGateway, MailStore, PushEventStream, PushTransport, SecretResolver, SyncChunkSink, SyncProgressReporter, plan_imap_mailbox_sync, plan_imap_move};
+use posthaste_domain_service::{
+    plan_imap_mailbox_sync, plan_imap_move, MailGateway, MailStore, PushEventStream, PushTransport,
+    SecretResolver, SyncChunkSink, SyncProgressReporter,
+};
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
+use crate::body::{fetch_message_body_by_location, fetch_raw_message_by_location};
+use crate::compose::fetch_imap_reply_context_by_location;
 use crate::fetch::{
     fetch_header_chunk, fetch_mailbox_changed_since_snapshot_with_client,
     fetch_mailbox_condstore_delta_snapshot_with_client, fetch_mailbox_header_snapshot_with_client,
@@ -15,14 +26,12 @@ use crate::fetch::{
     INITIAL_SNAPSHOT_CHUNK_SIZE,
 };
 use crate::mailbox::{examine_selected_mailbox, status_imap_mailbox, ImapMailboxStatus};
-use crate::session::ImapSessionManager;
-use crate::body::{fetch_message_body_by_location, fetch_raw_message_by_location};
-use crate::compose::fetch_imap_reply_context_by_location;
 use crate::mutation::{
     apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
     expunge_imap_message_by_location, mark_imap_message_deleted_by_location,
     move_imap_message_to_mailbox_by_location,
 };
+use crate::session::ImapSessionManager;
 use crate::smtp::transport::append_smtp_sent_copy;
 use crate::{
     imap_attachment_bytes_from_raw_mime, imap_condstore_delta_sync_batch, imap_delta_sync_batch,

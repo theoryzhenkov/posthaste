@@ -133,8 +133,7 @@ impl AccountSupervisor {
     /// (of its incarnation + watchdog) — the escalation, not the primary path.
     pub async fn stop_all(&self, deadline: Duration) {
         self.root_cancel.cancel();
-        let entries: Vec<(String, ManagedRuntime)> =
-            self.runtimes.write().await.drain().collect();
+        let entries: Vec<(String, ManagedRuntime)> = self.runtimes.write().await.drain().collect();
         let deadline_at = tokio::time::Instant::now() + deadline;
         for (account_id, runtime) in entries {
             let ManagedRuntime {
@@ -631,7 +630,11 @@ async fn join_or_escalate(
 ) {
     let monitor_abort = monitor.abort_handle();
     if tokio::time::timeout(deadline, monitor).await.is_err() {
-        if let Some(abort) = incarnation_abort.lock().expect("abort slot poisoned").as_ref() {
+        if let Some(abort) = incarnation_abort
+            .lock()
+            .expect("abort slot poisoned")
+            .as_ref()
+        {
             abort.abort();
         }
         monitor_abort.abort();

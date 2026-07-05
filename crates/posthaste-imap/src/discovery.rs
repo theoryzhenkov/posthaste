@@ -1,11 +1,14 @@
 use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::flag::FlagNameAttribute;
 use imap_client::imap_types::mailbox::Mailbox;
-use posthaste_domain_model::{AccountTransportSettings, ImapCapabilities, MailboxRole, ProviderAuthKind, ProviderProfile, TransportSecurity};
 use posthaste_domain_model::MailboxId;
+use posthaste_domain_model::{
+    AccountTransportSettings, ImapCapabilities, MailboxRole, ProviderAuthKind, ProviderProfile,
+    TransportSecurity,
+};
 
-use crate::ImapAdapterError;
 use crate::timeout::with_deadline;
+use crate::ImapAdapterError;
 
 /// Concrete connection details for one IMAP account.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,10 +124,18 @@ pub(crate) async fn discover_authenticated_client(
 async fn connect(config: &ImapConnectionConfig) -> Result<ImapClient, ImapAdapterError> {
     match config.security {
         TransportSecurity::Tls => {
-            with_deadline("connect", ImapClient::rustls(&config.host, config.port, false, None)).await
+            with_deadline(
+                "connect",
+                ImapClient::rustls(&config.host, config.port, false, None),
+            )
+            .await
         }
         TransportSecurity::StartTls => {
-            with_deadline("connect", ImapClient::rustls(&config.host, config.port, true, None)).await
+            with_deadline(
+                "connect",
+                ImapClient::rustls(&config.host, config.port, true, None),
+            )
+            .await
         }
         TransportSecurity::Plain => {
             with_deadline("connect", ImapClient::insecure(&config.host, config.port)).await

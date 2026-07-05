@@ -63,7 +63,9 @@ use std::time::Duration;
 use jmap_client::client::{Client, Credentials};
 use jmap_client::{email, mailbox};
 use posthaste_client_link::RuntimeLink;
-use posthaste_contract_core::{AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot};
+use posthaste_contract_core::{
+    AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot,
+};
 use posthaste_domain_model::{AccountId, MessageId, OperationKind};
 use posthaste_runtime_api::{RuntimeMailReadApi, RuntimeMailWriteApi};
 use posthaste_testkit::{Harness, RuntimeHarness, StalwartFixture};
@@ -87,9 +89,11 @@ async fn server_client(stalwart: &StalwartFixture) -> Arc<Client> {
 /// The Drafts mailbox id on the server (by role).
 async fn server_drafts_mailbox(client: &Client) -> String {
     let mut request = client.build();
-    request
-        .get_mailbox()
-        .properties([mailbox::Property::Id, mailbox::Property::Role, mailbox::Property::Name]);
+    request.get_mailbox().properties([
+        mailbox::Property::Id,
+        mailbox::Property::Role,
+        mailbox::Property::Name,
+    ]);
     request
         .send_get_mailbox()
         .await
@@ -120,7 +124,9 @@ async fn seed_server_draft(client: &Client, drafts_mailbox: &str, subject: &str)
             email::HeaderValue::AsText(STABLE_DRAFT_KEY.to_string()),
         );
         email.text_body(
-            email::EmailBodyPart::new().content_type("text/plain").part_id("t"),
+            email::EmailBodyPart::new()
+                .content_type("text/plain")
+                .part_id("t"),
         );
         email.body_value("t".to_string(), "A seeded draft, to be discarded.");
     }
@@ -154,11 +160,18 @@ async fn server_draft_ids(client: &Client) -> Vec<String> {
 async fn destroy_server_email(client: &Client, id: &str) -> bool {
     let mut request = client.build();
     request.set_email().destroy([id]);
-    let response = request.send_set_email().await.expect("Email/set destroy should run");
-    let destroyed_ids: Vec<String> =
-        response.destroyed_ids().map(|it| it.cloned().collect()).unwrap_or_default();
-    let not_destroyed_ids: Vec<String> =
-        response.not_destroyed_ids().map(|it| it.cloned().collect()).unwrap_or_default();
+    let response = request
+        .send_set_email()
+        .await
+        .expect("Email/set destroy should run");
+    let destroyed_ids: Vec<String> = response
+        .destroyed_ids()
+        .map(|it| it.cloned().collect())
+        .unwrap_or_default();
+    let not_destroyed_ids: Vec<String> = response
+        .not_destroyed_ids()
+        .map(|it| it.cloned().collect())
+        .unwrap_or_default();
     eprintln!(
         "DIAG (B) Email/set destroy response: destroyed={destroyed_ids:?} notDestroyed={not_destroyed_ids:?}"
     );
@@ -171,7 +184,9 @@ async fn drafts_mailbox_id(harness: &RuntimeHarness, account: &AccountId) -> Str
         .core()
         .list_mailboxes(
             RuntimeCaller::test(),
-            AccountScopeRequest::Explicit { account_ids: vec![account.clone()] },
+            AccountScopeRequest::Explicit {
+                account_ids: vec![account.clone()],
+            },
         )
         .await
         .expect("mailboxes should list");
@@ -179,7 +194,9 @@ async fn drafts_mailbox_id(harness: &RuntimeHarness, account: &AccountId) -> Str
         .get(account)
         .and_then(|ms| {
             ms.iter().find(|m| {
-                m.role.as_deref().is_some_and(|r| r.eq_ignore_ascii_case("drafts"))
+                m.role
+                    .as_deref()
+                    .is_some_and(|r| r.eq_ignore_ascii_case("drafts"))
                     || m.name.eq_ignore_ascii_case("drafts")
             })
         })
@@ -197,7 +214,12 @@ async fn local_draft_row_ids(
 ) -> Vec<String> {
     let caller = RuntimeCaller::test();
     let view = common::mail_list_view(&format!("in:{account}/{drafts_mailbox}"));
-    let link = harness.core().open_link(caller.clone()).await.expect("link should open").link_id;
+    let link = harness
+        .core()
+        .open_link(caller.clone())
+        .await
+        .expect("link should open")
+        .link_id;
     let snapshot: ViewSnapshot = harness
         .core()
         .open_link_view(caller, link, view)
@@ -207,7 +229,12 @@ async fn local_draft_row_ids(
         .expect("snapshot data should be mail list state")
         .rows
         .iter()
-        .filter_map(|row| row.projection.get("id").and_then(|id| id.as_str()).map(str::to_string))
+        .filter_map(|row| {
+            row.projection
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(str::to_string)
+        })
         .collect()
 }
 
@@ -322,7 +349,9 @@ async fn discard_flush_through_runtime_reaches_the_server() {
     let stalwart = StalwartFixture::start();
     let server = server_client(&stalwart).await;
     let harness = Harness::new().with_runtime().await;
-    let account = harness.create_jmap_account("jmap-discard-flush", &stalwart).await;
+    let account = harness
+        .create_jmap_account("jmap-discard-flush", &stalwart)
+        .await;
 
     // Seed a draft on the server and pull it (fresh-restart-no-edit state).
     let drafts_server = server_drafts_mailbox(&server).await;
@@ -361,7 +390,8 @@ async fn discard_flush_through_runtime_reaches_the_server() {
 
     // Flush the DraftDelete. If this stalls, the interactive Email/set destroy
     // never reaches the server — the reproduction.
-    let flushed = tokio::time::timeout(Duration::from_secs(45), harness.sync_account(&account)).await;
+    let flushed =
+        tokio::time::timeout(Duration::from_secs(45), harness.sync_account(&account)).await;
     let still_on_server = server_draft_ids(&server).await.contains(&seeded_id);
     match &flushed {
         Ok(n) => eprintln!("DIAG discard flush completed ({n} changes)"),

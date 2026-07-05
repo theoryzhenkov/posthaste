@@ -7,25 +7,25 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use posthaste_authority_server::oauth::OAuthTokenSet;
 use posthaste_authority_server::{build_authority_server, from_api_bridge_for_migration};
-use posthaste_domain_model::{
-    AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
-    SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection, SyncBatch,
-    SyncCursor, SyncObject, SyncTrigger, ThreadId, TransportSecurity,
-    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_UPDATED,
-};
-use posthaste_domain_service::SecretStore;
-use posthaste_engine::MockJmapGateway;
 use posthaste_client_link::RuntimeLink;
-use posthaste_runtime::{RuntimeBuildConfig, RuntimeBuildError};
 use posthaste_contract_core::RuntimeCaller;
-use posthaste_runtime_api::RuntimeAccountApi;
 use posthaste_contract_core::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,
     MutationSettlementState, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle, RuntimeLinkSeq,
     SecretWriteMode, SecretWriteMutation, ViewDescriptor,
 };
+use posthaste_domain_model::{
+    AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
+    MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
+    SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection, SyncBatch,
+    SyncCursor, SyncObject, SyncTrigger, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
+};
+use posthaste_domain_service::SecretStore;
+use posthaste_engine::MockJmapGateway;
+use posthaste_runtime::{RuntimeBuildConfig, RuntimeBuildError};
+use posthaste_runtime_api::RuntimeAccountApi;
 use tempfile::TempDir;
 use tokio::sync::Notify;
 
@@ -676,7 +676,11 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
 
     let catch_up = build
         .handle
-        .subscribe_runtime_frames(RuntimeCaller::test(), link.link_id.clone(), Some(RuntimeLinkSeq::new(0)))
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
+        )
         .await
         .expect("behind subscriber should get collapsed catch-up")
         .catch_up;
@@ -2586,7 +2590,8 @@ impl posthaste_authority_server_link::AuthorityServerLink for DeferredTransport 
         &self,
         coverage: posthaste_authority_server_link::LinkCoverage,
         after_seq: Option<u64>,
-    ) -> Result<posthaste_authority_server_link::DownStream, posthaste_contract_core::RuntimeError> {
+    ) -> Result<posthaste_authority_server_link::DownStream, posthaste_contract_core::RuntimeError>
+    {
         self.inner.subscribe(coverage, after_seq).await
     }
 }
@@ -2600,7 +2605,8 @@ impl posthaste_authority_server_link::AuthorityServerApi for DeferredTransport {
     async fn create_account(
         &self,
         mutation: CreateAccountMutation,
-    ) -> Result<posthaste_domain_model::AccountOverview, posthaste_contract_core::RuntimeError> {
+    ) -> Result<posthaste_domain_model::AccountOverview, posthaste_contract_core::RuntimeError>
+    {
         self.inner.create_account(mutation).await
     }
 }
@@ -2662,7 +2668,11 @@ async fn runtime_serves_optimistic_rows_from_its_pending_set_while_a_forward_is_
     // Baseline: message-1 is not flagged.
     let baseline = build
         .handle
-        .open_link_view(RuntimeCaller::test(), link.link_id.clone(), descriptor.clone())
+        .open_link_view(
+            RuntimeCaller::test(),
+            link.link_id.clone(),
+            descriptor.clone(),
+        )
         .await
         .expect("baseline view should open");
     assert!(!flagged(&mail_list_state(&baseline), "message-1"));
@@ -2701,7 +2711,11 @@ async fn runtime_serves_optimistic_rows_from_its_pending_set_while_a_forward_is_
     // flagged — folded from its pending set via the shared MailListReplica.
     let optimistic = build
         .handle
-        .open_link_view(RuntimeCaller::test(), link.link_id.clone(), descriptor.clone())
+        .open_link_view(
+            RuntimeCaller::test(),
+            link.link_id.clone(),
+            descriptor.clone(),
+        )
         .await
         .expect("optimistic view should open");
     assert!(
@@ -3053,7 +3067,11 @@ async fn mark_read_echo_carries_enriched_source_mailbox_count_deltas() {
         .expect("link should open");
     let mut subscription = build
         .handle
-        .subscribe_runtime_frames(caller.clone(), link.link_id.clone(), Some(RuntimeLinkSeq::new(0)))
+        .subscribe_runtime_frames(
+            caller.clone(),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
+        )
         .await
         .expect("runtime frames should subscribe");
 

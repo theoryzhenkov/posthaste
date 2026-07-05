@@ -138,6 +138,8 @@ pub async fn stream_events(
     let gap_stream = tokio_stream::iter(subscription.gap.map(gap_to_sse));
     let backlog_stream = tokio_stream::iter(subscription.replay.into_iter().map(event_to_sse));
     let live_stream = subscription.live.map(event_to_sse);
-    Ok(Sse::new(gap_stream.chain(backlog_stream).chain(live_stream))
-        .keep_alive(KeepAlive::default()))
+    Ok(
+        Sse::new(gap_stream.chain(backlog_stream).chain(live_stream))
+            .keep_alive(KeepAlive::default()),
+    )
 }

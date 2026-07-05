@@ -21,7 +21,9 @@
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
-use crate::install::{launch_agents_dir_pub, start_service, stop_service, user_unit_dir, ServiceScope};
+use crate::install::{
+    launch_agents_dir_pub, start_service, stop_service, user_unit_dir, ServiceScope,
+};
 use crate::manifest::Manifest;
 use crate::render::xml_escape;
 
@@ -46,7 +48,10 @@ impl WatchCommand {
     pub fn default_name(&self) -> String {
         match self {
             WatchCommand::Watch {
-                rule, keyword, topic, ..
+                rule,
+                keyword,
+                topic,
+                ..
             } => rule
                 .clone()
                 .or_else(|| keyword.clone())
@@ -102,7 +107,13 @@ fn push_opt(v: &mut Vec<String>, flag: &str, value: &Option<String>) {
 pub fn sanitize_name(raw: &str) -> String {
     let s: String = raw
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let s = s.trim_matches('-').to_string();
     if s.is_empty() {
@@ -144,10 +155,14 @@ pub fn locate_ctl(manifest: &Manifest, bin_dir: &Path) -> String {
 /// explicit API URL/token carries into the always-on service (the CLI still
 /// auto-discovers `daemon.json` when none is set).
 pub fn discovery_env() -> Vec<(String, String)> {
-    ["POSTHASTE_STATE_ROOT", "POSTHASTE_API_URL", "POSTHASTE_TOKEN"]
-        .iter()
-        .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
-        .collect()
+    [
+        "POSTHASTE_STATE_ROOT",
+        "POSTHASTE_API_URL",
+        "POSTHASTE_TOKEN",
+    ]
+    .iter()
+    .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
+    .collect()
 }
 
 /// Render a `systemd --user` unit wrapping the `posthastectl` argv, restarting
@@ -332,7 +347,10 @@ pub fn unregister_watch(scope: ServiceScope, name: &str) -> Result<PathBuf, Stri
             let unit = systemd_unit_name(name);
             let path = user_unit_dir()?.join(&unit);
             if !path.exists() {
-                return Err(format!("no registered watch named `{name}` at {}", path.display()));
+                return Err(format!(
+                    "no registered watch named `{name}` at {}",
+                    path.display()
+                ));
             }
             let _ = stop_service(ServiceScope::UserSystemd, &unit);
             let _ = std::process::Command::new("systemctl")
@@ -347,7 +365,10 @@ pub fn unregister_watch(scope: ServiceScope, name: &str) -> Result<PathBuf, Stri
         ServiceScope::Launchd => {
             let path = launch_agents_dir_pub()?.join(format!("{}.plist", launchd_label(name)));
             if !path.exists() {
-                return Err(format!("no registered watch named `{name}` at {}", path.display()));
+                return Err(format!(
+                    "no registered watch named `{name}` at {}",
+                    path.display()
+                ));
             }
             let _ = stop_service(ServiceScope::Launchd, &path.display().to_string());
             std::fs::remove_file(&path).map_err(|e| format!("remove {}: {e}", path.display()))?;
@@ -361,12 +382,16 @@ pub fn unregister_watch(scope: ServiceScope, name: &str) -> Result<PathBuf, Stri
 /// the `posthaste-watch-*` / `com.posthaste.watch.*` naming), for `ctl status`.
 pub fn list_watches(scope: ServiceScope) -> Vec<String> {
     let (dir, prefix, suffix) = match scope {
-        ServiceScope::UserSystemd | ServiceScope::SystemSystemd => {
-            (user_unit_dir(), "posthaste-watch-".to_string(), ".service".to_string())
-        }
-        ServiceScope::Launchd => {
-            (launch_agents_dir_pub(), "com.posthaste.watch.".to_string(), ".plist".to_string())
-        }
+        ServiceScope::UserSystemd | ServiceScope::SystemSystemd => (
+            user_unit_dir(),
+            "posthaste-watch-".to_string(),
+            ".service".to_string(),
+        ),
+        ServiceScope::Launchd => (
+            launch_agents_dir_pub(),
+            "com.posthaste.watch.".to_string(),
+            ".plist".to_string(),
+        ),
         ServiceScope::None => return Vec::new(),
     };
     let Ok(dir) = dir else { return Vec::new() };
@@ -460,7 +485,18 @@ mod tests {
         };
         assert_eq!(cmd.default_name(), "hook");
         let argv = cmd.argv("posthastectl");
-        assert_eq!(argv, vec!["posthastectl", "hook", "serve", "--exec", "./h.sh", "--port", "8787"]);
+        assert_eq!(
+            argv,
+            vec![
+                "posthastectl",
+                "hook",
+                "serve",
+                "--exec",
+                "./h.sh",
+                "--port",
+                "8787"
+            ]
+        );
     }
 
     #[test]
@@ -522,7 +558,10 @@ mod tests {
         assert_eq!(locate_ctl(&empty, dir.path()), bin.display().to_string());
         // 3) nothing: the bare name.
         let empty_dir = tempfile::tempdir().unwrap();
-        assert_eq!(locate_ctl(&empty, empty_dir.path()), crate::ctl_binary_name());
+        assert_eq!(
+            locate_ctl(&empty, empty_dir.path()),
+            crate::ctl_binary_name()
+        );
     }
 
     #[test]

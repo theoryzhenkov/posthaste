@@ -18,12 +18,12 @@ mod shutdown_seams;
 mod startup;
 mod startup_authority_server;
 
+pub use oauth_routes::{build_oauth_router, OAuthState};
 /// The far-node link wire (`link_router` + `LinkAuth`) lives in
 /// `posthaste-authority-server` with its own error/auth vocabulary (RFC D24):
 /// the standalone far-node binary no longer drags the `/v1` client platform to
 /// serve it. `posthaste-server` remains the composition root that mounts it.
 use posthaste_authority_server::{link_router, LinkAuth};
-pub use oauth_routes::{build_oauth_router, OAuthState};
 pub use startup::start_server;
 pub use startup_authority_server::{start_authority_server, AuthorityServerHandle};
 
@@ -33,14 +33,14 @@ use std::sync::Arc;
 
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
+use posthaste_authority_server::{build_authority_server, build_authority_server_node};
 use posthaste_http_api_adapter::{
     assemble_daemon_preamble, build_api_router, build_app_state, serve, token, DaemonPreamble,
     ServeOptions, ServerConfig, ServerHandle, ShutdownSequence, StoreClose, SupervisorStop,
 };
-use posthaste_authority_server::{build_authority_server, build_authority_server_node};
-use rule_minter::MacaroonMinter;
 use posthaste_observability::{events, ph_info};
 use posthaste_runtime::{build_remote_runtime, AuthorityServerTransportConfig};
+use rule_minter::MacaroonMinter;
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};

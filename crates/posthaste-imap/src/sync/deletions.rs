@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use posthaste_domain_model::{ImapMessageLocation, ImapMessageLocationKey, ImapUid, ImapUidValidity, MessageRecord};
+use posthaste_domain_model::{
+    ImapMessageLocation, ImapMessageLocationKey, ImapUid, ImapUidValidity, MessageRecord,
+};
 use posthaste_domain_model::{MailboxId, MessageId};
 
 pub(super) fn deleted_locations_missing_from_remote(
@@ -65,7 +67,10 @@ pub(super) fn partition_deleted_message_ids_by_origin(
     authoritative_keys: &BTreeSet<ImapMessageLocationKey>,
     absence_keys: &BTreeSet<ImapMessageLocationKey>,
 ) -> (Vec<MessageId>, Vec<MessageId>) {
-    let fully_gone = fully_gone_message_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let fully_gone = fully_gone_message_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let mut removed_keys_by_message = BTreeMap::<MessageId, Vec<ImapMessageLocationKey>>::new();
     for location in local_locations {
         let key = location.key();

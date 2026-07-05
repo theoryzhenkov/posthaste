@@ -34,11 +34,7 @@ impl LiveImapSmtpGateway {
         account_id: AccountId,
         mailbox_name: String,
     ) -> PushEventStream {
-        crate::idle::imap_idle_event_stream(
-            account_id,
-            Arc::clone(&self.sessions),
-            mailbox_name,
-        )
+        crate::idle::imap_idle_event_stream(account_id, Arc::clone(&self.sessions), mailbox_name)
     }
 
     pub(crate) fn location_and_mailbox_name(

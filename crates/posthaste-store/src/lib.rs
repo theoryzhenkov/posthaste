@@ -24,8 +24,8 @@ mod sync_state;
 #[cfg(test)]
 mod test_support;
 
-pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 pub(crate) use crate::store::StagedBodyFiles;
+pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 pub use rev_log::MAX_REV_LOG_HISTORY;
 
 use std::collections::{BTreeSet, HashSet};
@@ -41,15 +41,15 @@ use posthaste_domain_model::{
     CacheFetchUnit, CacheLayer, CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate,
     CacheSearchSignals, CacheSignalUpdate, CachedSenderAddress, CommandResult, ConversationCursor,
     ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, EventLogBounds, FetchedBody, ImapMailboxSyncState, ImapMessageLocation,
-    ImapMessageLocationKey, ImapModSeq, ImapUid, ImapUidValidity, MailboxId, MailboxRole,
-    MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
-    MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
-    OperationState, RawMessageRef, Recipient, ReplaceMailboxesCommand, RevCursor, RevLogSnapshot,
-    RevLogStep, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue, SortDirection, StoreError, SyncBatch, SyncCursor, SyncObject,
-    SyncReconciliation, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
+    DomainEvent, EventFilter, EventLogBounds, FetchedBody, ImapMailboxSyncState,
+    ImapMessageLocation, ImapMessageLocationKey, ImapModSeq, ImapUid, ImapUidValidity, MailboxId,
+    MailboxRole, MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage,
+    MessageSortField, MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId,
+    OperationKind, OperationState, RawMessageRef, Recipient, ReplaceMailboxesCommand, RevCursor,
+    RevLogSnapshot, RevLogStep, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxValue, SortDirection, StoreError, SyncBatch, SyncCursor,
+    SyncObject, SyncReconciliation, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
     EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_domain_service::{
