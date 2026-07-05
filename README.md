@@ -1,6 +1,6 @@
 # Posthaste
 
-**A local-first mail client your scripts and AI agents can actually use.**
+**Your mail, delivered at Posthaste**
 
 Posthaste keeps your mail on your machine, replicates it into a fast optimistic
 local store, and exposes everything through the same documented API the app
@@ -10,6 +10,10 @@ reacts the instant mail lands. It's a full-featured mail workstation first, and
 a programmable one by design.
 
 [posthaste.theor.net](https://posthaste.theor.net)
+
+<p align="center">
+  <img src="apps/site/public/screenshots/command-palette.png" alt="Posthaste — the command palette over the mail reader" width="820">
+</p>
 
 > **Beta status.** Posthaste is in active development, heading toward a public
 > beta. Nightly builds are available now for technical early adopters — expect
