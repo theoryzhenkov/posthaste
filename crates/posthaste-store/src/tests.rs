@@ -165,6 +165,7 @@ mod cache_cleanup;
 mod concurrency;
 mod conversation_queries;
 mod conversation_threads_events;
+mod destroy_imap_locations;
 mod fts_search;
 mod imap_resume;
 mod imap_snapshots;

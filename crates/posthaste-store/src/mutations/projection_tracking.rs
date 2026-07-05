@@ -140,6 +140,17 @@ pub(crate) fn delete_message_and_track_projection_inputs(
         .flatten()
         .map(ConversationId);
     delete_message_tx(tx, account_id, message_id)?;
+    // Tear down the sync-owned IMAP coordinates here, on the server-confirmed
+    // (VANISHED/absence) delete path — NOT in `delete_message_tx`, so the
+    // optimistic Destroy write-through leaves them intact for the outbox flush
+    // to read back and issue the server-side delete (DP-C1). This is the
+    // catch-all for any coordinate not already pruned via the batch's explicit
+    // `deleted_imap_message_locations`.
+    tx.execute(
+        "DELETE FROM imap_message_location WHERE account_id = ?1 AND message_id = ?2",
+        params![account_id.as_str(), message_id.as_str()],
+    )
+    .map_err(sql_to_store_error)?;
     if let Some(thread_id) = thread_id {
         affected.threads.insert(thread_id);
     }
