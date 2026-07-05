@@ -732,6 +732,61 @@ class EntityStoreController {
   }
 
   /**
+   * FIX1 / D134 — the FOLD phase of a deferred discard, split off from the
+   * dispatch. Applies the optimistic destroy fold on the row (the instant blink)
+   * under `request.clientMutationId`, but WITHOUT persisting a durable
+   * pending-set record and WITHOUT dispatching to the runtime. So during the
+   * pre-commit grace nothing is durable (a tab close drops the fold with the
+   * page → the draft is kept) and nothing hits the server.
+   *
+   * The fold is later either REVERTED ({@link revertOptimistic}, on Undo — the
+   * row returns with no round-trip) or COMMITTED by re-running the SAME mutation
+   * through {@link runMutation} under the same clientMutationId. Re-accepting the
+   * same id is idempotent (the M66 send-redelivery invariant: "one blink, not a
+   * double-fold artifact"), so the commit adds the durable record + dispatch
+   * without a second blink.
+   *
+   * Returns the foldId, or null when the op has no local fold (nothing to defer).
+   */
+  async foldOptimistic(
+    request: RuntimeRunMutationRequest,
+  ): Promise<string | null> {
+    const translated = await parseMailOperation(
+      request,
+      this.roleMapForRequest(request),
+    )
+    if (!translated) {
+      return null
+    }
+    const foldId = request.clientMutationId
+    await this.enqueue(async () => {
+      await this.store.acceptMutationJson(
+        JSON.stringify({
+          mutationId: foldId,
+          messageId: translated.messageId,
+          assertion: translated.assertion,
+        }),
+      )
+      await this.drainAndEmit()
+    })
+    return foldId
+  }
+
+  /**
+   * FIX1 / D134 — REVERT a fold applied by {@link foldOptimistic} that was never
+   * committed (the user hit Undo within the grace). Purely client-side: settle
+   * the optimism `failed` so the row returns, with no server round-trip and no
+   * durable record to clear (the fold phase persisted none).
+   */
+  async revertOptimistic(foldId: string): Promise<void> {
+    await this.enqueue(async () => {
+      await this.store.settle(foldId, 'failed')
+      await this.clearRetired()
+      await this.drainAndEmit()
+    })
+  }
+
+  /**
    * Send a translated mutation to the runtime and link/settle its receipt
    * against the durable pending set (stamping the dispatching link so the
    * engine's reconciler can query its settlement cross-link, D44b). On a
@@ -1045,10 +1100,42 @@ class EntityStoreController {
 // `getRuntimeAdapter()` shouldn't need to know this method exists at all.
 let activeFlush: (() => Promise<void>) | undefined
 
+// The active controller, for the deferred-discard fold/revert bridge (FIX1 /
+// D134). Module-level (like `activeFlush`) rather than on the `RuntimeAdapter`
+// object because the fold/revert are pure client-side store ops that never
+// cross the transport — they must not be forced onto the exact `RuntimeAdapter`
+// return shape (an excess property there is a compile error at the call site).
+let activeController: EntityStoreController | undefined
+
 /** Await any store op the active entity-store adapter has queued/running.
  *  A no-op before the adapter installs (nothing durable is in flight yet). */
 export function flushActiveEntityStore(): Promise<void> {
   return activeFlush ? activeFlush() : Promise.resolve()
+}
+
+/**
+ * FIX1 / D134 — apply a deferred discard's optimistic destroy fold NOW (the
+ * instant blink) without dispatching, returning its foldId (or null when there
+ * is no active store or the op has no local fold). See
+ * {@link EntityStoreController.foldOptimistic}.
+ */
+export function foldOptimisticMailMutation(
+  request: RuntimeRunMutationRequest,
+): Promise<string | null> {
+  return activeController
+    ? activeController.foldOptimistic(request)
+    : Promise.resolve(null)
+}
+
+/**
+ * FIX1 / D134 — revert a never-committed optimistic fold (Undo within the
+ * grace); the row returns with no server round-trip. See
+ * {@link EntityStoreController.revertOptimistic}.
+ */
+export function revertOptimisticMailMutation(foldId: string): Promise<void> {
+  return activeController
+    ? activeController.revertOptimistic(foldId)
+    : Promise.resolve()
 }
 
 /** Test-only: override/clear the active flush without constructing a full
@@ -1069,6 +1156,7 @@ export function createEntityStoreAdapter(
 ): RuntimeAdapter {
   const controller = new EntityStoreController(deps)
   activeFlush = () => controller.flush()
+  activeController = controller
   return {
     ...deps.base,
     openRuntimeLinkMessageListView: (request) =>
