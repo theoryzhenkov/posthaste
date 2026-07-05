@@ -433,8 +433,11 @@ fn write_through_draft_registry_on_message_upsert_tx(
 /// registry REPOINTS to it; otherwise the draft is confirmed gone and the
 /// registry FORGETS the key. Within-batch rotations (delete old + upsert new)
 /// pass through a transient forget here and re-register in the upsert loop
-/// below, all inside one transaction. Runs only on sync's delete/prune paths —
-/// enqueue-time removal on user discard is unchanged until M70.
+/// below, all inside one transaction. This is one of exactly two forget sites
+/// (M70): the other is the `DraftDelete` settlement in the domain service's
+/// flush. Both fire only on CONFIRMED destruction and both are idempotent
+/// deletes of the same row, so whichever observes the destruction second is a
+/// no-op — a draft's mapping is forgotten exactly once, never at enqueue.
 ///
 /// @spec docs/eph/RFC-L2-draft-identity#21-d135--one-authority-the-draft_registry
 fn write_through_draft_registry_on_message_delete_tx(
