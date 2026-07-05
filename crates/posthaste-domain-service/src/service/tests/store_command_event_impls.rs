@@ -216,7 +216,11 @@ impl OperationOutboxStore for TestStore {
         ops.retain(|op| &op.id != id);
         Ok(())
     }
+}
 
+/// M68: the draft-identity methods, extracted into the `DraftRegistry` port —
+/// same in-memory alias/projection behavior as before the split.
+impl DraftRegistry for TestStore {
     fn resolve_draft_entity(
         &self,
         account_id: &AccountId,
