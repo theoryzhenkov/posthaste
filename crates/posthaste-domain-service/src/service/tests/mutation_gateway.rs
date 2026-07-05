@@ -27,6 +27,11 @@ pub(super) struct MutationGateway {
     pub(super) save_draft_calls: Mutex<Vec<Option<MessageId>>>,
     /// The `idempotent_redelivery` flag (DS3/D133) of each `save_draft` call.
     pub(super) save_draft_idempotent_calls: Mutex<Vec<bool>>,
+    /// Committed draft-save identities keyed by `idempotency_key` -> the provider
+    /// id the first (committing) attempt minted. A second `save_draft` under a key
+    /// already present is a lost-response redelivery that returns the SAME id — no
+    /// twin draft (models the deterministic create-with-id dedup — DS2).
+    pub(super) committed_draft_saves: Mutex<Vec<(String, MessageId)>>,
     pub(super) delete_draft_calls: Mutex<Vec<MessageId>>,
     /// The `idempotent_redelivery` flag (D133) of each `delete_draft` call.
     pub(super) delete_draft_idempotent_calls: Mutex<Vec<bool>>,
@@ -78,6 +83,7 @@ impl MutationGateway {
             save_draft_results: Mutex::new(Vec::new()),
             save_draft_calls: Mutex::new(Vec::new()),
             save_draft_idempotent_calls: Mutex::new(Vec::new()),
+            committed_draft_saves: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
             delete_draft_idempotent_calls: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
@@ -317,6 +323,7 @@ impl MailGateway for MutationGateway {
         _request: &SendMessageRequest,
         replace: Option<&MessageId>,
         idempotent_redelivery: bool,
+        idempotency_key: &str,
     ) -> Result<MessageId, GatewayError> {
         self.save_draft_idempotent_calls
             .lock()
@@ -330,12 +337,28 @@ impl MailGateway for MutationGateway {
             calls.push(replace.cloned());
             calls.len()
         };
+        // A redelivery under a key that already committed a create+destroy
+        // server-side returns the SAME provider id — the deterministic
+        // create-with-id no-ops the duplicate create, so no twin draft results
+        // (DS2). This is what closes the lost-response window.
+        let mut committed = self
+            .committed_draft_saves
+            .lock()
+            .expect("committed draft saves poisoned");
+        if let Some((_, id)) = committed.iter().find(|(key, _)| key == idempotency_key) {
+            return Ok(id.clone());
+        }
+        let new_id = MessageId::from(format!("provider-draft-{call_index}"));
+        // Record the commit *before* applying the configured outcome, so an `Err`
+        // outcome models "created+destroyed server-side but the response was lost."
+        committed.push((idempotency_key.to_string(), new_id.clone()));
+        drop(committed);
         let mut results = self
             .save_draft_results
             .lock()
             .expect("save draft results poisoned");
         if results.is_empty() {
-            Ok(MessageId::from(format!("provider-draft-{call_index}")))
+            Ok(new_id)
         } else {
             results.remove(0)
         }

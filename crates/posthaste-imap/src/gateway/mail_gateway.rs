@@ -176,6 +176,10 @@ impl MailGateway for LiveImapSmtpGateway {
         // (DS3/D133) is a JMAP `Email/set` `notFound`-mask concern only and does
         // not change the IMAP path.
         _idempotent_redelivery: bool,
+        // The deterministic create-id (DS2) is a JMAP create-with-id device; IMAP
+        // APPEND has no create-id, so the stable X-Posthaste-Draft-Id header the
+        // APPEND already stamps is the id that survives a redelivery.
+        _idempotency_key: &str,
     ) -> Result<MessageId, GatewayError> {
         let mut lease = self
             .sessions

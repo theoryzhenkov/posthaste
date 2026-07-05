@@ -39,7 +39,7 @@ async fn draft_id_header_round_trips_through_save_and_sync() {
         ..Default::default()
     };
     let provider_id = gateway
-        .save_draft(&account, &request, None, false)
+        .save_draft(&account, &request, None, false, "draft-op-roundtrip")
         .await
         .expect("draft should save");
 
