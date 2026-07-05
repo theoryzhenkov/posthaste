@@ -652,3 +652,153 @@ async fn mock_api(State(state): State<Arc<MockJmapState>>, Json(body): Json<Valu
         other => panic!("unexpected mock JMAP method: {other}"),
     }
 }
+
+/// Mailbox full-sync mock whose `Mailbox/query` is capped AND ignores `position`
+/// (always the same first page) and reports no `total` — an id set that cannot
+/// be proven complete, so mailbox prune-by-absence must be refused (DP-C3).
+async fn mock_capped_stuck_mailbox_query_api(
+    State(state): State<Arc<MockJmapState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let method_calls = body["methodCalls"]
+        .as_array()
+        .expect("methodCalls array present");
+    let method = method_calls[0][0]
+        .as_str()
+        .expect("method name present")
+        .to_string();
+    state
+        .seen_methods
+        .lock()
+        .expect("seen methods lock poisoned")
+        .push(method.clone());
+
+    match method.as_str() {
+        // Always the same two ids regardless of `position`, capped to the applied
+        // `limit`, and no `total`: unpageable, so completeness cannot be proven.
+        "Mailbox/query" => Json(json!({
+            "methodResponses": [[
+                "Mailbox/query",
+                {
+                    "accountId": "acc1",
+                    "queryState": "mq-1",
+                    "position": 0,
+                    "limit": 2,
+                    "ids": ["inbox", "archive"]
+                },
+                "s0"
+            ]],
+            "sessionState": "session-1"
+        })),
+        "Mailbox/get" => {
+            let ids = method_calls[0][1]["ids"].as_array().expect("ids present");
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|id| {
+                    let id = id.as_str().expect("id string");
+                    json!({ "id": id, "name": id, "role": Value::Null,
+                            "totalEmails": 0, "unreadEmails": 0 })
+                })
+                .collect();
+            Json(json!({
+                "methodResponses": [[
+                    "Mailbox/get",
+                    { "accountId": "acc1", "state": "mailbox-state-1", "list": list,
+                      "notFound": [] },
+                    "s0"
+                ]],
+                "sessionState": "session-1"
+            }))
+        }
+        other => panic!("unexpected mock JMAP method: {other}"),
+    }
+}
+
+/// DP-C3 mail-loss test: a capped, unpageable `Mailbox/query` (no `total`) cannot
+/// be proven exhaustive, so the full mailbox snapshot upserts what it got but
+/// does NOT earn `replace_all_mailboxes` — pruning is disabled so a transiently-
+/// capped listing can never cascade-delete every local mailbox.
+#[tokio::test]
+async fn capped_mailbox_query_that_cannot_be_paged_refuses_to_prune() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock JMAP server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let app_state = Arc::new(MockJmapState {
+        base_url: format!("http://{addr}"),
+        seen_methods: Mutex::new(Vec::new()),
+    });
+    let app = Router::new()
+        .route("/.well-known/jmap", get(mock_session))
+        .route("/api", post(mock_capped_stuck_mailbox_query_api))
+        .with_state(app_state.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve mock JMAP");
+    });
+
+    let client = connect_jmap_client(&format!("http://{addr}"), Some("dev"), "devpass")
+        .await
+        .expect("connect mock client");
+
+    let sync = fetch_mailbox_sync(&client, None)
+        .await
+        .expect("full mailbox sync succeeds");
+
+    assert_eq!(sync.mailboxes.len(), 2, "what arrived is still upserted");
+    assert!(
+        !sync.replace_all_mailboxes,
+        "an unprovable/incomplete mailbox listing MUST NOT drive prune-by-absence",
+    );
+
+    server.abort();
+    let _ = server.await;
+}
+
+/// A complete (short-tail) `Mailbox/query` earns `replace_all_mailboxes`, so a
+/// genuinely-deleted mailbox is still pruned.
+#[tokio::test]
+async fn complete_mailbox_query_earns_prune() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock JMAP server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let app_state = Arc::new(MockJmapState {
+        base_url: format!("http://{addr}"),
+        seen_methods: Mutex::new(Vec::new()),
+    });
+    let app = Router::new()
+        .route("/.well-known/jmap", get(mock_session))
+        .route(
+            "/api",
+            post(
+                |State(state): State<Arc<MockJmapState>>, Json(body): Json<Value>| async move {
+                    let method_calls = body["methodCalls"].as_array().expect("methodCalls");
+                    let method = method_calls[0][0].as_str().expect("method").to_string();
+                    state.seen_methods.lock().expect("lock").push(method.clone());
+                    mock_mailbox_full_sync_response(&method)
+                        .unwrap_or_else(|| panic!("unexpected method {method}"))
+                },
+            ),
+        )
+        .with_state(app_state.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve mock JMAP");
+    });
+
+    let client = connect_jmap_client(&format!("http://{addr}"), Some("dev"), "devpass")
+        .await
+        .expect("connect mock client");
+
+    let sync = fetch_mailbox_sync(&client, None)
+        .await
+        .expect("full mailbox sync succeeds");
+
+    assert_eq!(sync.mailboxes.len(), 1);
+    assert!(
+        sync.replace_all_mailboxes,
+        "a provably-complete mailbox listing earns prune-by-absence",
+    );
+
+    server.abort();
+    let _ = server.await;
+}

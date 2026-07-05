@@ -60,6 +60,8 @@ fn full_imap_snapshot_prunes_stale_location_without_deleting_canonical_message(
             imap_message_locations: vec![sent_location.clone(), starred_location],
             deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
+            absence_deleted_imap_message_locations: Vec::new(),
+            absence_deleted_message_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: true,
             replace_all_messages: true,
@@ -80,6 +82,8 @@ fn full_imap_snapshot_prunes_stale_location_without_deleting_canonical_message(
             imap_message_locations: vec![sent_location.clone()],
             deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
+            absence_deleted_imap_message_locations: Vec::new(),
+            absence_deleted_message_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: true,
             replace_all_messages: true,
@@ -156,6 +160,8 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
             imap_message_locations: vec![archive_location.clone(), inbox_location.clone()],
             deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
+            absence_deleted_imap_message_locations: Vec::new(),
+            absence_deleted_message_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: true,
             replace_all_messages: true,
@@ -172,6 +178,8 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
             imap_message_locations: Vec::new(),
             deleted_imap_message_locations: vec![inbox_location.key()],
             deleted_mailbox_ids: Vec::new(),
+            absence_deleted_imap_message_locations: Vec::new(),
+            absence_deleted_message_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
             replace_all_messages: false,
@@ -224,6 +232,150 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
             .filter(|event| event.payload["removedMailboxId"] == inbox_id.as_str())
             .count(),
         1
+    );
+    Ok(())
+}
+
+// spec: docs/eph/AUDIT-L2-architecture-health (DP-C4 / H1)
+// DP-C4 mail-loss: the IMAP explicit-delete loop must route ABSENCE-derived
+// (inferred from a possibly-truncated `UID SEARCH UNDELETED`) deletions through
+// the DS1 floor guard, while server-asserted VANISHED deletions bypass it.
+fn imap_inbox_location(message_id: &MessageId, uid: u32) -> ImapMessageLocation {
+    ImapMessageLocation {
+        message_id: message_id.clone(),
+        mailbox_id: MailboxId::from("imap:inbox"),
+        uid_validity: ImapUidValidity(7),
+        uid: ImapUid(uid),
+        modseq: Some(ImapModSeq(u64::from(90 + uid))),
+        updated_at: "2026-04-25T00:00:00Z".to_string(),
+    }
+}
+
+fn seed_imap_inbox_messages(
+    store: &DatabaseStore,
+    account: &AccountId,
+    count: u32,
+) -> Result<Vec<(MessageId, ImapMessageLocation)>, StoreError> {
+    let mut seeded = Vec::new();
+    let mut messages = Vec::new();
+    let mut locations = Vec::new();
+    for i in 1..=count {
+        let id = MessageId::from(format!("imap:msg-{i}"));
+        let location = imap_inbox_location(&id, 10 + i);
+        messages.push(MessageRecord {
+            mailbox_ids: vec![MailboxId::from("imap:inbox")],
+            ..sample_message(id.as_str(), "imap:inbox", Some(&format!("mime-{i}")))
+        });
+        locations.push(location.clone());
+        seeded.push((id, location));
+    }
+    store.apply_sync_batch(
+        account,
+        &SyncBatch {
+            messages,
+            imap_message_locations: locations,
+            ..SyncBatch::default()
+        },
+    )?;
+    Ok(seeded)
+}
+
+#[test]
+fn imap_absence_floor_guard_refuses_drastic_absence_deletion() -> Result<(), StoreError> {
+    // A truncated/empty `UID SEARCH UNDELETED` makes most of a mailbox's local
+    // mail look "absent". BEFORE the guard the explicit-delete loop wiped it;
+    // now the absence-derived removals over the floor are refused and local mail
+    // survives.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    let seeded = seed_imap_inbox_messages(&store, &account, 4)?;
+
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            absence_deleted_imap_message_locations: seeded[0..3]
+                .iter()
+                .map(|(_, location)| location.key())
+                .collect(),
+            absence_deleted_message_ids: seeded[0..3]
+                .iter()
+                .map(|(id, _)| id.clone())
+                .collect(),
+            ..SyncBatch::default()
+        },
+    )?;
+
+    assert_eq!(
+        store.list_messages(&account, None)?.len(),
+        4,
+        "absence-derived deletions over the floor must be refused (local mail preserved)",
+    );
+    Ok(())
+}
+
+#[test]
+fn imap_vanished_deletions_bypass_the_absence_floor_guard() -> Result<(), StoreError> {
+    // A GENUINE VANISHED delete is a server assertion and must still delete, even
+    // when it removes more than the floor fraction of the local store.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    let seeded = seed_imap_inbox_messages(&store, &account, 4)?;
+
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            deleted_imap_message_locations: seeded[0..3]
+                .iter()
+                .map(|(_, location)| location.key())
+                .collect(),
+            deleted_message_ids: seeded[0..3].iter().map(|(id, _)| id.clone()).collect(),
+            ..SyncBatch::default()
+        },
+    )?;
+
+    let remaining = store.list_messages(&account, None)?;
+    assert_eq!(
+        remaining.len(),
+        1,
+        "server-asserted VANISHED deletions delete unconditionally, past the floor",
+    );
+    assert_eq!(remaining[0].id, seeded[3].0);
+    Ok(())
+}
+
+#[test]
+fn imap_absence_deletion_below_floor_still_prunes() -> Result<(), StoreError> {
+    // The guard must not over-correct: an ordinary single absence-derived
+    // deletion (well under the floor) still prunes normally.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    let seeded = seed_imap_inbox_messages(&store, &account, 4)?;
+
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            absence_deleted_imap_message_locations: vec![seeded[0].1.key()],
+            absence_deleted_message_ids: vec![seeded[0].0.clone()],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    assert_eq!(
+        store.list_messages(&account, None)?.len(),
+        3,
+        "a single genuine absence deletion still prunes",
+    );
+    assert!(
+        store
+            .get_message_detail(&account, &seeded[0].0)?
+            .is_none(),
+        "the absent message is pruned",
     );
     Ok(())
 }

@@ -152,6 +152,7 @@ pub(super) fn imap_gmail_flagged_delta_batch(
         }],
         locations,
         Vec::new(),
+        Vec::new(),
         "2026-04-25T12:01:00Z".to_string(),
     )
 }
@@ -189,6 +190,7 @@ pub(super) fn imap_single_label_vanished_batch(
         Vec::new(),
         locations,
         vec![vanished],
+        Vec::new(),
         "2026-04-25T12:01:00Z".to_string(),
     )
 }
