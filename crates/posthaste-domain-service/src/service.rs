@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::{
     AutomationBackfillStore, CacheStore, ConfigDiff, ConfigRepository, ConversationReadStore,
-    EventStore, MailGateway, MailStore, MailboxReadStore, MailboxRoleOverrideStore,
+    DraftRegistry, EventStore, MailGateway, MailStore, MailboxReadStore, MailboxRoleOverrideStore,
     MessageCommandStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
     OperationOutboxStore, ServiceResultExt, SharedConfigRepository, SmartMailboxStore, SnoozeStore,
     SourceDataStore, SourceProjectionStore, SyncStateStore, SyncWriteStore, TagReadStore,
@@ -63,6 +63,7 @@ pub struct MailService {
     automation_backfills: Arc<dyn AutomationBackfillStore>,
     snooze_reader: Arc<dyn SnoozeStore>,
     outbox: Arc<dyn OperationOutboxStore>,
+    draft_registry: Arc<dyn DraftRegistry>,
 }
 
 impl MailService {
@@ -90,7 +91,8 @@ impl MailService {
             cache_store: store.clone(),
             automation_backfills: store.clone(),
             snooze_reader: store.clone(),
-            outbox: store,
+            outbox: store.clone(),
+            draft_registry: store,
         }
     }
 }

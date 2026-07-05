@@ -317,7 +317,12 @@ impl OperationOutboxStore for DatabaseStore {
             Ok(())
         })
     }
+}
 
+/// M68: the draft-identity methods, extracted from `OperationOutboxStore` into
+/// the dedicated `DraftRegistry` port — same SQL, same behavior, still backed
+/// by the `draft_alias` table (the schema rename is M73).
+impl DraftRegistry for DatabaseStore {
     fn resolve_draft_entity(
         &self,
         account_id: &AccountId,
