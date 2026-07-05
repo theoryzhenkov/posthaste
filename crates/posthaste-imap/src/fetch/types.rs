@@ -32,8 +32,10 @@ pub struct ImapChangedSinceSnapshot {
 
 /// Fetch and map header-level records for every message in one IMAP mailbox.
 ///
-/// This performs a conservative full mailbox snapshot: `UID SEARCH ALL` obtains
-/// candidate UIDs, then chunked `UID FETCH` retrieves only metadata and
+/// This performs a conservative full mailbox snapshot: `UID SEARCH UNDELETED`
+/// obtains candidate UIDs (messages flagged `\Deleted` but not yet expunged are
+/// excluded — this is what keeps a pending hard-delete from being re-imported;
+/// see DP-C1), then chunked `UID FETCH` retrieves only metadata and
 /// RFC822 headers. Message bodies remain lazy.
 ///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
