@@ -1,0 +1,43 @@
+---
+// Override the docs footer to keep Starlight's default footer (prev/next
+// pagination, TOC-driven links) and append a slim brand strip so the docs share
+// the site's footer voice.
+import Default from '@astrojs/starlight/components/Footer.astro'
+---
+
+<Default {...Astro.props}><slot /></Default>
+
+<div class="brand-footer">
+  <span>Posthaste — your mail, delivered at Posthaste.</span>
+  <nav aria-label="Site">
+    <a href="/">Home</a>
+    <a href="https://github.com/theoryzhenkov/posthaste">GitHub</a>
+    <a href="https://discord.gg/8ARFrDa2Gv">Discord</a>
+  </nav>
+</div>
+
+<style>
+  .brand-footer {
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--sl-color-hairline);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    justify-content: space-between;
+    align-items: center;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+  .brand-footer nav {
+    display: flex;
+    gap: 1.25rem;
+  }
+  .brand-footer a {
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+  }
+  .brand-footer a:hover {
+    color: var(--sl-color-white);
+  }
+</style>

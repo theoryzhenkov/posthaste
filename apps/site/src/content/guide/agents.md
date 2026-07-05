@@ -1,11 +1,10 @@
 ---
-title: Plug in an agent
-navLabel: Plug in an agent
+title: Plug your AI agent into Posthaste
 description: Connect your AI agent over MCP — the one thing everyone gets wrong, and a full worked example.
-order: 3
+sidebar:
+  label: Plug in an agent
+  order: 3
 ---
-
-# Plug your AI agent into Posthaste
 
 This is the part people are most excited about — and the part most people get
 subtly wrong the first time. So we'll name the confusion up front, clear it up,
@@ -145,7 +144,7 @@ try to instruct the agent, which then acts with your key. So:
   only mail you trust can set it off.
 
 Before you grant an autonomous agent any write ability, read **threat 2 (prompt
-injection)** in the [security guide](../scripting-security.md).
+injection)** in the [security guide](scripting-security.md).
 
 ---
 
@@ -157,7 +156,7 @@ do. That's the piece a stock chat app is missing — and once it exists, the eve
 feed genuinely wakes your agent.
 
 You don't have to design it from scratch: the technical
-[scripting quickstart](../scripting-quickstart.md#reference-a-wake-on-event-agent-loop) describes a
+[scripting quickstart](scripting-quickstart.md#reference-a-wake-on-event-agent-loop) describes a
 reference wake-on-event loop you can adapt. The shape is: connect over MCP with
 your grants, wait for a `rule.fired` event, then run one agent turn with the
 tools. To keep that loop alive across reboots, wrap it as a background
@@ -297,5 +296,5 @@ tools, are in [Automations → Keeping it running](automations.md#keeping-it-run
   and especially before letting an autonomous agent write or send.
 
 For the exact tools, the event contract, and the reference loop, see the
-[scripting quickstart](../scripting-quickstart.md); for the full threat model,
-the [security guide](../scripting-security.md).
+[scripting quickstart](scripting-quickstart.md); for the full threat model,
+the [security guide](scripting-security.md).

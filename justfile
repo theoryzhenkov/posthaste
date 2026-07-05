@@ -1,7 +1,6 @@
 # Root justfile - orchestrates backend, frontend, desktop, docs, and dev stacks
 
 mod template
-mod mkdocs
 mod backend 'crates/justfile'
 mod web 'apps/web/justfile'
 mod mcp 'apps/mcp/justfile'

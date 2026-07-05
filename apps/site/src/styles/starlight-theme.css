@@ -1,0 +1,67 @@
+/*
+ * Posthaste brand theme for Starlight. Maps the site's `:root` design tokens
+ * (see src/styles.css) onto Starlight's `--sl-*` theme variables so the docs
+ * inherit the site's dark palette, coral accent and Geist typography while
+ * keeping Starlight's nav / search / TOC / prev-next intact. The site is
+ * dark-only, so the same palette is applied to both Starlight themes.
+ */
+
+:root {
+  --sl-font:
+    'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --sl-font-mono:
+    'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root,
+:root[data-theme='light'],
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Coral accent (site --coral). */
+  --sl-color-accent-low: oklch(0.3 0.08 45);
+  --sl-color-accent: oklch(0.68 0.17 45);
+  --sl-color-accent-high: oklch(0.83 0.1 45);
+  --sl-color-text-accent: oklch(0.78 0.14 45);
+
+  /* Text + gray scale (site --fg / --muted / --subtle / --faint / borders). */
+  --sl-color-white: oklch(0.94 0.005 80);
+  --sl-color-gray-1: oklch(0.88 0.006 75);
+  --sl-color-gray-2: oklch(0.78 0.008 70);
+  --sl-color-gray-3: oklch(0.66 0.008 70);
+  --sl-color-gray-4: oklch(0.5 0.008 60);
+  --sl-color-gray-5: oklch(0.34 0.008 60);
+  --sl-color-gray-6: oklch(0.26 0.008 60);
+  --sl-color-gray-7: oklch(0.225 0.008 60);
+  --sl-color-black: oklch(0.17 0.008 55);
+
+  /* Surfaces (site --bg-root / --bg / --bg-titlebar / --bg-sidebar). */
+  --sl-color-bg: oklch(0.19 0.008 55);
+  --sl-color-bg-nav: oklch(0.185 0.008 55);
+  --sl-color-bg-sidebar: oklch(0.195 0.008 55);
+  --sl-color-bg-inline-code: oklch(0.26 0.008 60);
+  --sl-color-bg-accent: oklch(0.68 0.17 45);
+
+  --sl-color-hairline: oklch(0.32 0.008 60);
+  --sl-color-hairline-light: oklch(0.28 0.008 60);
+  --sl-color-hairline-shade: oklch(0.24 0.008 60);
+}
+
+/* Match the landing's soft two-tone glow so docs pages feel like the site. */
+:root body {
+  background:
+    radial-gradient(
+      circle at 84% 0%,
+      rgb(111 173 232 / 0.06),
+      transparent 32rem
+    ),
+    radial-gradient(circle at 8% 0%, rgb(214 120 80 / 0.06), transparent 30rem),
+    var(--sl-color-bg);
+  background-attachment: fixed;
+}
+
+/* Slightly tighter, brand-weighted headings. */
+.sl-markdown-content h1,
+.content-panel h1 {
+  letter-spacing: -0.015em;
+}
