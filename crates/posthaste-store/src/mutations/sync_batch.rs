@@ -147,6 +147,7 @@ fn apply_sync_batch_tx_impl(
         // but needs countDeltas to keep the sidebar live (was projection-less).
         let previous_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
         delete_message_and_track_projection_inputs(tx, account_id, message_id, &mut affected)?;
+        write_through_draft_registry_on_message_delete_tx(tx, account_id, message_id)?;
         let count_deltas =
             crate::query::mailbox_counts_json_tx(tx, account_id, previous_mailboxes.iter())?;
         let mut payload = json!({ "messageId": message_id.as_str(), "deleted": true });
@@ -193,6 +194,7 @@ fn apply_sync_batch_tx_impl(
             &mut affected,
             &mut events,
         )?;
+        write_through_draft_registry_on_message_upsert_tx(tx, account_id, message)?;
     }
 
     // Pure single-statement loops over the whole batch: hoist one prepared
@@ -383,12 +385,102 @@ pub(crate) fn prune_messages_absent_from_remote_tx(
             continue;
         }
         delete_message_and_track_projection_inputs(tx, account_id, message_id, affected)?;
+        write_through_draft_registry_on_message_delete_tx(tx, account_id, message_id)?;
         events.record(
             EVENT_TOPIC_MESSAGE_UPDATED,
             None,
             Some(message_id),
             json!({ "messageId": message_id.as_str(), "deleted": true }),
         )?;
+    }
+    Ok(())
+}
+
+/// M69 (D135) sync write-through, upsert half: a synced message that carries a
+/// stable draft key (the round-tripped `X-Posthaste-Draft-Id` header, already
+/// projected as `message.draft_id`) upserts the draft registry (still the
+/// `draft_alias` table until the M73 rename) in the SAME transaction as the
+/// message row itself, so the registry can never be torn or stale relative to
+/// the projection. This makes the registry the single authority for the
+/// stable-key → live-entity mapping: a draft synced from the server / another
+/// device / a past session resolves through the registry alone, and an
+/// observed rotation (same key, new provider id) repoints it.
+///
+/// @spec docs/eph/RFC-L2-draft-identity#21-d135--one-authority-the-draft_registry
+fn write_through_draft_registry_on_message_upsert_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message: &posthaste_domain_model::MessageRecord,
+) -> Result<(), StoreError> {
+    let Some(draft_key) = message.draft_id.as_deref() else {
+        return Ok(());
+    };
+    tx.execute_cached(
+        "INSERT INTO draft_alias (account_id, draft_key, entity_id)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(account_id, draft_key) DO UPDATE SET entity_id = excluded.entity_id",
+        params![account_id.as_str(), draft_key, message.id.as_str()],
+    )
+    .map_err(sql_to_store_error)?;
+    Ok(())
+}
+
+/// M69 (D135) sync write-through, delete half: when sync deletes a message row
+/// the registry points at, the mapping is corrected in the SAME transaction.
+/// If another projected row still carries the same draft key (a rotation whose
+/// new row was already applied — this chunk's deletes run before its upserts,
+/// but an earlier chunk or batch may have upserted the successor first), the
+/// registry REPOINTS to it; otherwise the draft is confirmed gone and the
+/// registry FORGETS the key. Within-batch rotations (delete old + upsert new)
+/// pass through a transient forget here and re-register in the upsert loop
+/// below, all inside one transaction. Runs only on sync's delete/prune paths —
+/// enqueue-time removal on user discard is unchanged until M70.
+///
+/// @spec docs/eph/RFC-L2-draft-identity#21-d135--one-authority-the-draft_registry
+fn write_through_draft_registry_on_message_delete_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+) -> Result<(), StoreError> {
+    let mut keys_statement = tx
+        .prepare_cached("SELECT draft_key FROM draft_alias WHERE account_id = ?1 AND entity_id = ?2")
+        .map_err(sql_to_store_error)?;
+    let draft_keys = keys_statement
+        .query_map(params![account_id.as_str(), message_id.as_str()], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(sql_to_store_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)?;
+
+    for draft_key in draft_keys {
+        // The message row is already deleted, so any hit is a surviving
+        // projected row for the same stable key — the rotation's successor.
+        let survivor = tx
+            .query_row_cached(
+                "SELECT id FROM message WHERE account_id = ?1 AND draft_id = ?2 LIMIT 1",
+                params![account_id.as_str(), draft_key.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(sql_to_store_error)?;
+        match survivor {
+            Some(live_entity_id) => {
+                tx.execute_cached(
+                    "UPDATE draft_alias SET entity_id = ?3
+                     WHERE account_id = ?1 AND draft_key = ?2",
+                    params![account_id.as_str(), draft_key.as_str(), live_entity_id],
+                )
+                .map_err(sql_to_store_error)?;
+            }
+            None => {
+                tx.execute_cached(
+                    "DELETE FROM draft_alias WHERE account_id = ?1 AND draft_key = ?2",
+                    params![account_id.as_str(), draft_key.as_str()],
+                )
+                .map_err(sql_to_store_error)?;
+            }
+        }
     }
     Ok(())
 }
