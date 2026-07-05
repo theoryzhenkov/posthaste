@@ -4,18 +4,20 @@ use super::*;
 /// (`X-Posthaste-Draft-Id`) and the entity id — temporary before the first
 /// flush, provider-assigned after — currently embodying it (D136).
 ///
-/// M68 carved this out of `OperationOutboxStore` as a mechanical,
-/// behavior-identical extraction. It is still backed by the existing
-/// `draft_alias` table, `resolve_draft_entity` still keeps the D131
-/// alias-then-projection fallback internally, and the D136 vocabulary rename
-/// (resolve/register/rotate/forget) plus the sync write-through are later
-/// slices (M69+).
+/// M68 carved this out of `OperationOutboxStore` as a mechanical extraction;
+/// M69 (D135) made the registry AUTHORITATIVE: sync writes through to it in
+/// the same transaction as every message upsert/prune, so
+/// `resolve_draft_entity` is one lookup against one authority — the D131
+/// alias-then-projection fallback is deleted. It is still backed by the
+/// `draft_alias` table (rename is M73); the D136 vocabulary rename
+/// (resolve/register/rotate/forget) and resolve-at-flush are M70+.
 ///
 /// @spec docs/eph/RFC-L2-draft-identity#22-d136--one-seam-the-draftregistry-port-resolve-at-flush
 pub trait DraftRegistry: Send + Sync {
     /// Resolve a stable client draft key to the entity id currently representing
     /// that draft (a temporary id before its first flush, a provider id after).
-    /// Returns `None` for a key never saved before.
+    /// Returns `None` for a key never saved in this runtime and never observed
+    /// by sync — one lookup against the one authority (M69/D135).
     ///
     /// @spec docs/L1-outbox#temp-id-reconciliation
     fn resolve_draft_entity(

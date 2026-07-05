@@ -1077,17 +1077,18 @@ async fn discard_draft_removes_the_row_emits_deleted_and_queues_a_non_idempotent
 }
 
 #[tokio::test]
-async fn discard_of_a_synced_draft_without_alias_resolves_via_projection() {
-    // The owner repro (DS2/D131): a draft synced from the server / created on
-    // another device / surviving a restart has its `message` row keyed by the
-    // live server Email id ("E1") and carrying the stable `draft_id`
-    // ("draft-local-X"), but NO `draft_alias` (that is only written by a
-    // create/save in THIS runtime). A stable-id list-row discard must resolve
-    // draft-local-X → E1 via the projection, NOT surface a spurious NotFound,
+async fn discard_of_a_synced_draft_resolves_via_the_sync_written_registry() {
+    // The owner repro (DS2/D131), M69 shape: a draft synced from the server /
+    // created on another device / surviving a restart was NOT saved in this
+    // runtime, but sync's in-transaction write-through registered its stable
+    // key ("draft-local-X") → live server Email id ("E1") in the draft
+    // registry when the message row was projected (D135). A stable-id
+    // list-row discard must resolve draft-local-X → E1 via the registry ALONE
+    // (the projection fallback is deleted), NOT surface a spurious NotFound,
     // and target the LIVE Email id in the queued provider destroy.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("E1", &["drafts"]));
-    store.draft_projection.lock().unwrap().push((
+    store.draft_aliases.lock().unwrap().push((
         account.to_string(),
         "draft-local-X".to_string(),
         "E1".to_string(),
@@ -1097,7 +1098,7 @@ async fn discard_of_a_synced_draft_without_alias_resolves_via_projection() {
     let ack = service
         .discard_draft(&account, MessageId::from("draft-local-X"))
         .await
-        .expect("synced-draft discard resolves via the projection, no NotFound");
+        .expect("synced-draft discard resolves via the registry, no NotFound");
     let reconciling = ack
         .events
         .iter()
