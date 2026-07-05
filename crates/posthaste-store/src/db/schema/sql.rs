@@ -123,6 +123,7 @@ pub(super) const SCHEMA_SQL: &str = "
                 uid_validity INTEGER NOT NULL,
                 highest_uid INTEGER,
                 highest_modseq TEXT,
+                partial_initial_uid INTEGER,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (account_id, mailbox_id)
             );

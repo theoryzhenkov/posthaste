@@ -227,7 +227,47 @@ pub fn imap_mailbox_state_from_header_snapshot(
                 .filter_map(|header| header.location.modseq)
                 .max()
         }),
+        // A completed full snapshot clears any resumable initial-sync checkpoint.
+        partial_initial_uid: None,
         updated_at,
+    }
+}
+
+/// Upsert-only chunk batch for a resumable INITIAL full sync (B4).
+///
+/// Carries this chunk's projected messages + IMAP locations and the advancing
+/// per-mailbox checkpoint (`state`). It NEVER sets `replace_all_messages` and
+/// carries no deletions: a mid-sync checkpoint commits UPSERTS only and must not
+/// drive prune-by-absence (the DS1 mail-loss invariant) — the local set is not
+/// yet the complete remote set. Mailboxes are emitted once, separately, via
+/// [`imap_mailbox_sync_batch`], so this batch carries none.
+///
+/// When `state.partial_initial_uid` is `Some`, the snapshot is still in progress
+/// and a restart resumes from that UID; when it is `None` (and `highest_uid` is
+/// set), this is the finalizing chunk that completes the snapshot.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+pub fn imap_initial_snapshot_chunk_batch(
+    discovery: &DiscoveredImapAccount,
+    headers: Vec<ImapMappedHeader>,
+    state: ImapMailboxSyncState,
+) -> SyncBatch {
+    let ProjectedMessages {
+        messages,
+        locations,
+        ..
+    } = messages_and_locations_for_batch(discovery, headers);
+    SyncBatch {
+        mailboxes: Vec::new(),
+        messages,
+        imap_mailbox_states: vec![state],
+        imap_message_locations: locations,
+        deleted_imap_message_locations: Vec::new(),
+        deleted_mailbox_ids: Vec::new(),
+        deleted_message_ids: Vec::new(),
+        replace_all_mailboxes: false,
+        replace_all_messages: false,
+        cursors: Vec::new(),
     }
 }
 
@@ -242,6 +282,7 @@ pub fn imap_mailbox_state_from_changed_since_snapshot(
         uid_validity: snapshot.selected.uid_validity,
         highest_uid: stored.highest_uid,
         highest_modseq: stored.highest_modseq,
+        partial_initial_uid: stored.partial_initial_uid,
         updated_at,
     };
 

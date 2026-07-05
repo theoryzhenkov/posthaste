@@ -233,14 +233,15 @@ fn apply_sync_batch_tx_impl(
             .prepare(
                 "INSERT INTO imap_mailbox_sync_state (
                     account_id, mailbox_id, mailbox_name, uid_validity,
-                    highest_uid, highest_modseq, updated_at
+                    highest_uid, highest_modseq, partial_initial_uid, updated_at
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(account_id, mailbox_id) DO UPDATE SET
                     mailbox_name = excluded.mailbox_name,
                     uid_validity = excluded.uid_validity,
                     highest_uid = excluded.highest_uid,
                     highest_modseq = excluded.highest_modseq,
+                    partial_initial_uid = excluded.partial_initial_uid,
                     updated_at = excluded.updated_at",
             )
             .map_err(sql_to_store_error)?;
@@ -253,6 +254,7 @@ fn apply_sync_batch_tx_impl(
                     state.uid_validity.0,
                     state.highest_uid.map(|uid| uid.0),
                     state.highest_modseq.map(|modseq| modseq.0.to_string()),
+                    state.partial_initial_uid.map(|uid| uid.0),
                     state.updated_at,
                 ])
                 .map_err(sql_to_store_error)?;

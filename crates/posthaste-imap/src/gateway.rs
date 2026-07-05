@@ -3,15 +3,16 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use imap_client::client::tokio::Client as ImapClient;
-use posthaste_domain_model::{FetchedBody, GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState, ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MutationOutcome, ProviderProfile, ReplyContext, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress, SyncProgressStage, SyncTrigger, now_iso8601};
+use posthaste_domain_model::{FetchedBody, GatewayError, Identity, ImapCapabilities, ImapFullSyncReason, ImapMailboxSyncPlan, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapMoveStrategy, ImapSelectedMailbox, ImapUid, ImapUidValidity, MutationOutcome, ProviderProfile, ReplyContext, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncOutcome, SyncProgress, SyncProgressStage, SyncTrigger, now_iso8601};
 use posthaste_domain_model::{AccountId, BlobId, MailboxId, MessageId};
-use posthaste_domain_service::{MailGateway, MailStore, PushEventStream, PushTransport, SecretResolver, SyncProgressReporter, plan_imap_mailbox_sync, plan_imap_move};
+use posthaste_domain_service::{MailGateway, MailStore, PushEventStream, PushTransport, SecretResolver, SyncChunkSink, SyncProgressReporter, plan_imap_mailbox_sync, plan_imap_move};
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
 use crate::fetch::{
-    fetch_mailbox_changed_since_snapshot_with_client,
+    fetch_header_chunk, fetch_mailbox_changed_since_snapshot_with_client,
     fetch_mailbox_condstore_delta_snapshot_with_client, fetch_mailbox_header_snapshot_with_client,
-    fetch_mailbox_headers_after_uid_with_client,
+    fetch_mailbox_headers_after_uid_with_client, search_undeleted_uids, uids_above,
+    INITIAL_SNAPSHOT_CHUNK_SIZE,
 };
 use crate::mailbox::{examine_selected_mailbox, status_imap_mailbox, ImapMailboxStatus};
 use crate::session::ImapSessionManager;
@@ -25,11 +26,11 @@ use crate::mutation::{
 use crate::smtp::transport::append_smtp_sent_copy;
 use crate::{
     imap_attachment_bytes_from_raw_mime, imap_condstore_delta_sync_batch, imap_delta_sync_batch,
-    imap_full_sync_batch, imap_mailbox_replacement_delta,
+    imap_full_sync_batch, imap_initial_snapshot_chunk_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_changed_since_snapshot, imap_mailbox_state_from_header_snapshot,
-    normalize_imap_capabilities, parse_imap_attachment_blob_id, smtp_sent_copy_strategy,
-    submit_smtp_message, DiscoveredImapAccount, DiscoveredImapMailbox, ImapAdapterError,
-    ImapChangedSinceSnapshot, ImapConnectionConfig, ImapMailboxHeaderSnapshot,
+    imap_mailbox_sync_batch, normalize_imap_capabilities, parse_imap_attachment_blob_id,
+    smtp_sent_copy_strategy, submit_smtp_message, DiscoveredImapAccount, DiscoveredImapMailbox,
+    ImapAdapterError, ImapChangedSinceSnapshot, ImapConnectionConfig, ImapMailboxHeaderSnapshot,
     ImapMailboxUidDeltaSnapshot, ImapMappedHeader, SmtpConnectionConfig, SmtpSentCopyStrategy,
 };
 
@@ -46,6 +47,7 @@ mod mutations;
 mod planning;
 mod progress;
 mod send;
+mod streaming;
 mod sync;
 mod types;
 mod utils;
@@ -67,7 +69,8 @@ use planning::{
 };
 use progress::{report_sync_progress, ImapSyncProgressUpdate};
 use send::send_message_via_smtp;
-use sync::sync_imap_account;
+use streaming::sync_imap_account_streamed;
+use sync::{prepare_planned_sync, sync_imap_account, PlannedSync};
 use types::{PlannedImapMailbox, PlannedImapMailboxSync, SyncBatchAccumulator};
 use utils::{imap_error_to_gateway, mailbox_status_proves_unchanged, store_error_to_gateway};
 

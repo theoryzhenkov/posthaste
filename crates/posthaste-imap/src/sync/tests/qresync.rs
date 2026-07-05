@@ -53,6 +53,7 @@ fn condstore_delta_sync_batch_only_deletes_vanished_local_locations() {
             uid_validity: selected.uid_validity,
             highest_uid: Some(ImapUid(42)),
             highest_modseq: Some(ImapModSeq(900)),
+            partial_initial_uid: None,
             updated_at: "2026-04-25T00:00:00Z".to_string(),
         }],
         vec![unchanged_location.clone(), vanished_location.clone()],
@@ -197,6 +198,7 @@ fn changed_since_snapshot_state_preserves_stored_uid_and_advances_modseq() {
         uid_validity: selected.uid_validity,
         highest_uid: Some(ImapUid(100)),
         highest_modseq: Some(ImapModSeq(700)),
+        partial_initial_uid: None,
         updated_at: "2026-04-24T00:00:00Z".to_string(),
     };
     let snapshot = ImapChangedSinceSnapshot {

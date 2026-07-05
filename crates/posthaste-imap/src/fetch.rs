@@ -39,9 +39,11 @@ pub(crate) use changed_since::{
     fetch_mailbox_condstore_delta_snapshot_with_client,
 };
 pub(crate) use headers::{
-    fetch_mailbox_header_snapshot_with_client, fetch_mailbox_headers_after_uid_with_client,
-    fetch_selected_mailbox_headers,
+    fetch_header_chunk, fetch_mailbox_header_snapshot_with_client,
+    fetch_mailbox_headers_after_uid_with_client, fetch_selected_mailbox_headers,
+    search_undeleted_uids, uids_above,
 };
+pub(crate) const INITIAL_SNAPSHOT_CHUNK_SIZE: usize = UID_FETCH_CHUNK_SIZE;
 pub use items::{fetched_header_from_items, fetched_header_from_items_with_metadata};
 pub use types::{
     ImapChangedSinceSnapshot, ImapFetchedHeaderWithMetadata, ImapMailboxHeaderSnapshot,

@@ -275,6 +275,7 @@ fn imap_mailbox_state(highest_uid: Option<ImapUid>) -> ImapMailboxSyncState {
         uid_validity: ImapUidValidity(7),
         highest_uid,
         highest_modseq: None,
+        partial_initial_uid: None,
         updated_at: "2026-04-27T00:00:00Z".to_string(),
     }
 }

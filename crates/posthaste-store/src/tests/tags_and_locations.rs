@@ -141,6 +141,7 @@ fn sync_batch_persists_and_deletes_imap_message_locations() -> Result<(), StoreE
         uid_validity: ImapUidValidity(10),
         highest_uid: Some(ImapUid(101)),
         highest_modseq: Some(ImapModSeq(999)),
+        partial_initial_uid: None,
         updated_at: "2026-04-25T00:00:00Z".to_string(),
     };
 
