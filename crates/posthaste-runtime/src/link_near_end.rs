@@ -399,7 +399,10 @@ enum Command {
     /// Forward a mutation through the engine (deadline + jittered transient
     /// retry) and reply with the outcome.
     Forward(
-        MutationRequest,
+        // Boxed: `MutationRequest` is by far the largest payload here, and an
+        // unboxed variant would bloat every `Command` (incl. the empty
+        // `StartDownChannel`) to its size.
+        Box<MutationRequest>,
         oneshot::Sender<Result<MutationReceipt, EngineError>>,
     ),
     /// Start the engine's reconnect loop (idempotent) — frames flow into the
@@ -440,7 +443,7 @@ impl NativeNearEnd {
     ) -> Result<MutationReceipt, RuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.commands
-            .send(Command::Forward(request, reply_tx))
+            .send(Command::Forward(Box::new(request), reply_tx))
             .map_err(|_| engine_gone())?;
         reply_rx
             .await
@@ -524,7 +527,7 @@ fn engine_thread(
                 Command::Forward(request, reply) => {
                     let engine = engine.clone();
                     tokio::task::spawn_local(async move {
-                        let _ = reply.send(engine.forward(request).await);
+                        let _ = reply.send(engine.forward(*request).await);
                     });
                 }
                 Command::StartDownChannel => {

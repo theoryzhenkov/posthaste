@@ -53,7 +53,7 @@ pub(crate) struct LinkRegistry {
     /// hand-roll; a client "link" IS this seam's `LinkId` (D42).
     dedup: DedupStore<RuntimeLinkId, StoredMutation>,
     /// The shared seq mechanism (D50): the per-link monotonic frame seq counter
-    /// + reconnect (collapse) detection, in **collapse-always** mode — the runtime
+    /// plus reconnect (collapse) detection, in **collapse-always** mode — the runtime
     /// far-end's collapse re-serves whole snapshots, so a per-frame replay backlog
     /// buys nothing; the store owns the counter and the resume→collapse decision.
     /// Replaces the former hand-rolled `StoredLink.last_seq` / `next_seq`.
@@ -601,7 +601,7 @@ impl LinkRegistry {
         // record; the frame is emitted even for a cleared (Failed) verdict.
         let mut settled = base;
         settled.state = state.clone();
-        settled.error = error.clone();
+        settled.error.clone_from(&error);
         settled.output = output.clone();
         let receipt = settled.receipt();
         let class = terminal_class_for(&state, error.as_ref());
@@ -1171,7 +1171,9 @@ pub(crate) fn spawn_deferred_settlement_bridge(
                     };
                     links.settle_deferred_from_event(&event);
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // A lagged subscriber skips the missed events and keeps looping
+                // (the loop body is this match, so falling through re-polls).
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }
@@ -1525,7 +1527,7 @@ mod race_tests {
         }
     }
 
-    async fn deferred_send_link() -> (Arc<LinkRegistry>, RuntimeLinkId, RuntimeMutationId) {
+    fn deferred_send_link() -> (Arc<LinkRegistry>, RuntimeLinkId, RuntimeMutationId) {
         let reg = registry();
         let sid = reg.open_link(RuntimeCaller::test()).unwrap().link_id;
         let mutation_id = match reg
@@ -1543,7 +1545,7 @@ mod race_tests {
     // draft-Destroy fold confirms — the send left Drafts).
     #[tokio::test]
     async fn deferred_send_applied_confirms_at_the_client() {
-        let (reg, sid, mutation_id) = deferred_send_link().await;
+        let (reg, sid, mutation_id) = deferred_send_link();
         reg.register_deferred_settlement(OperationId::from("op-send-c"), sid.clone(), mutation_id);
         // Accepted (in-flight) at subscribe — no notification yet.
         let subscription = reg
@@ -1572,7 +1574,7 @@ mod race_tests {
     // Sent. A permanent Failed settlement behaves the same.
     #[tokio::test]
     async fn deferred_send_parked_reverts_at_the_client_no_false_sent() {
-        let (reg, sid, mutation_id) = deferred_send_link().await;
+        let (reg, sid, mutation_id) = deferred_send_link();
         reg.register_deferred_settlement(OperationId::from("op-send-p"), sid.clone(), mutation_id);
         let subscription = reg
             .subscribe_frames(RuntimeCaller::test(), sid.clone(), None)
@@ -1600,7 +1602,7 @@ mod race_tests {
     // different near node's op) — no panic, no spurious frame.
     #[tokio::test]
     async fn a_non_deferred_settlement_is_ignored() {
-        let (reg, _sid, _mutation_id) = deferred_send_link().await;
+        let (reg, _sid, _mutation_id) = deferred_send_link();
         reg.settle_deferred_from_event(&operation_settled_event("op-unknown", true));
         // No deferred record removed, nothing settled — the call is a no-op.
     }

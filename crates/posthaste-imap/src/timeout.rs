@@ -40,11 +40,14 @@ pub(crate) fn op_timeout() -> Duration {
 /// Test-only: serialize tests that shrink the process-global deadline seams
 /// ([`IMAP_OP_TIMEOUT_MS`], `session::IMAP_IDLE_REISSUE_MS`) so parallel
 /// tests never observe each other's shrunken deadlines.
+///
+/// Uses an async-aware [`tokio::sync::Mutex`] so the guard can be held across
+/// the awaits of a test body (its whole purpose) without a std guard being held
+/// across an await point.
 #[cfg(test)]
-pub(crate) fn seam_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+pub(crate) async fn seam_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    LOCK.lock().await
 }
 
 /// Test-only: shrink the per-op deadline so a stalling server triggers a

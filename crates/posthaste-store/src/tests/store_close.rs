@@ -5,7 +5,6 @@ use super::*;
 
 /// Removes the test's tempdir on drop so a panicking or early-returning test
 /// still leaves no state behind (P6).
-
 fn fetched_body(raw_mime: Option<&str>) -> FetchedBody {
     FetchedBody {
         body_html: Some("<p>hi</p>".to_string()),

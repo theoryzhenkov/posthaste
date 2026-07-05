@@ -42,7 +42,7 @@ pub(crate) fn sync_progress_reporter(
     let (tx, mut rx) = mpsc::channel::<SyncProgress>(SYNC_PROGRESS_CHANNEL_CAPACITY);
 
     let forwarder_shared = shared.clone();
-    let forwarder_account_id = account_id.clone();
+    let forwarder_account_id = account_id;
     tokio::spawn(async move {
         while let Some(progress) = rx.recv().await {
             forwarder_shared

@@ -309,7 +309,13 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     // self-terminates on registry drop (Weak). Detached — no explicit teardown
     // step needed (the down-channel task is retained only because a remote
     // reconnect loop must be stopped; this is a pure bus reader).
-    let _ = crate::far_end::links::spawn_deferred_settlement_bridge(&links, &event_sender);
+    // Drop (not `let _ =`) the `JoinHandle`: dropping detaches the task so it
+    // keeps running; it is never joined or aborted (self-terminates on registry
+    // drop via its `Weak`).
+    drop(crate::far_end::links::spawn_deferred_settlement_bridge(
+        &links,
+        &event_sender,
+    ));
     // The fact-carrying event tap (RFC-L2-scripting D52 / S2): the down-channel
     // half over the durable `event_log` (reached through the same `reads` the live
     // broadcast records into), mounted on `/v1/events` by `subscribe_events`.

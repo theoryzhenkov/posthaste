@@ -77,7 +77,7 @@ fn full_snapshot_prune_set_is_the_complete_fetched_header_set() {
         },
         mapped,
         vec![ImapMailboxSyncState {
-            mailbox_id: selected.mailbox_id.clone(),
+            mailbox_id: selected.mailbox_id,
             mailbox_name: "INBOX".to_string(),
             uid_validity: ImapUidValidity(9),
             highest_uid: Some(ImapUid(30)),
@@ -134,7 +134,7 @@ fn initial_snapshot_chunk_is_upsert_only_and_carries_the_checkpoint() {
         .collect();
 
     let checkpoint = ImapMailboxSyncState {
-        mailbox_id: selected.mailbox_id.clone(),
+        mailbox_id: selected.mailbox_id,
         mailbox_name: "INBOX".to_string(),
         uid_validity: ImapUidValidity(9),
         highest_uid: None,
