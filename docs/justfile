@@ -1,4 +1,6 @@
-# Docs (MkDocs) recipes
+# Docs recipes. The docs are published by the Astro/Starlight site in
+# apps/site (the /docs section); these recipes cover the generated artifacts and
+# a local preview via the site.
 
 set working-directory := '..'
 
@@ -6,10 +8,10 @@ set working-directory := '..'
 gen-endpoints:
     python3 tools/docs/gen_endpoints.py
 
-# Serve docs locally
+# Serve the docs locally via the site's dev server (Starlight owns /docs)
 serve: gen-endpoints
-    uv run mkdocs serve
+    bun --cwd=apps/site run dev
 
-# Build docs
+# Build the site (includes the Starlight docs + Pagefind index)
 build: gen-endpoints
-    uv run mkdocs build --strict
+    bun --cwd=apps/site run build

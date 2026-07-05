@@ -1,11 +1,10 @@
 ---
-title: Security
-navLabel: Security
+title: Scripting security & threat model
 description: The full threat model behind Posthaste scripting — the threats stated honestly, and the mitigations you own.
-order: 5
+sidebar:
+  label: Security
+  order: 5
 ---
-
-# Scripting security & threat model
 
 Posthaste scripting lets server-side events trigger code. That is powerful and
 therefore dangerous. This page states the threats honestly and the mitigations

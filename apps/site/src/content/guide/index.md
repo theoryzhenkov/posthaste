@@ -1,11 +1,10 @@
 ---
-title: Start here
-navLabel: Start here
+title: Automations — make Posthaste do things for you
 description: Make Posthaste act on your mail — from one-click built-in rules to your own scripts and AI agents.
-order: 1
+sidebar:
+  label: Start here
+  order: 1
 ---
-
-# Automations — make Posthaste do things for you
 
 Posthaste can react to your mail on its own: tag an invoice the moment it lands,
 ping you when your boss writes, run a little script of yours, or hand a message
@@ -46,7 +45,7 @@ with a short decision guide that points you to the right level.
 This guide is deliberately non-technical. If you want the exact endpoints, the
 event tap, tokens, and every flag:
 
-- **[Scripting quickstart](../scripting-quickstart.md)** — the five-minute
+- **[Scripting quickstart](scripting-quickstart.md)** — the five-minute
   technical version, with the reference agent loop.
-- **[Scripting security & threat model](../scripting-security.md)** — the full
+- **[Scripting security & threat model](scripting-security.md)** — the full
   threat model behind the safety advice here.

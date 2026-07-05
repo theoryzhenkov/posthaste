@@ -1,0 +1,80 @@
+---
+// On-brand docs header. Mirrors Starlight's default three-zone layout (site
+// title | search | right group) so search, theme toggle, social icons and the
+// mobile menu keep working, but adds the site's top-level nav (Home / Releases
+// / Wizard / Docs) so the docs read as part of posthaste.theor.net.
+import Search from '@astrojs/starlight/components/Search.astro'
+import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro'
+import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro'
+import SiteTitle from './SiteTitle.astro'
+
+const navLinks = [
+  { href: '/', label: 'Home' },
+  { href: '/releases', label: 'Releases' },
+  { href: '/wizard', label: 'Wizard' },
+  { href: '/docs/', label: 'Docs', current: true },
+]
+---
+
+<div class="header sl-flex">
+  <div class="title-wrapper sl-flex">
+    <SiteTitle />
+  </div>
+  <div class="sl-flex print:hidden">
+    <Search />
+  </div>
+  <div class="sl-hidden md:sl-flex right-group print:hidden">
+    <nav class="site-nav sl-flex" aria-label="Site">
+      {
+        navLinks.map((link) => (
+          <a href={link.href} aria-current={link.current ? 'page' : undefined}>
+            {link.label}
+          </a>
+        ))
+      }
+    </nav>
+    <div class="sl-flex social-icons">
+      <SocialIcons />
+    </div>
+    <ThemeSelect />
+  </div>
+</div>
+
+<style>
+  .header {
+    gap: var(--sl-nav-gap);
+    justify-content: space-between;
+    align-items: center;
+    height: 100%;
+  }
+  .title-wrapper {
+    overflow: clip;
+    padding: 0.25rem;
+    margin: -0.25rem;
+    min-width: 0;
+  }
+  .right-group,
+  .social-icons {
+    gap: 1rem;
+    align-items: center;
+  }
+  .site-nav {
+    gap: 1.1rem;
+    align-items: center;
+    font-size: var(--sl-text-sm);
+  }
+  .site-nav a {
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+  .site-nav a:hover,
+  .site-nav a[aria-current='page'] {
+    color: var(--sl-color-white);
+  }
+  .social-icons::after {
+    content: '';
+    height: 2rem;
+    border-inline-end: 1px solid var(--sl-color-gray-5);
+  }
+</style>

@@ -1,4 +1,5 @@
 ---
+title: "Crate topology (L2)"
 scope: L2
 summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. Realized per RFC-L2-architecture-cleanup M0–M9c plus RFC-L2-provider-reliability M30/M31 (the call-policy/provider-call split); no [::state] markers remain (§2.1b records the D38 projector-merge verdict: not a fit, not forced)."
 modified: 2026-07-04
