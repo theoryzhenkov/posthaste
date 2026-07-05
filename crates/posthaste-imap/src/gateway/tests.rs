@@ -151,7 +151,8 @@ fn accumulator_builds_partial_delta_batch_from_explicit_deleted_uids() {
     };
     let mut accumulator = SyncBatchAccumulator::default();
     accumulator.add_local_locations(std::slice::from_ref(&local_location));
-    accumulator.add_deleted_uid_identities(vec![(mailbox_id, ImapUidValidity(7), ImapUid(11))]);
+    // Absence-derived (inferred from a UID listing) → floor-guarded absence fields.
+    accumulator.add_absence_uid_identities(vec![(mailbox_id, ImapUidValidity(7), ImapUid(11))]);
 
     let batch = accumulator.into_sync_batch(
         &account_id,
@@ -166,11 +167,15 @@ fn accumulator_builds_partial_delta_batch_from_explicit_deleted_uids() {
     );
 
     assert!(!batch.replace_all_messages);
+    // Authoritative fields stay empty; the inferred removal lands in the
+    // absence-derived (floor-guarded) fields.
+    assert!(batch.deleted_imap_message_locations.is_empty());
+    assert!(batch.deleted_message_ids.is_empty());
     assert_eq!(
-        batch.deleted_imap_message_locations,
+        batch.absence_deleted_imap_message_locations,
         vec![local_location.key()]
     );
-    assert_eq!(batch.deleted_message_ids, vec![message_id]);
+    assert_eq!(batch.absence_deleted_message_ids, vec![message_id]);
     assert!(batch.messages.is_empty());
     assert!(batch.imap_message_locations.is_empty());
 }

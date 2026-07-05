@@ -130,9 +130,30 @@ pub struct SyncBatch {
     /// This is distinct from `deleted_message_ids`: one vanished IMAP UID can
     /// mean a Gmail label was removed while the canonical message still exists
     /// in another mailbox location.
+    ///
+    /// DS1/DP-C4 mail-loss: this field carries only AUTHORITATIVE (server-
+    /// asserted) removals — QRESYNC `VANISHED (EARLIER)` — which the store
+    /// applies unconditionally. Removals INFERRED from a possibly-truncated
+    /// `UID SEARCH UNDELETED` / header listing (a message is "in local, not in
+    /// the remote result") are absence-derived and go in
+    /// [`Self::absence_deleted_imap_message_locations`] so the store can route
+    /// them through the DS1 floor guard.
     pub deleted_imap_message_locations: Vec<ImapMessageLocationKey>,
     pub deleted_mailbox_ids: Vec<MailboxId>,
+    /// Messages whose complete disappearance is AUTHORITATIVE (every removed
+    /// location was a server-asserted VANISHED), applied unconditionally.
     pub deleted_message_ids: Vec<MessageId>,
+    /// DP-C4 mail-loss floor guard: IMAP location removals INFERRED from a
+    /// `UID SEARCH UNDELETED` / header snapshot being smaller than the local
+    /// set. A truncated/empty-but-`Ok` search makes the whole local set look
+    /// "absent", so the store routes these through the DS1 floor guard rather
+    /// than deleting them unconditionally.
+    #[serde(default)]
+    pub absence_deleted_imap_message_locations: Vec<ImapMessageLocationKey>,
+    /// Messages whose complete disappearance depends on at least one absence-
+    /// derived (inferred) location removal. Floor-guarded by the store.
+    #[serde(default)]
+    pub absence_deleted_message_ids: Vec<MessageId>,
     /// When true, mailboxes are a full snapshot (from full resync fallback).
     pub replace_all_mailboxes: bool,
     /// When true, messages are a full snapshot (from full resync fallback).

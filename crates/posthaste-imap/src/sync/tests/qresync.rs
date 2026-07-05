@@ -62,6 +62,7 @@ fn condstore_delta_sync_batch_only_deletes_vanished_local_locations() {
             selected.uid_validity,
             vanished_location.uid,
         )],
+        Vec::new(),
         "2026-04-25T00:00:00Z".to_string(),
     );
 
@@ -125,6 +126,7 @@ fn qresync_vanished_deduplicates_canonical_message_deletions() {
                 all_mail_location.uid,
             ),
         ],
+        Vec::new(),
         "2026-04-25T00:00:00Z".to_string(),
     );
 
@@ -173,6 +175,7 @@ fn qresync_single_location_vanish_preserves_canonical_message() {
             inbox_location.uid_validity,
             inbox_location.uid,
         )],
+        Vec::new(),
         "2026-04-25T00:00:00Z".to_string(),
     );
 
