@@ -10,6 +10,7 @@ import {
 import type { ReactNode } from 'react'
 
 import { AccountEditor } from '../src/components/settings-panel/AccountEditor'
+import { ApiError } from '../src/api/errors'
 import { AccountSetupChoice } from '../src/components/settings-panel/accounts-pane/AccountSetupChoice'
 import { useAccountCommandMutation } from '../src/components/settings-panel/useAccountCommandMutation'
 import type { AccountOverview } from '../src/api/types'
@@ -126,6 +127,127 @@ describe('account settings runtime adapter UI paths', () => {
     expect(
       view.getByText('Verified identity: primary@example.com'),
     ).toBeTruthy()
+  })
+
+  // Seed account used to drive the create-account form: a manual-credentials
+  // account whose email is a known IMAP provider, so switching the protocol
+  // picker to IMAP prefills the endpoints from smart defaults (the form's text
+  // inputs are exercised at the pure-helper level; here we drive the button-only
+  // interactions the happy-dom harness dispatches reliably).
+  const fastmailSeed: AccountOverview = {
+    ...account,
+    id: 'seed',
+    name: 'Fastmail',
+    driver: 'jmap',
+    emailPatterns: ['me@fastmail.com'],
+    connection: {
+      kind: 'manualCredentials',
+      provider: 'generic',
+      providerKind: 'generic',
+      auth: 'password',
+      baseUrl: 'https://mail.example.com/jmap',
+      username: 'me@fastmail.com',
+      imap: null,
+      smtp: null,
+      secret: { storage: 'os', configured: true, label: null },
+    },
+  }
+
+  it('submits an IMAP/SMTP account with smart-default endpoints from the form', async () => {
+    const fake = createFakeRuntimeAdapter({ defaultAccount: fastmailSeed })
+    setRuntimeAdapterForTesting(fake)
+
+    const view = render(
+      <AccountEditor
+        editorTarget="new"
+        editingAccount={fastmailSeed}
+        onSaved={async () => undefined}
+        onVerified={async () => undefined}
+        onCommand={() => undefined}
+        isCommandPending={false}
+        commandError={null}
+      />,
+      { wrapper: withQueryClient() },
+    )
+
+    // The manual form defaults to the JMAP base URL field.
+    expect(
+      view.getByPlaceholderText('https://mail.example.com/jmap'),
+    ).toBeTruthy()
+
+    // Switching the protocol picker to IMAP swaps in the endpoint fields and
+    // prefills them from the fastmail.com smart defaults.
+    await act(async () => {
+      fireEvent.click(view.getByRole('radio', { name: 'IMAP / SMTP' }))
+    })
+    expect(view.getByPlaceholderText('imap.example.com')).toBeTruthy()
+    expect(view.getByPlaceholderText('smtp.example.com')).toBeTruthy()
+    expect(
+      view.queryByPlaceholderText('https://mail.example.com/jmap'),
+    ).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(view.getByRole('button', { name: 'Apply' }))
+    })
+
+    await waitFor(() => {
+      expect(fake.accountCreateCalls.length).toBe(1)
+    })
+    const [created] = fake.accountCreateCalls
+    expect(created.driver).toBe('imapSmtp')
+    expect(created.transport).toMatchObject({
+      provider: 'generic',
+      auth: 'appPassword',
+      username: 'me@fastmail.com',
+      imap: { host: 'imap.fastmail.com', port: 993, security: 'tls' },
+      smtp: { host: 'smtp.fastmail.com', port: 465, security: 'tls' },
+    })
+  })
+
+  it('surfaces a classified error (with app-password hint) when IMAP creation fails', async () => {
+    const fake = createFakeRuntimeAdapter()
+    fake.queueAccountError(
+      new ApiError(
+        401,
+        'Unauthorized',
+        'authentication failed: LOGIN rejected',
+        'auth_error',
+      ),
+    )
+    setRuntimeAdapterForTesting(fake)
+
+    const view = render(
+      <AccountEditor
+        editorTarget="new"
+        editingAccount={fastmailSeed}
+        onSaved={async () => undefined}
+        onVerified={async () => undefined}
+        onCommand={() => undefined}
+        isCommandPending={false}
+        commandError={null}
+      />,
+      { wrapper: withQueryClient() },
+    )
+
+    await act(async () => {
+      fireEvent.click(view.getByRole('radio', { name: 'IMAP / SMTP' }))
+    })
+    await act(async () => {
+      fireEvent.click(view.getByRole('button', { name: 'Apply' }))
+    })
+
+    // The banner shows the classified auth message with the Fastmail
+    // app-password hint appended, and never leaks the raw library string.
+    await waitFor(() => {
+      expect(
+        view.getByText(
+          (content) =>
+            content.includes('Sign-in was rejected') &&
+            content.includes('app password'),
+        ),
+      ).toBeTruthy()
+    })
+    expect(view.queryByText(/LOGIN rejected/)).toBeNull()
   })
 
   it('starts provider OAuth through a fake runtime adapter', async () => {
