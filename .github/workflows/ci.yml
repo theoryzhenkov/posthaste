@@ -35,6 +35,30 @@ jobs:
       - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-client-node-wasm -- -D warnings
       - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-client-node-wasm
 
+  # Live Stalwart integration tests (mail-loss convergence + draft/discard).
+  # These targets early-`return` unless POSTHASTE_STALWART_INTEGRATION=1 and a
+  # real `stalwart` binary is on PATH, so without this job they are dead
+  # coverage. The nix devshell (nix/devshell.d/posthaste.nix -> pkgs.stalwart)
+  # provides the binary (named `stalwart`, matching the fixture's default PATH
+  # lookup in crates/posthaste-testkit/src/paths.rs) plus cargo/bash, so the
+  # gated tests run inside `nix develop`. The StalwartFixture spawns the process
+  # itself on dynamic loopback ports (no service container needed) and seeds via
+  # tools/dev/stalwart/{config.toml,seed.sh}.
+  stalwart-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-stalwart
+          cache-on-failure: true
+      - name: Run live Stalwart integration tests
+        env:
+          POSTHASTE_STALWART_INTEGRATION: "1"
+        run: nix develop --command cargo test -p posthaste-testkit -p posthaste-server
+
   # The frontier set grows as wasm-pure policy is extracted (RFC-L2-architecture-cleanup D15/M8;
   # RFC-L2-provider-reliability M30 adds posthaste-call-policy — seven crates).
   wasm-frontier:

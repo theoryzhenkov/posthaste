@@ -46,6 +46,54 @@ pub(super) fn deleted_locations_for_delta(
     deduplicate_location_keys(deleted_locations)
 }
 
+/// Partition the message ids of a set of deleted locations into AUTHORITATIVE
+/// (server-asserted VANISHED) and ABSENCE-derived (inferred from a possibly-
+/// truncated `UID SEARCH UNDELETED` / header listing) buckets.
+///
+/// A message id is authoritative only when EVERY one of its removed local
+/// locations is a VANISHED removal; if even one removal was absence-derived, the
+/// conclusion "this message is gone" rests on an inference and the deletion is
+/// routed through the store's DP-C4 floor guard. `authoritative_keys` and
+/// `absence_keys` are disjoint location-key sets (a VANISHED key wins over an
+/// absence key for the same location — see the builder). The input
+/// `fully_gone_message_ids` is the deduped set of messages with no surviving
+/// location (as computed by [`deleted_message_ids_for_deleted_locations`] over
+/// the union of both key sets).
+pub(super) fn partition_deleted_message_ids_by_origin(
+    local_locations: &[ImapMessageLocation],
+    fully_gone_message_ids: &[MessageId],
+    authoritative_keys: &BTreeSet<ImapMessageLocationKey>,
+    absence_keys: &BTreeSet<ImapMessageLocationKey>,
+) -> (Vec<MessageId>, Vec<MessageId>) {
+    let fully_gone = fully_gone_message_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut removed_keys_by_message = BTreeMap::<MessageId, Vec<ImapMessageLocationKey>>::new();
+    for location in local_locations {
+        let key = location.key();
+        let is_removed = authoritative_keys.contains(&key) || absence_keys.contains(&key);
+        if is_removed && fully_gone.contains(&location.message_id) {
+            removed_keys_by_message
+                .entry(location.message_id.clone())
+                .or_default()
+                .push(key);
+        }
+    }
+
+    let mut authoritative = Vec::new();
+    let mut absence = Vec::new();
+    for message_id in &fully_gone {
+        let all_authoritative = removed_keys_by_message
+            .get(message_id)
+            .map(|keys| keys.iter().all(|key| authoritative_keys.contains(key)))
+            .unwrap_or(false);
+        if all_authoritative {
+            authoritative.push(message_id.clone());
+        } else {
+            absence.push(message_id.clone());
+        }
+    }
+    (authoritative, absence)
+}
+
 pub(super) fn deleted_message_ids_for_deleted_locations(
     local_locations: &[ImapMessageLocation],
     deleted_locations: &[ImapMessageLocationKey],

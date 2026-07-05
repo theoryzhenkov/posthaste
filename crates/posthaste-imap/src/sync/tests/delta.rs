@@ -167,6 +167,7 @@ fn gmail_partial_flag_delta_preserves_unobserved_existing_mailboxes() {
         Vec::new(),
         vec![inbox_location.clone(), all_mail_location],
         Vec::new(),
+        Vec::new(),
         "2026-04-25T00:01:00Z".to_string(),
     );
 
@@ -244,6 +245,7 @@ fn gmail_starred_location_removal_unflags_remaining_message() {
             starred_location.uid_validity,
             starred_location.uid,
         )],
+        Vec::new(),
         "2026-04-25T00:01:00Z".to_string(),
     );
 

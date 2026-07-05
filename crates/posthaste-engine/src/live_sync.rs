@@ -87,6 +87,8 @@ pub(crate) async fn sync_account(
         deleted_imap_message_locations: Vec::new(),
         deleted_mailbox_ids: mailbox_sync.deleted_mailbox_ids,
         deleted_message_ids: email_sync.deleted_message_ids,
+        absence_deleted_imap_message_locations: Vec::new(),
+        absence_deleted_message_ids: Vec::new(),
         replace_all_mailboxes: mailbox_sync.replace_all_mailboxes,
         replace_all_messages: email_sync.replace_all_messages,
         cursors: vec![mailbox_sync.cursor, email_sync.cursor],

@@ -125,7 +125,10 @@ pub(crate) async fn execute_mailbox_plan(
             .await
             .map_err(imap_error_to_gateway)?;
             if !execution.account_full_message_snapshot {
-                accumulator.add_deleted_uid_identities(missing_location_identities(
+                // A per-mailbox full-snapshot fetch derives deletions by INFERENCE
+                // (local locations absent from this header listing, which could be
+                // truncated), so they are absence-derived and floor-guarded.
+                accumulator.add_absence_uid_identities(missing_location_identities(
                     &mailbox.local_locations,
                     &snapshot.headers,
                 ));

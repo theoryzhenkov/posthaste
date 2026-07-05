@@ -98,6 +98,12 @@ pub const JMAP_MAILBOX_DELTA_STARTED: LogEvent = LogEvent::new("jmap.mailbox.del
 pub const JMAP_MAILBOX_DELTA_UNAVAILABLE: LogEvent =
     LogEvent::new("jmap.mailbox.delta.unavailable");
 pub const JMAP_MAILBOX_FULL_IDS_FETCHED: LogEvent = LogEvent::new("jmap.mailbox.full_ids_fetched");
+/// DP-C3 mail-loss guard: a full `Mailbox/query` snapshot whose id set could not
+/// be proven exhaustive. The snapshot upserts what it retrieved but refuses
+/// mailbox prune-by-absence — a capped/empty listing must never cascade-delete
+/// every local mailbox.
+pub const JMAP_MAILBOX_FULL_QUERY_INCOMPLETE: LogEvent =
+    LogEvent::new("jmap.mailbox.full_query_incomplete");
 pub const JMAP_MAILBOX_FULL_SNAPSHOT_FETCHED: LogEvent =
     LogEvent::new("jmap.mailbox.full_snapshot_fetched");
 pub const JMAP_SESSION_CONNECTING: LogEvent = LogEvent::new("jmap.session.connecting");

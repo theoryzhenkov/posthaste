@@ -59,7 +59,13 @@ pub(crate) struct SyncBatchAccumulator {
     pub(crate) headers: Vec<ImapMappedHeader>,
     pub(crate) local_locations: Vec<ImapMessageLocation>,
     pub(crate) mailbox_states: Vec<ImapMailboxSyncState>,
-    pub(crate) explicit_deleted_uids: Vec<(MailboxId, ImapUidValidity, ImapUid)>,
+    /// AUTHORITATIVE removals — server-asserted QRESYNC `VANISHED (EARLIER)`.
+    /// Applied unconditionally by the store.
+    pub(crate) vanished_deleted_uids: Vec<(MailboxId, ImapUidValidity, ImapUid)>,
+    /// INFERRED removals — a local UID absent from a possibly-truncated
+    /// `UID SEARCH UNDELETED` / header snapshot. Routed through the store's DP-C4
+    /// floor guard (DS1 mail-loss).
+    pub(crate) absence_deleted_uids: Vec<(MailboxId, ImapUidValidity, ImapUid)>,
 }
 
 pub(crate) struct ChangedSinceRecordSummary {
@@ -78,11 +84,20 @@ impl SyncBatchAccumulator {
         self.local_locations.extend(locations.iter().cloned());
     }
 
-    pub(crate) fn add_deleted_uid_identities(
+    /// Record AUTHORITATIVE (server-asserted VANISHED) removals.
+    pub(crate) fn add_vanished_uid_identities(
         &mut self,
         identities: impl IntoIterator<Item = (MailboxId, ImapUidValidity, ImapUid)>,
     ) {
-        self.explicit_deleted_uids.extend(identities);
+        self.vanished_deleted_uids.extend(identities);
+    }
+
+    /// Record INFERRED (absence-derived) removals — floor-guarded by the store.
+    pub(crate) fn add_absence_uid_identities(
+        &mut self,
+        identities: impl IntoIterator<Item = (MailboxId, ImapUidValidity, ImapUid)>,
+    ) {
+        self.absence_deleted_uids.extend(identities);
     }
 
     pub(crate) fn record_header_snapshot(
@@ -123,12 +138,17 @@ impl SyncBatchAccumulator {
                 ));
         }
         if snapshot.is_full_snapshot {
-            self.add_deleted_uid_identities(missing_location_identities(
+            // QRESYNC-enable failed → a full `UID SEARCH UNDELETED` snapshot; the
+            // "missing" locations are INFERRED from that (possibly truncated)
+            // listing, so they are absence-derived and floor-guarded.
+            self.add_absence_uid_identities(missing_location_identities(
                 &mailbox.local_locations,
                 &snapshot.headers,
             ));
         } else {
-            self.add_deleted_uid_identities(
+            // A real QRESYNC `VANISHED (EARLIER)` response is the server asserting
+            // these UIDs are gone — AUTHORITATIVE, applied unconditionally.
+            self.add_vanished_uid_identities(
                 snapshot
                     .vanished_uids
                     .iter()
@@ -151,12 +171,15 @@ impl SyncBatchAccumulator {
         updated_at: &str,
     ) -> UidDeltaRecordSummary {
         let header_count = snapshot.headers.len();
-        let deleted_before = self.explicit_deleted_uids.len();
-        self.add_deleted_uid_identities(missing_location_identities_from_uids(
+        let deleted_before = self.absence_deleted_uids.len();
+        // CONDSTORE / fetch-new: deletions are INFERRED from a header-free
+        // `UID SEARCH UNDELETED` (`current_uids`); a truncated/empty search would
+        // make the whole local set look absent, so these are floor-guarded.
+        self.add_absence_uid_identities(missing_location_identities_from_uids(
             &mailbox.local_locations,
             &snapshot.current_uids,
         ));
-        let deleted_uid_count = self.explicit_deleted_uids.len() - deleted_before;
+        let deleted_uid_count = self.absence_deleted_uids.len() - deleted_before;
         if let Some(stored_state) = mailbox.stored_state.as_ref() {
             self.mailbox_states
                 .push(imap_mailbox_state_from_changed_since_snapshot(
@@ -183,7 +206,7 @@ impl SyncBatchAccumulator {
     }
 
     pub(crate) fn deleted_uid_count(&self) -> usize {
-        self.explicit_deleted_uids.len()
+        self.vanished_deleted_uids.len() + self.absence_deleted_uids.len()
     }
 
     pub(crate) fn into_sync_batch(
@@ -196,13 +219,15 @@ impl SyncBatchAccumulator {
         updated_at: String,
     ) -> SyncBatch {
         let use_explicit_deletion_batch = requires_partial_delta_batch
-            || !self.explicit_deleted_uids.is_empty()
+            || !self.vanished_deleted_uids.is_empty()
+            || !self.absence_deleted_uids.is_empty()
             || has_full_mailbox_snapshot;
         let Self {
             headers,
             local_locations,
             mailbox_states,
-            explicit_deleted_uids,
+            vanished_deleted_uids,
+            absence_deleted_uids,
         } = self;
 
         if account_full_message_snapshot {
@@ -214,7 +239,8 @@ impl SyncBatchAccumulator {
                 headers,
                 mailbox_states,
                 local_locations,
-                explicit_deleted_uids,
+                vanished_deleted_uids,
+                absence_deleted_uids,
                 updated_at,
             )
         } else {
