@@ -10,6 +10,12 @@ COPY apps/mcp/package.json apps/mcp/package.json
 RUN bun install --frozen-lockfile
 
 COPY apps/site apps/site
+# The Starlight docs collection reads the canonical, @spec-referenced technical
+# specs in place from the repo-root `docs/` tree (content.config.ts glob, base
+# `../../`) — so the image must include them, not just apps/site. eph/issues are
+# excluded from the published collection by the glob; they only ride along in
+# this discarded build layer (the final nginx image ships `dist/` only).
+COPY docs docs
 WORKDIR /app/apps/site
 RUN bun run build
 
