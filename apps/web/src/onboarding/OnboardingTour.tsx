@@ -93,7 +93,7 @@ export function OnboardingTour() {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[2300]" aria-live="polite">
+    <div className="fixed inset-0 z-(--z-tooltip)" aria-live="polite">
       <div
         className="absolute inset-0"
         style={{ background: anchorRect ? 'transparent' : 'rgba(0,0,0,0.55)' }}

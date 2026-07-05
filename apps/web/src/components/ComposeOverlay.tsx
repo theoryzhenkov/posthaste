@@ -303,7 +303,6 @@ export function ComposeOverlay({
       <FloatingPanel
         panelLabel={panelLabel}
         storageKey="posthaste.compose.panelOffset"
-        zIndexClassName="z-[80]"
         sizePreset="compose"
         className="flex flex-col"
         header={header}

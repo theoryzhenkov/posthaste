@@ -45,7 +45,7 @@ export function MailOverlays(props: MailClientViewProps) {
         </Suspense>
       )}
       {props.invalidSurfaceRoute && (
-        <div className="fixed inset-0 z-[2300] bg-background text-foreground">
+        <div className="fixed inset-0 z-(--z-surface) bg-background text-foreground">
           <InvalidSurface
             route={props.invalidSurfaceRoute}
             onClose={closeWebSurface}
@@ -93,7 +93,7 @@ function CommandPaletteOverlay(props: MailClientViewProps) {
 
 function ComposeFallback() {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-(--z-window) flex items-center justify-center">
       <Loader2 size={18} className="animate-spin text-muted-foreground" />
     </div>
   )
