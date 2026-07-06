@@ -7,6 +7,8 @@ import {
 } from '../src/api/querySchema.gen'
 import {
   FIELD_REGISTRY,
+  operatorLabel,
+  operatorLabelForField,
   operatorOptionsForField,
   valueTypeForField,
 } from '../src/components/settings-panel/helpers/fieldRegistry'
@@ -58,8 +60,8 @@ describe('fieldRegistry', () => {
       to: ['equals', 'contains', 'in'],
       subject: ['equals', 'contains', 'in'],
       preview: ['equals', 'contains', 'in'],
-      receivedAt: ['before', 'after', 'onOrBefore', 'onOrAfter'],
-      size: ['before', 'after', 'onOrBefore', 'onOrAfter'],
+      receivedAt: ['lt', 'gt', 'le', 'ge'],
+      size: ['lt', 'gt', 'le', 'ge'],
     }
     for (const field of Object.keys(expected) as SmartMailboxField[]) {
       expect(operatorOptionsForField(field)).toEqual(expected[field])
@@ -73,6 +75,27 @@ describe('fieldRegistry', () => {
     expect(Object.keys(FIELD_REGISTRY).sort()).toEqual(
       [...ALL_QUERY_FIELDS].sort(),
     )
+  })
+
+  it('D6: labels the neutral operators per field type (date vs size)', () => {
+    // The MODEL operators are neutral (`lt`/`gt`/`le`/`ge`); the editor labels
+    // them per value type. A date field reads "before/after/on or before/on or
+    // after"; a size field reads "smaller/larger than / at most / at least".
+    // Both map to the SAME neutral operators.
+    expect(operatorLabelForField('receivedAt', 'lt')).toBe('before')
+    expect(operatorLabelForField('receivedAt', 'gt')).toBe('after')
+    expect(operatorLabelForField('receivedAt', 'le')).toBe('on or before')
+    expect(operatorLabelForField('receivedAt', 'ge')).toBe('on or after')
+
+    expect(operatorLabelForField('size', 'lt')).toBe('smaller than')
+    expect(operatorLabelForField('size', 'gt')).toBe('larger than')
+    expect(operatorLabelForField('size', 'le')).toBe('at most')
+    expect(operatorLabelForField('size', 'ge')).toBe('at least')
+
+    // Type-agnostic operators keep their plain labels regardless of value type.
+    expect(operatorLabel('equals', 'text')).toBe('equals')
+    expect(operatorLabel('contains', 'text')).toBe('contains')
+    expect(operatorLabel('in', 'text')).toBe('is one of')
   })
 
   it('derives its operators verbatim from the generated Rust schema', () => {
@@ -221,11 +244,11 @@ describe('emitted condition JSON — wire-shape parity vs the old text box', () 
 
   it('absolute date widget emits a typed { kind:"absolute" } value', () => {
     const emitted = {
-      ...base('receivedAt', 'before', ''),
+      ...base('receivedAt', 'lt', ''),
       value: absoluteDateValue('2026-07-06'),
     }
     expect(emitted).toEqual(
-      base('receivedAt', 'before', {
+      base('receivedAt', 'lt', {
         kind: 'absolute',
         value: '2026-07-06T00:00:00Z',
       }),
@@ -234,11 +257,11 @@ describe('emitted condition JSON — wire-shape parity vs the old text box', () 
 
   it('relative date widget emits a rolling { kind:"relative" } value (no freeze)', () => {
     const emitted = {
-      ...base('receivedAt', 'after', ''),
+      ...base('receivedAt', 'gt', ''),
       value: relativeDateValue(7, 'days'),
     }
     expect(emitted).toEqual(
-      base('receivedAt', 'after', {
+      base('receivedAt', 'gt', {
         kind: 'relative',
         amount: 7,
         unit: 'days',

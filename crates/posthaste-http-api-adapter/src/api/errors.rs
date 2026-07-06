@@ -20,6 +20,13 @@ const INTERNAL_ERROR_MESSAGE: &str = "internal error";
 pub enum ApiErrorCode {
     // Boundary validation.
     InvalidQuery,
+    /// A smart-mailbox / rule query was rejected by the canonical field schema
+    /// (D5): an operator not allowed for the field, or a value whose shape does
+    /// not match the field's value type. Distinct from [`Self::InvalidQuery`] (a
+    /// malformed descriptor/mutation) so the editor can surface the exact
+    /// field/operator/reason carried in `details`, and so it is rejected at the
+    /// write boundary before the store compiler could ever fail on it.
+    QueryInvalid,
     InvalidCursor,
     InvalidLimit,
     InvalidMailbox,
@@ -163,6 +170,32 @@ impl ApiError {
                 code,
                 message: envelope.message.clone(),
                 details: envelope.details.clone(),
+            },
+        }
+    }
+
+    /// D5 boundary check: reject a smart-mailbox / rule query that violates the
+    /// canonical field schema (`posthaste_domain_model::validate_query`) BEFORE it
+    /// is persisted, so a query the store SQL compiler would later fail on never
+    /// gets stored. On failure returns a `query_invalid` 400 whose `details`
+    /// carry the offending `field`, `operator`, and `reason`.
+    ///
+    /// @spec docs/eph/RFC-L2-query-schema.md#d5--boundary-validation-invalid--rejected-at-the-edge
+    pub fn validate_query(rule: &posthaste_domain_model::SmartMailboxRule) -> Result<(), ApiError> {
+        posthaste_domain_model::validate_query(rule).map_err(Self::from_query_validation)
+    }
+
+    fn from_query_validation(error: posthaste_domain_model::QueryValidationError) -> ApiError {
+        ApiError {
+            status: StatusCode::BAD_REQUEST,
+            body: ApiErrorBody {
+                code: ApiErrorCode::QueryInvalid,
+                message: error.to_string(),
+                details: json!({
+                    "field": error.field,
+                    "operator": error.operator,
+                    "reason": error.reason,
+                }),
             },
         }
     }
