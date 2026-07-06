@@ -7,9 +7,11 @@ import {
   valueTypeForField,
 } from '../src/components/settings-panel/helpers/fieldRegistry'
 import {
+  bytesFromSize,
   dateInputValue,
   pickedRefValue,
   relativeDateValue,
+  sizeInputParts,
   splitListValue,
   toRfc3339FromDateInput,
 } from '../src/components/settings-panel/rule-group/conditionValueFormat'
@@ -24,6 +26,8 @@ describe('fieldRegistry', () => {
     expect(valueTypeForField('isFlagged')).toBe('boolean')
     expect(valueTypeForField('hasAttachment')).toBe('boolean')
     expect(valueTypeForField('subject')).toBe('text')
+    expect(valueTypeForField('to')).toBe('address')
+    expect(valueTypeForField('size')).toBe('size')
   })
 
   it('preserves the exact operator subsets the old switch returned', () => {
@@ -43,9 +47,11 @@ describe('fieldRegistry', () => {
       keyword: ['equals', 'in'],
       fromName: ['equals', 'contains', 'in'],
       fromEmail: ['equals', 'contains', 'in'],
+      to: ['equals', 'contains', 'in'],
       subject: ['equals', 'contains', 'in'],
       preview: ['equals', 'contains', 'in'],
       receivedAt: ['before', 'after', 'onOrBefore', 'onOrAfter'],
+      size: ['before', 'after', 'onOrBefore', 'onOrAfter'],
     }
     for (const field of Object.keys(expected) as SmartMailboxField[]) {
       expect(operatorOptionsForField(field)).toEqual(expected[field])
@@ -53,7 +59,7 @@ describe('fieldRegistry', () => {
   })
 
   it('covers exactly the known fields', () => {
-    expect(Object.keys(FIELD_REGISTRY).sort()).toHaveLength(16)
+    expect(Object.keys(FIELD_REGISTRY).sort()).toHaveLength(18)
   })
 })
 
@@ -95,6 +101,34 @@ describe('ref + list value helpers (wire-shape parity)', () => {
   it('the in-operator box still splits to a string[] exactly as before', () => {
     expect(splitListValue('a, b,,  c ')).toEqual(['a', 'b', 'c'])
     expect(splitListValue('')).toEqual([])
+  })
+})
+
+describe('size value helpers (bytes wire shape)', () => {
+  it('converts amount+unit to a byte-count string the numeric compiler parses', () => {
+    expect(bytesFromSize(500, 'bytes')).toBe('500')
+    expect(bytesFromSize(1, 'kb')).toBe('1024')
+    expect(bytesFromSize(1, 'mb')).toBe(String(1024 * 1024))
+    expect(bytesFromSize(2, 'mb')).toBe(String(2 * 1024 * 1024))
+    // Always a string (parity with every other single-value operator).
+    expect(typeof bytesFromSize(1, 'mb')).toBe('string')
+  })
+
+  it('emits the empty string for blank/invalid amounts, never NaN', () => {
+    expect(bytesFromSize(Number.NaN, 'kb')).toBe('')
+    expect(bytesFromSize(-1, 'kb')).toBe('')
+  })
+
+  it('round-trips a stored byte count to a friendly amount+unit', () => {
+    expect(sizeInputParts(String(1024 * 1024))).toEqual({
+      amount: '1',
+      unit: 'mb',
+    })
+    expect(sizeInputParts('2048')).toEqual({ amount: '2', unit: 'kb' })
+    expect(sizeInputParts('500')).toEqual({ amount: '500', unit: 'bytes' })
+    expect(sizeInputParts('')).toEqual({ amount: '', unit: 'kb' })
+    // Non-string (boolean/array) never crashes the size input.
+    expect(sizeInputParts(true)).toEqual({ amount: '', unit: 'kb' })
   })
 })
 

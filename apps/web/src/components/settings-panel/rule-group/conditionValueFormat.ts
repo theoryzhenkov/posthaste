@@ -67,6 +67,61 @@ export function pickedRefValue(raw: string): string {
   return raw === UNSET_REF ? '' : raw
 }
 
+// ---------------------------------------------------------------------------
+// Size (bytes + unit) helpers
+// ---------------------------------------------------------------------------
+
+/** Byte-size unit the size widget offers. */
+export type SizeUnit = 'bytes' | 'kb' | 'mb'
+
+export const SIZE_UNIT_OPTIONS: { value: SizeUnit; label: string }[] = [
+  { value: 'bytes', label: 'bytes' },
+  { value: 'kb', label: 'KB' },
+  { value: 'mb', label: 'MB' },
+]
+
+/** Multiplier to convert a value in `unit` into bytes (KB/MB are binary: 1024). */
+const SIZE_UNIT_BYTES: Record<SizeUnit, number> = {
+  bytes: 1,
+  kb: 1024,
+  mb: 1024 * 1024,
+}
+
+/**
+ * Convert an `amount` in `unit` to the byte-count STRING the compiler expects.
+ * The `size` field compiles to a numeric comparison on `message.size` (bytes),
+ * so the wire value is always bytes encoded as a string — the same string wire
+ * shape every other single-value operator uses. A blank/invalid amount emits
+ * the empty string (an unset condition), never `NaN`.
+ */
+export function bytesFromSize(amount: number, unit: SizeUnit): string {
+  if (!Number.isFinite(amount) || amount < 0) return ''
+  return String(Math.round(amount * SIZE_UNIT_BYTES[unit]))
+}
+
+/**
+ * Best-effort reverse of {@link bytesFromSize}: pick the largest unit that
+ * represents the stored byte count without a fractional remainder, so an edited
+ * condition round-trips to a friendly `amount`/`unit` pair. Falls back to bytes.
+ */
+export function sizeInputParts(value: SmartMailboxValue): {
+  amount: string
+  unit: SizeUnit
+} {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return { amount: '', unit: 'kb' }
+  }
+  const bytes = Number(value)
+  if (!Number.isFinite(bytes)) return { amount: '', unit: 'kb' }
+  for (const unit of ['mb', 'kb'] as SizeUnit[]) {
+    const factor = SIZE_UNIT_BYTES[unit]
+    if (bytes >= factor && bytes % factor === 0) {
+      return { amount: String(bytes / factor), unit }
+    }
+  }
+  return { amount: String(bytes), unit: 'bytes' }
+}
+
 /** Split the comma-separated `in` text box into a `string[]` (unchanged). */
 export function splitListValue(text: string): string[] {
   return text
