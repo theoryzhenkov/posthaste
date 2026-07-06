@@ -95,6 +95,14 @@ export interface ActionServices {
   /** app/useMailClientHandlers.ts — selection-scoped wrappers / navigation /
    *  overlays. Bound in later slices. */
   app?: ReturnType<typeof useMailClientHandlers>
+  /** Row-scoped navigation the context menu binds per message row: the two
+   *  `open` entries delegate here. Absent on every non-row surface — which is
+   *  exactly how those entries stay context-menu-only (their `isAvailable`
+   *  gates on `row` being bound). */
+  row?: {
+    open: (message: MessageSummary) => void
+    viewConversation: (message: MessageSummary) => void
+  }
 }
 
 /** Enablement result: `true` = runnable; `false` = shown-but-disabled with no
@@ -114,8 +122,11 @@ export interface ActionDefinition {
   keywords?: string
   surfaces: readonly ActionSurface[]
   shortcut?: ShortcutChord | readonly ShortcutChord[]
-  /** Hidden entirely when false (context menu drops it; palette omits it). */
-  isAvailable?: (ctx: ActionContext) => boolean
+  /** Hidden entirely when false (context menu drops it; palette omits it).
+   *  Receives the bound `services` too, so an action can gate on a capability
+   *  the surface provides (e.g. the row-scoped `open` entries require
+   *  `services.row`). Most predicates only read `ctx`. */
+  isAvailable?: (ctx: ActionContext, services: ActionServices) => boolean
   /** Shown but not runnable when not `true`; `{ reason }` renders as hint. */
   isEnabled?: (ctx: ActionContext) => ActionEnablement
   destructive?: boolean
