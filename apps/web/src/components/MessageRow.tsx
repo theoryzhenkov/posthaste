@@ -9,10 +9,12 @@
 import { Fragment, memo, useCallback } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
-  buildMessageContextActions,
-  type MessageActionContext,
-} from '../actions/contextualActions'
+  resolveActions,
+  type ActionContext,
+  type ActionServices,
+} from '../actions'
 import type { MessageSummary } from '../api/types'
+import { SYSTEM_KEYWORDS } from '../domainVocabulary'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { cn } from '../lib/utils'
 import type { ConversationTreeRow } from './message-list/conversationTree'
@@ -92,19 +94,32 @@ export const MessageRow = memo(function MessageRow({
   const handleSelect = useCallback(() => {
     onSelectMessage(message)
   }, [message, onSelectMessage])
-  const handleViewConversation = useCallback(() => {
-    onViewConversation(message)
-  }, [message, onViewConversation])
-  const context: MessageActionContext = {
-    message,
-    target: messageRef,
-    viewRole,
-    surface: 'context-menu',
+  // The context menu resolves directly from the registry for this row's target.
+  // `services.row` binds the two `open` entries to the row callbacks (the same
+  // wiring the deleted shim owned); `email` carries the domain mutations. Built
+  // per render — cheap plain objects, no hooks inside.
+  const services: ActionServices = {
+    email: actions,
+    row: { open: onSelectMessage, viewConversation: onViewConversation },
   }
-  const contextActions = buildMessageContextActions(actions, context, {
-    onOpen: handleSelect,
-    onViewConversation: handleViewConversation,
-  })
+  const actionContext: ActionContext = {
+    targets: [
+      {
+        ref: messageRef,
+        summary: message,
+        isDraft: message.keywords.includes(SYSTEM_KEYWORDS.Draft),
+        draftId: message.draftId,
+        conversationId: message.conversationId,
+      },
+    ],
+    viewRole,
+    activePane: 'list',
+    surface: 'context-menu',
+    inputOwner: 'mail',
+    hasPendingMutation: actions.isPending,
+    connection: 'unknown',
+  }
+  const contextActions = resolveActions(actionContext, services)
   const row = (
     <button
       className={cn(
@@ -161,13 +176,13 @@ export const MessageRow = memo(function MessageRow({
           const previous = contextActions[index - 1]
           const Icon = action.icon
           return (
-            <Fragment key={action.id}>
-              {previous && previous.group !== action.group && (
+            <Fragment key={action.def.id}>
+              {previous && previous.def.section !== action.def.section && (
                 <ContextMenuSeparator />
               )}
               <ContextMenuItem
-                variant={action.destructive ? 'destructive' : 'default'}
-                onSelect={action.run}
+                variant={action.def.destructive ? 'destructive' : 'default'}
+                onSelect={action.execute}
               >
                 <Icon size={14} />
                 {action.title}
