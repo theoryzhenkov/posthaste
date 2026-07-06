@@ -66,6 +66,7 @@ impl AuthorityServerLink for StubFarNode {
                         keywords: vec!["$flagged".into()],
                         mailbox_ids: vec!["inbox".into()],
                     }),
+                    event: None,
                 }],
             },
         );
@@ -134,6 +135,7 @@ async fn remote_transport_reads_the_link_router_down_channel() {
                     keywords: vec!["$flagged".into()],
                     mailbox_ids: vec!["inbox".into()],
                 }),
+                event: None,
             }],
         })
     );

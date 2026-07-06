@@ -107,7 +107,7 @@ pub enum BaseUpdate {
 /// ([replication authority-server-link L1 §3](../replication/authority-server-link/L1.md)). Ordered within a frame; the near
 /// node applies them to its base cache in order, then recomputes its derived
 /// views (never invalidates).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseAssertion {
     /// The account the message belongs to. Carried so a near node can scope the
@@ -116,6 +116,16 @@ pub struct BaseAssertion {
     pub account_id: String,
     pub message_id: String,
     pub update: BaseUpdate,
+    /// The authoritative `message.updated` [`DomainEvent`] this assertion was
+    /// derived from, carried whole so a split (remote) runtime republishes the
+    /// SAME enriched event the co-located bus delivers — `payload.projection`
+    /// (the body-free `MessageSummary`) + `payload.countDeltas` (absolute
+    /// per-mailbox counts) included — instead of hand-building a bare
+    /// `{changes: {...}}` one that leaves the client's mailbox counters frozen.
+    /// `None` on frames from an older far node (or synthetic test frames); the
+    /// near node then falls back to the bare synthesized event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<DomainEvent>,
 }
 
 /// One frame on the link's down-channel ([replication authority-server-link L1 §3](../replication/authority-server-link/L1.md)).
@@ -128,7 +138,7 @@ pub struct BaseAssertion {
 /// assertion arrives first, so a confirmed settlement is a visual no-op; a
 /// failed one drives the near node's recompute back to authoritative state
 /// ([replication L1 §5.3, §5.5](../replication/L1.md)).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -1352,11 +1362,13 @@ mod tests {
                         keywords: vec!["$flagged".into()],
                         mailbox_ids: vec!["inbox".into()],
                     }),
+                    event: None,
                 },
                 BaseAssertion {
                     account_id: "acct".into(),
                     message_id: "m2".into(),
                     update: BaseUpdate::Removed,
+                    event: None,
                 },
             ],
         };
