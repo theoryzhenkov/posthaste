@@ -7,5 +7,8 @@ src/api/schema.gen.ts
 # Generated from asyncapi.json by `bun run events:generate`; drift-checked
 # verbatim, so it must stay byte-identical to the generator output.
 src/api/events.gen.ts
+# Generated from query-schema.json by `bun run query-schema:generate`;
+# drift-checked verbatim, so it must stay byte-identical to the generator output.
+src/api/querySchema.gen.ts
 # wasm-bindgen output (just build-replica-wasm); regenerated, not hand-edited.
 src/runtime/wasm/

@@ -37,7 +37,7 @@ pub enum SmartMailboxGroupOperator {
 /// Message field that a smart mailbox condition can filter on.
 ///
 /// @spec docs/L1-accounts#condition-fields-and-operators
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxField {
@@ -71,7 +71,7 @@ pub enum SmartMailboxField {
 /// Comparison operator for a smart mailbox condition.
 ///
 /// @spec docs/L1-accounts#condition-fields-and-operators
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxOperator {

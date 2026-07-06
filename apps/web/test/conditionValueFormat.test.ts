@@ -2,6 +2,10 @@ import { describe, expect, it } from 'bun:test'
 
 import type { SmartMailboxCondition, SmartMailboxField } from '../src/api/types'
 import {
+  ALL_QUERY_FIELDS,
+  QUERY_FIELD_SCHEMA,
+} from '../src/api/querySchema.gen'
+import {
   FIELD_REGISTRY,
   operatorOptionsForField,
   valueTypeForField,
@@ -41,6 +45,7 @@ describe('fieldRegistry', () => {
       sourceName: ['equals', 'contains', 'in'],
       messageId: ['equals', 'in'],
       threadId: ['equals', 'in'],
+      conversationId: ['equals', 'in'],
       mailboxId: ['equals', 'in'],
       mailboxName: ['equals', 'contains', 'in'],
       mailboxRole: ['equals', 'in'],
@@ -61,8 +66,24 @@ describe('fieldRegistry', () => {
     }
   })
 
-  it('covers exactly the known fields', () => {
-    expect(Object.keys(FIELD_REGISTRY).sort()).toHaveLength(18)
+  it('covers exactly the fields in the generated Rust schema', () => {
+    // The field set is generated from the canonical Rust schema, so the registry
+    // must cover exactly `ALL_QUERY_FIELDS` — no hand-maintained subset that can
+    // drift (this is what caught `conversationId` missing from the web registry).
+    expect(Object.keys(FIELD_REGISTRY).sort()).toEqual(
+      [...ALL_QUERY_FIELDS].sort(),
+    )
+  })
+
+  it('derives its operators verbatim from the generated Rust schema', () => {
+    // The schema-consistency guard: the operators the editor offers for every
+    // field are exactly the generated schema's, so they cannot drift from the
+    // store SQL compiler (which validates against the SAME schema).
+    for (const field of ALL_QUERY_FIELDS) {
+      expect(operatorOptionsForField(field)).toEqual([
+        ...QUERY_FIELD_SCHEMA[field].operators,
+      ])
+    }
   })
 })
 

@@ -2,12 +2,19 @@ import type {
   SmartMailboxField,
   SmartMailboxOperator,
 } from '../../../api/types'
+import {
+  QUERY_FIELD_SCHEMA,
+  type QueryValueType,
+} from '../../../api/querySchema.gen'
 
 /**
- * The value-entry "type" for a condition field. This is the web-side mirror of
- * the Rust compiler's per-field operator/value matrix (`field_compilers.rs`):
- * it drives which VALUE widget the condition editor renders, while the emitted
- * `SmartMailboxValue` wire shape (string | string[] | boolean) is unchanged.
+ * The value-entry "type" for a condition field: which VALUE widget the condition
+ * editor renders. This is PRESENTATION and is *finer* than the compiler's value
+ * type — e.g. an id, a mailbox ref, a role, and an address all share the coarse
+ * `text` value type in the Rust schema but want different pickers here.
+ *
+ * The field -> valueType/operators DATA is generated from the Rust schema
+ * (`querySchema.gen.ts`); this module only layers the widget choice on top.
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
@@ -22,72 +29,74 @@ export type ConditionValueType =
   | 'address'
   | 'size'
 
-/** Descriptor for a single condition field: its value type + allowed operators. */
+/** Descriptor for a single condition field: its widget value type + operators. */
 export interface FieldDescriptor {
   /** Drives the type-directed value widget in the condition editor. */
   valueType: ConditionValueType
   /**
-   * Operators offered for this field, mirroring the Rust compiler's type-gated
-   * matrix (`field_compilers.rs`). Kept here so the operator subset and the
-   * value widget stay in lock-step and cannot drift apart.
+   * Operators offered for this field. Sourced from the generated Rust schema, so
+   * the operator subset offered by the editor can never drift from the store SQL
+   * compiler's accepted set.
    */
-  operators: SmartMailboxOperator[]
+  operators: readonly SmartMailboxOperator[]
 }
 
-const ID_OPERATORS: SmartMailboxOperator[] = ['equals', 'in']
-const TEXT_OPERATORS: SmartMailboxOperator[] = ['equals', 'contains', 'in']
-const BOOL_OPERATORS: SmartMailboxOperator[] = ['equals']
-const DATE_OPERATORS: SmartMailboxOperator[] = [
-  'before',
-  'after',
-  'onOrBefore',
-  'onOrAfter',
-]
-// Numeric size comparison reuses the four inequality operators as `< > <= >=`
-// (the Rust `compile_numeric_field` matrix), so the wire enum stays unchanged.
-const SIZE_OPERATORS: SmartMailboxOperator[] = [
-  'before',
-  'after',
-  'onOrBefore',
-  'onOrAfter',
-]
+/**
+ * The default widget for each coarse (Rust) value type. A field with no explicit
+ * override in {@link WIDGET_OVERRIDE} renders with this widget.
+ */
+const DEFAULT_WIDGET: Record<QueryValueType, ConditionValueType> = {
+  text: 'text',
+  bool: 'boolean',
+  date: 'date',
+  number: 'size',
+}
 
 /**
- * The single field → { valueType, operators } table that drives the whole
- * condition row. Adding type-directed value widgets is a matter of setting the
- * right `valueType` here; the emitted value never changes shape.
+ * Presentation-only refinement: fields whose coarse value type is `text` (or
+ * `number`) but that deserve a dedicated picker instead of the generic text box.
+ * Purely which widget to show — it never changes the emitted wire shape or the
+ * allowed operators (those come from the generated schema).
+ *
+ * Tag/keyword and address autocomplete are follow-ons (no shared picker wired
+ * yet), so `keyword`/`address` render as text boxes today; the distinct type is
+ * kept so wiring the picker later is a one-line change here.
+ */
+const WIDGET_OVERRIDE: Partial<Record<SmartMailboxField, ConditionValueType>> =
+  {
+    sourceId: 'accountRef',
+    mailboxId: 'mailboxRef',
+    mailboxRole: 'roleEnum',
+    keyword: 'keyword',
+    fromName: 'address',
+    fromEmail: 'address',
+    // Recipient (To) address field — matched against `to_json`. Cc/Bcc are not
+    // stored as separate columns, so only To is queryable.
+    to: 'address',
+    // Byte size + unit widget over the numeric compiler (`compile_numeric_field`).
+    size: 'size',
+  }
+
+/**
+ * The field -> { valueType (widget), operators } table. The DATA (field set +
+ * operators + coarse value type) is generated from the Rust schema; only the
+ * widget refinement above is hand-maintained here.
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-export const FIELD_REGISTRY: Record<SmartMailboxField, FieldDescriptor> = {
-  sourceId: { valueType: 'accountRef', operators: ID_OPERATORS },
-  sourceName: { valueType: 'text', operators: TEXT_OPERATORS },
-  messageId: { valueType: 'text', operators: ID_OPERATORS },
-  threadId: { valueType: 'text', operators: ID_OPERATORS },
-  mailboxId: { valueType: 'mailboxRef', operators: ID_OPERATORS },
-  mailboxName: { valueType: 'text', operators: TEXT_OPERATORS },
-  mailboxRole: { valueType: 'roleEnum', operators: ID_OPERATORS },
-  isRead: { valueType: 'boolean', operators: BOOL_OPERATORS },
-  isFlagged: { valueType: 'boolean', operators: BOOL_OPERATORS },
-  hasAttachment: { valueType: 'boolean', operators: BOOL_OPERATORS },
-  // Tag/keyword autocomplete is a follow-on (no known-tag source wired yet);
-  // interim value type is `keyword`, rendered as the generic text box.
-  keyword: { valueType: 'keyword', operators: ID_OPERATORS },
-  // Address autocomplete is a follow-on (no shared address picker to reuse in
-  // the condition editor yet); interim value type is `address` → text box.
-  fromName: { valueType: 'address', operators: TEXT_OPERATORS },
-  fromEmail: { valueType: 'address', operators: TEXT_OPERATORS },
-  // Recipient (To) address field — matched against `to_json` (Cc/Bcc are not
-  // stored as separate columns, so only To is queryable). Same operators and
-  // wire shape as fromEmail; interim widget is the address text box.
-  to: { valueType: 'address', operators: TEXT_OPERATORS },
-  subject: { valueType: 'text', operators: TEXT_OPERATORS },
-  preview: { valueType: 'text', operators: TEXT_OPERATORS },
-  receivedAt: { valueType: 'date', operators: DATE_OPERATORS },
-  // Byte size + unit widget; emits a byte-count string the numeric compiler
-  // parses (`compile_numeric_field` on `message.size`).
-  size: { valueType: 'size', operators: SIZE_OPERATORS },
-}
+export const FIELD_REGISTRY: Record<SmartMailboxField, FieldDescriptor> =
+  Object.fromEntries(
+    (Object.keys(QUERY_FIELD_SCHEMA) as SmartMailboxField[]).map((field) => {
+      const spec = QUERY_FIELD_SCHEMA[field]
+      return [
+        field,
+        {
+          valueType: WIDGET_OVERRIDE[field] ?? DEFAULT_WIDGET[spec.valueType],
+          operators: spec.operators,
+        },
+      ]
+    }),
+  ) as Record<SmartMailboxField, FieldDescriptor>
 
 /** The value type that drives the type-directed widget for a field. */
 export function valueTypeForField(
@@ -97,11 +106,11 @@ export function valueTypeForField(
 }
 
 /**
- * Operator subset for a field — the single source of truth, consumed by both
+ * Operator subset for a field — generated from the Rust schema, consumed by both
  * the operator dropdown and `defaultCondition`.
  */
 export function operatorOptionsForField(
   field: SmartMailboxField,
-): SmartMailboxOperator[] {
+): readonly SmartMailboxOperator[] {
   return FIELD_REGISTRY[field].operators
 }

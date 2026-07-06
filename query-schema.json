@@ -1,0 +1,164 @@
+{
+  "fields": [
+    {
+      "field": "sourceId",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "in"
+      ]
+    },
+    {
+      "field": "sourceName",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "contains",
+        "in"
+      ]
+    },
+    {
+      "field": "messageId",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "in"
+      ]
+    },
+    {
+      "field": "threadId",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "in"
+      ]
+    },
+    {
+      "field": "conversationId",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "in"
+      ]
+    },
+    {
+      "field": "mailboxId",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "in"
+      ]
+    },
+    {
+      "field": "mailboxName",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "contains",
+        "in"
+      ]
+    },
+    {
+      "field": "mailboxRole",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "in"
+      ]
+    },
+    {
+      "field": "isRead",
+      "valueType": "bool",
+      "operators": [
+        "equals"
+      ]
+    },
+    {
+      "field": "isFlagged",
+      "valueType": "bool",
+      "operators": [
+        "equals"
+      ]
+    },
+    {
+      "field": "hasAttachment",
+      "valueType": "bool",
+      "operators": [
+        "equals"
+      ]
+    },
+    {
+      "field": "keyword",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "in"
+      ]
+    },
+    {
+      "field": "fromName",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "contains",
+        "in"
+      ]
+    },
+    {
+      "field": "fromEmail",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "contains",
+        "in"
+      ]
+    },
+    {
+      "field": "to",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "contains",
+        "in"
+      ]
+    },
+    {
+      "field": "subject",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "contains",
+        "in"
+      ]
+    },
+    {
+      "field": "preview",
+      "valueType": "text",
+      "operators": [
+        "equals",
+        "contains",
+        "in"
+      ]
+    },
+    {
+      "field": "receivedAt",
+      "valueType": "date",
+      "operators": [
+        "before",
+        "after",
+        "onOrBefore",
+        "onOrAfter"
+      ]
+    },
+    {
+      "field": "size",
+      "valueType": "number",
+      "operators": [
+        "before",
+        "after",
+        "onOrBefore",
+        "onOrAfter"
+      ]
+    }
+  ]
+}
