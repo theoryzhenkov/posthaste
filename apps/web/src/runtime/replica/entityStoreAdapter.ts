@@ -680,8 +680,9 @@ class EntityStoreController {
       // of N. The mailbox→account tracking stays on the main thread.
       const updates: StoreUpdate[] = []
       for (const frame of frames) {
-        const update = this.storeUpdateFromEvent(frame.payload as DomainEvent)
-        if (update) updates.push(update)
+        updates.push(
+          ...this.storeUpdatesFromEvent(frame.payload as DomainEvent),
+        )
       }
       if (updates.length) {
         await this.store.ingestBatchJson(JSON.stringify(updates))
@@ -963,11 +964,20 @@ class EntityStoreController {
     }
   }
 
-  /** Ingest a `message.updated` event's projection + count deltas into the store. */
-  /** Build a single store update from a `message.updated` event (or null if
-   *  there's nothing to materialize), tracking mailbox→account on the side.
-   *  Extracted so a coalesced flush can fold a whole burst into one ingest. */
-  private storeUpdateFromEvent(event: DomainEvent): StoreUpdate | null {
+  /** Build the store updates from a `message.updated` event (empty when there's
+   *  nothing to apply), tracking mailbox→account on the side. Extracted so a
+   *  coalesced flush can fold a whole burst into one ingest.
+   *
+   *  A projection (or a delete) materializes the row AND applies its
+   *  `countDeltas` in one `Message` update. A projection-LESS event that still
+   *  carries `countDeltas` — a count-only `message.updated` (a mailbox-metadata
+   *  event, or the split-runtime down-channel that re-publishes without a
+   *  projection) — must STILL move the source-mailbox counter: its `countDeltas`
+   *  are routed as standalone `MailboxCount` updates so the live-store counter
+   *  slice ingests them instead of the whole event (counts included) being
+   *  dropped. Previously such an event returned `null` and its counts were lost,
+   *  freezing the sidebar unread counter until a reload re-bootstrapped it. */
+  private storeUpdatesFromEvent(event: DomainEvent): StoreUpdate[] {
     const inner = event.payload as
       | {
           messageId?: string
@@ -978,31 +988,32 @@ class EntityStoreController {
       | undefined
     const messageId = inner?.messageId
     if (typeof messageId !== 'string') {
-      return null
+      return []
     }
     const deleted = inner?.deleted === true
     const projection = inner?.projection ?? null
     const countDeltas = inner?.countDeltas ?? []
-    // Not deleted + no projection: nothing to materialize (shouldn't happen —
-    // 2c attaches the projection to every non-destroy event).
-    if (!deleted && !projection) {
-      return null
-    }
     const accountId = event.accountId
     if (accountId) {
       for (const delta of countDeltas) {
         this.mailboxAccount.set(delta.mailboxId, accountId)
       }
     }
-    return { message: { messageId, projection, deleted, countDeltas } }
+    if (projection || deleted) {
+      return [{ message: { messageId, projection, deleted, countDeltas } }]
+    }
+    // No projection to materialize a row: apply the counts on their own so the
+    // counter slice still moves (the mark-read/move source-mailbox count is the
+    // motivating case).
+    return countDeltas.map((delta) => ({ mailboxCount: delta }))
   }
 
   private async ingestMessageEvent(event: DomainEvent): Promise<void> {
-    const update = this.storeUpdateFromEvent(event)
-    if (!update) {
+    const updates = this.storeUpdatesFromEvent(event)
+    if (updates.length === 0) {
       return
     }
-    await this.store.ingestBatchJson(JSON.stringify([update]))
+    await this.store.ingestBatchJson(JSON.stringify(updates))
   }
 
   /** The account's role→mailbox-id map from the cached mailbox list, so role
