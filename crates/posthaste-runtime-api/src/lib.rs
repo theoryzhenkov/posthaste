@@ -151,6 +151,20 @@ pub trait RuntimeMailReadApi: Send + Sync {
         name: String,
     ) -> Result<Vec<MailboxSummary>, RuntimeError>;
 
+    /// Destroy a mailbox and return the account's refreshed mailbox list.
+    /// Synchronous (blocking provider round-trip + resync). `remove_emails` is the
+    /// confirmed safety flag: the service refuses a non-empty mailbox without it
+    /// (→ `MailboxNotEmpty`/409). Mirrors [`create_mailbox`](Self::create_mailbox).
+    ///
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    async fn destroy_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        remove_emails: bool,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError>;
+
     async fn list_smart_mailboxes(
         &self,
         caller: RuntimeCaller,

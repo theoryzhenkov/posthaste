@@ -1,5 +1,21 @@
-import type { AccountAppearance, SmartMailboxSummary } from '@/api/types'
+import type {
+  AccountAppearance,
+  Mailbox,
+  SmartMailboxSummary,
+} from '@/api/types'
 import { cn } from '@/lib/utils'
+
+/**
+ * Whether a mailbox may be deleted from the sidebar. Protected/role mailboxes
+ * (Inbox/Sent/Trash/…) carry a provider-structural `role` and must never be
+ * deletable; only a plain user mailbox (`role === null`) is. The delete
+ * context-menu item and its confirm dialog are both gated on this.
+ *
+ * @spec docs/eph/RFC-L2-mailbox-management
+ */
+export function isMailboxDeletable(mailbox: Mailbox): boolean {
+  return mailbox.role == null
+}
 
 export function fallbackAccountAppearance(
   sourceId: string,

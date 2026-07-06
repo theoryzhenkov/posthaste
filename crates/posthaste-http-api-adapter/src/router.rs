@@ -134,7 +134,7 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/sources/{source_id}/mailboxes/{mailbox_id}",
-            patch(api::patch_mailbox),
+            patch(api::patch_mailbox).delete(api::delete_mailbox),
         )
         .route(
             "/sources/{source_id}/messages",

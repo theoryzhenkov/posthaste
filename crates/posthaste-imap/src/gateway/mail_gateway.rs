@@ -156,6 +156,31 @@ impl MailGateway for LiveImapSmtpGateway {
             .map(|()| crate::imap_mailbox_id(name))
     }
 
+    /// Destroy a mailbox with IMAP `DELETE`.
+    ///
+    /// IMAP has **no** `onDestroyRemoveEmails` — `DELETE` destroys any contained
+    /// mail unconditionally — so `remove_emails` is not forwarded to the server:
+    /// the non-empty safety gate lives entirely in the service layer, which has
+    /// already cleared it before this runs. The flag is accepted only to satisfy
+    /// the shared port signature.
+    ///
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    async fn destroy_mailbox(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        _remove_emails: bool,
+    ) -> Result<(), GatewayError> {
+        let mailbox_name = self.mailbox_name_for_id(account_id, mailbox_id)?;
+        let mut lease = self
+            .sessions
+            .acquire("destroy_mailbox")
+            .await
+            .map_err(imap_error_to_gateway)?;
+        let result = crate::mailbox::delete_imap_mailbox(lease.client(), &mailbox_name).await;
+        lease.finish(result).map_err(imap_error_to_gateway)
+    }
+
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Ok(Identity {
             id: "imap-smtp-default".to_string(),

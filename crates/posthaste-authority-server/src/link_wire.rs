@@ -280,6 +280,7 @@ fn runtime_error_status(code: &RuntimeErrorCode) -> (StatusCode, &'static str) {
             (StatusCode::SERVICE_UNAVAILABLE, "gateway_unavailable")
         }
         RuntimeErrorCode::Conflict => (StatusCode::CONFLICT, "conflict"),
+        RuntimeErrorCode::MailboxNotEmpty => (StatusCode::CONFLICT, "mailbox_not_empty"),
         RuntimeErrorCode::NetworkError => (StatusCode::BAD_GATEWAY, "network_error"),
         RuntimeErrorCode::StateMismatch => (StatusCode::CONFLICT, "state_mismatch"),
         RuntimeErrorCode::CannotCalculateChanges => (

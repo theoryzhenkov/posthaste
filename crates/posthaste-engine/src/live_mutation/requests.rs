@@ -118,6 +118,40 @@ pub(crate) fn create_mailbox_request_body(account_id: &str, name: &str) -> Value
     })
 }
 
+/// Build a `Mailbox/set` destroy request for a single mailbox.
+///
+/// `onDestroyRemoveEmails` mirrors the confirmed remove-emails flag: when
+/// `false` a JMAP server refuses to destroy a non-empty mailbox with a
+/// `mailboxHasEmail` set-error (parsed in [`crate::live_mutation::outcome::destroyed_mailbox`]
+/// into [`GatewayError::MailboxNotEmpty`]); when `true` the server deletes the
+/// contained mail along with the mailbox.
+pub(crate) fn destroy_mailbox_request_body(
+    account_id: &str,
+    mailbox_id: &MailboxId,
+    remove_emails: bool,
+) -> Value {
+    let mut arguments = Map::new();
+    arguments.insert(
+        "accountId".to_string(),
+        Value::String(account_id.to_string()),
+    );
+    arguments.insert("destroy".to_string(), json!([mailbox_id.as_str()]));
+    arguments.insert(
+        "onDestroyRemoveEmails".to_string(),
+        Value::Bool(remove_emails),
+    );
+
+    json!({
+        "using": [
+            "urn:ietf:params:jmap:core",
+            "urn:ietf:params:jmap:mail"
+        ],
+        "methodCalls": [
+            ["Mailbox/set", Value::Object(arguments), "s0"]
+        ]
+    })
+}
+
 pub(crate) async fn send_json_request(
     gateway: &LiveJmapGateway,
     request: Value,

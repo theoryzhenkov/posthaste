@@ -954,7 +954,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete mailbox
+         * @description Destroys a mailbox and returns the source's refreshed mailbox list. A non-empty mailbox is refused with 409 unless `removeEmails=true` is passed (confirm-with-count safety gate); the 409 body's `details.count` carries the message count.
+         */
+        delete: operations["delete_mailbox"];
         options?: never;
         head?: never;
         /**
@@ -1357,7 +1361,7 @@ export interface components {
          *     @spec docs/L1-api#error-code-mapping
          * @enum {string}
          */
-        ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse";
+        ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "mailbox_not_empty" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse";
         /**
          * @description Global application settings shared across all accounts.
          *
@@ -2448,7 +2452,7 @@ export interface components {
             ranges?: components["schemas"]["CoverageRange"][];
         };
         /** @enum {string} */
-        RuntimeErrorCode: "runtime_not_ready" | "invalid_descriptor" | "invalid_mutation" | "invalid_secret" | "invalid_account" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "unauthorized" | "not_found" | "provider_unavailable" | "conflict" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse" | "transport_disconnected" | "internal";
+        RuntimeErrorCode: "runtime_not_ready" | "invalid_descriptor" | "invalid_mutation" | "invalid_secret" | "invalid_account" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "unauthorized" | "not_found" | "provider_unavailable" | "conflict" | "mailbox_not_empty" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse" | "transport_disconnected" | "internal";
         RuntimeFrame: {
             linkSeq: components["schemas"]["RuntimeLinkSeq"];
             revision: components["schemas"]["ViewRevision"];
@@ -5420,6 +5424,61 @@ export interface operations {
             };
             /** @description Source not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Account gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    delete_mailbox: {
+        parameters: {
+            query?: {
+                /** @description Confirm deleting the mailbox's messages */
+                removeEmails?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+                /** @description Mailbox identifier */
+                mailbox_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated mailboxes for the source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxSummary"][];
+                };
+            };
+            /** @description Source or mailbox not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Mailbox is not empty and removeEmails was not set */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

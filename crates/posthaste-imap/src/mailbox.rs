@@ -60,6 +60,27 @@ pub(crate) async fn create_imap_mailbox(
     crate::timeout::with_deadline_resolve("create", client.resolve(CreateTask::new(mailbox))).await
 }
 
+/// Destroy a mailbox with IMAP `DELETE <name>`.
+///
+/// **Asymmetry with JMAP:** IMAP `DELETE` has no `onDestroyRemoveEmails`
+/// equivalent — the server destroys any contained mail unconditionally. There is
+/// therefore no provider-side non-empty guard: the confirm-with-count safety gate
+/// is enforced entirely in the SERVICE layer (`MailService::destroy_mailbox`
+/// refuses a non-empty mailbox without the explicit `remove_emails` flag), and by
+/// the time this runs the service has already cleared that gate. This impl just
+/// issues the DELETE.
+///
+/// @spec docs/eph/RFC-L2-mailbox-management
+pub(crate) async fn delete_imap_mailbox(
+    client: &mut ImapClient,
+    mailbox_name: &str,
+) -> Result<(), ImapAdapterError> {
+    let mailbox = Mailbox::try_from(mailbox_name)
+        .map_err(|_| ImapAdapterError::InvalidMailboxName(mailbox_name.to_string()))?
+        .into_static();
+    crate::timeout::with_deadline_resolve("delete", client.resolve(DeleteTask::new(mailbox))).await
+}
+
 pub(crate) async fn examine_selected_mailbox(
     client: &mut ImapClient,
     mailbox_name: &str,
@@ -163,6 +184,37 @@ impl Task for CreateTask {
 
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Create {
+            mailbox: self.mailbox.clone(),
+        }
+    }
+
+    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
+        match status_body.kind {
+            StatusKind::Ok => Ok(()),
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
+        }
+    }
+}
+
+/// Issues IMAP `DELETE <mailbox>` and reports success/failure from the tagged
+/// response. No untagged data is expected.
+#[derive(Clone, Debug)]
+struct DeleteTask {
+    mailbox: Mailbox<'static>,
+}
+
+impl DeleteTask {
+    fn new(mailbox: Mailbox<'static>) -> Self {
+        Self { mailbox }
+    }
+}
+
+impl Task for DeleteTask {
+    type Output = Result<(), TaskError>;
+
+    fn command_body(&self) -> CommandBody<'static> {
+        CommandBody::Delete {
             mailbox: self.mailbox.clone(),
         }
     }

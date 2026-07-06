@@ -76,3 +76,104 @@ async fn create_mailbox_creates_then_resyncs() {
         Some("mb-Receipts"),
     );
 }
+
+#[tokio::test]
+async fn destroy_empty_mailbox_calls_the_gateway_then_resyncs() {
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    // Empty `rule_page` => the TestStore reports every mailbox with total 0, so
+    // "inbox" is empty and the destroy needs no confirmation.
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    let account = AccountId::from("primary");
+    let mailbox = MailboxId::from("inbox");
+
+    let events = service
+        .destroy_mailbox(&account, &mailbox, false, &gateway)
+        .await
+        .expect("destroying an empty mailbox needs no confirmation");
+
+    assert_eq!(
+        &*gateway
+            .destroy_mailbox_calls
+            .lock()
+            .expect("calls poisoned"),
+        &[(mailbox.clone(), false)],
+        "the gateway destroy runs exactly once, with remove_emails=false",
+    );
+    let removed = events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MAILBOX_UPDATED)
+        .expect("a mailbox-updated event marks the removal");
+    assert_eq!(removed.payload["mailboxId"], "inbox");
+    assert_eq!(removed.payload["deleted"], true);
+}
+
+#[tokio::test]
+async fn destroy_non_empty_without_remove_emails_refuses_and_never_calls_the_gateway() {
+    // THE SAFETY GATE, un-bypassable from any caller: a non-empty mailbox destroy
+    // without the confirmed remove-emails flag returns `MailboxNotEmpty` with the
+    // count BEFORE the gateway is ever touched.
+    let store = Arc::new(TestStore::default());
+    store.rule_page.lock().expect("rule page poisoned").push({
+        let mut summary = sample_message_summary("m-archive", Vec::new());
+        summary.mailbox_ids = vec![MailboxId::from("archive")];
+        summary
+    });
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    let account = AccountId::from("primary");
+    let mailbox = MailboxId::from("archive");
+
+    let error = service
+        .destroy_mailbox(&account, &mailbox, false, &gateway)
+        .await
+        .expect_err("a non-empty mailbox must be refused without remove_emails");
+
+    assert!(
+        matches!(
+            error,
+            posthaste_domain_model::ServiceError::Gateway(GatewayError::MailboxNotEmpty {
+                count: 1
+            })
+        ),
+        "the refusal carries the message count, got {error:?}",
+    );
+    assert!(
+        gateway
+            .destroy_mailbox_calls
+            .lock()
+            .expect("calls poisoned")
+            .is_empty(),
+        "the gateway must NOT be called when the gate refuses",
+    );
+}
+
+#[tokio::test]
+async fn destroy_non_empty_with_remove_emails_calls_the_gateway() {
+    // With the confirmed flag the same non-empty mailbox proceeds: the gateway
+    // destroy runs (with remove_emails=true) and the resync tears the rows down.
+    let store = Arc::new(TestStore::default());
+    store.rule_page.lock().expect("rule page poisoned").push({
+        let mut summary = sample_message_summary("m-archive", Vec::new());
+        summary.mailbox_ids = vec![MailboxId::from("archive")];
+        summary
+    });
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    let account = AccountId::from("primary");
+    let mailbox = MailboxId::from("archive");
+
+    service
+        .destroy_mailbox(&account, &mailbox, true, &gateway)
+        .await
+        .expect("a confirmed remove_emails destroy succeeds");
+
+    assert_eq!(
+        &*gateway
+            .destroy_mailbox_calls
+            .lock()
+            .expect("calls poisoned"),
+        &[(mailbox, true)],
+        "the confirmed flag threads through to the gateway",
+    );
+}
