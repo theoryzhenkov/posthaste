@@ -5,8 +5,8 @@ import { defineConfig } from 'vite'
 import wasm from 'vite-plugin-wasm'
 
 // `wasm` lets the generated `posthaste-client-node-wasm` module (the client-layer
-// replica boundary) load in the browser. Inert unless the replicaAdapter is
-// imported (gated behind VITE_RUNTIME_REPLICA).
+// replica boundary) load in the browser. The entity-store replica adapter is
+// always installed, so the WASM module is a required part of every bundle.
 export default defineConfig({
   plugins: [react(), tailwindcss(), wasm()],
   resolve: {

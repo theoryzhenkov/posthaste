@@ -206,9 +206,6 @@ jobs:
           # Baked into the web bundle so OAuth account setup can exchange the
           # authorization code (Google rejects the exchange without it).
           VITE_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_OAUTH_CLIENT_SECRET }}
-          # Nightly builds exercise the WASM client-layer replica so we can
-          # validate it in real web bundles before flipping it on for stable.
-          VITE_RUNTIME_REPLICA: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL == 'nightly' && 'true' || 'false' }}
         run: |
           bun --cwd=apps/web run build
           bash tools/package/web.sh
@@ -378,9 +375,6 @@ jobs:
       POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
       POSTHASTE_BUNDLE_VERSION: ${{ needs.resolve-channel.outputs.POSTHASTE_BUNDLE_VERSION }}
       VITE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
-      # Nightly desktop builds exercise the WASM client-layer replica so we can
-      # validate WebView WASM loading before enabling it on stable.
-      VITE_RUNTIME_REPLICA: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL == 'nightly' && 'true' || 'false' }}
     strategy:
       fail-fast: false
       matrix:
