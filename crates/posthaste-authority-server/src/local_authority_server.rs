@@ -81,6 +81,14 @@ pub(crate) fn base_frame_from_event(
 /// from the authority server (`None` when the message is gone); a `deleted` event maps to
 /// a removal regardless. Non-message events and events without a message id
 /// produce no assertion.
+///
+/// The assertion carries the source event whole (`BaseAssertion::event`): the
+/// store command authored it ENRICHED — `payload.projection` (the body-free
+/// `MessageSummary`) + `payload.countDeltas` (absolute per-mailbox counts),
+/// `posthaste-store` `mutations/commands.rs` — and a split (remote) runtime
+/// republishes it verbatim, so its clients' mailbox counters move on their own
+/// mutations exactly as a co-located runtime's do (which shares this bus
+/// directly).
 pub(crate) fn message_event_to_assertion(
     event: &DomainEvent,
     current: Option<MessageFoldState>,
@@ -100,6 +108,7 @@ pub(crate) fn message_event_to_assertion(
             account_id,
             message_id,
             update: BaseUpdate::Removed,
+            event: Some(event.clone()),
         });
     }
     // A present message asserts its complete current state. If the read found
@@ -111,6 +120,7 @@ pub(crate) fn message_event_to_assertion(
             Some(state) => BaseUpdate::Present(state),
             None => BaseUpdate::Removed,
         },
+        event: Some(event.clone()),
     })
 }
 
@@ -697,6 +707,9 @@ mod tests {
             assertion.update,
             BaseUpdate::Present(fold(&["$flagged"], &["inbox"]))
         );
+        // The source event rides the assertion whole, enrichment
+        // (projection/countDeltas) and all, for the split runtime's republish.
+        assert_eq!(assertion.event.as_ref(), Some(&event));
     }
 
     #[test]
@@ -704,6 +717,9 @@ mod tests {
         let event = message_event(json!({ "messageId": "m1", "deleted": true }));
         let assertion = message_event_to_assertion(&event, Some(fold(&[], &["inbox"]))).unwrap();
         assert_eq!(assertion.update, BaseUpdate::Removed);
+        // Deletions carry the source event too — its `countDeltas` still name
+        // the mailboxes the message left.
+        assert_eq!(assertion.event.as_ref(), Some(&event));
     }
 
     #[test]

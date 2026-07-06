@@ -408,6 +408,7 @@ mod tests {
                         account_id: "acct".into(),
                         message_id: "m1".into(),
                         update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
+                        event: None,
                     }],
                 },
             );
@@ -456,6 +457,7 @@ mod tests {
                     account_id: "acct".into(),
                     message_id: "m1".into(),
                     update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
+                    event: None,
                 }],
             })
         );
@@ -500,6 +502,7 @@ mod tests {
                         account_id: "acct".into(),
                         message_id: format!("m{seq}"),
                         update: BaseUpdate::Removed,
+                        event: None,
                     }],
                 },
             );
