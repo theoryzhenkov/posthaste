@@ -4991,6 +4991,7 @@
         "description": "Stable machine-readable API error code.\n\nThe single typed code space for the `/v1` surface: boundary-validation codes\nraised by the API layer, plus the domain [`ServiceErrorKind`] codes mapped via\n[`From<ServiceErrorKind>`]. Serializes to snake_case wire strings.\n\n@spec docs/L1-api#error-format\n@spec docs/L1-api#error-code-mapping",
         "enum": [
           "invalid_query",
+          "query_invalid",
           "invalid_cursor",
           "invalid_limit",
           "invalid_mailbox",
@@ -8304,15 +8305,15 @@
       },
       "SmartMailboxOperator": {
         "type": "string",
-        "description": "Comparison operator for a smart mailbox condition.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "description": "Comparison operator for a smart mailbox condition.\n\nThe four ordered comparisons are **neutral** (`Lt`/`Gt`/`Le`/`Ge`, i.e.\n`< > <= >=`): the model no longer speaks \"date\" — dates and numbers share the\nsame comparators, and the editor labels them per field type (\"before/after\"\nfor dates, \"smaller/larger than\" for size). See D6 of RFC-L2-query-schema.\n\nBACK-COMPAT (critical — these are stored wire names): the four ordered\nvariants carry a `#[serde(alias = ...)]` for their OLD camelCase names\n(`before`/`after`/`onOrBefore`/`onOrAfter`), so smart mailboxes / rules\npersisted before the rename still deserialize. Serialization emits the NEW\nnames (`lt`/`gt`/`le`/`ge`); no migration is needed — old data reads, re-saved\ndata uses the new names.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
         "enum": [
           "equals",
           "in",
           "contains",
-          "before",
-          "after",
-          "onOrBefore",
-          "onOrAfter"
+          "lt",
+          "gt",
+          "le",
+          "ge"
         ]
       },
       "SmartMailboxRule": {

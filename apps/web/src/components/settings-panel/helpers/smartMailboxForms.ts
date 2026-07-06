@@ -11,7 +11,12 @@ import type {
 import type { SmartMailboxFormState } from '../types'
 import { operatorOptionsForField, valueTypeForField } from './fieldRegistry'
 
-export { operatorOptionsForField, valueTypeForField } from './fieldRegistry'
+export {
+  operatorLabel,
+  operatorLabelForField,
+  operatorOptionsForField,
+  valueTypeForField,
+} from './fieldRegistry'
 export type { ConditionValueType, FieldDescriptor } from './fieldRegistry'
 
 /** Default empty form state for creating a new smart mailbox. */

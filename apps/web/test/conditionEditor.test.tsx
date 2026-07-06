@@ -65,7 +65,7 @@ function renderCondition(
 describe('ConditionEditor — type-directed value widget', () => {
   it('renders the date/relative picker (a native date input, not a text box) for a date field', () => {
     const { getByTestId, queryByTestId, container } = renderCondition(
-      mkCondition('receivedAt', 'before', ''),
+      mkCondition('receivedAt', 'lt', ''),
     )
 
     expect(getByTestId('value-widget-date')).toBeDefined()
@@ -149,7 +149,7 @@ describe('ConditionEditor — type-directed value widget', () => {
 
   it('renders the number+unit widget for the size field (not a bare text box)', () => {
     const { getByTestId, getByRole, queryByTestId } = renderCondition(
-      mkCondition('size', 'after', ''),
+      mkCondition('size', 'gt', ''),
     )
     expect(getByTestId('value-widget-size')).toBeDefined()
     // A numeric amount input plus a unit combobox — the "size + unit" case.

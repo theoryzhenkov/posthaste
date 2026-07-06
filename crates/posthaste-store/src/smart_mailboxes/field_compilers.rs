@@ -101,10 +101,10 @@ pub(super) fn compile_date_field(
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     let comparator = match condition.operator {
-        SmartMailboxOperator::Before => "<",
-        SmartMailboxOperator::After => ">",
-        SmartMailboxOperator::OnOrBefore => "<=",
-        SmartMailboxOperator::OnOrAfter => ">=",
+        SmartMailboxOperator::Lt => "<",
+        SmartMailboxOperator::Gt => ">",
+        SmartMailboxOperator::Le => "<=",
+        SmartMailboxOperator::Ge => ">=",
         _ => {
             return Err(StoreError::Failure(format!(
                 "unsupported operator {:?} for field {:?}",
@@ -152,8 +152,8 @@ pub(super) fn compile_date_field(
 }
 
 /// Compiles a numeric-comparison condition against an integer column (used for
-/// `size`). The `Before/After/OnOrBefore/OnOrAfter` operators are reused as the
-/// numeric `< > <= >=` comparators (mirroring the date compiler's shape, but
+/// `size`). The neutral ordered operators (`Lt/Gt/Le/Ge`) are the numeric
+/// `< > <= >=` comparators (mirroring the date compiler's shape, but
 /// binding an integer so SQLite compares numerically, not lexicographically).
 /// The wire value is a byte count encoded as a string.
 pub(super) fn compile_numeric_field(
@@ -162,10 +162,10 @@ pub(super) fn compile_numeric_field(
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     let comparator = match condition.operator {
-        SmartMailboxOperator::Before => "<",
-        SmartMailboxOperator::After => ">",
-        SmartMailboxOperator::OnOrBefore => "<=",
-        SmartMailboxOperator::OnOrAfter => ">=",
+        SmartMailboxOperator::Lt => "<",
+        SmartMailboxOperator::Gt => ">",
+        SmartMailboxOperator::Le => "<=",
+        SmartMailboxOperator::Ge => ">=",
         _ => {
             return Err(StoreError::Failure(format!(
                 "unsupported operator {:?} for field {:?}",
