@@ -16,9 +16,10 @@ pub use mail_query::*;
 
 use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, Appearance, AutomationRule,
-    CachePolicy, GatewayError, ImapTransportSettings, MailboxColor, MessageAttachment,
-    MessageSummary, Notifications, ProviderAuthKind, ProviderHint, ServiceError, ServiceErrorKind,
-    SmartMailboxId, SmartMailboxRule, SmtpTransportSettings, TagAppearance, ValidationError,
+    CachePolicy, GatewayError, ImapTransportSettings, MailboxColor, MailboxGroup,
+    MessageAttachment, MessageSummary, Notifications, ProviderAuthKind, ProviderHint, ServiceError,
+    ServiceErrorKind, SmartMailboxId, SmartMailboxRule, SmtpTransportSettings, TagAppearance,
+    ValidationError,
 };
 
 // Re-exported so the shared retryability vocabulary is reachable as
@@ -255,6 +256,9 @@ pub struct PatchAppSettingsMutation {
     /// — the drag-to-reorder primitive (see [`AppSettings::smart_mailbox_order`]).
     pub smart_mailbox_order: Option<Vec<SmartMailboxId>>,
     pub account_order: Option<Vec<AccountId>>,
+    /// Client-side sidebar Groups (presentation only). Overwrites the stored list
+    /// wholesale, mirroring [`mailbox_colors`](Self::mailbox_colors).
+    pub mailbox_groups: Option<Vec<MailboxGroup>>,
     /// Force the current backfill rules to re-run after persisting, even when
     /// the rule fingerprint is unchanged (on-demand "backfill now").
     #[serde(default)]

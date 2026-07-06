@@ -13,7 +13,8 @@ import { useCallback, useMemo, useState } from 'react'
 
 import { useActivePane, useFocusedPaneHandler } from './keyboard/usePane'
 import { useMailboxNavigationReadModels } from '../mailboxNavigationReadModels'
-import { sortSmartMailboxes } from './sidebar/model'
+import { sortSmartMailboxes, visibleSourceMailboxes } from './sidebar/model'
+import { useMailboxGroups } from './sidebar/useMailboxGroups'
 import { useSidebarReorder } from './sidebar/useSidebarReorder'
 import {
   moveRovingKey,
@@ -73,12 +74,18 @@ export function Sidebar({
   const { error, isLoading, refetchBootstrap, smartMailboxes, sources } =
     useMailboxNavigationReadModels()
   const { reorderSmartMailboxes, reorderAccounts } = useSidebarReorder()
+  const groups = useMailboxGroups()
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false)
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
   // Per-source collapse is owned here (not in SourceSection) so `j`/`k` only ever
   // land on rows that are actually visible.
   const [collapsedSourceIds, setCollapsedSourceIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set())
+  // Per-group collapse is owned here for the same reason: a collapsed Group must
+  // hide its member mailboxes from the `j`/`k` walk (mirrors per-source collapse).
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<
     ReadonlySet<string>
   >(() => new Set())
 
@@ -102,6 +109,18 @@ export function Sidebar({
     })
   }, [])
 
+  const toggleGroupCollapsed = useCallback((groupId: string) => {
+    setCollapsedGroupIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) {
+        next.delete(groupId)
+      } else {
+        next.add(groupId)
+      }
+      return next
+    })
+  }, [])
+
   // Flat, in-DOM-order list of navigable rows, honoring every collapse state.
   const navItems = useMemo(() => {
     const items: { key: SidebarNavKey; activate: () => void }[] = []
@@ -117,7 +136,14 @@ export function Sidebar({
     if (!sourcesCollapsed) {
       for (const source of sources) {
         if (collapsedSourceIds.has(source.id)) continue
-        for (const mailbox of source.mailboxes) {
+        // Walk in DOM order: ungrouped mailboxes first, then each expanded
+        // Group's members — a collapsed Group hides its members from the walk
+        // (mirrors per-source collapse), so `j`/`k` only lands on visible rows.
+        for (const mailbox of visibleSourceMailboxes(
+          source.mailboxes,
+          groups,
+          collapsedGroupIds,
+        )) {
           items.push({
             key: sourceNavKey(source.id, mailbox.id),
             activate: () =>
@@ -132,7 +158,9 @@ export function Sidebar({
     }
     return items
   }, [
+    collapsedGroupIds,
     collapsedSourceIds,
+    groups,
     mailboxesCollapsed,
     onSelectSmartMailbox,
     onSelectSourceMailbox,
@@ -192,6 +220,7 @@ export function Sidebar({
               selectedView={selectedView}
               isPaneActive={isSidebarActive}
               collapsedSourceIds={collapsedSourceIds}
+              collapsedGroupIds={collapsedGroupIds}
               sources={sources}
               onOpenAccountSettings={onOpenAccountSettings}
               onSelectSourceMailbox={onSelectSourceMailbox}
@@ -199,6 +228,7 @@ export function Sidebar({
               onReorder={reorderAccounts}
               onToggle={() => setSourcesCollapsed((prev) => !prev)}
               onToggleSourceCollapsed={toggleSourceCollapsed}
+              onToggleGroupCollapsed={toggleGroupCollapsed}
             />
           </>
         )}

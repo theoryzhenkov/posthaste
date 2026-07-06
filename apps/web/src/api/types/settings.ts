@@ -18,6 +18,26 @@ export interface AppSettings {
   smartMailboxOrder: string[]
   /** Explicit sidebar arrangement of accounts (ids); same override semantics. */
   accountOrder: string[]
+  /** Client-side, cross-device-synced sidebar Groups that visually cluster a
+   *  source's mailboxes. Pure presentation; a Group never maps to a provider
+   *  mailbox. */
+  mailboxGroups: MailboxGroup[]
+}
+
+/**
+ * A client-side sidebar Group (presentation only): a named cluster of a
+ * source's mailboxes, ordered by `order`. A mailbox belongs to at most one
+ * group; deleting a group only drops the grouping (never touches mailboxes).
+ */
+export interface MailboxGroup {
+  /** Stable client-generated id. */
+  id: string
+  /** User-facing group name. */
+  name: string
+  /** Member mailbox ids (of the group's source). */
+  mailboxIds: string[]
+  /** Sidebar sort position among a source's groups (ascending). */
+  order: number
 }
 
 /**
