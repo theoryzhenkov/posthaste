@@ -9,6 +9,7 @@
 
 mod account_reads;
 mod account_repository;
+mod apply_ledger_store;
 mod authority_server;
 mod bootstrap;
 mod build;

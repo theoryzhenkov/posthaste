@@ -3,6 +3,7 @@
 //!
 //! @spec docs/L1-sync#sqlite-schema
 
+mod apply_ledger;
 mod automation;
 mod cache;
 mod commands;
@@ -24,6 +25,9 @@ mod sync_state;
 #[cfg(test)]
 mod test_support;
 
+pub use crate::apply_ledger::{
+    ApplyLedgerReserve, ApplyLedgerRow, ApplyLedgerState, APPLY_LEDGER_RETENTION_SECS,
+};
 pub(crate) use crate::store::StagedBodyFiles;
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 pub use rev_log::MAX_REV_LOG_HISTORY;
