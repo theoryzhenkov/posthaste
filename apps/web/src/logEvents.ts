@@ -3,6 +3,7 @@ export const LOG_EVENTS = {
   apiRequestFailed: 'api.request.failed',
   apiRequestStarted: 'api.request.started',
   daemonEventMalformed: 'daemon.event.malformed',
+  dockBadgeUpdateFailed: 'dock.badge.update.failed',
   daemonEventStreamError: 'daemon.event.stream_error',
   frontendConsoleOutput: 'frontend.console.output',
   frontendErrorUncaught: 'frontend.error.uncaught',
