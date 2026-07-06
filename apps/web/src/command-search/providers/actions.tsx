@@ -59,7 +59,13 @@ export function createActionProvider(input: {
           strokeWidth: 1.7,
           className: 'text-muted-foreground',
         }),
-        action: { kind: 'action', actionId: action.def.id },
+        // A PARAMETERIZED action (Move to…, Snooze…) doesn't run on select — it
+        // pushes the palette into its pick-step (a searchable option list), so
+        // the palette must stay open.
+        action: action.params
+          ? { kind: 'open-action-params', actionId: action.def.id }
+          : { kind: 'action', actionId: action.def.id },
+        closeOnSelect: action.params ? false : undefined,
         disabled: !action.enabled,
         disabledReason: action.disabledReason,
         shortcut: formatChord(action.def.shortcut),

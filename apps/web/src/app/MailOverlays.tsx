@@ -73,6 +73,7 @@ function CommandPaletteOverlay(props: MailClientViewProps) {
         actions={props.actions}
         app={props.handlers}
         viewRole={props.viewRole}
+        initialActionId={props.commandPaletteSeedActionId}
         selectedMessage={props.selectedMessage}
         selectedMessageData={props.selectedMessageData}
         onApplySearch={props.onApplySearch}

@@ -37,6 +37,13 @@ export interface MailboxDirectory {
     message: MessageSummary,
     excludeMailboxId: string | null,
   ) => ResolvedMailbox | null
+  /**
+   * All cached mailboxes of one account, in read-model order — the row-level
+   * binding for `ActionServices.mailboxes` (the parameterized "Move to…"
+   * options). Empty until the account's mailboxes load, which hides the action
+   * rather than offering a bogus empty picker.
+   */
+  list: (sourceId: string) => Mailbox[]
 }
 
 export function useMailboxDirectory(
@@ -60,6 +67,7 @@ export function useMailboxDirectory(
     const isMultiAccount = accounts.length > 1
 
     return {
+      list: (sourceId) => [...(bySource.get(sourceId)?.values() ?? [])],
       resolve: (message, excludeMailboxId) => {
         const mailboxesById = bySource.get(message.sourceId)
         if (!mailboxesById || mailboxesById.size === 0) return null

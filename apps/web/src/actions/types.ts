@@ -14,7 +14,7 @@
  * @spec docs/eph/PLAN-L2-action-registry.md
  */
 import type { LucideIcon } from 'lucide-react'
-import type { MessageSummary, SourceMessageRef } from '../api/types'
+import type { Mailbox, MessageSummary, SourceMessageRef } from '../api/types'
 import type { PaneId } from '../components/keyboard/dispatch'
 import type { useMailClientHandlers } from '../app/useMailClientHandlers'
 import type { EmailActions } from '../hooks/useEmailActions'
@@ -50,6 +50,20 @@ export interface ShortcutChord {
   /** Fires even when an editable element is focused (the "modifier chords"
    *  tier). Default false. */
   inEditable?: boolean
+}
+
+/**
+ * One choosable target of a PARAMETERIZED action (e.g. a mailbox for
+ * `message.move-to-mailbox`, a snooze preset for `message.snooze`). Pure data —
+ * `id` is the value `run` receives, `label` is what every surface renders
+ * (context submenu row, palette pick-step row, header popover row).
+ */
+export interface ActionParamOption {
+  id: string
+  label: string
+  icon?: LucideIcon
+  /** Extra search terms for the palette's pick-step filter. */
+  keywords?: string
 }
 
 /** A single action subject. `targets` is a list from day one so multi-select is
@@ -103,6 +117,27 @@ export interface ActionServices {
     open: (message: MessageSummary) => void
     viewConversation: (message: MessageSummary) => void
   }
+  /** The account-scoped mailbox read model (the same source the sidebar /
+   *  navigation read models hydrate). Bound by surfaces that can offer
+   *  mailbox-parameterized actions (context menu via `useMailboxDirectory`,
+   *  palette + keyboard via the navigation read models); absent elsewhere —
+   *  which is exactly how `move-to-mailbox` stays hidden where no mailbox
+   *  source exists (e.g. the email-only parity harness). */
+  mailboxes?: {
+    list: (sourceId: string) => Mailbox[]
+  }
+  /** Detail-header-scoped handler bindings, bound by `MessageHeader` from its
+   *  callback props. Lets both header hosts (the mail shell, which also has
+   *  `app`, and the focused message window, which does not) drive the same
+   *  definitions. Defs prefer these over `app` when present. */
+  detail?: {
+    reply: () => void
+    replyAll: () => void
+    forward: () => void
+    editDraft?: () => void
+    openTagEditor?: () => void
+    openFocusedMessage?: () => void
+  }
 }
 
 /** Enablement result: `true` = runnable; `false` = shown-but-disabled with no
@@ -133,7 +168,25 @@ export interface ActionDefinition {
   /** Confirmation before run — routed through a shared dialog host (wired in a
    *  later slice). Slice-1 ports carry NONE, preserving today's behavior. */
   confirm?: { title: string; description: string; confirmLabel: string }
+  /**
+   * PARAMETERIZED actions: present iff the action needs a user-chosen target
+   * (a mailbox, a snooze preset) before it can run. Returns the choosable
+   * options for this context — the resolver exposes them as
+   * `ResolvedAction.params`, and each surface renders its own picker (context
+   * submenu, palette pick-step, header popover; a keyboard chord opens the
+   * palette picker). An action whose options resolve empty is dropped like a
+   * failed `isAvailable`. Non-parameterized actions simply omit this.
+   */
+  resolveParams?: (
+    ctx: ActionContext,
+    services: ActionServices,
+  ) => ActionParamOption[]
   /** Thin handler: delegates to {@link ActionServices}, which already own
-   *  optimistic folds, toasts, and undo. */
-  run: (ctx: ActionContext, services: ActionServices) => void | Promise<void>
+   *  optimistic folds, toasts, and undo. A parameterized action receives the
+   *  chosen `param` (and must no-op without one — surfaces always supply it). */
+  run: (
+    ctx: ActionContext,
+    services: ActionServices,
+    param?: ActionParamOption,
+  ) => void | Promise<void>
 }
