@@ -133,7 +133,7 @@ function OperatorSelect({
 }: {
   condition: SmartMailboxCondition
   isBooleanField: boolean
-  operators: string[]
+  operators: readonly string[]
   onChange: (condition: SmartMailboxCondition) => void
 }) {
   return (
