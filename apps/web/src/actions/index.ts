@@ -19,8 +19,16 @@
 import './defs/message'
 import './defs/app'
 
-export { formatChord } from './formatChord'
+export { formatChord, formatChords } from './formatChord'
 export { resolveActions, type ResolvedAction } from './resolve'
+export {
+  resolveKeyboardAction,
+  runResolvedWithConfirm,
+  matchesChord,
+  shortcutMatches,
+  type ActionConfirm,
+  type ChordEvent,
+} from './keyboard'
 export { getAction, allActions } from './registry'
 export type {
   ActionContext,

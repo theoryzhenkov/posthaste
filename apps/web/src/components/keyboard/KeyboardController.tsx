@@ -19,6 +19,15 @@ import {
   type ReactNode,
 } from 'react'
 
+import {
+  resolveKeyboardAction,
+  runResolvedWithConfirm,
+  type ActionConfirm,
+  type ActionContext,
+  type ActionServices,
+  type MessageTarget,
+} from '@/actions'
+
 import { KeyboardContext, type KeyboardContextValue } from './context'
 import {
   dispatchMailKey,
@@ -27,6 +36,7 @@ import {
   type PaneId,
   type PaneKeyHandler,
 } from './dispatch'
+import { KeyboardConfirmDialog } from './KeyboardConfirmDialog'
 import type { GotoPrefix, GotoRole } from './goto'
 
 /** How long a half-typed goto prefix (`g`, `gq`) waits for its next key. */
@@ -55,6 +65,14 @@ export interface KeyboardControllerProps {
   onToggleShortcuts: () => void
   onGoto: (role: GotoRole, options: { forceSmart: boolean }) => void
   onGotoConversation: () => void
+  /** Role of the current view — gates the contextual keyboard action tier
+   *  (e.g. `#` ⇒ delete-permanently only in Trash). */
+  viewRole: string | null
+  /** The focused message as a resolver target, or `null` when none is selected.
+   *  Built by MailClient from the selected message's detail. */
+  keyboardTarget: MessageTarget | null
+  /** Domain + app handler bundle the resolved actions delegate to. */
+  actionServices: ActionServices
   children: ReactNode
 }
 
@@ -64,6 +82,19 @@ export function KeyboardController({
 }: KeyboardControllerProps) {
   const [requestedPane, setRequestedPane] = useState<PaneId>('list')
   const handlersRef = useRef(new Map<PaneId, PaneKeyHandler>())
+
+  // A keyboard-invoked destructive action (delete-permanently) parks its runner
+  // here and renders a confirm dialog — a keystroke must never silently perform
+  // an irreversible delete.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    confirm: ActionConfirm
+    onConfirm: () => void
+  } | null>(null)
+  const requestConfirm = useCallback(
+    (confirm: ActionConfirm, onConfirm: () => void) =>
+      setPendingConfirm({ confirm, onConfirm }),
+    [],
+  )
 
   // The goto prefix lives in a ref (not state) so it is read/written
   // synchronously within a keydown — a fast `gi` must not race a re-render — and
@@ -152,13 +183,38 @@ export function KeyboardController({
         onClearSelectedMessage: p.onClearSelectedMessage,
         onClearSearchQuery: p.onClearSearchQuery,
         onToggleShortcuts: p.onToggleShortcuts,
+        // The registry tier is rebuilt per keydown from the ref snapshot (never
+        // render-scope state) so it never races focus/selection changes.
+        registryHook: {
+          match: (keyEvent) => {
+            const keyboardCtx: ActionContext = {
+              targets: p.keyboardTarget ? [p.keyboardTarget] : [],
+              viewRole: p.viewRole,
+              activePane: pane,
+              surface: 'keyboard',
+              inputOwner: 'mail',
+              hasPendingMutation: p.actionServices.email.isPending,
+              connection: 'unknown',
+            }
+            const resolved = resolveKeyboardAction(
+              keyEvent,
+              keyboardCtx,
+              p.actionServices,
+            )
+            if (!resolved) return null
+            return {
+              id: resolved.def.id,
+              run: () => runResolvedWithConfirm(resolved, requestConfirm),
+            }
+          },
+        },
       }
       dispatchMailKey(event, ctx)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setPendingPrefix])
+  }, [requestConfirm, setPendingPrefix])
 
   const value = useMemo<KeyboardContextValue>(
     () => ({ activePane, focusPane, registerPaneHandler }),
@@ -168,6 +224,14 @@ export function KeyboardController({
   return (
     <KeyboardContext.Provider value={value}>
       {children}
+      <KeyboardConfirmDialog
+        confirm={pendingConfirm?.confirm ?? null}
+        onConfirm={() => {
+          pendingConfirm?.onConfirm()
+          setPendingConfirm(null)
+        }}
+        onCancel={() => setPendingConfirm(null)}
+      />
     </KeyboardContext.Provider>
   )
 }

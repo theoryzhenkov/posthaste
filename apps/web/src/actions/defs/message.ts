@@ -142,7 +142,7 @@ export const messageActions: readonly ActionDefinition[] = [
     title: 'Archive',
     icon: Archive,
     keywords: 'archive',
-    surfaces: ['context-menu', 'palette'],
+    surfaces: ['context-menu', 'palette', 'keyboard'],
     shortcut: { key: 'e' },
     isAvailable: (ctx) =>
       ctx.viewRole !== 'archive' && ctx.viewRole !== 'trash',
@@ -167,7 +167,10 @@ export const messageActions: readonly ActionDefinition[] = [
     icon: Trash2,
     destructive: true,
     keywords: 'trash delete move',
-    surfaces: ['context-menu', 'palette'],
+    surfaces: ['context-menu', 'palette', 'keyboard'],
+    // Same chord as delete-permanently below; `isAvailable` disambiguates them
+    // (trash-view ⇒ delete-permanently, elsewhere ⇒ this). Stays instant —
+    // move-to-trash is reversible via the undo toast.
     shortcut: [{ key: '#' }, { key: 'backspace' }],
     // Not offered in Trash, and never on drafts (D127: a draft is discarded,
     // never trashed).
@@ -182,8 +185,19 @@ export const messageActions: readonly ActionDefinition[] = [
     title: 'Delete permanently',
     icon: Trash2,
     destructive: true,
+    // Irreversible: the keyboard tier PROMPTS via this metadata before running
+    // (no silent permanent-delete from a keystroke). The context menu / palette
+    // route through the same gate.
+    confirm: {
+      title: 'Delete permanently?',
+      description: 'This message will be destroyed. This cannot be undone.',
+      confirmLabel: 'Delete',
+    },
     keywords: 'delete permanently destroy',
-    surfaces: ['context-menu', 'palette'],
+    surfaces: ['context-menu', 'palette', 'keyboard'],
+    // Same `#`/Backspace chord as move-to-trash; availability (trash-view only,
+    // never a draft) is what makes the resolver pick this one inside Trash.
+    shortcut: [{ key: '#' }, { key: 'backspace' }],
     // Trash view only, and never on drafts.
     isAvailable: (ctx) =>
       ctx.viewRole === 'trash' && !ctx.targets.some((t) => t.isDraft),
@@ -218,7 +232,7 @@ export const messageActions: readonly ActionDefinition[] = [
     title: 'Tag',
     icon: Tag,
     keywords: 'tag add remove label message',
-    surfaces: ['palette'],
+    surfaces: ['palette', 'keyboard'],
     shortcut: { key: 't' },
     isEnabled: requireTarget,
     run: (_ctx, s) => s.app?.handleOpenTagEditor(),

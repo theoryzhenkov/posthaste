@@ -27,6 +27,28 @@ export const PANE_ORDER: readonly PaneId[] = ['sidebar', 'list']
  */
 export type PaneKeyHandler = (event: KeyboardEvent) => boolean
 
+/**
+ * The registry tier of the dispatcher (PLAN-L2, Slice 5).
+ *
+ * The controller supplies a `match` built over the action registry: for a
+ * pressed chord it resolves the `keyboard` surface in the CURRENT context and
+ * returns a bound runner for the matching AVAILABLE action, or `null` to fall
+ * through to native dispatch. The returned `run` already encapsulates the
+ * destructive-confirm gate (it prompts before an irreversible delete), so the
+ * dispatcher stays a thin, pure router.
+ */
+export interface RegistryKeyMatch {
+  /** Resolved action id (for debugging / the ambiguity guard). */
+  id: string
+  /** Execute the action — instant, or after a confirm prompt for destructive
+   *  actions. Owned by the controller so the dialog state lives in React-land. */
+  run: () => void
+}
+
+export interface RegistryKeyHook {
+  match(event: KeyboardEvent): RegistryKeyMatch | null
+}
+
 export interface KeyboardDispatchContext {
   /** A focused surface (settings/message/compose window) owns the screen. */
   effectiveSurfaceOpen: boolean
@@ -61,6 +83,12 @@ export interface KeyboardDispatchContext {
   onClearSelectedMessage: () => void
   onClearSearchQuery: () => void
   onToggleShortcuts: () => void
+  /** Registry tier: contextual mail-action shortcuts (archive/trash/delete/tag).
+   *  Consulted before the native selection-scoped handlers so the SAME chord
+   *  (`#`/Backspace) resolves to move-to-trash outside Trash and
+   *  delete-permanently inside it. Optional so `dispatchMailKey` stays usable in
+   *  unit tests that only exercise native behaviors. */
+  registryHook?: RegistryKeyHook
 }
 
 function moveFocus(ctx: KeyboardDispatchContext, direction: 1 | -1): void {
@@ -219,6 +247,19 @@ export function dispatchMailKey(
   // step the selection — which is what the detail pane shows.
   const paneHandler = ctx.resolvePaneHandler(ctx.activePane)
   if (paneHandler && paneHandler(event)) return
+
+  // ---- Registry tier: contextual mail actions (archive/trash/delete/tag). ----
+  // The resolver picks the AVAILABLE action for this chord IN THIS CONTEXT, so
+  // `#`/Backspace lands on delete-permanently in Trash (with a confirm) and
+  // move-to-trash elsewhere. A `null` match (no available action — e.g. a draft,
+  // or no selection) falls through to the native handlers below, so every legacy
+  // behavior is preserved.
+  const registryMatch = ctx.registryHook?.match(event)
+  if (registryMatch) {
+    event.preventDefault()
+    registryMatch.run()
+    return
+  }
 
   // Selection-scoped actions, available from any pane while a message is open.
   if (!ctx.hasSelectedMessage) return
