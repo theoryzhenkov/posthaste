@@ -43,8 +43,8 @@ export const QUERY_FIELD_SCHEMA: Record<SmartMailboxField, QueryFieldSchema> = {
   to: { valueType: 'text', operators: ['equals', 'contains', 'in'] },
   subject: { valueType: 'text', operators: ['equals', 'contains', 'in'] },
   preview: { valueType: 'text', operators: ['equals', 'contains', 'in'] },
-  receivedAt: { valueType: 'date', operators: ['before', 'after', 'onOrBefore', 'onOrAfter'] },
-  size: { valueType: 'number', operators: ['before', 'after', 'onOrBefore', 'onOrAfter'] },
+  receivedAt: { valueType: 'date', operators: ['lt', 'gt', 'le', 'ge'] },
+  size: { valueType: 'number', operators: ['lt', 'gt', 'le', 'ge'] },
 }
 
 /** Every query field, in the schema's canonical declaration order. */

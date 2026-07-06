@@ -251,7 +251,7 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
     // `After` (>) 1 MiB, encoded as a byte-count string on the wire.
     let over_1mib = store.query_messages_by_rule(&single_condition_rule(
         SmartMailboxField::Size,
-        SmartMailboxOperator::After,
+        SmartMailboxOperator::Gt,
         SmartMailboxValue::String("1048576".to_string()),
     ))?;
     assert_eq!(
@@ -265,7 +265,7 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
     // `OnOrAfter` (>=) is inclusive of the exact-boundary message.
     let at_least_1mib = store.query_messages_by_rule(&single_condition_rule(
         SmartMailboxField::Size,
-        SmartMailboxOperator::OnOrAfter,
+        SmartMailboxOperator::Ge,
         SmartMailboxValue::String("1048576".to_string()),
     ))?;
     let mut ids: Vec<&str> = at_least_1mib.iter().map(|m| m.id.as_str()).collect();
@@ -275,7 +275,7 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
     // `Before` (<) compares numerically, not lexicographically: "500" < "1048576".
     let under_1mib = store.query_messages_by_rule(&single_condition_rule(
         SmartMailboxField::Size,
-        SmartMailboxOperator::Before,
+        SmartMailboxOperator::Lt,
         SmartMailboxValue::String("1048576".to_string()),
     ))?;
     assert_eq!(
@@ -289,7 +289,7 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
     // A non-numeric wire value is a type error at evaluation time.
     let err = store.query_messages_by_rule(&single_condition_rule(
         SmartMailboxField::Size,
-        SmartMailboxOperator::Before,
+        SmartMailboxOperator::Lt,
         SmartMailboxValue::String("not-a-number".to_string()),
     ));
     assert!(err.is_err());
@@ -441,7 +441,7 @@ fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
     };
 
     // "in the last 7 days" == received_at After (>) now-7days → only the recent one.
-    let within = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::After))?;
+    let within = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::Gt))?;
     assert_eq!(
         within.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         vec!["recent"],
@@ -449,7 +449,7 @@ fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
     );
 
     // "more than 7 days ago" == received_at Before (<) now-7days → only the old one.
-    let older = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::Before))?;
+    let older = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::Lt))?;
     assert_eq!(
         older.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         vec!["old"]
@@ -460,7 +460,7 @@ fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
     // time — a frozen absolute could never widen to include the older message).
     let last_20_days = single_condition_rule(
         SmartMailboxField::ReceivedAt,
-        SmartMailboxOperator::After,
+        SmartMailboxOperator::Gt,
         SmartMailboxValue::Date(DateValue::Relative {
             amount: 20,
             unit: DateUnit::Days,
@@ -499,7 +499,7 @@ fn date_field_accepts_legacy_string_and_typed_absolute() -> Result<(), StoreErro
     // Back-compat: a legacy bare-string absolute date still compiles + matches.
     let legacy = store.query_messages_by_rule(&single_condition_rule(
         SmartMailboxField::ReceivedAt,
-        SmartMailboxOperator::Before,
+        SmartMailboxOperator::Lt,
         SmartMailboxValue::String("2026-03-01T00:00:00Z".to_string()),
     ))?;
     assert_eq!(
@@ -510,7 +510,7 @@ fn date_field_accepts_legacy_string_and_typed_absolute() -> Result<(), StoreErro
     // The typed `Date::Absolute` matches identically.
     let typed = store.query_messages_by_rule(&single_condition_rule(
         SmartMailboxField::ReceivedAt,
-        SmartMailboxOperator::After,
+        SmartMailboxOperator::Gt,
         SmartMailboxValue::Date(DateValue::Absolute {
             value: "2026-03-01T00:00:00Z".to_string(),
         }),

@@ -63,12 +63,24 @@ pub enum SmartMailboxField {
     Preview,
     ReceivedAt,
     /// Message byte size (`message.size`), compared numerically. Reuses the
-    /// inequality operators (`Before`/`After`/`OnOrBefore`/`OnOrAfter`) as
-    /// `< > <= >=`; the emitted value is a byte count encoded as a string.
+    /// neutral ordered operators (`Lt`/`Gt`/`Le`/`Ge`) as `< > <= >=`; the
+    /// emitted value is a byte count encoded as a string.
     Size,
 }
 
 /// Comparison operator for a smart mailbox condition.
+///
+/// The four ordered comparisons are **neutral** (`Lt`/`Gt`/`Le`/`Ge`, i.e.
+/// `< > <= >=`): the model no longer speaks "date" — dates and numbers share the
+/// same comparators, and the editor labels them per field type ("before/after"
+/// for dates, "smaller/larger than" for size). See D6 of RFC-L2-query-schema.
+///
+/// BACK-COMPAT (critical — these are stored wire names): the four ordered
+/// variants carry a `#[serde(alias = ...)]` for their OLD camelCase names
+/// (`before`/`after`/`onOrBefore`/`onOrAfter`), so smart mailboxes / rules
+/// persisted before the rename still deserialize. Serialization emits the NEW
+/// names (`lt`/`gt`/`le`/`ge`); no migration is needed — old data reads, re-saved
+/// data uses the new names.
 ///
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -78,10 +90,18 @@ pub enum SmartMailboxOperator {
     Equals,
     In,
     Contains,
-    Before,
-    After,
-    OnOrBefore,
-    OnOrAfter,
+    /// `<` — legacy wire name `before`.
+    #[serde(alias = "before")]
+    Lt,
+    /// `>` — legacy wire name `after`.
+    #[serde(alias = "after")]
+    Gt,
+    /// `<=` — legacy wire name `onOrBefore`.
+    #[serde(alias = "onOrBefore")]
+    Le,
+    /// `>=` — legacy wire name `onOrAfter`.
+    #[serde(alias = "onOrAfter")]
+    Ge,
 }
 
 /// Condition value: scalar string, string list (for `In`), boolean, or a typed
@@ -329,6 +349,48 @@ mod value_serde_tests {
             serde_json::from_value::<SmartMailboxValue>(json).unwrap(),
             value
         );
+    }
+
+    #[test]
+    fn legacy_operator_names_deserialize_to_neutral_variants() {
+        // BACK-COMPAT: stored rules use the OLD wire names; they must still read.
+        for (legacy, expected) in [
+            ("before", SmartMailboxOperator::Lt),
+            ("after", SmartMailboxOperator::Gt),
+            ("onOrBefore", SmartMailboxOperator::Le),
+            ("onOrAfter", SmartMailboxOperator::Ge),
+        ] {
+            let json = format!("\"{legacy}\"");
+            assert_eq!(
+                serde_json::from_str::<SmartMailboxOperator>(&json).unwrap(),
+                expected,
+                "legacy operator {legacy:?} must deserialize to the neutral variant"
+            );
+        }
+        // The unchanged operators still round-trip by their own names.
+        assert_eq!(
+            serde_json::from_str::<SmartMailboxOperator>("\"equals\"").unwrap(),
+            SmartMailboxOperator::Equals
+        );
+    }
+
+    #[test]
+    fn neutral_operators_serialize_with_new_names() {
+        // Re-saved data uses the NEW neutral wire names.
+        for (operator, wire) in [
+            (SmartMailboxOperator::Lt, "lt"),
+            (SmartMailboxOperator::Gt, "gt"),
+            (SmartMailboxOperator::Le, "le"),
+            (SmartMailboxOperator::Ge, "ge"),
+            (SmartMailboxOperator::Equals, "equals"),
+            (SmartMailboxOperator::In, "in"),
+            (SmartMailboxOperator::Contains, "contains"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(operator).unwrap(),
+                serde_json::json!(wire)
+            );
+        }
     }
 
     #[test]

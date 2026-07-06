@@ -101,6 +101,11 @@ pub enum FieldToml {
 
 /// Comparison operators for smart mailbox conditions.
 ///
+/// The four ordered comparisons are the neutral `Lt`/`Gt`/`Le`/`Ge` (D6). Stored
+/// TOML written before the rename used the old snake_case names
+/// (`before`/`after`/`on_or_before`/`on_or_after`); the `#[serde(alias = ...)]`s
+/// keep those readable, while serialization emits the new `lt`/`gt`/`le`/`ge`.
+///
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -108,10 +113,14 @@ pub enum ConditionOperatorToml {
     Equals,
     In,
     Contains,
-    Before,
-    After,
-    OnOrBefore,
-    OnOrAfter,
+    #[serde(alias = "before")]
+    Lt,
+    #[serde(alias = "after")]
+    Gt,
+    #[serde(alias = "on_or_before")]
+    Le,
+    #[serde(alias = "on_or_after")]
+    Ge,
 }
 
 // -- Helpers --

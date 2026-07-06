@@ -168,27 +168,30 @@ type DateReading = {
   operator: SmartMailboxOperator
 }
 
+// The MODEL operators are neutral (`lt`/`gt`/`le`/`ge`); for date fields the
+// reading LABELS them "before/after/on or before/on or after" (D6's per-type
+// labelling — dates read as dates even though the operator is neutral).
 const DATE_READINGS: DateReading[] = [
   {
     key: 'onOrAfter',
     label: 'on or after',
     mode: 'absolute',
-    operator: 'onOrAfter',
+    operator: 'ge',
   },
-  { key: 'after', label: 'after', mode: 'absolute', operator: 'after' },
-  { key: 'before', label: 'before', mode: 'absolute', operator: 'before' },
+  { key: 'after', label: 'after', mode: 'absolute', operator: 'gt' },
+  { key: 'before', label: 'before', mode: 'absolute', operator: 'lt' },
   {
     key: 'onOrBefore',
     label: 'on or before',
     mode: 'absolute',
-    operator: 'onOrBefore',
+    operator: 'le',
   },
   // received_at > now-N: the message arrived inside the rolling window.
   {
     key: 'inTheLast',
     label: 'in the last',
     mode: 'relative',
-    operator: 'after',
+    operator: 'gt',
   },
   // received_at < now-N: the message is older than the rolling window.
   {
@@ -196,16 +199,16 @@ const DATE_READINGS: DateReading[] = [
     label: 'more than',
     suffix: 'ago',
     mode: 'relative',
-    operator: 'before',
+    operator: 'lt',
   },
 ]
 
 /** Derive the active reading from the stored condition (operator + value). */
 function readingForCondition(condition: SmartMailboxCondition): DateReading {
   if (dateValueMode(condition.value) === 'relative') {
-    // A relative value is either "in the last" (after) or "more than … ago"
-    // (before), keyed off the operator.
-    return condition.operator === 'before'
+    // A relative value is either "in the last" (gt) or "more than … ago"
+    // (lt), keyed off the neutral operator.
+    return condition.operator === 'lt'
       ? DATE_READINGS.find((r) => r.key === 'moreThanAgo')!
       : DATE_READINGS.find((r) => r.key === 'inTheLast')!
   }

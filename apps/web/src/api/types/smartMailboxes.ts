@@ -25,15 +25,20 @@ export type SmartMailboxField =
   | 'receivedAt'
   | 'size'
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
+/** Neutral comparison operators (D6): the four ordered comparisons are
+ *  `lt`/`gt`/`le`/`ge` (`< > <= >=`), labelled per field type in the editor
+ *  ("before/after" for dates, "smaller/larger than" for size). The model no
+ *  longer speaks "date". Stored rules using the old names still deserialize
+ *  server-side via serde aliases.
+ *  @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxOperator =
   | 'equals'
   | 'in'
   | 'contains'
-  | 'before'
-  | 'after'
-  | 'onOrBefore'
-  | 'onOrAfter'
+  | 'lt'
+  | 'gt'
+  | 'le'
+  | 'ge'
 
 /** Time unit for a relative date offset.
  *  @spec docs/L1-search#smart-mailbox-data-model */

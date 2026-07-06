@@ -180,10 +180,10 @@ mod schema_agreement_tests {
             SmartMailboxOperator::Equals,
             SmartMailboxOperator::In,
             SmartMailboxOperator::Contains,
-            SmartMailboxOperator::Before,
-            SmartMailboxOperator::After,
-            SmartMailboxOperator::OnOrBefore,
-            SmartMailboxOperator::OnOrAfter,
+            SmartMailboxOperator::Lt,
+            SmartMailboxOperator::Gt,
+            SmartMailboxOperator::Le,
+            SmartMailboxOperator::Ge,
         ];
         for &field in ALL_QUERY_FIELDS {
             let spec = field_spec(field);
