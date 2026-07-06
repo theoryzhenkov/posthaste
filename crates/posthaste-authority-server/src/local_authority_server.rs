@@ -383,6 +383,14 @@ impl AuthorityServerApi for LocalAuthorityServer {
             .await
     }
 
+    async fn create_mailbox(
+        &self,
+        account_id: AccountId,
+        name: String,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        self.authority_server.create_mailbox(account_id, name).await
+    }
+
     async fn send_message(
         &self,
         account_id: AccountId,

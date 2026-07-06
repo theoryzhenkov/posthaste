@@ -3462,6 +3462,80 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "mailboxes"
+        ],
+        "summary": "Create mailbox",
+        "description": "Creates a new top-level mailbox and returns the source's refreshed mailbox list.",
+        "operationId": "create_mailbox",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMailboxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated mailboxes for the source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailboxSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mailbox name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Account gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/sources/{source_id}/mailboxes/{mailbox_id}": {
@@ -5601,6 +5675,18 @@
           "token": {
             "type": "string",
             "description": "The minted capability token (a macaroon), for use as\n`Authorization: Bearer <token>`."
+          }
+        }
+      },
+      "CreateMailboxRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/sources/{source_id}/mailboxes`.\n\nFlat create — a `name` only; the parent/hierarchy is out of scope.\n\n@spec docs/eph/RFC-L2-mailbox-management",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
           }
         }
       },

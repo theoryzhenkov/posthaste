@@ -679,6 +679,19 @@ impl RuntimeMailReadApi for RuntimeHandle {
             .await
     }
 
+    async fn create_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        name: String,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .authority_server_link
+            .create_mailbox(account_id, name)
+            .await
+    }
+
     async fn list_smart_mailboxes(
         &self,
         _caller: RuntimeCaller,

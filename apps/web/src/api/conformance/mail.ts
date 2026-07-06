@@ -2,6 +2,7 @@ import type {
   ConversationPage,
   ConversationSummary,
   ConversationView,
+  CreateMailboxInput,
   DomainEvent,
   Mailbox,
   MessageAttachment,
@@ -19,6 +20,9 @@ import type { AssertTrue, Conforms, Wire } from './core'
 export type _Mailbox = AssertTrue<Conforms<Mailbox, Wire['MailboxSummary']>>
 export type _PatchMailboxInput = AssertTrue<
   Conforms<PatchMailboxInput, Wire['PatchMailboxRequest']>
+>
+export type _CreateMailboxInput = AssertTrue<
+  Conforms<CreateMailboxInput, Wire['CreateMailboxRequest']>
 >
 export type _MessageSummary = AssertTrue<
   Conforms<MessageSummary, Wire['MessageSummary']>

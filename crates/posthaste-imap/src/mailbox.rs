@@ -42,6 +42,24 @@ pub(crate) async fn status_imap_mailbox(
     .await
 }
 
+/// Create a new top-level mailbox with IMAP `CREATE <name>`.
+///
+/// Flat create — the name is passed through as-is; hierarchy nesting (a name
+/// carrying the server's delimiter) is out of scope. The name is encoded to a
+/// wire mailbox by `imap-types` the same way existing mailbox names are (STATUS/
+/// EXAMINE go through `Mailbox::try_from`), so no separate UTF-7 step is needed.
+///
+/// @spec docs/eph/RFC-L2-mailbox-management
+pub(crate) async fn create_imap_mailbox(
+    client: &mut ImapClient,
+    mailbox_name: &str,
+) -> Result<(), ImapAdapterError> {
+    let mailbox = Mailbox::try_from(mailbox_name)
+        .map_err(|_| ImapAdapterError::InvalidMailboxName(mailbox_name.to_string()))?
+        .into_static();
+    crate::timeout::with_deadline_resolve("create", client.resolve(CreateTask::new(mailbox))).await
+}
+
 pub(crate) async fn examine_selected_mailbox(
     client: &mut ImapClient,
     mailbox_name: &str,
@@ -121,6 +139,37 @@ impl Task for StatusTask {
     fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
         match status_body.kind {
             StatusKind::Ok => Ok(self.output),
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
+        }
+    }
+}
+
+/// Issues IMAP `CREATE <mailbox>` and reports success/failure from the tagged
+/// response. No untagged data is expected.
+#[derive(Clone, Debug)]
+struct CreateTask {
+    mailbox: Mailbox<'static>,
+}
+
+impl CreateTask {
+    fn new(mailbox: Mailbox<'static>) -> Self {
+        Self { mailbox }
+    }
+}
+
+impl Task for CreateTask {
+    type Output = Result<(), TaskError>;
+
+    fn command_body(&self) -> CommandBody<'static> {
+        CommandBody::Create {
+            mailbox: self.mailbox.clone(),
+        }
+    }
+
+    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
+        match status_body.kind {
+            StatusKind::Ok => Ok(()),
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }

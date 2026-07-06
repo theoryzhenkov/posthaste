@@ -102,6 +102,62 @@ pub async fn patch_mailbox(
         .map_err(ApiError::from_runtime_error)
 }
 
+/// Request body for `POST /v1/sources/{source_id}/mailboxes`.
+///
+/// Flat create — a `name` only; the parent/hierarchy is out of scope.
+///
+/// @spec docs/eph/RFC-L2-mailbox-management
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMailboxRequest {
+    pub name: String,
+}
+
+/// POST /v1/sources/{source_id}/mailboxes
+///
+/// @spec docs/eph/RFC-L2-mailbox-management
+/// @spec docs/L1-jmap#methods-used
+#[utoipa::path(
+    post,
+    path = "/v1/sources/{source_id}/mailboxes",
+    tag = "mailboxes",
+    summary = "Create mailbox",
+    description = "Creates a new top-level mailbox and returns the source's refreshed mailbox list.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    request_body = CreateMailboxRequest,
+    responses(
+        (status = 200, description = "Updated mailboxes for the source", body = [MailboxSummary]),
+        (status = 400, description = "Invalid mailbox name", body = ApiErrorBody),
+        (status = 404, description = "Source not found", body = ApiErrorBody),
+        (status = 503, description = "Account gateway unavailable", body = ApiErrorBody)
+    )
+)]
+pub async fn create_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+    Json(request): Json<CreateMailboxRequest>,
+) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
+    let name = validate_create_mailbox_name(request.name)?;
+    state
+        .runtime
+        .create_mailbox(RuntimeCaller::api(), AccountId(source_id), name)
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
+fn validate_create_mailbox_name(name: String) -> Result<String, ApiError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ApiErrorCode::InvalidMailbox,
+            "mailbox name is required",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
 fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<String>, ApiError> {
     let Some(role) = role else {
         return Err(ApiError::new(

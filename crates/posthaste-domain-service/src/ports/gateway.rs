@@ -139,6 +139,19 @@ pub trait MailGateway: Send + Sync {
         clear_role_from: Option<&MailboxId>,
     ) -> Result<MutationOutcome, GatewayError>;
 
+    /// Create a new top-level mailbox via `Mailbox/set` create (JMAP) or
+    /// `CREATE` (IMAP), returning the new mailbox's id.
+    ///
+    /// Flat create only — no parent (nesting is out of scope).
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    async fn create_mailbox(
+        &self,
+        account_id: &AccountId,
+        name: &str,
+    ) -> Result<MailboxId, GatewayError>;
+
     /// Fetch the primary sender identity via `Identity/get`.
     ///
     /// @spec docs/L1-jmap#methods-used

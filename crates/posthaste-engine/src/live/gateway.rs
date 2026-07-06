@@ -132,6 +132,18 @@ impl MailGateway for LiveJmapGateway {
         .await
     }
 
+    /// Create a new top-level mailbox via `Mailbox/set` create.
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    async fn create_mailbox(
+        &self,
+        _account_id: &AccountId,
+        name: &str,
+    ) -> Result<MailboxId, GatewayError> {
+        crate::live_mutation::create_mailbox(self, name).await
+    }
+
     /// Fetch the primary sender identity for an account via `Identity/get`.
     ///
     /// @spec docs/L1-jmap#methods-used

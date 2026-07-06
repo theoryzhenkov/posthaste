@@ -88,6 +88,36 @@ pub(crate) fn set_mailbox_role_request_body(
     })
 }
 
+/// The client-side create id used in the hand-rolled `Mailbox/set` create
+/// request. The server echoes it under `created`, keying the created mailbox's
+/// server id (see [`crate::live_mutation::outcome::created_mailbox_id`]).
+pub(crate) const CREATE_MAILBOX_CREATE_ID: &str = "c0";
+
+/// Build a `Mailbox/set` create request for a new top-level mailbox.
+///
+/// Flat create — `name` only, no `parentId` (nesting is out of scope).
+pub(crate) fn create_mailbox_request_body(account_id: &str, name: &str) -> Value {
+    let mut arguments = Map::new();
+    arguments.insert(
+        "accountId".to_string(),
+        Value::String(account_id.to_string()),
+    );
+    arguments.insert(
+        "create".to_string(),
+        json!({ CREATE_MAILBOX_CREATE_ID: { "name": name } }),
+    );
+
+    json!({
+        "using": [
+            "urn:ietf:params:jmap:core",
+            "urn:ietf:params:jmap:mail"
+        ],
+        "methodCalls": [
+            ["Mailbox/set", Value::Object(arguments), "s0"]
+        ]
+    })
+}
+
 pub(crate) async fn send_json_request(
     gateway: &LiveJmapGateway,
     request: Value,

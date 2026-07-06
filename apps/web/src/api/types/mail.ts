@@ -23,6 +23,14 @@ export interface PatchMailboxInput {
 }
 
 /**
+ * Body for creating a new top-level mailbox. Flat create — a name only.
+ * @spec docs/eph/RFC-L2-mailbox-management
+ */
+export interface CreateMailboxInput {
+  name: string
+}
+
+/**
  * Compact message metadata used in conversation rows and thread switchers.
  * @spec docs/L1-ui#messagelist
  */
