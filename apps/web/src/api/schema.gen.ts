@@ -1389,6 +1389,16 @@ export interface components {
              *     @spec docs/eph/RFC-L2-configuration-matrix
              */
             mailboxColors?: components["schemas"]["MailboxColor"][];
+            /**
+             * @description Client-side, cross-device-synced sidebar "Groups" that visually cluster
+             *     a source's mailboxes. Purely presentational — a Group never maps to a
+             *     provider parent/child mailbox and no provider interaction occurs. Each
+             *     group lists the member mailbox ids and a sidebar `order`. Deleting a
+             *     group only drops the grouping; it never touches mailboxes or mail.
+             *
+             *     @spec docs/eph/RFC-L2-mailbox-management#a4
+             */
+            mailboxGroups?: components["schemas"]["MailboxGroup"][];
             notifications?: null | components["schemas"]["Notifications"];
             /**
              * @description User's explicit sidebar arrangement of smart mailboxes (by id). Acts as
@@ -1843,6 +1853,30 @@ export interface components {
             sourceId: components["schemas"]["AccountId"];
         };
         /**
+         * @description A client-side sidebar Group (presentation only): a named cluster of a
+         *     source's mailboxes, ordered in the sidebar by `order`. Groups never map to a
+         *     provider mailbox and nesting is out of scope (flat groups). A mailbox belongs
+         *     to at most one group (enforced in the assign UI).
+         *
+         *     @spec docs/eph/RFC-L2-mailbox-management#a4
+         */
+        MailboxGroup: {
+            /** @description Stable client-generated id for the group. */
+            id: string;
+            /**
+             * @description Member mailbox ids (of this group's source). A mailbox appears in at most
+             *     one group.
+             */
+            mailboxIds?: string[];
+            /** @description User-facing group name. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Sidebar sort position among a source's groups (ascending).
+             */
+            order: number;
+        };
+        /**
          * @description Opaque server-assigned identifier for a mailbox (folder or label).
          *
          *     @spec docs/L1-jmap#core-types
@@ -2177,6 +2211,8 @@ export interface components {
              */
             forceBackfill?: boolean;
             mailboxColors?: components["schemas"]["MailboxColor"][] | null;
+            /** @description Client-side sidebar Groups (presentation only); overwrites the stored list. */
+            mailboxGroups?: components["schemas"]["MailboxGroup"][] | null;
             notifications?: null | components["schemas"]["Notifications"];
             /** @description Explicit sidebar arrangement (ids); overwrites the stored list wholesale. */
             smartMailboxOrder?: components["schemas"]["SmartMailboxId"][] | null;

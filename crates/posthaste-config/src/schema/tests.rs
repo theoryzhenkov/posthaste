@@ -184,6 +184,12 @@ fn app_toml_round_trips() {
             actions: vec![AutomationAction::ApplyTag { tag: String::new() }],
             backfill: true,
         }],
+        mailbox_groups: vec![MailboxGroup {
+            id: "group-work".to_string(),
+            name: "Work".to_string(),
+            mailbox_ids: vec!["mb-1".to_string(), "mb-2".to_string()],
+            order: 0,
+        }],
         ..Default::default()
     };
     let existing = AppToml {
@@ -200,6 +206,7 @@ fn app_toml_round_trips() {
         tags: Vec::new(),
         smart_mailbox_order: Vec::new(),
         account_order: Vec::new(),
+        mailbox_groups: Vec::new(),
         link: LinkToml::default(),
         tls: None,
     };

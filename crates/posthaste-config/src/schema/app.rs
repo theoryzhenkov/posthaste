@@ -37,6 +37,9 @@ pub struct AppToml {
     pub smart_mailbox_order: Vec<String>,
     #[serde(default)]
     pub account_order: Vec<String>,
+    /// Client-side sidebar Groups (`[[mailbox_groups]]`). Presentation only.
+    #[serde(default, rename = "mailbox_groups")]
+    pub mailbox_groups: Vec<MailboxGroupToml>,
     #[serde(default)]
     pub link: LinkToml,
     /// Optional in-daemon TLS (`[tls]` cert+key). When present the daemon serves
@@ -70,6 +73,39 @@ impl MailboxColorToml {
             source_id: color.source_id.to_string(),
             mailbox_id: color.mailbox_id.as_str().to_string(),
             hue: color.hue,
+        }
+    }
+}
+
+/// TOML representation of a client-side sidebar Group (`[[mailbox_groups]]`).
+/// Presentation only — never maps to a provider mailbox.
+///
+/// @spec docs/eph/RFC-L2-mailbox-management#a4
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct MailboxGroupToml {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub mailbox_ids: Vec<String>,
+    pub order: i64,
+}
+
+impl MailboxGroupToml {
+    fn to_mailbox_group(&self) -> MailboxGroup {
+        MailboxGroup {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            mailbox_ids: self.mailbox_ids.clone(),
+            order: self.order,
+        }
+    }
+
+    fn from_mailbox_group(group: &MailboxGroup) -> Self {
+        Self {
+            id: group.id.clone(),
+            name: group.name.clone(),
+            mailbox_ids: group.mailbox_ids.clone(),
+            order: group.order,
         }
     }
 }
@@ -367,6 +403,11 @@ impl AppToml {
                 .iter()
                 .map(|id| AccountId::from(id.as_str()))
                 .collect(),
+            mailbox_groups: self
+                .mailbox_groups
+                .iter()
+                .map(MailboxGroupToml::to_mailbox_group)
+                .collect(),
         })
     }
 
@@ -421,6 +462,11 @@ impl AppToml {
                 .account_order
                 .iter()
                 .map(|id| id.to_string())
+                .collect(),
+            mailbox_groups: settings
+                .mailbox_groups
+                .iter()
+                .map(MailboxGroupToml::from_mailbox_group)
                 .collect(),
             link: existing.link.clone(),
             // TLS is daemon-side config, never derived from AppSettings; preserve

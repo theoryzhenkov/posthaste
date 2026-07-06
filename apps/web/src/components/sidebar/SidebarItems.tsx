@@ -1,7 +1,17 @@
 import { useState, type ReactNode } from 'react'
-import { Edit3, MailOpen, RefreshCw, Settings, Trash2 } from 'lucide-react'
+import {
+  Check,
+  Edit3,
+  FolderPlus,
+  FolderMinus,
+  MailOpen,
+  Plus,
+  RefreshCw,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 
-import type { Mailbox } from '@/api/types'
+import type { Mailbox, MailboxGroup } from '@/api/types'
 import { accentColor } from '@/design'
 import { useMailboxCounts } from '@/live-store/store'
 import { cn } from '@/lib/utils'
@@ -16,9 +26,13 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import { DeleteMailboxDialog } from './DeleteMailboxDialog'
+import { GroupNameDialog } from './GroupNameDialog'
 import { isMailboxDeletable, itemButtonClass } from './model'
 
 function roleIcon(role: Mailbox['role'], size = 14): ReactNode {
@@ -94,9 +108,14 @@ export function MailboxItem({
   isSelected,
   isPaneActive = false,
   depth = 0,
+  groups = [],
+  currentGroupId = null,
   onOpenAccountSettings,
   onSelect,
   onSyncSource,
+  onAssignToGroup,
+  onRemoveFromGroup,
+  onCreateGroup,
 }: {
   sourceId: string
   sourceName: string
@@ -106,10 +125,22 @@ export function MailboxItem({
   isSelected: boolean
   isPaneActive?: boolean
   depth?: number
+  /** Sidebar Groups available on this source (for the "Add to group" submenu). */
+  groups?: readonly MailboxGroup[]
+  /** The group this mailbox currently belongs to, if any. */
+  currentGroupId?: string | null
   onOpenAccountSettings: (sourceId: string) => void
   onSelect: () => void
   onSyncSource: (sourceId: string) => void
+  /** Assign this mailbox to an existing group (presentational, synced). */
+  onAssignToGroup?: (groupId: string, mailboxId: string) => void
+  /** Remove this mailbox from its current group (back to ungrouped). */
+  onRemoveFromGroup?: (mailboxId: string) => void
+  /** Create a new group seeded with this mailbox. */
+  onCreateGroup?: (name: string, seedMailboxId: string) => void
 }) {
+  const [isNewGroupOpen, setIsNewGroupOpen] = useState(false)
+  const groupsEnabled = onAssignToGroup != null && onCreateGroup != null
   const iconColor =
     colorHue != null ? accentColor(colorHue) : mailboxRoleAccent(mailbox.role)
   // D116: STRUCTURE (name/role/hierarchy) stays request/response from the
@@ -145,6 +176,47 @@ export function MailboxItem({
             <MailOpen size={14} />
             Open mailbox
           </ContextMenuItem>
+          {groupsEnabled && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <FolderPlus size={14} />
+                  Add to group
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="min-w-44">
+                  {groups.map((group) => (
+                    <ContextMenuItem
+                      key={group.id}
+                      onSelect={() => onAssignToGroup?.(group.id, mailbox.id)}
+                    >
+                      <span className="flex w-4 justify-center">
+                        {group.id === currentGroupId ? (
+                          <Check size={14} />
+                        ) : null}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {group.name}
+                      </span>
+                    </ContextMenuItem>
+                  ))}
+                  {groups.length > 0 && <ContextMenuSeparator />}
+                  <ContextMenuItem onSelect={() => setIsNewGroupOpen(true)}>
+                    <Plus size={14} />
+                    New group…
+                  </ContextMenuItem>
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+              {currentGroupId != null && (
+                <ContextMenuItem
+                  onSelect={() => onRemoveFromGroup?.(mailbox.id)}
+                >
+                  <FolderMinus size={14} />
+                  Remove from group
+                </ContextMenuItem>
+              )}
+            </>
+          )}
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => onSyncSource(sourceId)}>
             <RefreshCw size={14} />
@@ -174,6 +246,14 @@ export function MailboxItem({
           mailbox={mailbox}
           open={isDeleteOpen}
           onOpenChange={setIsDeleteOpen}
+        />
+      )}
+      {groupsEnabled && (
+        <GroupNameDialog
+          mode="create"
+          open={isNewGroupOpen}
+          onOpenChange={setIsNewGroupOpen}
+          onSubmit={(name) => onCreateGroup?.(name, mailbox.id)}
         />
       )}
     </>

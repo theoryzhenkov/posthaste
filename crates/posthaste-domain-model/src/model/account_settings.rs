@@ -55,6 +55,37 @@ pub struct AppSettings {
     /// @spec docs/L1-accounts#sidebar-ordering
     #[serde(default)]
     pub account_order: Vec<AccountId>,
+    /// Client-side, cross-device-synced sidebar "Groups" that visually cluster
+    /// a source's mailboxes. Purely presentational — a Group never maps to a
+    /// provider parent/child mailbox and no provider interaction occurs. Each
+    /// group lists the member mailbox ids and a sidebar `order`. Deleting a
+    /// group only drops the grouping; it never touches mailboxes or mail.
+    ///
+    /// @spec docs/eph/RFC-L2-mailbox-management#a4
+    #[serde(default)]
+    pub mailbox_groups: Vec<MailboxGroup>,
+}
+
+/// A client-side sidebar Group (presentation only): a named cluster of a
+/// source's mailboxes, ordered in the sidebar by `order`. Groups never map to a
+/// provider mailbox and nesting is out of scope (flat groups). A mailbox belongs
+/// to at most one group (enforced in the assign UI).
+///
+/// @spec docs/eph/RFC-L2-mailbox-management#a4
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MailboxGroup {
+    /// Stable client-generated id for the group.
+    pub id: String,
+    /// User-facing group name.
+    pub name: String,
+    /// Member mailbox ids (of this group's source). A mailbox appears in at most
+    /// one group.
+    #[serde(default)]
+    pub mailbox_ids: Vec<String>,
+    /// Sidebar sort position among a source's groups (ascending).
+    pub order: i64,
 }
 
 /// A per-mailbox sidebar color override (presentation only). Overrides the

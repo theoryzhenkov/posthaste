@@ -5082,6 +5082,13 @@
             },
             "description": "Per-mailbox sidebar color overrides. Each entry overrides the renderer's\ndefault (hash-derived) color for one provider mailbox. Pure presentation,\nkeyed by `(source_id, mailbox_id)`; TOML source of truth.\n\n@spec docs/eph/RFC-L2-configuration-matrix"
           },
+          "mailboxGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailboxGroup"
+            },
+            "description": "Client-side, cross-device-synced sidebar \"Groups\" that visually cluster\na source's mailboxes. Purely presentational — a Group never maps to a\nprovider parent/child mailbox and no provider interaction occurs. Each\ngroup lists the member mailbox ids and a sidebar `order`. Deleting a\ngroup only drops the grouping; it never touches mailboxes or mail.\n\n@spec docs/eph/RFC-L2-mailbox-management#a4"
+          },
           "notifications": {
             "oneOf": [
               {
@@ -6120,6 +6127,37 @@
           }
         }
       },
+      "MailboxGroup": {
+        "type": "object",
+        "description": "A client-side sidebar Group (presentation only): a named cluster of a\nsource's mailboxes, ordered in the sidebar by `order`. Groups never map to a\nprovider mailbox and nesting is out of scope (flat groups). A mailbox belongs\nto at most one group (enforced in the assign UI).\n\n@spec docs/eph/RFC-L2-mailbox-management#a4",
+        "required": [
+          "id",
+          "name",
+          "order"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable client-generated id for the group."
+          },
+          "mailboxIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Member mailbox ids (of this group's source). A mailbox appears in at most\none group."
+          },
+          "name": {
+            "type": "string",
+            "description": "User-facing group name."
+          },
+          "order": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sidebar sort position among a source's groups (ascending)."
+          }
+        }
+      },
       "MailboxId": {
         "type": "string",
         "description": "Opaque server-assigned identifier for a mailbox (folder or label).\n\n@spec docs/L1-jmap#core-types"
@@ -6891,6 +6929,16 @@
             "items": {
               "$ref": "#/components/schemas/MailboxColor"
             }
+          },
+          "mailboxGroups": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MailboxGroup"
+            },
+            "description": "Client-side sidebar Groups (presentation only); overwrites the stored list."
           },
           "notifications": {
             "oneOf": [
