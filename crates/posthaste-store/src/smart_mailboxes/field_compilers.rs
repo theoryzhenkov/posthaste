@@ -20,6 +20,23 @@ fn expect_strings_value(value: &SmartMailboxValue) -> Result<&[String], StoreErr
     }
 }
 
+/// Escapes the LIKE metacharacters (`%`, `_`) — and the escape character itself
+/// (`\`) — in a user-supplied value so a `beginsWith`/`endsWith` match treats them
+/// literally. The compiled clause pairs this with `ESCAPE '\'`, so e.g. a value of
+/// `50%` matches a literal `50%` prefix rather than "50" followed by anything. The
+/// value is still bound as a parameter — this only stops it acting as a wildcard,
+/// it is never an injection surface.
+fn escape_like(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
 /// Extracts a boolean value or returns a type error.
 fn expect_bool_value(value: &SmartMailboxValue) -> Result<bool, StoreError> {
     match value {
@@ -74,6 +91,36 @@ pub(super) fn compile_text_field(
                 expect_string_value(&condition.value)?.to_lowercase()
             )));
             Ok(format!("LOWER(COALESCE({column}, '')) LIKE ?"))
+        }
+        // Prefix/suffix matches: case-insensitive `LIKE` with the value's LIKE
+        // metacharacters escaped (so a literal `%`/`_` is not a wildcard), paired
+        // with `ESCAPE '\'`.
+        SmartMailboxOperator::BeginsWith => {
+            params.push(SqlValue::Text(format!(
+                "{}%",
+                escape_like(&expect_string_value(&condition.value)?.to_lowercase())
+            )));
+            Ok(format!("LOWER(COALESCE({column}, '')) LIKE ? ESCAPE '\\'"))
+        }
+        SmartMailboxOperator::EndsWith => {
+            params.push(SqlValue::Text(format!(
+                "%{}",
+                escape_like(&expect_string_value(&condition.value)?.to_lowercase())
+            )));
+            Ok(format!("LOWER(COALESCE({column}, '')) LIKE ? ESCAPE '\\'"))
+        }
+        // Regex: the pattern is bound as a parameter and evaluated by the
+        // `regexp` scalar registered on the connection (see `db/connection.rs`).
+        // PERF: a regex predicate cannot use an index, so it is a full scan of the
+        // candidate set — acceptable for a smart-mailbox/rule filter, but noted.
+        // A malformed pattern is rejected at the write boundary (R5c
+        // `validate_condition`), so it never reaches here; if one somehow did, the
+        // scalar surfaces a `StoreError`, never a panic.
+        SmartMailboxOperator::Regex => {
+            params.push(SqlValue::Text(
+                expect_string_value(&condition.value)?.to_string(),
+            ));
+            Ok(format!("COALESCE({column}, '') REGEXP ?"))
         }
         SmartMailboxOperator::In => {
             let values = expect_strings_value(&condition.value)?;
@@ -216,6 +263,31 @@ pub(super) fn compile_recipient_json_field(
              OR LOWER(COALESCE(json_extract(r.value, '$.name'), '')) LIKE ?)"
                 .to_string()
         }
+        // Prefix/suffix against either address part (email or display name),
+        // case-insensitive with LIKE metacharacters escaped.
+        SmartMailboxOperator::BeginsWith | SmartMailboxOperator::EndsWith => {
+            let escaped = escape_like(&expect_string_value(&condition.value)?.to_lowercase());
+            let needle = if condition.operator == SmartMailboxOperator::BeginsWith {
+                format!("{escaped}%")
+            } else {
+                format!("%{escaped}")
+            };
+            params.push(SqlValue::Text(needle.clone()));
+            params.push(SqlValue::Text(needle));
+            "(LOWER(COALESCE(json_extract(r.value, '$.email'), '')) LIKE ? ESCAPE '\\'\n                  \
+             OR LOWER(COALESCE(json_extract(r.value, '$.name'), '')) LIKE ? ESCAPE '\\')"
+                .to_string()
+        }
+        // Regex against either address part. Bound twice, once per part; PERF: a
+        // full scan (no index), acceptable for a filter.
+        SmartMailboxOperator::Regex => {
+            let pattern = expect_string_value(&condition.value)?.to_string();
+            params.push(SqlValue::Text(pattern.clone()));
+            params.push(SqlValue::Text(pattern));
+            "(COALESCE(json_extract(r.value, '$.email'), '') REGEXP ?\n                  \
+             OR COALESCE(json_extract(r.value, '$.name'), '') REGEXP ?)"
+                .to_string()
+        }
         SmartMailboxOperator::In => {
             let values = expect_strings_value(&condition.value)?;
             if values.is_empty() {
@@ -305,6 +377,26 @@ pub(super) fn compile_exists_text_membership(
             )));
             " IS NOT NULL
                   AND LOWER(b.name) LIKE ?"
+                .to_string()
+        }
+        SmartMailboxOperator::BeginsWith | SmartMailboxOperator::EndsWith => {
+            let escaped = escape_like(&expect_string_value(&condition.value)?.to_lowercase());
+            let needle = if condition.operator == SmartMailboxOperator::BeginsWith {
+                format!("{escaped}%")
+            } else {
+                format!("%{escaped}")
+            };
+            params.push(SqlValue::Text(needle));
+            " IS NOT NULL
+                  AND LOWER(b.name) LIKE ? ESCAPE '\\'"
+                .to_string()
+        }
+        SmartMailboxOperator::Regex => {
+            params.push(SqlValue::Text(
+                expect_string_value(&condition.value)?.to_string(),
+            ));
+            " IS NOT NULL
+                  AND b.name REGEXP ?"
                 .to_string()
         }
         SmartMailboxOperator::In => {

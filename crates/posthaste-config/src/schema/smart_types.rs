@@ -113,6 +113,12 @@ pub enum ConditionOperatorToml {
     Equals,
     In,
     Contains,
+    /// Prefix match (`begins_with`) — additive text operator (R4).
+    BeginsWith,
+    /// Suffix match (`ends_with`) — additive text operator (R4).
+    EndsWith,
+    /// Regex match (`regex`) — additive text operator (R4).
+    Regex,
     #[serde(alias = "before")]
     Lt,
     #[serde(alias = "after")]

@@ -14,7 +14,10 @@
       "operators": [
         "equals",
         "contains",
-        "in"
+        "in",
+        "beginsWith",
+        "endsWith",
+        "regex"
       ]
     },
     {
@@ -55,7 +58,10 @@
       "operators": [
         "equals",
         "contains",
-        "in"
+        "in",
+        "beginsWith",
+        "endsWith",
+        "regex"
       ]
     },
     {
@@ -101,7 +107,10 @@
       "operators": [
         "equals",
         "contains",
-        "in"
+        "in",
+        "beginsWith",
+        "endsWith",
+        "regex"
       ]
     },
     {
@@ -110,7 +119,10 @@
       "operators": [
         "equals",
         "contains",
-        "in"
+        "in",
+        "beginsWith",
+        "endsWith",
+        "regex"
       ]
     },
     {
@@ -119,7 +131,10 @@
       "operators": [
         "equals",
         "contains",
-        "in"
+        "in",
+        "beginsWith",
+        "endsWith",
+        "regex"
       ]
     },
     {
@@ -128,7 +143,10 @@
       "operators": [
         "equals",
         "contains",
-        "in"
+        "in",
+        "beginsWith",
+        "endsWith",
+        "regex"
       ]
     },
     {
@@ -137,7 +155,10 @@
       "operators": [
         "equals",
         "contains",
-        "in"
+        "in",
+        "beginsWith",
+        "endsWith",
+        "regex"
       ]
     },
     {
