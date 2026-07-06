@@ -79,6 +79,7 @@ function renderTagEditor(props: {
     tags: props.tagAppearance ?? [],
     smartMailboxOrder: [],
     accountOrder: [],
+    mailboxGroups: [],
   })
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
