@@ -933,7 +933,11 @@ export interface paths {
          */
         get: operations["list_mailboxes"];
         put?: never;
-        post?: never;
+        /**
+         * Create mailbox
+         * @description Creates a new top-level mailbox and returns the source's refreshed mailbox list.
+         */
+        post: operations["create_mailbox"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1663,6 +1667,16 @@ export interface components {
              *     `Authorization: Bearer <token>`.
              */
             token: string;
+        };
+        /**
+         * @description Request body for `POST /v1/sources/{source_id}/mailboxes`.
+         *
+         *     Flat create — a `name` only; the parent/hierarchy is out of scope.
+         *
+         *     @spec docs/eph/RFC-L2-mailbox-management
+         */
+        CreateMailboxRequest: {
+            name: string;
         };
         /**
          * @description Request body for `POST /v1/smart-mailboxes`.
@@ -5361,6 +5375,60 @@ export interface operations {
             };
             /** @description Source not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    create_mailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMailboxRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated mailboxes for the source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxSummary"][];
+                };
+            };
+            /** @description Invalid mailbox name */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Source not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Account gateway unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

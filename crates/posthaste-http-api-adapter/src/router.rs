@@ -128,7 +128,10 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             "/views/conversations/{conversation_id}",
             get(api::get_conversation),
         )
-        .route("/sources/{source_id}/mailboxes", get(api::list_mailboxes))
+        .route(
+            "/sources/{source_id}/mailboxes",
+            get(api::list_mailboxes).post(api::create_mailbox),
+        )
         .route(
             "/sources/{source_id}/mailboxes/{mailbox_id}",
             patch(api::patch_mailbox),

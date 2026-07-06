@@ -86,6 +86,32 @@ async fn set_mailbox_role_returns_updated_mailbox_cursor() {
 }
 
 #[tokio::test]
+async fn create_mailbox_returns_id_and_resync_surfaces_it() {
+    let gateway = MockJmapGateway::default();
+    let account = AccountId::from("primary");
+
+    let mailbox_id = gateway
+        .create_mailbox(&account, "Receipts")
+        .await
+        .expect("create should succeed");
+    assert_eq!(mailbox_id, MailboxId::from("mb-Receipts"));
+
+    // The resync readback (what the service performs after a create) surfaces
+    // the new mailbox.
+    let batch = gateway
+        .sync(&account, &[], None)
+        .await
+        .expect("sync should succeed");
+    assert!(
+        batch
+            .mailboxes
+            .iter()
+            .any(|mailbox| mailbox.id == mailbox_id && mailbox.name == "Receipts"),
+        "the created mailbox appears in the resync batch"
+    );
+}
+
+#[tokio::test]
 async fn set_mailbox_role_can_clear_existing_owner() {
     let gateway = MockJmapGateway::default();
     let outcome = gateway

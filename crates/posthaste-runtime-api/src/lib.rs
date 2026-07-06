@@ -141,6 +141,16 @@ pub trait RuntimeMailReadApi: Send + Sync {
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError>;
 
+    /// Create a new top-level mailbox and return the account's refreshed
+    /// mailbox list. Synchronous (blocking provider round-trip + resync),
+    /// mirroring [`set_mailbox_role`](Self::set_mailbox_role).
+    async fn create_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        name: String,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError>;
+
     async fn list_smart_mailboxes(
         &self,
         caller: RuntimeCaller,

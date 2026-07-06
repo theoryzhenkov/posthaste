@@ -276,6 +276,16 @@ impl MailGateway for MutationGateway {
         Err(GatewayError::Rejected("unused".to_string()))
     }
 
+    async fn create_mailbox(
+        &self,
+        _account_id: &AccountId,
+        name: &str,
+    ) -> Result<MailboxId, GatewayError> {
+        // Return a deterministic id derived from the name so the service's
+        // create-then-resync path can be asserted end to end.
+        Ok(MailboxId::from(format!("mb-{name}").as_str()))
+    }
+
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         self.fetch_identity_result
             .lock()

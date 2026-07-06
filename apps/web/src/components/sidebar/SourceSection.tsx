@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  FolderPlus,
   RefreshCw,
   Settings,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ import {
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import { MailboxItem } from './SidebarItems'
+import { NewMailboxDialog } from './NewMailboxDialog'
 
 export function SourceSection({
   source,
@@ -55,6 +57,7 @@ export function SourceSection({
   onSyncSource: (sourceId: string) => void
 }) {
   const mailboxColorHue = useMailboxColorLookup()
+  const [isNewMailboxOpen, setIsNewMailboxOpen] = useState(false)
   // The account header's aggregate unread reflects live COUNTS (D116): sum each
   // mailbox's live count, falling back to the query's server count when no frame
   // has seeded a live entry yet (bootstrap).
@@ -130,6 +133,10 @@ export function SourceSection({
             {collapsed ? 'Expand' : 'Collapse'}
           </ContextMenuItem>
           <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => setIsNewMailboxOpen(true)}>
+            <FolderPlus size={14} />
+            New mailbox
+          </ContextMenuItem>
           <ContextMenuItem onSelect={() => onSyncSource(source.id)}>
             <RefreshCw size={14} />
             Sync account
@@ -140,6 +147,11 @@ export function SourceSection({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      <NewMailboxDialog
+        sourceId={source.id}
+        open={isNewMailboxOpen}
+        onOpenChange={setIsNewMailboxOpen}
+      />
       {!collapsed && (
         <div className="space-y-0.5">
           {source.mailboxes.map((mailbox) => (

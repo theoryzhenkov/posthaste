@@ -8,10 +8,12 @@ use posthaste_domain_model::{
 
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 use crate::live_mutation::outcome::{
-    mailbox_mutation_outcome, message_mutation_outcome, set_keywords_mutation_outcome,
+    created_mailbox_id, mailbox_mutation_outcome, message_mutation_outcome,
+    set_keywords_mutation_outcome,
 };
 use crate::live_mutation::requests::{
-    send_json_request, set_keywords_request_body, set_mailbox_role_request_body,
+    create_mailbox_request_body, send_json_request, set_keywords_request_body,
+    set_mailbox_role_request_body, CREATE_MAILBOX_CREATE_ID,
 };
 
 /// Add or remove keywords (flags) on a message via `Email/set`.
@@ -116,6 +118,25 @@ pub(crate) async fn set_mailbox_role(
         .unwrap_set_mailbox()
         .map_err(map_gateway_error)?;
     mailbox_mutation_outcome(response, mailbox_id)
+}
+
+/// Create a new top-level mailbox via a hand-rolled `Mailbox/set` create.
+///
+/// Flat create — `name` only, no `parentId`. Returns the server-assigned id of
+/// the new mailbox (parsed from the response's `created` map).
+///
+/// @spec docs/L1-jmap#methods-used
+/// @spec docs/eph/RFC-L2-mailbox-management
+pub(crate) async fn create_mailbox(
+    gateway: &LiveJmapGateway,
+    name: &str,
+) -> Result<MailboxId, GatewayError> {
+    let request = create_mailbox_request_body(gateway.server_account_id(), name);
+    let mut response = send_json_request(gateway, request).await?;
+    let response = required_method_response(response.pop_method_response(), "Mailbox/set")?
+        .unwrap_set_mailbox()
+        .map_err(map_gateway_error)?;
+    created_mailbox_id(response, CREATE_MAILBOX_CREATE_ID)
 }
 
 /// Replace a message's mailbox membership via `Email/set`.
