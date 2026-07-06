@@ -106,6 +106,48 @@ export function valueTypeForField(
 }
 
 /**
+ * D6 — the human LABEL for a neutral operator, keyed off the field's value type.
+ * The MODEL operators are neutral (`lt`/`gt`/`le`/`ge` = `< > <= >=`); the editor
+ * labels them per type: a numeric/size field reads "smaller than / larger than /
+ * at most / at least", while a date field reads "before / after / on or before /
+ * on or after". `equals`/`contains`/`in` are type-agnostic.
+ *
+ * @spec docs/eph/RFC-L2-query-schema.md#d6--neutral-operator-names
+ */
+export function operatorLabel(
+  operator: SmartMailboxOperator,
+  valueType: ConditionValueType,
+): string {
+  const isSize = valueType === 'size'
+  switch (operator) {
+    case 'equals':
+      return 'equals'
+    case 'contains':
+      return 'contains'
+    case 'in':
+      return 'is one of'
+    case 'lt':
+      return isSize ? 'smaller than' : 'before'
+    case 'gt':
+      return isSize ? 'larger than' : 'after'
+    case 'le':
+      return isSize ? 'at most' : 'on or before'
+    case 'ge':
+      return isSize ? 'at least' : 'on or after'
+    default:
+      return operator
+  }
+}
+
+/** The operator label for a field, resolving its value type from the registry. */
+export function operatorLabelForField(
+  field: SmartMailboxField,
+  operator: SmartMailboxOperator,
+): string {
+  return operatorLabel(operator, valueTypeForField(field))
+}
+
+/**
  * Operator subset for a field — generated from the Rust schema, consumed by both
  * the operator dropdown and `defaultCondition`.
  */

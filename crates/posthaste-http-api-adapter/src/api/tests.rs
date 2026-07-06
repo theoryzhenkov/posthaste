@@ -6,4 +6,5 @@ use posthaste_domain_model::{GatewayError, EVENT_TOPIC_MESSAGE_UPDATED};
 mod accounts;
 mod auth_tokens;
 mod cursors_events;
+mod query_validation;
 mod send_validation;

@@ -46,6 +46,8 @@ pub async fn create_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateSmartMailboxRequest>,
 ) -> Result<Json<SmartMailbox>, ApiError> {
+    // D5: reject a schema-invalid query at the boundary, before it is persisted.
+    ApiError::validate_query(&request.rule)?;
     state
         .runtime
         .create_smart_mailbox(
@@ -112,6 +114,10 @@ pub async fn patch_smart_mailbox(
     Path(smart_mailbox_id): Path<String>,
     Json(request): Json<PatchSmartMailboxRequest>,
 ) -> Result<Json<SmartMailbox>, ApiError> {
+    // D5: a rule update is rejected at the boundary if it violates the schema.
+    if let Some(rule) = &request.rule {
+        ApiError::validate_query(rule)?;
+    }
     state
         .runtime
         .patch_smart_mailbox(

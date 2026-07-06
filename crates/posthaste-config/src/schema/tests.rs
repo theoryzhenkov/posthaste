@@ -152,7 +152,7 @@ fn smart_mailbox_relative_date_value_round_trips_through_toml() {
                 negated: false,
                 nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
                     field: SmartMailboxField::ReceivedAt,
-                    operator: SmartMailboxOperator::After,
+                    operator: SmartMailboxOperator::Gt,
                     negated: false,
                     value: SmartMailboxValue::Date(DateValue::Relative {
                         amount: 7,

@@ -28,13 +28,13 @@ pub(super) fn date_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRu
         nodes: vec![
             SmartMailboxRuleNode::Condition(SmartMailboxCondition {
                 field: SmartMailboxField::ReceivedAt,
-                operator: SmartMailboxOperator::OnOrAfter,
+                operator: SmartMailboxOperator::Ge,
                 negated: false,
                 value: SmartMailboxValue::String(start),
             }),
             SmartMailboxRuleNode::Condition(SmartMailboxCondition {
                 field: SmartMailboxField::ReceivedAt,
-                operator: SmartMailboxOperator::Before,
+                operator: SmartMailboxOperator::Lt,
                 negated: false,
                 value: SmartMailboxValue::String(end),
             }),

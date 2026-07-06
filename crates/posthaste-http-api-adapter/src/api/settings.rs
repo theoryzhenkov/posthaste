@@ -111,6 +111,16 @@ pub async fn patch_settings(
     State(state): State<Arc<AppState>>,
     Json(request): Json<PatchSettingsRequest>,
 ) -> Result<Json<AppSettings>, ApiError> {
+    // D5: reject a schema-invalid automation-rule / draft condition at the
+    // boundary, before it is persisted (each rule's `condition` is a query tree).
+    for rules in [&request.automation_rules, &request.automation_drafts]
+        .into_iter()
+        .flatten()
+    {
+        for rule in rules {
+            ApiError::validate_query(&rule.condition)?;
+        }
+    }
     state
         .runtime
         .patch_app_settings(
@@ -158,6 +168,9 @@ pub async fn preview_automation_rule(
     Json(request): Json<PreviewAutomationRuleRequest>,
 ) -> Result<Json<AutomationRulePreviewResponse>, ApiError> {
     let limit = automation_rule_preview_limit(request.limit)?;
+    // D5: a schema-invalid preview condition is a clean `query_invalid` 400
+    // rather than a deep store-compiler failure.
+    ApiError::validate_query(&request.condition)?;
     state
         .runtime
         .preview_automation_rule(

@@ -32,6 +32,8 @@ export {
   defaultEmptyRule,
   defaultGroup,
   formFromSmartMailbox,
+  operatorLabel,
+  operatorLabelForField,
   operatorOptionsForField,
   parseField,
   parseGroupOperator,

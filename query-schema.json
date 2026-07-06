@@ -144,20 +144,20 @@
       "field": "receivedAt",
       "valueType": "date",
       "operators": [
-        "before",
-        "after",
-        "onOrBefore",
-        "onOrAfter"
+        "lt",
+        "gt",
+        "le",
+        "ge"
       ]
     },
     {
       "field": "size",
       "valueType": "number",
       "operators": [
-        "before",
-        "after",
-        "onOrBefore",
-        "onOrAfter"
+        "lt",
+        "gt",
+        "le",
+        "ge"
       ]
     }
   ]

@@ -77,22 +77,22 @@ fn parse_prefixed(
         }
         _ if normalized_prefix == "before" => Ok(vec![condition_node(
             SmartMailboxField::ReceivedAt,
-            SmartMailboxOperator::Before,
+            SmartMailboxOperator::Lt,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
         _ if normalized_prefix == "after" => Ok(vec![condition_node(
             SmartMailboxField::ReceivedAt,
-            SmartMailboxOperator::After,
+            SmartMailboxOperator::Gt,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
         _ if normalized_prefix == "date" => date_node(value, negated),
         _ if normalized_prefix == "newer" => {
-            relative_date_node(value, SmartMailboxOperator::After, negated)
+            relative_date_node(value, SmartMailboxOperator::Gt, negated)
         }
         _ if normalized_prefix == "older" => {
-            relative_date_node(value, SmartMailboxOperator::Before, negated)
+            relative_date_node(value, SmartMailboxOperator::Lt, negated)
         }
         _ => Err(format!("unknown search prefix: {prefix}")),
     }

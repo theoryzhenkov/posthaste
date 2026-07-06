@@ -1,4 +1,7 @@
-import type { SmartMailboxCondition } from '../../../api/types'
+import type {
+  SmartMailboxCondition,
+  SmartMailboxOperator,
+} from '../../../api/types'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
 import {
@@ -11,6 +14,7 @@ import {
 import {
   defaultCondition,
   FIELD_OPTIONS,
+  operatorLabelForField,
   operatorOptionsForField,
   parseField,
   parseOperator,
@@ -133,7 +137,7 @@ function OperatorSelect({
 }: {
   condition: SmartMailboxCondition
   isBooleanField: boolean
-  operators: readonly string[]
+  operators: readonly SmartMailboxOperator[]
   onChange: (condition: SmartMailboxCondition) => void
 }) {
   return (
@@ -162,7 +166,7 @@ function OperatorSelect({
         <SelectContent>
           {operators.map((operator) => (
             <SelectItem key={operator} value={operator}>
-              {operator}
+              {operatorLabelForField(condition.field, operator)}
             </SelectItem>
           ))}
         </SelectContent>
