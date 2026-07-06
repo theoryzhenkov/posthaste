@@ -7,7 +7,7 @@
  * @spec docs/L1-api#smart-mailbox-crud
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   AccountOverview,
   AppSettings,
@@ -51,6 +51,10 @@ import {
   mailboxEditorTargetFromSettingsTarget,
 } from './settings-panel/targetRouting'
 import { useAccountCommandMutation } from './settings-panel/useAccountCommandMutation'
+import {
+  markSurfaceBootstrap,
+  markSurfaceBootstrapOnce,
+} from '../surfaceBootstrapLog'
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 interface SettingsPanelProps {
@@ -80,6 +84,10 @@ export function SettingsPanel({
   showBackToApp = true,
   shell = 'page',
 }: SettingsPanelProps) {
+  markSurfaceBootstrapOnce('settings_panel_render')
+  useEffect(() => {
+    markSurfaceBootstrap('settings_panel_mounted')
+  }, [])
   const queryClient = useQueryClient()
   const activeCategory = surface.params.category ?? 'general'
   const settingsTarget = surface.params.target ?? null

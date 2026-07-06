@@ -40,6 +40,10 @@ export const LOG_EVENTS = {
   viewExtendFailed: 'view.extend.failed',
   viewOpenFailed: 'view.open.failed',
   viewSnapshotApplied: 'view.snapshot.applied',
+  // Ordered markers through the standalone-surface bootstrap + render path
+  // (see `surfaceBootstrapLog.ts`). The LAST one in a frozen tester's backend
+  // log names the exact blocking step of the Windows settings-surface hang.
+  surfaceBootstrap: 'surface.bootstrap',
 } as const
 
 export type LogEvent = (typeof LOG_EVENTS)[keyof typeof LOG_EVENTS]
