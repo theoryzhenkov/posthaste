@@ -72,3 +72,45 @@ fn examine_state_task_captures_highest_modseq() {
 
     assert_eq!(selected.highest_modseq, Some(ImapModSeq(777)));
 }
+
+#[test]
+fn delete_task_issues_delete_command_for_the_mailbox() {
+    let task = DeleteTask::new(
+        Mailbox::try_from("Receipts")
+            .expect("mailbox")
+            .into_static(),
+    );
+    match task.command_body() {
+        CommandBody::Delete { mailbox } => {
+            assert_eq!(mailbox, Mailbox::try_from("Receipts").expect("mailbox"));
+        }
+        other => panic!("DELETE task must issue a Delete command, got {other:?}"),
+    }
+}
+
+#[test]
+fn delete_task_reports_ok_and_no() {
+    let ok = DeleteTask::new(
+        Mailbox::try_from("Receipts")
+            .expect("mailbox")
+            .into_static(),
+    )
+    .process_tagged(StatusBody {
+        kind: StatusKind::Ok,
+        code: None,
+        text: Text::unvalidated("DELETE completed"),
+    });
+    assert!(ok.is_ok(), "a tagged OK is success");
+
+    let refused = DeleteTask::new(
+        Mailbox::try_from("Receipts")
+            .expect("mailbox")
+            .into_static(),
+    )
+    .process_tagged(StatusBody {
+        kind: StatusKind::No,
+        code: None,
+        text: Text::unvalidated("cannot delete"),
+    });
+    assert!(refused.is_err(), "a tagged NO surfaces as an error");
+}

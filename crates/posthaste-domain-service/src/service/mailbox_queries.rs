@@ -129,6 +129,66 @@ impl MailService {
         );
         Ok(events)
     }
+
+    /// Destroy a server-side mailbox, then resync so its disappearance tears down
+    /// the local rows (the resync-observed-deletion path reuses the store's
+    /// `mailbox_cleanup` teardown — `message_mailbox` + `imap_message_location` +
+    /// the `mailbox` row).
+    ///
+    /// **The M2 safety gate (un-bypassable from the API):** a NON-EMPTY mailbox is
+    /// refused unless the caller explicitly confirms `remove_emails`. The mailbox's
+    /// `total_emails` is read from the local projection *before* the gateway is
+    /// touched; when `total_emails > 0 && !remove_emails` this returns
+    /// [`GatewayError::MailboxNotEmpty`] (→ 409) WITHOUT calling the gateway, so a
+    /// REST `DELETE` without `removeEmails` can never destroy a non-empty mailbox.
+    /// Only an empty mailbox, or one with the confirmed flag, proceeds to the
+    /// blocking `gateway.destroy_mailbox` + resync.
+    ///
+    /// Synchronous, not optimistic (mirroring
+    /// [`create_mailbox`](Self::create_mailbox)).
+    ///
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    pub async fn destroy_mailbox(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        remove_emails: bool,
+        gateway: &dyn MailGateway,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        // Read the canonical count BEFORE any gateway round-trip: the gate must
+        // hold on the local projection so a non-empty destroy without the
+        // confirmed flag never reaches the provider.
+        let mailbox = self
+            .mailbox_reader
+            .list_mailboxes(account_id)?
+            .into_iter()
+            .find(|mailbox| mailbox.id == *mailbox_id)
+            .ok_or_else(|| {
+                StoreError::NotFound(format!("mailbox {} not found", mailbox_id.as_str()))
+            })?;
+        if mailbox.total_emails > 0 && !remove_emails {
+            return Err(ServiceError::Gateway(GatewayError::MailboxNotEmpty {
+                count: mailbox.total_emails,
+            }));
+        }
+
+        gateway
+            .destroy_mailbox(account_id, mailbox_id, remove_emails)
+            .await?;
+        let removed_event = self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MAILBOX_UPDATED,
+            Some(mailbox_id),
+            None,
+            json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
+        )?;
+        let mut events = vec![removed_event];
+        events.extend(
+            self.sync_account(account_id, SyncTrigger::Manual, gateway, None)
+                .await?,
+        );
+        Ok(events)
+    }
 }
 
 /// Whether `role` is a provider-native mailbox role (one JMAP/IMAP accepts on

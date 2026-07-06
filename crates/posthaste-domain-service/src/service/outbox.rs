@@ -102,6 +102,13 @@ fn classify_gateway_error(error: GatewayError) -> FlushError {
         | GatewayError::Corruption(message)
         | GatewayError::Internal(message) => (FlushDisposition::Permanent, message),
         GatewayError::MutationRejected { reason, .. } => (FlushDisposition::Permanent, reason),
+        // Mailbox destroy is a synchronous mutation (never queued in the outbox),
+        // so this refusal cannot actually reach the flush path; classify it
+        // permanent for exhaustiveness — retrying the same push can't change it.
+        GatewayError::MailboxNotEmpty { count } => (
+            FlushDisposition::Permanent,
+            format!("mailbox is not empty ({count} messages)"),
+        ),
     };
     FlushError {
         disposition,

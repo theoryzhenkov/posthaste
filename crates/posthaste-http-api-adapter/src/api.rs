@@ -93,7 +93,8 @@ use cursor_support::{
 };
 pub use errors::{ApiError, ApiErrorBody, ApiErrorCode};
 pub use mailboxes::{
-    create_mailbox, list_mailboxes, patch_mailbox, CreateMailboxRequest, PatchMailboxRequest,
+    create_mailbox, delete_mailbox, list_mailboxes, patch_mailbox, CreateMailboxRequest,
+    DeleteMailboxQuery, PatchMailboxRequest,
 };
 pub use message_commands::{
     add_to_mailbox, destroy_message, remove_from_mailbox, replace_mailboxes, set_keywords,

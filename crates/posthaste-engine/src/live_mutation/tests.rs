@@ -90,6 +90,62 @@ fn create_mailbox_request_builds_flat_create_with_name_and_no_parent() {
 }
 
 #[test]
+fn destroy_mailbox_request_carries_id_and_on_destroy_remove_emails_true() {
+    let request = destroy_mailbox_request_body("account-1", &MailboxId::from("MB123"), true);
+
+    let args = &request["methodCalls"][0][1];
+    assert_eq!(request["methodCalls"][0][0], "Mailbox/set");
+    assert_eq!(args["destroy"], json!(["MB123"]));
+    assert_eq!(args["onDestroyRemoveEmails"], Value::Bool(true));
+}
+
+#[test]
+fn destroy_mailbox_request_sets_on_destroy_remove_emails_false() {
+    // onDestroyRemoveEmails=false makes the SERVER refuse a non-empty destroy
+    // (mailboxHasEmail) — the wire must faithfully carry the unconfirmed flag.
+    let request = destroy_mailbox_request_body("account-1", &MailboxId::from("MB123"), false);
+    assert_eq!(
+        request["methodCalls"][0][1]["onDestroyRemoveEmails"],
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn destroyed_mailbox_parses_destroyed_list_as_success() {
+    let response: jmap_client::core::response::MailboxSetResponse = serde_json::from_value(json!({
+        "accountId": "account-1",
+        "oldState": "mailbox-1",
+        "newState": "mailbox-2",
+        "destroyed": ["MB123"]
+    }))
+    .expect("destroy response should deserialize");
+
+    destroyed_mailbox(response, &MailboxId::from("MB123")).expect("destroyed id is a success");
+}
+
+#[test]
+fn destroyed_mailbox_maps_mailbox_has_email_to_typed_not_empty() {
+    // The onDestroyRemoveEmails=false backstop: a `notDestroyed` mailboxHasEmail
+    // becomes the typed `MailboxNotEmpty`, not a generic rejection.
+    let response: jmap_client::core::response::MailboxSetResponse = serde_json::from_value(json!({
+        "accountId": "account-1",
+        "oldState": "mailbox-1",
+        "newState": "mailbox-1",
+        "notDestroyed": {
+            "MB123": { "type": "mailboxHasEmail" }
+        }
+    }))
+    .expect("destroy response should deserialize");
+
+    let error = destroyed_mailbox(response, &MailboxId::from("MB123"))
+        .expect_err("a non-empty destroy must not be treated as success");
+    assert!(
+        matches!(error, GatewayError::MailboxNotEmpty { .. }),
+        "expected MailboxNotEmpty, got {error:?}",
+    );
+}
+
+#[test]
 fn created_mailbox_id_parses_server_id_from_created_map() {
     let response: jmap_client::core::response::MailboxSetResponse = serde_json::from_value(json!({
         "accountId": "account-1",

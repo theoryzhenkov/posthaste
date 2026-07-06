@@ -589,6 +589,19 @@ pub trait AuthorityServerApi: Send + Sync {
         Err(write_channel_unsupported())
     }
 
+    /// Write: destroy a mailbox, returning the account's mailboxes. `remove_emails`
+    /// is the confirmed safety flag (the service refuses a non-empty mailbox
+    /// without it — M2 confirm-with-count gate).
+    async fn destroy_mailbox(
+        &self,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        remove_emails: bool,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        let _ = (account_id, mailbox_id, remove_emails);
+        Err(write_channel_unsupported())
+    }
+
     /// Write: queue a local-first send for an account.
     async fn send_message(
         &self,
@@ -982,6 +995,11 @@ macro_rules! for_each_link_api_op {
             create_mailbox => "/v1/link/create-mailbox" => CreateMailboxRequest {
                 account_id: $crate::reexport::AccountId,
                 name: String
+            } => Vec<$crate::reexport::MailboxSummary>;
+            destroy_mailbox => "/v1/link/destroy-mailbox" => DestroyMailboxRequest {
+                account_id: $crate::reexport::AccountId,
+                mailbox_id: $crate::reexport::MailboxId,
+                remove_emails: bool
             } => Vec<$crate::reexport::MailboxSummary>;
             send_message => "/v1/link/send-message" => SendMessageLinkRequest {
                 account_id: $crate::reexport::AccountId,

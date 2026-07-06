@@ -692,6 +692,20 @@ impl RuntimeMailReadApi for RuntimeHandle {
             .await
     }
 
+    async fn destroy_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        remove_emails: bool,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .authority_server_link
+            .destroy_mailbox(account_id, mailbox_id, remove_emails)
+            .await
+    }
+
     async fn list_smart_mailboxes(
         &self,
         _caller: RuntimeCaller,

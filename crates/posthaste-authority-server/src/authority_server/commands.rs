@@ -250,6 +250,21 @@ impl AuthorityServer {
         Ok(self.service.list_mailboxes(&account_id)?)
     }
 
+    pub(crate) async fn destroy_mailbox(
+        &self,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        remove_emails: bool,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        let gateway = self.live_accounts.gateway(&account_id).await?;
+        let events = self
+            .service
+            .destroy_mailbox(&account_id, &mailbox_id, remove_emails, gateway.as_ref())
+            .await?;
+        self.publish_events(&events);
+        Ok(self.service.list_mailboxes(&account_id)?)
+    }
+
     /// Write: queue a local-first send and nudge a flush. No live gateway is
     /// required to accept it; it flushes on the next connectivity window.
     pub(crate) async fn send_message(

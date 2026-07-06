@@ -9,6 +9,7 @@ import type {
   CreateAccountInput,
   CreateMailboxInput,
   CreateSmartMailboxInput,
+  DeleteMailboxInput,
   DraftContent,
   Mailbox,
   MessageCommand,
@@ -447,6 +448,11 @@ export interface RuntimeAdapter {
   createMailbox(
     accountId: string,
     input: CreateMailboxInput,
+  ): Promise<Mailbox[]>
+  deleteMailbox(
+    accountId: string,
+    mailboxId: string,
+    input: DeleteMailboxInput,
   ): Promise<Mailbox[]>
   patchSettings(input: PatchSettingsInput): Promise<AppSettings>
   previewAutomationRule(

@@ -65,6 +65,29 @@ export const commandOperations: Operation[] = [
   }),
 
   defineOperation({
+    mcpName: "delete_mailbox",
+    title: "Delete mailbox",
+    description:
+      "Delete a mailbox (folder/label) on a source and return the source's " +
+      "refreshed mailbox list. SAFETY: a non-empty mailbox is refused with a 409 " +
+      "unless removeEmails is true (confirm-with-count); pass removeEmails=true " +
+      "only to also permanently delete the mailbox's messages.",
+    mutates: true,
+    cli: { path: ["mailboxes", "delete"], primary: "sourceId" },
+    argSchema: {
+      sourceId: z.string(),
+      mailboxId: z.string(),
+      removeEmails: z.boolean().default(false),
+    },
+    handler: (conn, args) =>
+      apiFetch<Schemas["MailboxSummary"][]>(
+        conn,
+        `/sources/${encodeURIComponent(args.sourceId)}/mailboxes/${encodeURIComponent(args.mailboxId)}`,
+        { method: "DELETE", query: { removeEmails: String(args.removeEmails) } },
+      ),
+  }),
+
+  defineOperation({
     mcpName: "set_keywords",
     title: "Set keywords",
     description:

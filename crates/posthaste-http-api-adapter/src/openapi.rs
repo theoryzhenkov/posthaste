@@ -43,6 +43,7 @@ use utoipa::OpenApi;
         crate::api::mailboxes::list_mailboxes,
         crate::api::mailboxes::create_mailbox,
         crate::api::mailboxes::patch_mailbox,
+        crate::api::mailboxes::delete_mailbox,
         crate::api::messages::listing::list_source_messages,
         crate::api::messages::listing::search_messages,
         crate::api::messages::listing::list_conversations,
