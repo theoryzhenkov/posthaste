@@ -14,6 +14,10 @@ import { useEmailActions } from '@/hooks/useEmailActions'
 import { useUndoRedo } from '@/hooks/useUndoRedo'
 import { replaceFocusedSurface } from '@/hooks/useSurfaceRouting'
 import { runtimeViews } from '@/runtime/views'
+import {
+  markSurfaceBootstrap,
+  markSurfaceBootstrapOnce,
+} from '@/surfaceBootstrapLog'
 import { AttachmentSurface } from './AttachmentSurface'
 import { ComposeOverlay } from './ComposeOverlay'
 import { MessageDetail } from './MessageDetail'
@@ -35,6 +39,7 @@ export function FocusedSurface({
   onSearch,
   onSelectMessage,
 }: FocusedSurfaceProps) {
+  markSurfaceBootstrapOnce('focused_surface_render', { kind: surface.kind })
   const selectedMessage = surface.kind === 'message' ? surface.params : null
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
@@ -136,16 +141,20 @@ export function FocusedSurfaceDocument({
 }: {
   surface: SurfaceDescriptor
 }) {
+  markSurfaceBootstrapOnce('focused_document_render', { kind: surface.kind })
   useEffect(() => {
+    markSurfaceBootstrap('focused_document_mounted')
     if (!isTauriRuntime()) {
       return
     }
 
     let unlisten: (() => void) | null = null
     let disposed = false
+    markSurfaceBootstrap('close_listener_start')
     void listenForDesktopCloseRequest(() => {
       void closeCurrentSurfaceWindow()
     }).then((nextUnlisten) => {
+      markSurfaceBootstrap('close_listener_done')
       if (disposed) {
         nextUnlisten()
         return
