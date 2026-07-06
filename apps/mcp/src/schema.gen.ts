@@ -1734,6 +1734,10 @@ export interface components {
         /**
          * @description An ordered domain event stored in `event_log` and published via SSE.
          *
+         *     `PartialEq` (no `Eq` — the payload is a [`Value`], and JSON numbers are not
+         *     `Eq`) so wire envelopes that carry a whole event (the link down-channel's
+         *     `BaseAssertion.event`) stay comparable in round-trip tests.
+         *
          *     @spec docs/L1-sync#event-propagation
          *     @spec docs/L1-api#sse-event-stream
          */
@@ -2767,7 +2771,7 @@ export interface components {
          *     @spec docs/L1-accounts#condition-fields-and-operators
          * @enum {string}
          */
-        SmartMailboxOperator: "equals" | "in" | "contains" | "lt" | "gt" | "le" | "ge";
+        SmartMailboxOperator: "equals" | "in" | "contains" | "beginsWith" | "endsWith" | "regex" | "lt" | "gt" | "le" | "ge";
         /**
          * @description Top-level rule for a smart mailbox, wrapping a root group.
          *

@@ -5877,7 +5877,7 @@
       },
       "DomainEvent": {
         "type": "object",
-        "description": "An ordered domain event stored in `event_log` and published via SSE.\n\n@spec docs/L1-sync#event-propagation\n@spec docs/L1-api#sse-event-stream",
+        "description": "An ordered domain event stored in `event_log` and published via SSE.\n\n`PartialEq` (no `Eq` — the payload is a [`Value`], and JSON numbers are not\n`Eq`) so wire envelopes that carry a whole event (the link down-channel's\n`BaseAssertion.event`) stay comparable in round-trip tests.\n\n@spec docs/L1-sync#event-propagation\n@spec docs/L1-api#sse-event-stream",
         "required": [
           "seq",
           "accountId",
@@ -8310,6 +8310,9 @@
           "equals",
           "in",
           "contains",
+          "beginsWith",
+          "endsWith",
+          "regex",
           "lt",
           "gt",
           "le",
