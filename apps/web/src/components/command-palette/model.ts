@@ -1,4 +1,5 @@
 import type {
+  DecayedCounter,
   PaletteRow,
   RankingContext,
   SearchCandidate,
@@ -56,6 +57,9 @@ export function currentSearchableServerQuery(query: string): string {
 
 export function createRankingContext(input: {
   hasSelectedMessage: boolean
+  /** Persisted per-command recency/frequency (PLAN-L2 §4.5). Defaults to an
+   *  empty counter so callers/tests that don't wire persistence are unaffected. */
+  recentCommands?: DecayedCounter
 }): RankingContext {
   return {
     now: Date.now(),
@@ -67,9 +71,9 @@ export function createRankingContext(input: {
       paletteOpenReason: 'keyboard',
     },
     user: {
-      recentCommands: emptyCounter(),
+      recentCommands: input.recentCommands ?? emptyCounter(),
       recentEntities: emptyCounter(),
-      frequentCommands: emptyCounter(),
+      frequentCommands: input.recentCommands ?? emptyCounter(),
       frequentMailboxes: emptyCounter(),
       frequentContacts: emptyCounter(),
       pinnedCommands: [],

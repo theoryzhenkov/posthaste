@@ -70,22 +70,16 @@ function CommandPaletteOverlay(props: MailClientViewProps) {
   return (
     <Suspense fallback={null}>
       <CommandPalette
-        hasSelectedMessage={props.selectedMessage !== null}
-        onAddTag={props.onAddTag}
+        actions={props.actions}
+        app={props.handlers}
+        viewRole={props.viewRole}
+        selectedMessage={props.selectedMessage}
+        selectedMessageData={props.selectedMessageData}
         onApplySearch={props.onApplySearch}
-        onArchive={props.onArchive}
         onClose={props.onCloseCommandPalette}
-        onCompose={props.onCompose}
-        onOpenSettings={props.onOpenSettings}
-        onOpenShortcuts={props.onShowShortcuts}
-        onOpenTagEditor={props.onOpenTagEditor}
-        onPlaceholderAction={props.onPlaceholderAction}
-        onRemoveTag={props.onRemoveTag}
-        onReply={props.onReply}
         onSelectMessage={props.onSelectMessageRef}
         onSelectSmartMailbox={props.onSelectSmartMailbox}
         onSelectSourceMailbox={props.onSelectSourceMailbox}
-        onToggleFlag={props.onToggleFlag}
       />
     </Suspense>
   )

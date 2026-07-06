@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
+import type { ActionContext, ActionServices } from '@/actions'
 import { createCommandProviders } from '@/command-search/providers'
+import { loadRecentCommands } from '@/command-search/recentCommands'
 import { recentCachedMessages } from '@/command-search/recentMessages'
 import { useCommandSearch } from '@/command-search/useCommandSearch'
 import { useMailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
@@ -16,8 +18,12 @@ import {
 export function useCommandPaletteSearch(input: {
   hasSelectedMessage: boolean
   query: string
+  /** Stable accessors for the palette's action context + bound services. */
+  getActionContext: () => ActionContext
+  getActionServices: () => ActionServices
 }) {
-  const { hasSelectedMessage, query } = input
+  const { hasSelectedMessage, query, getActionContext, getActionServices } =
+    input
   const queryClient = useQueryClient()
   const readModels = useMailboxNavigationReadModels()
   const recentMessages = useMemo(
@@ -37,14 +43,25 @@ export function useCommandPaletteSearch(input: {
     [readModels.smartMailboxes, readModels.sources, readModels.tags],
   )
   const providers = useMemo(
-    () => createCommandProviders({ readModels, recentMessages }),
+    () =>
+      createCommandProviders({
+        readModels,
+        recentMessages,
+        getActionContext,
+        getActionServices,
+      }),
     // readModelKey intentionally collapses unstable React Query wrapper arrays
-    // into the domain IDs that affect provider candidates.
+    // into the domain IDs that affect provider candidates. The action getters
+    // are stable (ref-backed), so they never re-create the provider list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [readModelKey, recentMessages],
+    [readModelKey, recentMessages, getActionContext, getActionServices],
   )
   const rankingContext = useMemo(
-    () => createRankingContext({ hasSelectedMessage }),
+    () =>
+      createRankingContext({
+        hasSelectedMessage,
+        recentCommands: loadRecentCommands(),
+      }),
     [hasSelectedMessage],
   )
   const search = useCommandSearch({ query, context: rankingContext, providers })

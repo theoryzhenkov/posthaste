@@ -1,20 +1,23 @@
 import { useCallback } from 'react'
 
+import { getAction, type ActionContext, type ActionServices } from '@/actions'
 import type { PaletteAction } from '@/command-search/types'
+import { recordCommandUse } from '@/command-search/recentCommands'
 import type { MailSelection } from '@/mailState'
-import type { SettingsSurfaceCategory as SettingsCategory } from '@/surfaces'
 
-export interface PaletteActionHandlers {
-  onAddTag: (tag: string) => void
+/**
+ * The palette's SINGLE execution path (PLAN-L2, Slice 3).
+ *
+ * The old parallel execution switch (a `PaletteAction`-kind switch plus a second
+ * `CommandActionId` switch that re-implemented every command handler) is gone.
+ * Registry rows (`kind: 'action'`) now dispatch through the resolved action's
+ * `run(ctx, services)` — the very same code path the context menu uses — and
+ * bump the recency counter. Everything else here is pure search-result
+ * navigation emitted by the other providers (mailboxes/messages/tags/query),
+ * which are not registry actions.
+ */
+export interface PaletteNavHandlers {
   onApplySearch: (query: string) => void
-  onArchive: () => void
-  onCompose: () => void
-  onRemoveTag: (tag: string) => void
-  onOpenSettings: (category?: SettingsCategory) => void
-  onOpenShortcuts: () => void
-  onOpenTagEditor: () => void
-  onPlaceholderAction: (label: string) => void
-  onReply: () => void
   onSelectMessage: (selection: MailSelection) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onSelectSourceMailbox: (
@@ -22,106 +25,57 @@ export interface PaletteActionHandlers {
     mailboxId: string,
     name: string,
   ) => void
-  onToggleFlag: () => void
   replaceQuery: (query: string) => void
 }
 
-export function usePaletteActions(handlers: PaletteActionHandlers) {
+export function usePaletteActions(input: {
+  actionContext: ActionContext
+  services: ActionServices
+  nav: PaletteNavHandlers
+}) {
+  const { actionContext, services, nav } = input
   return useCallback(
     (action: PaletteAction) => {
       switch (action.kind) {
-        case 'command':
-          executeCommandAction(action.commandId, handlers)
+        case 'action': {
+          const def = getAction(action.actionId)
+          if (!def) break
+          recordCommandUse(action.actionId)
+          void def.run(actionContext, services)
           break
+        }
         case 'apply-query':
-          handlers.onApplySearch(action.query)
+          nav.onApplySearch(action.query)
           break
         case 'replace-query':
-          handlers.replaceQuery(action.query)
+          nav.replaceQuery(action.query)
           break
         case 'open-source-mailbox':
-          handlers.onSelectSourceMailbox(
+          nav.onSelectSourceMailbox(
             action.sourceId,
             action.mailboxId,
             action.name,
           )
           break
         case 'open-smart-mailbox':
-          handlers.onSelectSmartMailbox(action.smartMailboxId, action.name)
+          nav.onSelectSmartMailbox(action.smartMailboxId, action.name)
           break
         case 'open-message':
           if (action.mailboxHint) {
-            handlers.onSelectSourceMailbox(
+            nav.onSelectSourceMailbox(
               action.sourceId,
               action.mailboxHint.mailboxId,
               action.mailboxHint.name,
             )
           }
-          handlers.onSelectMessage({
+          nav.onSelectMessage({
             conversationId: action.conversationId,
             sourceId: action.sourceId,
             messageId: action.messageId,
           })
           break
-        case 'open-settings':
-          handlers.onOpenSettings(action.category)
-          break
-        case 'open-compose':
-          handlers.onCompose()
-          break
-        case 'open-contact':
-          handlers.onApplySearch(action.query)
-          break
-        case 'add-tag-to-message':
-          handlers.onAddTag(action.tag)
-          break
-        case 'remove-tag-from-message':
-          handlers.onRemoveTag(action.tag)
-          break
-        case 'open-tag-editor':
-          handlers.onOpenTagEditor()
-          break
-        case 'noop':
-          handlers.onPlaceholderAction(action.label)
-          break
       }
     },
-    [handlers],
+    [actionContext, services, nav],
   )
-}
-
-function executeCommandAction(
-  commandId: Extract<PaletteAction, { kind: 'command' }>['commandId'],
-  handlers: PaletteActionHandlers,
-) {
-  switch (commandId) {
-    case 'compose':
-      handlers.onCompose()
-      break
-    case 'reply':
-      handlers.onReply()
-      break
-    case 'archive':
-      handlers.onArchive()
-      break
-    case 'flag':
-      handlers.onToggleFlag()
-      break
-    case 'shortcuts':
-      handlers.onOpenShortcuts()
-      break
-    case 'snooze':
-      handlers.onPlaceholderAction('Snooze')
-      break
-    case 'newSmart':
-    case 'newRule':
-      handlers.onOpenSettings('mailboxes')
-      break
-    case 'settings':
-      handlers.onOpenSettings()
-      break
-    case 'account':
-      handlers.onOpenSettings('accounts')
-      break
-  }
 }

@@ -18,6 +18,7 @@ import { describe, expect, it, mock } from 'bun:test'
 // Side-effect import: registers the message definitions into the registry (the
 // running app registers them the same way, via the MessageRow → shim import).
 import '../src/actions/defs/message'
+import '../src/actions/defs/app'
 import { resolveActions } from '../src/actions/resolve'
 import type { ActionContext, MessageTarget } from '../src/actions/types'
 import type { MessageSummary, SourceMessageRef } from '../src/api/types'
@@ -235,13 +236,21 @@ describe('resolveActions — delegation to EmailActions (Slice 1)', () => {
   })
 })
 
-describe('resolveActions — surface + enablement (Slice 1)', () => {
-  it('returns only context-menu actions; other surfaces are empty until later slices', () => {
-    expect(
-      resolveActions(ctx({ surface: 'palette' }), {
-        email: makeSpyActions() as unknown as EmailActions,
-      }),
-    ).toHaveLength(0)
+describe('resolveActions — surface + enablement (Slice 1/3)', () => {
+  it('palette surface resolves palette-eligible actions; keyboard/detail-header stay empty until later slices', () => {
+    // Slice 3 lit up the palette surface: message actions gained 'palette' and
+    // the app-level commands (defs/app.ts) register palette-only entries.
+    const palette = resolveActions(ctx({ surface: 'palette' }), {
+      email: makeSpyActions() as unknown as EmailActions,
+    })
+    const paletteIds = palette.map((r) => r.def.id)
+    expect(paletteIds).toContain('message.archive')
+    expect(paletteIds).toContain('message.reply')
+    expect(paletteIds).toContain('app.compose')
+    // Context-menu-only entries never leak into the palette.
+    expect(paletteIds).not.toContain('message.open')
+
+    // The keyboard + detail-header surfaces are migrated in Slices 4-5.
     expect(
       resolveActions(ctx({ surface: 'keyboard' }), {
         email: makeSpyActions() as unknown as EmailActions,
