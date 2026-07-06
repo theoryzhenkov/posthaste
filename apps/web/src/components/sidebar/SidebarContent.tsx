@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { AlertCircle } from 'lucide-react'
 
 import type { SmartMailboxSummary } from '@/api/types'
@@ -6,9 +7,14 @@ import type { useMailboxNavigationReadModels } from '@/mailboxNavigationReadMode
 
 import type { SidebarSelection } from '../Sidebar'
 import { SortableList, SortableRow } from '../ui/SortableList'
-import { fallbackAccountAppearance } from './model'
-import { SectionHeader, SourceSection } from './SourceSection'
+import {
+  fallbackAccountAppearance,
+  partitionSmartMailboxes,
+  smartAssignableGroups,
+} from './model'
+import { GroupHeader, SectionHeader, SourceSection } from './SourceSection'
 import { SmartMailboxItem } from './SidebarItems'
+import { useMailboxGroups, useMailboxGroupMutations } from './useMailboxGroups'
 
 type NavigationReadModels = ReturnType<typeof useMailboxNavigationReadModels>
 
@@ -53,54 +59,124 @@ export function SmartMailboxSection({
   mailboxes,
   selectedView,
   isPaneActive,
+  collapsedGroupIds,
   onOpenSmartMailboxSettings,
   onSelectSmartMailbox,
   onReorder,
   onToggle,
+  onToggleGroupCollapsed,
 }: {
   collapsed: boolean
   mailboxes: SmartMailboxSummary[]
   selectedView: SidebarSelection | null
   isPaneActive: boolean
+  /** Collapsed sidebar Group ids (shared with the j/k walker in Sidebar). */
+  collapsedGroupIds: ReadonlySet<string>
   onOpenSmartMailboxSettings: (smartMailboxId: string) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onReorder: (orderedIds: string[]) => void
   onToggle: () => void
+  onToggleGroupCollapsed: (groupId: string) => void
 }) {
+  const groups = useMailboxGroups()
+  const groupMutations = useMailboxGroupMutations()
+  // Partition the smart mailboxes into synced Groups + an ungrouped remainder,
+  // mirroring SourceSection. A group surfaces here only if it holds ≥1 SMART
+  // mailbox; ungrouped smart mailboxes render flat (and stay drag-reorderable).
+  const partition = useMemo(
+    () => partitionSmartMailboxes(mailboxes, groups),
+    [mailboxes, groups],
+  )
+  // HOMOGENEITY: the "Add to group" list for a smart mailbox offers ONLY groups
+  // whose every member is a smart mailbox (never a source-populated group), so a
+  // group can never become mixed.
+  const smartIds = useMemo(
+    () => new Set(mailboxes.map((mailbox) => mailbox.id)),
+    [mailboxes],
+  )
+  const assignableGroups = useMemo(
+    () => smartAssignableGroups(groups, smartIds),
+    [groups, smartIds],
+  )
+  const currentGroupIdByMailbox = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of partition.groups) {
+      for (const mailbox of entry.mailboxes) {
+        map.set(mailbox.id, entry.group.id)
+      }
+    }
+    return map
+  }, [partition.groups])
+
+  const renderSmartMailboxItem = (
+    smartMailbox: SmartMailboxSummary,
+    depth = 0,
+  ) => (
+    <SmartMailboxItem
+      id={smartMailbox.id}
+      name={smartMailbox.name}
+      role={smartMailbox.role}
+      defaultKey={smartMailbox.defaultKey}
+      unreadMessages={smartMailbox.unreadMessages}
+      accent={smartMailboxAccent(smartMailbox.role, smartMailbox.name)}
+      depth={depth}
+      groups={assignableGroups}
+      currentGroupId={currentGroupIdByMailbox.get(smartMailbox.id) ?? null}
+      isSelected={
+        selectedView?.kind === 'smart-mailbox' &&
+        selectedView.id === smartMailbox.id
+      }
+      isPaneActive={isPaneActive}
+      onSelect={() => onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)}
+      onOpenSettings={onOpenSmartMailboxSettings}
+      onAssignToGroup={groupMutations.assignToGroup}
+      onRemoveFromGroup={groupMutations.removeFromGroup}
+      onCreateGroup={groupMutations.createGroup}
+    />
+  )
+
   return (
     <>
       <SectionHeader label="Smart" collapsed={collapsed} onToggle={onToggle} />
       {!collapsed && (
         <div className="space-y-0.5 py-1">
           <SortableList
-            ids={mailboxes.map((mailbox) => mailbox.id)}
+            ids={partition.ungrouped.map((mailbox) => mailbox.id)}
             onReorder={onReorder}
           >
-            {mailboxes.map((smartMailbox) => (
+            {partition.ungrouped.map((smartMailbox) => (
               <SortableRow key={smartMailbox.id} id={smartMailbox.id}>
-                <SmartMailboxItem
-                  id={smartMailbox.id}
-                  name={smartMailbox.name}
-                  role={smartMailbox.role}
-                  defaultKey={smartMailbox.defaultKey}
-                  unreadMessages={smartMailbox.unreadMessages}
-                  accent={smartMailboxAccent(
-                    smartMailbox.role,
-                    smartMailbox.name,
-                  )}
-                  isSelected={
-                    selectedView?.kind === 'smart-mailbox' &&
-                    selectedView.id === smartMailbox.id
-                  }
-                  isPaneActive={isPaneActive}
-                  onSelect={() =>
-                    onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
-                  }
-                  onOpenSettings={onOpenSmartMailboxSettings}
-                />
+                {renderSmartMailboxItem(smartMailbox)}
               </SortableRow>
             ))}
           </SortableList>
+          {partition.groups.map((entry) => {
+            const groupCollapsed = collapsedGroupIds.has(entry.group.id)
+            return (
+              <div key={entry.group.id}>
+                <GroupHeader
+                  group={entry.group}
+                  collapsed={groupCollapsed}
+                  onToggleCollapsed={() =>
+                    onToggleGroupCollapsed(entry.group.id)
+                  }
+                  onRename={(name) =>
+                    groupMutations.renameGroup(entry.group.id, name)
+                  }
+                  onDelete={() => groupMutations.deleteGroup(entry.group.id)}
+                />
+                {!groupCollapsed && (
+                  <div className="space-y-0.5">
+                    {entry.mailboxes.map((smartMailbox) => (
+                      <div key={smartMailbox.id}>
+                        {renderSmartMailboxItem(smartMailbox, 1)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </>
