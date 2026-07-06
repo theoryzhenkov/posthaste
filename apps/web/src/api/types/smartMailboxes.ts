@@ -34,8 +34,21 @@ export type SmartMailboxOperator =
   | 'onOrBefore'
   | 'onOrAfter'
 
+/** Time unit for a relative date offset.
+ *  @spec docs/L1-search#smart-mailbox-data-model */
+export type DateUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
+
+/** A typed date condition value. `absolute` compares against a stored RFC3339
+ *  instant; `relative` is a rolling "N units ago" offset resolved at query
+ *  time (so it never freezes to a fixed date at edit time). Distinguished from
+ *  the scalar `SmartMailboxValue` shapes by being an object with a `kind` tag.
+ *  @spec docs/L1-search#smart-mailbox-data-model */
+export type DateValue =
+  | { kind: 'absolute'; value: string }
+  | { kind: 'relative'; amount: number; unit: DateUnit }
+
 /** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxValue = string | string[] | boolean
+export type SmartMailboxValue = string | string[] | boolean | DateValue
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxGroup {

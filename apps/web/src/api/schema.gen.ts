@@ -1702,6 +1702,31 @@ export interface components {
             role?: string | null;
             rule: components["schemas"]["SmartMailboxRule"];
         };
+        /**
+         * @description Time unit for a [`DateValue::Relative`] offset.
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         * @enum {string}
+         */
+        DateUnit: "minutes" | "hours" | "days" | "weeks" | "months";
+        /**
+         * @description A date condition value. Tagged (internally, on `kind`) so absolute and
+         *     relative dates are explicit, distinct JSON objects — this is what lets the
+         *     untagged [`SmartMailboxValue`] tell a date apart from a bare string.
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         */
+        DateValue: {
+            /** @enum {string} */
+            kind: "absolute";
+            value: string;
+        } | {
+            /** Format: int32 */
+            amount: number;
+            /** @enum {string} */
+            kind: "relative";
+            unit: components["schemas"]["DateUnit"];
+        };
         /** @description Request body for `POST /v1/sources/{source_id}/commands/delete-draft`. */
         DeleteDraftRequest: {
             draftId: string;
@@ -2771,11 +2796,21 @@ export interface components {
             updatedAt: string;
         };
         /**
-         * @description Condition value: scalar string, string list (for `In`), or boolean.
+         * @description Condition value: scalar string, string list (for `In`), boolean, or a typed
+         *     date value.
+         *
+         *     The enum is `#[serde(untagged)]`: each variant is distinguished by its JSON
+         *     *shape*, so the legacy `String`/`Strings`/`Bool` values still deserialize
+         *     exactly as before (a bare string, a string array, a bare boolean). The
+         *     [`Date`](Self::Date) variant is a JSON *object* carrying a `kind`
+         *     discriminator, a shape none of the scalar variants accept, so adding it is
+         *     fully back-compatible and needs no migration of stored data — legacy
+         *     absolute dates persisted as a bare `String` keep parsing (see the date field
+         *     compiler, which reads both the legacy string and the new `Date::Absolute`).
          *
          *     @spec docs/L1-accounts#condition-fields-and-operators
          */
-        SmartMailboxValue: string | string[] | boolean;
+        SmartMailboxValue: string | string[] | boolean | components["schemas"]["DateValue"];
         /**
          * @description SMTP endpoint settings for traditional provider submission.
          *

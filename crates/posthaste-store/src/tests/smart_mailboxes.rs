@@ -385,3 +385,139 @@ fn to_field_matches_recipients_in_to_json() -> Result<(), StoreError> {
     assert!(none.is_empty());
     Ok(())
 }
+
+/// Computes an RFC3339 timestamp offset from the real clock, using SQLite's own
+/// `strftime`/`datetime` so the seeded messages sit at a known distance from
+/// the `now` the compiler's `datetime('now', ...)` bound will use.
+fn now_offset_rfc3339(store: &DatabaseStore, modifier: &str) -> Result<String, StoreError> {
+    let connection = store.read_connection()?;
+    let value: String = connection
+        .query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?1)",
+            params![modifier],
+            |row| row.get(0),
+        )
+        .map_err(sql_to_store_error)?;
+    Ok(value)
+}
+
+#[test]
+fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    // Seed relative to the *real* clock: one message 3 days old, one 10 days
+    // old. A rolling "last 7 days" bound (now-7d) must split them regardless of
+    // the absolute wall-clock date the test runs on.
+    let recent = now_offset_rfc3339(&store, "-3 days")?;
+    let old = now_offset_rfc3339(&store, "-10 days")?;
+    seed_messages(
+        &store,
+        &account,
+        vec![
+            MessageRecord {
+                received_at: recent,
+                ..sample_message("recent", "inbox", Some("mime-recent"))
+            },
+            MessageRecord {
+                received_at: old,
+                ..sample_message("old", "inbox", Some("mime-old"))
+            },
+        ],
+        "state-relative",
+    )?;
+
+    let last_7_days = |operator| {
+        single_condition_rule(
+            SmartMailboxField::ReceivedAt,
+            operator,
+            SmartMailboxValue::Date(DateValue::Relative {
+                amount: 7,
+                unit: DateUnit::Days,
+            }),
+        )
+    };
+
+    // "in the last 7 days" == received_at After (>) now-7days → only the recent one.
+    let within = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::After))?;
+    assert_eq!(
+        within.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["recent"],
+        "rolling window must select the message inside now-7days, not a frozen date"
+    );
+
+    // "more than 7 days ago" == received_at Before (<) now-7days → only the old one.
+    let older = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::Before))?;
+    assert_eq!(
+        older.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["old"]
+    );
+
+    // The window is genuinely rolling: a 20-day lookback captures both (proving
+    // the bound is computed from `now`, not a fixed instant baked in at edit
+    // time — a frozen absolute could never widen to include the older message).
+    let last_20_days = single_condition_rule(
+        SmartMailboxField::ReceivedAt,
+        SmartMailboxOperator::After,
+        SmartMailboxValue::Date(DateValue::Relative {
+            amount: 20,
+            unit: DateUnit::Days,
+        }),
+    );
+    let both = store.query_messages_by_rule(&last_20_days)?;
+    let mut ids: Vec<&str> = both.iter().map(|m| m.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["old", "recent"]);
+    Ok(())
+}
+
+#[test]
+fn date_field_accepts_legacy_string_and_typed_absolute() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    seed_messages(
+        &store,
+        &account,
+        vec![
+            MessageRecord {
+                received_at: "2026-01-01T00:00:00Z".to_string(),
+                ..sample_message("jan", "inbox", Some("mime-jan"))
+            },
+            MessageRecord {
+                received_at: "2026-06-01T00:00:00Z".to_string(),
+                ..sample_message("jun", "inbox", Some("mime-jun"))
+            },
+        ],
+        "state-abs",
+    )?;
+
+    // Back-compat: a legacy bare-string absolute date still compiles + matches.
+    let legacy = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::ReceivedAt,
+        SmartMailboxOperator::Before,
+        SmartMailboxValue::String("2026-03-01T00:00:00Z".to_string()),
+    ))?;
+    assert_eq!(
+        legacy.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["jan"]
+    );
+
+    // The typed `Date::Absolute` matches identically.
+    let typed = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::ReceivedAt,
+        SmartMailboxOperator::After,
+        SmartMailboxValue::Date(DateValue::Absolute {
+            value: "2026-03-01T00:00:00Z".to_string(),
+        }),
+    ))?;
+    assert_eq!(
+        typed.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["jun"]
+    );
+    Ok(())
+}

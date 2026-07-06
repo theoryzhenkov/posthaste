@@ -88,7 +88,10 @@ pub(crate) fn convert_condition(
 }
 
 /// Converts a TOML value to a `SmartMailboxValue`. Supports string, boolean,
-/// and string arrays (for `in` operator).
+/// string arrays (for the `in` operator), and a typed date table (a `[table]`
+/// with a `kind` discriminator — `absolute`/`relative` — mirroring the
+/// [`DateValue`] wire shape). Legacy bare-string date values still load as a
+/// plain `String`, so no migration is required.
 pub(crate) fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValue, String> {
     match value {
         toml::Value::String(s) => Ok(SmartMailboxValue::String(s.clone())),
@@ -103,7 +106,69 @@ pub(crate) fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValu
                 .collect();
             Ok(SmartMailboxValue::Strings(strings?))
         }
+        toml::Value::Table(table) => convert_toml_date_table(table),
         _ => Err(format!("unsupported TOML value type: {value}")),
+    }
+}
+
+/// Converts a TOML date table (`{ kind = "absolute"/"relative", ... }`) to a
+/// [`SmartMailboxValue::Date`].
+fn convert_toml_date_table(table: &toml::value::Table) -> Result<SmartMailboxValue, String> {
+    let kind = table
+        .get("kind")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| "date value table must have a string `kind`".to_string())?;
+    let date = match kind {
+        "absolute" => {
+            let value = table
+                .get("value")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| "absolute date value must have a string `value`".to_string())?;
+            DateValue::Absolute {
+                value: value.to_string(),
+            }
+        }
+        "relative" => {
+            let amount = table
+                .get("amount")
+                .and_then(toml::Value::as_integer)
+                .ok_or_else(|| "relative date value must have an integer `amount`".to_string())?;
+            let amount = u32::try_from(amount)
+                .map_err(|_| "relative date `amount` out of range".to_string())?;
+            let unit = table
+                .get("unit")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| "relative date value must have a string `unit`".to_string())?;
+            DateValue::Relative {
+                amount,
+                unit: date_unit_from_str(unit)?,
+            }
+        }
+        other => return Err(format!("unknown date value kind: {other}")),
+    };
+    Ok(SmartMailboxValue::Date(date))
+}
+
+/// Maps a TOML/wire `unit` string to a [`DateUnit`].
+fn date_unit_from_str(unit: &str) -> Result<DateUnit, String> {
+    match unit {
+        "minutes" => Ok(DateUnit::Minutes),
+        "hours" => Ok(DateUnit::Hours),
+        "days" => Ok(DateUnit::Days),
+        "weeks" => Ok(DateUnit::Weeks),
+        "months" => Ok(DateUnit::Months),
+        other => Err(format!("unknown relative date unit: {other}")),
+    }
+}
+
+/// The wire/TOML `unit` string for a [`DateUnit`].
+fn date_unit_str(unit: &DateUnit) -> &'static str {
+    match unit {
+        DateUnit::Minutes => "minutes",
+        DateUnit::Hours => "hours",
+        DateUnit::Days => "days",
+        DateUnit::Weeks => "weeks",
+        DateUnit::Months => "months",
     }
 }
 
@@ -141,13 +206,42 @@ pub(crate) fn convert_condition_to_toml(condition: &SmartMailboxCondition) -> Co
     }
 }
 
-/// Converts a domain `SmartMailboxValue` back to a `toml::Value`.
+/// Converts a domain `SmartMailboxValue` back to a `toml::Value`. A `Date`
+/// serializes to a `{ kind = ..., ... }` table (round-tripping
+/// [`convert_toml_date_table`]).
 pub(crate) fn convert_value_to_toml(value: &SmartMailboxValue) -> toml::Value {
     match value {
         SmartMailboxValue::String(s) => toml::Value::String(s.clone()),
         SmartMailboxValue::Bool(b) => toml::Value::Boolean(*b),
         SmartMailboxValue::Strings(arr) => {
             toml::Value::Array(arr.iter().map(|s| toml::Value::String(s.clone())).collect())
+        }
+        SmartMailboxValue::Date(date) => {
+            let mut table = toml::value::Table::new();
+            match date {
+                DateValue::Absolute { value } => {
+                    table.insert(
+                        "kind".to_string(),
+                        toml::Value::String("absolute".to_string()),
+                    );
+                    table.insert("value".to_string(), toml::Value::String(value.clone()));
+                }
+                DateValue::Relative { amount, unit } => {
+                    table.insert(
+                        "kind".to_string(),
+                        toml::Value::String("relative".to_string()),
+                    );
+                    table.insert(
+                        "amount".to_string(),
+                        toml::Value::Integer(i64::from(*amount)),
+                    );
+                    table.insert(
+                        "unit".to_string(),
+                        toml::Value::String(date_unit_str(unit).to_string()),
+                    );
+                }
+            }
+            toml::Value::Table(table)
         }
     }
 }
