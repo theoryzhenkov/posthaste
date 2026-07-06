@@ -64,8 +64,23 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/sources/{source_id}/mailboxes",
         authz: gate(Action::Read, ResourceShape::account("source_id")),
     },
+    // Create a mailbox on the account (M1) — no mailbox_id yet, account-scoped.
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/mailboxes",
+        authz: gate(Action::Manage, ResourceShape::account("source_id")),
+    },
     Entry {
         method: "PATCH",
+        template: "/sources/{source_id}/mailboxes/{mailbox_id}",
+        authz: gate(
+            Action::Manage,
+            ResourceShape::account_mailbox("source_id", "mailbox_id"),
+        ),
+    },
+    // Delete a mailbox (M2) — same Manage gate as the role PATCH.
+    Entry {
+        method: "DELETE",
         template: "/sources/{source_id}/mailboxes/{mailbox_id}",
         authz: gate(
             Action::Manage,
