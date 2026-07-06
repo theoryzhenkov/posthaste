@@ -1,50 +1,17 @@
-import { useQuery } from '@tanstack/react-query'
-import type React from 'react'
 import type { AutomationAction, Mailbox } from '../../../api/types'
-import { queryKeys } from '../../../queryKeys'
-import { runtimeViews } from '../../../runtime/views'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/select'
+import { SelectItem } from '../../ui/select'
 import {
   ACTION_KIND_OPTIONS,
   actionForKind,
   defaultAction,
   parseActionKind,
 } from '../automationRuleHelpers'
+import { LabeledSelect, MailboxSelect } from '../MailboxSelect'
 import { Field } from '../shared'
 
-export function LabeledSelect({
-  label,
-  value,
-  onValueChange,
-  children,
-}: {
-  label: string
-  value: string
-  onValueChange: (value: string) => void
-  children: React.ReactNode
-}) {
-  return (
-    <label className="grid gap-1.5 text-[13px]">
-      <span className="text-[12px] font-medium text-muted-foreground">
-        {label}
-      </span>
-      <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger className="h-8 w-full rounded-md border-border bg-background text-[13px] shadow-none">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>{children}</SelectContent>
-      </Select>
-    </label>
-  )
-}
+export { LabeledSelect } from '../MailboxSelect'
 
 export function ActionListEditor({
   accountId,
@@ -186,48 +153,5 @@ function ActionValueEditor({
         disabled
       />
     </label>
-  )
-}
-
-function MailboxSelect({
-  accountId,
-  label,
-  mailboxId,
-  staticMailboxes,
-  onChange,
-}: {
-  accountId: string
-  label: string
-  mailboxId: string
-  staticMailboxes: Mailbox[] | null
-  onChange: (mailboxId: string) => void
-}) {
-  const mailboxesQuery = useQuery({
-    queryKey: queryKeys.mailboxes(accountId),
-    queryFn: () => runtimeViews.mail.mailboxes(accountId),
-    enabled: staticMailboxes === null && accountId.trim().length > 0,
-  })
-  const mailboxes = staticMailboxes ?? mailboxesQuery.data ?? []
-  const value = mailboxId.trim().length > 0 ? mailboxId : '__unset__'
-
-  return (
-    <LabeledSelect
-      label={label}
-      value={value}
-      onValueChange={(value) =>
-        onChange(value.startsWith('__unset__') ? '' : value)
-      }
-    >
-      <SelectItem value="__unset__">Choose mailbox</SelectItem>
-      {mailboxes.map((mailbox) => (
-        <SelectItem key={mailbox.id} value={mailbox.id}>
-          {mailbox.name}
-        </SelectItem>
-      ))}
-      {mailboxId.trim().length > 0 &&
-        !mailboxes.some((mailbox) => mailbox.id === mailboxId) && (
-          <SelectItem value={mailboxId}>{mailboxId}</SelectItem>
-        )}
-    </LabeledSelect>
   )
 }

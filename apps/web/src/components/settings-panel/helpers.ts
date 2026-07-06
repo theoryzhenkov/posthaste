@@ -36,4 +36,9 @@ export {
   parseField,
   parseGroupOperator,
   parseOperator,
+  valueTypeForField,
+} from './helpers/smartMailboxForms'
+export type {
+  ConditionValueType,
+  FieldDescriptor,
 } from './helpers/smartMailboxForms'

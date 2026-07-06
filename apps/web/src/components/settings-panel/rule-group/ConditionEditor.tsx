@@ -1,7 +1,6 @@
 import type { SmartMailboxCondition } from '../../../api/types'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
-import { Input } from '../../ui/input'
 import {
   Select,
   SelectContent,
@@ -15,10 +14,17 @@ import {
   operatorOptionsForField,
   parseField,
   parseOperator,
+  valueTypeForField,
 } from '../helpers'
+import { ConditionValueEditor } from './conditionValueWidgets'
 
 /**
  * Single condition row editor: field, operator, value, and negate toggle.
+ *
+ * The VALUE input is type-directed — its widget is inferred from the field's
+ * `valueType` (see `conditionValueWidgets.tsx`), while the emitted value keeps
+ * the same wire shape (string | string[] | boolean) as the old text box.
+ *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
 export function ConditionEditor({
@@ -31,11 +37,7 @@ export function ConditionEditor({
   onRemove: () => void
 }) {
   const operators = operatorOptionsForField(condition.field)
-  const usesList = condition.operator === 'in'
-  const isBooleanField =
-    condition.field === 'isRead' ||
-    condition.field === 'isFlagged' ||
-    condition.field === 'hasAttachment'
+  const isBooleanField = valueTypeForField(condition.field) === 'boolean'
 
   return (
     <div className="grid gap-2 sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center">
@@ -60,12 +62,7 @@ export function ConditionEditor({
           operators={operators}
           onChange={onChange}
         />
-        <ValueEditor
-          condition={condition}
-          isBooleanField={isBooleanField}
-          usesList={usesList}
-          onChange={onChange}
-        />
+        <ConditionValueEditor condition={condition} onChange={onChange} />
       </div>
 
       <div className="flex items-center justify-end">
@@ -161,63 +158,6 @@ function OperatorSelect({
           ))}
         </SelectContent>
       </Select>
-    </div>
-  )
-}
-
-function ValueEditor({
-  condition,
-  isBooleanField,
-  usesList,
-  onChange,
-}: {
-  condition: SmartMailboxCondition
-  isBooleanField: boolean
-  usesList: boolean
-  onChange: (condition: SmartMailboxCondition) => void
-}) {
-  return (
-    <div className="grid gap-1 text-[13px]">
-      {isBooleanField ? (
-        <Select
-          value={String(Boolean(condition.value))}
-          onValueChange={(value) =>
-            onChange({ ...condition, value: value === 'true' })
-          }
-        >
-          <SelectTrigger
-            aria-label="Value"
-            className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="true">true</SelectItem>
-            <SelectItem value="false">false</SelectItem>
-          </SelectContent>
-        </Select>
-      ) : (
-        <Input
-          className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-          value={
-            Array.isArray(condition.value)
-              ? condition.value.join(', ')
-              : String(condition.value)
-          }
-          placeholder={usesList ? 'comma, separated, values' : 'value'}
-          onChange={(event) =>
-            onChange({
-              ...condition,
-              value: usesList
-                ? event.target.value
-                    .split(',')
-                    .map((value) => value.trim())
-                    .filter(Boolean)
-                : event.target.value,
-            })
-          }
-        />
-      )}
     </div>
   )
 }
