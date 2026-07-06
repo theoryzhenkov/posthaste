@@ -31,6 +31,16 @@ export interface CreateMailboxInput {
 }
 
 /**
+ * Options for deleting a mailbox. `removeEmails` is the confirm-with-count
+ * safety flag: a non-empty mailbox delete is refused with 409 `mailbox_not_empty`
+ * unless it is `true`.
+ * @spec docs/eph/RFC-L2-mailbox-management
+ */
+export interface DeleteMailboxInput {
+  removeEmails: boolean
+}
+
+/**
  * Compact message metadata used in conversation rows and thread switchers.
  * @spec docs/L1-ui#messagelist
  */

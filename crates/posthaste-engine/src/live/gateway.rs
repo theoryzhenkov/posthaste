@@ -144,6 +144,19 @@ impl MailGateway for LiveJmapGateway {
         crate::live_mutation::create_mailbox(self, name).await
     }
 
+    /// Destroy a mailbox via `Mailbox/set` destroy.
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    async fn destroy_mailbox(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        remove_emails: bool,
+    ) -> Result<(), GatewayError> {
+        crate::live_mutation::destroy_mailbox(self, mailbox_id, remove_emails).await
+    }
+
     /// Fetch the primary sender identity for an account via `Identity/get`.
     ///
     /// @spec docs/L1-jmap#methods-used

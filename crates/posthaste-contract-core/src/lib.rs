@@ -16,9 +16,9 @@ pub use mail_query::*;
 
 use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, Appearance, AutomationRule,
-    CachePolicy, ImapTransportSettings, MailboxColor, MessageAttachment, MessageSummary,
-    Notifications, ProviderAuthKind, ProviderHint, ServiceError, ServiceErrorKind, SmartMailboxId,
-    SmartMailboxRule, SmtpTransportSettings, TagAppearance, ValidationError,
+    CachePolicy, GatewayError, ImapTransportSettings, MailboxColor, MessageAttachment,
+    MessageSummary, Notifications, ProviderAuthKind, ProviderHint, ServiceError, ServiceErrorKind,
+    SmartMailboxId, SmartMailboxRule, SmtpTransportSettings, TagAppearance, ValidationError,
 };
 
 // Re-exported so the shared retryability vocabulary is reachable as
@@ -837,6 +837,10 @@ pub enum RuntimeErrorCode {
     NotFound,
     ProviderUnavailable,
     Conflict,
+    /// A non-empty mailbox destroy refused without the confirmed remove-emails
+    /// flag (M2 safety gate). Routes to 409 Conflict; the message count rides in
+    /// the envelope `details` so the client can show the confirm-with-count dialog.
+    MailboxNotEmpty,
     NetworkError,
     StateMismatch,
     CannotCalculateChanges,
@@ -880,6 +884,7 @@ impl RuntimeErrorCode {
             | Self::AccountSenderRequired
             | Self::NotFound
             | Self::Conflict
+            | Self::MailboxNotEmpty
             | Self::StateMismatch
             | Self::CannotCalculateChanges
             | Self::GatewayRejected
@@ -1052,6 +1057,7 @@ impl From<ServiceError> for RuntimeError {
             ServiceErrorKind::Internal => RuntimeErrorCode::Internal,
             ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
             ServiceErrorKind::Conflict => RuntimeErrorCode::Conflict,
+            ServiceErrorKind::MailboxNotEmpty => RuntimeErrorCode::MailboxNotEmpty,
             ServiceErrorKind::StateMismatch => RuntimeErrorCode::StateMismatch,
             ServiceErrorKind::AuthError => RuntimeErrorCode::Unauthorized,
             ServiceErrorKind::GatewayUnavailable => RuntimeErrorCode::ProviderUnavailable,
@@ -1066,6 +1072,12 @@ impl From<ServiceError> for RuntimeError {
             ServiceErrorKind::ConfigIo => RuntimeErrorCode::ConfigIo,
             ServiceErrorKind::ConfigParse => RuntimeErrorCode::ConfigParse,
         };
+        // The M2 safety refusal carries the mailbox's message count into the
+        // envelope `details` so a 409 can drive the confirm-with-count dialog
+        // (the count survives to `ApiErrorBody.details` on the 4xx path).
+        if let ServiceError::Gateway(GatewayError::MailboxNotEmpty { count }) = &error {
+            return Self::with_details(code, error.to_string(), json!({ "count": count }));
+        }
         Self::new(code, error.to_string())
     }
 }

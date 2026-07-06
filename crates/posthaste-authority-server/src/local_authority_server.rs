@@ -391,6 +391,17 @@ impl AuthorityServerApi for LocalAuthorityServer {
         self.authority_server.create_mailbox(account_id, name).await
     }
 
+    async fn destroy_mailbox(
+        &self,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        remove_emails: bool,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        self.authority_server
+            .destroy_mailbox(account_id, mailbox_id, remove_emails)
+            .await
+    }
+
     async fn send_message(
         &self,
         account_id: AccountId,

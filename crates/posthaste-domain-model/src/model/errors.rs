@@ -95,6 +95,17 @@ pub enum GatewayError {
         readback: Box<MessageReadback>,
         reason: String,
     },
+    /// A destroy-mailbox was refused because the mailbox still holds `count`
+    /// messages and the caller did not confirm removing them. The M2 safety gate:
+    /// the SERVICE raises this (without calling the gateway) when
+    /// `total_emails > 0 && !remove_emails`, and the JMAP gateway raises it as a
+    /// backstop when the server rejects a `Mailbox/set` destroy with
+    /// `mailboxHasEmail` (`onDestroyRemoveEmails=false`). It maps to a 409 Conflict
+    /// carrying the count so the client can show the confirm-with-count dialog.
+    ///
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    #[error("mailbox is not empty: {count} message(s) would be deleted")]
+    MailboxNotEmpty { count: i64 },
 }
 
 /// Errors from the local SQLite store.
@@ -146,6 +157,9 @@ pub enum ServiceErrorKind {
     SecretUnsupported,
     NotFound,
     Conflict,
+    /// A non-empty mailbox destroy refused without the confirmed remove-emails
+    /// flag (M2 safety gate). Maps to 409 Conflict carrying the message count.
+    MailboxNotEmpty,
     StorageFailure,
     StorageCorrupted,
     ConfigValidation,
@@ -171,6 +185,7 @@ impl ServiceErrorKind {
             Self::SecretUnsupported => "secret_unsupported",
             Self::NotFound => "not_found",
             Self::Conflict => "conflict",
+            Self::MailboxNotEmpty => "mailbox_not_empty",
             Self::StorageFailure => "storage_failure",
             Self::StorageCorrupted => "storage_corrupted",
             Self::ConfigValidation => "config_validation",
@@ -201,6 +216,11 @@ impl ServiceError {
             Self::Gateway(GatewayError::Rejected(_))
             | Self::Gateway(GatewayError::MutationRejected { .. }) => {
                 ServiceErrorKind::GatewayRejected
+            }
+            // The M2 confirm-with-count safety refusal: its own category so it
+            // maps to a distinct 409 carrying the count (not a generic reject).
+            Self::Gateway(GatewayError::MailboxNotEmpty { .. }) => {
+                ServiceErrorKind::MailboxNotEmpty
             }
             // A corrupt local store surfaced through a gateway op keeps the
             // storage-corruption class end-to-end (→ `storage_corrupted`).
@@ -364,6 +384,7 @@ impl ServiceError {
             },
             ServiceErrorKind::NotFound
             | ServiceErrorKind::Conflict
+            | ServiceErrorKind::MailboxNotEmpty
             | ServiceErrorKind::ConfigIo
             | ServiceErrorKind::Internal => UserFacingError {
                 category: AccountErrorCategory::Internal,

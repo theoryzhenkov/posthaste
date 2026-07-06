@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { Edit3, MailOpen, RefreshCw, Settings } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Edit3, MailOpen, RefreshCw, Settings, Trash2 } from 'lucide-react'
 
 import type { Mailbox } from '@/api/types'
 import { accentColor } from '@/design'
@@ -18,7 +18,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '../ui/context-menu'
-import { itemButtonClass } from './model'
+import { DeleteMailboxDialog } from './DeleteMailboxDialog'
+import { isMailboxDeletable, itemButtonClass } from './model'
 
 function roleIcon(role: Mailbox['role'], size = 14): ReactNode {
   return renderMailboxRoleIcon(role, size)
@@ -118,6 +119,8 @@ export function MailboxItem({
   // frame arrives, then the live mirror takes over.
   const liveCounts = useMailboxCounts(sourceId)[mailbox.id]
   const unread = liveCounts ? liveCounts.unread : mailbox.unreadEmails
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const isDeletable = isMailboxDeletable(mailbox)
   const button = (
     <button
       className={itemButtonClass(isSelected, depth, isPaneActive)}
@@ -134,24 +137,46 @@ export function MailboxItem({
   )
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-48">
-        <ContextMenuItem onSelect={onSelect}>
-          <MailOpen size={14} />
-          Open mailbox
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => onSyncSource(sourceId)}>
-          <RefreshCw size={14} />
-          Sync {sourceName}
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => onOpenAccountSettings(sourceId)}>
-          <Settings size={14} />
-          Account settings
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+        <ContextMenuContent className="min-w-48">
+          <ContextMenuItem onSelect={onSelect}>
+            <MailOpen size={14} />
+            Open mailbox
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => onSyncSource(sourceId)}>
+            <RefreshCw size={14} />
+            Sync {sourceName}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onOpenAccountSettings(sourceId)}>
+            <Settings size={14} />
+            Account settings
+          </ContextMenuItem>
+          {isDeletable && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                variant="destructive"
+                onSelect={() => setIsDeleteOpen(true)}
+              >
+                <Trash2 size={14} />
+                Delete mailbox
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+      {isDeletable && (
+        <DeleteMailboxDialog
+          sourceId={sourceId}
+          mailbox={mailbox}
+          open={isDeleteOpen}
+          onOpenChange={setIsDeleteOpen}
+        />
+      )}
+    </>
   )
 }
 

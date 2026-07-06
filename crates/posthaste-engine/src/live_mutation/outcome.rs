@@ -38,6 +38,32 @@ pub(crate) fn created_mailbox_id(
         .ok_or_else(|| GatewayError::Rejected("Mailbox/set create returned no id".to_string()))
 }
 
+/// Parse a `Mailbox/set` destroy response for a single mailbox.
+///
+/// A `destroyed` entry is success. A `notDestroyed` `mailboxHasEmail` (the
+/// server refusing an `onDestroyRemoveEmails=false` destroy of a non-empty
+/// mailbox) is surfaced as the typed [`GatewayError::MailboxNotEmpty`] backstop
+/// — the count is not in the JMAP response (the service gate carries the real
+/// count), so `0` stands for "unknown, at least one". Any other `notDestroyed`
+/// set-error maps through the ordinary gateway-error path.
+pub(crate) fn destroyed_mailbox(
+    mut response: jmap_client::core::response::MailboxSetResponse,
+    mailbox_id: &MailboxId,
+) -> Result<(), GatewayError> {
+    match response.destroyed(mailbox_id.as_str()) {
+        Ok(()) => Ok(()),
+        Err(jmap_client::Error::Set(error))
+            if matches!(
+                error.error(),
+                jmap_client::core::set::SetErrorType::MailboxHasEmail
+            ) =>
+        {
+            Err(GatewayError::MailboxNotEmpty { count: 0 })
+        }
+        Err(error) => Err(map_gateway_error(error)),
+    }
+}
+
 /// Build a `MutationOutcome` with a message-type sync cursor from the server's new state string.
 ///
 /// @spec docs/L1-jmap#core-types

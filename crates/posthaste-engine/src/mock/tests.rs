@@ -112,6 +112,74 @@ async fn create_mailbox_returns_id_and_resync_surfaces_it() {
 }
 
 #[tokio::test]
+async fn destroy_empty_mailbox_disappears_from_the_resync() {
+    // mb-trash holds no sample messages, so destroying it needs no confirmation.
+    let gateway = MockJmapGateway::default();
+    let account = AccountId::from("primary");
+
+    gateway
+        .destroy_mailbox(&account, &MailboxId::from("mb-trash"), false)
+        .await
+        .expect("an empty mailbox destroys without confirmation");
+
+    let batch = gateway
+        .sync(&account, &[], None)
+        .await
+        .expect("sync should succeed");
+    assert!(
+        !batch
+            .mailboxes
+            .iter()
+            .any(|mailbox| mailbox.id == MailboxId::from("mb-trash")),
+        "the destroyed mailbox is gone from the resync readback",
+    );
+}
+
+#[tokio::test]
+async fn destroy_non_empty_mailbox_without_remove_emails_is_refused() {
+    // mb-archive holds em-002 — the onDestroyRemoveEmails=false backstop refuses.
+    let gateway = MockJmapGateway::default();
+    let account = AccountId::from("primary");
+
+    let error = gateway
+        .destroy_mailbox(&account, &MailboxId::from("mb-archive"), false)
+        .await
+        .expect_err("a non-empty mailbox is refused without remove_emails");
+    assert!(matches!(error, GatewayError::MailboxNotEmpty { count: 1 }));
+
+    // The mailbox is untouched: still present in the next sync.
+    let batch = gateway.sync(&account, &[], None).await.expect("sync");
+    assert!(batch
+        .mailboxes
+        .iter()
+        .any(|mailbox| mailbox.id == MailboxId::from("mb-archive")));
+}
+
+#[tokio::test]
+async fn destroy_non_empty_mailbox_with_remove_emails_drops_mailbox_and_mail() {
+    let gateway = MockJmapGateway::default();
+    let account = AccountId::from("primary");
+
+    gateway
+        .destroy_mailbox(&account, &MailboxId::from("mb-archive"), true)
+        .await
+        .expect("remove_emails destroys the mailbox and its mail");
+
+    let batch = gateway.sync(&account, &[], None).await.expect("sync");
+    assert!(!batch
+        .mailboxes
+        .iter()
+        .any(|mailbox| mailbox.id == MailboxId::from("mb-archive")));
+    assert!(
+        !batch
+            .messages
+            .iter()
+            .any(|message| message.id == MessageId::from("em-002")),
+        "the contained mail is removed with remove_emails=true",
+    );
+}
+
+#[tokio::test]
 async fn set_mailbox_role_can_clear_existing_owner() {
     let gateway = MockJmapGateway::default();
     let outcome = gateway

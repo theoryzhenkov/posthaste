@@ -504,6 +504,39 @@ impl MailGateway for MockJmapGateway {
         Ok(id)
     }
 
+    /// Remove a mock mailbox so the next `sync` reports it gone (mirroring the
+    /// provider-side deletion the service reads back). Mirrors the JMAP
+    /// `onDestroyRemoveEmails=false` backstop: a non-empty mailbox is refused
+    /// with [`GatewayError::MailboxNotEmpty`] unless `remove_emails` is set, in
+    /// which case the contained messages are dropped too.
+    async fn destroy_mailbox(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        remove_emails: bool,
+    ) -> Result<(), GatewayError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
+        let count = state
+            .messages
+            .iter()
+            .filter(|message| message.mailbox_ids.contains(mailbox_id))
+            .count() as i64;
+        if count > 0 && !remove_emails {
+            return Err(GatewayError::MailboxNotEmpty { count });
+        }
+        if remove_emails {
+            state
+                .messages
+                .retain(|message| !message.mailbox_ids.contains(mailbox_id));
+        }
+        state.mailboxes.retain(|mailbox| &mailbox.id != mailbox_id);
+        bump_revision(&mut state);
+        Ok(())
+    }
+
     /// Return a hard-coded mock sender identity.
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Ok(Identity {

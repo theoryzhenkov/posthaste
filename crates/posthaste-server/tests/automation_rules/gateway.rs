@@ -224,6 +224,17 @@ impl MailGateway for ScriptedGateway {
         ))
     }
 
+    async fn destroy_mailbox(
+        &self,
+        _account_id: &AccountId,
+        _mailbox_id: &MailboxId,
+        _remove_emails: bool,
+    ) -> Result<(), GatewayError> {
+        Err(GatewayError::Rejected(
+            "unused in automation tests".to_string(),
+        ))
+    }
+
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Err(GatewayError::Rejected(
             "unused in automation tests".to_string(),

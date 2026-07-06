@@ -3539,6 +3539,88 @@
       }
     },
     "/v1/sources/{source_id}/mailboxes/{mailbox_id}": {
+      "delete": {
+        "tags": [
+          "mailboxes"
+        ],
+        "summary": "Delete mailbox",
+        "description": "Destroys a mailbox and returns the source's refreshed mailbox list. A non-empty mailbox is refused with 409 unless `removeEmails=true` is passed (confirm-with-count safety gate); the 409 body's `details.count` carries the message count.",
+        "operationId": "delete_mailbox",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox_id",
+            "in": "path",
+            "description": "Mailbox identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "removeEmails",
+            "in": "query",
+            "description": "Confirm deleting the mailbox's messages",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated mailboxes for the source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailboxSummary"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source or mailbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Mailbox is not empty and removeEmails was not set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Account gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "mailboxes"
@@ -4927,6 +5009,7 @@
           "account_sender_required",
           "not_found",
           "conflict",
+          "mailbox_not_empty",
           "internal_error",
           "unauthorized",
           "forbidden",
@@ -7493,6 +7576,7 @@
           "not_found",
           "provider_unavailable",
           "conflict",
+          "mailbox_not_empty",
           "network_error",
           "state_mismatch",
           "cannot_calculate_changes",
