@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { ActionContext, ActionServices } from '@/actions'
+import { createActionParamProvider } from '@/command-search/providers/actionParams'
 import { createCommandProviders } from '@/command-search/providers'
 import { loadRecentCommands } from '@/command-search/recentCommands'
 import { recentCachedMessages } from '@/command-search/recentMessages'
@@ -21,9 +22,18 @@ export function useCommandPaletteSearch(input: {
   /** Stable accessors for the palette's action context + bound services. */
   getActionContext: () => ActionContext
   getActionServices: () => ActionServices
+  /** When set, the palette is in a parameterized action's PICK-STEP: the whole
+   *  provider set is swapped for that action's option list, so search/selection
+   *  machinery is reused unchanged for the second step. */
+  paramStep: { actionId: string; label: string } | null
 }) {
-  const { hasSelectedMessage, query, getActionContext, getActionServices } =
-    input
+  const {
+    hasSelectedMessage,
+    query,
+    getActionContext,
+    getActionServices,
+    paramStep,
+  } = input
   const queryClient = useQueryClient()
   const readModels = useMailboxNavigationReadModels()
   const recentMessages = useMemo(
@@ -44,17 +54,32 @@ export function useCommandPaletteSearch(input: {
   )
   const providers = useMemo(
     () =>
-      createCommandProviders({
-        readModels,
-        recentMessages,
-        getActionContext,
-        getActionServices,
-      }),
+      paramStep
+        ? [
+            createActionParamProvider({
+              actionId: paramStep.actionId,
+              label: paramStep.label,
+              getContext: getActionContext,
+              getServices: getActionServices,
+            }),
+          ]
+        : createCommandProviders({
+            readModels,
+            recentMessages,
+            getActionContext,
+            getActionServices,
+          }),
     // readModelKey intentionally collapses unstable React Query wrapper arrays
     // into the domain IDs that affect provider candidates. The action getters
     // are stable (ref-backed), so they never re-create the provider list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [readModelKey, recentMessages, getActionContext, getActionServices],
+    [
+      readModelKey,
+      recentMessages,
+      getActionContext,
+      getActionServices,
+      paramStep,
+    ],
   )
   const rankingContext = useMemo(
     () =>

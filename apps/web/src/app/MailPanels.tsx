@@ -121,9 +121,8 @@ function MessagePanels(props: MailClientViewProps) {
             <div className="h-full min-h-0">
               <MessageDetailPane
                 selection={props.selectedMessage}
-                onArchive={props.onArchive}
-                onSnooze={props.onSnooze}
-                onDiscardDraft={props.onDiscardDraft}
+                actions={props.actions}
+                viewRole={props.viewRole}
                 onEditDraft={props.onEditDraft}
                 onForward={props.onForward}
                 onOpenFocusedMessage={props.onOpenFocusedMessage}
@@ -132,8 +131,6 @@ function MessagePanels(props: MailClientViewProps) {
                 onSelectMessage={props.onSelectMessage}
                 onSearch={props.onSearch}
                 onTag={() => props.onSetTagEditorOpen(true)}
-                onToggleFlag={props.onToggleFlag}
-                onTrash={props.onTrash}
               />
             </div>
           </ResizablePanel>

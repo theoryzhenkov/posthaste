@@ -104,11 +104,21 @@ export type ActionConfirm = NonNullable<ActionDefinition['confirm']>
  * NEVER executed straight from a keystroke: it routes through `requestConfirm`,
  * and only runs if the user accepts. This is what stops `#`/Backspace in Trash
  * from silently, irreversibly destroying a message.
+ *
+ * A PARAMETERIZED action (`def.resolveParams`) cannot run from a bare chord —
+ * there is no chosen target yet. It routes through `requestParam` (the
+ * controller opens the command palette in that action's pick-step) instead of
+ * silently no-oping; without a `requestParam` host it is skipped entirely.
  */
 export function runResolvedWithConfirm(
   resolved: ResolvedAction,
   requestConfirm: (confirm: ActionConfirm, onConfirm: () => void) => void,
+  requestParam?: (resolved: ResolvedAction) => void,
 ): void {
+  if (resolved.params !== undefined) {
+    requestParam?.(resolved)
+    return
+  }
   const confirm = resolved.def.confirm
   if (confirm) {
     requestConfirm(confirm, () => void resolved.execute())

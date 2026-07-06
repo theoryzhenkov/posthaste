@@ -126,8 +126,11 @@ describe('createActionProvider', () => {
     expect(ids).toContain('message.snooze')
     expect(ids).toContain('app.compose')
     expect(ids).toContain('app.open-settings')
-    // Context-menu-only + non-applicable actions stay out.
-    expect(ids).not.toContain('message.open')
+    // Coverage-gap fixes: the open/show-conversation entries reach the palette
+    // through the app-handler fallback.
+    expect(ids).toContain('message.open')
+    expect(ids).toContain('message.view-conversation')
+    // Non-applicable actions stay out (delete-permanently is trash-view only).
     expect(ids).not.toContain('message.delete-permanently')
   })
 

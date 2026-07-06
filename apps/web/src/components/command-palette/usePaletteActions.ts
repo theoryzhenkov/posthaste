@@ -26,6 +26,10 @@ export interface PaletteNavHandlers {
     name: string,
   ) => void
   replaceQuery: (query: string) => void
+  /** Push the palette into a parameterized action's pick-step (the two-step
+   *  flow: pick the command, then pick its target). Optional so non-palette
+   *  hosts of this hook need not care. */
+  openActionParams?: (actionId: string) => void
 }
 
 export function usePaletteActions(input: {
@@ -42,6 +46,20 @@ export function usePaletteActions(input: {
           if (!def) break
           recordCommandUse(action.actionId)
           void def.run(actionContext, services)
+          break
+        }
+        case 'open-action-params':
+          // Two-step flow, step 1: a parameterized action never runs bare —
+          // the palette swaps into its searchable pick-step.
+          nav.openActionParams?.(action.actionId)
+          break
+        case 'run-action-param': {
+          // Two-step flow, step 2: run with the chosen option — the SAME
+          // `def.run` the context submenu / header popover invoke.
+          const def = getAction(action.actionId)
+          if (!def) break
+          recordCommandUse(action.actionId)
+          void def.run(actionContext, services, action.param)
           break
         }
         case 'apply-query':

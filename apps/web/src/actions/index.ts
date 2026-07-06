@@ -33,6 +33,7 @@ export { getAction, allActions } from './registry'
 export type {
   ActionContext,
   ActionDefinition,
+  ActionParamOption,
   ActionSection,
   ActionServices,
   ActionSurface,

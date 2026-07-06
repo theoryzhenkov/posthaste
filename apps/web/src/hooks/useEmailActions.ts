@@ -395,6 +395,30 @@ export function useEmailActions({ undo }: { undo: () => void }) {
     discardDraft,
     moveToInbox: (target: SourceMessageRef) =>
       moveToRole(target, MAILBOX_ROLES.Inbox, 'Moved to Inbox'),
+    /** Move to an EXPLICIT mailbox (the parameterized "Move to…" action) — the
+     *  same optimistic named-mutation path as the role moves, via the typed
+     *  `replaceMailboxes` command. Undoable like any structural move. */
+    moveToMailbox: (
+      target: SourceMessageRef,
+      mailboxId: string,
+      mailboxName: string,
+    ) =>
+      dispatch({
+        label: `Moved to ${mailboxName}`,
+        run: () =>
+          runtimeMutations.messages.command(
+            {
+              command: {
+                kind: 'replaceMailboxes',
+                mailboxIds: [mailboxId],
+              } satisfies MessageCommand,
+              messageId: target.messageId,
+              sourceId: target.sourceId,
+            },
+            { userInitiated: true },
+          ),
+        undoSourceId: target.sourceId,
+      }),
     snooze: (target: SourceMessageRef, until: number) =>
       dispatch({
         label: 'Message snoozed',

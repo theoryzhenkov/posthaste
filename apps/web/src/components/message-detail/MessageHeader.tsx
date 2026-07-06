@@ -1,26 +1,41 @@
+/**
+ * Message detail header (PLAN-L2, Slice 4 — registry-driven action row).
+ *
+ * The action row is no longer hand-rolled JSX per action: it renders from
+ * `resolveActions(ctx, { surface: 'detail-header' })`, the SAME resolver the
+ * context menu / palette / keyboard use. That makes the row ROLE-AWARE (the old
+ * header offered Archive inside Archive and Trash inside Trash; now Trash shows
+ * Delete permanently + Move to Inbox instead — the latent bug the plan flagged)
+ * and makes the draft-vs-message branch availability-driven (a draft resolves
+ * to edit/discard only, D129).
+ *
+ * Presentation stays here: icon buttons in a fixed header order, a popover for
+ * PARAMETERIZED actions (Snooze presets), a confirm dialog for destructive
+ * `confirm`-bearing actions (delete-permanently), the flag tint, and the tag
+ * editor's outside-click anchor attribute.
+ *
+ * @spec docs/eph/PLAN-L2-action-registry.md
+ */
 import { useState, type MouseEvent } from 'react'
-import {
-  Archive,
-  Clock,
-  Flag,
-  Forward,
-  Maximize2,
-  Paperclip,
-  Pencil,
-  Reply,
-  ReplyAll,
-  Tag,
-  Trash2,
-} from 'lucide-react'
+import { Paperclip } from 'lucide-react'
 
+import {
+  resolveActions,
+  runResolvedWithConfirm,
+  type ActionConfirm,
+  type ActionContext,
+  type ActionServices,
+  type ResolvedAction,
+} from '@/actions'
 import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
+import type { EmailActions } from '@/hooks/useEmailActions'
 
 import type { MessageDetail, MessageSummary } from '@/api/types'
 
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
+import { KeyboardConfirmDialog } from '../keyboard/KeyboardConfirmDialog'
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
-import { snoozePresets } from './snoozePresets'
 import {
   formatAbsoluteDate,
   formatRecipientEmailList,
@@ -31,34 +46,30 @@ import {
 export function MessageHeader({
   conversationSubject,
   message,
-  onArchive,
-  onDiscardDraft,
+  actions,
+  viewRole,
   onEditDraft,
   onForward,
   onOpenFocusedMessage,
   onReply,
   onReplyAll,
   onSearch,
-  onSnooze,
   onTag,
-  onToggleFlag,
-  onTrash,
   threadMessages,
 }: {
   conversationSubject: string | null | undefined
   message: MessageDetail
-  onArchive: () => void
-  onDiscardDraft?: () => void
+  /** Domain mutations the resolved actions delegate to. */
+  actions: EmailActions
+  /** Role of the current view (null when ambiguous / focused window). */
+  viewRole: string | null
   onEditDraft?: () => void
   onForward: () => void
   onOpenFocusedMessage?: () => void
   onReply: () => void
   onReplyAll: () => void
   onSearch?: (query: string, append?: boolean) => void
-  onSnooze: (until: number) => void
   onTag?: () => void
-  onToggleFlag?: () => void
-  onTrash?: () => void
   threadMessages: MessageSummary[]
 }) {
   const isDraft = message.keywords.includes(SYSTEM_KEYWORDS.Draft)
@@ -66,6 +77,39 @@ export function MessageHeader({
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
   const recipientLabel = `to ${formatRecipientEmailList(message.to)}`
+
+  // The header's ActionContext/Services — built per render (cheap plain
+  // objects, exactly like MessageRow's). `detail` binds this host's callbacks;
+  // absent ones (e.g. no tag editor in the focused window) hide their actions.
+  const services: ActionServices = {
+    email: actions,
+    detail: {
+      reply: onReply,
+      replyAll: onReplyAll,
+      forward: onForward,
+      editDraft: onEditDraft,
+      openTagEditor: onTag,
+      openFocusedMessage: onOpenFocusedMessage,
+    },
+  }
+  const actionContext: ActionContext = {
+    targets: [
+      {
+        ref: { sourceId: message.sourceId, messageId: message.id },
+        summary: message,
+        isDraft,
+        draftId: message.draftId,
+        conversationId: message.conversationId,
+      },
+    ],
+    viewRole,
+    activePane: 'list',
+    surface: 'detail-header',
+    inputOwner: 'mail',
+    hasPendingMutation: actions.isPending,
+    connection: 'unknown',
+  }
+  const headerActions = orderForHeader(resolveActions(actionContext, services))
 
   return (
     <div className="shrink-0 border-b border-border bg-panel px-5 py-4">
@@ -99,19 +143,8 @@ export function MessageHeader({
               </div>
             </div>
             <HeaderActions
-              isDraft={isDraft}
+              headerActions={headerActions}
               isFlagged={message.isFlagged}
-              onArchive={onArchive}
-              onDiscardDraft={onDiscardDraft}
-              onEditDraft={onEditDraft}
-              onForward={onForward}
-              onOpenFocusedMessage={onOpenFocusedMessage}
-              onReply={onReply}
-              onReplyAll={onReplyAll}
-              onSnooze={onSnooze}
-              onTag={onTag}
-              onToggleFlag={onToggleFlag}
-              onTrash={onTrash}
             />
           </div>
           <MessageTagRow
@@ -159,191 +192,132 @@ function SenderButtons({
   )
 }
 
-function HeaderActions({
-  isDraft,
-  isFlagged,
-  onArchive,
-  onDiscardDraft,
-  onEditDraft,
-  onForward,
-  onOpenFocusedMessage,
-  onReply,
-  onReplyAll,
-  onSnooze,
-  onTag,
-  onToggleFlag,
-  onTrash,
-}: {
-  isDraft: boolean
-  isFlagged: boolean
-  onArchive: () => void
-  onDiscardDraft?: () => void
-  onEditDraft?: () => void
-  onForward: () => void
-  onOpenFocusedMessage?: () => void
-  onReply: () => void
-  onReplyAll: () => void
-  onSnooze: (until: number) => void
-  onTag?: () => void
-  onToggleFlag?: () => void
-  onTrash?: () => void
-}) {
-  const [snoozeOpen, setSnoozeOpen] = useState(false)
-  if (isDraft) {
-    // D129: drafts get a draft-appropriate action set in the standard action
-    // row — edit + discard as icons, never trash.
-    return (
-      <div className="flex shrink-0 items-center gap-1">
-        {onEditDraft && (
-          <Button
-            aria-label="Edit draft"
-            onClick={onEditDraft}
-            size="icon-sm"
-            title="Edit draft"
-            type="button"
-            variant="ghost"
-          >
-            <Pencil size={14} strokeWidth={1.6} />
-          </Button>
-        )}
-        {onDiscardDraft && (
-          <Button
-            aria-label="Discard draft"
-            onClick={onDiscardDraft}
-            size="icon-sm"
-            title="Discard draft"
-            type="button"
-            variant="ghost"
-          >
-            <Trash2 size={14} strokeWidth={1.6} />
-          </Button>
-        )}
-      </div>
-    )
+/** The header's fixed visual order (matching the pre-registry layout). Resolver
+ *  output is section-ordered for menus; the header keeps its familiar icon-row
+ *  arrangement instead. Unknown ids append in resolver order. */
+const HEADER_ACTION_ORDER = [
+  'message.reply',
+  'message.reply-all',
+  'message.forward',
+  'message.edit-draft',
+  'message.archive',
+  'message.move-to-inbox',
+  'message.move-to-trash',
+  'message.delete-permanently',
+  'message.discard-draft',
+  'message.snooze',
+  'message.toggle-flag',
+  'message.tag',
+  'message.open-focused',
+]
+
+function orderForHeader(resolved: ResolvedAction[]): ResolvedAction[] {
+  const rank = (action: ResolvedAction) => {
+    const index = HEADER_ACTION_ORDER.indexOf(action.def.id)
+    return index === -1 ? HEADER_ACTION_ORDER.length : index
   }
+  return [...resolved].sort((a, b) => rank(a) - rank(b))
+}
+
+/** "Snooze…" → "Snooze": the icon button needs the bare label (and the snooze
+ *  e2e flow anchors on `aria-label="Snooze"`). */
+function headerLabel(action: ResolvedAction): string {
+  return action.title.replace(/…$/, '')
+}
+
+function HeaderActions({
+  headerActions,
+  isFlagged,
+}: {
+  headerActions: ResolvedAction[]
+  isFlagged: boolean
+}) {
+  // A destructive `confirm`-bearing action (delete-permanently) parks its
+  // runner here — same gate the keyboard tier uses, same dialog host.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    confirm: ActionConfirm
+    onConfirm: () => void
+  } | null>(null)
+
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <Button
-        aria-label="Reply"
-        onClick={onReply}
-        size="icon-sm"
-        title="Reply"
-        type="button"
-        variant="ghost"
-      >
-        <Reply size={14} strokeWidth={1.6} />
-      </Button>
-      <Button
-        aria-label="Reply All"
-        onClick={onReplyAll}
-        size="icon-sm"
-        title="Reply All"
-        type="button"
-        variant="ghost"
-      >
-        <ReplyAll size={14} strokeWidth={1.6} />
-      </Button>
-      <Button
-        aria-label="Forward"
-        onClick={onForward}
-        size="icon-sm"
-        title="Forward"
-        type="button"
-        variant="ghost"
-      >
-        <Forward size={14} strokeWidth={1.6} />
-      </Button>
-      <Button
-        aria-label="Archive"
-        onClick={onArchive}
-        size="icon-sm"
-        title="Archive"
-        type="button"
-        variant="ghost"
-      >
-        <Archive size={14} strokeWidth={1.6} />
-      </Button>
-      {onTrash && (
+      {headerActions.map((action) =>
+        action.params ? (
+          <HeaderParamAction key={action.def.id} action={action} />
+        ) : (
+          <Button
+            key={action.def.id}
+            aria-label={headerLabel(action)}
+            data-tag-editor-trigger={
+              action.def.id === 'message.tag' ? 'true' : undefined
+            }
+            onClick={() =>
+              runResolvedWithConfirm(action, (confirm, onConfirm) =>
+                setPendingConfirm({ confirm, onConfirm }),
+              )
+            }
+            size="icon-sm"
+            title={headerLabel(action)}
+            type="button"
+            variant="ghost"
+            className={
+              action.def.id === 'message.toggle-flag' && isFlagged
+                ? 'text-signal-flag'
+                : undefined
+            }
+          >
+            <action.icon size={14} strokeWidth={1.6} />
+          </Button>
+        ),
+      )}
+      <KeyboardConfirmDialog
+        confirm={pendingConfirm?.confirm ?? null}
+        onConfirm={() => {
+          pendingConfirm?.onConfirm()
+          setPendingConfirm(null)
+        }}
+        onCancel={() => setPendingConfirm(null)}
+      />
+    </div>
+  )
+}
+
+/** A PARAMETERIZED action in the header renders as an icon button + popover of
+ *  its options (the Snooze presets popover, generically). */
+function HeaderParamAction({ action }: { action: ResolvedAction }) {
+  const [open, setOpen] = useState(false)
+  const label = headerLabel(action)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <Button
-          aria-label="Trash"
-          onClick={onTrash}
+          aria-label={label}
           size="icon-sm"
-          title="Trash"
+          title={label}
           type="button"
           variant="ghost"
         >
-          <Trash2 size={14} strokeWidth={1.6} />
+          <action.icon size={14} strokeWidth={1.6} />
         </Button>
-      )}
-      <Popover open={snoozeOpen} onOpenChange={setSnoozeOpen}>
-        <PopoverTrigger asChild>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-44">
+        {(action.params ?? []).map((option) => (
           <Button
-            aria-label="Snooze"
-            size="icon-sm"
-            title="Snooze"
+            key={option.id}
+            className="w-full justify-start"
+            onClick={() => {
+              void action.executeWith?.(option)
+              setOpen(false)
+            }}
+            size="sm"
             type="button"
             variant="ghost"
           >
-            <Clock size={14} strokeWidth={1.6} />
+            {option.label}
           </Button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-44">
-          {snoozePresets().map((preset) => (
-            <Button
-              key={preset.label}
-              className="w-full justify-start"
-              onClick={() => {
-                onSnooze(preset.until)
-                setSnoozeOpen(false)
-              }}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              {preset.label}
-            </Button>
-          ))}
-        </PopoverContent>
-      </Popover>
-      {onToggleFlag && (
-        <Button
-          aria-label="Flag"
-          onClick={onToggleFlag}
-          size="icon-sm"
-          title="Flag"
-          type="button"
-          variant="ghost"
-          className={isFlagged ? 'text-signal-flag' : undefined}
-        >
-          <Flag size={14} strokeWidth={1.6} />
-        </Button>
-      )}
-      {onTag && (
-        <Button
-          aria-label="Tag"
-          data-tag-editor-trigger="true"
-          onClick={onTag}
-          size="icon-sm"
-          title="Tag"
-          type="button"
-          variant="ghost"
-        >
-          <Tag size={14} strokeWidth={1.6} />
-        </Button>
-      )}
-      {onOpenFocusedMessage && (
-        <Button
-          aria-label="Open message"
-          onClick={onOpenFocusedMessage}
-          size="icon-sm"
-          title="Open message"
-          type="button"
-          variant="ghost"
-        >
-          <Maximize2 size={14} strokeWidth={1.6} />
-        </Button>
-      )}
-    </div>
+        ))}
+      </PopoverContent>
+    </Popover>
   )
 }
 

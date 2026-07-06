@@ -8,7 +8,7 @@ import {
   type UIEvent as ReactUIEvent,
 } from 'react'
 
-import type { ActionContext, ActionServices } from '@/actions'
+import { getAction, type ActionContext, type ActionServices } from '@/actions'
 import type { MessageDetail } from '@/api/types'
 import type {
   CommandPaletteEntry,
@@ -17,6 +17,7 @@ import type {
 import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
 import type { useMailClientHandlers } from '@/app/useMailClientHandlers'
 import type { EmailActions } from '@/hooks/useEmailActions'
+import { useMailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
 import type { MailSelection } from '@/mailState'
 import { validateSearchQuery } from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'
@@ -41,6 +42,9 @@ interface CommandPaletteProps {
   app: ReturnType<typeof useMailClientHandlers>
   /** Role of the current view, gating contextual palette actions. */
   viewRole: string | null
+  /** Open straight into a parameterized action's pick-step (the keyboard
+   *  chord → picker path, e.g. `m` → the mailbox picker). */
+  initialActionId?: string | null
   selectedMessage: MailSelection | null
   selectedMessageData: MessageDetail | undefined
   onApplySearch: (query: string) => void
@@ -54,10 +58,23 @@ interface CommandPaletteProps {
   ) => void
 }
 
+/** The pick-step section label / input placeholder for an action id. */
+function paramStepFor(
+  actionId: string,
+): { actionId: string; label: string } | null {
+  const def = getAction(actionId)
+  if (!def?.resolveParams) return null
+  return {
+    actionId,
+    label: typeof def.title === 'string' ? def.title : actionId,
+  }
+}
+
 export function CommandPalette({
   actions,
   app,
   viewRole,
+  initialActionId,
   selectedMessage,
   selectedMessageData,
   onApplySearch,
@@ -67,6 +84,13 @@ export function CommandPalette({
   onSelectSourceMailbox,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
+  // Two-step flow (parameterized actions): non-null while the palette shows an
+  // action's OPTION list instead of the root command/search list. Seeded when a
+  // keyboard chord opened the palette directly into a picker.
+  const [paramStep, setParamStep] = useState<{
+    actionId: string
+    label: string
+  } | null>(() => (initialActionId ? paramStepFor(initialActionId) : null))
 
   // The ActionContext for the palette surface: the focused message becomes the
   // single target, so registry actions resolve exactly as the context menu does
@@ -99,9 +123,21 @@ export function CommandPalette({
     }
   }, [actions.isPending, selectedMessage, selectedMessageData, viewRole])
 
+  // The mailbox read model (the sidebar's source), bound as the palette's
+  // `ActionServices.mailboxes` so parameterized mailbox actions (Move to…)
+  // resolve their options here too.
+  const readModels = useMailboxNavigationReadModels()
   const services = useMemo<ActionServices>(
-    () => ({ email: actions, app }),
-    [actions, app],
+    () => ({
+      email: actions,
+      app,
+      mailboxes: {
+        list: (sourceId: string) =>
+          readModels.sources.find((source) => source.id === sourceId)
+            ?.mailboxes ?? [],
+      },
+    }),
+    [actions, app, readModels.sources],
   )
 
   // Providers read ctx/services through stable getters so the provider list
@@ -123,10 +159,28 @@ export function CommandPalette({
       query,
       getActionContext,
       getActionServices,
+      paramStep,
     })
 
   function handleQueryChange(value: string) {
     setQuery(value)
+    search.select(null)
+  }
+
+  /** Enter a parameterized action's pick-step: swap the provider set and reset
+   *  the query so the user types the TARGET (e.g. a mailbox name). */
+  function enterParamStep(actionId: string) {
+    const step = paramStepFor(actionId)
+    if (!step) return
+    setParamStep(step)
+    setQuery('')
+    search.select(null)
+  }
+
+  /** Pop back from the pick-step to the root command list. */
+  function exitParamStep() {
+    setParamStep(null)
+    setQuery('')
     search.select(null)
   }
 
@@ -156,7 +210,11 @@ export function CommandPalette({
         setQuery(nextQuery)
         search.select(null)
       },
+      openActionParams: enterParamStep,
     }),
+    // enterParamStep is a plain closure over stable setters + `search`, which
+    // is already a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       onApplySearch,
       onSelectMessage,
@@ -190,7 +248,19 @@ export function CommandPalette({
 
     if (event.key === 'Escape') {
       event.preventDefault()
+      // In a pick-step, Escape backs out to the root list; a second Escape
+      // closes — mirroring nested-menu affordances.
+      if (paramStep) {
+        exitParamStep()
+        return
+      }
       closeWithoutApplyingQuery()
+      return
+    }
+    // Backspace on an empty pick-step query also pops back to the root list.
+    if (event.key === 'Backspace' && paramStep && query === '') {
+      event.preventDefault()
+      exitParamStep()
       return
     }
     if (isDownKey || isUpKey) {
@@ -207,7 +277,8 @@ export function CommandPalette({
       })
       switch (action) {
         case 'apply':
-          applyCurrentQuery()
+          // The pick-step query filters OPTIONS, never the mail view.
+          if (!paramStep) applyCurrentQuery()
           break
         case 'run':
           runCandidate(itemRows[activeSelectedIndex].candidate)
@@ -280,7 +351,11 @@ export function CommandPalette({
             autoFocus
             value={query}
             onValueChange={handleQueryChange}
-            placeholder="Search messages, contacts, commands..."
+            placeholder={
+              paramStep
+                ? paramStep.label
+                : 'Search messages, contacts, commands...'
+            }
             wrapperClassName="min-w-0 flex-1 h-12 px-3"
           />
         }

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import type { ActionParamOption } from '@/actions'
 import type { ComposeIntent } from '@/composeIntent'
 import type { SettingsSurfaceCategory } from '@/surfaces'
 
@@ -89,6 +90,12 @@ export type PaletteAction =
   /** Registry action: dispatched via `getAction(actionId).run(ctx, services)`
    *  — the palette's single execution path (PLAN-L2 Slice 3). */
   | { kind: 'action'; actionId: string }
+  /** PARAMETERIZED registry action: selecting it pushes the palette into its
+   *  pick-step (a searchable list of the action's options) instead of running. */
+  | { kind: 'open-action-params'; actionId: string }
+  /** One picked option of a parameterized action (a pick-step row): runs
+   *  `getAction(actionId).run(ctx, services, param)`. */
+  | { kind: 'run-action-param'; actionId: string; param: ActionParamOption }
   | { kind: 'apply-query'; query: string }
   | {
       kind: 'open-source-mailbox'
