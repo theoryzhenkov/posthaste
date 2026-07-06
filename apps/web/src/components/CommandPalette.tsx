@@ -1,18 +1,25 @@
 import {
+  useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type UIEvent as ReactUIEvent,
 } from 'react'
 
+import type { ActionContext, ActionServices } from '@/actions'
+import type { MessageDetail } from '@/api/types'
 import type {
   CommandPaletteEntry,
   SearchCandidate,
 } from '@/command-search/types'
+import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
+import type { useMailClientHandlers } from '@/app/useMailClientHandlers'
+import type { EmailActions } from '@/hooks/useEmailActions'
 import type { MailSelection } from '@/mailState'
 import { validateSearchQuery } from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'
-import type { SettingsSurfaceCategory as SettingsCategory } from '@/surfaces'
 
 import { CommandPaletteList } from './command-palette/CommandPaletteList'
 import {
@@ -27,18 +34,17 @@ import { FloatingPanel } from './FloatingPanel'
 import { Command, CommandInput } from './ui/command'
 
 interface CommandPaletteProps {
-  hasSelectedMessage: boolean
-  onAddTag: (tag: string) => void
+  /** Domain mutations — the `email` half of the palette's {@link ActionServices}. */
+  actions: EmailActions
+  /** App/handler bundle — the `app` half of {@link ActionServices} (compose,
+   *  settings, shortcuts, reply, tag editor, snooze placeholder). */
+  app: ReturnType<typeof useMailClientHandlers>
+  /** Role of the current view, gating contextual palette actions. */
+  viewRole: string | null
+  selectedMessage: MailSelection | null
+  selectedMessageData: MessageDetail | undefined
   onApplySearch: (query: string) => void
-  onArchive: () => void
   onClose: () => void
-  onCompose: () => void
-  onOpenSettings: (category?: SettingsCategory) => void
-  onOpenShortcuts: () => void
-  onOpenTagEditor: () => void
-  onPlaceholderAction: (label: string) => void
-  onRemoveTag: (tag: string) => void
-  onReply: () => void
   onSelectMessage: (selection: MailSelection) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onSelectSourceMailbox: (
@@ -46,30 +52,78 @@ interface CommandPaletteProps {
     mailboxId: string,
     name: string,
   ) => void
-  onToggleFlag: () => void
 }
 
 export function CommandPalette({
-  hasSelectedMessage,
-  onAddTag,
+  actions,
+  app,
+  viewRole,
+  selectedMessage,
+  selectedMessageData,
   onApplySearch,
-  onArchive,
   onClose,
-  onCompose,
-  onOpenSettings,
-  onOpenShortcuts,
-  onOpenTagEditor,
-  onPlaceholderAction,
-  onRemoveTag,
-  onReply,
   onSelectMessage,
   onSelectSmartMailbox,
   onSelectSourceMailbox,
-  onToggleFlag,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
+
+  // The ActionContext for the palette surface: the focused message becomes the
+  // single target, so registry actions resolve exactly as the context menu does
+  // (contextual availability, disabled-with-reason). Rebuilt per render — cheap.
+  const actionContext = useMemo<ActionContext>(() => {
+    const targets = selectedMessage
+      ? [
+          {
+            ref: {
+              sourceId: selectedMessage.sourceId,
+              messageId: selectedMessage.messageId,
+            },
+            summary: selectedMessageData,
+            isDraft:
+              selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft) ??
+              false,
+            draftId: selectedMessageData?.draftId ?? null,
+            conversationId: selectedMessage.conversationId,
+          },
+        ]
+      : []
+    return {
+      targets,
+      viewRole,
+      activePane: 'list',
+      surface: 'palette',
+      inputOwner: 'overlay',
+      hasPendingMutation: actions.isPending,
+      connection: 'unknown',
+    }
+  }, [actions.isPending, selectedMessage, selectedMessageData, viewRole])
+
+  const services = useMemo<ActionServices>(
+    () => ({ email: actions, app }),
+    [actions, app],
+  )
+
+  // Providers read ctx/services through stable getters so the provider list
+  // never re-creates on selection changes (which would restart every search).
+  const contextRef = useRef(actionContext)
+  const servicesRef = useRef(services)
+  useEffect(() => {
+    contextRef.current = actionContext
+  }, [actionContext])
+  useEffect(() => {
+    servicesRef.current = services
+  }, [services])
+  const getActionContext = useCallback(() => contextRef.current, [])
+  const getActionServices = useCallback(() => servicesRef.current, [])
+
   const { activeSelectedIndex, itemRows, search, selectedValue } =
-    useCommandPaletteSearch({ hasSelectedMessage, query })
+    useCommandPaletteSearch({
+      hasSelectedMessage: selectedMessage !== null,
+      query,
+      getActionContext,
+      getActionServices,
+    })
 
   function handleQueryChange(value: string) {
     setQuery(value)
@@ -92,48 +146,30 @@ export function CommandPalette({
     onClose()
   }
 
-  const paletteActionHandlers = useMemo(
+  const nav = useMemo(
     () => ({
-      onAddTag,
       onApplySearch,
-      onArchive,
-      onCompose,
-      onOpenSettings,
-      onOpenShortcuts,
-      onOpenTagEditor,
-      onPlaceholderAction,
-      onRemoveTag,
-      onReply,
       onSelectMessage,
       onSelectSmartMailbox,
       onSelectSourceMailbox,
-      onToggleFlag,
       replaceQuery: (nextQuery: string) => {
         setQuery(nextQuery)
         search.select(null)
       },
     }),
     [
-      onAddTag,
       onApplySearch,
-      onArchive,
-      onCompose,
-      onOpenSettings,
-      onOpenShortcuts,
-      onOpenTagEditor,
-      onPlaceholderAction,
-      onRemoveTag,
-      onReply,
       onSelectMessage,
       onSelectSmartMailbox,
       onSelectSourceMailbox,
-      onToggleFlag,
       search,
     ],
   )
-  const executeAction = usePaletteActions(paletteActionHandlers)
+  const executeAction = usePaletteActions({ actionContext, services, nav })
 
   function runEntry(entry: CommandPaletteEntry) {
+    // Disabled registry rows are inert — skip on Enter/click (PLAN-L2 §4.2).
+    if (entry.disabled) return
     executeAction(entry.action)
     if (entry.closeOnSelect !== false) {
       onClose()

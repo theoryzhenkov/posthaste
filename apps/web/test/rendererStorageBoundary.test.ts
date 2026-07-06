@@ -12,6 +12,9 @@ const allowedStorageFiles = new Set([
   'src/components/thread-list/useColumnConfig.ts',
   'src/connection/store.ts',
   'src/onboarding/store.ts',
+  // Palette command recency/frequency counter (PLAN-L2 §4.5): persists only a
+  // decayed use-count keyed by stable action id — no bodies or auth material.
+  'src/command-search/recentCommands.ts',
   'src/developerTools.ts',
   'src/hooks/useMailLayoutPersistence.ts',
   // The near-end engine binding mirrors the engine-owned resume cursor (a

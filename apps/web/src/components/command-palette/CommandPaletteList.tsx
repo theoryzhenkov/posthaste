@@ -56,27 +56,47 @@ function renderRow(
           {row.label}
         </div>
       )
-    case 'item':
+    case 'item': {
+      const entry = row.candidate.entry
+      const isDisabled = entry.disabled === true
+      // Disabled rows stay visible and highlightable (discoverability) but are
+      // inert: onSelect no-ops so Enter/click skip them (PLAN-L2 §4.2).
       return (
         <CommandItem
           key={row.id}
           value={commandPaletteEntryValue(row.candidate)}
-          className="mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]"
-          onSelect={() => onRunCandidate(row.candidate)}
+          aria-disabled={isDisabled || undefined}
+          className={
+            isDisabled
+              ? 'mx-0 px-4 py-2.5 text-muted-foreground/60 data-[selected=true]:bg-[var(--hover-bg)]'
+              : 'mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]'
+          }
+          onSelect={
+            isDisabled ? undefined : () => onRunCandidate(row.candidate)
+          }
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
-            {row.candidate.entry.icon}
+            {entry.icon}
           </span>
-          <span className="min-w-0 flex-1 truncate">
-            {row.candidate.entry.label}
-          </span>
-          {row.candidate.entry.subtitle && (
-            <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground">
-              {row.candidate.entry.subtitle}
+          <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+          {isDisabled && entry.disabledReason && (
+            <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground/70 italic">
+              {entry.disabledReason}
             </span>
+          )}
+          {!isDisabled && entry.subtitle && (
+            <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground">
+              {entry.subtitle}
+            </span>
+          )}
+          {entry.shortcut && (
+            <kbd className="ml-2 shrink-0 rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {entry.shortcut}
+            </kbd>
           )}
         </CommandItem>
       )
+    }
     case 'loading':
       return (
         <div key={row.id} className="px-4 py-2 text-sm text-muted-foreground">
