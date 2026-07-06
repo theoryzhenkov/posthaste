@@ -175,9 +175,13 @@ pub struct FetchedBody {
 
 /// An ordered domain event stored in `event_log` and published via SSE.
 ///
+/// `PartialEq` (no `Eq` — the payload is a [`Value`], and JSON numbers are not
+/// `Eq`) so wire envelopes that carry a whole event (the link down-channel's
+/// `BaseAssertion.event`) stay comparable in round-trip tests.
+///
 /// @spec docs/L1-sync#event-propagation
 /// @spec docs/L1-api#sse-event-stream
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DomainEvent {
