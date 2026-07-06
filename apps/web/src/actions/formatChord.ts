@@ -47,7 +47,26 @@ export function formatChord(
     ? shortcut[0]
     : (shortcut as ShortcutChord)
   if (!chord) return undefined
+  return formatSingle(chord)
+}
+
+function formatSingle(chord: ShortcutChord): string {
   return `${chord.mod ? MOD : ''}${chord.shift ? SHIFT : ''}${
     chord.alt ? ALT : ''
   }${formatKey(chord.key)}`
+}
+
+/**
+ * Render EVERY chord a definition declares (e.g. `['#', 'Backspace']`) — used by
+ * the generated `ShortcutReference`, which lists each alternative key. Empty when
+ * there is no shortcut.
+ */
+export function formatChords(
+  shortcut?: ShortcutChord | readonly ShortcutChord[],
+): string[] {
+  if (!shortcut) return []
+  const chords = Array.isArray(shortcut)
+    ? shortcut
+    : [shortcut as ShortcutChord]
+  return chords.map(formatSingle)
 }
