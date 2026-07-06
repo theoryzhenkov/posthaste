@@ -386,6 +386,99 @@ fn to_field_matches_recipients_in_to_json() -> Result<(), StoreError> {
     Ok(())
 }
 
+#[test]
+fn text_match_operators_begins_ends_regex() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    seed_messages(
+        &store,
+        &account,
+        vec![
+            MessageRecord {
+                subject: Some("Invoice 2026".to_string()),
+                ..sample_message("invoice", "inbox", Some("mime-invoice"))
+            },
+            MessageRecord {
+                subject: Some("Weekly report".to_string()),
+                ..sample_message("report", "inbox", Some("mime-report"))
+            },
+            // A subject containing a LITERAL percent sign: the escaping test.
+            MessageRecord {
+                subject: Some("50% off sale".to_string()),
+                ..sample_message("sale", "inbox", Some("mime-sale"))
+            },
+        ],
+        "state-text",
+    )?;
+
+    let ids = |messages: Vec<MessageSummary>| {
+        let mut ids: Vec<String> = messages.iter().map(|m| m.id.as_str().to_string()).collect();
+        ids.sort();
+        ids
+    };
+
+    // begins-with is case-insensitive and anchors at the start.
+    let begins = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Subject,
+        SmartMailboxOperator::BeginsWith,
+        SmartMailboxValue::String("invoice".to_string()),
+    ))?;
+    assert_eq!(ids(begins), vec!["invoice"]);
+
+    // ends-with anchors at the end.
+    let ends = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Subject,
+        SmartMailboxOperator::EndsWith,
+        SmartMailboxValue::String("REPORT".to_string()),
+    ))?;
+    assert_eq!(ids(ends), vec!["report"]);
+
+    // LIKE-metachar escaping: a literal `%` in the value must match a literal
+    // `%`, NOT act as a wildcard. `begins-with "50%"` matches only "50% off…",
+    // and crucially NOT "Weekly report" / "Invoice 2026" (which an unescaped
+    // `50%` -> `50%%` would still exclude, but an unescaped bare `%` prefix
+    // pattern like `%...` would over-match). Assert the literal match.
+    let literal_percent = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Subject,
+        SmartMailboxOperator::BeginsWith,
+        SmartMailboxValue::String("50%".to_string()),
+    ))?;
+    assert_eq!(ids(literal_percent), vec!["sale"]);
+
+    // A `%` that is NOT present literally matches nothing (proves the `%` is
+    // escaped, not treated as "match anything").
+    let percent_wildcard_defused = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Subject,
+        SmartMailboxOperator::BeginsWith,
+        SmartMailboxValue::String("Invoice%".to_string()),
+    ))?;
+    assert!(
+        percent_wildcard_defused.is_empty(),
+        "an escaped `%` must not act as a wildcard"
+    );
+
+    // regex: `^...$` anchors compile and match correctly.
+    let regex = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Subject,
+        SmartMailboxOperator::Regex,
+        SmartMailboxValue::String("^Invoice.*2026$".to_string()),
+    ))?;
+    assert_eq!(ids(regex), vec!["invoice"]);
+
+    // regex alternation across two subjects.
+    let regex_alt = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Subject,
+        SmartMailboxOperator::Regex,
+        SmartMailboxValue::String("^(Invoice|Weekly)".to_string()),
+    ))?;
+    assert_eq!(ids(regex_alt), vec!["invoice", "report"]);
+
+    Ok(())
+}
+
 /// Computes an RFC3339 timestamp offset from the real clock, using SQLite's own
 /// `strftime`/`datetime` so the seeded messages sit at a known distance from
 /// the `now` the compiler's `datetime('now', ...)` bound will use.

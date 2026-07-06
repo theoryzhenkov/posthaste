@@ -90,6 +90,18 @@ pub enum SmartMailboxOperator {
     Equals,
     In,
     Contains,
+    /// Case-insensitive prefix match (`beginsWith`): the text starts with the
+    /// value. Compiles to a `LIKE '<value>%'` with the value's LIKE metacharacters
+    /// escaped, so a literal `%`/`_` matches itself.
+    BeginsWith,
+    /// Case-insensitive suffix match (`endsWith`): the text ends with the value.
+    /// Compiles to a `LIKE '%<value>'` (metacharacters escaped).
+    EndsWith,
+    /// Regular-expression match (`regex`): the value is a regex pattern compiled
+    /// by the `regex` crate and evaluated via the store's registered `regexp`
+    /// SQLite scalar. A malformed pattern is rejected at the write boundary
+    /// (`validate_condition`), so it never reaches the store.
+    Regex,
     /// `<` — legacy wire name `before`.
     #[serde(alias = "before")]
     Lt,
@@ -389,6 +401,25 @@ mod value_serde_tests {
             assert_eq!(
                 serde_json::to_value(operator).unwrap(),
                 serde_json::json!(wire)
+            );
+        }
+    }
+
+    #[test]
+    fn text_match_operators_use_camel_case() {
+        // The additive text operators (R4) round-trip by their camelCase wire names.
+        for (operator, wire) in [
+            (SmartMailboxOperator::BeginsWith, "beginsWith"),
+            (SmartMailboxOperator::EndsWith, "endsWith"),
+            (SmartMailboxOperator::Regex, "regex"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(operator).unwrap(),
+                serde_json::json!(wire)
+            );
+            assert_eq!(
+                serde_json::from_str::<SmartMailboxOperator>(&format!("\"{wire}\"")).unwrap(),
+                operator
             );
         }
     }

@@ -124,6 +124,12 @@ export function operatorLabel(
       return 'equals'
     case 'contains':
       return 'contains'
+    case 'beginsWith':
+      return 'begins with'
+    case 'endsWith':
+      return 'ends with'
+    case 'regex':
+      return 'matches regex'
     case 'in':
       return 'is one of'
     case 'lt':

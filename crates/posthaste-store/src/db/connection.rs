@@ -1,4 +1,7 @@
 use super::*;
+use regex::Regex;
+use rusqlite::functions::FunctionFlags;
+use std::sync::Arc;
 use std::time::Duration;
 
 const SQLITE_CACHE_SIZE_KIB: i64 = -65_536;
@@ -34,7 +37,41 @@ pub(crate) fn configure_connection(connection: &Connection) -> Result<(), StoreE
         .map_err(sql_to_store_error)?;
     // Hold hot read/write statements (see `sql_cache`) without LRU eviction.
     connection.set_prepared_statement_cache_capacity(256);
+    register_regexp_function(connection)?;
     Ok(())
+}
+
+/// Registers the `regexp(pattern, text)` scalar so the smart-mailbox `regex`
+/// operator's `text REGEXP ?` clause works — SQLite ships no built-in REGEXP.
+///
+/// The `text REGEXP pattern` operator invokes `regexp(pattern, text)`. The
+/// compiled [`Regex`] is cached per prepared-statement via `get_or_create_aux`
+/// (keyed on the pattern argument, which is a bound constant per query), so a
+/// pattern compiles once per statement, not once per row.
+///
+/// A pattern that fails to compile surfaces as a `rusqlite` error → `StoreError`,
+/// never a panic — but in practice the write boundary (`validate_condition`)
+/// already rejects a malformed pattern with the same `regex` engine, so an
+/// un-compilable pattern never reaches a query.
+fn register_regexp_function(connection: &Connection) -> Result<(), StoreError> {
+    connection
+        .create_scalar_function(
+            "regexp",
+            2,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| {
+                let regexp: Arc<Regex> = ctx.get_or_create_aux(
+                    0,
+                    |value| -> Result<_, Box<dyn std::error::Error + Send + Sync + 'static>> {
+                        Ok(Regex::new(value.as_str()?)?)
+                    },
+                )?;
+                // A NULL text side (e.g. a NULL column) never matches.
+                let text = ctx.get_raw(1).as_str_or_null()?;
+                Ok(text.is_some_and(|text| regexp.is_match(text)))
+            },
+        )
+        .map_err(sql_to_store_error)
 }
 
 /// Returns the current time as an ISO 8601 string.
