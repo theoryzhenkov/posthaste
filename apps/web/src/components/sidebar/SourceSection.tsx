@@ -3,13 +3,16 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Edit3,
+  Folder,
   FolderPlus,
   RefreshCw,
   Settings,
+  Trash2,
 } from 'lucide-react'
 
 import type { AccountHealth } from '@/accountHealth'
-import type { AccountAppearance, Mailbox } from '@/api/types'
+import type { AccountAppearance, Mailbox, MailboxGroup } from '@/api/types'
 import { useMailboxColorLookup } from '@/hooks/useMailboxColors'
 import { useMailboxCounts } from '@/live-store/store'
 
@@ -22,7 +25,10 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '../ui/context-menu'
+import { GroupNameDialog } from './GroupNameDialog'
+import { partitionSourceMailboxes } from './model'
 import { MailboxItem } from './SidebarItems'
+import { useMailboxGroups, useMailboxGroupMutations } from './useMailboxGroups'
 import { NewMailboxDialog } from './NewMailboxDialog'
 
 export function SourceSection({
@@ -31,7 +37,9 @@ export function SourceSection({
   selectedView,
   isPaneActive,
   collapsed,
+  collapsedGroupIds,
   onToggleCollapsed,
+  onToggleGroupCollapsed,
   onOpenAccountSettings,
   onSelectSourceMailbox,
   onSyncSource,
@@ -47,7 +55,10 @@ export function SourceSection({
   /** Whether the sidebar is the focused pane (drives accent-vs-grey selection). */
   isPaneActive: boolean
   collapsed: boolean
+  /** Collapsed sidebar Group ids (shared with the j/k walker in Sidebar). */
+  collapsedGroupIds: ReadonlySet<string>
   onToggleCollapsed: () => void
+  onToggleGroupCollapsed: (groupId: string) => void
   onOpenAccountSettings: (sourceId: string) => void
   onSelectSourceMailbox: (
     sourceId: string,
@@ -57,7 +68,32 @@ export function SourceSection({
   onSyncSource: (sourceId: string) => void
 }) {
   const mailboxColorHue = useMailboxColorLookup()
+  const groups = useMailboxGroups()
+  const groupMutations = useMailboxGroupMutations()
   const [isNewMailboxOpen, setIsNewMailboxOpen] = useState(false)
+  // Partition THIS source's mailboxes into synced Groups + an ungrouped
+  // remainder. A group surfaces here only if it holds ≥1 of this source's
+  // mailboxes; ungrouped mailboxes render flat as before.
+  const partition = useMemo(
+    () => partitionSourceMailboxes(source.mailboxes, groups),
+    [source.mailboxes, groups],
+  )
+  // The group each of this source's mailboxes belongs to (for the "Add to group"
+  // check-mark + "Remove from group" item), and the list of this source's groups
+  // for the submenu.
+  const sourceGroups = useMemo(
+    () => partition.groups.map((entry) => entry.group),
+    [partition.groups],
+  )
+  const currentGroupIdByMailbox = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of partition.groups) {
+      for (const mailbox of entry.mailboxes) {
+        map.set(mailbox.id, entry.group.id)
+      }
+    }
+    return map
+  }, [partition.groups])
   // The account header's aggregate unread reflects live COUNTS (D116): sum each
   // mailbox's live count, falling back to the query's server count when no frame
   // has seeded a live entry yet (bootstrap).
@@ -154,34 +190,141 @@ export function SourceSection({
       />
       {!collapsed && (
         <div className="space-y-0.5">
-          {source.mailboxes.map((mailbox) => (
-            <MailboxItem
-              key={`${source.id}:${mailbox.id}`}
-              sourceId={source.id}
-              sourceName={source.name}
-              mailbox={mailbox}
-              colorHue={mailboxColorHue(source.id, mailbox.id)}
-              depth={1}
-              onOpenAccountSettings={onOpenAccountSettings}
-              isSelected={
-                selectedView?.kind === 'source-mailbox' &&
-                selectedView.sourceId === source.id &&
-                selectedView.mailboxId === mailbox.id
-              }
-              isPaneActive={isPaneActive}
-              onSelect={() =>
-                onSelectSourceMailbox(
-                  source.id,
-                  mailbox.id,
-                  `${source.name} / ${mailbox.name}`,
-                )
-              }
-              onSyncSource={onSyncSource}
-            />
-          ))}
+          {partition.ungrouped.map((mailbox) => renderMailboxItem(mailbox, 1))}
+          {partition.groups.map((entry) => {
+            const groupCollapsed = collapsedGroupIds.has(entry.group.id)
+            return (
+              <div key={entry.group.id}>
+                <GroupHeader
+                  group={entry.group}
+                  collapsed={groupCollapsed}
+                  onToggleCollapsed={() =>
+                    onToggleGroupCollapsed(entry.group.id)
+                  }
+                  onRename={(name) =>
+                    groupMutations.renameGroup(entry.group.id, name)
+                  }
+                  onDelete={() => groupMutations.deleteGroup(entry.group.id)}
+                />
+                {!groupCollapsed && (
+                  <div className="space-y-0.5">
+                    {entry.mailboxes.map((mailbox) =>
+                      renderMailboxItem(mailbox, 2),
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
+  )
+
+  function renderMailboxItem(mailbox: Mailbox, depth: number) {
+    return (
+      <MailboxItem
+        key={`${source.id}:${mailbox.id}`}
+        sourceId={source.id}
+        sourceName={source.name}
+        mailbox={mailbox}
+        colorHue={mailboxColorHue(source.id, mailbox.id)}
+        depth={depth}
+        groups={sourceGroups}
+        currentGroupId={currentGroupIdByMailbox.get(mailbox.id) ?? null}
+        onOpenAccountSettings={onOpenAccountSettings}
+        isSelected={
+          selectedView?.kind === 'source-mailbox' &&
+          selectedView.sourceId === source.id &&
+          selectedView.mailboxId === mailbox.id
+        }
+        isPaneActive={isPaneActive}
+        onSelect={() =>
+          onSelectSourceMailbox(
+            source.id,
+            mailbox.id,
+            `${source.name} / ${mailbox.name}`,
+          )
+        }
+        onSyncSource={onSyncSource}
+        onAssignToGroup={groupMutations.assignToGroup}
+        onRemoveFromGroup={groupMutations.removeFromGroup}
+        onCreateGroup={groupMutations.createGroup}
+      />
+    )
+  }
+}
+
+/**
+ * A collapsible sidebar Group header (presentation only). Clicking toggles the
+ * group's collapse; a context menu offers rename / delete. Delete only ungroups
+ * the members — it never touches mailboxes or mail.
+ *
+ * @spec docs/eph/RFC-L2-mailbox-management#a4
+ */
+function GroupHeader({
+  group,
+  collapsed,
+  onToggleCollapsed,
+  onRename,
+  onDelete,
+}: {
+  group: MailboxGroup
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  onRename: (name: string) => void
+  onDelete: () => void
+}) {
+  const [isRenameOpen, setIsRenameOpen] = useState(false)
+  const headerButton = (
+    <button
+      type="button"
+      aria-expanded={!collapsed}
+      className="ph-focus-ring mx-1.5 flex h-[var(--density-sidebar-row-height)] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] pl-[22px] pr-2 text-left text-[13px] font-medium text-sidebar-foreground/92 transition-colors hover:bg-[var(--sidebar-accent)]"
+      onClick={onToggleCollapsed}
+    >
+      {collapsed ? (
+        <ChevronRight
+          size={12}
+          strokeWidth={1.5}
+          className="shrink-0 text-muted-foreground"
+        />
+      ) : (
+        <ChevronDown
+          size={12}
+          strokeWidth={1.5}
+          className="shrink-0 text-muted-foreground"
+        />
+      )}
+      <Folder size={14} className="shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate">{group.name}</span>
+    </button>
+  )
+
+  return (
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{headerButton}</ContextMenuTrigger>
+        <ContextMenuContent className="min-w-44">
+          <ContextMenuItem onSelect={() => setIsRenameOpen(true)}>
+            <Edit3 size={14} />
+            Rename group
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={onDelete}>
+            <Trash2 size={14} />
+            Delete group
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      <GroupNameDialog
+        mode="rename"
+        initialName={group.name}
+        open={isRenameOpen}
+        onOpenChange={setIsRenameOpen}
+        onSubmit={onRename}
+      />
+    </>
   )
 }
 

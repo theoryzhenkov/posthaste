@@ -112,6 +112,7 @@ export function AccountsSection({
   selectedView,
   isPaneActive,
   collapsedSourceIds,
+  collapsedGroupIds,
   sources,
   onOpenAccountSettings,
   onSelectSourceMailbox,
@@ -119,11 +120,13 @@ export function AccountsSection({
   onReorder,
   onToggle,
   onToggleSourceCollapsed,
+  onToggleGroupCollapsed,
 }: {
   collapsed: boolean
   selectedView: SidebarSelection | null
   isPaneActive: boolean
   collapsedSourceIds: ReadonlySet<string>
+  collapsedGroupIds: ReadonlySet<string>
   sources: SourceReadModel[]
   onOpenAccountSettings: (sourceId: string) => void
   onSelectSourceMailbox: (
@@ -135,6 +138,7 @@ export function AccountsSection({
   onReorder: (orderedIds: string[]) => void
   onToggle: () => void
   onToggleSourceCollapsed: (sourceId: string) => void
+  onToggleGroupCollapsed: (groupId: string) => void
 }) {
   return (
     <>
@@ -160,7 +164,9 @@ export function AccountsSection({
                   selectedView={selectedView}
                   isPaneActive={isPaneActive}
                   collapsed={collapsedSourceIds.has(source.id)}
+                  collapsedGroupIds={collapsedGroupIds}
                   onToggleCollapsed={() => onToggleSourceCollapsed(source.id)}
+                  onToggleGroupCollapsed={onToggleGroupCollapsed}
                   onOpenAccountSettings={onOpenAccountSettings}
                   onSelectSourceMailbox={onSelectSourceMailbox}
                   onSyncSource={onSyncSource}

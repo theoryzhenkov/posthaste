@@ -27,6 +27,7 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
                 force_backfill: false,
+                mailbox_groups: None,
                 smart_mailbox_order: None,
                 account_order: None,
                 default_account_id: Some(Some("primary".to_string())),

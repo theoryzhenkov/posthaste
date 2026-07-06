@@ -19,6 +19,8 @@ pub struct PatchSettingsRequest {
     /// Explicit sidebar arrangement (ids); overwrites the stored list wholesale.
     pub smart_mailbox_order: Option<Vec<SmartMailboxId>>,
     pub account_order: Option<Vec<AccountId>>,
+    /// Client-side sidebar Groups (presentation only); overwrites the stored list.
+    pub mailbox_groups: Option<Vec<MailboxGroup>>,
     /// When true, re-run the current backfill rules against existing messages
     /// after persisting (on-demand "backfill now").
     #[serde(default)]
@@ -124,6 +126,7 @@ pub async fn patch_settings(
                 tags: request.tags,
                 smart_mailbox_order: request.smart_mailbox_order,
                 account_order: request.account_order,
+                mailbox_groups: request.mailbox_groups,
                 force_backfill: request.force_backfill,
             },
         )

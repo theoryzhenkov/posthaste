@@ -108,6 +108,16 @@ impl AccountMutationService {
                     Ok(())
                 }),
             },
+            AppSettingsFieldPatch {
+                name: "mailboxGroups",
+                present: request.mailbox_groups.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(mailbox_groups) = &request.mailbox_groups {
+                        settings.mailbox_groups.clone_from(mailbox_groups);
+                    }
+                    Ok(())
+                }),
+            },
         ];
 
         let mut changed = Vec::new();
