@@ -1,35 +1,23 @@
 /**
  * Keyboard shortcut reference overlay, toggled with `?`.
  *
+ * The action rows are GENERATED from the action registry (their chords are the
+ * exact data the keyboard tier dispatches), so the list can no longer drift from
+ * behavior the way the old hand-maintained array did (PLAN-L2 §1.1, Slice 5).
+ * Native, non-action keys stay a small static list. See ./shortcutReferenceRows.
+ *
  * @spec docs/ui/L1#keyboard-shortcuts
  */
 import { Keyboard } from 'lucide-react'
 
 import { FloatingPanel } from './FloatingPanel'
+import { shortcutReferenceRows } from './shortcutReferenceRows'
 
 interface ShortcutReferenceProps {
   onClose: () => void
 }
 
-const SHORTCUTS: { keys: string[]; action: string }[] = [
-  { keys: ['j', '\u2193'], action: 'Next conversation' },
-  { keys: ['k', '\u2191'], action: 'Previous conversation' },
-  { keys: ['h', '\u2190'], action: 'Collapse conversation' },
-  { keys: ['l', '\u2192'], action: 'Expand conversation' },
-  { keys: ['⇧ H'], action: 'Focus pane left' },
-  { keys: ['⇧ L'], action: 'Focus pane right' },
-  { keys: ['g i'], action: 'Go to inbox' },
-  { keys: ['g a'], action: 'Go to archive' },
-  { keys: ['g t'], action: 'Go to trash' },
-  { keys: ['g c'], action: 'Go to conversation' },
-  { keys: ['g q', '…'], action: 'Go to smart mailbox by role' },
-  { keys: ['e'], action: 'Archive' },
-  { keys: ['#', 'Backspace'], action: 'Trash' },
-  { keys: ['t'], action: 'Edit tags' },
-  { keys: ['o'], action: 'Open message' },
-  { keys: ['/'], action: 'Open command search' },
-  { keys: ['?'], action: 'Toggle this reference' },
-]
+const SHORTCUTS = shortcutReferenceRows()
 
 export function ShortcutReference({ onClose }: ShortcutReferenceProps) {
   return (

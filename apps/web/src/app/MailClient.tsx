@@ -3,8 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
+import type { ActionServices, MessageTarget } from '@/actions'
 import type { TagSummary } from '@/api/types'
 import type { SidebarSelection } from '@/components/Sidebar'
+import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
 import {
   closeCurrentSurfaceWindow,
   listenForDesktopCloseRequest,
@@ -173,6 +175,33 @@ export function MailClient({
     onSelectSourceMailbox: handlers.handleSelectSourceMailbox,
   })
 
+  // The focused message as a resolver target for the keyboard tier — the same
+  // shape the palette builds (MessageDetail widens to the summary the toggles
+  // read). Rebuilt per render; consumed through the controller's ref snapshot.
+  const selectedMessageData = selectedMessageQuery.data
+  const keyboardTarget = useMemo<MessageTarget | null>(
+    () =>
+      selectedMessage
+        ? {
+            ref: {
+              sourceId: selectedMessage.sourceId,
+              messageId: selectedMessage.messageId,
+            },
+            summary: selectedMessageData,
+            isDraft:
+              selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft) ??
+              false,
+            draftId: selectedMessageData?.draftId ?? null,
+            conversationId: selectedMessage.conversationId,
+          }
+        : null,
+    [selectedMessage, selectedMessageData],
+  )
+  const keyboardServices = useMemo<ActionServices>(
+    () => ({ email: actions, app: handlers }),
+    [actions, handlers],
+  )
+
   const appReadinessState = appReadinessStateFromAccountsQuery({
     isLoading,
     isSuccess: hasLoadedAccounts,
@@ -223,6 +252,9 @@ export function MailClient({
             )
           }
         }}
+        viewRole={viewRole}
+        keyboardTarget={keyboardTarget}
+        actionServices={keyboardServices}
       >
         <MailClientView
           actions={actions}

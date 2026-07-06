@@ -237,7 +237,7 @@ describe('resolveActions — delegation to EmailActions (Slice 1)', () => {
 })
 
 describe('resolveActions — surface + enablement (Slice 1/3)', () => {
-  it('palette surface resolves palette-eligible actions; keyboard/detail-header stay empty until later slices', () => {
+  it('palette surface resolves palette-eligible actions; keyboard lit in Slice 5; detail-header stays empty', () => {
     // Slice 3 lit up the palette surface: message actions gained 'palette' and
     // the app-level commands (defs/app.ts) register palette-only entries.
     const palette = resolveActions(ctx({ surface: 'palette' }), {
@@ -250,12 +250,16 @@ describe('resolveActions — surface + enablement (Slice 1/3)', () => {
     // Context-menu-only entries never leak into the palette.
     expect(paletteIds).not.toContain('message.open')
 
-    // The keyboard + detail-header surfaces are migrated in Slices 4-5.
-    expect(
-      resolveActions(ctx({ surface: 'keyboard' }), {
-        email: makeSpyActions() as unknown as EmailActions,
-      }),
-    ).toHaveLength(0)
+    // Slice 5 migrated the contextual mail-action shortcuts onto the keyboard
+    // surface (archive/trash/delete/tag); everything else stays native.
+    const keyboardIds = resolveActions(ctx({ surface: 'keyboard' }), {
+      email: makeSpyActions() as unknown as EmailActions,
+    }).map((r) => r.def.id)
+    expect(keyboardIds).toContain('message.archive')
+    expect(keyboardIds).toContain('message.move-to-trash')
+    expect(keyboardIds).toContain('message.tag')
+
+    // The detail-header surface is not part of this slice.
     expect(
       resolveActions(ctx({ surface: 'detail-header' }), {
         email: makeSpyActions() as unknown as EmailActions,
