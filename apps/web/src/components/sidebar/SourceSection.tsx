@@ -262,7 +262,7 @@ export function SourceSection({
  *
  * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
-function GroupHeader({
+export function GroupHeader({
   group,
   collapsed,
   onToggleCollapsed,

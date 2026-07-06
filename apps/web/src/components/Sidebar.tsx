@@ -13,7 +13,11 @@ import { useCallback, useMemo, useState } from 'react'
 
 import { useActivePane, useFocusedPaneHandler } from './keyboard/usePane'
 import { useMailboxNavigationReadModels } from '../mailboxNavigationReadModels'
-import { sortSmartMailboxes, visibleSourceMailboxes } from './sidebar/model'
+import {
+  sortSmartMailboxes,
+  visibleSmartMailboxes,
+  visibleSourceMailboxes,
+} from './sidebar/model'
 import { useMailboxGroups } from './sidebar/useMailboxGroups'
 import { useSidebarReorder } from './sidebar/useSidebarReorder'
 import {
@@ -125,7 +129,14 @@ export function Sidebar({
   const navItems = useMemo(() => {
     const items: { key: SidebarNavKey; activate: () => void }[] = []
     if (!mailboxesCollapsed) {
-      for (const smartMailbox of sortedSmartMailboxes) {
+      // Walk in DOM order: ungrouped smart mailboxes first, then each expanded
+      // Group's members — a collapsed smart Group hides its members from the
+      // walk (mirrors the source section), so `j`/`k` only lands on visible rows.
+      for (const smartMailbox of visibleSmartMailboxes(
+        sortedSmartMailboxes,
+        groups,
+        collapsedGroupIds,
+      )) {
         items.push({
           key: smartNavKey(smartMailbox.id),
           activate: () =>
@@ -210,10 +221,12 @@ export function Sidebar({
               mailboxes={sortedSmartMailboxes}
               selectedView={selectedView}
               isPaneActive={isSidebarActive}
+              collapsedGroupIds={collapsedGroupIds}
               onOpenSmartMailboxSettings={onOpenSmartMailboxSettings}
               onSelectSmartMailbox={onSelectSmartMailbox}
               onReorder={reorderSmartMailboxes}
               onToggle={() => setMailboxesCollapsed((prev) => !prev)}
+              onToggleGroupCollapsed={toggleGroupCollapsed}
             />
             <AccountsSection
               collapsed={sourcesCollapsed}
