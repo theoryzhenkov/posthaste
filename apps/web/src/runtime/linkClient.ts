@@ -10,6 +10,7 @@
  * so it closes when nothing uses it.
  */
 import { LOG_EVENTS, syncLogger } from '../logger'
+import { markSurfaceBootstrap } from '../surfaceBootstrapLog'
 import { setConnectionHealth } from '@/live-store/store'
 
 import {
@@ -77,26 +78,32 @@ function ensureLink(sourceId?: string | null): Promise<RuntimeLinkConnection> {
     return linkPromise
   }
   activeLinkSourceId = sourceId
+  markSurfaceBootstrap('link_open_start', { sourceId: String(sourceId) })
   // CL-C2 / R1: gate the first link open on the entity-store install so this
   // link's frame subscription + view-opens bind to the entity-store adapter, not
   // the transient base adapter that would strand the session (no ingest, counts,
   // or synthesized viewReplace) until a reload. Bounded inside the gate, so a
   // stuck install still lets the link open (degraded) rather than hang.
   linkPromise = whenRuntimeAdapterReady()
-    .then(() =>
+    .then(() => {
+      markSurfaceBootstrap('link_adapter_ready')
       // Opt into incremental mail-list deltas (replication client-link). Both
       // client read paths apply them: the default renderer reconciles directly,
       // and the replica adapter folds the delta into its served base.
-      runtimeStream.openLink({
+      return runtimeStream.openLink({
         ...(sourceId === undefined ? {} : { sourceId }),
         viewDelta: true,
-      }),
-    )
+      })
+    })
     .then((link) => {
+      markSurfaceBootstrap('link_open_done', { linkId: link.linkId })
       activeLink = link
       return link
     })
     .catch((error) => {
+      markSurfaceBootstrap('link_open_error', {
+        error: error instanceof Error ? error.message : String(error),
+      })
       linkPromise = undefined
       activeLink = undefined
       activeLinkSourceId = undefined
@@ -316,10 +323,15 @@ export const runtimeLinkClient = {
     sourceId?: string | null
   }): Promise<RuntimeOpenViewResult<TData>> {
     const link = await ensureLink(request.sourceId)
+    markSurfaceBootstrap('view_open_start', { family: request.family })
     const result = await runtimeStream.openView<TData>({
       linkId: link.linkId,
       descriptor: { family: request.family, payload: request.payload },
       sourceId: activeTransportSourceId(),
+    })
+    markSurfaceBootstrap('view_open_done', {
+      family: request.family,
+      viewId: result.viewId,
     })
     openViewIds.add(result.viewId)
     return result

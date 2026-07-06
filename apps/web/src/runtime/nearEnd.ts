@@ -30,6 +30,7 @@ import {
 
 import { authHeaders, baseUrl } from '../api/client'
 import { LOG_EVENTS, syncLogger } from '../logger'
+import { markSurfaceBootstrap } from '../surfaceBootstrapLog'
 
 import { loadLinkWasmModule, type NearEndWasmHandle } from './replica/wasmUtil'
 import type {
@@ -323,7 +324,13 @@ function buildIo() {
 async function createEngine(
   sourceId: string | null | undefined,
 ): Promise<NearEndWasmHandle> {
+  // The near-end engine is compiled into the shared link WASM. Instantiating it
+  // in a *secondary* WebView2 renderer (a surface window) is the platform's one
+  // unvalidated hazard — bracket the load so a frozen surface's last marker
+  // pins the hang here vs after.
+  markSurfaceBootstrap('wasm_load_start')
   const module = await loadLinkWasmModule()
+  markSurfaceBootstrap('wasm_load_done')
   const config = {
     viewDelta: true,
     ...(sourceId ? { sourceId } : {}),
@@ -349,9 +356,11 @@ export function connectNearEnd(options?: {
   }
   engineSourceId = sourceId
   connectPromise = (async () => {
+    markSurfaceBootstrap('near_end_connect_start')
     const handle = await createEngine(sourceId)
     engine = handle
     await handle.connect()
+    markSurfaceBootstrap('near_end_connect_done')
     const linkId = handle.linkId()
     if (!linkId) {
       throw new Error('near-end engine connected without a link id')
