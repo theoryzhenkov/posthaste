@@ -23,14 +23,18 @@ import { LabeledSelect, MailboxSelect } from '../MailboxSelect'
 import { valueTypeForField } from '../helpers'
 import { useConditionEditorData } from './conditionEditorContext'
 import {
+  bytesFromSize,
   dateInputValue,
   pickedRefValue,
   relativeDateValue,
   RELATIVE_UNIT_OPTIONS,
+  SIZE_UNIT_OPTIONS,
+  sizeInputParts,
   splitListValue,
   toRfc3339FromDateInput,
   UNSET_REF,
   type RelativeUnit,
+  type SizeUnit,
 } from './conditionValueFormat'
 
 // ---------------------------------------------------------------------------
@@ -77,6 +81,8 @@ export function ConditionValueEditor({
       return <AccountValueWidget condition={condition} onChange={onChange} />
     case 'roleEnum':
       return <RoleValueWidget condition={condition} onChange={onChange} />
+    case 'size':
+      return <SizeValueWidget condition={condition} onChange={onChange} />
     default:
       // text | keyword | address — the generic text box (honest fallback;
       // keyword/address autocomplete are follow-on slices).
@@ -213,6 +219,51 @@ function DateValueWidget({ condition, onChange }: WidgetProps) {
             </LabeledSelect>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+function SizeValueWidget({ condition, onChange }: WidgetProps) {
+  const initial = sizeInputParts(condition.value)
+  const [amount, setAmount] = useState(initial.amount)
+  const [unit, setUnit] = useState<SizeUnit>(initial.unit)
+
+  return (
+    <div data-testid="value-widget-size" className="grid gap-1 text-[13px]">
+      <div className="flex items-center gap-1.5">
+        <Input
+          type="number"
+          min={0}
+          aria-label="Value"
+          className={INPUT_CLASS}
+          value={amount}
+          placeholder="size"
+          onChange={(event) => {
+            const next = event.target.value
+            setAmount(next)
+            emitValue(condition, onChange, bytesFromSize(Number(next), unit))
+          }}
+        />
+        <LabeledSelect
+          ariaLabel="Unit"
+          value={unit}
+          onValueChange={(value) => {
+            const nextUnit = (value as SizeUnit) ?? 'kb'
+            setUnit(nextUnit)
+            emitValue(
+              condition,
+              onChange,
+              bytesFromSize(Number(amount), nextUnit),
+            )
+          }}
+        >
+          {SIZE_UNIT_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </LabeledSelect>
       </div>
     </div>
   )
