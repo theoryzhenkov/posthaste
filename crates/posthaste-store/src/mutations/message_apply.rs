@@ -29,6 +29,20 @@ pub(crate) fn apply_message_record_tx(
     events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
     let before = fetch_message_before_apply_tx(tx, account_id, &message.id)?;
+    // Address-book maintenance: every newly-ingested message contributes its
+    // sender and all its recipients to the persistent address book. Guarded on
+    // "newly inserted" so a re-applied message (a flag/keyword update re-running
+    // this path) does not double-count the same correspondents.
+    if !before.existed {
+        crate::sender_cache::harvest_addresses_tx(
+            tx,
+            account_id,
+            message.from_name.as_deref(),
+            message.from_email.as_deref(),
+            &message.to,
+            &message.received_at,
+        )?;
+    }
     let conversation_id = assign_conversation_id_tx(tx, account_id, message)?;
 
     upsert_message_record_tx(tx, account_id, message, &conversation_id)?;

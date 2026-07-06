@@ -157,6 +157,12 @@ describe('compose form helpers', () => {
     const cached = [
       { sourceId: 'acct-1', name: 'Cached', email: 'ada@work.com' },
       { sourceId: 'unknown', name: 'Ghost', email: 'x@y.com' },
+      // A within-domain alias (covered by the `*@work.com` catch-all) is a
+      // genuine send identity — kept.
+      { sourceId: 'acct-1', name: 'Alias', email: 'sales@work.com' },
+      // An external correspondent now lives in the address book keyed to this
+      // account. It must NOT become a selectable From identity.
+      { sourceId: 'acct-1', name: 'Bob', email: 'bob@external.com' },
     ] as unknown as CachedSenderAddress[]
 
     const options = accountFromOptions(
@@ -172,6 +178,10 @@ describe('compose form helpers', () => {
     expect(options.some((o) => o.email === '*@work.com')).toBe(false)
     // cached entry for an unknown account is skipped
     expect(options.some((o) => o.email === 'x@y.com')).toBe(false)
+    // an alias within the account's catch-all domain is offered
+    expect(options.some((o) => o.email === 'sales@work.com')).toBe(true)
+    // an external correspondent from the address book is NOT a From identity
+    expect(options.some((o) => o.email === 'bob@external.com')).toBe(false)
     // dedup by sourceId:email — identity + configured + cached all 'ada@work.com'
     // on acct-1 collapse to a single entry
     const adaOnAcct1 = options.filter(

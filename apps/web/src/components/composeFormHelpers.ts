@@ -163,6 +163,20 @@ export function accountFromOptions(
     if (!account) {
       continue
     }
+    // The `senderAddresses` view is now the full address book (every
+    // correspondent, senders AND recipients), not just addresses this user has
+    // sent *from*. The From selector must only offer the user's own sending
+    // identities, so keep a cached address only when it falls inside one of the
+    // account's own email patterns (a concrete identity or a `*@domain`
+    // catch-all) — external correspondents are excluded.
+    const isOwnIdentity = account.emailPatterns.some((pattern) =>
+      isConcreteEmailPattern(pattern)
+        ? pattern.trim().toLowerCase() === cached.email.trim().toLowerCase()
+        : wildcardMatchesEmail(pattern, cached.email),
+    )
+    if (!isOwnIdentity) {
+      continue
+    }
     options.push({
       sourceId: cached.sourceId,
       sourceName: account.name,

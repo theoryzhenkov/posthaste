@@ -158,14 +158,25 @@ describe('ConditionEditor — type-directed value widget', () => {
     expect(queryByTestId('value-widget-text')).toBeNull()
   })
 
-  it('renders the address text box for the To recipient field (parity with fromEmail)', () => {
-    // `to` is an address field: interim widget is the shared text box, same as
-    // fromEmail, emitting the identical string wire shape.
-    const { getByTestId, getByRole } = renderCondition(
+  it('renders the shared address autocomplete for the To recipient field', () => {
+    // `to` is an address field: it now shares the compose recipient
+    // autocomplete (the persistent address book), not a bare text box, while
+    // still emitting the identical string wire shape.
+    const { getByTestId, queryByTestId, getByRole } = renderCondition(
       mkCondition('to', 'contains', ''),
     )
-    expect(getByTestId('value-widget-text')).toBeDefined()
+    expect(getByTestId('value-widget-address')).toBeDefined()
+    expect(queryByTestId('value-widget-text')).toBeNull()
+    // The reused RecipientSuggestionInput is a labelled text input.
     expect(getByRole('textbox', { name: 'Value' })).toBeDefined()
+  })
+
+  it('renders the shared address autocomplete for the fromEmail field', () => {
+    const { getByTestId, queryByTestId } = renderCondition(
+      mkCondition('fromEmail', 'contains', ''),
+    )
+    expect(getByTestId('value-widget-address')).toBeDefined()
+    expect(queryByTestId('value-widget-text')).toBeNull()
   })
 
   it('shows the existing stored value in the reused picker even with no account context', () => {

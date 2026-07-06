@@ -1,5 +1,6 @@
 import type {
   AccountOverview,
+  CachedSenderAddress,
   ConversationPage,
   ConversationSummary,
 } from './api/types'
@@ -61,6 +62,37 @@ export function buildRecipientSuggestionOptions(
     seen.add(key)
     return true
   })
+}
+
+/**
+ * Map the persistent server-side address book (`senderAddresses` view) into the
+ * same suggestion options the compose recipient inputs consume, so the rules
+ * editor's address fields share one autocomplete engine with compose. Filters
+ * non-concrete addresses and de-dupes by lowercased email.
+ */
+export function buildAddressBookSuggestionOptions(
+  addresses: CachedSenderAddress[],
+): AddressSuggestionOption[] {
+  const seen = new Set<string>()
+  const options: AddressSuggestionOption[] = []
+  for (const address of addresses) {
+    const email = address.email.trim()
+    if (!isConcreteEmailAddress(email)) {
+      continue
+    }
+    const key = email.toLowerCase()
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    options.push({
+      name: address.name,
+      email,
+      sourceLabel: 'Address book',
+      origin: 'correspondent',
+    })
+  }
+  return options
 }
 
 export function filterAddressSuggestions(
