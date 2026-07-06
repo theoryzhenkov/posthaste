@@ -4,6 +4,7 @@ import type {
   AutomationRulePreviewInput,
   AutomationRulePreviewResponse,
   CreateAccountInput,
+  CreateMailboxInput,
   CreateSmartMailboxInput,
   Mailbox,
   MessageCommandResult,
@@ -131,6 +132,9 @@ export const runtimeMutations = {
       input: PatchMailboxInput,
     ): Promise<Mailbox[]> {
       return getRuntimeAdapter().patchMailbox(accountId, mailboxId, input)
+    },
+    create(accountId: string, input: CreateMailboxInput): Promise<Mailbox[]> {
+      return getRuntimeAdapter().createMailbox(accountId, input)
     },
   },
   messages: {

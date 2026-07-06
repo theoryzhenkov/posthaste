@@ -139,6 +139,23 @@ impl MailGateway for LiveImapSmtpGateway {
         })
     }
 
+    async fn create_mailbox(
+        &self,
+        _account_id: &AccountId,
+        name: &str,
+    ) -> Result<MailboxId, GatewayError> {
+        let mut lease = self
+            .sessions
+            .acquire("create_mailbox")
+            .await
+            .map_err(imap_error_to_gateway)?;
+        let result = crate::mailbox::create_imap_mailbox(lease.client(), name).await;
+        lease
+            .finish(result)
+            .map_err(imap_error_to_gateway)
+            .map(|()| crate::imap_mailbox_id(name))
+    }
+
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Ok(Identity {
             id: "imap-smtp-default".to_string(),

@@ -98,6 +98,37 @@ impl MailService {
         self.sync_account(account_id, SyncTrigger::Manual, gateway, None)
             .await
     }
+
+    /// Create a new top-level mailbox on the provider and refresh the local
+    /// mailbox projection so it surfaces in the sidebar.
+    ///
+    /// Mailbox mutations are synchronous, not optimistic (mirroring
+    /// [`set_mailbox_role`](Self::set_mailbox_role)): a blocking provider
+    /// round-trip creates the mailbox, then a resync reads it back. Flat create
+    /// only — no parent (nesting is out of scope).
+    ///
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    pub async fn create_mailbox(
+        &self,
+        account_id: &AccountId,
+        name: &str,
+        gateway: &dyn MailGateway,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let mailbox_id = gateway.create_mailbox(account_id, name).await?;
+        let created_event = self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MAILBOX_UPDATED,
+            Some(&mailbox_id),
+            None,
+            json!({ "mailboxId": mailbox_id.as_str() }),
+        )?;
+        let mut events = vec![created_event];
+        events.extend(
+            self.sync_account(account_id, SyncTrigger::Manual, gateway, None)
+                .await?,
+        );
+        Ok(events)
+    }
 }
 
 /// Whether `role` is a provider-native mailbox role (one JMAP/IMAP accepts on

@@ -7,6 +7,7 @@ import type {
   ConversationPage,
   ConversationView,
   CreateAccountInput,
+  CreateMailboxInput,
   CreateSmartMailboxInput,
   DraftContent,
   Mailbox,
@@ -442,6 +443,10 @@ export interface RuntimeAdapter {
     accountId: string,
     mailboxId: string,
     input: PatchMailboxInput,
+  ): Promise<Mailbox[]>
+  createMailbox(
+    accountId: string,
+    input: CreateMailboxInput,
   ): Promise<Mailbox[]>
   patchSettings(input: PatchSettingsInput): Promise<AppSettings>
   previewAutomationRule(

@@ -214,6 +214,16 @@ impl MailGateway for ScriptedGateway {
         ))
     }
 
+    async fn create_mailbox(
+        &self,
+        _account_id: &AccountId,
+        _name: &str,
+    ) -> Result<MailboxId, GatewayError> {
+        Err(GatewayError::Rejected(
+            "unused in automation tests".to_string(),
+        ))
+    }
+
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Err(GatewayError::Rejected(
             "unused in automation tests".to_string(),

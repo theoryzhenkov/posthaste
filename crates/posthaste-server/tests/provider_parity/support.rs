@@ -154,6 +154,14 @@ impl MailGateway for StaticGateway {
         Err(GatewayError::Rejected("unused".to_string()))
     }
 
+    async fn create_mailbox(
+        &self,
+        _account_id: &AccountId,
+        _name: &str,
+    ) -> Result<MailboxId, GatewayError> {
+        Err(GatewayError::Rejected("unused".to_string()))
+    }
+
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Ok(Identity {
             id: "identity".to_string(),

@@ -74,6 +74,39 @@ fn set_mailbox_role_request_clears_role() {
 }
 
 #[test]
+fn create_mailbox_request_builds_flat_create_with_name_and_no_parent() {
+    let request = create_mailbox_request_body("account-1", "Receipts");
+
+    let create = &request["methodCalls"][0][1]["create"][CREATE_MAILBOX_CREATE_ID];
+    assert_eq!(create["name"], Value::String("Receipts".to_string()));
+    // Flat create: no parentId is sent.
+    assert!(
+        create.get("parentId").is_none(),
+        "a flat create must not carry a parentId"
+    );
+    assert_eq!(request["methodCalls"][0][0], "Mailbox/set");
+    // A create carries no `ifInState`/`update` — those are the role-patch path.
+    assert!(request["methodCalls"][0][1].get("update").is_none());
+}
+
+#[test]
+fn created_mailbox_id_parses_server_id_from_created_map() {
+    let response: jmap_client::core::response::MailboxSetResponse = serde_json::from_value(json!({
+        "accountId": "account-1",
+        "oldState": "mailbox-1",
+        "newState": "mailbox-2",
+        "created": {
+            CREATE_MAILBOX_CREATE_ID: { "id": "MB123", "name": "Receipts" }
+        }
+    }))
+    .expect("create response should deserialize");
+
+    let id = created_mailbox_id(response, CREATE_MAILBOX_CREATE_ID)
+        .expect("the created server id should parse");
+    assert_eq!(id.as_str(), "MB123");
+}
+
+#[test]
 fn set_keywords_outcome_requires_target_id_to_be_updated() {
     let response: jmap_client::core::response::EmailSetResponse = serde_json::from_value(json!({
         "accountId": "account-1",
