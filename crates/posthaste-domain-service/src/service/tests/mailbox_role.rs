@@ -46,3 +46,33 @@ async fn standard_role_still_uses_the_gateway() {
         "a standard role goes through the gateway (which rejects here)"
     );
 }
+
+#[tokio::test]
+async fn create_mailbox_creates_then_resyncs() {
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    // `create_mailbox` runs a blocking gateway create then a resync readback.
+    // An (empty) sync batch lets that readback complete — in production the
+    // batch carries the new mailbox; the mock gateway mints a deterministic id
+    // (`mb-<name>`) so we can assert it threaded into the emitted event.
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    let account = AccountId::from("primary");
+
+    let events = service
+        .create_mailbox(&account, "Receipts", &gateway)
+        .await
+        .expect("create should succeed");
+
+    let created = events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MAILBOX_UPDATED)
+        .expect("a mailbox-updated event is emitted for the created mailbox");
+    assert_eq!(
+        created.payload["mailboxId"], "mb-Receipts",
+        "the event carries the id the gateway minted for the new mailbox"
+    );
+    assert_eq!(
+        created.mailbox_id.as_ref().map(MailboxId::as_str),
+        Some("mb-Receipts"),
+    );
+}

@@ -579,6 +579,16 @@ pub trait AuthorityServerApi: Send + Sync {
         Err(write_channel_unsupported())
     }
 
+    /// Write: create a new top-level mailbox, returning the account's mailboxes.
+    async fn create_mailbox(
+        &self,
+        account_id: AccountId,
+        name: String,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        let _ = (account_id, name);
+        Err(write_channel_unsupported())
+    }
+
     /// Write: queue a local-first send for an account.
     async fn send_message(
         &self,
@@ -968,6 +978,10 @@ macro_rules! for_each_link_api_op {
                 account_id: $crate::reexport::AccountId,
                 mailbox_id: $crate::reexport::MailboxId,
                 role: Option<String>
+            } => Vec<$crate::reexport::MailboxSummary>;
+            create_mailbox => "/v1/link/create-mailbox" => CreateMailboxRequest {
+                account_id: $crate::reexport::AccountId,
+                name: String
             } => Vec<$crate::reexport::MailboxSummary>;
             send_message => "/v1/link/send-message" => SendMessageLinkRequest {
                 account_id: $crate::reexport::AccountId,

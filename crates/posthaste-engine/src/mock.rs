@@ -481,6 +481,29 @@ impl MailGateway for MockJmapGateway {
         Ok(mutation_outcome(&state, SyncObject::Mailbox))
     }
 
+    /// Create a mock mailbox and return its id. The new record surfaces on the
+    /// next `sync`, mirroring the readback the service performs after a create.
+    async fn create_mailbox(
+        &self,
+        _account_id: &AccountId,
+        name: &str,
+    ) -> Result<MailboxId, GatewayError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
+        let id = MailboxId::from(format!("mb-{name}").as_str());
+        state.mailboxes.push(MailboxRecord {
+            id: id.clone(),
+            name: name.to_string(),
+            role: None,
+            unread_emails: 0,
+            total_emails: 0,
+        });
+        bump_revision(&mut state);
+        Ok(id)
+    }
+
     /// Return a hard-coded mock sender identity.
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Ok(Identity {

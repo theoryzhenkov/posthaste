@@ -41,6 +41,30 @@ export const commandOperations: Operation[] = [
   }),
 
   defineOperation({
+    mcpName: "create_mailbox",
+    title: "Create mailbox",
+    description:
+      "Create a new top-level mailbox (folder/label) on a source and return " +
+      "the source's refreshed mailbox list.",
+    mutates: true,
+    cli: { path: ["mailboxes", "create"], primary: "sourceId" },
+    argSchema: {
+      sourceId: z.string(),
+      name: z.string(),
+    },
+    handler: (conn, args) => {
+      const body: Schemas["CreateMailboxRequest"] = {
+        name: args.name,
+      };
+      return apiFetch<Schemas["MailboxSummary"][]>(
+        conn,
+        `/sources/${encodeURIComponent(args.sourceId)}/mailboxes`,
+        { method: "POST", body },
+      );
+    },
+  }),
+
+  defineOperation({
     mcpName: "set_keywords",
     title: "Set keywords",
     description:

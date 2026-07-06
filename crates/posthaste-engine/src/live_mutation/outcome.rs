@@ -25,6 +25,19 @@ pub(crate) fn mailbox_mutation_outcome(
     sync_object_mutation_outcome(SyncObject::Mailbox, response.new_state().to_string())
 }
 
+/// Parse the server id of a mailbox created under `create_id` from a
+/// `Mailbox/set` response. A `notCreated` entry surfaces as a typed rejection.
+pub(crate) fn created_mailbox_id(
+    mut response: jmap_client::core::response::MailboxSetResponse,
+    create_id: &str,
+) -> Result<MailboxId, GatewayError> {
+    let created = response.created(create_id).map_err(map_gateway_error)?;
+    created
+        .id()
+        .map(MailboxId::from)
+        .ok_or_else(|| GatewayError::Rejected("Mailbox/set create returned no id".to_string()))
+}
+
 /// Build a `MutationOutcome` with a message-type sync cursor from the server's new state string.
 ///
 /// @spec docs/L1-jmap#core-types

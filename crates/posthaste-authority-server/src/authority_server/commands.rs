@@ -236,6 +236,20 @@ impl AuthorityServer {
         Ok(self.service.list_mailboxes(&account_id)?)
     }
 
+    pub(crate) async fn create_mailbox(
+        &self,
+        account_id: AccountId,
+        name: String,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        let gateway = self.live_accounts.gateway(&account_id).await?;
+        let events = self
+            .service
+            .create_mailbox(&account_id, &name, gateway.as_ref())
+            .await?;
+        self.publish_events(&events);
+        Ok(self.service.list_mailboxes(&account_id)?)
+    }
+
     /// Write: queue a local-first send and nudge a flush. No live gateway is
     /// required to accept it; it flushes on the next connectivity window.
     pub(crate) async fn send_message(

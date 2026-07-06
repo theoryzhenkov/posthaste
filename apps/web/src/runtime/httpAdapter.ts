@@ -7,6 +7,7 @@ import {
   closeRuntimeLink,
   closeRuntimeLinkView,
   createAccount,
+  createMailbox,
   createRule,
   createSmartMailbox,
   deleteAccount,
@@ -335,6 +336,9 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   patchMailbox(accountId, mailboxId, input) {
     return patchMailbox(accountId, mailboxId, input)
+  },
+  createMailbox(accountId, input) {
+    return createMailbox(accountId, input)
   },
   patchSettings(input) {
     return patchSettings(input)

@@ -262,6 +262,9 @@ export function createFakeRuntimeAdapter(
     patchMailbox() {
       return unsupported('mailbox patch result')
     },
+    createMailbox() {
+      return unsupported('mailbox create result')
+    },
     patchSettings() {
       return unsupported('settings')
     },
