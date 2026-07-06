@@ -10,12 +10,49 @@
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-import type { SmartMailboxValue } from '../../../api/types'
+import type { DateUnit, DateValue, SmartMailboxValue } from '../../../api/types'
 
-/** Extract the `YYYY-MM-DD` a native date input wants from a stored value. */
+/** True when a value is the typed absolute-date object `{ kind:'absolute' }`. */
+function isAbsoluteDate(
+  value: SmartMailboxValue,
+): value is { kind: 'absolute'; value: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    value.kind === 'absolute'
+  )
+}
+
+/** True when a value is the typed relative-date object `{ kind:'relative' }`. */
+function isRelativeDate(
+  value: SmartMailboxValue,
+): value is { kind: 'relative'; amount: number; unit: DateUnit } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    value.kind === 'relative'
+  )
+}
+
+/**
+ * Which date sub-editor a stored value maps to. A `relative` object edits as a
+ * rolling offset; everything else (a typed `absolute`, or a legacy bare RFC3339
+ * string) edits as an absolute date.
+ */
+export function dateValueMode(
+  value: SmartMailboxValue,
+): 'absolute' | 'relative' {
+  return isRelativeDate(value) ? 'relative' : 'absolute'
+}
+
+/** Extract the `YYYY-MM-DD` a native date input wants from a stored value.
+ *  Reads both a legacy bare RFC3339 string and the typed `{kind:'absolute'}`. */
 export function dateInputValue(value: SmartMailboxValue): string {
-  if (typeof value !== 'string') return ''
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})/)
+  const raw =
+    typeof value === 'string' ? value : isAbsoluteDate(value) ? value.value : ''
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/)
   return match ? match[1] : ''
 }
 
@@ -25,34 +62,52 @@ export function toRfc3339FromDateInput(dateStr: string): string {
   return dateStr ? `${dateStr}T00:00:00Z` : ''
 }
 
+/** Build the typed absolute-date value from a native date input string. */
+export function absoluteDateValue(dateStr: string): DateValue {
+  return { kind: 'absolute', value: toRfc3339FromDateInput(dateStr) }
+}
+
+/** The relative units the editor offers (a subset of the wire `DateUnit`). */
 export type RelativeUnit = 'days' | 'weeks' | 'months'
 
+// Bare unit labels: the surrounding reading ("in the last N …" / "more than N …
+// ago") already supplies the direction, so the unit must NOT read "days ago".
 export const RELATIVE_UNIT_OPTIONS: { value: RelativeUnit; label: string }[] = [
-  { value: 'days', label: 'days ago' },
-  { value: 'weeks', label: 'weeks ago' },
-  { value: 'months', label: 'months ago' },
+  { value: 'days', label: 'days' },
+  { value: 'weeks', label: 'weeks' },
+  { value: 'months', label: 'months' },
 ]
 
 /**
- * Resolve a relative "N units ago" selection to an absolute RFC3339 string.
- * The smart-mailbox evaluator compares stored values literally, so relative
- * input is resolved to an absolute timestamp at edit time.
+ * Build a typed *relative* date value, stored AS-IS. Unlike the old helper,
+ * this does NOT resolve the offset to an absolute timestamp at edit time — the
+ * `{ kind:'relative', amount, unit }` shape is persisted so the evaluator
+ * resolves it against `now` at query time and the window keeps rolling. This is
+ * the relative-date freeze bug fix.
  */
 export function relativeDateValue(
   amount: number,
   unit: RelativeUnit,
-  now: Date,
-): string {
-  const shifted = new Date(now.getTime())
-  const n = Number.isFinite(amount) ? amount : 0
-  if (unit === 'weeks') {
-    shifted.setUTCDate(shifted.getUTCDate() - n * 7)
-  } else if (unit === 'months') {
-    shifted.setUTCMonth(shifted.getUTCMonth() - n)
-  } else {
-    shifted.setUTCDate(shifted.getUTCDate() - n)
+): DateValue {
+  const n = Number.isFinite(amount) && amount >= 0 ? Math.trunc(amount) : 0
+  return { kind: 'relative', amount: n, unit }
+}
+
+/** Best-effort read of a stored relative value into editable amount/unit parts
+ *  (defaults to `7 days` for a fresh/non-relative value). */
+export function relativeParts(value: SmartMailboxValue): {
+  amount: string
+  unit: RelativeUnit
+} {
+  if (isRelativeDate(value)) {
+    const unit = (['days', 'weeks', 'months'] as RelativeUnit[]).includes(
+      value.unit as RelativeUnit,
+    )
+      ? (value.unit as RelativeUnit)
+      : 'days'
+    return { amount: String(value.amount), unit }
   }
-  return shifted.toISOString().replace(/\.\d{3}Z$/, 'Z')
+  return { amount: '7', unit: 'days' }
 }
 
 /** Sentinel a picker uses for "nothing chosen"; maps back to the empty string. */

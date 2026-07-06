@@ -7,10 +7,13 @@ import {
   valueTypeForField,
 } from '../src/components/settings-panel/helpers/fieldRegistry'
 import {
+  absoluteDateValue,
   bytesFromSize,
   dateInputValue,
+  dateValueMode,
   pickedRefValue,
   relativeDateValue,
+  relativeParts,
   sizeInputParts,
   splitListValue,
   toRfc3339FromDateInput,
@@ -64,29 +67,75 @@ describe('fieldRegistry', () => {
 })
 
 describe('date value helpers', () => {
-  it('extracts YYYY-MM-DD from a stored RFC3339 value', () => {
+  it('extracts YYYY-MM-DD from a legacy bare string AND a typed absolute date', () => {
+    // Legacy bare RFC3339 string (pre-R5a stored value) still loads for editing.
     expect(dateInputValue('2026-07-06T00:00:00Z')).toBe('2026-07-06')
     expect(dateInputValue('2026-07-06')).toBe('2026-07-06')
+    // Typed absolute date object.
+    expect(
+      dateInputValue({ kind: 'absolute', value: '2026-07-06T00:00:00Z' }),
+    ).toBe('2026-07-06')
     expect(dateInputValue('')).toBe('')
-    // Non-string (boolean / array) never crashes the date input.
+    // Non-string (boolean / array / relative) never crashes the date input.
     expect(dateInputValue(true)).toBe('')
     expect(dateInputValue(['a'])).toBe('')
+    expect(dateInputValue({ kind: 'relative', amount: 7, unit: 'days' })).toBe(
+      '',
+    )
   })
 
-  it('emits an RFC3339 string from a native date input (string wire shape)', () => {
+  it('emits an RFC3339 string from a native date input', () => {
     const emitted = toRfc3339FromDateInput('2026-07-06')
     expect(emitted).toBe('2026-07-06T00:00:00Z')
     expect(typeof emitted).toBe('string')
     expect(toRfc3339FromDateInput('')).toBe('')
   })
 
-  it('resolves "N units ago" to an absolute RFC3339 string', () => {
-    const now = new Date('2026-07-06T12:34:56.000Z')
-    expect(relativeDateValue(7, 'days', now)).toBe('2026-06-29T12:34:56Z')
-    expect(relativeDateValue(2, 'weeks', now)).toBe('2026-06-22T12:34:56Z')
-    expect(relativeDateValue(1, 'months', now)).toBe('2026-06-06T12:34:56Z')
-    // No fractional-millis suffix, matching the stored received_at format.
-    expect(relativeDateValue(1, 'days', now)).not.toContain('.')
+  it('the absolute widget emits a typed { kind:"absolute" } value', () => {
+    expect(absoluteDateValue('2026-07-06')).toEqual({
+      kind: 'absolute',
+      value: '2026-07-06T00:00:00Z',
+    })
+  })
+
+  it('the relative widget stores { kind:"relative", amount, unit } AS-IS — NOT a frozen date', () => {
+    // The bug fix: no `new Date()` freeze. The offset is persisted verbatim so
+    // the evaluator rolls it against `now` at query time.
+    const emitted = relativeDateValue(7, 'days')
+    expect(emitted).toEqual({ kind: 'relative', amount: 7, unit: 'days' })
+    // It must NOT be a resolved absolute string (the old freeze behavior).
+    expect(typeof emitted).not.toBe('string')
+    // Normalizes a blank/negative amount to 0, never NaN.
+    expect(relativeDateValue(Number.NaN, 'weeks')).toEqual({
+      kind: 'relative',
+      amount: 0,
+      unit: 'weeks',
+    })
+  })
+
+  it('classifies stored values into the right sub-editor mode', () => {
+    expect(dateValueMode({ kind: 'relative', amount: 7, unit: 'days' })).toBe(
+      'relative',
+    )
+    expect(
+      dateValueMode({ kind: 'absolute', value: '2026-07-06T00:00:00Z' }),
+    ).toBe('absolute')
+    // A legacy bare string edits as absolute.
+    expect(dateValueMode('2026-07-06T00:00:00Z')).toBe('absolute')
+  })
+
+  it('reads a stored relative value back into editable amount/unit parts', () => {
+    expect(
+      relativeParts({ kind: 'relative', amount: 3, unit: 'weeks' }),
+    ).toEqual({
+      amount: '3',
+      unit: 'weeks',
+    })
+    // A non-relative value defaults to 7 days.
+    expect(relativeParts('2026-07-06T00:00:00Z')).toEqual({
+      amount: '7',
+      unit: 'days',
+    })
   })
 })
 
@@ -149,15 +198,31 @@ describe('emitted condition JSON — wire-shape parity vs the old text box', () 
     value,
   })
 
-  it('date widget emits a string (was: hand-typed string)', () => {
+  it('absolute date widget emits a typed { kind:"absolute" } value', () => {
     const emitted = {
       ...base('receivedAt', 'before', ''),
-      value: toRfc3339FromDateInput('2026-07-06'),
+      value: absoluteDateValue('2026-07-06'),
     }
     expect(emitted).toEqual(
-      base('receivedAt', 'before', '2026-07-06T00:00:00Z'),
+      base('receivedAt', 'before', {
+        kind: 'absolute',
+        value: '2026-07-06T00:00:00Z',
+      }),
     )
-    expect(typeof emitted.value).toBe('string')
+  })
+
+  it('relative date widget emits a rolling { kind:"relative" } value (no freeze)', () => {
+    const emitted = {
+      ...base('receivedAt', 'after', ''),
+      value: relativeDateValue(7, 'days'),
+    }
+    expect(emitted).toEqual(
+      base('receivedAt', 'after', {
+        kind: 'relative',
+        amount: 7,
+        unit: 'days',
+      }),
+    )
   })
 
   it('mailbox / account / role pickers emit a string (was: hand-typed id)', () => {
