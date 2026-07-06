@@ -27,6 +27,7 @@ import {
 import { SmartMailboxAutomationFields } from './AutomationActionsEditor'
 import { EMPTY_SMART_MAILBOX_FORM, formFromSmartMailbox } from './helpers'
 import { RuleGroupEditor } from './RuleGroupEditor'
+import { ConditionEditorContext } from './rule-group/conditionEditorContext'
 import {
   FeedbackBanner,
   Field,
@@ -184,12 +185,16 @@ export function SmartMailboxEditor({
       </SettingsSection>
 
       <SettingsSection title="Rules">
-        <RuleGroupEditor
-          group={form.rule.root}
-          onChange={(root) =>
-            setForm((current) => ({ ...current, rule: { root } }))
-          }
-        />
+        <ConditionEditorContext.Provider
+          value={{ accountId: '', mailboxes: null, accounts }}
+        >
+          <RuleGroupEditor
+            group={form.rule.root}
+            onChange={(root) =>
+              setForm((current) => ({ ...current, rule: { root } }))
+            }
+          />
+        </ConditionEditorContext.Provider>
       </SettingsSection>
 
       {editorTarget !== 'new' &&
