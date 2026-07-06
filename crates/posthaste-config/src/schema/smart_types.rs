@@ -92,9 +92,11 @@ pub enum FieldToml {
     Keyword,
     FromName,
     FromEmail,
+    To,
     Subject,
     Preview,
     ReceivedAt,
+    Size,
 }
 
 /// Comparison operators for smart mailbox conditions.

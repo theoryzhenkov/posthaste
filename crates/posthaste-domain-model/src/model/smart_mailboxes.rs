@@ -55,9 +55,17 @@ pub enum SmartMailboxField {
     Keyword,
     FromName,
     FromEmail,
+    /// Recipient (`To`) address or display name, matched against the stored
+    /// `to_json` recipient list. Cc/Bcc are not projected as separate columns
+    /// today, so only the `To` recipient set is queryable (see field compiler).
+    To,
     Subject,
     Preview,
     ReceivedAt,
+    /// Message byte size (`message.size`), compared numerically. Reuses the
+    /// inequality operators (`Before`/`After`/`OnOrBefore`/`OnOrAfter`) as
+    /// `< > <= >=`; the emitted value is a byte count encoded as a string.
+    Size,
 }
 
 /// Comparison operator for a smart mailbox condition.

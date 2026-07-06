@@ -64,9 +64,11 @@ export const FIELD_OPTIONS: Array<{ value: SmartMailboxField; label: string }> =
     { value: 'keyword', label: 'Keyword' },
     { value: 'fromName', label: 'From name' },
     { value: 'fromEmail', label: 'From email' },
+    { value: 'to', label: 'To (recipient)' },
     { value: 'subject', label: 'Subject' },
     { value: 'preview', label: 'Preview' },
     { value: 'receivedAt', label: 'Received at' },
+    { value: 'size', label: 'Size' },
   ]
 
 /** @spec docs/L1-search#smart-mailbox-data-model */

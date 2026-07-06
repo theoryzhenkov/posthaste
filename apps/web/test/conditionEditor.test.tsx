@@ -147,6 +147,27 @@ describe('ConditionEditor — type-directed value widget', () => {
     expect(queryByTestId('value-widget-mailbox')).toBeNull()
   })
 
+  it('renders the number+unit widget for the size field (not a bare text box)', () => {
+    const { getByTestId, getByRole, queryByTestId } = renderCondition(
+      mkCondition('size', 'after', ''),
+    )
+    expect(getByTestId('value-widget-size')).toBeDefined()
+    // A numeric amount input plus a unit combobox — the "size + unit" case.
+    expect(getByRole('spinbutton', { name: 'Value' })).toBeDefined()
+    expect(getByRole('combobox', { name: 'Unit' })).toBeDefined()
+    expect(queryByTestId('value-widget-text')).toBeNull()
+  })
+
+  it('renders the address text box for the To recipient field (parity with fromEmail)', () => {
+    // `to` is an address field: interim widget is the shared text box, same as
+    // fromEmail, emitting the identical string wire shape.
+    const { getByTestId, getByRole } = renderCondition(
+      mkCondition('to', 'contains', ''),
+    )
+    expect(getByTestId('value-widget-text')).toBeDefined()
+    expect(getByRole('textbox', { name: 'Value' })).toBeDefined()
+  })
+
   it('shows the existing stored value in the reused picker even with no account context', () => {
     // Smart-mailbox editor path: no account scope, but a previously-saved
     // mailbox id must still round-trip (interim: picker with the raw id shown).

@@ -30,8 +30,8 @@ bimap_enum!(SmartMailboxKindToml => SmartMailboxKind { Default, User });
 bimap_enum!(GroupOperatorToml => SmartMailboxGroupOperator { All, Any });
 bimap_enum!(FieldToml => SmartMailboxField {
     SourceId, SourceName, MessageId, ThreadId, ConversationId, MailboxId, MailboxName,
-    MailboxRole, IsRead, IsFlagged, HasAttachment, Keyword, FromName, FromEmail, Subject,
-    Preview, ReceivedAt,
+    MailboxRole, IsRead, IsFlagged, HasAttachment, Keyword, FromName, FromEmail, To, Subject,
+    Preview, ReceivedAt, Size,
 });
 bimap_enum!(ConditionOperatorToml => SmartMailboxOperator {
     Equals, In, Contains, Before, After, OnOrBefore, OnOrAfter,

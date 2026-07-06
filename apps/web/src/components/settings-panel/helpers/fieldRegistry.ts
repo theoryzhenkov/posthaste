@@ -20,6 +20,7 @@ export type ConditionValueType =
   | 'roleEnum'
   | 'keyword'
   | 'address'
+  | 'size'
 
 /** Descriptor for a single condition field: its value type + allowed operators. */
 export interface FieldDescriptor {
@@ -37,6 +38,14 @@ const ID_OPERATORS: SmartMailboxOperator[] = ['equals', 'in']
 const TEXT_OPERATORS: SmartMailboxOperator[] = ['equals', 'contains', 'in']
 const BOOL_OPERATORS: SmartMailboxOperator[] = ['equals']
 const DATE_OPERATORS: SmartMailboxOperator[] = [
+  'before',
+  'after',
+  'onOrBefore',
+  'onOrAfter',
+]
+// Numeric size comparison reuses the four inequality operators as `< > <= >=`
+// (the Rust `compile_numeric_field` matrix), so the wire enum stays unchanged.
+const SIZE_OPERATORS: SmartMailboxOperator[] = [
   'before',
   'after',
   'onOrBefore',
@@ -68,9 +77,16 @@ export const FIELD_REGISTRY: Record<SmartMailboxField, FieldDescriptor> = {
   // the condition editor yet); interim value type is `address` → text box.
   fromName: { valueType: 'address', operators: TEXT_OPERATORS },
   fromEmail: { valueType: 'address', operators: TEXT_OPERATORS },
+  // Recipient (To) address field — matched against `to_json` (Cc/Bcc are not
+  // stored as separate columns, so only To is queryable). Same operators and
+  // wire shape as fromEmail; interim widget is the address text box.
+  to: { valueType: 'address', operators: TEXT_OPERATORS },
   subject: { valueType: 'text', operators: TEXT_OPERATORS },
   preview: { valueType: 'text', operators: TEXT_OPERATORS },
   receivedAt: { valueType: 'date', operators: DATE_OPERATORS },
+  // Byte size + unit widget; emits a byte-count string the numeric compiler
+  // parses (`compile_numeric_field` on `message.size`).
+  size: { valueType: 'size', operators: SIZE_OPERATORS },
 }
 
 /** The value type that drives the type-directed widget for a field. */

@@ -110,6 +110,91 @@ pub(super) fn compile_date_field(
     Ok(format!("{column} {comparator} ?"))
 }
 
+/// Compiles a numeric-comparison condition against an integer column (used for
+/// `size`). The `Before/After/OnOrBefore/OnOrAfter` operators are reused as the
+/// numeric `< > <= >=` comparators (mirroring the date compiler's shape, but
+/// binding an integer so SQLite compares numerically, not lexicographically).
+/// The wire value is a byte count encoded as a string.
+pub(super) fn compile_numeric_field(
+    column: &str,
+    condition: &SmartMailboxCondition,
+    params: &mut Vec<SqlValue>,
+) -> Result<String, StoreError> {
+    let comparator = match condition.operator {
+        SmartMailboxOperator::Before => "<",
+        SmartMailboxOperator::After => ">",
+        SmartMailboxOperator::OnOrBefore => "<=",
+        SmartMailboxOperator::OnOrAfter => ">=",
+        _ => {
+            return Err(StoreError::Failure(format!(
+                "unsupported operator {:?} for field {:?}",
+                condition.operator, condition.field
+            )))
+        }
+    };
+    let raw = expect_string_value(&condition.value)?;
+    let number = raw.trim().parse::<i64>().map_err(|_| {
+        StoreError::Failure(format!(
+            "expected integer smart mailbox value for field {:?}, got {raw:?}",
+            condition.field
+        ))
+    })?;
+    params.push(SqlValue::Integer(number));
+    Ok(format!("{column} {comparator} ?"))
+}
+
+/// Compiles an address condition against a JSON recipient column (`to_json`, a
+/// JSON array of `{ "name": ..., "email": ... }`). Uses `json_each` so matching
+/// is per-recipient and structured rather than a blob `LIKE`:
+/// - `Equals` matches a recipient whose email equals the value exactly;
+/// - `Contains` matches a substring of either the email or the display name
+///   (case-insensitive), mirroring how the `from:` grammar expansion searches
+///   both address parts;
+/// - `In` matches a recipient whose email is any of the listed values.
+pub(super) fn compile_recipient_json_field(
+    column: &str,
+    condition: &SmartMailboxCondition,
+    params: &mut Vec<SqlValue>,
+) -> Result<String, StoreError> {
+    let predicate = match condition.operator {
+        SmartMailboxOperator::Equals => {
+            params.push(SqlValue::Text(
+                expect_string_value(&condition.value)?.to_string(),
+            ));
+            "json_extract(r.value, '$.email') = ?".to_string()
+        }
+        SmartMailboxOperator::Contains => {
+            let needle = format!(
+                "%{}%",
+                expect_string_value(&condition.value)?.to_lowercase()
+            );
+            // Bind twice: once for the email part, once for the display name.
+            params.push(SqlValue::Text(needle.clone()));
+            params.push(SqlValue::Text(needle));
+            "(LOWER(COALESCE(json_extract(r.value, '$.email'), '')) LIKE ?\n                  \
+             OR LOWER(COALESCE(json_extract(r.value, '$.name'), '')) LIKE ?)"
+                .to_string()
+        }
+        SmartMailboxOperator::In => {
+            let values = expect_strings_value(&condition.value)?;
+            if values.is_empty() {
+                return Ok("1 = 0".to_string());
+            }
+            let placeholders = push_placeholders(values, params);
+            format!("json_extract(r.value, '$.email') IN ({placeholders})")
+        }
+        _ => {
+            return Err(StoreError::Failure(format!(
+                "unsupported operator {:?} for field {:?}",
+                condition.operator, condition.field
+            )))
+        }
+    };
+    Ok(format!(
+        "EXISTS (\n                SELECT 1\n                FROM json_each({column}) r\n                WHERE {predicate}\n            )"
+    ))
+}
+
 /// Compiles a boolean field equality check (integer 0/1).
 pub(super) fn compile_bool_field(
     column: &str,
