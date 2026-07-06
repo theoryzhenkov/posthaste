@@ -31,6 +31,10 @@ import { useDesktopUpdates } from './hooks/useDesktopUpdates'
 import { useReplicaDatabaseReloadPrompt } from './hooks/useReplicaDatabaseReloadPrompt'
 import { AppearanceSettingsSync } from './hooks/useAppearanceSettingsSync'
 import { useSurfaceRouteState } from './hooks/useSurfaceRouting'
+import {
+  markSurfaceBootstrap,
+  markSurfaceBootstrapOnce,
+} from './surfaceBootstrapLog'
 
 function DaemonEventBridge() {
   useDaemonEvents()
@@ -83,6 +87,15 @@ export default function App() {
   const isStandaloneSurface =
     isTauriRuntime() && routeState.kind !== 'none' && !isMainDesktopWindow()
 
+  markSurfaceBootstrapOnce('app_render', {
+    isStandaloneSurface,
+    routeKind: routeState.kind,
+    surfaceKind: routeSurface?.kind ?? null,
+  })
+  useEffect(() => {
+    markSurfaceBootstrap('app_mounted', { isStandaloneSurface })
+  }, [isStandaloneSurface])
+
   useDeveloperToolsShortcut()
   useDesktopUpdates()
   useReplicaDatabaseReloadPrompt()
@@ -92,9 +105,18 @@ export default function App() {
       <DesignThemeProvider writeThrough>
         <AppearanceSettingsSync />
         <ActiveConnectionProvider>
-          <DaemonEventBridge
-            key={isStandaloneSurface ? 'standalone' : 'mail'}
-          />
+          {/* The live domain-event link (frame stream + accountStatus view)
+              rides the near-end ENGINE, which instantiates the shared link WASM
+              in this window's renderer. A standalone surface renders no mail
+              list and reads all its data over plain REST (fetchSettings/
+              fetchAccounts/…), so it needs NONE of this — and instantiating /
+              driving that WASM in a *secondary* WebView2 renderer is the
+              platform's one unvalidated hazard (the same one the entity-store
+              gate dodges in adapter.ts; near-end was missed). Gating the bridge
+              off surfaces keeps their transport to the base HTTP path. Minimal +
+              reversible: drop this `!isStandaloneSurface &&` to restore live
+              events in surface windows. */}
+          {!isStandaloneSurface && <DaemonEventBridge key="mail" />}
           {/* App-wide unread badge — main window only; a standalone surface
               window must not drive the shared Dock counter to 0. */}
           {!isStandaloneSurface && <DockBadge />}
