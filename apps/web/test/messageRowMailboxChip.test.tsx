@@ -55,7 +55,7 @@ const COLUMNS_WITH_MAILBOX: ColumnId[] = [...DEFAULT_COLUMNS, 'sourceMailbox']
 function directoryResolvingTo(
   resolved: ReturnType<MailboxDirectory['resolve']>,
 ): MailboxDirectory {
-  return { resolve: () => resolved }
+  return { list: () => [], resolve: () => resolved }
 }
 
 function renderRow(overrides: {

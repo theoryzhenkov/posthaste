@@ -24,7 +24,10 @@ import {
   appReadinessStateFromAccountsQuery,
   LAB_READINESS_STATES,
 } from '@/labReadiness'
-import { useMailNavigationReadBootstrap } from '@/mailboxNavigationReadModels'
+import {
+  useMailboxNavigationReadModels,
+  useMailNavigationReadBootstrap,
+} from '@/mailboxNavigationReadModels'
 import { mailKeys, type MailSelection } from '@/mailState'
 import { OnboardingTour } from '@/onboarding/OnboardingTour'
 import { useOnboardingNeeded } from '@/onboarding/store'
@@ -69,6 +72,11 @@ export function MailClient({
     null,
   )
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  // Non-null while the palette should OPEN INTO a parameterized action's
+  // pick-step (a keyboard chord like `m` requested a target picker).
+  const [paletteSeedActionId, setPaletteSeedActionId] = useState<string | null>(
+    null,
+  )
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showShortcuts, setShowShortcuts] = useState(false)
@@ -197,10 +205,36 @@ export function MailClient({
         : null,
     [selectedMessage, selectedMessageData],
   )
+  // The shared mailbox read model, bound as `ActionServices.mailboxes` so the
+  // keyboard tier can resolve parameterized mailbox actions (the `m` chord).
+  const navigationReadModels = useMailboxNavigationReadModels()
   const keyboardServices = useMemo<ActionServices>(
-    () => ({ email: actions, app: handlers }),
-    [actions, handlers],
+    () => ({
+      email: actions,
+      app: handlers,
+      mailboxes: {
+        list: (sourceId: string) =>
+          navigationReadModels.sources.find((source) => source.id === sourceId)
+            ?.mailboxes ?? [],
+      },
+    }),
+    [actions, handlers, navigationReadModels.sources],
   )
+
+  // Keyboard chord → palette pick-step (e.g. `m` opens the mailbox picker).
+  const handleOpenActionPicker = useCallback((actionId: string) => {
+    setPaletteSeedActionId(actionId)
+    setIsCommandPaletteOpen(true)
+  }, [])
+  // A PLAIN open (⌘K, `/`, the toolbar button) always starts at the root list:
+  // clearing the seed on open (rather than on close) covers every close path
+  // without an effect. The palette reads the seed only at mount.
+  const handleOpenCommandPalette = useCallback(() => {
+    setPaletteSeedActionId(null)
+    handlers.handleOpenCommandPalette()
+    // handlers is rebuilt per render; the underlying setter is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handlers.handleOpenCommandPalette])
 
   const appReadinessState = appReadinessStateFromAccountsQuery({
     isLoading,
@@ -229,7 +263,7 @@ export function MailClient({
         }
         hasSelectedMessage={selectedMessage !== null}
         hasSearchQuery={searchQuery.trim().length > 0}
-        onOpenCommandPalette={handlers.handleOpenCommandPalette}
+        onOpenCommandPalette={handleOpenCommandPalette}
         onOpenSettings={handlers.handleOpenSettingsShortcut}
         onCompose={handlers.handleCompose}
         onReply={handlers.handleReply}
@@ -244,6 +278,7 @@ export function MailClient({
         onClearSelectedMessage={handlers.handleClearSelectedMessage}
         onClearSearchQuery={handlers.handleRejectSearchPreview}
         onToggleShortcuts={handlers.handleToggleShortcuts}
+        onOpenActionPicker={handleOpenActionPicker}
         onGoto={gotoNavigation.goto}
         onGotoConversation={() => {
           if (selectedMessage) {
@@ -265,6 +300,7 @@ export function MailClient({
           effectiveSurface={effectiveSurface}
           effectiveView={effectiveView}
           invalidSurfaceRoute={invalidSurfaceRoute}
+          commandPaletteSeedActionId={paletteSeedActionId}
           isCommandPaletteOpen={isCommandPaletteOpen}
           isDarkMode={theme.resolvedMode === 'dark'}
           isMessageDetailOpen={isMessageDetailOpen}
@@ -281,9 +317,6 @@ export function MailClient({
           viewRole={viewRole}
           onAddTag={handlers.handleAddTag}
           onApplySearch={handlers.handleApplySearch}
-          onArchive={handlers.handleArchive}
-          onSnooze={handlers.handleSnooze}
-          onDiscardDraft={handlers.handleDiscardDraft}
           onEditDraft={handlers.handleEditDraft}
           onClearSearch={handlers.handleRejectSearchPreview}
           onClearSelectedMessage={handlers.handleClearSelectedMessage}
@@ -292,7 +325,7 @@ export function MailClient({
           onForward={handlers.handleForward}
           onReplyAll={handlers.handleReplyAll}
           onMessageLayoutChanged={layout.onMessageLayoutChanged}
-          onOpenCommandPalette={handlers.handleOpenCommandPalette}
+          onOpenCommandPalette={handleOpenCommandPalette}
           onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
           onOpenSettings={handlers.handleOpenSettings}
           onOpenTagEditor={handlers.handleOpenTagEditor}
@@ -309,11 +342,9 @@ export function MailClient({
           onShellLayoutChanged={layout.onShellLayoutChanged}
           onShowShortcuts={handlers.handleShowShortcuts}
           onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
-          onToggleFlag={handlers.handleToggleFlag}
           onToggleShortcuts={handlers.handleToggleShortcuts}
           onToggleSettings={handlers.handleToggleSettings}
           onToggleTheme={handleToggleTheme}
-          onTrash={handlers.handleTrash}
         />
       </KeyboardController>
     </>

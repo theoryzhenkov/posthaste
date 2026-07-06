@@ -237,7 +237,7 @@ describe('resolveActions — delegation to EmailActions (Slice 1)', () => {
 })
 
 describe('resolveActions — surface + enablement (Slice 1/3)', () => {
-  it('palette surface resolves palette-eligible actions; keyboard lit in Slice 5; detail-header stays empty', () => {
+  it('palette surface resolves palette-eligible actions; keyboard lit in Slice 5; detail-header lit in Slice 4', () => {
     // Slice 3 lit up the palette surface: message actions gained 'palette' and
     // the app-level commands (defs/app.ts) register palette-only entries.
     const palette = resolveActions(ctx({ surface: 'palette' }), {
@@ -247,7 +247,8 @@ describe('resolveActions — surface + enablement (Slice 1/3)', () => {
     expect(paletteIds).toContain('message.archive')
     expect(paletteIds).toContain('message.reply')
     expect(paletteIds).toContain('app.compose')
-    // Context-menu-only entries never leak into the palette.
+    // The row-scoped `open` entry needs a row or app binding — with email-only
+    // services it stays out of the palette.
     expect(paletteIds).not.toContain('message.open')
 
     // Slice 5 migrated the contextual mail-action shortcuts onto the keyboard
@@ -259,12 +260,16 @@ describe('resolveActions — surface + enablement (Slice 1/3)', () => {
     expect(keyboardIds).toContain('message.move-to-trash')
     expect(keyboardIds).toContain('message.tag')
 
-    // The detail-header surface is not part of this slice.
-    expect(
-      resolveActions(ctx({ surface: 'detail-header' }), {
-        email: makeSpyActions() as unknown as EmailActions,
-      }),
-    ).toHaveLength(0)
+    // Slice 4: the detail-header resolves the email-backed row actions even
+    // with email-only services (compose-scoped entries need `detail`/`app`).
+    const headerIds = resolveActions(ctx({ surface: 'detail-header' }), {
+      email: makeSpyActions() as unknown as EmailActions,
+    }).map((r) => r.def.id)
+    expect(headerIds).toContain('message.archive')
+    expect(headerIds).toContain('message.move-to-trash')
+    expect(headerIds).toContain('message.toggle-flag')
+    expect(headerIds).not.toContain('message.open')
+    expect(headerIds).not.toContain('message.tag') // needs a bound tag editor
   })
 
   it('drops no-target actions from a menu but keeps them disabled with includeDisabled', () => {

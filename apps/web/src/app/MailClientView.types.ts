@@ -22,6 +22,9 @@ export interface MailClientViewProps {
   handlers: ReturnType<typeof useMailClientHandlers>
   appReadinessState: string
   closeCompose: () => void
+  /** Non-null when the palette should open straight into a parameterized
+   *  action's pick-step (keyboard chord → picker). */
+  commandPaletteSeedActionId: string | null
   composeIntent: ComposeIntent | null
   effectiveSurface: SurfaceDescriptor | null
   effectiveView: SidebarSelection | null
@@ -42,13 +45,10 @@ export interface MailClientViewProps {
   viewRole: string | null
   onAddTag: (tag: string) => void
   onApplySearch: (query: string) => void
-  onArchive: () => void
-  onSnooze: (until: number) => void
   onClearSearch: () => void
   onClearSelectedMessage: () => void
   onCloseCommandPalette: () => void
   onCompose: () => void
-  onDiscardDraft: () => void
   onEditDraft: () => void
   onForward: () => void
   onReplyAll: () => void
@@ -77,9 +77,7 @@ export interface MailClientViewProps {
   onShellLayoutChanged: LayoutHandler
   onShowShortcuts: () => void
   onSyncSource: (sourceId: string) => void
-  onToggleFlag: () => void
   onToggleShortcuts: () => void
   onToggleSettings: () => void
   onToggleTheme: () => void
-  onTrash: () => void
 }
