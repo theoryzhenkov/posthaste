@@ -1,36 +1,38 @@
 /**
- * Contextual actions — the first slice of a general registry for context-aware,
- * eventually user-defined actions on items (see
- * `docs/eph/PLAN-L1-contextual-actions.md`).
+ * Contextual actions — the right-click context-menu builder.
  *
- * Phase 0 covers built-in message actions surfaced in the right-click menu, with
- * availability derived from the current view's mailbox role: e.g. in Trash the
- * menu offers "Move to Inbox" + "Delete permanently" instead of a no-op "Move to
- * Trash". The builder is pure (icons are component references, not JSX) so it
- * can be unit-tested and reused across surfaces (palette, keyboard) later.
+ * As of PLAN-L2 Slice 1 this is a THIN SHIM over the unified action registry +
+ * {@link resolveActions}: the role-gated, pure message actions (toggle read/flag,
+ * archive, move-to-inbox, and the trash/delete/discard trio) now live once in
+ * `actions/defs/message.ts` and are resolved for the `'context-menu'` surface.
+ * The builder still owns the two row-scoped `open` / `view-conversation` entries
+ * (they migrate to definitions in Slice 2) and maps everything back to the
+ * `ContextualAction` shape `MessageRow` already renders — so the menu renders
+ * EXACTLY what it did before (same ids-as-keys, labels, icons, destructive
+ * flags, group separators, and order). Zero behavior change.
  *
+ * @spec docs/eph/PLAN-L2-action-registry.md
  * @spec docs/L1-ui#messagelist
  */
 import type { LucideIcon } from 'lucide-react'
-import {
-  Archive,
-  Eye,
-  EyeOff,
-  Inbox,
-  MailOpen,
-  MessagesSquare,
-  Star,
-  Trash2,
-} from 'lucide-react'
+import { MailOpen, MessagesSquare } from 'lucide-react'
 import type { MessageSummary, SourceMessageRef } from '../api/types'
 import { SYSTEM_KEYWORDS } from '../domainVocabulary'
 import type { EmailActions } from '../hooks/useEmailActions'
+// Side-effect import: registers the message definitions into the registry.
+import { messageActions } from './defs/message'
+import { resolveActions } from './resolve'
+import type { ActionContext, ActionSection, MessageTarget } from './types'
+
+// Reference the registered set so the side-effect import is never elided and the
+// registry is populated before the first resolve. (No runtime cost.)
+void messageActions
 
 /** Visual grouping; a separator is drawn between adjacent groups. */
 export type ActionGroup = 'open' | 'state' | 'move'
 
 export interface ContextualAction {
-  /** Stable, namespaced id (e.g. `builtin.move-to-inbox`). */
+  /** Stable, namespaced id (used as the React key). */
   id: string
   group: ActionGroup
   title: string
@@ -54,18 +56,38 @@ export interface MessageActionContext {
   surface: 'context-menu'
 }
 
-/** Roles from which a message is "removed" and can be restored to the inbox. */
-function isRestorableRole(role: string | null): boolean {
-  return role === 'trash' || role === 'archive' || role === 'junk'
+/** Map a definition's richer {@link ActionSection} back to the three-value menu
+ *  grouping the row renderer draws separators from. Every Slice-1 message
+ *  definition is `state` or `move`. */
+function sectionToGroup(section: ActionSection): ActionGroup {
+  return section === 'state' ? 'state' : 'move'
+}
+
+/** The context menu's historical public ids are `builtin.*` and are used as
+ *  React keys by `MessageRow`. The registry is canonical (`message.*`); this map
+ *  preserves the legacy id the menu emitted so this slice is byte-for-byte
+ *  behavior-neutral (Slice 2 collapses the shim and drops the map). */
+const LEGACY_MENU_ID: Readonly<Record<string, string>> = {
+  'message.toggle-read': 'builtin.toggle-read',
+  'message.toggle-flag': 'builtin.toggle-flag',
+  'message.archive': 'builtin.archive',
+  'message.move-to-inbox': 'builtin.move-to-inbox',
+  'message.move-to-trash': 'builtin.move-to-trash',
+  'message.delete-permanently': 'builtin.delete-permanently',
+  'message.discard-draft': 'builtin.discard-draft',
 }
 
 /**
- * Build the ordered, context-filtered actions for a message. Availability is
- * derived from `viewRole`:
+ * Build the ordered, context-filtered actions for a message.
+ *
+ * The two `open` entries come from the row-scoped `hooks` (unchanged); the rest
+ * are resolved from the registry for the `'context-menu'` surface. Availability
+ * is derived from `viewRole` and draft-ness inside the definitions:
  * - Archive: any view that isn't already archive or trash.
  * - Move to Inbox: trash / archive / junk (restore).
- * - Move to Trash: any view that isn't already trash.
- * - Delete permanently: trash only.
+ * - Move to Trash: any non-trash view, non-drafts.
+ * - Delete permanently: trash only, non-drafts.
+ * - Discard draft: drafts only.
  */
 export function buildMessageContextActions(
   actions: EmailActions,
@@ -73,7 +95,27 @@ export function buildMessageContextActions(
   hooks: { onOpen: () => void; onViewConversation: () => void },
 ): ContextualAction[] {
   const { message, target, viewRole } = ctx
-  const list: ContextualAction[] = [
+
+  const messageTarget: MessageTarget = {
+    ref: target,
+    summary: message,
+    isDraft: message.keywords.includes(SYSTEM_KEYWORDS.Draft),
+    draftId: message.draftId,
+    conversationId: message.conversationId,
+  }
+  const actionContext: ActionContext = {
+    targets: [messageTarget],
+    viewRole,
+    activePane: 'list',
+    surface: 'context-menu',
+    inputOwner: 'mail',
+    hasPendingMutation: actions.isPending,
+    connection: 'unknown',
+  }
+
+  // Row-scoped entries stay owned by the builder until Slice 2 turns them into
+  // definitions running through services.
+  const open: ContextualAction[] = [
     {
       id: 'builtin.open',
       group: 'open',
@@ -88,72 +130,18 @@ export function buildMessageContextActions(
       icon: MessagesSquare,
       run: hooks.onViewConversation,
     },
-    {
-      id: 'builtin.toggle-read',
-      group: 'state',
-      title: message.isRead ? 'Mark unread' : 'Mark read',
-      icon: message.isRead ? EyeOff : Eye,
-      run: () => actions.toggleRead(message),
-    },
-    {
-      id: 'builtin.toggle-flag',
-      group: 'state',
-      title: message.isFlagged ? 'Unflag' : 'Flag',
-      icon: Star,
-      run: () => actions.toggleFlag(message),
-    },
   ]
 
-  if (viewRole !== 'archive' && viewRole !== 'trash') {
-    list.push({
-      id: 'builtin.archive',
-      group: 'move',
-      title: 'Archive',
-      icon: Archive,
-      run: () => actions.archive(target),
-    })
-  }
+  const resolved = resolveActions(actionContext, { email: actions }).map(
+    (r): ContextualAction => ({
+      id: LEGACY_MENU_ID[r.def.id] ?? r.def.id,
+      group: sectionToGroup(r.def.section),
+      title: r.title,
+      icon: r.icon,
+      destructive: r.def.destructive,
+      run: r.execute,
+    }),
+  )
 
-  if (isRestorableRole(viewRole)) {
-    list.push({
-      id: 'builtin.move-to-inbox',
-      group: 'move',
-      title: 'Move to Inbox',
-      icon: Inbox,
-      run: () => actions.moveToInbox(target),
-    })
-  }
-
-  if (message.keywords.includes(SYSTEM_KEYWORDS.Draft)) {
-    // D127: a draft is discarded (hard delete via the draft-delete op), never
-    // trashed. The trash / delete-permanently actions are not offered on drafts.
-    list.push({
-      id: 'builtin.discard-draft',
-      group: 'move',
-      title: 'Discard draft',
-      icon: Trash2,
-      destructive: true,
-      run: () => actions.discardDraft({ ...target, draftId: message.draftId }),
-    })
-  } else if (viewRole !== 'trash') {
-    list.push({
-      id: 'builtin.move-to-trash',
-      group: 'move',
-      title: 'Move to Trash',
-      icon: Trash2,
-      destructive: true,
-      run: () => actions.trash(target),
-    })
-  } else {
-    list.push({
-      id: 'builtin.delete-permanently',
-      group: 'move',
-      title: 'Delete permanently',
-      icon: Trash2,
-      destructive: true,
-      run: () => actions.deletePermanently(target),
-    })
-  }
-
-  return list
+  return [...open, ...resolved]
 }
