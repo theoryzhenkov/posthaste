@@ -39,10 +39,10 @@ relevant `client-link` section and remove its `[::state]` marker.
   calls `query_mail_page` on every event and the delta is computed by diffing two
   full snapshots (`sessions.rs::mail_list_delta`) — so cost (2), the per-event
   full re-query, is **not** removed. Lowest risk, no client change, no flag.
-- **U3 — the replica is the default client read path.** Promote the WASM replica
-  from flag-gated (`VITE_RUNTIME_REPLICA`) to default: finish production wiring +
-  real-browser validation, and close the surfaced-failure gap (§3). The
-  non-replica snapshot path stays a fallback during transition.
+- **U3 — the replica is the default client read path. DONE.** The WASM replica is
+  no longer flag-gated: the `entityStoreAdapter` is installed unconditionally, the
+  WASM-load-failure REST fallback was removed (entity store is the sole `mailList`
+  owner), and `VITE_RUNTIME_REPLICA` has been deleted from the build.
 - **U4 — coverage replaces sessions/views.** `open_view` → `subscribe(coverage)`
   + read-through for the initial base; the runtime stops server-side view
   recompute for covered views and serves assertions for the coverage. Sessions
