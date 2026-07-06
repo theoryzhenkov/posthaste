@@ -9,6 +9,7 @@ export type SmartMailboxField =
   | 'sourceName'
   | 'messageId'
   | 'threadId'
+  | 'conversationId'
   | 'mailboxId'
   | 'mailboxName'
   | 'mailboxRole'

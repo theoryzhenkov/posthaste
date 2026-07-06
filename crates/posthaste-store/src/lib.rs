@@ -36,7 +36,7 @@ use std::time::Instant;
 
 use hex::encode as hex_encode;
 use posthaste_domain_model::{
-    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId,
+    field_spec, now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId,
     AutomationBackfillJob, AutomationBackfillJobStatus, CacheCandidate, CacheFetchCandidate,
     CacheFetchUnit, CacheLayer, CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate,
     CacheSearchSignals, CacheSignalUpdate, CachedSenderAddress, CommandResult, ConversationCursor,
