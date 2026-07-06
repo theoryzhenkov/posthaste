@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test'
 
-import type { AccountOverview, ConversationPage } from '../src/api/types'
+import type {
+  AccountOverview,
+  CachedSenderAddress,
+  ConversationPage,
+} from '../src/api/types'
 import {
+  buildAddressBookSuggestionOptions,
   buildRecipientSuggestionOptions,
   filterAddressSuggestions,
   insertAddressSuggestion,
@@ -81,6 +86,42 @@ describe('compose address suggestions', () => {
 
     expect(insertAddressSuggestion('one@example.com, wo', suggestion)).toBe(
       'one@example.com, Work Person <work@example.com>, ',
+    )
+  })
+
+  it('maps the server address book, filtering junk and de-duping by email', () => {
+    const book: CachedSenderAddress[] = [
+      {
+        sourceId: 'work',
+        name: 'Ada',
+        email: 'ada@example.net',
+        lastUsedAt: '',
+      },
+      // duplicate email (different case) — dropped
+      {
+        sourceId: 'home',
+        name: null,
+        email: 'ADA@example.net',
+        lastUsedAt: '',
+      },
+      // wildcard pattern — not a concrete address
+      { sourceId: 'work', name: null, email: '*@example.com', lastUsedAt: '' },
+      {
+        sourceId: 'work',
+        name: 'Bob',
+        email: 'bob@example.com',
+        lastUsedAt: '',
+      },
+    ]
+
+    const options = buildAddressBookSuggestionOptions(book)
+
+    expect(options.map((option) => option.email)).toEqual([
+      'ada@example.net',
+      'bob@example.com',
+    ])
+    expect(options[0]).toEqual(
+      expect.objectContaining({ name: 'Ada', sourceLabel: 'Address book' }),
     )
   })
 })

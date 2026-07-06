@@ -187,12 +187,13 @@ pub(super) const SCHEMA_SQL: &str = "
                 PRIMARY KEY (account_id, rule_fingerprint)
             );
 
-            CREATE TABLE IF NOT EXISTS sender_address_cache (
+            CREATE TABLE IF NOT EXISTS address_book (
                 account_id TEXT NOT NULL,
                 normalized_email TEXT NOT NULL,
                 email TEXT NOT NULL,
                 name TEXT,
-                last_used_at TEXT NOT NULL,
+                frequency INTEGER NOT NULL DEFAULT 0,
+                last_seen_at TEXT NOT NULL,
                 PRIMARY KEY (account_id, normalized_email)
             );
 
@@ -306,8 +307,8 @@ pub(super) const SCHEMA_SQL: &str = "
                 ON conversation_message (account_id, message_id);
             CREATE INDEX IF NOT EXISTS idx_automation_backfill_pending
                 ON automation_backfill_job (account_id, status, updated_at);
-            CREATE INDEX IF NOT EXISTS idx_sender_address_cache_recent
-                ON sender_address_cache (last_used_at DESC, account_id);
+            CREATE INDEX IF NOT EXISTS idx_address_book_rank
+                ON address_book (frequency DESC, last_seen_at DESC, account_id, normalized_email);
             CREATE INDEX IF NOT EXISTS idx_cache_fetch_candidates
                 ON cache_object (account_id, state, layer, priority DESC);
             CREATE INDEX IF NOT EXISTS idx_cache_cached_bytes

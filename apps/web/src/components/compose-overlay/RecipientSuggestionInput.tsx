@@ -10,17 +10,27 @@ import {
 import { Input } from '../ui/input'
 
 export function RecipientSuggestionInput({
+  ariaLabel,
   autoFocus = false,
   disabled = false,
   onChange,
   placeholder,
+  selectionMode = 'append',
   suggestions,
   value,
 }: {
+  ariaLabel?: string
   autoFocus?: boolean
   disabled?: boolean
   onChange: (value: string) => void
   placeholder?: string
+  /**
+   * How a chosen suggestion is committed. Compose recipient fields hold a
+   * comma-delimited list, so they `append` the pick to the active token; a
+   * single-value field (a rules condition on an address) `replace`s the whole
+   * value with the bare email.
+   */
+  selectionMode?: 'append' | 'replace'
   suggestions: AddressSuggestionOption[]
   value: string
 }) {
@@ -34,6 +44,7 @@ export function RecipientSuggestionInput({
     <div className="relative">
       <Input
         value={value}
+        aria-label={ariaLabel}
         autoFocus={autoFocus}
         disabled={disabled}
         onBlur={() => {
@@ -53,7 +64,11 @@ export function RecipientSuggestionInput({
               className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-[var(--hover-bg)]"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                onChange(insertAddressSuggestion(value, suggestion))
+                onChange(
+                  selectionMode === 'replace'
+                    ? suggestion.email
+                    : insertAddressSuggestion(value, suggestion),
+                )
                 setFocused(false)
               }}
             >

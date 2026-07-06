@@ -11,12 +11,17 @@
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type {
   SmartMailboxCondition,
   SmartMailboxOperator,
   SmartMailboxValue,
 } from '../../../api/types'
+import { buildAddressBookSuggestionOptions } from '@/composeAddressSuggestions'
+import { RecipientSuggestionInput } from '@/components/compose-overlay/RecipientSuggestionInput'
+import { queryKeys } from '@/queryKeys'
+import { runtimeViews } from '@/runtime/views'
 import { ASSIGNABLE_MAILBOX_ROLES } from '../../../domainVocabulary'
 import { Input } from '../../ui/input'
 import { SelectItem } from '../../ui/select'
@@ -86,9 +91,11 @@ export function ConditionValueEditor({
       return <RoleValueWidget condition={condition} onChange={onChange} />
     case 'size':
       return <SizeValueWidget condition={condition} onChange={onChange} />
+    case 'address':
+      return <AddressValueWidget condition={condition} onChange={onChange} />
     default:
-      // text | keyword | address — the generic text box (honest fallback;
-      // keyword/address autocomplete are follow-on slices).
+      // text | keyword — the generic text box (honest fallback; keyword
+      // autocomplete is a follow-on slice).
       return <TextValueWidget condition={condition} onChange={onChange} />
   }
 }
@@ -131,6 +138,38 @@ function ListValueWidget({ condition, onChange }: WidgetProps) {
         onChange={(event) =>
           emitValue(condition, onChange, splitListValue(event.target.value))
         }
+      />
+    </div>
+  )
+}
+
+/**
+ * Address fields (`fromEmail`, `fromName`, `to`) share the SAME autocomplete
+ * the compose recipient inputs use: the persistent server-side address book
+ * (`senderAddresses`) fed through the reused `RecipientSuggestionInput`. A
+ * condition holds a single address, so the input runs in `replace` mode (a pick
+ * sets the bare email) and still emits the identical `string` wire shape the
+ * old text box did.
+ */
+function AddressValueWidget({ condition, onChange }: WidgetProps) {
+  const addressBook = useQuery({
+    queryKey: queryKeys.senderAddresses,
+    queryFn: runtimeViews.compose.senderAddresses,
+  })
+  const suggestions = useMemo(
+    () => buildAddressBookSuggestionOptions(addressBook.data ?? []),
+    [addressBook.data],
+  )
+  const value = Array.isArray(condition.value) ? '' : String(condition.value)
+  return (
+    <div data-testid="value-widget-address" className="grid gap-1 text-[13px]">
+      <RecipientSuggestionInput
+        ariaLabel="Value"
+        selectionMode="replace"
+        placeholder="name or email"
+        suggestions={suggestions}
+        value={value}
+        onChange={(next) => emitValue(condition, onChange, next)}
       />
     </div>
   )
