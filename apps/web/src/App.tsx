@@ -25,6 +25,7 @@ import { ActiveConnectionProvider } from './connection/useActiveConnection'
 import { isMainDesktopWindow, isTauriRuntime, toggleDevtools } from './desktop'
 import { isDeveloperToolsEnabled } from './developerTools'
 import { useAccountsView } from './hooks/useAccountsView'
+import { DockBadge } from './hooks/DockBadge'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import { useDesktopUpdates } from './hooks/useDesktopUpdates'
 import { useReplicaDatabaseReloadPrompt } from './hooks/useReplicaDatabaseReloadPrompt'
@@ -94,6 +95,9 @@ export default function App() {
           <DaemonEventBridge
             key={isStandaloneSurface ? 'standalone' : 'mail'}
           />
+          {/* App-wide unread badge — main window only; a standalone surface
+              window must not drive the shared Dock counter to 0. */}
+          {!isStandaloneSurface && <DockBadge />}
           <ErrorBoundary label="app-root" fallback={renderAppRootError}>
             <ConnectionGate>
               {isStandaloneSurface && routeSurface ? (
