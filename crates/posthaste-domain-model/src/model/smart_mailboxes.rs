@@ -84,7 +84,17 @@ pub enum SmartMailboxOperator {
     OnOrAfter,
 }
 
-/// Condition value: scalar string, string list (for `In`), or boolean.
+/// Condition value: scalar string, string list (for `In`), boolean, or a typed
+/// date value.
+///
+/// The enum is `#[serde(untagged)]`: each variant is distinguished by its JSON
+/// *shape*, so the legacy `String`/`Strings`/`Bool` values still deserialize
+/// exactly as before (a bare string, a string array, a bare boolean). The
+/// [`Date`](Self::Date) variant is a JSON *object* carrying a `kind`
+/// discriminator, a shape none of the scalar variants accept, so adding it is
+/// fully back-compatible and needs no migration of stored data — legacy
+/// absolute dates persisted as a bare `String` keep parsing (see the date field
+/// compiler, which reads both the legacy string and the new `Date::Absolute`).
 ///
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -94,6 +104,42 @@ pub enum SmartMailboxValue {
     String(String),
     Strings(Vec<String>),
     Bool(bool),
+    /// A typed date value: either an absolute instant or a rolling relative
+    /// offset. Distinguished from the scalar variants by being a JSON object
+    /// with a `kind` tag.
+    Date(DateValue),
+}
+
+/// A date condition value. Tagged (internally, on `kind`) so absolute and
+/// relative dates are explicit, distinct JSON objects — this is what lets the
+/// untagged [`SmartMailboxValue`] tell a date apart from a bare string.
+///
+/// @spec docs/L1-accounts#condition-fields-and-operators
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum DateValue {
+    /// An absolute RFC3339 instant, compared against `received_at` as stored
+    /// (the same literal comparison legacy bare-string dates always used).
+    Absolute { value: String },
+    /// A rolling relative offset ("N units ago"), stored as-is and resolved to
+    /// an instant at *query* time so the window rolls with `now` instead of
+    /// freezing to a fixed date at edit time.
+    Relative { amount: u32, unit: DateUnit },
+}
+
+/// Time unit for a [`DateValue::Relative`] offset.
+///
+/// @spec docs/L1-accounts#condition-fields-and-operators
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum DateUnit {
+    Minutes,
+    Hours,
+    Days,
+    Weeks,
+    Months,
 }
 
 /// Boolean group node containing child conditions or nested groups.
@@ -229,6 +275,74 @@ pub fn apply_explicit_order<T>(
         .partition(|item| rank.contains_key(id_of(item)));
     pinned.sort_by_key(|item| rank[id_of(item)]);
     pinned.into_iter().chain(rest).collect()
+}
+
+#[cfg(test)]
+mod value_serde_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_scalar_shapes_still_deserialize() {
+        // Back-compat: the pre-existing untagged shapes are unchanged.
+        assert_eq!(
+            serde_json::from_str::<SmartMailboxValue>(r#""2026-01-01T00:00:00Z""#).unwrap(),
+            SmartMailboxValue::String("2026-01-01T00:00:00Z".to_string())
+        );
+        assert_eq!(
+            serde_json::from_str::<SmartMailboxValue>(r#"["a","b"]"#).unwrap(),
+            SmartMailboxValue::Strings(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            serde_json::from_str::<SmartMailboxValue>("true").unwrap(),
+            SmartMailboxValue::Bool(true)
+        );
+    }
+
+    #[test]
+    fn date_relative_round_trips_tagged() {
+        let value = SmartMailboxValue::Date(DateValue::Relative {
+            amount: 7,
+            unit: DateUnit::Days,
+        });
+        let json = serde_json::to_value(&value).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "kind": "relative", "amount": 7, "unit": "days" })
+        );
+        assert_eq!(
+            serde_json::from_value::<SmartMailboxValue>(json).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn date_absolute_round_trips_tagged() {
+        let value = SmartMailboxValue::Date(DateValue::Absolute {
+            value: "2026-07-06T00:00:00Z".to_string(),
+        });
+        let json = serde_json::to_value(&value).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "kind": "absolute", "value": "2026-07-06T00:00:00Z" })
+        );
+        assert_eq!(
+            serde_json::from_value::<SmartMailboxValue>(json).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn all_date_units_use_camel_case() {
+        for (unit, wire) in [
+            (DateUnit::Minutes, "minutes"),
+            (DateUnit::Hours, "hours"),
+            (DateUnit::Days, "days"),
+            (DateUnit::Weeks, "weeks"),
+            (DateUnit::Months, "months"),
+        ] {
+            assert_eq!(serde_json::to_value(unit).unwrap(), serde_json::json!(wire));
+        }
+    }
 }
 
 #[cfg(test)]

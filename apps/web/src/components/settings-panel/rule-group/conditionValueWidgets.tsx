@@ -14,6 +14,7 @@
 import { useState } from 'react'
 import type {
   SmartMailboxCondition,
+  SmartMailboxOperator,
   SmartMailboxValue,
 } from '../../../api/types'
 import { ASSIGNABLE_MAILBOX_ROLES } from '../../../domainVocabulary'
@@ -23,15 +24,17 @@ import { LabeledSelect, MailboxSelect } from '../MailboxSelect'
 import { valueTypeForField } from '../helpers'
 import { useConditionEditorData } from './conditionEditorContext'
 import {
+  absoluteDateValue,
   bytesFromSize,
   dateInputValue,
+  dateValueMode,
   pickedRefValue,
   relativeDateValue,
+  relativeParts,
   RELATIVE_UNIT_OPTIONS,
   SIZE_UNIT_OPTIONS,
   sizeInputParts,
   splitListValue,
-  toRfc3339FromDateInput,
   UNSET_REF,
   type RelativeUnit,
   type SizeUnit,
@@ -148,25 +151,107 @@ function TextValueWidget({ condition, onChange }: WidgetProps) {
   )
 }
 
+/**
+ * A natural-language "reading" for a date condition. Each reading bundles the
+ * sub-editor (absolute date vs. rolling relative) with the operator it implies,
+ * so the user picks e.g. "in the last" instead of the nonsensical
+ * "before" + "within". The reading OWNS the operator for date fields — the
+ * ConditionEditor hides the generic operator dropdown for dates (see
+ * `ConditionEditor.tsx`).
+ */
+type DateReading = {
+  key: string
+  label: string
+  /** Optional trailing word after the amount/unit, e.g. "ago". */
+  suffix?: string
+  mode: 'absolute' | 'relative'
+  operator: SmartMailboxOperator
+}
+
+const DATE_READINGS: DateReading[] = [
+  {
+    key: 'onOrAfter',
+    label: 'on or after',
+    mode: 'absolute',
+    operator: 'onOrAfter',
+  },
+  { key: 'after', label: 'after', mode: 'absolute', operator: 'after' },
+  { key: 'before', label: 'before', mode: 'absolute', operator: 'before' },
+  {
+    key: 'onOrBefore',
+    label: 'on or before',
+    mode: 'absolute',
+    operator: 'onOrBefore',
+  },
+  // received_at > now-N: the message arrived inside the rolling window.
+  {
+    key: 'inTheLast',
+    label: 'in the last',
+    mode: 'relative',
+    operator: 'after',
+  },
+  // received_at < now-N: the message is older than the rolling window.
+  {
+    key: 'moreThanAgo',
+    label: 'more than',
+    suffix: 'ago',
+    mode: 'relative',
+    operator: 'before',
+  },
+]
+
+/** Derive the active reading from the stored condition (operator + value). */
+function readingForCondition(condition: SmartMailboxCondition): DateReading {
+  if (dateValueMode(condition.value) === 'relative') {
+    // A relative value is either "in the last" (after) or "more than … ago"
+    // (before), keyed off the operator.
+    return condition.operator === 'before'
+      ? DATE_READINGS.find((r) => r.key === 'moreThanAgo')!
+      : DATE_READINGS.find((r) => r.key === 'inTheLast')!
+  }
+  return (
+    DATE_READINGS.find(
+      (r) => r.mode === 'absolute' && r.operator === condition.operator,
+    ) ?? DATE_READINGS[0]
+  )
+}
+
 function DateValueWidget({ condition, onChange }: WidgetProps) {
-  const [mode, setMode] = useState<'absolute' | 'relative'>('absolute')
-  const [amount, setAmount] = useState('7')
-  const [unit, setUnit] = useState<RelativeUnit>('days')
+  const reading = readingForCondition(condition)
+  const parts = relativeParts(condition.value)
+  const [amount, setAmount] = useState(parts.amount)
+  const [unit, setUnit] = useState<RelativeUnit>(parts.unit)
+
+  const applyReading = (next: DateReading) => {
+    onChange({
+      ...condition,
+      operator: next.operator,
+      value:
+        next.mode === 'relative'
+          ? relativeDateValue(Number(amount), unit)
+          : absoluteDateValue(dateInputValue(condition.value)),
+    })
+  }
 
   return (
     <div data-testid="value-widget-date" className="grid gap-1 text-[13px]">
       <div className="flex items-center gap-1.5">
         <LabeledSelect
           ariaLabel="Date mode"
-          value={mode}
-          onValueChange={(value) =>
-            setMode(value === 'relative' ? 'relative' : 'absolute')
-          }
+          value={reading.key}
+          onValueChange={(value) => {
+            const next =
+              DATE_READINGS.find((r) => r.key === value) ?? DATE_READINGS[0]
+            applyReading(next)
+          }}
         >
-          <SelectItem value="absolute">On</SelectItem>
-          <SelectItem value="relative">Within</SelectItem>
+          {DATE_READINGS.map((option) => (
+            <SelectItem key={option.key} value={option.key}>
+              {option.label}
+            </SelectItem>
+          ))}
         </LabeledSelect>
-        {mode === 'absolute' ? (
+        {reading.mode === 'absolute' ? (
           <Input
             type="date"
             aria-label="Value"
@@ -176,7 +261,7 @@ function DateValueWidget({ condition, onChange }: WidgetProps) {
               emitValue(
                 condition,
                 onChange,
-                toRfc3339FromDateInput(event.target.value),
+                absoluteDateValue(event.target.value),
               )
             }
           />
@@ -194,7 +279,7 @@ function DateValueWidget({ condition, onChange }: WidgetProps) {
                 emitValue(
                   condition,
                   onChange,
-                  relativeDateValue(Number(next), unit, new Date()),
+                  relativeDateValue(Number(next), unit),
                 )
               }}
             />
@@ -207,7 +292,7 @@ function DateValueWidget({ condition, onChange }: WidgetProps) {
                 emitValue(
                   condition,
                   onChange,
-                  relativeDateValue(Number(amount), nextUnit, new Date()),
+                  relativeDateValue(Number(amount), nextUnit),
                 )
               }}
             >
@@ -217,6 +302,11 @@ function DateValueWidget({ condition, onChange }: WidgetProps) {
                 </SelectItem>
               ))}
             </LabeledSelect>
+            {reading.suffix ? (
+              <span className="text-[13px] text-muted-foreground">
+                {reading.suffix}
+              </span>
+            ) : null}
           </>
         )}
       </div>

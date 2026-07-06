@@ -5802,6 +5802,66 @@
           }
         }
       },
+      "DateUnit": {
+        "type": "string",
+        "description": "Time unit for a [`DateValue::Relative`] offset.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "enum": [
+          "minutes",
+          "hours",
+          "days",
+          "weeks",
+          "months"
+        ]
+      },
+      "DateValue": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "An absolute RFC3339 instant, compared against `received_at` as stored\n(the same literal comparison legacy bare-string dates always used).",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "absolute"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A rolling relative offset (\"N units ago\"), stored as-is and resolved to\nan instant at *query* time so the window rolls with `now` instead of\nfreezing to a fixed date at edit time.",
+            "required": [
+              "amount",
+              "unit",
+              "kind"
+            ],
+            "properties": {
+              "amount": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "relative"
+                ]
+              },
+              "unit": {
+                "$ref": "#/components/schemas/DateUnit"
+              }
+            }
+          }
+        ],
+        "description": "A date condition value. Tagged (internally, on `kind`) so absolute and\nrelative dates are explicit, distinct JSON objects — this is what lets the\nuntagged [`SmartMailboxValue`] tell a date apart from a bare string.\n\n@spec docs/L1-accounts#condition-fields-and-operators"
+      },
       "DeleteDraftRequest": {
         "type": "object",
         "description": "Request body for `POST /v1/sources/{source_id}/commands/delete-draft`.",
@@ -8387,9 +8447,13 @@
           },
           {
             "type": "boolean"
+          },
+          {
+            "$ref": "#/components/schemas/DateValue",
+            "description": "A typed date value: either an absolute instant or a rolling relative\noffset. Distinguished from the scalar variants by being a JSON object\nwith a `kind` tag."
           }
         ],
-        "description": "Condition value: scalar string, string list (for `In`), or boolean.\n\n@spec docs/L1-accounts#condition-fields-and-operators"
+        "description": "Condition value: scalar string, string list (for `In`), boolean, or a typed\ndate value.\n\nThe enum is `#[serde(untagged)]`: each variant is distinguished by its JSON\n*shape*, so the legacy `String`/`Strings`/`Bool` values still deserialize\nexactly as before (a bare string, a string array, a bare boolean). The\n[`Date`](Self::Date) variant is a JSON *object* carrying a `kind`\ndiscriminator, a shape none of the scalar variants accept, so adding it is\nfully back-compatible and needs no migration of stored data — legacy\nabsolute dates persisted as a bare `String` keep parsing (see the date field\ncompiler, which reads both the legacy string and the new `Date::Absolute`).\n\n@spec docs/L1-accounts#condition-fields-and-operators"
       },
       "SmtpTransportSettings": {
         "type": "object",
