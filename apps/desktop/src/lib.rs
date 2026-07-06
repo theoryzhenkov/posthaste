@@ -166,6 +166,13 @@ pub fn run() {
         let backend = {
             let config = ServerConfig {
                 extra_cors_origins: vec![
+                    // Windows WebView2 default origin (Tauri v2, no useHttpsScheme):
+                    // http://tauri.localhost. Without this, every API request's
+                    // Origin is CORS-rejected → the frontend retries forever and
+                    // the app is stuck on "Setting up…" (v0.3.0 Windows bug).
+                    "http://tauri.localhost".to_string(),
+                    // macOS WKWebView serves over the custom tauri:// scheme; the
+                    // https variant covers a useHttpsScheme opt-in.
                     "https://tauri.localhost".to_string(),
                     "tauri://localhost".to_string(),
                     "http://127.0.0.1:5173".to_string(),
