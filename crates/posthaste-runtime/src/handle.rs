@@ -915,7 +915,12 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         // `phsend-<operation-id>` identity + `DispatchUncertain`) then guards
         // provider-side duplicates for that ONE operation retried. They stack:
         // key → one operation (here) → one provider submission (M32).
-        match self.core.apply_ledger.reserve(&caller, &key, SEND_OP_NAME) {
+        match self
+            .core
+            .apply_ledger
+            .reserve(&caller, &key, SEND_OP_NAME)
+            .await
+        {
             // A send carries no events, so its ledger slot is an empty
             // `CommandAck` (Ack-shaped, like the message commands — not an
             // `Operation` like the draft routes); the redelivery just needs
@@ -934,13 +939,16 @@ impl RuntimeMailWriteApi for RuntimeHandle {
                 // then applies D47 retention: `Confirmed` kept, a permanent rejection
                 // re-observed, a transient failure cleared so a deliberate retry
                 // re-executes.
-                self.core.apply_ledger.settle(
-                    &caller,
-                    &key,
-                    result
-                        .as_ref()
-                        .map(|()| AppliedOutcome::Ack(CommandAck { events: vec![] })),
-                );
+                self.core
+                    .apply_ledger
+                    .settle(
+                        &caller,
+                        &key,
+                        result
+                            .as_ref()
+                            .map(|()| AppliedOutcome::Ack(CommandAck { events: vec![] })),
+                    )
+                    .await;
                 result
             }
         }
@@ -972,7 +980,12 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         // ORIGINAL operation (its id and response), never enqueuing a second
         // draft version. `draft.save` is a distinct op-name so reusing a key for
         // a delete (or any other command) Conflicts on the op-name guard.
-        match self.core.apply_ledger.reserve(&caller, &key, DRAFT_SAVE_OP) {
+        match self
+            .core
+            .apply_ledger
+            .reserve(&caller, &key, DRAFT_SAVE_OP)
+            .await
+        {
             Reserved::Return(result) => result
                 .map(|outcome| *outcome)
                 .and_then(AppliedOutcome::into_draft),
@@ -982,11 +995,14 @@ impl RuntimeMailWriteApi for RuntimeHandle {
                     .authority_server_link
                     .save_draft(account_id, draft_id, request)
                     .await;
-                self.core.apply_ledger.settle(
-                    &caller,
-                    &key,
-                    result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
-                );
+                self.core
+                    .apply_ledger
+                    .settle(
+                        &caller,
+                        &key,
+                        result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
+                    )
+                    .await;
                 result
             }
         }
@@ -1016,6 +1032,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
             .core
             .apply_ledger
             .reserve(&caller, &key, DRAFT_DELETE_OP)
+            .await
         {
             Reserved::Return(result) => result
                 .map(|outcome| *outcome)
@@ -1026,11 +1043,14 @@ impl RuntimeMailWriteApi for RuntimeHandle {
                     .authority_server_link
                     .delete_draft(account_id, draft_id)
                     .await;
-                self.core.apply_ledger.settle(
-                    &caller,
-                    &key,
-                    result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
-                );
+                self.core
+                    .apply_ledger
+                    .settle(
+                        &caller,
+                        &key,
+                        result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
+                    )
+                    .await;
                 result
             }
         }
@@ -1106,17 +1126,25 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         };
         // Keyed direct-apply (D53 / P8 fix): dedupe at-least-once write-back so a
         // redelivery re-observes the first outcome instead of re-executing.
-        match self.core.apply_ledger.reserve(&caller, &key, op.name()) {
+        match self
+            .core
+            .apply_ledger
+            .reserve(&caller, &key, op.name())
+            .await
+        {
             Reserved::Return(result) => result
                 .map(|outcome| *outcome)
                 .and_then(AppliedOutcome::into_ack),
             Reserved::Execute => {
                 let result = self.core.authority_server_link.apply(op).await;
-                self.core.apply_ledger.settle(
-                    &caller,
-                    &key,
-                    result.as_ref().map(|ack| AppliedOutcome::Ack(ack.clone())),
-                );
+                self.core
+                    .apply_ledger
+                    .settle(
+                        &caller,
+                        &key,
+                        result.as_ref().map(|ack| AppliedOutcome::Ack(ack.clone())),
+                    )
+                    .await;
                 result
             }
         }

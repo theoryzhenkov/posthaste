@@ -21,6 +21,7 @@ mod shutdown;
 mod transport;
 mod views;
 
+pub use apply_ledger::{DurableApplyRecord, DurableApplyState, DurableApplyStore, DurableReserve};
 pub use assembly::{
     assemble_runtime, build_remote_runtime, AuthorityServerTransportConfig,
     AuthorityServerTransportDecorator, ComposedRuntime, RemoteRuntimeBuild, RuntimeAssembly,

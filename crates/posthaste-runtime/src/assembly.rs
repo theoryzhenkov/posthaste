@@ -223,6 +223,9 @@ pub fn build_remote_runtime(
         event_sender,
         startup_status: runtime_status.clone(),
         down_channel,
+        // A remote near node has no local store to back the apply ledger; the
+        // in-memory ledger alone carries the (pre-DS7) dedup behavior here.
+        durable_apply: None,
     });
 
     Ok(RemoteRuntimeBuild {
@@ -255,6 +258,13 @@ pub struct RuntimeAssembly {
     pub down_channel: Option<
         tokio::sync::mpsc::UnboundedReceiver<posthaste_authority_server_link::SequencedFrame>,
     >,
+    /// The durable backing of the apply-scoped idempotency ledger (DS7):
+    /// `Some` in the co-located build (the authority server's SQLite
+    /// `apply_ledger` table), so keyed direct-apply/send/draft decisions
+    /// survive the in-memory TTL reap and a process restart. `None` for a
+    /// store-less remote near node — that build keeps the in-memory-only
+    /// (TTL/restart-vulnerable) behavior, which its deployment accepts.
+    pub durable_apply: Option<Arc<dyn crate::apply_ledger::DurableApplyStore>>,
 }
 
 /// The handle + shutdown produced by [`assemble_runtime`].
@@ -275,6 +285,7 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         event_sender,
         startup_status,
         down_channel,
+        durable_apply,
     } = assembly;
 
     let stopped = Arc::new(AtomicBool::new(false));
@@ -330,7 +341,10 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         links,
         event_tap,
         tap_subscriber_seq: AtomicU64::new(0),
-        apply_ledger: crate::apply_ledger::ApplyLedger::new(),
+        apply_ledger: match durable_apply {
+            Some(durable) => crate::apply_ledger::ApplyLedger::with_durable(durable),
+            None => crate::apply_ledger::ApplyLedger::new(),
+        },
         startup_status,
         stopped: stopped.clone(),
     });
