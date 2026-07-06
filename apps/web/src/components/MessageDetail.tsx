@@ -15,6 +15,7 @@ import type {
   MessageSummary,
   SourceMessageRef,
 } from '../api/types'
+import type { EmailActions } from '../hooks/useEmailActions'
 import { mailKeys, mergeConversationView } from '../mailState'
 import { runtimeViews } from '../runtime/views'
 import { useRuntimeObjectView } from '../runtime/useRuntimeObjectView'
@@ -52,9 +53,12 @@ interface MessageSelection extends SourceMessageRef {
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageDetailProps {
   selection: MessageSelection | null
-  onArchive: () => void
-  onSnooze: (until: number) => void
-  onDiscardDraft?: () => void
+  /** Domain mutations — the header resolves its action row from the registry
+   *  and delegates email operations (archive/trash/flag/snooze/…) here. */
+  actions: EmailActions
+  /** Role of the current view (null when ambiguous, e.g. the focused message
+   *  window) — makes the header's action row role-aware. */
+  viewRole: string | null
   onEditDraft?: () => void
   onForward: () => void
   onOpenFocusedMessage?: () => void
@@ -63,8 +67,6 @@ interface MessageDetailProps {
   onSelectMessage: (message: MessageSummary) => void
   onSearch?: (query: string, append?: boolean) => void
   onTag?: () => void
-  onToggleFlag?: () => void
-  onTrash?: () => void
 }
 
 /**
@@ -74,9 +76,8 @@ interface MessageDetailProps {
  */
 export function MessageDetail({
   selection,
-  onArchive,
-  onSnooze,
-  onDiscardDraft,
+  actions,
+  viewRole,
   onEditDraft,
   onForward,
   onOpenFocusedMessage,
@@ -85,8 +86,6 @@ export function MessageDetail({
   onSelectMessage,
   onSearch,
   onTag,
-  onToggleFlag,
-  onTrash,
 }: MessageDetailProps) {
   const queryClient = useQueryClient()
   const conversationQueryKey = useMemo(
@@ -194,9 +193,8 @@ export function MessageDetail({
       <MessageHeader
         conversationSubject={conversation.subject}
         message={message}
-        onArchive={onArchive}
-        onSnooze={onSnooze}
-        onDiscardDraft={onDiscardDraft}
+        actions={actions}
+        viewRole={viewRole}
         onEditDraft={onEditDraft}
         onForward={onForward}
         onOpenFocusedMessage={onOpenFocusedMessage}
@@ -204,8 +202,6 @@ export function MessageDetail({
         onReplyAll={onReplyAll}
         onSearch={onSearch}
         onTag={onTag}
-        onToggleFlag={onToggleFlag}
-        onTrash={onTrash}
         threadMessages={threadMessages}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

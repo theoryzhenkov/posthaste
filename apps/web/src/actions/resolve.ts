@@ -15,6 +15,7 @@ import { allActions } from './registry'
 import type {
   ActionContext,
   ActionDefinition,
+  ActionParamOption,
   ActionSection,
   ActionServices,
 } from './types'
@@ -26,8 +27,14 @@ export interface ResolvedAction {
   icon: LucideIcon
   enabled: boolean
   disabledReason?: string
+  /** Context-resolved options of a PARAMETERIZED action (`def.resolveParams`);
+   *  `undefined` for plain actions. Surfaces render these as their picker. */
+  params?: ActionParamOption[]
   /** Bound runner: applies confirm gating (later slices), then `def.run`. */
   execute: () => void | Promise<void>
+  /** Parameterized runner — present iff {@link params} is. Runs `def.run` with
+   *  the chosen option. */
+  executeWith?: (param: ActionParamOption) => void | Promise<void>
 }
 
 /** Menu / palette section order. */
@@ -60,15 +67,20 @@ function bind(
     enablement !== true && typeof enablement === 'object'
       ? enablement.reason
       : undefined
+  const params = def.resolveParams?.(ctx, services)
   return {
     def,
     title,
     icon,
     enabled,
     disabledReason,
+    params,
     // Slice 1 ports carry no `confirm`, so this matches the old direct `run`.
     // The confirm-dialog host is wired in a later slice.
     execute: () => def.run(ctx, services),
+    executeWith: params
+      ? (param: ActionParamOption) => def.run(ctx, services, param)
+      : undefined,
   }
 }
 
@@ -83,14 +95,24 @@ export function resolveActions(
   services: ActionServices,
   opts?: { includeDisabled?: boolean },
 ): ResolvedAction[] {
-  return allActions()
-    .filter((d) => d.surfaces.includes(ctx.surface))
-    .filter((d) => d.isAvailable?.(ctx, services) ?? true)
-    .map((d) => bind(d, ctx, services))
-    .filter((r) => r.enabled || opts?.includeDisabled)
-    .sort(
-      (a, b) =>
-        SECTION_ORDER.indexOf(a.def.section) -
-        SECTION_ORDER.indexOf(b.def.section),
-    )
+  return (
+    allActions()
+      .filter((d) => d.surfaces.includes(ctx.surface))
+      .filter((d) => d.isAvailable?.(ctx, services) ?? true)
+      .map((d) => bind(d, ctx, services))
+      .filter((r) => r.enabled || opts?.includeDisabled)
+      // A parameterized action with NOTHING to pick (e.g. move-to-mailbox when
+      // every candidate mailbox is excluded) is dropped like a failed
+      // availability check. A DISABLED row is kept (its options are naturally
+      // empty without a target) so the palette can still hint "Select a message
+      // first" under `includeDisabled`.
+      .filter(
+        (r) => r.params === undefined || r.params.length > 0 || !r.enabled,
+      )
+      .sort(
+        (a, b) =>
+          SECTION_ORDER.indexOf(a.def.section) -
+          SECTION_ORDER.indexOf(b.def.section),
+      )
+  )
 }

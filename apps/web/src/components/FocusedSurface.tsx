@@ -111,27 +111,10 @@ export function FocusedSurface({
     <>
       <MessageDetail
         selection={surface.params}
-        onArchive={() =>
-          actions.archive({
-            sourceId: surface.params.sourceId,
-            messageId: surface.params.messageId,
-          })
-        }
-        onSnooze={(until: number) =>
-          actions.snooze(
-            {
-              sourceId: surface.params.sourceId,
-              messageId: surface.params.messageId,
-            },
-            until,
-          )
-        }
-        onDiscardDraft={() =>
-          actions.discardDraft({
-            sourceId: surface.params.sourceId,
-            messageId: surface.params.messageId,
-          })
-        }
+        actions={actions}
+        // A focused window has no view context — role-gated header actions
+        // resolve as they do for an ambiguous view.
+        viewRole={null}
         onEditDraft={() =>
           editDraft(surface.params.sourceId, surface.params.messageId)
         }

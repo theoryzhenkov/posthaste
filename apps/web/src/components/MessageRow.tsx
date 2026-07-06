@@ -25,6 +25,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from './ui/context-menu'
 import {
@@ -101,6 +104,9 @@ export const MessageRow = memo(function MessageRow({
   const services: ActionServices = {
     email: actions,
     row: { open: onSelectMessage, viewConversation: onViewConversation },
+    // The account's mailbox read model (already subscribed once per account by
+    // useMailboxDirectory) — options source for the parameterized "Move to ▸".
+    mailboxes: { list: mailboxDirectory.list },
   }
   const actionContext: ActionContext = {
     targets: [
@@ -180,13 +186,35 @@ export const MessageRow = memo(function MessageRow({
               {previous && previous.def.section !== action.def.section && (
                 <ContextMenuSeparator />
               )}
-              <ContextMenuItem
-                variant={action.def.destructive ? 'destructive' : 'default'}
-                onSelect={action.execute}
-              >
-                <Icon size={14} />
-                {action.title}
-              </ContextMenuItem>
+              {action.params ? (
+                // A PARAMETERIZED action renders as a submenu ("Move to ▸"):
+                // one row per resolved option, each running `executeWith`.
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger>
+                    <Icon size={14} />
+                    {/* The chevron already signals "more"; drop a trailing ellipsis. */}
+                    {action.title.replace(/…$/, '')}
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="min-w-40">
+                    {action.params.map((option) => (
+                      <ContextMenuItem
+                        key={option.id}
+                        onSelect={() => void action.executeWith?.(option)}
+                      >
+                        {option.label}
+                      </ContextMenuItem>
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+              ) : (
+                <ContextMenuItem
+                  variant={action.def.destructive ? 'destructive' : 'default'}
+                  onSelect={action.execute}
+                >
+                  <Icon size={14} />
+                  {action.title}
+                </ContextMenuItem>
+              )}
             </Fragment>
           )
         })}

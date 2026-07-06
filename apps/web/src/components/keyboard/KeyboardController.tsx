@@ -63,6 +63,9 @@ export interface KeyboardControllerProps {
   onClearSelectedMessage: () => void
   onClearSearchQuery: () => void
   onToggleShortcuts: () => void
+  /** A PARAMETERIZED action's chord (e.g. `m` → move-to-mailbox) can't run
+   *  bare — this opens the command palette in that action's pick-step. */
+  onOpenActionPicker: (actionId: string) => void
   onGoto: (role: GotoRole, options: { forceSmart: boolean }) => void
   onGotoConversation: () => void
   /** Role of the current view — gates the contextual keyboard action tier
@@ -204,7 +207,12 @@ export function KeyboardController({
             if (!resolved) return null
             return {
               id: resolved.def.id,
-              run: () => runResolvedWithConfirm(resolved, requestConfirm),
+              // Parameterized actions route to the palette pick-step (never a
+              // silent no-op); destructive ones still gate on the confirm host.
+              run: () =>
+                runResolvedWithConfirm(resolved, requestConfirm, (r) =>
+                  stateRef.current.props.onOpenActionPicker(r.def.id),
+                ),
             }
           },
         },
