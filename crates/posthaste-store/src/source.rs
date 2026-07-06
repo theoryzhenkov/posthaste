@@ -108,7 +108,7 @@ impl SourceDataStore for DatabaseStore {
             )
             .map_err(sql_to_store_error)?;
             tx.execute(
-                "DELETE FROM sender_address_cache WHERE account_id = ?1",
+                "DELETE FROM address_book WHERE account_id = ?1",
                 params![account_id.as_str()],
             )
             .map_err(sql_to_store_error)?;

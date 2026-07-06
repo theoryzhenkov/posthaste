@@ -196,6 +196,13 @@ pub const STORE_SYNC_BATCH_APPLYING: LogEvent = LogEvent::new("store.sync.batch_
 pub const STORE_STARTUP_BODY_CACHE_REPAIR_FAILED: LogEvent =
     LogEvent::new("store.startup.body_cache_repair_failed");
 
+/// The deferred post-startup address-book backfill failed. Non-fatal — the
+/// store is already serving, the backfill is idempotent, and ingest maintains
+/// the book incrementally regardless; a future retry or the next startup
+/// catches it up.
+pub const STORE_STARTUP_ADDRESS_BOOK_BACKFILL_FAILED: LogEvent =
+    LogEvent::new("store.startup.address_book_backfill_failed");
+
 pub const SUPERVISOR_ACCOUNT_DISABLED: LogEvent = LogEvent::new("supervisor.account.disabled");
 pub const SUPERVISOR_ACCOUNT_REMOVED: LogEvent = LogEvent::new("supervisor.account.removed");
 pub const SUPERVISOR_ACCOUNT_RUNTIME_STARTED: LogEvent =

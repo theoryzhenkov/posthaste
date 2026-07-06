@@ -280,6 +280,17 @@ pub(crate) async fn build_authority_server_parts(
                     "deferred startup body-cache repair failed"
                 );
             }
+            // Seed the persistent address book from mail already in the store, so
+            // recipient autocomplete is complete from day one (not only for mail
+            // that arrives after this feature ships). Idempotent and off the hot
+            // open path; ingest maintains the book incrementally from here on.
+            if let Err(error) = repair_store.backfill_address_book() {
+                ph_warn!(
+                    events::STORE_STARTUP_ADDRESS_BOOK_BACKFILL_FAILED,
+                    error = %error,
+                    "deferred startup address-book backfill failed"
+                );
+            }
         });
     }
     let store: Arc<dyn MailStore> = database_store.clone();
