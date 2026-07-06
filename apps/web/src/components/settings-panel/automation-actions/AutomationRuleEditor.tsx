@@ -17,6 +17,7 @@ import {
   type AutomationRuleState,
 } from '../automationRuleHelpers'
 import { RuleGroupEditor } from '../RuleGroupEditor'
+import { ConditionEditorContext } from '../rule-group/conditionEditorContext'
 import { Field, SettingsBackButton } from '../shared'
 import { ActionListEditor, LabeledSelect } from './ActionListEditor'
 import { AutomationRulePreview } from './AutomationRulePreview'
@@ -221,10 +222,18 @@ export function AutomationRuleEditor({
       </RuleEditorSection>
 
       <RuleEditorSection title="Conditions">
-        <RuleGroupEditor
-          group={draft.condition.root}
-          onChange={(root) => onChange({ condition: { root } })}
-        />
+        <ConditionEditorContext.Provider
+          value={{
+            accountId: draft.accountId,
+            mailboxes: staticMailboxes,
+            accounts,
+          }}
+        >
+          <RuleGroupEditor
+            group={draft.condition.root}
+            onChange={(root) => onChange({ condition: { root } })}
+          />
+        </ConditionEditorContext.Provider>
       </RuleEditorSection>
 
       <RuleEditorSection title="Preview">
