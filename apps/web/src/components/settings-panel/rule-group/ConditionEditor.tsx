@@ -37,7 +37,12 @@ export function ConditionEditor({
   onRemove: () => void
 }) {
   const operators = operatorOptionsForField(condition.field)
-  const isBooleanField = valueTypeForField(condition.field) === 'boolean'
+  const valueType = valueTypeForField(condition.field)
+  const isBooleanField = valueType === 'boolean'
+  // Date fields fold the operator into the value widget's natural reading
+  // ("in the last N days" / "before <date>"), so the generic operator dropdown
+  // is hidden — the user never sees "before" next to "within".
+  const isDateField = valueType === 'date'
 
   return (
     <div className="grid gap-2 sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center">
@@ -56,12 +61,16 @@ export function ConditionEditor({
           />
           not
         </label>
-        <OperatorSelect
-          condition={condition}
-          isBooleanField={isBooleanField}
-          operators={operators}
-          onChange={onChange}
-        />
+        {isDateField ? (
+          <span className="h-8" aria-hidden="true" />
+        ) : (
+          <OperatorSelect
+            condition={condition}
+            isBooleanField={isBooleanField}
+            operators={operators}
+            onChange={onChange}
+          />
+        )}
         <ConditionValueEditor condition={condition} onChange={onChange} />
       </div>
 

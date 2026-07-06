@@ -136,6 +136,54 @@ fn default_smart_mailboxes_stamp_role_for_contextual_actions() {
 }
 
 #[test]
+fn smart_mailbox_relative_date_value_round_trips_through_toml() {
+    // A `Date::Relative` value must survive the TOML round-trip as a `{ kind,
+    // amount, unit }` table (not silently frozen to a string).
+    let mailbox = SmartMailbox {
+        id: SmartMailboxId::from("recent"),
+        name: "Recent".to_string(),
+        kind: SmartMailboxKind::User,
+        default_key: None,
+        role: None,
+        parent_id: None,
+        rule: SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::All,
+                negated: false,
+                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                    field: SmartMailboxField::ReceivedAt,
+                    operator: SmartMailboxOperator::After,
+                    negated: false,
+                    value: SmartMailboxValue::Date(DateValue::Relative {
+                        amount: 7,
+                        unit: DateUnit::Days,
+                    }),
+                })],
+            },
+        },
+        created_at: "2026-07-06T00:00:00Z".to_string(),
+        updated_at: "2026-07-06T00:00:00Z".to_string(),
+    };
+
+    let toml_struct = SmartMailboxToml::from_smart_mailbox(&mailbox);
+    let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
+    let parsed: SmartMailboxToml = toml::from_str(&toml_string).unwrap();
+    let round_tripped = parsed.to_smart_mailbox().unwrap();
+
+    assert_eq!(round_tripped.rule, mailbox.rule);
+
+    // Legacy bare-string absolute dates still load unchanged (no migration).
+    let legacy_condition_toml =
+        "field = \"received_at\"\noperator = \"before\"\nvalue = \"2026-01-01T00:00:00Z\"\n";
+    let parsed_condition: ConditionToml = toml::from_str(legacy_condition_toml).unwrap();
+    let domain = super::smart_conversions::convert_condition(&parsed_condition).unwrap();
+    assert_eq!(
+        domain.value,
+        SmartMailboxValue::String("2026-01-01T00:00:00Z".to_string())
+    );
+}
+
+#[test]
 fn app_toml_round_trips() {
     let settings = AppSettings {
         default_account_id: Some(AccountId::from("primary")),

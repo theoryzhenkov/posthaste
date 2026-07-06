@@ -87,14 +87,19 @@ pub(super) fn compile_text_field(
 }
 
 /// Compiles a date comparison condition (before/after/on-or-before/on-or-after).
+///
+/// Accepts three value shapes, back-compatibly:
+/// - a legacy bare [`SmartMailboxValue::String`] — an absolute RFC3339 instant
+///   compared against the stored `received_at` literally (unchanged behavior);
+/// - [`DateValue::Absolute`] — the same literal comparison, but typed;
+/// - [`DateValue::Relative`] — a *rolling* bound resolved at query time via
+///   SQLite's `datetime('now', ?)`, so "in the last N days" keeps rolling with
+///   the clock instead of freezing to a fixed instant at edit time.
 pub(super) fn compile_date_field(
     column: &str,
     condition: &SmartMailboxCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
-    params.push(SqlValue::Text(
-        expect_string_value(&condition.value)?.to_string(),
-    ));
     let comparator = match condition.operator {
         SmartMailboxOperator::Before => "<",
         SmartMailboxOperator::After => ">",
@@ -107,7 +112,43 @@ pub(super) fn compile_date_field(
             )))
         }
     };
-    Ok(format!("{column} {comparator} ?"))
+    match &condition.value {
+        // Legacy bare-string absolute date, and the typed absolute date, both
+        // compare against the stored RFC3339 instant as-is.
+        SmartMailboxValue::String(instant) => {
+            params.push(SqlValue::Text(instant.clone()));
+            Ok(format!("{column} {comparator} ?"))
+        }
+        SmartMailboxValue::Date(DateValue::Absolute { value }) => {
+            params.push(SqlValue::Text(value.clone()));
+            Ok(format!("{column} {comparator} ?"))
+        }
+        // Rolling relative bound: emit `datetime(received_at) <cmp>
+        // datetime('now', '-N unit')`. `received_at` is stored as RFC3339 TEXT,
+        // so both sides go through `datetime()` for a real instant comparison.
+        // The `-N unit` modifier is built from a bound-integer amount (`u32`,
+        // digits only) and a fixed, validated unit string, then passed as a
+        // *bound parameter* — no user text ever reaches the SQL, so there is no
+        // injection surface.
+        SmartMailboxValue::Date(DateValue::Relative { amount, unit }) => {
+            let modifier = match unit {
+                DateUnit::Minutes => format!("-{amount} minutes"),
+                DateUnit::Hours => format!("-{amount} hours"),
+                DateUnit::Days => format!("-{amount} days"),
+                // SQLite has no `weeks` modifier; express it as 7-day multiples.
+                DateUnit::Weeks => format!("-{} days", u64::from(*amount) * 7),
+                DateUnit::Months => format!("-{amount} months"),
+            };
+            params.push(SqlValue::Text(modifier));
+            Ok(format!(
+                "datetime({column}) {comparator} datetime('now', ?)"
+            ))
+        }
+        _ => Err(StoreError::Failure(format!(
+            "expected date smart mailbox value for field {:?}",
+            condition.field
+        ))),
+    }
 }
 
 /// Compiles a numeric-comparison condition against an integer column (used for
