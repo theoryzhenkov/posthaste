@@ -39,8 +39,9 @@ fn origin_allowed_normalizes_and_matches() {
     let allowed = origin_allowlist(
         "http://localhost:5173",
         &[
-            "tauri://localhost".to_string(),
+            "http://tauri.localhost".to_string(),
             "https://tauri.localhost".to_string(),
+            "tauri://localhost".to_string(),
             "http://127.0.0.1:5173".to_string(),
         ],
     );
@@ -49,14 +50,15 @@ fn origin_allowed_normalizes_and_matches() {
     // Casing is normalized by url::Url.
     assert!(origin_allowed("HTTP://LOCALHOST:5173", &allowed));
     assert!(origin_allowed("tauri://localhost", &allowed));
-    // The Windows WebView2 origin must be allowed (regression: it was
-    // previously missing from the hardcoded list).
+    // The Windows WebView2 DEFAULT origin is `http://tauri.localhost` (Tauri v2,
+    // no useHttpsScheme). It MUST be allowed — otherwise every API request is
+    // CORS-rejected and the app is stuck on "Setting up…" (the v0.3.0 Windows
+    // bug, where the list carried only the `https` variant). macOS uses the
+    // `tauri://` scheme; the `https` variant covers a useHttpsScheme opt-in.
+    assert!(origin_allowed("http://tauri.localhost", &allowed));
     assert!(origin_allowed("https://tauri.localhost", &allowed));
     assert!(!origin_allowed("http://evil.example", &allowed));
     assert!(!origin_allowed("http://localhost:9999", &allowed));
-    // An origin CORS does not list (e.g. plain http://tauri.localhost here)
-    // is not allowed — auth tracks CORS exactly.
-    assert!(!origin_allowed("http://tauri.localhost", &allowed));
     // Fail closed on garbage / non-absolute values.
     assert!(!origin_allowed("not a url", &allowed));
     assert!(!origin_allowed("", &allowed));
