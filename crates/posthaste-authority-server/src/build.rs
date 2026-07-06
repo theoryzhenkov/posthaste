@@ -423,6 +423,13 @@ pub(crate) fn build_runtime(
         event_sender,
         startup_status: runtime_status.clone(),
         down_channel,
+        // DS7: back the runtime's apply-scoped idempotency ledger with the
+        // authority server's SQLite `apply_ledger` table, so keyed
+        // direct-apply/send/draft decisions survive the in-memory TTL reap
+        // and a process restart (never re-executed on redelivery).
+        durable_apply: Some(Arc::new(
+            crate::apply_ledger_store::StoreDurableApplyLedger::new(database_store.clone()),
+        )),
     });
 
     AuthorityServerBuild {
@@ -606,6 +613,10 @@ fn migration_runtime(
         event_sender: api_bridge.event_sender,
         startup_status: runtime_status,
         down_channel: None,
+        // The migration/test-harness runtime is built over an abstract
+        // `MailStore` (no `DatabaseStore` in hand), so its apply ledger stays
+        // in-memory-only — the pre-DS7 baseline the harness tests pin.
+        durable_apply: None,
     });
     (composed.handle, account_mutations)
 }
