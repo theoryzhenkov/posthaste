@@ -398,4 +398,31 @@ pub(super) const SCHEMA_SQL: &str = "
             );
             CREATE INDEX IF NOT EXISTS idx_message_snooze_until
                 ON message_snooze (account_id, until);
+
+            -- DS7: the durable direct-apply idempotency ledger. One row per
+            -- (caller scope, idempotency key): reserved 'pending' BEFORE the
+            -- keyed operation executes, settled to 'confirmed'/'rejected' with
+            -- the outcome JSON after. The durable source of truth for \"already
+            -- applied\" — a redelivery after a process restart (or after the
+            -- in-memory ledger's TTL reap) finds the prior decision here and is
+            -- never re-executed. Caller-scoped (not account-scoped): the key is
+            -- the client-supplied Idempotency-Key under its ApplyScope bucket,
+            -- mirroring the in-memory ledger's (ApplyScope, ClientMutationId).
+            -- Settled rows are GC'd only past APPLY_LEDGER_RETENTION_SECS (see
+            -- src/apply_ledger.rs — it dominates any realistic redelivery
+            -- window); 'pending' rows are never GC'd (an unresolved crash
+            -- marker must keep blocking re-execution).
+            CREATE TABLE IF NOT EXISTS apply_ledger (
+                scope TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                op_name TEXT NOT NULL,
+                state TEXT NOT NULL,
+                outcome_json TEXT,
+                created_at INTEGER NOT NULL,
+                settled_at INTEGER,
+                PRIMARY KEY (scope, idempotency_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_apply_ledger_settled_at
+                ON apply_ledger (settled_at)
+                WHERE settled_at IS NOT NULL;
             ";
