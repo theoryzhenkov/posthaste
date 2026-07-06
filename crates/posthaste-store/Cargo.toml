@@ -8,6 +8,10 @@ hex = { workspace = true }
 posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-observability = { path = "../posthaste-observability" }
+# Backs the `regexp(pattern, text)` SQLite scalar registered on every connection
+# (see `db/connection.rs`) so the smart-mailbox `regex` operator can evaluate
+# `text REGEXP ?`.
+regex = { workspace = true }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

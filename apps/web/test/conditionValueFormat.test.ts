@@ -42,24 +42,34 @@ describe('fieldRegistry', () => {
   it('preserves the exact operator subsets the old switch returned', () => {
     // Wire-compat: the operator matrix must not drift when moved into the
     // registry, or existing rules would offer different operators.
+    // Free-text fields also carry the additive text-match operators (R4):
+    // begins-with / ends-with / regex, alongside contains.
+    const textMatch = [
+      'equals',
+      'contains',
+      'in',
+      'beginsWith',
+      'endsWith',
+      'regex',
+    ]
     const expected: Record<SmartMailboxField, string[]> = {
       sourceId: ['equals', 'in'],
-      sourceName: ['equals', 'contains', 'in'],
+      sourceName: textMatch,
       messageId: ['equals', 'in'],
       threadId: ['equals', 'in'],
       conversationId: ['equals', 'in'],
       mailboxId: ['equals', 'in'],
-      mailboxName: ['equals', 'contains', 'in'],
+      mailboxName: textMatch,
       mailboxRole: ['equals', 'in'],
       isRead: ['equals'],
       isFlagged: ['equals'],
       hasAttachment: ['equals'],
       keyword: ['equals', 'in'],
-      fromName: ['equals', 'contains', 'in'],
-      fromEmail: ['equals', 'contains', 'in'],
-      to: ['equals', 'contains', 'in'],
-      subject: ['equals', 'contains', 'in'],
-      preview: ['equals', 'contains', 'in'],
+      fromName: textMatch,
+      fromEmail: textMatch,
+      to: textMatch,
+      subject: textMatch,
+      preview: textMatch,
       receivedAt: ['lt', 'gt', 'le', 'ge'],
       size: ['lt', 'gt', 'le', 'ge'],
     }
@@ -96,6 +106,32 @@ describe('fieldRegistry', () => {
     expect(operatorLabel('equals', 'text')).toBe('equals')
     expect(operatorLabel('contains', 'text')).toBe('contains')
     expect(operatorLabel('in', 'text')).toBe('is one of')
+  })
+
+  it('R4: adds the text-match operators to text fields only, labeled', () => {
+    // The additive operators appear on free-text fields (subject, from, to)…
+    for (const field of ['subject', 'fromEmail', 'to'] as SmartMailboxField[]) {
+      const ops = operatorOptionsForField(field)
+      expect(ops).toContain('beginsWith')
+      expect(ops).toContain('endsWith')
+      expect(ops).toContain('regex')
+    }
+    // …and their labels read naturally.
+    expect(operatorLabel('beginsWith', 'text')).toBe('begins with')
+    expect(operatorLabel('endsWith', 'text')).toBe('ends with')
+    expect(operatorLabel('regex', 'text')).toBe('matches regex')
+
+    // They are NOT offered on bool or date fields.
+    for (const field of [
+      'isRead',
+      'hasAttachment',
+      'receivedAt',
+    ] as SmartMailboxField[]) {
+      const ops = operatorOptionsForField(field)
+      expect(ops).not.toContain('beginsWith')
+      expect(ops).not.toContain('endsWith')
+      expect(ops).not.toContain('regex')
+    }
   })
 
   it('derives its operators verbatim from the generated Rust schema', () => {

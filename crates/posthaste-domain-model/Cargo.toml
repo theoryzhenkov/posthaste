@@ -5,6 +5,11 @@ edition = "2021"
 
 [dependencies]
 futures-util = { workspace = true }
+# Compile-checks a `regex` operator's pattern at the write boundary
+# (`validate_condition`) so a malformed pattern is a typed `query_invalid` error,
+# never a runtime failure deep in the store. Same engine the store's `regexp`
+# SQL function uses, so validation agrees with evaluation.
+regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

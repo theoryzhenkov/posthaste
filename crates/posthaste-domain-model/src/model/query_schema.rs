@@ -27,7 +27,7 @@ use super::smart_mailboxes::{
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
 };
 
-use SmartMailboxOperator::{Contains, Equals, Ge, Gt, In, Le, Lt};
+use SmartMailboxOperator::{BeginsWith, Contains, EndsWith, Equals, Ge, Gt, In, Le, Lt, Regex};
 
 /// The value-shape family a field's condition value carries. This selects how the
 /// compiler validates and binds the value, and drives the web's coarse widget
@@ -69,8 +69,12 @@ pub struct MailQueryFieldSpec {
 
 /// Equality / membership only (identifier-shaped columns: ids, roles, keywords).
 const EQ_IN: &[SmartMailboxOperator] = &[Equals, In];
-/// Equality / substring / membership (free-text columns).
-const EQ_CONTAINS_IN: &[SmartMailboxOperator] = &[Equals, Contains, In];
+/// Free-text columns: equality / substring / membership plus the additive text
+/// match operators (R4) — prefix (`beginsWith`), suffix (`endsWith`), and regex.
+/// These belong with `contains`: they are text-shaped predicates over the same
+/// free-text columns (id columns keep the leaner [`EQ_IN`] set).
+const EQ_CONTAINS_IN: &[SmartMailboxOperator] =
+    &[Equals, Contains, In, BeginsWith, EndsWith, Regex];
 /// Boolean equality.
 const EQ_ONLY: &[SmartMailboxOperator] = &[Equals];
 /// The four ordered comparisons, reused for dates and numbers (`< > <= >=`).
@@ -199,6 +203,12 @@ pub enum QueryValidationReason {
     OperatorNotAllowed,
     /// The value's shape does not match the field's [`QueryValueType`].
     ValueTypeMismatch,
+    /// A `regex` operator carried a pattern that does not compile. Rejected here
+    /// so an un-compilable regex never reaches the store (where it would surface
+    /// as a runtime error on every scanned row). The engine is the same `regex`
+    /// crate the store's `regexp` SQL scalar uses, so validation agrees with
+    /// evaluation.
+    InvalidRegex,
 }
 
 impl QueryValidationReason {
@@ -207,6 +217,7 @@ impl QueryValidationReason {
         match self {
             Self::OperatorNotAllowed => "operator_not_allowed",
             Self::ValueTypeMismatch => "value_type_mismatch",
+            Self::InvalidRegex => "invalid_regex",
         }
     }
 }
@@ -237,6 +248,11 @@ impl std::fmt::Display for QueryValidationError {
                 f,
                 "value type does not match field {:?} (operator {:?})",
                 self.field, self.operator
+            ),
+            QueryValidationReason::InvalidRegex => write!(
+                f,
+                "value is not a valid regular expression for field {:?}",
+                self.field
             ),
         }
     }
@@ -287,6 +303,29 @@ pub fn validate_condition(condition: &SmartMailboxCondition) -> Result<(), Query
             operator: condition.operator,
             reason: QueryValidationReason::ValueTypeMismatch,
         });
+    }
+    // A `regex` operator's value must be a single, compilable pattern. A list
+    // (`Strings`) has no scalar pattern to compile, and a pattern that does not
+    // compile must be rejected here rather than failing per-row in the store.
+    if condition.operator == SmartMailboxOperator::Regex {
+        match &condition.value {
+            SmartMailboxValue::String(pattern) => {
+                if regex::Regex::new(pattern).is_err() {
+                    return Err(QueryValidationError {
+                        field: condition.field,
+                        operator: condition.operator,
+                        reason: QueryValidationReason::InvalidRegex,
+                    });
+                }
+            }
+            _ => {
+                return Err(QueryValidationError {
+                    field: condition.field,
+                    operator: condition.operator,
+                    reason: QueryValidationReason::ValueTypeMismatch,
+                });
+            }
+        }
     }
     Ok(())
 }
@@ -459,6 +498,62 @@ mod tests {
         ] {
             assert_eq!(validate_condition(&cond), Ok(()), "condition {cond:?}");
         }
+    }
+
+    #[test]
+    fn valid_regex_pattern_passes_but_malformed_is_rejected() {
+        // A well-formed anchored pattern on a text field validates.
+        assert_eq!(
+            validate_condition(&condition(
+                SmartMailboxField::Subject,
+                SmartMailboxOperator::Regex,
+                SmartMailboxValue::String("^foo.*bar$".to_string()),
+            )),
+            Ok(())
+        );
+        // A malformed pattern (unclosed group) is a typed boundary error, NOT a
+        // panic and NOT a deferred store failure.
+        let err = validate_condition(&condition(
+            SmartMailboxField::Subject,
+            SmartMailboxOperator::Regex,
+            SmartMailboxValue::String("foo(".to_string()),
+        ))
+        .unwrap_err();
+        assert_eq!(err.reason, QueryValidationReason::InvalidRegex);
+        assert_eq!(err.operator, SmartMailboxOperator::Regex);
+        // A regex operator needs a scalar pattern — a list is a type mismatch.
+        let err = validate_condition(&condition(
+            SmartMailboxField::Subject,
+            SmartMailboxOperator::Regex,
+            SmartMailboxValue::Strings(vec!["a".to_string()]),
+        ))
+        .unwrap_err();
+        assert_eq!(err.reason, QueryValidationReason::ValueTypeMismatch);
+    }
+
+    #[test]
+    fn text_match_operators_pass_on_free_text_fields() {
+        for operator in [
+            SmartMailboxOperator::BeginsWith,
+            SmartMailboxOperator::EndsWith,
+        ] {
+            assert_eq!(
+                validate_condition(&condition(
+                    SmartMailboxField::FromEmail,
+                    operator,
+                    SmartMailboxValue::String("50%".to_string()),
+                )),
+                Ok(())
+            );
+        }
+        // …but not on an identifier field (which keeps the leaner equals/in set).
+        let err = validate_condition(&condition(
+            SmartMailboxField::MessageId,
+            SmartMailboxOperator::Regex,
+            SmartMailboxValue::String("x".to_string()),
+        ))
+        .unwrap_err();
+        assert_eq!(err.reason, QueryValidationReason::OperatorNotAllowed);
     }
 
     #[test]

@@ -4121,6 +4121,7 @@ name = "posthaste-domain-model"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -4430,6 +4431,7 @@ dependencies = [
  "posthaste-domain-service",
  "posthaste-observability",
  "posthaste-query-grammar",
+ "regex",
  "rusqlite",
  "serde_json",
  "sha2",

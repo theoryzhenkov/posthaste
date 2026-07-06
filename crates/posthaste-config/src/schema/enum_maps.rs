@@ -34,7 +34,7 @@ bimap_enum!(FieldToml => SmartMailboxField {
     Preview, ReceivedAt, Size,
 });
 bimap_enum!(ConditionOperatorToml => SmartMailboxOperator {
-    Equals, In, Contains, Lt, Gt, Le, Ge,
+    Equals, In, Contains, BeginsWith, EndsWith, Regex, Lt, Gt, Le, Ge,
 });
 bimap_enum!(DriverToml => AccountDriver { Jmap, ImapSmtp, Mock });
 bimap_enum!(SecretKindToml => SecretKind { Env, Os });
