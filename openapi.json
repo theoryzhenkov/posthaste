@@ -8178,9 +8178,11 @@
           "keyword",
           "fromName",
           "fromEmail",
+          "to",
           "subject",
           "preview",
-          "receivedAt"
+          "receivedAt",
+          "size"
         ]
       },
       "SmartMailboxGroup": {

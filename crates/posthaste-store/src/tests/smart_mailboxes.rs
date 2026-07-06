@@ -199,3 +199,189 @@ fn bulk_message_hydration_preserves_order_and_account_scoped_metadata() -> Resul
     assert_eq!(queried[0].keywords, vec!["beta".to_string()]);
     Ok(())
 }
+
+/// Wraps a single leaf condition in an `All` root group — the shape the editor
+/// emits for a one-condition rule.
+fn single_condition_rule(
+    field: SmartMailboxField,
+    operator: SmartMailboxOperator,
+    value: SmartMailboxValue,
+) -> SmartMailboxRule {
+    SmartMailboxRule {
+        root: SmartMailboxGroup {
+            operator: SmartMailboxGroupOperator::All,
+            negated: false,
+            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                field,
+                operator,
+                negated: false,
+                value,
+            })],
+        },
+    }
+}
+
+#[test]
+fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    seed_messages(
+        &store,
+        &account,
+        vec![
+            MessageRecord {
+                size: 500,
+                ..sample_message("small", "inbox", Some("mime-small"))
+            },
+            MessageRecord {
+                size: 1_048_576, // exactly 1 MiB
+                ..sample_message("mid", "inbox", Some("mime-mid"))
+            },
+            MessageRecord {
+                size: 5_000_000,
+                ..sample_message("large", "inbox", Some("mime-large"))
+            },
+        ],
+        "state-size",
+    )?;
+
+    // `After` (>) 1 MiB, encoded as a byte-count string on the wire.
+    let over_1mib = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Size,
+        SmartMailboxOperator::After,
+        SmartMailboxValue::String("1048576".to_string()),
+    ))?;
+    assert_eq!(
+        over_1mib
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["large"]
+    );
+
+    // `OnOrAfter` (>=) is inclusive of the exact-boundary message.
+    let at_least_1mib = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Size,
+        SmartMailboxOperator::OnOrAfter,
+        SmartMailboxValue::String("1048576".to_string()),
+    ))?;
+    let mut ids: Vec<&str> = at_least_1mib.iter().map(|m| m.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["large", "mid"]);
+
+    // `Before` (<) compares numerically, not lexicographically: "500" < "1048576".
+    let under_1mib = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Size,
+        SmartMailboxOperator::Before,
+        SmartMailboxValue::String("1048576".to_string()),
+    ))?;
+    assert_eq!(
+        under_1mib
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["small"]
+    );
+
+    // A non-numeric wire value is a type error at evaluation time.
+    let err = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::Size,
+        SmartMailboxOperator::Before,
+        SmartMailboxValue::String("not-a-number".to_string()),
+    ));
+    assert!(err.is_err());
+    Ok(())
+}
+
+#[test]
+fn to_field_matches_recipients_in_to_json() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    seed_messages(
+        &store,
+        &account,
+        vec![
+            MessageRecord {
+                to: vec![
+                    Recipient {
+                        name: Some("Bob Jones".to_string()),
+                        email: "bob@example.com".to_string(),
+                    },
+                    Recipient {
+                        name: None,
+                        email: "carol@example.com".to_string(),
+                    },
+                ],
+                ..sample_message("to-bob", "inbox", Some("mime-bob"))
+            },
+            MessageRecord {
+                to: vec![Recipient {
+                    name: Some("Dave".to_string()),
+                    email: "dave@other.test".to_string(),
+                }],
+                ..sample_message("to-dave", "inbox", Some("mime-dave"))
+            },
+        ],
+        "state-to",
+    )?;
+
+    // `Equals` matches an exact recipient email (structured per-recipient match).
+    let exact = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::To,
+        SmartMailboxOperator::Equals,
+        SmartMailboxValue::String("carol@example.com".to_string()),
+    ))?;
+    assert_eq!(
+        exact.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["to-bob"]
+    );
+
+    // `Contains` is case-insensitive and matches email OR display name.
+    let by_domain = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::To,
+        SmartMailboxOperator::Contains,
+        SmartMailboxValue::String("EXAMPLE.COM".to_string()),
+    ))?;
+    assert_eq!(
+        by_domain.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["to-bob"]
+    );
+    let by_name = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::To,
+        SmartMailboxOperator::Contains,
+        SmartMailboxValue::String("dave".to_string()),
+    ))?;
+    assert_eq!(
+        by_name.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["to-dave"]
+    );
+
+    // `In` matches any recipient whose email is in the list.
+    let in_list = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::To,
+        SmartMailboxOperator::In,
+        SmartMailboxValue::Strings(vec![
+            "dave@other.test".to_string(),
+            "nobody@nowhere.test".to_string(),
+        ]),
+    ))?;
+    assert_eq!(
+        in_list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["to-dave"]
+    );
+
+    // No recipient match returns nothing.
+    let none = store.query_messages_by_rule(&single_condition_rule(
+        SmartMailboxField::To,
+        SmartMailboxOperator::Equals,
+        SmartMailboxValue::String("ghost@example.com".to_string()),
+    ))?;
+    assert!(none.is_empty());
+    Ok(())
+}

@@ -1,6 +1,7 @@
 use super::field_compilers::{
     compile_bool_field, compile_date_field, compile_exists_membership,
-    compile_exists_text_membership, compile_simple_field, compile_text_field,
+    compile_exists_text_membership, compile_numeric_field, compile_recipient_json_field,
+    compile_simple_field, compile_text_field,
 };
 use super::*;
 
@@ -66,9 +67,11 @@ fn compile_smart_mailbox_condition(
         }
         SmartMailboxField::FromName => compile_text_field("m.from_name", condition, params)?,
         SmartMailboxField::FromEmail => compile_text_field("m.from_email", condition, params)?,
+        SmartMailboxField::To => compile_recipient_json_field("m.to_json", condition, params)?,
         SmartMailboxField::Subject => compile_text_field("m.subject", condition, params)?,
         SmartMailboxField::Preview => compile_text_field("m.preview", condition, params)?,
         SmartMailboxField::ReceivedAt => compile_date_field("m.received_at", condition, params)?,
+        SmartMailboxField::Size => compile_numeric_field("m.size", condition, params)?,
         SmartMailboxField::IsRead => compile_bool_field("m.is_read", condition)?,
         SmartMailboxField::IsFlagged => compile_bool_field("m.is_flagged", condition)?,
         SmartMailboxField::HasAttachment => compile_bool_field("m.has_attachment", condition)?,

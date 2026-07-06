@@ -18,9 +18,11 @@ export type SmartMailboxField =
   | 'keyword'
   | 'fromName'
   | 'fromEmail'
+  | 'to'
   | 'subject'
   | 'preview'
   | 'receivedAt'
+  | 'size'
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxOperator =
