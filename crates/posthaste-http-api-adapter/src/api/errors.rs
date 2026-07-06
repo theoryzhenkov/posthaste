@@ -41,6 +41,10 @@ pub enum ApiErrorCode {
     // Generic.
     NotFound,
     Conflict,
+    /// A non-empty mailbox delete was refused without the confirmed
+    /// `removeEmails` flag (M2 safety gate). 409 Conflict; `details.count` carries
+    /// the message count for the confirm-with-count dialog.
+    MailboxNotEmpty,
     InternalError,
     // Authentication / authorization (loopback trust model, default-off).
     Unauthorized,
@@ -78,6 +82,7 @@ impl From<ServiceErrorKind> for ApiErrorCode {
             ServiceErrorKind::SecretUnsupported => Self::SecretUnsupported,
             ServiceErrorKind::NotFound => Self::NotFound,
             ServiceErrorKind::Conflict => Self::Conflict,
+            ServiceErrorKind::MailboxNotEmpty => Self::MailboxNotEmpty,
             ServiceErrorKind::StorageFailure => Self::StorageFailure,
             ServiceErrorKind::StorageCorrupted => Self::StorageCorrupted,
             ServiceErrorKind::ConfigValidation => Self::ConfigValidation,
@@ -239,6 +244,7 @@ fn runtime_error_status_code(code: &RuntimeErrorCode) -> (StatusCode, ApiErrorCo
             ApiErrorCode::GatewayUnavailable,
         ),
         RuntimeErrorCode::Conflict => (StatusCode::CONFLICT, ApiErrorCode::Conflict),
+        RuntimeErrorCode::MailboxNotEmpty => (StatusCode::CONFLICT, ApiErrorCode::MailboxNotEmpty),
         RuntimeErrorCode::NetworkError => (StatusCode::BAD_GATEWAY, ApiErrorCode::NetworkError),
         RuntimeErrorCode::StateMismatch => (StatusCode::CONFLICT, ApiErrorCode::StateMismatch),
         RuntimeErrorCode::GatewayRejected => {
@@ -277,7 +283,9 @@ fn runtime_error_status_code(code: &RuntimeErrorCode) -> (StatusCode, ApiErrorCo
 fn service_error_status(kind: ServiceErrorKind) -> StatusCode {
     match kind {
         ServiceErrorKind::NotFound => StatusCode::NOT_FOUND,
-        ServiceErrorKind::Conflict | ServiceErrorKind::StateMismatch => StatusCode::CONFLICT,
+        ServiceErrorKind::Conflict
+        | ServiceErrorKind::MailboxNotEmpty
+        | ServiceErrorKind::StateMismatch => StatusCode::CONFLICT,
         ServiceErrorKind::AuthError => StatusCode::UNAUTHORIZED,
         ServiceErrorKind::GatewayUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ServiceErrorKind::NetworkError => StatusCode::BAD_GATEWAY,

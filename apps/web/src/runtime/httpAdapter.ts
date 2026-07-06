@@ -11,6 +11,7 @@ import {
   createRule,
   createSmartMailbox,
   deleteAccount,
+  deleteMailbox,
   deleteRule,
   deleteSmartMailbox,
   disableAccount,
@@ -339,6 +340,9 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   createMailbox(accountId, input) {
     return createMailbox(accountId, input)
+  },
+  deleteMailbox(accountId, mailboxId, input) {
+    return deleteMailbox(accountId, mailboxId, input)
   },
   patchSettings(input) {
     return patchSettings(input)

@@ -6,6 +6,7 @@ import type {
   CreateAccountInput,
   CreateMailboxInput,
   CreateSmartMailboxInput,
+  DeleteMailboxInput,
   Mailbox,
   MessageCommandResult,
   OkResponse,
@@ -135,6 +136,13 @@ export const runtimeMutations = {
     },
     create(accountId: string, input: CreateMailboxInput): Promise<Mailbox[]> {
       return getRuntimeAdapter().createMailbox(accountId, input)
+    },
+    delete(
+      accountId: string,
+      mailboxId: string,
+      input: DeleteMailboxInput,
+    ): Promise<Mailbox[]> {
+      return getRuntimeAdapter().deleteMailbox(accountId, mailboxId, input)
     },
   },
   messages: {

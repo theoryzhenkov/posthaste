@@ -59,6 +59,7 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     fetchSmartMailboxes: () => reject(),
     patchMailbox: () => reject(),
     createMailbox: () => reject(),
+    deleteMailbox: () => reject(),
     patchSettings: () => reject(),
     previewAutomationRule: () => reject(),
     read: () => reject(),

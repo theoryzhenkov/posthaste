@@ -222,6 +222,36 @@ async fn m30_internal_error_body_is_sanitized_and_cause_is_logged() {
     );
 }
 
+/// M2 safety gate at the wire: the `MailboxNotEmpty` refusal the service raises
+/// for a `DELETE …/mailboxes/{id}` without `removeEmails=true` maps to a 409
+/// Conflict whose body carries the machine code `mailbox_not_empty` and the
+/// message count in `details.count`, so the client can drive the
+/// confirm-with-count dialog. The refusal never reaches the provider (proved in
+/// the service-layer gate test); this asserts the shape the client sees.
+#[tokio::test]
+async fn delete_non_empty_mailbox_without_remove_emails_maps_to_409_with_count() {
+    use posthaste_contract_core::RuntimeError;
+    use posthaste_domain_model::{GatewayError, ServiceError};
+
+    // The exact error `MailService::destroy_mailbox` returns when the gate refuses.
+    let runtime_error = RuntimeError::from(ServiceError::Gateway(GatewayError::MailboxNotEmpty {
+        count: 7,
+    }));
+    let response = crate::api::ApiError::from_runtime_error(runtime_error).into_response();
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = body_string(response).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("body is JSON");
+    assert_eq!(
+        parsed["code"], "mailbox_not_empty",
+        "distinct code lets the client detect the confirm-with-count case: {body}"
+    );
+    assert_eq!(
+        parsed["details"]["count"], 7,
+        "the 409 carries the message count for the dialog: {body}"
+    );
+}
+
 /// D72: a 4xx runtime error is caller-actionable — its message is NOT sanitized
 /// away (this guards against over-redaction of the useful validation text).
 #[tokio::test]

@@ -60,6 +60,10 @@ pub(super) struct MutationGateway {
     /// When set, the next message mutation is rejected: returns
     /// `Err(MutationRejected { readback, reason })` so the flush reverts + surfaces.
     pub(super) reject_next: Mutex<Option<(posthaste_domain_model::MessageReadback, String)>>,
+    /// Every `destroy_mailbox` call's `(mailbox_id, remove_emails)`, in order —
+    /// lets the M2 gate tests assert the gateway is NOT reached when the service
+    /// refuses a non-empty destroy, and that the confirmed flag threads through.
+    pub(super) destroy_mailbox_calls: Mutex<Vec<(MailboxId, bool)>>,
 }
 
 impl MutationGateway {
@@ -96,6 +100,7 @@ impl MutationGateway {
             set_keywords_results: Mutex::new(Vec::new()),
             readbacks: Mutex::new(Vec::new()),
             reject_next: Mutex::new(None),
+            destroy_mailbox_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -284,6 +289,19 @@ impl MailGateway for MutationGateway {
         // Return a deterministic id derived from the name so the service's
         // create-then-resync path can be asserted end to end.
         Ok(MailboxId::from(format!("mb-{name}").as_str()))
+    }
+
+    async fn destroy_mailbox(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        remove_emails: bool,
+    ) -> Result<(), GatewayError> {
+        self.destroy_mailbox_calls
+            .lock()
+            .expect("destroy mailbox calls poisoned")
+            .push((mailbox_id.clone(), remove_emails));
+        Ok(())
     }
 
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {

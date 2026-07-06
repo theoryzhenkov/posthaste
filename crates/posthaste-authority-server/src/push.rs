@@ -28,7 +28,8 @@ fn open_failure_terminality(error: &GatewayError) -> Terminality {
         | GatewayError::CannotCalculateChanges
         | GatewayError::Corruption(_)
         | GatewayError::Internal(_)
-        | GatewayError::MutationRejected { .. } => Terminality::Permanent,
+        | GatewayError::MutationRejected { .. }
+        | GatewayError::MailboxNotEmpty { .. } => Terminality::Permanent,
         // Reachable-again: the network/credentials may recover, so keep
         // reconnecting under backoff.
         GatewayError::Network(_)

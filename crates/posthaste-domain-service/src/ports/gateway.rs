@@ -152,6 +152,25 @@ pub trait MailGateway: Send + Sync {
         name: &str,
     ) -> Result<MailboxId, GatewayError>;
 
+    /// Destroy a mailbox via `Mailbox/set` destroy (JMAP) or `DELETE` (IMAP).
+    ///
+    /// `remove_emails` is JMAP's `onDestroyRemoveEmails`: when `false` a JMAP
+    /// server refuses to destroy a non-empty mailbox (`mailboxHasEmail`), which
+    /// the implementation surfaces as [`GatewayError::MailboxNotEmpty`]. IMAP has
+    /// no such flag — its `DELETE` destroys contained mail unconditionally — so
+    /// the non-empty guard is enforced in the SERVICE layer, not here (the
+    /// service only calls this once the confirmed flag or an empty mailbox has
+    /// cleared the gate).
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/eph/RFC-L2-mailbox-management
+    async fn destroy_mailbox(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        remove_emails: bool,
+    ) -> Result<(), GatewayError>;
+
     /// Fetch the primary sender identity via `Identity/get`.
     ///
     /// @spec docs/L1-jmap#methods-used

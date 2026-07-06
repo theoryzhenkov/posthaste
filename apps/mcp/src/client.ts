@@ -202,7 +202,7 @@ function resolveDiscovered(): Connection {
 /** Options for a single API request. */
 export interface ApiFetchOptions {
   /** HTTP method; defaults to GET. */
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "DELETE";
   /** Query parameters; undefined/null values are omitted. */
   query?: Record<string, string | number | undefined | null>;
   /** JSON request body for POST operations. */

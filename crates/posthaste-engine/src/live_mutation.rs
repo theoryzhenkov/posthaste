@@ -8,12 +8,12 @@ use posthaste_domain_model::{
 
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 use crate::live_mutation::outcome::{
-    created_mailbox_id, mailbox_mutation_outcome, message_mutation_outcome,
+    created_mailbox_id, destroyed_mailbox, mailbox_mutation_outcome, message_mutation_outcome,
     set_keywords_mutation_outcome,
 };
 use crate::live_mutation::requests::{
-    create_mailbox_request_body, send_json_request, set_keywords_request_body,
-    set_mailbox_role_request_body, CREATE_MAILBOX_CREATE_ID,
+    create_mailbox_request_body, destroy_mailbox_request_body, send_json_request,
+    set_keywords_request_body, set_mailbox_role_request_body, CREATE_MAILBOX_CREATE_ID,
 };
 
 /// Add or remove keywords (flags) on a message via `Email/set`.
@@ -137,6 +137,29 @@ pub(crate) async fn create_mailbox(
         .unwrap_set_mailbox()
         .map_err(map_gateway_error)?;
     created_mailbox_id(response, CREATE_MAILBOX_CREATE_ID)
+}
+
+/// Destroy a mailbox via a hand-rolled `Mailbox/set` destroy.
+///
+/// `remove_emails` is JMAP's `onDestroyRemoveEmails`. When `false`, a non-empty
+/// mailbox is rejected server-side (`mailboxHasEmail`) and surfaces as
+/// [`GatewayError::MailboxNotEmpty`]; the service gate already enforces the same
+/// invariant locally, so this is a provider-side backstop.
+///
+/// @spec docs/L1-jmap#methods-used
+/// @spec docs/eph/RFC-L2-mailbox-management
+pub(crate) async fn destroy_mailbox(
+    gateway: &LiveJmapGateway,
+    mailbox_id: &MailboxId,
+    remove_emails: bool,
+) -> Result<(), GatewayError> {
+    let request =
+        destroy_mailbox_request_body(gateway.server_account_id(), mailbox_id, remove_emails);
+    let mut response = send_json_request(gateway, request).await?;
+    let response = required_method_response(response.pop_method_response(), "Mailbox/set")?
+        .unwrap_set_mailbox()
+        .map_err(map_gateway_error)?;
+    destroyed_mailbox(response, mailbox_id)
 }
 
 /// Replace a message's mailbox membership via `Email/set`.

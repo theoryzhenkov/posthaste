@@ -146,6 +146,62 @@ pub async fn create_mailbox(
         .map_err(ApiError::from_runtime_error)
 }
 
+/// Query for `DELETE /v1/sources/{source_id}/mailboxes/{mailbox_id}`.
+///
+/// `removeEmails` is the confirm-with-count safety flag. It defaults to `false`,
+/// so a DELETE that omits it can never destroy a non-empty mailbox: the service
+/// gate returns 409 `MailboxNotEmpty` (carrying the count) instead.
+///
+/// @spec docs/eph/RFC-L2-mailbox-management
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteMailboxQuery {
+    #[serde(default)]
+    pub remove_emails: bool,
+}
+
+/// DELETE /v1/sources/{source_id}/mailboxes/{mailbox_id}
+///
+/// @spec docs/eph/RFC-L2-mailbox-management
+/// @spec docs/L1-jmap#methods-used
+#[utoipa::path(
+    delete,
+    path = "/v1/sources/{source_id}/mailboxes/{mailbox_id}",
+    tag = "mailboxes",
+    summary = "Delete mailbox",
+    description = "Destroys a mailbox and returns the source's refreshed mailbox list. A non-empty \
+                   mailbox is refused with 409 unless `removeEmails=true` is passed (confirm-with-count \
+                   safety gate); the 409 body's `details.count` carries the message count.",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("mailbox_id" = String, Path, description = "Mailbox identifier"),
+        ("removeEmails" = Option<bool>, Query, description = "Confirm deleting the mailbox's messages")
+    ),
+    responses(
+        (status = 200, description = "Updated mailboxes for the source", body = [MailboxSummary]),
+        (status = 404, description = "Source or mailbox not found", body = ApiErrorBody),
+        (status = 409, description = "Mailbox is not empty and removeEmails was not set", body = ApiErrorBody),
+        (status = 503, description = "Account gateway unavailable", body = ApiErrorBody)
+    )
+)]
+pub async fn delete_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path((source_id, mailbox_id)): Path<(String, String)>,
+    Query(query): Query<DeleteMailboxQuery>,
+) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
+    state
+        .runtime
+        .destroy_mailbox(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MailboxId(mailbox_id),
+            query.remove_emails,
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
 fn validate_create_mailbox_name(name: String) -> Result<String, ApiError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
