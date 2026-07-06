@@ -4,6 +4,7 @@ import type { MessageDetail, MessageSummary, TagSummary } from '@/api/types'
 import type { ResizablePanelGroup } from '@/components/ui/resizable'
 import type { ComposeIntent } from '@/composeIntent'
 import type { EmailActions } from '@/hooks/useEmailActions'
+import type { useMailClientHandlers } from '@/app/useMailClientHandlers'
 import type { MailSelection } from '@/mailState'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
 import type { SettingsSurfaceCategory, SurfaceDescriptor } from '@/surfaces'
@@ -16,6 +17,9 @@ export type LayoutHandler = NonNullable<PanelGroupProps['onLayoutChanged']>
 
 export interface MailClientViewProps {
   actions: EmailActions
+  /** The app/handler bundle, bound as the palette's `ActionServices.app`
+   *  (PLAN-L2 Slice 3). */
+  handlers: ReturnType<typeof useMailClientHandlers>
   appReadinessState: string
   closeCompose: () => void
   composeIntent: ComposeIntent | null

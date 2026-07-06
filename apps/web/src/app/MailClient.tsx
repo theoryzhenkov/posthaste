@@ -226,6 +226,7 @@ export function MailClient({
       >
         <MailClientView
           actions={actions}
+          handlers={handlers}
           appReadinessState={appReadinessState}
           closeCompose={handlers.closeCompose}
           composeIntent={handlers.composeIntent}
