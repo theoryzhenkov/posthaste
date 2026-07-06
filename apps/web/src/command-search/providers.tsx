@@ -1,13 +1,13 @@
+import type { ActionContext, ActionServices } from '@/actions'
 import type { MessageSummary } from '@/api/types'
 import type { MailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
 
 import type { SearchProvider } from './types'
-import { createCommandProvider } from './providers/commands'
+import { createActionProvider } from './providers/actions'
 import { createMailboxProvider } from './providers/mailboxes'
 import { createMessageProvider } from './providers/messages'
 import { createQueryCompletionProvider } from './providers/queryCompletions'
 import { createTagProvider } from './providers/tags'
-import { createTagActionProvider } from './providers/tagActions'
 
 export function createCommandProviders(input: {
   readModels: Pick<
@@ -15,13 +15,20 @@ export function createCommandProviders(input: {
     'smartMailboxes' | 'sources' | 'tags'
   >
   recentMessages: MessageSummary[]
+  /** Live accessors for the palette's action context + bound services. Read
+   *  through getters so the provider list stays referentially stable while the
+   *  underlying app state (selection, view role) updates between renders. */
+  getActionContext: () => ActionContext
+  getActionServices: () => ActionServices
 }): SearchProvider[] {
   return [
-    createCommandProvider(),
+    createActionProvider({
+      getContext: input.getActionContext,
+      getServices: input.getActionServices,
+    }),
     createQueryCompletionProvider(input),
     createMailboxProvider(input),
     createTagProvider(input),
-    createTagActionProvider(),
     createMessageProvider(input),
   ]
 }

@@ -23,12 +23,15 @@
  */
 import {
   Archive,
+  Clock3,
   Eye,
   EyeOff,
   Inbox,
   MailOpen,
   MessagesSquare,
+  Reply,
   Star,
+  Tag,
   Trash2,
 } from 'lucide-react'
 import { registerActions } from '../registry'
@@ -100,7 +103,7 @@ export const messageActions: readonly ActionDefinition[] = [
     icon: (ctx: ActionContext) =>
       primaryTarget(ctx)?.summary?.isRead ? EyeOff : Eye,
     keywords: 'read unread seen mark',
-    surfaces: ['context-menu'],
+    surfaces: ['context-menu', 'palette'],
     isEnabled: requireTarget,
     run: (ctx, s) =>
       ctx.targets.forEach((t) => s.email.toggleRead(toggleSubject(t))),
@@ -110,12 +113,28 @@ export const messageActions: readonly ActionDefinition[] = [
     section: 'state',
     title: (ctx: ActionContext) =>
       primaryTarget(ctx)?.summary?.isFlagged ? 'Unflag' : 'Flag',
+    // Star (not the palette's old wrong `Tag` icon, PLAN §1.2) — one chosen icon.
     icon: Star,
     keywords: 'flag unflag star',
-    surfaces: ['context-menu'],
+    surfaces: ['context-menu', 'palette'],
+    shortcut: { key: 'l', mod: true, shift: true },
     isEnabled: requireTarget,
     run: (ctx, s) =>
       ctx.targets.forEach((t) => s.email.toggleFlag(toggleSubject(t))),
+  },
+  {
+    // Palette-only reply: delegates to the app handler (operates on the focused
+    // selection), so the palette gains a working Reply that respects the
+    // selection instead of the old always-shown static entry.
+    id: 'message.reply',
+    section: 'compose-reply',
+    title: 'Reply',
+    icon: Reply,
+    keywords: 'reply respond answer',
+    surfaces: ['palette'],
+    shortcut: { key: 'r', mod: true },
+    isEnabled: requireTarget,
+    run: (_ctx, s) => s.app?.handleReply(),
   },
   {
     id: 'message.archive',
@@ -123,7 +142,8 @@ export const messageActions: readonly ActionDefinition[] = [
     title: 'Archive',
     icon: Archive,
     keywords: 'archive',
-    surfaces: ['context-menu'],
+    surfaces: ['context-menu', 'palette'],
+    shortcut: { key: 'e' },
     isAvailable: (ctx) =>
       ctx.viewRole !== 'archive' && ctx.viewRole !== 'trash',
     isEnabled: requireTarget,
@@ -135,7 +155,7 @@ export const messageActions: readonly ActionDefinition[] = [
     title: 'Move to Inbox',
     icon: Inbox,
     keywords: 'move inbox restore',
-    surfaces: ['context-menu'],
+    surfaces: ['context-menu', 'palette'],
     isAvailable: (ctx) => isRestorableRole(ctx.viewRole),
     isEnabled: requireTarget,
     run: (ctx, s) => ctx.targets.forEach((t) => s.email.moveToInbox(t.ref)),
@@ -147,7 +167,8 @@ export const messageActions: readonly ActionDefinition[] = [
     icon: Trash2,
     destructive: true,
     keywords: 'trash delete move',
-    surfaces: ['context-menu'],
+    surfaces: ['context-menu', 'palette'],
+    shortcut: [{ key: '#' }, { key: 'backspace' }],
     // Not offered in Trash, and never on drafts (D127: a draft is discarded,
     // never trashed).
     isAvailable: (ctx) =>
@@ -162,7 +183,7 @@ export const messageActions: readonly ActionDefinition[] = [
     icon: Trash2,
     destructive: true,
     keywords: 'delete permanently destroy',
-    surfaces: ['context-menu'],
+    surfaces: ['context-menu', 'palette'],
     // Trash view only, and never on drafts.
     isAvailable: (ctx) =>
       ctx.viewRole === 'trash' && !ctx.targets.some((t) => t.isDraft),
@@ -177,7 +198,7 @@ export const messageActions: readonly ActionDefinition[] = [
     icon: Trash2,
     destructive: true,
     keywords: 'discard draft delete',
-    surfaces: ['context-menu'],
+    surfaces: ['context-menu', 'palette'],
     // Every target must be a draft (D127: hard delete via the draft-delete op).
     isAvailable: (ctx) =>
       ctx.targets.length > 0 && ctx.targets.every((t) => t.isDraft),
@@ -186,6 +207,32 @@ export const messageActions: readonly ActionDefinition[] = [
       ctx.targets.forEach((t) =>
         s.email.discardDraft({ ...t.ref, draftId: t.draftId }),
       ),
+  },
+  {
+    // Palette-only "Tag" command (folds the old dedicated tagActions provider
+    // into the registry): opens the tag editor for the focused message. The app
+    // handler already no-ops without a selection; `requireTarget` renders it
+    // disabled-with-reason in the palette instead of silently vanishing.
+    id: 'message.tag',
+    section: 'organize',
+    title: 'Tag',
+    icon: Tag,
+    keywords: 'tag add remove label message',
+    surfaces: ['palette'],
+    shortcut: { key: 't' },
+    isEnabled: requireTarget,
+    run: (_ctx, s) => s.app?.handleOpenTagEditor(),
+  },
+  {
+    // Palette-only Snooze — preserves today's placeholder behavior (a "not
+    // available yet" toast); it is ungated exactly as the old static entry was.
+    id: 'message.snooze',
+    section: 'organize',
+    title: 'Snooze…',
+    icon: Clock3,
+    keywords: 'snooze later remind',
+    surfaces: ['palette'],
+    run: (_ctx, s) => s.app?.handlePlaceholderAction('Snooze'),
   },
 ]
 

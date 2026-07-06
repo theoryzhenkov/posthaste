@@ -98,7 +98,9 @@ function contextScore(
     }
     if (
       context.app.hasSelectedMessage &&
-      ['reply', 'archive', 'flag'].includes(candidate.entry.id)
+      ['message.reply', 'message.archive', 'message.toggle-flag'].includes(
+        candidate.entry.id,
+      )
     ) {
       score += 16
     }

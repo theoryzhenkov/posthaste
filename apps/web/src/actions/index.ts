@@ -15,9 +15,11 @@
  * @spec docs/eph/PLAN-L2-action-registry.md
  */
 
-// Side-effect import: registers the message action definitions.
+// Side-effect imports: register the action definitions (message + app-level).
 import './defs/message'
+import './defs/app'
 
+export { formatChord } from './formatChord'
 export { resolveActions, type ResolvedAction } from './resolve'
 export { getAction, allActions } from './registry'
 export type {
