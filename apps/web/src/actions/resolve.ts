@@ -85,7 +85,7 @@ export function resolveActions(
 ): ResolvedAction[] {
   return allActions()
     .filter((d) => d.surfaces.includes(ctx.surface))
-    .filter((d) => d.isAvailable?.(ctx) ?? true)
+    .filter((d) => d.isAvailable?.(ctx, services) ?? true)
     .map((d) => bind(d, ctx, services))
     .filter((r) => r.enabled || opts?.includeDisabled)
     .sort(
