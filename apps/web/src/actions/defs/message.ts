@@ -7,18 +7,30 @@
  * delegate to `services.email` (never reimplementing the domain logic).
  *
  * Registration order below is meaningful: the resolver uses it as the
- * within-section tiebreak, so it mirrors the old builder's push order
- * (`archive`, then `move-to-inbox`, then the mutually-exclusive
- * trash/delete/discard trio) to preserve menu ordering.
+ * within-section tiebreak, so it mirrors the old builder's push order (the two
+ * `open` entries, then `toggle-read`/`toggle-flag`, then `archive`,
+ * `move-to-inbox`, and the mutually-exclusive trash/delete/discard trio) to
+ * preserve menu ordering.
  *
- * Slice 1 deliberately does NOT include `open` / `view-conversation` (row-scoped
- * hooks, migrated in Slice 2), the palette-only enrichments, or a `confirm` on
- * `delete-permanently` (today it runs unconfirmed — normalized in a later
- * slice). Behavior is preserved exactly.
+ * Slice 2 folds in the two row-scoped `open` / `view-conversation` entries the
+ * old shim owned: they delegate to `services.row` (bound per row by
+ * `MessageRow`) and gate their availability on that binding, so they surface in
+ * the context menu but stay absent on every non-row surface. Still omitted here:
+ * palette-only enrichments and a `confirm` on `delete-permanently` (today it
+ * runs unconfirmed — normalized in a later slice). Behavior is preserved exactly.
  *
  * @spec docs/eph/PLAN-L2-action-registry.md
  */
-import { Archive, Eye, EyeOff, Inbox, Star, Trash2 } from 'lucide-react'
+import {
+  Archive,
+  Eye,
+  EyeOff,
+  Inbox,
+  MailOpen,
+  MessagesSquare,
+  Star,
+  Trash2,
+} from 'lucide-react'
 import { registerActions } from '../registry'
 import type { ActionContext, ActionDefinition, MessageTarget } from '../types'
 
@@ -49,6 +61,37 @@ function requireTarget(ctx: ActionContext) {
 }
 
 export const messageActions: readonly ActionDefinition[] = [
+  {
+    id: 'message.open',
+    section: 'open',
+    title: 'Open',
+    icon: MailOpen,
+    keywords: 'open message',
+    surfaces: ['context-menu'],
+    // Row-scoped: only meaningful when the surface binds `services.row`. This
+    // keeps the entry out of every non-row `resolveActions` call (e.g. the
+    // parity harness's email-only services) while surfacing it in the menu.
+    isAvailable: (_ctx, s) => Boolean(s.row),
+    isEnabled: requireTarget,
+    run: (ctx, s) => {
+      const summary = primaryTarget(ctx)?.summary
+      if (summary) s.row?.open(summary)
+    },
+  },
+  {
+    id: 'message.view-conversation',
+    section: 'open',
+    title: 'View conversation',
+    icon: MessagesSquare,
+    keywords: 'conversation thread view',
+    surfaces: ['context-menu'],
+    isAvailable: (_ctx, s) => Boolean(s.row),
+    isEnabled: requireTarget,
+    run: (ctx, s) => {
+      const summary = primaryTarget(ctx)?.summary
+      if (summary) s.row?.viewConversation(summary)
+    },
+  },
   {
     id: 'message.toggle-read',
     section: 'state',
