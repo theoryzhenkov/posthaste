@@ -11,6 +11,7 @@ import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createWorkerStorePort } from './replica/workerStorePort'
 import { resolveStorePort } from './replica/storePortResolver'
 import { installUnloadDurabilityHooks } from './replica/unloadDurability'
+import { isSurfaceLocation } from '../surfaceHistory'
 import type { RuntimeAdapter } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
@@ -249,7 +250,23 @@ export function installEntityStoreAdapter(): Promise<void> {
 // from view frames, but without the store's optimism + count ownership — so the
 // failure is logged at error level rather than swallowed. Until the WASM finishes
 // loading the base HTTP adapter serves (bootstrap only).
-const bootEntityStoreInstall = installEntityStoreAdapter()
+// EXCEPT surface windows (settings/compose): they render no mail list, so they
+// never need the entity store — and instantiating WASM / a module-worker in a
+// *secondary* WebView2 renderer is the platform's one unvalidated hazard (named
+// above). A hard WASM/worker trap there wedges the surface renderer below the JS
+// layer — black, artifacts on resize, unclosable — where the worker-probe
+// fallback can't catch it (it only handles a *clean* rejection). Skip the store
+// in surface windows; the base HTTP adapter serves their (non-mail-list) views.
+const isSurfaceWindow =
+  typeof window !== 'undefined' &&
+  isSurfaceLocation({
+    hash: window.location.hash,
+    pathname: window.location.pathname,
+    search: window.location.search,
+  })
+const bootEntityStoreInstall = isSurfaceWindow
+  ? Promise.resolve()
+  : installEntityStoreAdapter()
 bootEntityStoreInstall.catch((error) => {
   syncLogger.error(
     {
