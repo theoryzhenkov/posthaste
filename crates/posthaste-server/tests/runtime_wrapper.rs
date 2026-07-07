@@ -246,10 +246,16 @@ async fn runtime_link_mutation_returns_receipt_and_collapsed_settlement() {
         "{frame}"
     );
 
-    let tag_only_token = harness.scoped(&["action = tag", "account = primary"]);
-    let (tag_only_status, tag_only_body) = harness
+    // Per-op authz (handler-derived actions): `message.setKeywords` requires
+    // the `tag` verb, so a token scoped to a DIFFERENT write verb is refused.
+    // (A tag-scoped token is correctly ALLOWED here now — the per-op
+    // derivation replaced the old blanket Read re-check that used to 403
+    // single-verb tokens; see capability_scoping's mutation_op_cases for the
+    // full verb matrix.)
+    let move_only_token = harness.scoped(&["action = move", "account = primary"]);
+    let (move_only_status, move_only_body) = harness
         .post_json(
-            &tag_only_token,
+            &move_only_token,
             &format!("/v1/runtime/sessions/{link_id}/mutations?sourceId=primary"),
             serde_json::json!({
                 "name": "message.setKeywords",
@@ -262,7 +268,7 @@ async fn runtime_link_mutation_returns_receipt_and_collapsed_settlement() {
             }),
         )
         .await;
-    assert_eq!(tag_only_status, StatusCode::FORBIDDEN, "{tag_only_body}");
+    assert_eq!(move_only_status, StatusCode::FORBIDDEN, "{move_only_body}");
 }
 
 // spec: docs/eph/RFC-L2-architecture-cleanup#d20
