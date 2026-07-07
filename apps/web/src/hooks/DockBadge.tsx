@@ -13,20 +13,18 @@ import {
 } from 'react'
 
 import type { AccountOverview, Mailbox } from '@/api/types'
-import { useMailboxCounts } from '@/live-store/store'
 import { queryKeys } from '@/queryKeys'
 import { runtimeViews } from '@/runtime/views'
 
 import { accountInboxUnread, useDockBadge } from './useDockBadge'
 
 /**
- * One account's live inbox-unread reporter. A cache-only observer of the mailbox
- * read-model (populated + kept fresh by the sidebar's
- * `useMailboxNavigationReadModels`) plus the per-account live-store counts,
- * re-reporting its total up when either moves. Per-account (mirroring the
- * sidebar's `useMailboxCounts(sourceId)` usage) because the live store is keyed
- * by account and a hook cannot subscribe to a variable-length account list in one
- * call.
+ * One account's live inbox-unread reporter. A cache-only observer of the
+ * mailbox read-model (populated + kept fresh by the sidebar's
+ * `useMailboxNavigationReadModels`, invalidated on count-affecting events, and
+ * adjusted by the optimistic overlay), re-reporting its total up when the rows
+ * move. Per-account because a hook cannot subscribe to a variable-length
+ * account list in one call.
  */
 function AccountInboxUnreadProbe({
   accountId,
@@ -40,11 +38,7 @@ function AccountInboxUnreadProbe({
     queryFn: () => runtimeViews.mail.mailboxes(accountId),
     enabled: false,
   })
-  const liveCounts = useMailboxCounts(accountId)
-  const unread = useMemo(
-    () => accountInboxUnread(mailboxes ?? [], liveCounts),
-    [mailboxes, liveCounts],
-  )
+  const unread = useMemo(() => accountInboxUnread(mailboxes ?? []), [mailboxes])
   useEffect(() => {
     onReport(accountId, unread)
   }, [accountId, unread, onReport])

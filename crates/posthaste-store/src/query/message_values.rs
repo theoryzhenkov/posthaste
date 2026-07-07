@@ -1,5 +1,4 @@
 use super::*;
-use crate::sql_cache::CachedSql;
 
 pub(crate) fn fetch_mailbox_ids(
     connection: &Connection,
@@ -92,38 +91,4 @@ pub(crate) fn fetch_message_version_tx(
         .map_err(sql_to_store_error)?
         .flatten();
     Ok(version.map(|value| value as u64))
-}
-
-/// Reads the current `unread_emails`/`total_emails` for a set of mailboxes
-/// within a transaction — the authoritative count point-read attached to a
-/// `message.updated` event so the reactive store's `mailbox[id].count` updates
-/// in the same atomic batch as the row delta (`D3`, `counts-on-the-stream`).
-/// Trigger-maintained, so the read is consistent at event-emit time. Mailboxes
-/// absent from the local `mailbox` table are skipped (no row to read).
-pub(crate) fn mailbox_counts_json_tx<'a>(
-    tx: &Transaction<'_>,
-    account_id: &AccountId,
-    mailbox_ids: impl Iterator<Item = &'a MailboxId>,
-) -> Result<Value, StoreError> {
-    let mut deltas = Vec::new();
-    for mailbox_id in mailbox_ids {
-        let counts = tx
-            .query_row_cached(
-                "SELECT unread_emails, total_emails
-                 FROM mailbox
-                 WHERE account_id = ?1 AND id = ?2",
-                params![account_id.as_str(), mailbox_id.as_str()],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()
-            .map_err(sql_to_store_error)?;
-        if let Some((unread, total)) = counts {
-            deltas.push(json!({
-                "mailboxId": mailbox_id.as_str(),
-                "unreadCount": unread,
-                "totalCount": total,
-            }));
-        }
-    }
-    Ok(Value::Array(deltas))
 }

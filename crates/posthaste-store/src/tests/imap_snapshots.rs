@@ -197,9 +197,11 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
         vec![archive_id.clone()]
     );
     // The membership-removal event self-maintains the reactive store (option iii):
-    // it carries the post-removal projection (mailboxIds = [archive]) + the removed
-    // mailbox's countDeltas, instead of being projection-less (which the store
-    // dropped, leaving the runtime's per-view re-serve as the only corrector).
+    // it carries the post-removal projection (mailboxIds = [archive]) instead of
+    // being projection-less (which the store dropped, leaving the runtime's
+    // per-view re-serve as the only corrector). Counts ride no event
+    // (RFC-L2-count-unification): clients invalidate + re-read the canonical
+    // mailbox counts.
     let membership_event = events
         .iter()
         .find(|event| {
@@ -213,12 +215,8 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
         serde_json::json!([archive_id.as_str()]),
     );
     assert!(
-        membership_event.payload["countDeltas"]
-            .as_array()
-            .is_some_and(|deltas| deltas
-                .iter()
-                .any(|delta| delta["mailboxId"] == inbox_id.as_str())),
-        "countDeltas carries the removed mailbox",
+        membership_event.payload.get("countDeltas").is_none(),
+        "no countDeltas on the membership-removal event (invalidation model)",
     );
     assert_eq!(
         store

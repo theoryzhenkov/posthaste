@@ -53,17 +53,11 @@ pub(crate) fn apply_message_record_tx(
 
     track_applied_message_projection_inputs(affected, message, &conversation_id, &before);
     let projection = crate::query::query_message_summary_tx(tx, account_id, &message.id)?;
-    let mut affected_mailboxes = BTreeSet::new();
-    affected_mailboxes.extend(message.mailbox_ids.iter().cloned());
-    affected_mailboxes.extend(before.mailboxes.iter().cloned());
-    let count_deltas =
-        crate::query::mailbox_counts_json_tx(tx, account_id, affected_mailboxes.iter())?;
     append_message_diff_events_tx(
         message,
         &conversation_id,
         &before,
         projection.as_ref(),
-        count_deltas,
         events,
     )
 }

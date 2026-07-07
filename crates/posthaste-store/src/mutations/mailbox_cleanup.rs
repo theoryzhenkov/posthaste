@@ -92,9 +92,9 @@ pub(crate) fn delete_mailbox_and_track_projection_inputs(
     for message_id in message_ids {
         let mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, &message_id)?;
         // Attach the post-cleanup projection so the store updates the base's
-        // membership (the surviving message left the deleted mailbox). No
-        // countDeltas: the cleaned mailbox is being deleted (its count is moot)
-        // and the message's surviving mailboxes are unchanged.
+        // membership (the surviving message left the deleted mailbox). Counts
+        // ride no event — clients invalidate + re-read the canonical mailbox
+        // counts, and the cleaned mailbox is being deleted anyway.
         let detail = query_message_detail_tx(tx, account_id, &message_id)?;
         events.record(
             EVENT_TOPIC_MESSAGE_UPDATED,

@@ -1,10 +1,11 @@
 /* @ts-self-types="./posthaste_client_node_wasm.d.ts" */
 
 /**
- * A live reactive entity store owned by JS: messages, mailboxes (count
- * scalars), and views (ordered row lists + coverage), with a message optimism
- * fold. The host feeds it authoritative batches and reads the dirty keys to
- * drive the renderer.
+ * A live reactive entity store owned by JS: messages and views (ordered row
+ * lists + coverage), with a message optimism fold. The host feeds it
+ * authoritative batches and reads the dirty keys to drive the renderer.
+ * Mailbox counts are not held here (RFC-L2-count-unification): the client
+ * reads them via react-query invalidation of the runtime's canonical counts.
  */
 export class EntityStoreHandle {
     __destroy_into_raw() {
@@ -87,8 +88,8 @@ export class EntityStoreHandle {
     }
     /**
      * Drain the keys changed since the last drain as a JSON array of
-     * `{"message":id}` / `{"mailbox":id}` / `{"view":id}`. The host re-reads
-     * these (re-project views, re-write counts). One drain per batch.
+     * `{"message":id}` / `{"view":id}`. The host re-reads these (re-project
+     * views). One drain per batch.
      * @returns {string}
      */
     drainDirtyJson() {
@@ -133,9 +134,7 @@ export class EntityStoreHandle {
     /**
      * Apply an authoritative batch atomically: every update is applied before
      * any dirty key is reported. `batch_json` is a JSON array of
-     * `{"message":{messageId, projection, deleted, countDeltas:[{mailboxId,
-     * unreadCount, totalCount}]}}` and/or `{"mailboxCount":{mailboxId,
-     * unreadCount, totalCount}}`.
+     * `{"message":{messageId, projection, deleted}}`.
      * @param {string} batch_json
      */
     ingestBatchJson(batch_json) {
@@ -144,26 +143,6 @@ export class EntityStoreHandle {
         const ret = wasm.entitystorehandle_ingestBatchJson(this.__wbg_ptr, ptr0, len0);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
-     * A mailbox's server-authoritative counts as `{"unreadCount",
-     * "totalCount"}`, or `"null"` if the mailbox is not held.
-     * @param {string} mailbox_id
-     * @returns {string}
-     */
-    mailboxJson(mailbox_id) {
-        let deferred2_0;
-        let deferred2_1;
-        try {
-            const ptr0 = passStringToWasm0(mailbox_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.entitystorehandle_mailboxJson(this.__wbg_ptr, ptr0, len0);
-            deferred2_0 = ret[0];
-            deferred2_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -594,17 +573,17 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 240, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 239, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__ha35c10aed9720f95);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [String, String, F64], shim_idx: 140, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [String, String, F64], shim_idx: 150, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hcbd61467c748630e);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 159, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 158, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h690adb9d64021208);
             return ret;
         },
@@ -644,12 +623,12 @@ function wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d(arg0, arg
     wasm.wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d(arg0, arg1, arg2, arg3);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea(arg0, arg1, arg2, arg3, arg4) {
+function wasm_bindgen__convert__closures_____invoke__hcbd61467c748630e(arg0, arg1, arg2, arg3, arg4) {
     const ptr0 = passStringToWasm0(arg2, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(arg3, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    wasm.wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea(arg0, arg1, ptr0, len0, ptr1, len1, arg4);
+    wasm.wasm_bindgen__convert__closures_____invoke__hcbd61467c748630e(arg0, arg1, ptr0, len0, ptr1, len1, arg4);
 }
 
 const EntityStoreHandleFinalization = (typeof FinalizationRegistry === 'undefined')

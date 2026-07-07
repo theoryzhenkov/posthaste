@@ -13,7 +13,6 @@ import {
 
 import type { Mailbox, MailboxGroup } from '@/api/types'
 import { accentColor } from '@/design'
-import { useMailboxCounts } from '@/live-store/store'
 import { cn } from '@/lib/utils'
 import {
   mailboxRoleAccent,
@@ -246,13 +245,10 @@ export function MailboxItem({
   const groupsEnabled = onAssignToGroup != null && onCreateGroup != null
   const iconColor =
     colorHue != null ? accentColor(colorHue) : mailboxRoleAccent(mailbox.role)
-  // D116: STRUCTURE (name/role/hierarchy) stays request/response from the
-  // mailboxes query (the `mailbox` prop); live COUNTS come from the store slice.
-  // Fall back to the query's server count when no frame has seeded a live entry
-  // yet (bootstrap): a fresh session shows the server count before the first
-  // frame arrives, then the live mirror takes over.
-  const liveCounts = useMailboxCounts(sourceId)[mailbox.id]
-  const unread = liveCounts ? liveCounts.unread : mailbox.unreadEmails
+  // Counts ride the mailboxes query itself (RFC-L2-count-unification): the
+  // `mailbox` prop is the react-query row, kept live by invalidation on
+  // count-affecting events plus the optimistic overlay's setQueryData.
+  const unread = mailbox.unreadEmails
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const isDeletable = isMailboxDeletable(mailbox)
   const button = (
