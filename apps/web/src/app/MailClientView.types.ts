@@ -64,6 +64,9 @@ export interface MailClientViewProps {
   onRejectSearchPreview: () => void
   onRemoveTag: (tag: string) => void
   onReply: () => void
+  /** Open the composer prefilled from a `mailto:` unsubscribe URI (List-
+   *  Unsubscribe mailto path); the source is the selected message's. */
+  onUnsubscribeMailto: (mailtoUri: string) => void
   onSearch: (query: string, append?: boolean) => void
   onSelectMessage: (message: MessageSummary) => void
   onSelectMessageRef: (selection: MailSelection) => void

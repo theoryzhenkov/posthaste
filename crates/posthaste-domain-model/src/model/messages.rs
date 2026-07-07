@@ -201,6 +201,11 @@ pub struct MessageDetail {
     pub body_text: Option<String>,
     pub raw_message: Option<RawMessageRef>,
     pub attachments: Vec<MessageAttachment>,
+    /// Parsed `List-Unsubscribe` targets (RFC 2369/8058), when present.
+    /// Carried on the detail only — the affordance renders in the detail
+    /// header, so list summaries stay untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_unsubscribe: Option<ListUnsubscribe>,
 }
 
 /// All messages belonging to a single JMAP thread, ordered by `receivedAt`.

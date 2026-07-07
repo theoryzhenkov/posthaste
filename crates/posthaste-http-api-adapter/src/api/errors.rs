@@ -52,6 +52,10 @@ pub enum ApiErrorCode {
     /// `removeEmails` flag (M2 safety gate). 409 Conflict; `details.count` carries
     /// the message count for the confirm-with-count dialog.
     MailboxNotEmpty,
+    /// The message carries no valid RFC 8058 one-click unsubscribe target (no
+    /// `List-Unsubscribe` data, no `One-Click` marker, or a stored target that
+    /// fails server-side re-validation). 400 Bad Request.
+    UnsubscribeUnavailable,
     InternalError,
     // Authentication / authorization (loopback trust model, default-off).
     Unauthorized,

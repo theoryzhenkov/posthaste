@@ -70,6 +70,7 @@ pub mod settings;
 pub mod smart_mailboxes;
 mod support;
 pub(crate) mod sync_events;
+pub mod unsubscribe;
 
 #[cfg(test)]
 use account_support::apply_account_patch;
@@ -131,6 +132,7 @@ use support::ensure_account_exists;
 pub use sync_events::{
     stream_events, trigger_sync, EventsQuery, TriggerSyncRequest, TriggerSyncResponse,
 };
+pub use unsubscribe::{unsubscribe_message, UnsubscribeAck};
 
 /// Product API readiness response.
 ///

@@ -235,6 +235,10 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             "/sources/{source_id}/commands/messages/{message_id}/destroy",
             post(api::destroy_message),
         )
+        .route(
+            "/sources/{source_id}/commands/messages/{message_id}/unsubscribe",
+            post(api::unsubscribe_message),
+        )
         .route("/config:reload", post(api::reload_config));
     let regular_routes = with_request_timeout(regular_routes);
     // Manual sync awaits the whole provider cycle end-to-end — its own, longer

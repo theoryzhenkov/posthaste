@@ -138,12 +138,32 @@ export interface ActionServices {
     openTagEditor?: () => void
     openFocusedMessage?: () => void
   }
+  /** The three `message.unsubscribe` execution paths, bound ONLY by hosts whose
+   *  execution route honors the destructive `confirm` gate (the detail header
+   *  today) — the one-click POST must never run without its confirm dialog.
+   *  Absent binding hides the action (capability gating, like `row`). */
+  unsubscribe?: {
+    /** Confirmed RFC 8058 one-click: the backend performs the POST; the
+     *  implementation owns success/failure toasts (useEmailActions). */
+    oneClick: (ref: SourceMessageRef) => void | Promise<void>
+    /** Open the composer prefilled from the `mailto:` URI — the user sends. */
+    mailto: (mailtoUri: string) => void
+    /** Open the plain (non-one-click) https target in the system browser. */
+    openLink: (url: string) => void | Promise<void>
+  }
 }
 
 /** Enablement result: `true` = runnable; `false` = shown-but-disabled with no
  *  hint; `{ reason }` = shown-but-disabled with hint text (palette
  *  discoverability). */
 export type ActionEnablement = boolean | { reason: string }
+
+/** Confirmation copy shown by the shared dialog host before a gated run. */
+export interface ActionConfirmCopy {
+  title: string
+  description: string
+  confirmLabel: string
+}
 
 export interface ActionDefinition {
   /** Stable namespaced id, e.g. `message.archive`. Persisted in
@@ -165,9 +185,13 @@ export interface ActionDefinition {
   /** Shown but not runnable when not `true`; `{ reason }` renders as hint. */
   isEnabled?: (ctx: ActionContext) => ActionEnablement
   destructive?: boolean
-  /** Confirmation before run — routed through a shared dialog host (wired in a
-   *  later slice). Slice-1 ports carry NONE, preserving today's behavior. */
-  confirm?: { title: string; description: string; confirmLabel: string }
+  /** Confirmation before run — routed through a shared dialog host. Either
+   *  static copy, or derived from context (`message.unsubscribe` confirms only
+   *  its one-click path and names the sender); a function returning
+   *  `undefined` means "no confirmation for this context". */
+  confirm?:
+    | ActionConfirmCopy
+    | ((ctx: ActionContext) => ActionConfirmCopy | undefined)
   /**
    * PARAMETERIZED actions: present iff the action needs a user-chosen target
    * (a mailbox, a snooze preset) before it can run. Returns the choosable

@@ -27,6 +27,7 @@ import {
   type ActionServices,
   type ResolvedAction,
 } from '@/actions'
+import { openExternalUrl } from '@/desktop'
 import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
 import type { EmailActions } from '@/hooks/useEmailActions'
 
@@ -55,6 +56,7 @@ export function MessageHeader({
   onReplyAll,
   onSearch,
   onTag,
+  onUnsubscribeMailto,
   threadMessages,
 }: {
   conversationSubject: string | null | undefined
@@ -70,6 +72,9 @@ export function MessageHeader({
   onReplyAll: () => void
   onSearch?: (query: string, append?: boolean) => void
   onTag?: () => void
+  /** Open the composer prefilled from a `mailto:` unsubscribe URI. Hosts
+   *  without a composer fall back to the system mailto handler. */
+  onUnsubscribeMailto?: (mailtoUri: string) => void
   threadMessages: MessageSummary[]
 }) {
   const isDraft = message.keywords.includes(SYSTEM_KEYWORDS.Draft)
@@ -90,6 +95,16 @@ export function MessageHeader({
       editDraft: onEditDraft,
       openTagEditor: onTag,
       openFocusedMessage: onOpenFocusedMessage,
+    },
+    // Bound here (and only here) because this host's execution path is
+    // `runResolvedWithConfirm` — the one-click POST always gets its dialog.
+    unsubscribe: {
+      oneClick: (ref) => void actions.unsubscribe(ref),
+      mailto: (mailtoUri) =>
+        onUnsubscribeMailto
+          ? onUnsubscribeMailto(mailtoUri)
+          : void openExternalUrl(mailtoUri),
+      openLink: (url) => void openExternalUrl(url),
     },
   }
   const actionContext: ActionContext = {
@@ -206,6 +221,7 @@ const HEADER_ACTION_ORDER = [
   'message.delete-permanently',
   'message.discard-draft',
   'message.snooze',
+  'message.unsubscribe',
   'message.toggle-flag',
   'message.tag',
   'message.open-focused',
