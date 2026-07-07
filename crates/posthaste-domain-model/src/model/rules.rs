@@ -332,14 +332,12 @@ pub fn validate_rule_action(action: &RuleAction, when: &MailQueryRule) -> Result
                 ));
             }
         }
-        RuleAction::Destroy => {
-            if !group_has_condition(&when.root) {
-                return Err(
-                    "a destroy rule must have at least one condition in its when-clause — \
-                     an unconditional destroy would permanently delete every matching-topic message"
-                        .to_string(),
-                );
-            }
+        RuleAction::Destroy if !group_has_condition(&when.root) => {
+            return Err(
+                "a destroy rule must have at least one condition in its when-clause — \
+                 an unconditional destroy would permanently delete every matching-topic message"
+                    .to_string(),
+            );
         }
         _ => {}
     }

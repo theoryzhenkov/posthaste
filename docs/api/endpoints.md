@@ -47,6 +47,8 @@ Mailboxes and navigation sidebar
 | Method | Path | Summary | Operation |
 | --- | --- | --- | --- |
 | `GET` | `/v1/sources/{source_id}/mailboxes` | List mailboxes | `list_mailboxes` |
+| `POST` | `/v1/sources/{source_id}/mailboxes` | Create mailbox | `create_mailbox` |
+| `DELETE` | `/v1/sources/{source_id}/mailboxes/{mailbox_id}` | Delete mailbox | `delete_mailbox` |
 | `PATCH` | `/v1/sources/{source_id}/mailboxes/{mailbox_id}` | Update mailbox role | `patch_mailbox` |
 
 ## messages
@@ -63,6 +65,7 @@ Messages, attachments, compose, and commands
 | `POST` | `/v1/sources/{source_id}/commands/messages/{message_id}/remove-from-mailbox` | Remove message from mailbox | `remove_from_mailbox` |
 | `POST` | `/v1/sources/{source_id}/commands/messages/{message_id}/replace-mailboxes` | Replace message mailboxes | `replace_mailboxes` |
 | `POST` | `/v1/sources/{source_id}/commands/messages/{message_id}/set-keywords` | Set message keywords | `set_keywords` |
+| `POST` | `/v1/sources/{source_id}/commands/messages/{message_id}/unsubscribe` | One-click unsubscribe | `unsubscribe_message` |
 | `POST` | `/v1/sources/{source_id}/commands/save-draft` | Save draft | `save_draft` |
 | `POST` | `/v1/sources/{source_id}/commands/send` | Send message | `send_message` |
 | `GET` | `/v1/sources/{source_id}/identity` | Get sender identity | `get_identity` |
