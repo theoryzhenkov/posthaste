@@ -231,9 +231,13 @@ impl RuntimeHandle {
             .link_id
             .clone()
             .ok_or_else(|| RuntimeError::invalid_mutation("runtime mutation requires a link id"))?;
-        let mutation_id = match self.core.links.accept_mutation(caller, request)? {
+        let mutation_id = match self.core.links.accept_mutation(caller.clone(), request)? {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
-            MutationAcceptance::Existing(receipt) => return Ok(receipt),
+            MutationAcceptance::Existing(receipt) => {
+                return self
+                    .re_observed_receipt(caller, &link_id, request, receipt)
+                    .await;
+            }
         };
         // Arm the cancel-guard before awaiting the authority server: if `forward.await`
         // is dropped (client disconnect mid-dispatch), neither branch below
@@ -270,6 +274,31 @@ impl RuntimeHandle {
                     }
                     return Ok(authority_server_receipt);
                 }
+                // Wire-contract guard (the v0.5.0 "did not return a message
+                // command result" field bug): a confirmed message-command
+                // receipt must carry the command ack — an object with an
+                // `events` array. Every authority apply serializes a
+                // `CommandAck` here, so a non-object output can only be a
+                // re-observed IN-FLIGHT record (an authority that answered a
+                // duplicate with its pending, output-less dedup entry — e.g. a
+                // pre-fix peer, or a record orphaned `pending` by a dispatch
+                // cancelled mid-apply). Never promote that to `Confirmed`:
+                // settle it `Failed` (transient) so the ledger clears and a
+                // retry re-executes / re-observes the real outcome.
+                if !authority_server_receipt.output.is_object() {
+                    let error = RuntimeError::retryable(
+                        RuntimeErrorCode::Conflict,
+                        "the authority returned no result for this mutation \
+                         (a duplicate of a dispatch still in flight); retry",
+                    );
+                    return self.core.links.settle_mutation(
+                        &link_id,
+                        &mutation_id,
+                        MutationSettlementState::Failed,
+                        Some(error.envelope().clone()),
+                        serde_json::Value::Null,
+                    );
+                }
                 // The authority server already serialized the command's events as the
                 // receipt output (state-before-event: the effect is applied
                 // before the receipt returns); settle the link with it.
@@ -291,6 +320,68 @@ impl RuntimeHandle {
                     Some(envelope),
                     serde_json::Value::Null,
                 )
+            }
+        }
+    }
+
+    /// Resolve a duplicate `clientMutationId` to a receipt that actually carries
+    /// the first dispatch's outcome (D47 re-observation, made shape-safe).
+    ///
+    /// A TERMINAL record's receipt is returned as-is — its `output` holds the
+    /// serialized `CommandAck` (or its `error` the kept rejection). A record
+    /// that is still `Accepted` has no outcome yet: its stored `output` is
+    /// `Null`, and returning that receipt hands the caller a non-failed receipt
+    /// WITHOUT the command result — the v0.5.0 field bug ("message.moveToRole
+    /// did not return a message command result"), hit whenever a client retry
+    /// (the near-end engine re-forwards after its 30s request deadline) raced a
+    /// first dispatch that was still applying. Instead, wait (bounded) for the
+    /// original in-process dispatch to settle and return ITS terminal receipt;
+    /// if the record clears meanwhile (the original failed transiently — D47
+    /// clears the ledger entry) or the wait times out, surface a retryable
+    /// conflict so the caller's retry re-executes / re-observes honestly.
+    async fn re_observed_receipt(
+        &self,
+        caller: RuntimeCaller,
+        link_id: &RuntimeLinkId,
+        request: &MutationRequest,
+        receipt: MutationReceipt,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        /// How long a duplicate waits for the original dispatch to settle.
+        /// Below the near-end engine's 30s request deadline, so the wait
+        /// resolves (or yields a typed conflict) within the caller's attempt.
+        const IN_FLIGHT_DUPLICATE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+        /// Settlement poll cadence — the ledger query is a cheap keyed read.
+        const IN_FLIGHT_DUPLICATE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+        if receipt.state.is_terminal() {
+            return Ok(receipt);
+        }
+        let deadline = tokio::time::Instant::now() + IN_FLIGHT_DUPLICATE_WAIT;
+        loop {
+            tokio::time::sleep(IN_FLIGHT_DUPLICATE_POLL).await;
+            match self.core.links.mutation_settlement(
+                caller.clone(),
+                link_id,
+                &request.client_mutation_id,
+            )? {
+                Some(settled) if settled.state.is_terminal() => return Ok(settled),
+                Some(_) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(RuntimeError::retryable(
+                            RuntimeErrorCode::Conflict,
+                            "a mutation with this client mutation id is still in flight; retry",
+                        ));
+                    }
+                }
+                // The record cleared: the original settled with a transient
+                // failure (D47) or the link closed. There is no outcome to
+                // re-observe — a deliberate retry re-accepts and re-executes.
+                None => {
+                    return Err(RuntimeError::retryable(
+                        RuntimeErrorCode::Conflict,
+                        "the first dispatch under this client mutation id did not settle; retry",
+                    ))
+                }
             }
         }
     }
