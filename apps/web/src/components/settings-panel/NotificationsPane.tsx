@@ -1,12 +1,20 @@
 /**
  * Notification preferences: new-mail alerts and sounds. Edits `notifications`
  * via the settings PATCH (the `app.toml` `[notifications]` table). OS-level
- * delivery permission stays device-local (not a config concern).
+ * delivery permission stays device-local (not a config concern): it is
+ * requested LAZILY when the user turns "New mail" on — never at boot — and a
+ * denial is surfaced inline so the user knows why banners stay silent.
  *
  * @spec docs/eph/RFC-L2-configuration-matrix
  */
+import { useState } from 'react'
+
 import type { Notifications } from '../../api/types'
 import { cn } from '../../lib/utils'
+import {
+  requestOsNotificationPermission,
+  type OsNotificationPermission,
+} from '../../notifications/osNotifier'
 import { SettingsPage, SettingsPageHeader, SettingsSection } from './shared'
 
 function Toggle({
@@ -70,6 +78,11 @@ export function NotificationsPane({
   const patch = (partial: Partial<Notifications>) =>
     onChange({ newMail, sound, ...partial })
 
+  // OS delivery permission, requested lazily on enable (never at boot). Known
+  // only after the user has toggled here; `null` = not asked this session.
+  const [osPermission, setOsPermission] =
+    useState<OsNotificationPermission | null>(null)
+
   return (
     <SettingsPage>
       <SettingsPageHeader
@@ -83,8 +96,19 @@ export function NotificationsPane({
           description="Show an alert when new mail arrives."
           checked={newMail}
           disabled={isPending}
-          onChange={(value) => patch({ newMail: value })}
+          onChange={(value) => {
+            patch({ newMail: value })
+            if (value) {
+              void requestOsNotificationPermission().then(setOsPermission)
+            }
+          }}
         />
+        {newMail && osPermission === 'denied' && (
+          <p className="text-[12px] leading-5 text-[var(--brand-coral)]">
+            Notifications are blocked at the system level. Allow notifications
+            for Posthaste in your OS settings to see new-mail alerts.
+          </p>
+        )}
         <Toggle
           label="Sounds"
           description="Play a sound for new mail."

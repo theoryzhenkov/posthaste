@@ -101,7 +101,12 @@ pub fn run() {
         // and the process plugin relaunches after an update is installed. Both
         // are inert until the frontend invokes a check (see useDesktopUpdates).
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        // New-mail OS banners (macOS/Windows/Linux). Delivery is driven entirely
+        // from the renderer (`apps/web/src/notifications/`): the arrival gate
+        // decides, the plugin's JS API posts. Permission is requested lazily on
+        // first enable in the NotificationsPane — never at boot.
+        .plugin(tauri_plugin_notification::init());
 
     let builder = builder.on_menu_event(|app, event| {
         if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {

@@ -16,6 +16,7 @@ import {
   invalidateTargetMessageReadModels,
 } from './invalidations'
 import { invalidateMailboxCountsDebounced } from './mailboxCounts'
+import { notifyNewMailFromEvent } from '../notifications/newMailArrivals'
 import { pushNotification } from '../notifications/store'
 import { payloadString } from './payload'
 import { applyResourceInvalidationsOrFallback, noop } from './resources'
@@ -149,6 +150,12 @@ const eventHandlers = {
     if (countAffecting) {
       invalidateMailboxCountsDebounced(queryClient, event.accountId)
     }
+
+    // New-mail OS banner: keys on the SAME `arrived` wire flag as the count
+    // invalidation above. The arrival gate (burst coalescing, initial-sync and
+    // backfill suppression, focus check, pane toggles) lives in
+    // notifications/newMailArrivals.
+    notifyNewMailFromEvent(queryClient, event)
 
     invalidateTargetMessageReadModels(queryClient, event)
   },
