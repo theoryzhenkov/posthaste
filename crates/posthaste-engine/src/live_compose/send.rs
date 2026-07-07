@@ -1,5 +1,6 @@
 use jmap_client::mailbox;
 use posthaste_domain_model::{GatewayError, SendMessageRequest};
+use posthaste_observability::{events, ph_warn};
 use posthaste_provider_call::SEND_TOTAL;
 
 use crate::compose::{recipient_to_address, render_markdown};
@@ -142,9 +143,19 @@ pub(crate) async fn send_message(
     let submission = submission_set.create_with_id(submission_create_id.as_str());
     submission.email_id(format!("#{email_create_id}"));
     submission.identity_id(identity.id.as_str());
+    // The `onSuccessUpdateEmail` map is keyed by EMAILSUBMISSION id (RFC 8621
+    // §7.5) — a `#creation-id` here references the SUBMISSION created above,
+    // and the server applies the patch to the Email that submission names.
+    // Keying it by the *Email's* creation id (the pre-fix bug) references no
+    // submission, so servers silently ignore the patch and the outgoing copy
+    // stays filed in Drafts forever — and, with the deterministic Message-ID
+    // (D85), a same-server recipient's ingest then dedups the delivery against
+    // that lingering Drafts copy: the send "vanishes" with every response
+    // reporting success (the implicit Email/set response carries no error for
+    // an unresolvable onSuccess key — it just doesn't update anything).
     submission_set
         .arguments()
-        .on_success_update_email(email_create_id.as_str())
+        .on_success_update_email(submission_create_id.as_str())
         .mailbox_id(drafts_mailbox_id.as_str(), false)
         .mailbox_id(sent_mailbox_id.as_str(), true);
 
@@ -186,8 +197,23 @@ pub(crate) async fn send_message(
     let sent_update = next_response("Email/set sent update")?
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
+    let moved_to_sent = sent_update.has_updated();
     sent_update
         .unwrap_update_errors()
         .map_err(map_gateway_error)?;
+    // A sent-update the server neither applied nor rejected (an unresolvable
+    // `onSuccessUpdateEmail` reference — the exact silent no-op the pre-fix
+    // wrong-key bug produced): the submission has already committed, so this is
+    // NOT a send failure and must not fail the op (a user retry of a delivered
+    // send risks a duplicate on servers without create-id dedup). Surface it in
+    // the log instead — the message stays filed in Drafts until the next sync
+    // reconciles, and a regression of this class must never again be invisible.
+    if !moved_to_sent {
+        ph_warn!(
+            events::SEND_SENT_MOVE_NOT_APPLIED,
+            message_id = %message_id,
+            "send submitted but the server did not apply the Drafts→Sent move"
+        );
+    }
     Ok(())
 }

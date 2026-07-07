@@ -3360,3 +3360,122 @@ async fn snooze_then_undo_apply_diff_clears_the_snooze_row() {
         "undoing the snooze (a mailbox replace) must clear the snooze row"
     );
 }
+
+/// The send end-to-end at the mutation layer (beta-blocker guard): compose →
+/// Send with NO prior draft, exactly as the web client dispatches it
+/// (`message.send` named mutation over the link). The send must EXECUTE: the
+/// receipt defers (Accepted + `deferredOperationId`), the outbox op flushes to
+/// the provider and settles, the settlement bridge routes a terminal
+/// `Confirmed` notification, and nothing is left pending in the outbox.
+#[tokio::test]
+async fn send_mutation_without_prior_draft_flushes_settles_and_confirms() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_server(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("send-regression-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
+
+    let receipt = build
+        .handle
+        .forward_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                link_id: Some(link.link_id.clone()),
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.send",
+                    "args": serde_json::json!({
+                        "sourceId": account.id.as_str(),
+                        "messageId": "",
+                        "request": {
+                            "from": null,
+                            "to": [{"name": null, "email": "self@example.com"}],
+                            "cc": [], "bcc": [],
+                            "subject": "send regression outgoing",
+                            "body": "hello",
+                            "inReplyTo": null,
+                            "references": null
+                        }
+                    }),
+                }))
+                .expect("typed operation parses"),
+                client_mutation_id: ClientMutationId::new("send-regression-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("send mutation should run");
+    // The send-bridge defers: no false Confirmed at enqueue, and the receipt
+    // carries the outbox op id the bridge joins the flush settlement on.
+    assert_eq!(receipt.state, MutationSettlementState::Accepted);
+    assert!(
+        receipt.output.get("deferredOperationId").is_some(),
+        "the deferred receipt must carry the outbox op id"
+    );
+
+    // The enqueue-time nudge triggers the flush; the settlement bridge must
+    // then route the terminal Confirmed notification for this mutation.
+    let notification = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if let RuntimeFrame::MutationNotification {
+                client_mutation_id,
+                notification,
+                ..
+            } = frame
+            {
+                break (client_mutation_id, notification);
+            }
+        }
+    })
+    .await
+    .expect("the send settlement must surface as a mutation notification");
+    assert_eq!(notification.0.as_str(), "send-regression-1");
+    assert_eq!(notification.1, MutationNotification::Confirmed);
+
+    // The push executed and the op settled: nothing pending, failed, or parked.
+    let pending = build
+        .api_bridge
+        .service
+        .list_pending_operations(&account.id)
+        .expect("list pending");
+    assert!(
+        pending.is_empty(),
+        "the send must flush and settle, leaving no pending/failed op: {:?}",
+        pending
+            .iter()
+            .map(|op| (op.kind, op.state, op.last_error.clone()))
+            .collect::<Vec<_>>()
+    );
+}
