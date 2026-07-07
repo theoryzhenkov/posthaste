@@ -3489,3 +3489,133 @@ async fn send_mutation_without_prior_draft_flushes_settles_and_confirms() {
             .collect::<Vec<_>>()
     );
 }
+
+/// RFC-L2-count-unification — the OWN-mutation echo contract the web client's
+/// count invalidation depends on (apps/web/src/domain-cache/handlers.ts:
+/// `payloadChangeFlag(event, 'keywords')`). A `message.setKeywords` forwarded
+/// over the link (the exact client path: near-end `forward` →
+/// `RuntimeLink::forward_mutation` → authority `set_keywords` →
+/// `publish_events` → the link's notification forwarder) MUST come back on the
+/// SAME link's frame stream as a `notification` frame whose payload is the
+/// DomainEvent verbatim, `changes.keywords === true` at
+/// `payload.payload.changes`. This test serializes the frame exactly as the
+/// SSE edge does (`frame_to_sse` → `serde_json::to_value(frame)`) and pins the
+/// wire shape the web fixtures mirror.
+#[tokio::test]
+async fn own_set_keywords_echo_arrives_on_the_link_stream_with_change_flags() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_server(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("echo-shape-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    seed_single_message_batch(&build, &account.id, "em-echo", "mb-inbox");
+
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            link.link_id.clone(),
+            Some(RuntimeLinkSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
+
+    let receipt = build
+        .handle
+        .forward_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                link_id: Some(link.link_id.clone()),
+                operation: serde_json::from_value(serde_json::json!({
+                    "name": "message.setKeywords",
+                    "args": serde_json::json!({
+                        "sourceId": account.id.as_str(),
+                        "messageId": "em-echo",
+                        "command": {"add": ["$seen"], "remove": []}
+                    }),
+                }))
+                .expect("typed operation parses"),
+                client_mutation_id: ClientMutationId::new("client-echo-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("mutation should run");
+
+    // The RECEIPT carries the SAME events (the BUNDLED ECHO — `CommandAck {
+    // detail, events }` serialized as `receipt.output`). The web client's
+    // entity-store adapter dispatches these through `applyDomainEvent` on
+    // settlement (`dispatchReceiptEchoEvents`) so the user's OWN mutation
+    // reconciles mailbox/smart-mailbox counts even when the link-stream echo
+    // is dropped (the stream's lag/stale-cursor collapse never replays missed
+    // notification frames). This pins the receipt half of the echo contract.
+    let receipt_events = receipt.output["events"]
+        .as_array()
+        .expect("receipt output carries the command's events");
+    assert_eq!(receipt_events.len(), 1);
+    let receipt_event = &receipt_events[0];
+    assert!(receipt_event["seq"].is_i64());
+    assert_eq!(receipt_event["accountId"], "echo-shape-account");
+    assert_eq!(receipt_event["topic"], "message.updated");
+    assert!(receipt_event["occurredAt"].is_string());
+    assert_eq!(
+        receipt_event["payload"]["changes"]["keywords"], true,
+        "the web count gate reads event.payload.changes.keywords on the receipt echo too"
+    );
+
+    // Drain the ORIGINATING link's own stream: the echo must arrive here (no
+    // own-echo suppression) as a `Notification` frame.
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(frame, RuntimeFrame::Notification { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("the own-mutation echo notification frame must arrive on the originating link");
+
+    // Serialize exactly as the SSE edge does (`frame_to_sse` uses the same serde
+    // path), then pin the nesting the web client reads.
+    // (The web fixtures in apps/web/test/daemonEventsRealFrameDispatch.test.tsx
+    // and apps/web/test/harness/scenarios/receiptEchoCountReconciliation.test.ts
+    // mirror this serialized value key-for-key — re-capture here if the shape
+    // ever changes.)
+    let wire = serde_json::to_value(&frame).expect("frame serializes");
+    assert_eq!(wire["type"], "notification");
+    assert_eq!(wire["kind"], "message.updated");
+    let event = &wire["payload"];
+    assert!(event["seq"].is_i64(), "event.seq must be a number");
+    assert_eq!(event["accountId"], "echo-shape-account");
+    assert_eq!(event["topic"], "message.updated");
+    assert!(event["occurredAt"].is_string());
+    assert_eq!(
+        event["payload"]["changes"]["keywords"], true,
+        "the web guard reads event.payload.changes.keywords"
+    );
+    assert_eq!(event["payload"]["messageId"], "em-echo");
+}

@@ -18,26 +18,8 @@ import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { syncLogger } from '../logger'
 import { LOG_EVENTS } from '../logEvents'
-import type { DomainEvent } from '../api/types'
-import { applyDomainEvent } from '../domainCache'
+import { applyDomainEvent, isDomainEventShape } from '../domainCache'
 import { runtimeLinkClient } from '../runtime/linkClient'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function isDomainEventPayload(payload: unknown): payload is DomainEvent {
-  if (!isRecord(payload)) {
-    return false
-  }
-  return (
-    typeof payload.seq === 'number' &&
-    typeof payload.accountId === 'string' &&
-    typeof payload.topic === 'string' &&
-    typeof payload.occurredAt === 'string' &&
-    isRecord(payload.payload)
-  )
-}
 
 /**
  * Subscribes to runtime notification frames, processes incoming domain events
@@ -56,7 +38,7 @@ export function useDaemonEvents() {
         if (frame.type !== 'notification') {
           return
         }
-        if (!isDomainEventPayload(frame.payload)) {
+        if (!isDomainEventShape(frame.payload)) {
           syncLogger.warn(
             {
               event: LOG_EVENTS.daemonEventMalformed,
