@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import type { SmartMailboxCondition, SmartMailboxField } from '../src/api/types'
+import type { MailQueryCondition, MailQueryField } from '../src/api/types'
 import {
   ALL_QUERY_FIELDS,
   QUERY_FIELD_SCHEMA,
@@ -55,7 +55,7 @@ describe('fieldRegistry', () => {
       'endsWith',
       'regex',
     ]
-    const expected: Record<SmartMailboxField, string[]> = {
+    const expected: Record<MailQueryField, string[]> = {
       sourceId: ['equals', 'in'],
       sourceName: textMatch,
       messageId: ['equals', 'in'],
@@ -76,7 +76,7 @@ describe('fieldRegistry', () => {
       receivedAt: ['lt', 'gt', 'le', 'ge'],
       size: ['lt', 'gt', 'le', 'ge'],
     }
-    for (const field of Object.keys(expected) as SmartMailboxField[]) {
+    for (const field of Object.keys(expected) as MailQueryField[]) {
       expect(operatorOptionsForField(field)).toEqual(expected[field])
     }
   })
@@ -113,7 +113,7 @@ describe('fieldRegistry', () => {
 
   it('R4: adds the text-match operators to text fields only, labeled', () => {
     // The additive operators appear on free-text fields (subject, from, to)…
-    for (const field of ['subject', 'fromEmail', 'to'] as SmartMailboxField[]) {
+    for (const field of ['subject', 'fromEmail', 'to'] as MailQueryField[]) {
       const ops = operatorOptionsForField(field)
       expect(ops).toContain('beginsWith')
       expect(ops).toContain('endsWith')
@@ -129,7 +129,7 @@ describe('fieldRegistry', () => {
       'isRead',
       'hasAttachment',
       'receivedAt',
-    ] as SmartMailboxField[]) {
+    ] as MailQueryField[]) {
       const ops = operatorOptionsForField(field)
       expect(ops).not.toContain('beginsWith')
       expect(ops).not.toContain('endsWith')
@@ -270,10 +270,10 @@ describe('emitted condition JSON — wire-shape parity vs the old text box', () 
   // generic text box produced, so the compiler/evaluator + stored JSON are
   // unchanged. This is the load-bearing assertion for R1.
   const base = (
-    field: SmartMailboxField,
-    op: SmartMailboxCondition['operator'],
-    value: SmartMailboxCondition['value'],
-  ): SmartMailboxCondition => ({
+    field: MailQueryField,
+    op: MailQueryCondition['operator'],
+    value: MailQueryCondition['value'],
+  ): MailQueryCondition => ({
     type: 'condition',
     field,
     operator: op,

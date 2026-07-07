@@ -1,7 +1,4 @@
-import type {
-  SmartMailboxField,
-  SmartMailboxOperator,
-} from '../../../api/types'
+import type { MailQueryField, MailQueryOperator } from '../../../api/types'
 import {
   QUERY_FIELD_SCHEMA,
   type QueryValueType,
@@ -38,7 +35,7 @@ export interface FieldDescriptor {
    * the operator subset offered by the editor can never drift from the store SQL
    * compiler's accepted set.
    */
-  operators: readonly SmartMailboxOperator[]
+  operators: readonly MailQueryOperator[]
 }
 
 /**
@@ -63,20 +60,19 @@ const DEFAULT_WIDGET: Record<QueryValueType, ConditionValueType> = {
  * (`address` → the compose address book, `keyword` → the live tag list), so a
  * capability declared here composes with every operator the schema admits.
  */
-const WIDGET_OVERRIDE: Partial<Record<SmartMailboxField, ConditionValueType>> =
-  {
-    sourceId: 'accountRef',
-    mailboxId: 'mailboxRef',
-    mailboxRole: 'roleEnum',
-    keyword: 'keyword',
-    fromName: 'address',
-    fromEmail: 'address',
-    // Recipient (To) address field — matched against `to_json`. Cc/Bcc are not
-    // stored as separate columns, so only To is queryable.
-    to: 'address',
-    // Byte size + unit widget over the numeric compiler (`compile_numeric_field`).
-    size: 'size',
-  }
+const WIDGET_OVERRIDE: Partial<Record<MailQueryField, ConditionValueType>> = {
+  sourceId: 'accountRef',
+  mailboxId: 'mailboxRef',
+  mailboxRole: 'roleEnum',
+  keyword: 'keyword',
+  fromName: 'address',
+  fromEmail: 'address',
+  // Recipient (To) address field — matched against `to_json`. Cc/Bcc are not
+  // stored as separate columns, so only To is queryable.
+  to: 'address',
+  // Byte size + unit widget over the numeric compiler (`compile_numeric_field`).
+  size: 'size',
+}
 
 /**
  * The field -> { valueType (widget), operators } table. The DATA (field set +
@@ -85,9 +81,9 @@ const WIDGET_OVERRIDE: Partial<Record<SmartMailboxField, ConditionValueType>> =
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-export const FIELD_REGISTRY: Record<SmartMailboxField, FieldDescriptor> =
+export const FIELD_REGISTRY: Record<MailQueryField, FieldDescriptor> =
   Object.fromEntries(
-    (Object.keys(QUERY_FIELD_SCHEMA) as SmartMailboxField[]).map((field) => {
+    (Object.keys(QUERY_FIELD_SCHEMA) as MailQueryField[]).map((field) => {
       const spec = QUERY_FIELD_SCHEMA[field]
       return [
         field,
@@ -97,12 +93,10 @@ export const FIELD_REGISTRY: Record<SmartMailboxField, FieldDescriptor> =
         },
       ]
     }),
-  ) as Record<SmartMailboxField, FieldDescriptor>
+  ) as Record<MailQueryField, FieldDescriptor>
 
 /** The value type that drives the type-directed widget for a field. */
-export function valueTypeForField(
-  field: SmartMailboxField,
-): ConditionValueType {
+export function valueTypeForField(field: MailQueryField): ConditionValueType {
   return FIELD_REGISTRY[field].valueType
 }
 
@@ -116,7 +110,7 @@ export function valueTypeForField(
  * @spec docs/eph/RFC-L2-query-schema.md#d6--neutral-operator-names
  */
 export function operatorLabel(
-  operator: SmartMailboxOperator,
+  operator: MailQueryOperator,
   valueType: ConditionValueType,
 ): string {
   const isSize = valueType === 'size'
@@ -148,8 +142,8 @@ export function operatorLabel(
 
 /** The operator label for a field, resolving its value type from the registry. */
 export function operatorLabelForField(
-  field: SmartMailboxField,
-  operator: SmartMailboxOperator,
+  field: MailQueryField,
+  operator: MailQueryOperator,
 ): string {
   return operatorLabel(operator, valueTypeForField(field))
 }
@@ -159,7 +153,7 @@ export function operatorLabelForField(
  * the operator dropdown and `defaultCondition`.
  */
 export function operatorOptionsForField(
-  field: SmartMailboxField,
-): readonly SmartMailboxOperator[] {
+  field: MailQueryField,
+): readonly MailQueryOperator[] {
   return FIELD_REGISTRY[field].operators
 }

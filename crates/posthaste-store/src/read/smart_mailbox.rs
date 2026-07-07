@@ -7,7 +7,7 @@ impl SmartMailboxStore for DatabaseStore {
     /// @spec docs/L1-search#smart-mailbox-data-model
     fn query_messages_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
     ) -> Result<Vec<MessageSummary>, StoreError> {
         let connection = self.read_connection()?;
         query_messages_by_rule(&connection, rule)
@@ -16,7 +16,7 @@ impl SmartMailboxStore for DatabaseStore {
     /// Evaluates a smart mailbox rule and returns all matching messages with explicit ordering.
     fn query_messages_by_rule_sorted(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         sort_field: MessageSortField,
         sort_direction: SortDirection,
     ) -> Result<Vec<MessageSummary>, StoreError> {
@@ -29,7 +29,7 @@ impl SmartMailboxStore for DatabaseStore {
     /// @spec docs/L1-api#cursor-pagination
     fn query_message_page_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         limit: usize,
         cursor: Option<&MessageCursor>,
         sort_field: MessageSortField,
@@ -44,7 +44,7 @@ impl SmartMailboxStore for DatabaseStore {
     /// @spec docs/L1-search#smart-mailbox-data-model
     fn query_conversations_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         limit: usize,
         cursor: Option<&ConversationCursor>,
         sort_field: ConversationSortField,
@@ -55,10 +55,7 @@ impl SmartMailboxStore for DatabaseStore {
     }
 
     /// Returns (unread, total) message counts for a smart mailbox rule.
-    fn query_smart_mailbox_counts(
-        &self,
-        rule: &SmartMailboxRule,
-    ) -> Result<(i64, i64), StoreError> {
+    fn query_smart_mailbox_counts(&self, rule: &MailQueryRule) -> Result<(i64, i64), StoreError> {
         let connection = self.read_connection()?;
         count_smart_mailbox_messages(&connection, rule)
     }

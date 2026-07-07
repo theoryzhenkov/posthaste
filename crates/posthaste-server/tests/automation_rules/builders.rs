@@ -1,9 +1,8 @@
 use posthaste_domain_model::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AutomationAction,
-    AutomationRule, AutomationTrigger, MailboxId, MailboxRecord, MessageId, MessageRecord,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, ThreadId,
-    RFC3339_EPOCH,
+    AutomationRule, AutomationTrigger, MailQueryCondition, MailQueryField, MailQueryGroup,
+    MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue,
+    MailboxId, MailboxRecord, MessageId, MessageRecord, ThreadId, RFC3339_EPOCH,
 };
 
 pub(super) fn account(id: &str, name: &str) -> AccountSettings {
@@ -57,11 +56,11 @@ pub(super) fn message(
 }
 
 fn condition(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: false,
@@ -69,44 +68,44 @@ fn condition(
     })
 }
 
-pub(super) fn source_is(account_id: &str) -> SmartMailboxRuleNode {
+pub(super) fn source_is(account_id: &str) -> MailQueryRuleNode {
     condition(
-        SmartMailboxField::SourceId,
-        SmartMailboxOperator::Equals,
-        SmartMailboxValue::String(account_id.to_string()),
+        MailQueryField::SourceId,
+        MailQueryOperator::Equals,
+        MailQueryValue::String(account_id.to_string()),
     )
 }
 
-pub(super) fn from_contains(value: &str) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
+pub(super) fn from_contains(value: &str) -> MailQueryRuleNode {
+    MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::Any,
         negated: false,
         nodes: vec![
             condition(
-                SmartMailboxField::FromName,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String(value.to_string()),
+                MailQueryField::FromName,
+                MailQueryOperator::Contains,
+                MailQueryValue::String(value.to_string()),
             ),
             condition(
-                SmartMailboxField::FromEmail,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String(value.to_string()),
+                MailQueryField::FromEmail,
+                MailQueryOperator::Contains,
+                MailQueryValue::String(value.to_string()),
             ),
         ],
     })
 }
 
-pub(super) fn mailbox_role_is(role: &str) -> SmartMailboxRuleNode {
+pub(super) fn mailbox_role_is(role: &str) -> MailQueryRuleNode {
     condition(
-        SmartMailboxField::MailboxRole,
-        SmartMailboxOperator::Equals,
-        SmartMailboxValue::String(role.to_string()),
+        MailQueryField::MailboxRole,
+        MailQueryOperator::Equals,
+        MailQueryValue::String(role.to_string()),
     )
 }
 
 pub(super) fn rule(
     id: &str,
-    nodes: Vec<SmartMailboxRuleNode>,
+    nodes: Vec<MailQueryRuleNode>,
     actions: Vec<AutomationAction>,
 ) -> AutomationRule {
     AutomationRule {
@@ -114,9 +113,9 @@ pub(super) fn rule(
         name: id.to_string(),
         enabled: true,
         triggers: vec![AutomationTrigger::MessageArrived],
-        condition: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+        condition: MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
                 nodes,
             },

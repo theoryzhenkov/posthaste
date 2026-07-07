@@ -93,13 +93,13 @@ fn query_conversations_by_rule_excludes_other_accounts() -> Result<(), StoreErro
     // A rule whose subject condition matches BOTH accounts, scoped to `primary`.
     let rule = all_rule(vec![
         rule_condition(
-            SmartMailboxField::SourceId,
-            SmartMailboxOperator::Equals,
+            MailQueryField::SourceId,
+            MailQueryOperator::Equals,
             "primary",
         ),
         rule_condition(
-            SmartMailboxField::Subject,
-            SmartMailboxOperator::Contains,
+            MailQueryField::Subject,
+            MailQueryOperator::Contains,
             "Shared subject",
         ),
     ]);

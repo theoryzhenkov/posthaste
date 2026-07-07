@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use posthaste_contract_core::SearchVisibilityRequest;
-use posthaste_domain_model::{AccountId, MessagePage, SmartMailboxRule};
+use posthaste_domain_model::{AccountId, MailQueryRule, MessagePage};
 use posthaste_domain_service::MailService;
 use posthaste_observability::{events, ph_warn};
 
@@ -47,8 +47,8 @@ pub(crate) async fn record(
 
 fn counts(
     service: &Arc<MailService>,
-    scope_rule: &SmartMailboxRule,
-    result_rule: &SmartMailboxRule,
+    scope_rule: &MailQueryRule,
+    result_rule: &MailQueryRule,
 ) -> Option<(u64, u64)> {
     let total_messages = match service.count_messages_by_rule(scope_rule) {
         Ok((_, total)) => total.max(0) as u64,

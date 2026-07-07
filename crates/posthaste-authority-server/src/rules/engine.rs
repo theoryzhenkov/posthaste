@@ -17,11 +17,11 @@ use posthaste_contract_core::mutation_args::{
 };
 use posthaste_contract_core::MailOperation;
 use posthaste_domain_model::{
-    now_iso8601, AccountId, DomainEvent, MailboxId, MailboxRole, MessageId, MessageSortField,
-    MessageSummary, Rule, RuleAction, RuleDeliveryFailed, RuleFired, RuleOutcome,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection,
-    EVENT_TOPIC_RULE_DELIVERY_FAILED, EVENT_TOPIC_RULE_FIRED,
+    now_iso8601, AccountId, DomainEvent, MailQueryCondition, MailQueryField, MailQueryGroup,
+    MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue,
+    MailboxId, MailboxRole, MessageId, MessageSortField, MessageSummary, Rule, RuleAction,
+    RuleDeliveryFailed, RuleFired, RuleOutcome, SortDirection, EVENT_TOPIC_RULE_DELIVERY_FAILED,
+    EVENT_TOPIC_RULE_FIRED,
 };
 use posthaste_link_far_end::down::FactLog;
 use posthaste_observability::{events, ph_info, ph_warn};
@@ -361,7 +361,7 @@ impl EngineContext {
     /// `message.updated` would otherwise cause.
     fn match_message(
         &self,
-        when: &SmartMailboxRule,
+        when: &MailQueryRule,
         account_id: &AccountId,
         message_id: &MessageId,
         action: &RuleAction,
@@ -643,30 +643,30 @@ fn level0_operation(
 /// [id] AND (when) AND precondition(action)`. This mirrors the ingestion-time
 /// automation matcher (`automation_query_rule`) — the established predicate path.
 fn scoped_match_rule(
-    when: &SmartMailboxRule,
+    when: &MailQueryRule,
     account_id: &AccountId,
     message_id: &MessageId,
     action: &RuleAction,
-) -> SmartMailboxRule {
+) -> MailQueryRule {
     let mut nodes = vec![
         condition(
-            SmartMailboxField::SourceId,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(account_id.to_string()),
+            MailQueryField::SourceId,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(account_id.to_string()),
         ),
         condition(
-            SmartMailboxField::MessageId,
-            SmartMailboxOperator::In,
-            SmartMailboxValue::Strings(vec![message_id.to_string()]),
+            MailQueryField::MessageId,
+            MailQueryOperator::In,
+            MailQueryValue::Strings(vec![message_id.to_string()]),
         ),
-        SmartMailboxRuleNode::Group(when.root.clone()),
+        MailQueryRuleNode::Group(when.root.clone()),
     ];
     if let Some(precondition) = action_precondition(action) {
         nodes.push(precondition);
     }
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },
@@ -677,35 +677,35 @@ fn scoped_match_rule(
 /// message when the effect already holds. Level-1 hooks have no precondition —
 /// they fire once per triggering fact and dedupe downstream via the idempotency
 /// key.
-fn action_precondition(action: &RuleAction) -> Option<SmartMailboxRuleNode> {
+fn action_precondition(action: &RuleAction) -> Option<MailQueryRuleNode> {
     match action {
         RuleAction::Tag { tag } => Some(negated_condition(
-            SmartMailboxField::Keyword,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(tag.clone()),
+            MailQueryField::Keyword,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(tag.clone()),
         )),
         RuleAction::Move { mailbox_id } => Some(negated_condition(
-            SmartMailboxField::MailboxId,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(mailbox_id.to_string()),
+            MailQueryField::MailboxId,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(mailbox_id.to_string()),
         )),
         // "Not already in a mailbox with this role" — idempotent and loop-free
         // for archive/junk/trash/inbox moves, mirroring `Move`.
         RuleAction::MoveToRole { role } => Some(negated_condition(
-            SmartMailboxField::MailboxRole,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(role.as_str().to_string()),
+            MailQueryField::MailboxRole,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(role.as_str().to_string()),
         )),
         // "Read state differs from the target" — skip when already read/unread.
         RuleAction::MarkRead { read } => Some(negated_condition(
-            SmartMailboxField::IsRead,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(*read),
+            MailQueryField::IsRead,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(*read),
         )),
         RuleAction::Flag { flagged } => Some(negated_condition(
-            SmartMailboxField::IsFlagged,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(*flagged),
+            MailQueryField::IsFlagged,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(*flagged),
         )),
         // Destroy needs no precondition: a destroyed message has no row, so its
         // own follow-up facts can never re-match the scoped query.
@@ -718,11 +718,11 @@ fn action_precondition(action: &RuleAction) -> Option<SmartMailboxRuleNode> {
 }
 
 fn condition(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: false,
@@ -731,11 +731,11 @@ fn condition(
 }
 
 fn negated_condition(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: true,
@@ -748,7 +748,7 @@ mod tests {
     use super::*;
     use posthaste_domain_model::RuleGrant;
 
-    fn when_subject_contains(term: &str) -> SmartMailboxRule {
+    fn when_subject_contains(term: &str) -> MailQueryRule {
         posthaste_query_grammar::parse_query(term).expect("parse when")
     }
 
@@ -889,18 +889,18 @@ mod tests {
                 body: None,
             },
         );
-        assert_eq!(scoped.root.operator, SmartMailboxGroupOperator::All);
+        assert_eq!(scoped.root.operator, MailQueryGroupOperator::All);
         // account + message + when group (notify has no precondition).
         assert_eq!(scoped.root.nodes.len(), 3);
         let has_source = scoped.root.nodes.iter().any(|node| {
-            matches!(node, SmartMailboxRuleNode::Condition(c)
-                if c.field == SmartMailboxField::SourceId
-                && c.value == SmartMailboxValue::String("acct-1".into()))
+            matches!(node, MailQueryRuleNode::Condition(c)
+                if c.field == MailQueryField::SourceId
+                && c.value == MailQueryValue::String("acct-1".into()))
         });
         let has_message = scoped.root.nodes.iter().any(|node| {
-            matches!(node, SmartMailboxRuleNode::Condition(c)
-                if c.field == SmartMailboxField::MessageId
-                && c.value == SmartMailboxValue::Strings(vec!["msg-1".into()]))
+            matches!(node, MailQueryRuleNode::Condition(c)
+                if c.field == MailQueryField::MessageId
+                && c.value == MailQueryValue::Strings(vec!["msg-1".into()]))
         });
         assert!(has_source && has_message);
     }
@@ -913,10 +913,10 @@ mod tests {
         let precondition = action_precondition(&RuleAction::Tag { tag: "done".into() })
             .expect("tag has a precondition");
         match precondition {
-            SmartMailboxRuleNode::Condition(condition) => {
-                assert_eq!(condition.field, SmartMailboxField::Keyword);
+            MailQueryRuleNode::Condition(condition) => {
+                assert_eq!(condition.field, MailQueryField::Keyword);
                 assert!(condition.negated);
-                assert_eq!(condition.value, SmartMailboxValue::String("done".into()));
+                assert_eq!(condition.value, MailQueryValue::String("done".into()));
             }
             other => panic!("expected a condition, got {other:?}"),
         }
@@ -942,10 +942,10 @@ mod tests {
         let mark_read = action_precondition(&RuleAction::MarkRead { read: true })
             .expect("markRead has a precondition");
         match mark_read {
-            SmartMailboxRuleNode::Condition(condition) => {
-                assert_eq!(condition.field, SmartMailboxField::IsRead);
+            MailQueryRuleNode::Condition(condition) => {
+                assert_eq!(condition.field, MailQueryField::IsRead);
                 assert!(condition.negated);
-                assert_eq!(condition.value, SmartMailboxValue::Bool(true));
+                assert_eq!(condition.value, MailQueryValue::Bool(true));
             }
             other => panic!("expected a condition, got {other:?}"),
         }
@@ -953,10 +953,10 @@ mod tests {
         let unflag = action_precondition(&RuleAction::Flag { flagged: false })
             .expect("flag has a precondition");
         match unflag {
-            SmartMailboxRuleNode::Condition(condition) => {
-                assert_eq!(condition.field, SmartMailboxField::IsFlagged);
+            MailQueryRuleNode::Condition(condition) => {
+                assert_eq!(condition.field, MailQueryField::IsFlagged);
                 assert!(condition.negated);
-                assert_eq!(condition.value, SmartMailboxValue::Bool(false));
+                assert_eq!(condition.value, MailQueryValue::Bool(false));
             }
             other => panic!("expected a condition, got {other:?}"),
         }
@@ -966,10 +966,10 @@ mod tests {
         })
         .expect("moveToRole has a precondition");
         match archive {
-            SmartMailboxRuleNode::Condition(condition) => {
-                assert_eq!(condition.field, SmartMailboxField::MailboxRole);
+            MailQueryRuleNode::Condition(condition) => {
+                assert_eq!(condition.field, MailQueryField::MailboxRole);
                 assert!(condition.negated);
-                assert_eq!(condition.value, SmartMailboxValue::String("archive".into()));
+                assert_eq!(condition.value, MailQueryValue::String("archive".into()));
             }
             other => panic!("expected a condition, got {other:?}"),
         }

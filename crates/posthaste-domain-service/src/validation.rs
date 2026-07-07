@@ -320,8 +320,8 @@ fn automation_draft_errors(
 mod tests {
     use super::*;
     use posthaste_domain_model::{
-        AccountTransportSettings, AppSettings, SecretKind, SmartMailbox, SmartMailboxGroup,
-        SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxRule, TransportSecurity,
+        AccountTransportSettings, AppSettings, MailQueryGroup, MailQueryGroupOperator,
+        MailQueryRule, SecretKind, SmartMailbox, SmartMailboxKind, TransportSecurity,
     };
 
     fn valid_account(id: &str) -> AccountSettings {
@@ -348,10 +348,10 @@ mod tests {
         }
     }
 
-    fn empty_rule() -> SmartMailboxRule {
-        SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+    fn empty_rule() -> MailQueryRule {
+        MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
                 nodes: Vec::new(),
             },

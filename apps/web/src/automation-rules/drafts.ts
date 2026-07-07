@@ -1,7 +1,7 @@
 import type {
   AutomationAction,
   AutomationRule,
-  SmartMailboxRule,
+  MailQueryRule,
 } from '../api/types'
 import {
   accountScopedCondition,
@@ -13,7 +13,7 @@ import type { AutomationRuleDraft } from './types'
 export function actionConditionFromAccountRule(
   rule: AutomationRule,
   accountId: string,
-): SmartMailboxRule {
+): MailQueryRule {
   const nodes = rule.condition.root.nodes
   const secondNode = nodes[1]
   if (

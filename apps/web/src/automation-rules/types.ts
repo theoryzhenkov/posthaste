@@ -1,7 +1,7 @@
 import type {
   AutomationAction,
   AutomationTrigger,
-  SmartMailboxRule,
+  MailQueryRule,
 } from '../api/types'
 
 export interface AutomationRuleDraft {
@@ -10,7 +10,7 @@ export interface AutomationRuleDraft {
   name: string
   enabled: boolean
   triggers: AutomationTrigger[]
-  condition: SmartMailboxRule
+  condition: MailQueryRule
   actions: AutomationAction[]
   backfill: boolean
 }

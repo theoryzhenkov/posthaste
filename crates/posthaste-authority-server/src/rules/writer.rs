@@ -149,16 +149,16 @@ fn atomic_write(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
 mod tests {
     use super::*;
     use posthaste_domain_model::{
-        RuleGrant, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxRule,
+        MailQueryGroup, MailQueryGroupOperator, MailQueryRule, RuleGrant,
     };
 
     fn rule(id: &str, action: RuleAction) -> Rule {
         Rule {
             id: id.into(),
             name: "n".into(),
-            when: SmartMailboxRule {
-                root: SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::All,
+            when: MailQueryRule {
+                root: MailQueryGroup {
+                    operator: MailQueryGroupOperator::All,
                     negated: false,
                     nodes: Vec::new(),
                 },

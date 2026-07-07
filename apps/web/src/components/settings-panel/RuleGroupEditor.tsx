@@ -6,7 +6,7 @@
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-import type { SmartMailboxGroup } from '../../api/types'
+import type { MailQueryGroup } from '../../api/types'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import { Checkbox } from '../ui/checkbox'
@@ -26,7 +26,7 @@ import {
 import { ConditionEditor } from './rule-group/ConditionEditor'
 
 /**
- * Recursive editor for a `SmartMailboxGroup` node.
+ * Recursive editor for a `MailQueryGroup` node.
  * Renders its own conditions inline and delegates nested groups recursively.
  *
  * @spec docs/L1-search#smart-mailbox-data-model
@@ -37,8 +37,8 @@ export function RuleGroupEditor({
   onRemove,
   depth = 0,
 }: {
-  group: SmartMailboxGroup
-  onChange: (group: SmartMailboxGroup) => void
+  group: MailQueryGroup
+  onChange: (group: MailQueryGroup) => void
   onRemove?: () => void
   depth?: number
 }) {

@@ -222,5 +222,5 @@ fn scan_value(chars: &[char], pos: &mut usize) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Token -> SmartMailboxRuleNode mapping
+// Token -> MailQueryRuleNode mapping
 // ---------------------------------------------------------------------------

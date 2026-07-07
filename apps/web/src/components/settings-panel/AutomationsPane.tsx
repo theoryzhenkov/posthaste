@@ -15,7 +15,7 @@ import { useMemo, useState } from 'react'
 
 import type {
   Rule,
-  SmartMailboxGroup,
+  MailQueryGroup,
   WritableRuleAction,
   WritableRuleInput,
 } from '../../api/types'
@@ -55,7 +55,7 @@ interface RuleForm {
 /** Does the WHEN tree contain at least one leaf condition? Mirrors the server's
  *  destroy guard (`validate_rule_action`), so the editor can refuse an
  *  unconditional destroy BEFORE the request instead of surfacing a 400. */
-function groupHasCondition(group: SmartMailboxGroup): boolean {
+function groupHasCondition(group: MailQueryGroup): boolean {
   return group.nodes.some((node) =>
     node.type === 'condition' ? true : groupHasCondition(node),
   )

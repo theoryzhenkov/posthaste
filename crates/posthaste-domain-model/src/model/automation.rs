@@ -12,7 +12,7 @@ pub struct AutomationRule {
     pub name: String,
     pub enabled: bool,
     pub triggers: Vec<AutomationTrigger>,
-    pub condition: SmartMailboxRule,
+    pub condition: MailQueryRule,
     pub actions: Vec<AutomationAction>,
     pub backfill: bool,
 }

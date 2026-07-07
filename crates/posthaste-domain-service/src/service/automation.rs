@@ -2,10 +2,10 @@ use crate::MailGateway;
 use posthaste_domain_model::{
     AccountId, AppSettings, AutomationAction, AutomationBackfillBatchOutcome,
     AutomationBackfillJob, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger,
-    CommandAck, DomainEvent, MessageId, MessageRecord, MessageSortField, MessageSummary,
-    ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection, StoreError,
+    CommandAck, DomainEvent, MailQueryCondition, MailQueryField, MailQueryGroup,
+    MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue,
+    MessageId, MessageRecord, MessageSortField, MessageSummary, ReplaceMailboxesCommand,
+    ServiceError, SetKeywordsCommand, SortDirection, StoreError,
 };
 
 use super::MailService;

@@ -6,7 +6,7 @@ import type {
   AutomationRule,
   Mailbox,
   PatchSettingsInput,
-  SmartMailboxRule,
+  MailQueryRule,
 } from '../../../api/types'
 import type { AutomationRuleDraft } from '../../../automationRules'
 import { runtimeMutations } from '../../../runtime/mutations'
@@ -45,7 +45,7 @@ export function LinkedAutomationRuleFields({
   itemsFromSettings: (settings: AppSettings) => AutomationRuleItem[]
   createDraft: () => AutomationRuleDraft | null
   draftToRule: (draft: AutomationRuleDraft) => AutomationRule
-  previewConditionForDraft: (draft: AutomationRuleDraft) => SmartMailboxRule
+  previewConditionForDraft: (draft: AutomationRuleDraft) => MailQueryRule
 }) {
   const [items, setItems] = useState<AutomationRuleItem[]>(() =>
     itemsFromSettings(settings),

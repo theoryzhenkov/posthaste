@@ -8,9 +8,9 @@ use posthaste_authority_server::AccountSupervisor;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    AutomationAction, AutomationRule, AutomationTrigger, DomainEvent, SecretRef, SecretStoreError,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AutomationAction, AutomationRule, AutomationTrigger, DomainEvent, MailQueryCondition,
+    MailQueryField, MailQueryGroup, MailQueryGroupOperator, MailQueryOperator, MailQueryRule,
+    MailQueryRuleNode, MailQueryValue, SecretRef, SecretStoreError, RFC3339_EPOCH,
 };
 use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
 use posthaste_http_api_adapter::AppState;
@@ -146,16 +146,16 @@ pub(super) fn expect_settings_ok(
     expect_api_ok(result, "settings patch should succeed")
 }
 
-pub(super) fn smart_rule_for_source(account_id: &str) -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+pub(super) fn smart_rule_for_source(account_id: &str) -> MailQueryRule {
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
-            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::SourceId,
-                operator: SmartMailboxOperator::Equals,
+            nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::SourceId,
+                operator: MailQueryOperator::Equals,
                 negated: false,
-                value: SmartMailboxValue::String(account_id.to_string()),
+                value: MailQueryValue::String(account_id.to_string()),
             })],
         },
     }

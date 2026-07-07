@@ -6,12 +6,12 @@ use posthaste_domain_model::{
     CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate, CacheSignalUpdate,
     CachedSenderAddress, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
-    ImapMailboxSyncState, ImapMessageLocation, MailboxId, MailboxSummary, MessageCursor,
-    MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
-    Operation, OperationId, OperationState, Recipient, ReplaceMailboxesCommand, ReplyContext,
-    RevLogSnapshot, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
-    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome, SyncProgress,
-    SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
+    ImapMailboxSyncState, ImapMessageLocation, MailQueryRule, MailboxId, MailboxSummary,
+    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
+    MutationOutcome, Operation, OperationId, OperationState, Recipient, ReplaceMailboxesCommand,
+    ReplyContext, RevLogSnapshot, SecretRef, SecretStoreError, SendMessageRequest,
+    SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome,
+    SyncProgress, SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
 use posthaste_domain_model::{DomainEvent, EventLogBounds, GatewayError, ServiceError, StoreError};
 

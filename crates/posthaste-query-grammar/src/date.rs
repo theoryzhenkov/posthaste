@@ -1,7 +1,7 @@
 use super::nodes::condition_node;
 use super::*;
 
-pub(super) fn date_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, String> {
+pub(super) fn date_node(value: &str, negated: bool) -> Result<Vec<MailQueryRuleNode>, String> {
     let date = time::Date::parse(
         value,
         &time::format_description::parse("[year]-[month]-[day]")
@@ -22,21 +22,21 @@ pub(super) fn date_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRu
         .format(&Rfc3339)
         .map_err(|e| format!("date format error: {e}"))?;
 
-    Ok(vec![SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::All,
+    Ok(vec![MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::All,
         negated,
         nodes: vec![
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::ReceivedAt,
-                operator: SmartMailboxOperator::Ge,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::ReceivedAt,
+                operator: MailQueryOperator::Ge,
                 negated: false,
-                value: SmartMailboxValue::String(start),
+                value: MailQueryValue::String(start),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::ReceivedAt,
-                operator: SmartMailboxOperator::Lt,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::ReceivedAt,
+                operator: MailQueryOperator::Lt,
                 negated: false,
-                value: SmartMailboxValue::String(end),
+                value: MailQueryValue::String(end),
             }),
         ],
     })])
@@ -45,14 +45,14 @@ pub(super) fn date_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRu
 /// `newer:7d` / `older:2w` — relative date from now.
 pub(super) fn relative_date_node(
     value: &str,
-    operator: SmartMailboxOperator,
+    operator: MailQueryOperator,
     negated: bool,
-) -> Result<Vec<SmartMailboxRuleNode>, String> {
+) -> Result<Vec<MailQueryRuleNode>, String> {
     let iso = compute_relative_date(value)?;
     Ok(vec![condition_node(
-        SmartMailboxField::ReceivedAt,
+        MailQueryField::ReceivedAt,
         operator,
-        SmartMailboxValue::String(iso),
+        MailQueryValue::String(iso),
         negated,
     )])
 }
