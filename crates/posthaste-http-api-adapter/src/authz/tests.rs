@@ -2,7 +2,7 @@ use super::*;
 
 fn ctx(action: Action) -> CaveatContext {
     CaveatContext {
-        action,
+        action: Some(action),
         account: None,
         mailbox: None,
         message: None,
@@ -15,12 +15,50 @@ fn action_caveat_allows_listed_and_denies_unlisted() {
     let mut c = ctx(Action::Read);
     assert_eq!(evaluate_predicate("action = read", &c), Decision::Allow);
     assert_eq!(evaluate_predicate("action = read,tag", &c), Decision::Allow);
-    c.action = Action::Send;
+    c.action = Some(Action::Send);
     assert!(matches!(
         evaluate_predicate("action = read,tag", &c),
         Decision::Deny(_)
     ));
     assert_eq!(evaluate_predicate("action = send", &c), Decision::Allow);
+}
+
+/// A deferred-action context (a `HandlerDerived` route at the perimeter) does
+/// not judge `action` caveats — the handler re-check does — while every OTHER
+/// caveat axis is still enforced in the same pass.
+#[test]
+fn deferred_action_context_defers_only_the_action_axis() {
+    let mut c = ctx(Action::Read);
+    c.action = None;
+    assert_eq!(evaluate_predicate("action = tag", &c), Decision::Allow);
+    // Resource + expiry caveats keep their full force under a deferred action.
+    assert!(matches!(
+        evaluate_predicate("account = acct-a", &c),
+        Decision::Deny(_)
+    ));
+    assert!(matches!(
+        evaluate_predicate("expires = 2020-01-01T00:00:00Z", &c),
+        Decision::Deny(_)
+    ));
+}
+
+/// The deferred-action escape hatch is reserved for the ONE named-mutation
+/// funnel route; any other `HandlerDerived` entry would need its own handler
+/// re-check, so growth of this set must be a deliberate, reviewed act.
+#[test]
+fn handler_derived_action_is_only_the_mutation_route() {
+    let handler_derived: Vec<String> = mapped_routes()
+        .into_iter()
+        .filter_map(|(method, template)| {
+            let authz = lookup(method, template).expect("mapped route resolves");
+            (authz.action == RouteAction::HandlerDerived).then_some(route_key(method, template))
+        })
+        .collect();
+    assert_eq!(
+        handler_derived,
+        vec!["POST /runtime/sessions/{session_id}/mutations".to_string()],
+        "every HandlerDerived route must have a handler-side per-op authorizer"
+    );
 }
 
 #[test]
@@ -89,7 +127,7 @@ fn malformed_and_unknown_caveats_deny() {
 fn lookup_resolves_a_known_route() {
     let authz = lookup("GET", "/sources/{source_id}/messages/{message_id}")
         .expect("mapped route should resolve");
-    assert_eq!(authz.action, Action::Read);
+    assert_eq!(authz.action, RouteAction::Static(Action::Read));
     assert_eq!(authz.resource.account, Some("source_id"));
     assert_eq!(authz.resource.message, Some("message_id"));
     assert_eq!(authz.mode, ScopeMode::Gate);

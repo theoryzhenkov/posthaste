@@ -20,6 +20,8 @@
 //     are enough messages to archive.
 import { readFileSync } from 'node:fs'
 
+import { mintSessionToken } from './lib/session-token.mjs'
+
 // Resolve playwright-core from the Nix dev shell (POSTHASTE_PLAYWRIGHT_CLI points
 // at playwright-core's cli.js); fall back to a bare 'playwright-core' import.
 const PW_CORE =
@@ -30,6 +32,8 @@ const { chromium } = await import(PW_CORE)
 const URL = process.env.APP_URL || 'http://127.0.0.1:5173'
 const STATE_ROOT = process.env.POSTHASTE_STATE_ROOT || 'var/dev/posthaste/state'
 const daemon = JSON.parse(readFileSync(`${STATE_ROOT}/daemon.json`, 'utf8'))
+// daemon.token is the {mint, read} bootstrap — no write verbs; mint a session token.
+const token = await mintSessionToken(daemon)
 const ROWSEL = '.ph-scroll:has([data-message-list-empty]) > div > button'
 const SWITCH_TO_INBOX = process.env.ALL_INBOXES !== '1' // default: specific Inbox (All Inboxes has a known staleness gap)
 
@@ -47,7 +51,7 @@ await page.addInitScript(
     window.__POSTHASTE_PORT__ = p
     window.__POSTHASTE_RUNTIME_MODE__ = 'loopback'
   },
-  [daemon.token, daemon.port],
+  [token, daemon.port],
 )
 await page.goto(URL, { waitUntil: 'load', timeout: 30000 })
 await page.waitForSelector(ROWSEL, { timeout: 20000 })

@@ -7,6 +7,8 @@
 // the Inbox → toast Undo → assert it returns. Teardown restores the role.
 import { readFileSync } from 'node:fs'
 
+import { mintSessionToken } from './lib/session-token.mjs'
+
 const PW_CORE =
   process.env.POSTHASTE_PLAYWRIGHT_CLI?.replace(/\/cli\.js$/, '/index.mjs') ??
   'playwright-core'
@@ -19,8 +21,10 @@ const ACCOUNT = 'local-stalwart'
 const SNOOZE_MAILBOX_ID = 'c'
 const SNOOZE_MAILBOX_RESTORE_ROLE = 'junk'
 const daemon = JSON.parse(readFileSync(`${STATE_ROOT}/daemon.json`, 'utf8'))
+// daemon.token is the {mint, read} bootstrap — no write verbs; mint a session token.
+const token = await mintSessionToken(daemon)
 const API = `http://127.0.0.1:${daemon.port}/v1`
-const auth = { Authorization: `Bearer ${daemon.token}` }
+const auth = { Authorization: `Bearer ${token}` }
 const ROWSEL = '.ph-scroll:has([data-message-list-empty]) > div > button'
 
 async function setMailboxRole(role) {
@@ -70,7 +74,7 @@ try {
       window.__POSTHASTE_PORT__ = p
       window.__POSTHASTE_RUNTIME_MODE__ = 'loopback'
     },
-    [daemon.token, daemon.port],
+    [token, daemon.port],
   )
   await page.goto(URL, { waitUntil: 'load', timeout: 30000 })
   await page.waitForSelector(ROWSEL, { timeout: 20000 })

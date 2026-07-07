@@ -178,3 +178,40 @@ pub(crate) fn authorize_presented_caveats(
         }
     }
 }
+
+/// Like [`authorize_presented_caveats`], but satisfied by ANY of the given
+/// contexts (same token, one context per candidate action). Used by the
+/// per-operation mutation authorizer for requirements of the form "at least
+/// one message-write verb" (`revCursor`). The token/deny→status mapping is
+/// identical to the single-context helper: absent/forged token → 401,
+/// full-scope → pass, no context satisfied → 403 with the first deny reason
+/// logged (D72) — one log line, not one per candidate.
+pub(crate) fn authorize_presented_caveats_any(
+    presented: Option<&PresentedToken>,
+    macaroon_root_key: &token::RootKey,
+    ctxs: &[authz::CaveatContext],
+    route: &str,
+) -> Result<(), crate::api::ApiError> {
+    let Some(presented) = presented else {
+        return Err(unauthorized());
+    };
+    let caveats =
+        token::verify_authenticity(&presented.0, macaroon_root_key).map_err(|_| unauthorized())?;
+    if caveats.is_empty() {
+        return Ok(());
+    }
+    let mut first_reason: Option<String> = None;
+    for ctx in ctxs {
+        match authz::evaluate(&caveats, ctx) {
+            Decision::Allow => return Ok(()),
+            Decision::Deny(reason) => {
+                first_reason.get_or_insert(reason);
+            }
+        }
+    }
+    // `ctxs` is never empty (the requirement sets are non-empty by
+    // construction), but an empty slice still fails CLOSED here.
+    let reason = first_reason.unwrap_or_else(|| "no permitted action".to_string());
+    log_authz_denied(route, &reason);
+    Err(forbidden_scope())
+}

@@ -40,8 +40,10 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
+mod operation;
 mod route_table;
 
+pub(crate) use operation::{required_actions, OperationActions};
 #[cfg(test)]
 use route_table::{authz_entry_count, authz_map};
 pub use route_table::{lookup, mapped_routes};
@@ -96,14 +98,20 @@ impl Action {
     }
 }
 
-/// The request-side facts a caveat is evaluated against. `action` is always the
-/// route's required action; `account`/`mailbox`/`message` are populated from the
-/// matched route's path params (and, for `Filter` routes, the query filter).
-/// `None` on an axis means the request has no value on that axis — a caveat
-/// restricting that axis then cannot be satisfied and the request is denied.
+/// The request-side facts a caveat is evaluated against. `action` is the
+/// required action — the route's static action, or, for a
+/// [`RouteAction::HandlerDerived`] route evaluated at the PERIMETER, `None`:
+/// the action axis is deferred to the handler's per-operation re-check (an
+/// `action = ...` caveat then evaluates as satisfied *here* precisely because
+/// the handler re-evaluates with the derived action before dispatch — see
+/// `api::runtime_stream::mutations`). Handlers must always pass `Some`.
+/// `account`/`mailbox`/`message` are populated from the matched route's path
+/// params (and, for `Filter` routes, the query filter). `None` on an axis means
+/// the request has no value on that axis — a caveat restricting that axis then
+/// cannot be satisfied and the request is denied.
 #[derive(Debug, Clone)]
 pub struct CaveatContext {
-    pub action: Action,
+    pub action: Option<Action>,
     pub account: Option<String>,
     pub mailbox: Option<String>,
     pub message: Option<String>,
@@ -166,12 +174,29 @@ impl ResourceShape {
     }
 }
 
+/// The action a route requires: fixed by the route shape, or derived
+/// per-request from the BODY by the route's handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteAction {
+    /// The route represents exactly one action, known statically.
+    Static(Action),
+    /// The required action depends on the request body (the named-mutation
+    /// funnel, where one route carries ops from `setKeywords` to `destroy` and
+    /// `send`). The perimeter middleware DEFERS the action axis — resource and
+    /// expiry caveats are still enforced there — and the route's handler MUST
+    /// derive and enforce the per-operation action (deny-by-default) before
+    /// dispatch. See [`required_actions`] and `api::runtime_stream::mutations`.
+    /// The pairing is pinned by `handler_derived_action_is_only_the_mutation_route`
+    /// in the authz tests.
+    HandlerDerived,
+}
+
 /// The authorization descriptor for a single route: the action it represents,
 /// which request fields identify its resource, and how resource caveats are
 /// applied (gate vs. matching-filter).
 #[derive(Debug, Clone, Copy)]
 pub struct RouteAuthz {
-    pub action: Action,
+    pub action: RouteAction,
     pub resource: ResourceShape,
     pub mode: ScopeMode,
 }
@@ -230,15 +255,25 @@ fn evaluate_predicate(text: &str, ctx: &CaveatContext) -> Decision {
     let value = value.trim();
     match key {
         "action" => {
+            // A `None` action is a `RouteAction::HandlerDerived` route evaluated
+            // at the perimeter: the action axis is DEFERRED to the handler's
+            // per-operation re-check (which always evaluates with `Some`), so
+            // the caveat is not judged here. This never weakens enforcement:
+            // only the one handler-derived route builds a `None` context, and
+            // its handler re-evaluates every caveat with the derived action
+            // before dispatch.
+            let Some(required) = ctx.action else {
+                return Decision::Allow;
+            };
             let allowed = value
                 .split(',')
-                .any(|tok| Action::parse(tok.trim()).is_some_and(|action| action == ctx.action));
+                .any(|tok| Action::parse(tok.trim()).is_some_and(|action| action == required));
             if allowed {
                 Decision::Allow
             } else {
                 Decision::Deny(format!(
                     "action {} not permitted by caveat",
-                    ctx.action.as_str()
+                    required.as_str()
                 ))
             }
         }
