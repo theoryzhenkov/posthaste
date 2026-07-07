@@ -1,6 +1,6 @@
-import type { SmartMailbox, SmartMailboxRule } from '../src/api/types'
+import type { SmartMailbox, MailQueryRule } from '../src/api/types'
 
-export const actionRule: SmartMailboxRule = {
+export const actionRule: MailQueryRule = {
   root: {
     operator: 'all',
     negated: false,
@@ -16,7 +16,7 @@ export const actionRule: SmartMailboxRule = {
   },
 }
 
-export const smartMailboxRule: SmartMailboxRule = {
+export const smartMailboxRule: MailQueryRule = {
   root: {
     operator: 'all',
     negated: false,

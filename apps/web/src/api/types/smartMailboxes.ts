@@ -1,95 +1,6 @@
+import type { MailQueryRule } from './mailQuery'
+
 export type SmartMailboxKind = 'default' | 'user'
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxGroupOperator = 'all' | 'any'
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxField =
-  | 'sourceId'
-  | 'sourceName'
-  | 'messageId'
-  | 'threadId'
-  | 'conversationId'
-  | 'mailboxId'
-  | 'mailboxName'
-  | 'mailboxRole'
-  | 'isRead'
-  | 'isFlagged'
-  | 'hasAttachment'
-  | 'keyword'
-  | 'fromName'
-  | 'fromEmail'
-  | 'to'
-  | 'subject'
-  | 'preview'
-  | 'receivedAt'
-  | 'size'
-
-/** Neutral comparison operators (D6): the four ordered comparisons are
- *  `lt`/`gt`/`le`/`ge` (`< > <= >=`), labelled per field type in the editor
- *  ("before/after" for dates, "smaller/larger than" for size). The model no
- *  longer speaks "date". Stored rules using the old names still deserialize
- *  server-side via serde aliases.
- *  @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxOperator =
-  | 'equals'
-  | 'in'
-  | 'contains'
-  | 'beginsWith'
-  | 'endsWith'
-  | 'regex'
-  | 'lt'
-  | 'gt'
-  | 'le'
-  | 'ge'
-
-/** Time unit for a relative date offset.
- *  @spec docs/L1-search#smart-mailbox-data-model */
-export type DateUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
-
-/** A typed date condition value. `absolute` compares against a stored RFC3339
- *  instant; `relative` is a rolling "N units ago" offset resolved at query
- *  time (so it never freezes to a fixed date at edit time). Distinguished from
- *  the scalar `SmartMailboxValue` shapes by being an object with a `kind` tag.
- *  @spec docs/L1-search#smart-mailbox-data-model */
-export type DateValue =
-  | { kind: 'absolute'; value: string }
-  | { kind: 'relative'; amount: number; unit: DateUnit }
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxValue = string | string[] | boolean | DateValue
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export interface SmartMailboxGroup {
-  operator: SmartMailboxGroupOperator
-  negated: boolean
-  nodes: SmartMailboxRuleNode[]
-}
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export interface SmartMailboxCondition {
-  type: 'condition'
-  field: SmartMailboxField
-  operator: SmartMailboxOperator
-  negated: boolean
-  value: SmartMailboxValue
-}
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export interface SmartMailboxRuleGroup {
-  type: 'group'
-  operator: SmartMailboxGroupOperator
-  negated: boolean
-  nodes: SmartMailboxRuleNode[]
-}
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxRuleNode = SmartMailboxRuleGroup | SmartMailboxCondition
-
-/** @spec docs/L1-search#smart-mailbox-data-model */
-export interface SmartMailboxRule {
-  root: SmartMailboxGroup
-}
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailbox {
@@ -102,7 +13,7 @@ export interface SmartMailbox {
    *  and unassigned user smart mailboxes. */
   role: string | null
   parentId: string | null
-  rule: SmartMailboxRule
+  rule: MailQueryRule
   createdAt: string
   updatedAt: string
 }
@@ -126,7 +37,7 @@ export interface CreateSmartMailboxInput {
   /** Optional view role (e.g. 'archive') giving the smart mailbox a built-in
    *  role's icon/accent and contextual actions. */
   role?: string | null
-  rule: SmartMailboxRule
+  rule: MailQueryRule
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
@@ -134,5 +45,5 @@ export interface UpdateSmartMailboxInput {
   name?: string
   /** Set a role, or pass an empty string to clear it. Omit to leave unchanged. */
   role?: string | null
-  rule?: SmartMailboxRule
+  rule?: MailQueryRule
 }

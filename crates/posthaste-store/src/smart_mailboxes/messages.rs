@@ -5,10 +5,10 @@ use super::*;
 /// @spec docs/L1-search#smart-mailbox-data-model
 pub(crate) fn count_smart_mailbox_messages(
     connection: &Connection,
-    rule: &SmartMailboxRule,
+    rule: &MailQueryRule,
 ) -> Result<(i64, i64), StoreError> {
     let mut params = Vec::new();
-    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    let where_clause = compile_mail_query_rule(rule, &mut params)?;
     let sql = format!(
         "SELECT COUNT(*), SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END)
          FROM message m
@@ -30,10 +30,10 @@ pub(crate) fn count_smart_mailbox_messages(
 /// @spec docs/L1-search#smart-mailbox-data-model
 pub(crate) fn query_messages_by_rule(
     connection: &Connection,
-    rule: &SmartMailboxRule,
+    rule: &MailQueryRule,
 ) -> Result<Vec<MessageSummary>, StoreError> {
     let mut params = Vec::new();
-    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    let where_clause = compile_mail_query_rule(rule, &mut params)?;
     let sql = format!(
         "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                 m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
@@ -168,12 +168,12 @@ pub(crate) fn query_message_page(
 /// Queries all messages matching a smart mailbox rule with explicit ordering.
 pub(crate) fn query_messages_by_rule_sorted(
     connection: &Connection,
-    rule: &SmartMailboxRule,
+    rule: &MailQueryRule,
     sort_field: MessageSortField,
     sort_direction: SortDirection,
 ) -> Result<Vec<MessageSummary>, StoreError> {
     let mut params = Vec::new();
-    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    let where_clause = compile_mail_query_rule(rule, &mut params)?;
     let sort_key = message_sort_key_expr(sort_field);
     let dir = match sort_direction {
         SortDirection::Desc => "DESC",
@@ -200,14 +200,14 @@ pub(crate) fn query_messages_by_rule_sorted(
 /// @spec docs/L1-api#cursor-pagination
 pub(crate) fn query_message_page_by_rule(
     connection: &Connection,
-    rule: &SmartMailboxRule,
+    rule: &MailQueryRule,
     limit: usize,
     cursor: Option<&MessageCursor>,
     sort_field: MessageSortField,
     sort_direction: SortDirection,
 ) -> Result<MessagePage, StoreError> {
     let mut params = Vec::new();
-    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    let where_clause = compile_mail_query_rule(rule, &mut params)?;
     query_message_page(
         connection,
         &format!("WHERE ({where_clause})"),

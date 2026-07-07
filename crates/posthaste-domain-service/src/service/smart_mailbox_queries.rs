@@ -88,7 +88,7 @@ impl MailService {
     /// @spec docs/L1-search#execution-pipeline
     pub fn query_messages_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
     ) -> Result<Vec<MessageSummary>, ServiceError> {
         // Indexed SQL over canonical. Optimism is written through to canonical
         // (S2), so the store's rule query serves the optimistic state directly
@@ -101,10 +101,7 @@ impl MailService {
     /// Count messages matching an explicit smart mailbox rule.
     ///
     /// @spec docs/L1-search#execution-pipeline
-    pub fn count_messages_by_rule(
-        &self,
-        rule: &SmartMailboxRule,
-    ) -> Result<(i64, i64), ServiceError> {
+    pub fn count_messages_by_rule(&self, rule: &MailQueryRule) -> Result<(i64, i64), ServiceError> {
         // Indexed SQL counts over canonical (optimism is written through, S2).
         self.smart_mailboxes
             .query_smart_mailbox_counts(rule)
@@ -116,7 +113,7 @@ impl MailService {
     /// @spec docs/L1-search#execution-pipeline
     pub fn query_messages_by_rule_sorted(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         sort_field: MessageSortField,
         sort_direction: SortDirection,
     ) -> Result<Vec<MessageSummary>, ServiceError> {
@@ -130,7 +127,7 @@ impl MailService {
     /// @spec docs/L1-search#execution-pipeline
     pub fn query_message_page_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         limit: usize,
         cursor: Option<&MessageCursor>,
         sort_field: MessageSortField,
@@ -167,7 +164,7 @@ impl MailService {
     /// Query conversations matching an arbitrary rule (used by search).
     pub fn query_conversations_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         limit: usize,
         cursor: Option<&ConversationCursor>,
         sort_field: ConversationSortField,

@@ -90,7 +90,7 @@ fn invalid_search_query_is_rejected() {
 fn source_scope_rule_combines_source_and_mailbox() {
     let rule = source_message_scope_rule("primary", Some(&MailboxId::from("inbox")));
 
-    assert_eq!(rule.root.operator, SmartMailboxGroupOperator::All);
+    assert_eq!(rule.root.operator, MailQueryGroupOperator::All);
     assert_eq!(rule.root.nodes.len(), 2);
 }
 

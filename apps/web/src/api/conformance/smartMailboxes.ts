@@ -1,39 +1,39 @@
 import type {
   CreateSmartMailboxInput,
   SmartMailbox,
-  SmartMailboxCondition,
-  SmartMailboxGroup,
-  SmartMailboxRule,
-  SmartMailboxRuleGroup,
-  SmartMailboxRuleNode,
+  MailQueryCondition,
+  MailQueryGroup,
+  MailQueryRule,
+  MailQueryRuleGroup,
+  MailQueryRuleNode,
   SmartMailboxSummary,
   UpdateSmartMailboxInput,
 } from '../types'
 import type { AssertTrue, Conforms, Wire } from './core'
 
 // The wire emits the rule-tree discriminant (`type`) only on the union
-// `SmartMailboxRuleNode` (= group-member | condition-member), whereas the
+// `MailQueryRuleNode` (= group-member | condition-member), whereas the
 // curated layer folds the discriminant into each node variant.
 export type _SmartMailboxGroup = AssertTrue<
-  Conforms<SmartMailboxGroup, Wire['SmartMailboxGroup']>
+  Conforms<MailQueryGroup, Wire['MailQueryGroup']>
 >
 export type _SmartMailboxCondition = AssertTrue<
   Conforms<
-    SmartMailboxCondition,
-    Extract<Wire['SmartMailboxRuleNode'], { type: 'condition' }>
+    MailQueryCondition,
+    Extract<Wire['MailQueryRuleNode'], { type: 'condition' }>
   >
 >
 export type _SmartMailboxRuleGroup = AssertTrue<
   Conforms<
-    SmartMailboxRuleGroup,
-    Extract<Wire['SmartMailboxRuleNode'], { type: 'group' }>
+    MailQueryRuleGroup,
+    Extract<Wire['MailQueryRuleNode'], { type: 'group' }>
   >
 >
 export type _SmartMailboxRuleNode = AssertTrue<
-  Conforms<SmartMailboxRuleNode, Wire['SmartMailboxRuleNode']>
+  Conforms<MailQueryRuleNode, Wire['MailQueryRuleNode']>
 >
 export type _SmartMailboxRule = AssertTrue<
-  Conforms<SmartMailboxRule, Wire['SmartMailboxRule']>
+  Conforms<MailQueryRule, Wire['MailQueryRule']>
 >
 export type _SmartMailbox = AssertTrue<
   Conforms<SmartMailbox, Wire['SmartMailbox']>

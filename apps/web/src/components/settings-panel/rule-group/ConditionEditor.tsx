@@ -1,7 +1,4 @@
-import type {
-  SmartMailboxCondition,
-  SmartMailboxOperator,
-} from '../../../api/types'
+import type { MailQueryCondition, MailQueryOperator } from '../../../api/types'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
 import {
@@ -36,8 +33,8 @@ export function ConditionEditor({
   onChange,
   onRemove,
 }: {
-  condition: SmartMailboxCondition
-  onChange: (condition: SmartMailboxCondition) => void
+  condition: MailQueryCondition
+  onChange: (condition: MailQueryCondition) => void
   onRemove: () => void
 }) {
   const operators = operatorOptionsForField(condition.field)
@@ -98,8 +95,8 @@ function FieldSelect({
   condition,
   onChange,
 }: {
-  condition: SmartMailboxCondition
-  onChange: (condition: SmartMailboxCondition) => void
+  condition: MailQueryCondition
+  onChange: (condition: MailQueryCondition) => void
 }) {
   return (
     <div className="grid gap-1 text-[13px]">
@@ -135,10 +132,10 @@ function OperatorSelect({
   operators,
   onChange,
 }: {
-  condition: SmartMailboxCondition
+  condition: MailQueryCondition
   isBooleanField: boolean
-  operators: readonly SmartMailboxOperator[]
-  onChange: (condition: SmartMailboxCondition) => void
+  operators: readonly MailQueryOperator[]
+  onChange: (condition: MailQueryCondition) => void
 }) {
   return (
     <div className="grid gap-1 text-[13px]">

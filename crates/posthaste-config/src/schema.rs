@@ -1,12 +1,12 @@
 use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
     AppSettings, Appearance, AutomationAction, AutomationRule, AutomationTrigger, CachePolicy,
-    DateUnit, DateValue, GlassTheme, ImapTransportSettings, MailboxColor, MailboxGroup, MailboxId,
-    Notifications, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SmartMailbox,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue, SmtpTransportSettings, TagAppearance, ThemeColors, ThemeMode,
-    TransportSecurity, UiDensity, RFC3339_EPOCH,
+    DateUnit, DateValue, GlassTheme, ImapTransportSettings, MailQueryCondition, MailQueryField,
+    MailQueryGroup, MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode,
+    MailQueryValue, MailboxColor, MailboxGroup, MailboxId, Notifications, ProviderAuthKind,
+    ProviderHint, SecretKind, SecretRef, SmartMailbox, SmartMailboxId, SmartMailboxKind,
+    SmtpTransportSettings, TagAppearance, ThemeColors, ThemeMode, TransportSecurity, UiDensity,
+    RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 

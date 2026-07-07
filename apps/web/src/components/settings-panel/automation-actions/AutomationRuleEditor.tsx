@@ -3,7 +3,7 @@ import type React from 'react'
 import type {
   AccountOverview,
   Mailbox,
-  SmartMailboxRule,
+  MailQueryRule,
 } from '../../../api/types'
 import type { AutomationRuleDraft } from '../../../automationRules'
 import { runtimeMutations } from '../../../runtime/mutations'
@@ -42,7 +42,7 @@ export function AutomationRuleEditor({
   accounts: AccountOverview[]
   staticMailboxes: Mailbox[] | null
   canEditAccount: boolean
-  previewCondition: SmartMailboxRule
+  previewCondition: MailQueryRule
   savePending: boolean
   onBack: () => void
   onSave: () => void
@@ -58,10 +58,7 @@ export function AutomationRuleEditor({
 }) {
   const previewKey = JSON.stringify(previewCondition)
   const previewMutation = useMutation({
-    mutationFn: async (input: {
-      key: string
-      condition: SmartMailboxRule
-    }) => ({
+    mutationFn: async (input: { key: string; condition: MailQueryRule }) => ({
       key: input.key,
       preview: await runtimeMutations.settings.previewAutomationRule({
         condition: input.condition,

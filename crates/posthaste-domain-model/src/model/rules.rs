@@ -8,7 +8,7 @@
 //! match — executes exactly one [`RuleAction`], up to a webhook or a local
 //! script driven by a **per-invocation, attenuated** capability token (D53).
 //!
-//! One grammar (ruling 4): [`Rule::when`] is a [`SmartMailboxRule`], the shared
+//! One grammar (ruling 4): [`Rule::when`] is a [`MailQueryRule`], the shared
 //! query grammar's output, reused verbatim — the same tree that powers smart
 //! mailboxes, not a parallel rule language.
 
@@ -36,10 +36,10 @@ pub const DEFAULT_RULE_TRIGGER_TOPICS: &[&str] = &[EVENT_TOPIC_MESSAGE_UPDATED];
 pub struct Rule {
     pub id: String,
     pub name: String,
-    /// The WHEN-clause: the shared query grammar's [`SmartMailboxRule`] output,
+    /// The WHEN-clause: the shared query grammar's [`MailQueryRule`] output,
     /// reused (not wrapped). Evaluated against the message a triggering fact
     /// names — a match means the action runs.
-    pub when: SmartMailboxRule,
+    pub when: MailQueryRule,
     /// The event topics whose facts trigger evaluation. Empty ⇒
     /// [`DEFAULT_RULE_TRIGGER_TOPICS`] (the message-update family).
     #[serde(default)]
@@ -317,7 +317,7 @@ pub const ASSIGNABLE_RULE_MOVE_ROLES: &[MailboxRole] = &[
 ///   condition — a condition-free destroy matches every message on the
 ///   trigger topic, and permanent mail destruction must never be one empty
 ///   clause away.
-pub fn validate_rule_action(action: &RuleAction, when: &SmartMailboxRule) -> Result<(), String> {
+pub fn validate_rule_action(action: &RuleAction, when: &MailQueryRule) -> Result<(), String> {
     match action {
         RuleAction::Webhook { grants, .. } | RuleAction::Exec { grants, .. } => {
             if grants.is_empty() {
@@ -347,10 +347,10 @@ pub fn validate_rule_action(action: &RuleAction, when: &SmartMailboxRule) -> Res
 }
 
 /// Does this group (recursively) contain at least one leaf condition?
-fn group_has_condition(group: &SmartMailboxGroup) -> bool {
+fn group_has_condition(group: &MailQueryGroup) -> bool {
     group.nodes.iter().any(|node| match node {
-        SmartMailboxRuleNode::Condition(_) => true,
-        SmartMailboxRuleNode::Group(inner) => group_has_condition(inner),
+        MailQueryRuleNode::Condition(_) => true,
+        MailQueryRuleNode::Group(inner) => group_has_condition(inner),
     })
 }
 
@@ -434,9 +434,9 @@ mod tests {
         let rule = Rule {
             id: "r".into(),
             name: "r".into(),
-            when: SmartMailboxRule {
-                root: SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::All,
+            when: MailQueryRule {
+                root: MailQueryGroup {
+                    operator: MailQueryGroupOperator::All,
                     negated: false,
                     nodes: Vec::new(),
                 },
@@ -541,25 +541,25 @@ mod tests {
         }
     }
 
-    fn when_with_condition() -> SmartMailboxRule {
-        SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+    fn when_with_condition() -> MailQueryRule {
+        MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
-                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                    field: SmartMailboxField::Keyword,
-                    operator: SmartMailboxOperator::Equals,
+                nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                    field: MailQueryField::Keyword,
+                    operator: MailQueryOperator::Equals,
                     negated: false,
-                    value: SmartMailboxValue::String("x".into()),
+                    value: MailQueryValue::String("x".into()),
                 })],
             },
         }
     }
 
-    fn empty_when() -> SmartMailboxRule {
-        SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+    fn empty_when() -> MailQueryRule {
+        MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
                 nodes: Vec::new(),
             },
@@ -576,21 +576,21 @@ mod tests {
         assert!(validate_rule_action(&RuleAction::Destroy, &when_with_condition()).is_ok());
 
         // A nested condition (inside a sub-group) also satisfies the guard.
-        let nested = SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::Any,
+        let nested = MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::Any,
                 negated: false,
-                nodes: vec![SmartMailboxRuleNode::Group(when_with_condition().root)],
+                nodes: vec![MailQueryRuleNode::Group(when_with_condition().root)],
             },
         };
         assert!(validate_rule_action(&RuleAction::Destroy, &nested).is_ok());
 
         // An empty sub-group does NOT satisfy it — no leaf condition anywhere.
-        let empty_nested = SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::Any,
+        let empty_nested = MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::Any,
                 negated: false,
-                nodes: vec![SmartMailboxRuleNode::Group(empty_when().root)],
+                nodes: vec![MailQueryRuleNode::Group(empty_when().root)],
             },
         };
         assert!(validate_rule_action(&RuleAction::Destroy, &empty_nested).is_err());

@@ -3,18 +3,18 @@
  * from the widgets (JSX) file so both stay lint-clean and so the wire-shape
  * parity of each transform can be unit-tested without a DOM.
  *
- * WIRE-SHAPE PARITY (load-bearing): these produce the exact `SmartMailboxValue`
+ * WIRE-SHAPE PARITY (load-bearing): these produce the exact `MailQueryValue`
  * shapes the old text box did — a `string` for single-value ops, a `string[]`
  * for `in`, a `boolean` for booleans — so the compiler/evaluator and stored
  * JSON are unchanged.
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-import type { DateUnit, DateValue, SmartMailboxValue } from '../../../api/types'
+import type { DateUnit, DateValue, MailQueryValue } from '../../../api/types'
 
 /** True when a value is the typed absolute-date object `{ kind:'absolute' }`. */
 function isAbsoluteDate(
-  value: SmartMailboxValue,
+  value: MailQueryValue,
 ): value is { kind: 'absolute'; value: string } {
   return (
     typeof value === 'object' &&
@@ -26,7 +26,7 @@ function isAbsoluteDate(
 
 /** True when a value is the typed relative-date object `{ kind:'relative' }`. */
 function isRelativeDate(
-  value: SmartMailboxValue,
+  value: MailQueryValue,
 ): value is { kind: 'relative'; amount: number; unit: DateUnit } {
   return (
     typeof value === 'object' &&
@@ -41,15 +41,13 @@ function isRelativeDate(
  * rolling offset; everything else (a typed `absolute`, or a legacy bare RFC3339
  * string) edits as an absolute date.
  */
-export function dateValueMode(
-  value: SmartMailboxValue,
-): 'absolute' | 'relative' {
+export function dateValueMode(value: MailQueryValue): 'absolute' | 'relative' {
   return isRelativeDate(value) ? 'relative' : 'absolute'
 }
 
 /** Extract the `YYYY-MM-DD` a native date input wants from a stored value.
  *  Reads both a legacy bare RFC3339 string and the typed `{kind:'absolute'}`. */
-export function dateInputValue(value: SmartMailboxValue): string {
+export function dateInputValue(value: MailQueryValue): string {
   const raw =
     typeof value === 'string' ? value : isAbsoluteDate(value) ? value.value : ''
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})/)
@@ -95,7 +93,7 @@ export function relativeDateValue(
 
 /** Best-effort read of a stored relative value into editable amount/unit parts
  *  (defaults to `7 days` for a fresh/non-relative value). */
-export function relativeParts(value: SmartMailboxValue): {
+export function relativeParts(value: MailQueryValue): {
   amount: string
   unit: RelativeUnit
 } {
@@ -159,7 +157,7 @@ export function bytesFromSize(amount: number, unit: SizeUnit): string {
  * represents the stored byte count without a fractional remainder, so an edited
  * condition round-trips to a friendly `amount`/`unit` pair. Falls back to bytes.
  */
-export function sizeInputParts(value: SmartMailboxValue): {
+export function sizeInputParts(value: MailQueryValue): {
   amount: string
   unit: SizeUnit
 } {
@@ -191,7 +189,7 @@ export function splitListValue(text: string): string[] {
 
 /** Read a stored condition value as the `string[]` the `in` operator holds.
  *  Tolerates a legacy scalar (one non-empty string becomes a one-entry list). */
-export function listValueEntries(value: SmartMailboxValue): string[] {
+export function listValueEntries(value: MailQueryValue): string[] {
   if (Array.isArray(value)) {
     return value
   }

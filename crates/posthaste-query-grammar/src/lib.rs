@@ -1,5 +1,5 @@
 //! The one query grammar: a text parser that compiles human-readable search
-//! strings into [`SmartMailboxRule`] trees.
+//! strings into [`MailQueryRule`] trees.
 //!
 //! Syntax: `prefix:value` tokens separated by whitespace. Quoted values
 //! (`"hello world"`), negation (`-prefix:value`), and aliases such as `f:` for
@@ -12,15 +12,15 @@
 //! so both smart mailboxes (domain-service) and the rules engine's WHEN-clause
 //! grammar (a later unit) consume the same parser without the rules engine
 //! dragging in domain-service. Depends on `posthaste-domain-model` only (the
-//! `SmartMailboxRule`/node output types live there) and is wasm-pure: no
+//! `MailQueryRule`/node output types live there) and is wasm-pure: no
 //! tokio, no http, nothing that would break a wasm32 target build.
 
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
 use posthaste_domain_model::{
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
+    MailQueryCondition, MailQueryField, MailQueryGroup, MailQueryGroupOperator, MailQueryOperator,
+    MailQueryRule, MailQueryRuleNode, MailQueryValue,
 };
 
 mod date;
@@ -40,7 +40,7 @@ pub struct ScopeToken {
     pub value: String,
 }
 
-/// Parses a human-readable query string into a [`SmartMailboxRule`].
+/// Parses a human-readable query string into a [`MailQueryRule`].
 ///
 /// Returns `Err` with a description when the query contains a malformed token
 /// (e.g. unknown `is:` value, unparseable date, bad `newer:`/`older:` unit).
@@ -48,7 +48,7 @@ pub struct ScopeToken {
 /// `in:` (and every other recognised prefix) is parsed into a rule node here.
 /// Callers that need to peel `in:` scope selectors out for service-side
 /// resolution should use [`parse_query_with_scopes`].
-pub fn parse_query(query: &str) -> Result<SmartMailboxRule, String> {
+pub fn parse_query(query: &str) -> Result<MailQueryRule, String> {
     let (rule, _scopes) = parse_query_with_scopes(query, &[])?;
     Ok(rule.unwrap_or_else(empty_rule))
 }
@@ -68,9 +68,9 @@ pub fn parse_query(query: &str) -> Result<SmartMailboxRule, String> {
 pub fn parse_query_with_scopes(
     query: &str,
     scope_prefixes: &[&str],
-) -> Result<(Option<SmartMailboxRule>, Vec<ScopeToken>), String> {
+) -> Result<(Option<MailQueryRule>, Vec<ScopeToken>), String> {
     let tokens = tokenize(query);
-    let mut nodes: Vec<SmartMailboxRuleNode> = Vec::new();
+    let mut nodes: Vec<MailQueryRuleNode> = Vec::new();
     let mut scopes: Vec<ScopeToken> = Vec::new();
 
     for token in tokens {
@@ -87,9 +87,9 @@ pub fn parse_query_with_scopes(
     let rule = if nodes.is_empty() {
         None
     } else {
-        Some(SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+        Some(MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
                 nodes,
             },
@@ -105,10 +105,10 @@ fn is_scope_prefix(prefix: Option<&str>, scope_prefixes: &[&str]) -> bool {
         .any(|scope| scope.eq_ignore_ascii_case(prefix))
 }
 
-fn empty_rule() -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+fn empty_rule() -> MailQueryRule {
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes: Vec::new(),
         },

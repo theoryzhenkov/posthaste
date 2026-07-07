@@ -5,9 +5,9 @@ import type { ReactNode } from 'react'
 
 import type {
   Mailbox,
-  SmartMailboxCondition,
-  SmartMailboxField,
-  SmartMailboxOperator,
+  MailQueryCondition,
+  MailQueryField,
+  MailQueryOperator,
 } from '../src/api/types'
 import { ConditionEditor } from '../src/components/settings-panel/rule-group/ConditionEditor'
 import {
@@ -33,15 +33,15 @@ const EMPTY_DATA: ConditionEditorData = {
 }
 
 function mkCondition(
-  field: SmartMailboxField,
-  operator: SmartMailboxOperator,
-  value: SmartMailboxCondition['value'],
-): SmartMailboxCondition {
+  field: MailQueryField,
+  operator: MailQueryOperator,
+  value: MailQueryCondition['value'],
+): MailQueryCondition {
   return { type: 'condition', field, operator, negated: false, value }
 }
 
 function renderCondition(
-  condition: SmartMailboxCondition,
+  condition: MailQueryCondition,
   data: ConditionEditorData = EMPTY_DATA,
 ) {
   const wrap = (node: ReactNode): ReactNode => (

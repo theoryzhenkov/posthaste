@@ -5,11 +5,11 @@ import type {
   ProviderAuthKind,
   ProviderHint,
   ProviderKind,
-  SmartMailboxField,
-  SmartMailboxGroupOperator,
+  MailQueryField,
+  MailQueryGroupOperator,
   SmartMailboxKind,
-  SmartMailboxOperator,
-  SmartMailboxValue,
+  MailQueryOperator,
+  MailQueryValue,
   SyncMode,
   TransportSecurity,
 } from '../types'
@@ -41,14 +41,14 @@ export type _SmartMailboxKind = AssertTrue<
   Conforms<SmartMailboxKind, Wire['SmartMailboxKind']>
 >
 export type _SmartMailboxGroupOperator = AssertTrue<
-  Conforms<SmartMailboxGroupOperator, Wire['SmartMailboxGroupOperator']>
+  Conforms<MailQueryGroupOperator, Wire['MailQueryGroupOperator']>
 >
 export type _SmartMailboxField = AssertTrue<
-  Conforms<SmartMailboxField, Wire['SmartMailboxField']>
+  Conforms<MailQueryField, Wire['MailQueryField']>
 >
 export type _SmartMailboxOperator = AssertTrue<
-  Conforms<SmartMailboxOperator, Wire['SmartMailboxOperator']>
+  Conforms<MailQueryOperator, Wire['MailQueryOperator']>
 >
 export type _SmartMailboxValue = AssertTrue<
-  Conforms<SmartMailboxValue, Wire['SmartMailboxValue']>
+  Conforms<MailQueryValue, Wire['MailQueryValue']>
 >

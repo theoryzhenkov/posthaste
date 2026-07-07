@@ -5,14 +5,14 @@
 
 use super::*;
 use posthaste_domain_model::{
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
+    MailQueryCondition, MailQueryField, MailQueryGroup, MailQueryGroupOperator, MailQueryOperator,
+    MailQueryRule, MailQueryRuleNode, MailQueryValue,
 };
 
-fn rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+fn rule(nodes: Vec<MailQueryRuleNode>) -> MailQueryRule {
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },
@@ -20,11 +20,11 @@ fn rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
 }
 
 fn condition_node(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: false,
@@ -37,9 +37,9 @@ fn operator_not_in_field_set_is_rejected_with_query_invalid() {
     // `contains` is not a valid operator for a boolean field — rejected at the
     // boundary, not deep in the store compiler.
     let error = ApiError::validate_query(&rule(vec![condition_node(
-        SmartMailboxField::IsRead,
-        SmartMailboxOperator::Contains,
-        SmartMailboxValue::Bool(true),
+        MailQueryField::IsRead,
+        MailQueryOperator::Contains,
+        MailQueryValue::Bool(true),
     )]))
     .expect_err("operator not in the field set should be rejected");
 
@@ -54,9 +54,9 @@ fn operator_not_in_field_set_is_rejected_with_query_invalid() {
 fn value_type_mismatch_is_rejected() {
     // A boolean field with a string value: valid operator, wrong value shape.
     let error = ApiError::validate_query(&rule(vec![condition_node(
-        SmartMailboxField::IsRead,
-        SmartMailboxOperator::Equals,
-        SmartMailboxValue::String("yes".to_string()),
+        MailQueryField::IsRead,
+        MailQueryOperator::Equals,
+        MailQueryValue::String("yes".to_string()),
     )]))
     .expect_err("value-type mismatch should be rejected");
 
@@ -71,9 +71,9 @@ fn malformed_regex_is_rejected_with_query_invalid() {
     // boundary as `invalid_regex` — it never reaches the store (where it would
     // otherwise error per scanned row), and it is NOT a panic.
     let error = ApiError::validate_query(&rule(vec![condition_node(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::Regex,
-        SmartMailboxValue::String("foo(".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::Regex,
+        MailQueryValue::String("foo(".to_string()),
     )]))
     .expect_err("a malformed regex pattern should be rejected");
 
@@ -89,15 +89,15 @@ fn well_formed_regex_and_prefix_operators_pass_the_boundary() {
     // A valid anchored regex and the prefix/suffix operators on a free-text
     // field all pass the boundary.
     assert!(ApiError::validate_query(&rule(vec![condition_node(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::Regex,
-        SmartMailboxValue::String("^foo.*bar$".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::Regex,
+        MailQueryValue::String("^foo.*bar$".to_string()),
     )]))
     .is_ok());
     assert!(ApiError::validate_query(&rule(vec![condition_node(
-        SmartMailboxField::FromEmail,
-        SmartMailboxOperator::BeginsWith,
-        SmartMailboxValue::String("alice".to_string()),
+        MailQueryField::FromEmail,
+        MailQueryOperator::BeginsWith,
+        MailQueryValue::String("alice".to_string()),
     )]))
     .is_ok());
 }
@@ -105,30 +105,30 @@ fn well_formed_regex_and_prefix_operators_pass_the_boundary() {
 #[test]
 fn valid_query_passes_the_boundary() {
     let ok = rule(vec![condition_node(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::Contains,
-        SmartMailboxValue::String("invoice".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::Contains,
+        MailQueryValue::String("invoice".to_string()),
     )]);
     assert!(ApiError::validate_query(&ok).is_ok());
 }
 
 #[test]
 fn invalid_condition_nested_in_a_group_is_rejected() {
-    let nested = SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
+    let nested = MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::Any,
         negated: false,
         nodes: vec![condition_node(
-            SmartMailboxField::Size,
+            MailQueryField::Size,
             // `contains` is not valid for a numeric field.
-            SmartMailboxOperator::Contains,
-            SmartMailboxValue::String("100".to_string()),
+            MailQueryOperator::Contains,
+            MailQueryValue::String("100".to_string()),
         )],
     });
     let error = ApiError::validate_query(&rule(vec![
         condition_node(
-            SmartMailboxField::Subject,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String("ok".to_string()),
+            MailQueryField::Subject,
+            MailQueryOperator::Equals,
+            MailQueryValue::String("ok".to_string()),
         ),
         nested,
     ]))

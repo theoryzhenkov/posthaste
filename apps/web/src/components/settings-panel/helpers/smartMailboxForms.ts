@@ -1,11 +1,11 @@
 import type {
   SmartMailbox,
-  SmartMailboxCondition,
-  SmartMailboxField,
-  SmartMailboxGroupOperator,
-  SmartMailboxOperator,
-  SmartMailboxRule,
-  SmartMailboxRuleNode,
+  MailQueryCondition,
+  MailQueryField,
+  MailQueryGroupOperator,
+  MailQueryOperator,
+  MailQueryRule,
+  MailQueryRuleNode,
   SmartMailboxSummary,
 } from '../../../api/types'
 import type { SmartMailboxFormState } from '../types'
@@ -26,7 +26,7 @@ export const EMPTY_SMART_MAILBOX_FORM: SmartMailboxFormState = {
   rule: defaultEmptyRule(),
 }
 
-export function defaultEmptyRule(): SmartMailboxRule {
+export function defaultEmptyRule(): MailQueryRule {
   return {
     root: {
       operator: 'all',
@@ -54,31 +54,30 @@ export function formFromSmartMailbox(
  * Available smart mailbox filter fields for the rule builder UI.
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-export const FIELD_OPTIONS: Array<{ value: SmartMailboxField; label: string }> =
-  [
-    { value: 'sourceId', label: 'Source ID' },
-    { value: 'sourceName', label: 'Source Name' },
-    { value: 'messageId', label: 'Message ID' },
-    { value: 'threadId', label: 'Thread ID' },
-    { value: 'mailboxId', label: 'Mailbox ID' },
-    { value: 'mailboxName', label: 'Mailbox Name' },
-    { value: 'mailboxRole', label: 'Mailbox Role' },
-    { value: 'isRead', label: 'Read state' },
-    { value: 'isFlagged', label: 'Flagged' },
-    { value: 'hasAttachment', label: 'Has attachment' },
-    { value: 'keyword', label: 'Keyword' },
-    { value: 'fromName', label: 'From name' },
-    { value: 'fromEmail', label: 'From email' },
-    { value: 'to', label: 'To (recipient)' },
-    { value: 'subject', label: 'Subject' },
-    { value: 'preview', label: 'Preview' },
-    { value: 'receivedAt', label: 'Received at' },
-    { value: 'size', label: 'Size' },
-  ]
+export const FIELD_OPTIONS: Array<{ value: MailQueryField; label: string }> = [
+  { value: 'sourceId', label: 'Source ID' },
+  { value: 'sourceName', label: 'Source Name' },
+  { value: 'messageId', label: 'Message ID' },
+  { value: 'threadId', label: 'Thread ID' },
+  { value: 'mailboxId', label: 'Mailbox ID' },
+  { value: 'mailboxName', label: 'Mailbox Name' },
+  { value: 'mailboxRole', label: 'Mailbox Role' },
+  { value: 'isRead', label: 'Read state' },
+  { value: 'isFlagged', label: 'Flagged' },
+  { value: 'hasAttachment', label: 'Has attachment' },
+  { value: 'keyword', label: 'Keyword' },
+  { value: 'fromName', label: 'From name' },
+  { value: 'fromEmail', label: 'From email' },
+  { value: 'to', label: 'To (recipient)' },
+  { value: 'subject', label: 'Subject' },
+  { value: 'preview', label: 'Preview' },
+  { value: 'receivedAt', label: 'Received at' },
+  { value: 'size', label: 'Size' },
+]
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export const GROUP_OPERATOR_OPTIONS: Array<{
-  value: SmartMailboxGroupOperator
+  value: MailQueryGroupOperator
   label: string
 }> = [
   { value: 'all', label: 'All' },
@@ -87,8 +86,8 @@ export const GROUP_OPERATOR_OPTIONS: Array<{
 
 export function parseGroupOperator(
   value: string,
-  fallback: SmartMailboxGroupOperator,
-): SmartMailboxGroupOperator {
+  fallback: MailQueryGroupOperator,
+): MailQueryGroupOperator {
   return (
     GROUP_OPERATOR_OPTIONS.find((option) => option.value === value)?.value ??
     fallback
@@ -97,8 +96,8 @@ export function parseGroupOperator(
 
 export function parseField(
   value: string,
-  fallback: SmartMailboxField,
-): SmartMailboxField {
+  fallback: MailQueryField,
+): MailQueryField {
   return (
     FIELD_OPTIONS.find((option) => option.value === value)?.value ?? fallback
   )
@@ -106,9 +105,9 @@ export function parseField(
 
 export function parseOperator(
   value: string,
-  field: SmartMailboxField,
-  fallback: SmartMailboxOperator,
-): SmartMailboxOperator {
+  field: MailQueryField,
+  fallback: MailQueryOperator,
+): MailQueryOperator {
   return (
     operatorOptionsForField(field).find((operator) => operator === value) ??
     fallback
@@ -116,8 +115,8 @@ export function parseOperator(
 }
 
 export function defaultCondition(
-  field: SmartMailboxField = 'mailboxRole',
-): SmartMailboxCondition {
+  field: MailQueryField = 'mailboxRole',
+): MailQueryCondition {
   const operator = operatorOptionsForField(field)[0]
   const isBooleanField = valueTypeForField(field) === 'boolean'
   return {
@@ -130,7 +129,7 @@ export function defaultCondition(
 }
 
 /** Create an empty rule group node. */
-export function defaultGroup(): SmartMailboxRuleNode {
+export function defaultGroup(): MailQueryRuleNode {
   return {
     type: 'group',
     operator: 'all',

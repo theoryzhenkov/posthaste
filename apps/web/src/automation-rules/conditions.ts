@@ -1,14 +1,14 @@
 import type {
   AutomationRule,
-  SmartMailboxGroup,
-  SmartMailboxRule,
+  MailQueryGroup,
+  MailQueryRule,
 } from '../api/types'
 
-export function cloneRule(rule: SmartMailboxRule): SmartMailboxRule {
-  return JSON.parse(JSON.stringify(rule)) as SmartMailboxRule
+export function cloneRule(rule: MailQueryRule): MailQueryRule {
+  return JSON.parse(JSON.stringify(rule)) as MailQueryRule
 }
 
-export function groupNode(group: SmartMailboxGroup) {
+export function groupNode(group: MailQueryGroup) {
   return {
     type: 'group' as const,
     operator: group.operator,
@@ -38,7 +38,7 @@ export function mailboxConditionNode(mailboxId: string) {
 }
 
 export function isSourceConditionForAccount(
-  node: SmartMailboxGroup['nodes'][number] | undefined,
+  node: MailQueryGroup['nodes'][number] | undefined,
   accountId: string,
 ): boolean {
   return (
@@ -52,7 +52,7 @@ export function isSourceConditionForAccount(
 }
 
 export function isMailboxConditionForMailbox(
-  node: SmartMailboxGroup['nodes'][number] | undefined,
+  node: MailQueryGroup['nodes'][number] | undefined,
   mailboxId: string,
 ): boolean {
   return (
@@ -85,9 +85,9 @@ export function extractAccountIdFromRule(
 }
 
 export function accountScopedCondition(
-  rule: SmartMailboxRule,
+  rule: MailQueryRule,
   accountId: string,
-): SmartMailboxRule {
+): MailQueryRule {
   return {
     root: {
       operator: 'all',

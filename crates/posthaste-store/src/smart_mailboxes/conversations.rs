@@ -5,14 +5,14 @@ use super::*;
 /// @spec docs/L1-sync#conversation-pagination
 pub(crate) fn query_conversations_by_rule(
     connection: &Connection,
-    rule: &SmartMailboxRule,
+    rule: &MailQueryRule,
     limit: usize,
     cursor: Option<&ConversationCursor>,
     sort_field: ConversationSortField,
     sort_direction: SortDirection,
 ) -> Result<ConversationPage, StoreError> {
     let mut params = Vec::new();
-    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    let where_clause = compile_mail_query_rule(rule, &mut params)?;
     query_conversations(
         connection,
         &format!("WHERE ({where_clause})"),

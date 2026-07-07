@@ -146,15 +146,15 @@ fn smart_mailbox_relative_date_value_round_trips_through_toml() {
         default_key: None,
         role: None,
         parent_id: None,
-        rule: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+        rule: MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
-                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                    field: SmartMailboxField::ReceivedAt,
-                    operator: SmartMailboxOperator::Gt,
+                nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                    field: MailQueryField::ReceivedAt,
+                    operator: MailQueryOperator::Gt,
                     negated: false,
-                    value: SmartMailboxValue::Date(DateValue::Relative {
+                    value: MailQueryValue::Date(DateValue::Relative {
                         amount: 7,
                         unit: DateUnit::Days,
                     }),
@@ -179,7 +179,7 @@ fn smart_mailbox_relative_date_value_round_trips_through_toml() {
     let domain = super::smart_conversions::convert_condition(&parsed_condition).unwrap();
     assert_eq!(
         domain.value,
-        SmartMailboxValue::String("2026-01-01T00:00:00Z".to_string())
+        MailQueryValue::String("2026-01-01T00:00:00Z".to_string())
     );
 }
 
@@ -192,22 +192,22 @@ fn app_toml_round_trips() {
             name: "Newsletters".to_string(),
             enabled: true,
             triggers: vec![AutomationTrigger::MessageArrived],
-            condition: SmartMailboxRule {
-                root: SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::Any,
+            condition: MailQueryRule {
+                root: MailQueryGroup {
+                    operator: MailQueryGroupOperator::Any,
                     negated: false,
                     nodes: vec![
-                        SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                            field: SmartMailboxField::FromName,
-                            operator: SmartMailboxOperator::Contains,
+                        MailQueryRuleNode::Condition(MailQueryCondition {
+                            field: MailQueryField::FromName,
+                            operator: MailQueryOperator::Contains,
                             negated: false,
-                            value: SmartMailboxValue::String("Posthaste".to_string()),
+                            value: MailQueryValue::String("Posthaste".to_string()),
                         }),
-                        SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                            field: SmartMailboxField::FromEmail,
-                            operator: SmartMailboxOperator::Contains,
+                        MailQueryRuleNode::Condition(MailQueryCondition {
+                            field: MailQueryField::FromEmail,
+                            operator: MailQueryOperator::Contains,
                             negated: false,
-                            value: SmartMailboxValue::String("Posthaste".to_string()),
+                            value: MailQueryValue::String("Posthaste".to_string()),
                         }),
                     ],
                 },
@@ -222,9 +222,9 @@ fn app_toml_round_trips() {
             name: "Draft newsletters".to_string(),
             enabled: true,
             triggers: vec![AutomationTrigger::MessageArrived],
-            condition: SmartMailboxRule {
-                root: SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::Any,
+            condition: MailQueryRule {
+                root: MailQueryGroup {
+                    operator: MailQueryGroupOperator::Any,
                     negated: false,
                     nodes: Vec::new(),
                 },

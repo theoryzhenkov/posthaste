@@ -11,7 +11,7 @@
  *
  * @spec docs/eph/RFC-L2-scripting#7-rulings
  */
-import type { SmartMailboxRule } from './smartMailboxes'
+import type { MailQueryRule } from './mailQuery'
 
 /** A capability a webhook token carries — least-privilege verbs only. */
 export type RuleGrant = 'read' | 'send' | 'tag' | 'move' | 'delete'
@@ -59,7 +59,7 @@ export type RuleAction =
 export interface Rule {
   id: string
   name: string
-  when: SmartMailboxRule
+  when: MailQueryRule
   /** Trigger topics; empty ⇒ the message-update default family. */
   on?: string[]
   action: RuleAction
@@ -80,7 +80,7 @@ export interface RulesListResponse {
 export interface WritableRuleInput {
   id?: string
   name: string
-  when: SmartMailboxRule
+  when: MailQueryRule
   on?: string[]
   enabled?: boolean
   action: WritableRuleAction

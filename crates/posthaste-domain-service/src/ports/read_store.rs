@@ -164,13 +164,13 @@ pub trait SmartMailboxStore: Send + Sync {
     /// @spec docs/L0-search#smart-mailboxes
     fn query_messages_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
     ) -> Result<Vec<MessageSummary>, StoreError>;
 
     /// Query messages matching a smart mailbox rule with explicit ordering.
     fn query_messages_by_rule_sorted(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         sort_field: MessageSortField,
         sort_direction: SortDirection,
     ) -> Result<Vec<MessageSummary>, StoreError>;
@@ -180,7 +180,7 @@ pub trait SmartMailboxStore: Send + Sync {
     /// @spec docs/L1-api#cursor-pagination
     fn query_message_page_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         limit: usize,
         cursor: Option<&MessageCursor>,
         sort_field: MessageSortField,
@@ -192,7 +192,7 @@ pub trait SmartMailboxStore: Send + Sync {
     /// @spec docs/L1-sync#conversation-pagination
     fn query_conversations_by_rule(
         &self,
-        rule: &SmartMailboxRule,
+        rule: &MailQueryRule,
         limit: usize,
         cursor: Option<&ConversationCursor>,
         sort_field: ConversationSortField,
@@ -202,8 +202,7 @@ pub trait SmartMailboxStore: Send + Sync {
     /// Return (unread, total) counts for a smart mailbox rule.
     ///
     /// @spec docs/L1-search#smart-mailbox-data-model
-    fn query_smart_mailbox_counts(&self, rule: &SmartMailboxRule)
-        -> Result<(i64, i64), StoreError>;
+    fn query_smart_mailbox_counts(&self, rule: &MailQueryRule) -> Result<(i64, i64), StoreError>;
 }
 
 /// Phase 2 undo/redo: the per-account reversible-op log + cursor read. Serves

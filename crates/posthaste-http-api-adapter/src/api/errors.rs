@@ -181,7 +181,7 @@ impl ApiError {
     /// carry the offending `field`, `operator`, and `reason`.
     ///
     /// @spec docs/eph/RFC-L2-query-schema.md#d5--boundary-validation-invalid--rejected-at-the-edge
-    pub fn validate_query(rule: &posthaste_domain_model::SmartMailboxRule) -> Result<(), ApiError> {
+    pub fn validate_query(rule: &posthaste_domain_model::MailQueryRule) -> Result<(), ApiError> {
         posthaste_domain_model::validate_query(rule).map_err(Self::from_query_validation)
     }
 

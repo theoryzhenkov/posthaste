@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use posthaste_authority_server::{ManagedRulesHandle, RuleWriteError};
-use posthaste_domain_model::{Rule, SmartMailboxRule, WritableRuleAction};
+use posthaste_domain_model::{MailQueryRule, Rule, WritableRuleAction};
 use posthaste_http_api_adapter::api::{ApiError, ApiErrorBody, ApiErrorCode, OkResponse};
 use posthaste_http_api_adapter::AppState;
 
@@ -65,7 +65,7 @@ pub struct RulesListResponse {
 /// The write body for create/replace. Its `action` is a
 /// [`WritableRuleAction`], which has NO exec variant — that is the structural
 /// exec-exclusion gate (ruling 23). `when` is the shared query grammar's
-/// [`SmartMailboxRule`] tree (the same the WHEN-clause builder emits).
+/// [`MailQueryRule`] tree (the same the WHEN-clause builder emits).
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WritableRuleInput {
@@ -75,7 +75,7 @@ pub struct WritableRuleInput {
     pub id: Option<String>,
     pub name: String,
     /// The WHEN-clause tree.
-    pub when: SmartMailboxRule,
+    pub when: MailQueryRule,
     /// Trigger topics; empty ⇒ the message-update default family.
     #[serde(default)]
     pub on: Vec<String>,

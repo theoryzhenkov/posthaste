@@ -88,7 +88,7 @@ export function renderQuerySchemaModule(artifactJson: string): string {
  * value type, and per-field operators here can never diverge from the store SQL
  * compiler.
  */
-import type { SmartMailboxField, SmartMailboxOperator } from './types'
+import type { MailQueryField, MailQueryOperator } from './types'
 
 /** The coarse value-shape family of a query field (the Rust \`QueryValueType\`). */
 export type QueryValueType = ${valueTypeUnion}
@@ -96,7 +96,7 @@ export type QueryValueType = ${valueTypeUnion}
 /** A field's canonical spec: its value type and the operators it accepts. */
 export interface QueryFieldSchema {
   valueType: QueryValueType
-  operators: readonly SmartMailboxOperator[]
+  operators: readonly MailQueryOperator[]
 }
 
 /**
@@ -104,12 +104,12 @@ export interface QueryFieldSchema {
  * Rust schema. Presentation (widget + label) lives in \`fieldRegistry.ts\`; this
  * is only the drift-prone DATA the store compiler shares.
  */
-export const QUERY_FIELD_SCHEMA: Record<SmartMailboxField, QueryFieldSchema> = {
+export const QUERY_FIELD_SCHEMA: Record<MailQueryField, QueryFieldSchema> = {
 ${rows}
 }
 
 /** Every query field, in the schema's canonical declaration order. */
-export const ALL_QUERY_FIELDS: readonly SmartMailboxField[] = [
+export const ALL_QUERY_FIELDS: readonly MailQueryField[] = [
 ${allFields}
 ]
 `
