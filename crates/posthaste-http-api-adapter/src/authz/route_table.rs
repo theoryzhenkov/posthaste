@@ -19,7 +19,7 @@ pub(crate) struct Entry {
 
 const fn gate(action: Action, resource: ResourceShape) -> RouteAuthz {
     RouteAuthz {
-        action,
+        action: RouteAction::Static(action),
         resource,
         mode: ScopeMode::Gate,
     }
@@ -27,7 +27,20 @@ const fn gate(action: Action, resource: ResourceShape) -> RouteAuthz {
 
 const fn filter(action: Action, resource: ResourceShape) -> RouteAuthz {
     RouteAuthz {
-        action,
+        action: RouteAction::Static(action),
+        resource,
+        mode: ScopeMode::Filter,
+    }
+}
+
+/// A `Filter` route whose ACTION is derived per-request by its handler from
+/// the request body ([`RouteAction::HandlerDerived`]). The middleware still
+/// enforces the resource/expiry caveats here; the handler MUST derive and
+/// enforce the per-operation action before dispatch. Reserved for the
+/// named-mutation funnel — the authz tests pin that it is the only user.
+const fn filter_handler_derived_action(resource: ResourceShape) -> RouteAuthz {
+    RouteAuthz {
+        action: RouteAction::HandlerDerived,
         resource,
         mode: ScopeMode::Filter,
     }

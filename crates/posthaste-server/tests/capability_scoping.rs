@@ -15,5 +15,7 @@ mod basic_cases;
 mod filter_cases;
 #[path = "capability_scoping/mint_cases.rs"]
 mod mint_cases;
+#[path = "capability_scoping/mutation_op_cases.rs"]
+mod mutation_op_cases;
 #[path = "capability_scoping/support.rs"]
 mod support;

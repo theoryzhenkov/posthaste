@@ -21,8 +21,8 @@ mod errors;
 mod middleware;
 mod perimeter;
 
-pub(crate) use middleware::authorize_presented_caveats;
 pub use middleware::require_auth_layer;
+pub(crate) use middleware::{authorize_presented_caveats, authorize_presented_caveats_any};
 pub use perimeter::{host_allowlist, origin_allowlist};
 // Shared with the runtime↔authority-server link auth (`link.rs` in `posthaste-server`):
 // one bearer-parse + one constant-time compare + the canonical 401, so the link

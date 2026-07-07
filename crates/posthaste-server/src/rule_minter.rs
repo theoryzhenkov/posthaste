@@ -68,7 +68,7 @@ mod tests {
 
     fn ctx(action: Action, message: &str, now: OffsetDateTime) -> CaveatContext {
         CaveatContext {
-            action,
+            action: Some(action),
             account: Some("acct-1".to_string()),
             mailbox: None,
             message: Some(message.to_string()),
