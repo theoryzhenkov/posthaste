@@ -14,12 +14,15 @@ import {
 } from '../src/components/settings-panel/helpers/fieldRegistry'
 import {
   absoluteDateValue,
+  appendListEntries,
   bytesFromSize,
   dateInputValue,
   dateValueMode,
+  listValueEntries,
   pickedRefValue,
   relativeDateValue,
   relativeParts,
+  removeListEntry,
   sizeInputParts,
   splitListValue,
   toRfc3339FromDateInput,
@@ -325,5 +328,28 @@ describe('emitted condition JSON — wire-shape parity vs the old text box', () 
       ...base('subject', 'in', []),
       value: splitListValue('x, y'),
     }).toEqual(base('subject', 'in', ['x', 'y']))
+  })
+
+  it('list editing keeps the string[] wire shape through append/remove', () => {
+    // The generic list editor's pure core (chips + typed entry): the emitted
+    // value is always the same `string[]` the old comma box produced.
+    expect(listValueEntries([])).toEqual([])
+    expect(listValueEntries(['a', 'b'])).toEqual(['a', 'b'])
+    // A legacy scalar (operator switched to `in` on a stored value) becomes a
+    // one-entry list rather than vanishing.
+    expect(listValueEntries('ada@example.com')).toEqual(['ada@example.com'])
+    expect(listValueEntries('')).toEqual([])
+
+    // A committed entry appends; a comma-separated batch (paste) splits
+    // exactly like the old box; duplicates are dropped.
+    expect(appendListEntries([], 'a@x.com')).toEqual(['a@x.com'])
+    expect(appendListEntries(['a@x.com'], ' b@y.com , c@z.com ')).toEqual([
+      'a@x.com',
+      'b@y.com',
+      'c@z.com',
+    ])
+    expect(appendListEntries(['a@x.com'], 'a@x.com')).toEqual(['a@x.com'])
+
+    expect(removeListEntry(['a', 'b', 'c'], 1)).toEqual(['a', 'c'])
   })
 })

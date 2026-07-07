@@ -1,10 +1,17 @@
 /**
  * Action picker for a GUI-created automation rule (RFC-L2-scripting ruling 23).
  *
- * Edits a {@link WritableRuleAction} — the SAFE action set only: tag / move /
- * notify / emit / webhook. There is deliberately **no `exec`**: it is not a
- * variant of `WritableRuleAction`, so this editor cannot express it (exec stays
- * config-file-only — a GUI-settable exec would be remote code execution).
+ * Edits a {@link WritableRuleAction} — the SAFE action set only, driven by the
+ * registry in `ruleActionHelpers.ts` (tag / move / moveToRole / markRead /
+ * flag / notify / destroy / emit / webhook). There is deliberately **no
+ * `exec`**: it is not a variant of `WritableRuleAction`, so neither the
+ * registry nor this editor can express it (exec stays config-file-only — a
+ * GUI-settable exec would be remote code execution).
+ *
+ * `destroy` is mail-destructive and rendered unmistakably so: destructive
+ * styling in the picker + hint, and an explanatory irreversibility callout in
+ * the form (plus the save-guard in `AutomationsPane` mirroring the server's
+ * non-empty-WHEN validation).
  *
  * The webhook branch surfaces the security guidance INLINE (a product
  * requirement, not decoration — docs/scripting-security.md threat 2): grants
@@ -12,9 +19,14 @@
  * pointing at a non-local host, shows the prompt-injection warning and nudges
  * sender-scoping the WHEN-clause.
  */
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, TriangleAlert } from 'lucide-react'
 
-import type { RuleGrant, WritableRuleAction } from '../../../api/types'
+import {
+  RULE_MOVE_ROLES,
+  type RuleGrant,
+  type RuleMoveRole,
+  type WritableRuleAction,
+} from '../../../api/types'
 import { Checkbox } from '../../ui/checkbox'
 import {
   Select,
@@ -24,30 +36,19 @@ import {
   SelectValue,
 } from '../../ui/select'
 import { Field } from '../shared'
-import { type ActionKind, defaultActionForKind } from './ruleActionHelpers'
+import { LabeledSelect } from '../MailboxSelect'
+import {
+  ACTION_KIND_OPTIONS,
+  ACTION_REGISTRY,
+  type ActionKind,
+  defaultActionForKind,
+} from './ruleActionHelpers'
 
-const ACTION_KIND_OPTIONS: {
-  value: ActionKind
-  label: string
-  hint: string
-}[] = [
-  { value: 'tag', label: 'Add a tag', hint: 'Tag the matched message.' },
-  { value: 'move', label: 'Move to mailbox', hint: 'Move it to one mailbox.' },
-  {
-    value: 'notify',
-    label: 'Notify',
-    hint: 'Raise an in-app notification (no external call).',
-  },
-  {
-    value: 'emit',
-    label: 'Emit a fact',
-    hint: 'Emit rule.fired only — a client-side watcher decides what to do.',
-  },
-  {
-    value: 'webhook',
-    label: 'Call a webhook',
-    hint: 'POST the message + a scoped token to a URL.',
-  },
+const MOVE_ROLE_OPTIONS: { value: RuleMoveRole; label: string }[] = [
+  { value: 'archive', label: 'Archive' },
+  { value: 'junk', label: 'Junk' },
+  { value: 'trash', label: 'Trash (recoverable)' },
+  { value: 'inbox', label: 'Inbox' },
 ]
 
 const GRANT_OPTIONS: { value: RuleGrant; label: string }[] = [
@@ -80,6 +81,7 @@ export function RuleActionEditor({
   action: WritableRuleAction
   onChange: (action: WritableRuleAction) => void
 }) {
+  const descriptor = ACTION_REGISTRY[action.kind]
   return (
     <div className="space-y-4">
       <label className="grid gap-1.5 text-[13px]">
@@ -97,14 +99,26 @@ export function RuleActionEditor({
           </SelectTrigger>
           <SelectContent>
             {ACTION_KIND_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
+              <SelectItem key={option.kind} value={option.kind}>
+                <span
+                  className={
+                    option.destructive ? 'font-medium text-destructive' : ''
+                  }
+                >
+                  {option.label}
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <span className="text-[12px] text-muted-foreground">
-          {ACTION_KIND_OPTIONS.find((o) => o.value === action.kind)?.hint}
+        <span
+          className={
+            descriptor.destructive
+              ? 'text-[12px] font-medium text-destructive'
+              : 'text-[12px] text-muted-foreground'
+          }
+        >
+          {descriptor.hint}
         </span>
       </label>
 
@@ -126,6 +140,63 @@ export function RuleActionEditor({
         />
       )}
 
+      {action.kind === 'moveToRole' && (
+        <div className="grid max-w-56 gap-1.5">
+          <LabeledSelect
+            label="Move to"
+            value={action.role}
+            onValueChange={(role) =>
+              onChange({
+                kind: 'moveToRole',
+                role: (RULE_MOVE_ROLES as readonly string[]).includes(role)
+                  ? (role as RuleMoveRole)
+                  : 'archive',
+              })
+            }
+          >
+            {MOVE_ROLE_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </LabeledSelect>
+          <span className="text-[12px] text-muted-foreground">
+            Files the message into the mailbox carrying this role on its own
+            account — one rule covers every account.
+          </span>
+        </div>
+      )}
+
+      {action.kind === 'markRead' && (
+        <div className="grid max-w-56 gap-1.5">
+          <LabeledSelect
+            label="Mark as"
+            value={action.read ? 'read' : 'unread'}
+            onValueChange={(value) =>
+              onChange({ kind: 'markRead', read: value === 'read' })
+            }
+          >
+            <SelectItem value="read">read</SelectItem>
+            <SelectItem value="unread">unread</SelectItem>
+          </LabeledSelect>
+        </div>
+      )}
+
+      {action.kind === 'flag' && (
+        <div className="grid max-w-56 gap-1.5">
+          <LabeledSelect
+            label="Flag state"
+            value={action.flagged ? 'flagged' : 'unflagged'}
+            onValueChange={(value) =>
+              onChange({ kind: 'flag', flagged: value === 'flagged' })
+            }
+          >
+            <SelectItem value="flagged">flagged</SelectItem>
+            <SelectItem value="unflagged">not flagged</SelectItem>
+          </LabeledSelect>
+        </div>
+      )}
+
       {action.kind === 'notify' && (
         <div className="space-y-3">
           <Field
@@ -144,6 +215,8 @@ export function RuleActionEditor({
         </div>
       )}
 
+      {action.kind === 'destroy' && <DestroyCallout />}
+
       {action.kind === 'emit' && (
         <p className="rounded-md border border-dashed border-border-soft px-3 py-3 text-[12px] text-muted-foreground">
           Emits only the <code>rule.fired</code> fact. Pair it with a
@@ -156,6 +229,34 @@ export function RuleActionEditor({
       {action.kind === 'webhook' && (
         <WebhookFields action={action} onChange={onChange} />
       )}
+    </div>
+  )
+}
+
+/** The unmistakable destroy warning (a destructive, irreversible action). */
+function DestroyCallout() {
+  return (
+    <div
+      data-testid="destroy-action-callout"
+      className="flex gap-2.5 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-[12px] leading-5 text-destructive"
+    >
+      <TriangleAlert
+        size={15}
+        strokeWidth={1.8}
+        className="mt-[1px] shrink-0"
+      />
+      <div className="space-y-1">
+        <p className="font-medium">
+          Permanently deletes matching messages — this cannot be undone.
+        </p>
+        <p>
+          Every message this rule matches is destroyed outright: it does NOT go
+          to Trash and cannot be recovered, on this device or the server. The
+          rule runs unattended on every matching message, so make the conditions
+          above as narrow as possible (a specific sender, an exact subject). A
+          rule with no conditions is refused.
+        </p>
+      </div>
     </div>
   )
 }
