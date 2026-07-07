@@ -390,7 +390,7 @@ describe('scenario: mailbox counts refetch on invalidation (RFC-L2-count-unifica
     expect(inboxUnread(h.queryClient)).toBe(20)
   })
 
-  it("(f) OVERLAY: the user's own mark-read adjusts the count immediately, then the echo reconciles", async () => {
+  it("(f) OVERLAY: the user's own mark-read adjusts the count immediately, then the echo reconciles — and the CANONICAL value wins", async () => {
     const h = await createClientHarness({
       mailboxes: [mailbox('inbox', 'inbox', 1, 1)],
       rows: [
@@ -414,9 +414,15 @@ describe('scenario: mailbox counts refetch on invalidation (RFC-L2-count-unifica
     await h.flush()
     expect(inboxUnread(h.queryClient)).toBe(0)
 
-    // The settlement echo arrives (canonical already updated server-side):
-    // the invalidation refetch reconciles the overlay to the same value.
-    server = [mailbox('inbox', 'inbox', 0, 1)]
+    // The settlement echo arrives. The canonical count DISAGREES with the
+    // overlay's guess (two new unreads landed server-side meanwhile): only a
+    // real invalidation + refetch can land 2. This closes the vacuous-pass
+    // trap the old assertion had — checking the overlay's own value on a
+    // never-invalidated query "passed" even when the echo was dropped whole
+    // (reconciliation-correctness must be distinguishable from
+    // overlay-correctness).
+    server = [mailbox('inbox', 'inbox', 2, 3)]
+    const fetchesBeforeEcho = observer.fetches()
     const frameCountBeforeEcho = h.frames.length
     h.emitFrame(messageUpdatedFrame('m1', m1Read))
     await h.flush()
@@ -424,9 +430,9 @@ describe('scenario: mailbox counts refetch on invalidation (RFC-L2-count-unifica
 
     await until(
       () =>
-        h.queryClient.getQueryState(queryKeys.mailboxes('s'))?.isInvalidated ===
-          false && inboxUnread(h.queryClient) === 0,
+        observer.fetches() > fetchesBeforeEcho &&
+        inboxUnread(h.queryClient) === 2,
     )
-    expect(inboxUnread(h.queryClient)).toBe(0)
+    expect(inboxUnread(h.queryClient)).toBe(2)
   })
 })
