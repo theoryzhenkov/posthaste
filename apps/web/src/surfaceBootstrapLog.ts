@@ -1,12 +1,15 @@
 /**
  * Ordered instrumentation for the standalone-surface bootstrap + render path.
  *
- * A Windows (WebView2) settings-surface window renders BLACK, is UNCLOSABLE,
- * and sits at 0% CPU — a synchronous DEADLOCK (blocked wait), not a spin loop,
- * somewhere AFTER its session/views open, in a *secondary* WebView2 renderer
- * where DevTools can't be attached. To localize it, we drop a distinct marker
- * BEFORE and AFTER each potentially-blocking step so the LAST marker in the
- * frozen tester's backend log names the exact blocking call.
+ * History: a Windows (WebView2) settings-surface window rendered BLACK,
+ * UNCLOSABLE, at 0% CPU, with ZERO markers — root-caused to the desktop
+ * backend creating the window from a *synchronous* Tauri command, which
+ * deadlocks WebView2 controller creation on Windows (the webview never
+ * existed, so no JS ran; see `open_surface_window` in
+ * apps/desktop/src/desktop_windows.rs). Fixed by making that command async.
+ * The markers stay as the watchdog: the surface URL always loads the bundled
+ * index.html, so `main_entry` MUST appear once the webview is created — a
+ * still-marker-less failure means webview creation itself failed again.
  *
  * Routing: `syncLogger.info` → pino browser `write` → `invoke('log_from_frontend')`
  * — the same frontend→backend path `consoleCapture`/the sync logger already use,
