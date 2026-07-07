@@ -102,7 +102,7 @@ fn entity_kind_str(kind: OperationEntityKind) -> &'static str {
 
 /// Columns selected by every operation read, in struct order.
 const OPERATION_COLUMNS: &str = "id, account_id, entity_kind, entity_id, kind, payload, \
-     state, attempts, last_error, depends_on, created_at, updated_at";
+     state, attempts, last_error, depends_on, send_at, created_at, updated_at";
 
 fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>> {
     // Extract every column first so all `rusqlite::Error`s surface through the
@@ -117,8 +117,9 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
     let attempts: i64 = row.get(7)?;
     let last_error: Option<String> = row.get(8)?;
     let depends_on: Option<String> = row.get(9)?;
-    let created_at: String = row.get(10)?;
-    let updated_at: String = row.get(11)?;
+    let send_at: Option<String> = row.get(10)?;
+    let created_at: String = row.get(11)?;
+    let updated_at: String = row.get(12)?;
     Ok((|| {
         let payload: Value = serde_json::from_str(&payload_str)
             .map_err(|error| StoreError::Failure(format!("invalid outbox payload: {error}")))?;
@@ -135,6 +136,7 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
             attempts: attempts.max(0) as u32,
             last_error,
             depends_on: depends_on.map(OperationId::from),
+            send_at,
             created_at,
             updated_at,
         })
@@ -166,9 +168,10 @@ impl OperationOutboxStore for DatabaseStore {
             tx.execute(
                 "INSERT OR IGNORE INTO outbox_operation (
                     id, account_id, entity_kind, entity_id, kind, payload,
-                    state, attempts, last_error, depends_on, created_at, updated_at
+                    state, attempts, last_error, depends_on, send_at,
+                    created_at, updated_at
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     operation.id.as_str(),
                     operation.account_id.as_str(),
@@ -180,6 +183,7 @@ impl OperationOutboxStore for DatabaseStore {
                     operation.attempts as i64,
                     operation.last_error,
                     operation.depends_on.as_ref().map(OperationId::as_str),
+                    operation.send_at,
                     operation.created_at,
                     operation.updated_at,
                 ],
@@ -194,19 +198,58 @@ impl OperationOutboxStore for DatabaseStore {
     fn list_flushable_operations(
         &self,
         account_id: &AccountId,
+        now: &str,
     ) -> Result<Vec<Operation>, StoreError> {
         let connection = self.read_connection()?;
-        collect_operations(
-            &connection,
-            &format!(
+        // A scheduled send (`send_at` in the future relative to the caller's
+        // monotonic-anchored `now`) is HELD out of the flushable set: it rests
+        // `pending` — visible, discardable — until due. Both sides of the
+        // comparison are normalized UTC whole-second RFC 3339, so the string
+        // comparison is exact chronological order.
+        let mut statement = connection
+            .prepare(&format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
                  WHERE account_id = ?1 AND state IN ('pending', 'inflight', 'conflicted')
+                   AND (send_at IS NULL OR send_at <= ?2)
                  ORDER BY rowid ASC
-                 LIMIT ?2"
-            ),
-            account_id,
-            OUTBOX_FLUSH_BATCH_LIMIT,
-        )
+                 LIMIT ?3"
+            ))
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(
+                params![account_id.as_str(), now, OUTBOX_FLUSH_BATCH_LIMIT],
+                row_to_operation,
+            )
+            .map_err(sql_to_store_error)?;
+        let mut operations = Vec::new();
+        for row in rows {
+            operations.push(row.map_err(sql_to_store_error)??);
+        }
+        Ok(operations)
+    }
+
+    fn count_due_scheduled_sends(
+        &self,
+        account_id: &AccountId,
+        now: &str,
+    ) -> Result<u64, StoreError> {
+        let connection = self.read_connection()?;
+        // The scheduler tick's probe: any held send now due? Served by the
+        // partial `idx_outbox_send_at` index (scheduled rows only), so the
+        // frequent tick stays a point read.
+        let mut statement = connection
+            .prepare(
+                "SELECT COUNT(*) FROM outbox_operation
+                 WHERE account_id = ?1 AND send_at IS NOT NULL AND send_at <= ?2
+                   AND state IN ('pending', 'inflight', 'conflicted')",
+            )
+            .map_err(sql_to_store_error)?;
+        statement
+            .query_row(params![account_id.as_str(), now], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map(|count| count.max(0) as u64)
+            .map_err(sql_to_store_error)
     }
 
     fn list_pending_operations(
@@ -315,6 +358,46 @@ impl OperationOutboxStore for DatabaseStore {
             )
             .map_err(sql_to_store_error)?;
             Ok(())
+        })
+    }
+
+    fn claim_operation_for_flush(&self, id: &OperationId) -> Result<bool, StoreError> {
+        // The flusher's half of the cancel-vs-flush race: one conditional UPDATE
+        // whose predicate is the flushable state set. SQLite serializes the two
+        // writers, so exactly one of {this claim, a concurrent
+        // `remove_operation_unless_inflight`} observes the row first:
+        // - claim lands first → the row is `inflight`, the discard's guarded
+        //   DELETE matches nothing → cancel loses, the push proceeds;
+        // - discard lands first → the row is gone, this UPDATE matches nothing →
+        //   the flusher skips the op, nothing is ever pushed.
+        // `attempts`/`last_error` are deliberately untouched (the pre-existing
+        // inflight transition preserved them too).
+        self.write_transaction(|tx| {
+            let claimed = tx
+                .execute(
+                    "UPDATE outbox_operation
+                     SET state = 'inflight', updated_at = ?2
+                     WHERE id = ?1 AND state IN ('pending', 'inflight', 'conflicted')",
+                    params![id.as_str(), now_iso8601()?],
+                )
+                .map_err(sql_to_store_error)?;
+            Ok(claimed > 0)
+        })
+    }
+
+    fn remove_operation_unless_inflight(&self, id: &OperationId) -> Result<bool, StoreError> {
+        // The cancel half of the cancel-vs-flush race (see
+        // `claim_operation_for_flush`): the not-inflight check and the delete are
+        // ONE guarded statement, so there is no check-then-delete window in which
+        // the flusher could claim the row between the check and the removal.
+        self.write_transaction(|tx| {
+            let removed = tx
+                .execute(
+                    "DELETE FROM outbox_operation WHERE id = ?1 AND state != 'inflight'",
+                    params![id.as_str()],
+                )
+                .map_err(sql_to_store_error)?;
+            Ok(removed > 0)
         })
     }
 }

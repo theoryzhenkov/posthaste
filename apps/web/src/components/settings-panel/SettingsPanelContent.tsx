@@ -8,6 +8,7 @@ import type {
   SmartMailbox,
   SmartMailboxSummary,
 } from '../../api/types'
+import { DEFAULT_UNDO_SEND_DELAY_SECONDS } from '../../api/types/settings'
 import type { SettingsSurfaceDescriptor } from '../../surfaces'
 import { AccountsPane } from './AccountsPane'
 import { AppearancePane } from './AppearancePane'
@@ -57,6 +58,8 @@ interface SettingsPanelContentProps {
   onCreateAccount: () => void
   onCreateMailbox: () => void
   onDefaultAccountChange: (accountId: string | null) => void
+  onUndoSendDelayChange: (seconds: number) => void
+  isComposePending: boolean
   onDeletedSmartMailbox: (mailboxId: string) => Promise<void>
   onResetSmartMailboxes: () => void
   onSavedAccount: (account: AccountOverview) => Promise<void>
@@ -93,6 +96,8 @@ export function SettingsPanelContent({
   onCreateAccount,
   onCreateMailbox,
   onDefaultAccountChange,
+  onUndoSendDelayChange,
+  isComposePending,
   onDeletedSmartMailbox,
   onResetSmartMailboxes,
   onSavedAccount,
@@ -112,6 +117,12 @@ export function SettingsPanelContent({
               defaultAccountId={defaultAccountId}
               onDefaultAccountChange={onDefaultAccountChange}
               isPending={defaultMutation.isPending}
+              undoSendDelaySeconds={
+                settings?.compose?.undoSendDelaySeconds ??
+                DEFAULT_UNDO_SEND_DELAY_SECONDS
+              }
+              onUndoSendDelayChange={onUndoSendDelayChange}
+              isComposePending={isComposePending}
             />
           </div>
         )}

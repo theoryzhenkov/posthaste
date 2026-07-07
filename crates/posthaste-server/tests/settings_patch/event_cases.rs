@@ -26,6 +26,7 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,

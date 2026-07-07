@@ -41,6 +41,7 @@ export function MailOverlays(props: MailClientViewProps) {
           <ComposeOverlay
             intent={props.composeIntent}
             onClose={props.closeCompose}
+            onRestoreDraft={props.handlers.editDraft}
           />
         </Suspense>
       )}

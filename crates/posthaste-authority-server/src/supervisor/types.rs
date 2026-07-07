@@ -11,6 +11,13 @@ pub(crate) const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const OAUTH_TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 pub(crate) const SNOOZE_INITIAL_DELAY: Duration = Duration::from_secs(30);
 pub(crate) const SNOOZE_INTERVAL: Duration = Duration::from_secs(60);
+/// Scheduled-send (undo-send / send-later) tick: the snooze scheduler's
+/// pattern on a shorter period, because undo-send's default hold is ~10s and
+/// the send should fire promptly once the undo window closes (worst added
+/// latency = one interval). Each tick is a cheap indexed point probe
+/// (`has_due_scheduled_sends`); only a DUE send triggers a flush sync.
+pub(crate) const SCHEDULED_SEND_INITIAL_DELAY: Duration = Duration::from_secs(5);
+pub(crate) const SCHEDULED_SEND_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Watchdog restart cap (RFC-L2-lifecycle §7 ruling 2 / D61): a faulting account
 /// runtime is restarted at most this many times under bounded backoff; the

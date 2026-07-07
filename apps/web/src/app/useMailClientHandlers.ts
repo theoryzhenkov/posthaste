@@ -158,6 +158,9 @@ export function useMailClientHandlers(input: {
   return {
     closeCompose: compose.closeCompose,
     composeIntent: compose.composeIntent,
+    // Reopen the composer on a specific draft (the scheduled-send undo's
+    // restore path — distinct from handleEditDraft's selected-message form).
+    editDraft: compose.editDraft,
     handleAddTag,
     handleRemoveTag,
     handleApplySearch: (query: string) => applySearchQuery(query),

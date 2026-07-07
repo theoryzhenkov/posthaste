@@ -886,7 +886,7 @@ impl RuntimeMailWriteApi for RuntimeHandle {
         account_id: AccountId,
         request: SendMessageRequest,
         idempotency_key: Option<ClientMutationId>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Option<Operation>, RuntimeError> {
         self.ensure_runtime_active()?;
         // Keyless send keeps the pre-existing behavior: no ledger, so idempotency
         // is only M32's outbox-level exactly-once for a single operation retried
@@ -896,7 +896,8 @@ impl RuntimeMailWriteApi for RuntimeHandle {
                 .core
                 .authority_server_link
                 .send_message(account_id, request)
-                .await;
+                .await
+                .map(Some);
         };
         // Keyed send (RFC-L2-scripting ruling 24): honor the client
         // `Idempotency-Key` so a redelivered rule webhook / hook-serve script /
@@ -921,24 +922,28 @@ impl RuntimeMailWriteApi for RuntimeHandle {
             .reserve(&caller, &key, SEND_OP_NAME)
             .await
         {
-            // A send carries no events, so its ledger slot is an empty
-            // `CommandAck` (Ack-shaped, like the message commands — not an
-            // `Operation` like the draft routes); the redelivery just needs
-            // "succeeded before", which this outcome witnesses.
-            Reserved::Return(result) => result
-                .map(|outcome| *outcome)
-                .and_then(AppliedOutcome::into_ack)
-                .map(|_ack| ()),
+            // A keyed send stores its ENQUEUED OPERATION (the operation-bearing
+            // outcome, like the draft routes — D128's "a real unit"): a
+            // redelivery re-observes the SAME operation, id and normalized
+            // `send_at` included, so a replayed scheduled send returns the same
+            // cancel handle instead of a fresh one. A record written before
+            // sends stored their operation holds an `Ack` — the send DID apply
+            // (exactly-once holds); only its operation payload is unavailable,
+            // surfaced as `None` rather than a fake error or a fabricated op.
+            Reserved::Return(result) => result.map(|outcome| match *outcome {
+                AppliedOutcome::Draft(operation) => Some(*operation),
+                AppliedOutcome::Ack(_) => None,
+            }),
             Reserved::Execute => {
                 let result = self
                     .core
                     .authority_server_link
                     .send_message(account_id, request)
                     .await;
-                // Fold the unit outcome into the ledger's `CommandAck` slot; `settle`
-                // then applies D47 retention: `Confirmed` kept, a permanent rejection
-                // re-observed, a transient failure cleared so a deliberate retry
-                // re-executes.
+                // Record the enqueued operation in the ledger slot; `settle`
+                // then applies D47 retention: `Confirmed` kept, a permanent
+                // rejection re-observed, a transient failure cleared so a
+                // deliberate retry re-executes.
                 self.core
                     .apply_ledger
                     .settle(
@@ -946,10 +951,10 @@ impl RuntimeMailWriteApi for RuntimeHandle {
                         &key,
                         result
                             .as_ref()
-                            .map(|()| AppliedOutcome::Ack(CommandAck { events: vec![] })),
+                            .map(|operation| AppliedOutcome::Draft(Box::new(operation.clone()))),
                     )
                     .await;
-                result
+                result.map(Some)
             }
         }
     }
@@ -1000,7 +1005,9 @@ impl RuntimeMailWriteApi for RuntimeHandle {
                     .settle(
                         &caller,
                         &key,
-                        result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
+                        result
+                            .as_ref()
+                            .map(|op| AppliedOutcome::Draft(Box::new(op.clone()))),
                     )
                     .await;
                 result
@@ -1048,7 +1055,9 @@ impl RuntimeMailWriteApi for RuntimeHandle {
                     .settle(
                         &caller,
                         &key,
-                        result.as_ref().map(|op| AppliedOutcome::Draft(op.clone())),
+                        result
+                            .as_ref()
+                            .map(|op| AppliedOutcome::Draft(Box::new(op.clone()))),
                     )
                     .await;
                 result

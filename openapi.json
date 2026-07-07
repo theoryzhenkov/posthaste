@@ -3294,7 +3294,7 @@
           "messages"
         ],
         "summary": "Send message",
-        "description": "Validates and submits a new email via the source gateway, then triggers a sync.",
+        "description": "Validates and enqueues a local-first send, then triggers a flush. With `sendAt` (RFC 3339) the send is HELD until due (undo-send / send-later) and can be canceled via the returned operation id while still queued. Local-first: a scheduled send fires when Posthaste is next running and online at/after `sendAt`, not via a server-side schedule.",
         "operationId": "send_message",
         "parameters": [
           {
@@ -3331,17 +3331,17 @@
         },
         "responses": {
           "200": {
-            "description": "Message accepted for delivery",
+            "description": "Message accepted for delivery (or held until `sendAt`)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OkResponse"
+                  "$ref": "#/components/schemas/SendMessageResponse"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid compose request",
+            "description": "Invalid compose request (including an invalid `sendAt`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -5139,6 +5139,17 @@
           "cachePolicy": {
             "$ref": "#/components/schemas/CachePolicy"
           },
+          "compose": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ComposeSettings",
+                "description": "Compose/sending preferences (undo-send delay). TOML source of truth;\nabsent keeps every compose default.\n\n@spec docs/eph/RFC-L2-configuration-matrix"
+              }
+            ]
+          },
           "defaultAccountId": {
             "oneOf": [
               {
@@ -5542,6 +5553,21 @@
             "items": {
               "$ref": "#/components/schemas/DomainEvent"
             }
+          }
+        }
+      },
+      "ComposeSettings": {
+        "type": "object",
+        "description": "Compose/sending preferences.\n\n@spec docs/eph/RFC-L2-configuration-matrix",
+        "properties": {
+          "undoSendDelaySeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Undo-send hold in seconds: after Send, the outbox holds the message\nthis long (`send_at = now + delay`) so the user can cancel before it\nleaves. `None` = the app default (10s, applied by the client); `0`\nsends immediately with no undo window (the pre-feature behavior).\nValidated to [`ComposeSettings::MAX_UNDO_SEND_DELAY_SECONDS`] on patch.",
+            "minimum": 0
           }
         }
       },
@@ -7068,6 +7094,13 @@
             "type": "object",
             "description": "Kind-specific payload (the wrapped command or draft body), as JSON so the\nenvelope stays uniform across kinds."
           },
+          "sendAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Scheduled-send hold (send ops only): the earliest flush time, normalized\nUTC whole-second RFC 3339. A queued op with `send_at` in the future is\nexcluded from the flushable set (it rests `pending`, visible and\ndiscardable) until due; `None` (every non-send op, and an immediate\nsend) keeps the pre-existing flush-now behavior. Persisted with the op,\nso a schedule survives restart. Local-first: the send fires on the first\nflush window at/after `send_at` while the app runs — not a server-side\nschedule.\n\n@spec docs/L1-outbox#operation-model"
+          },
           "state": {
             "$ref": "#/components/schemas/OperationState"
           },
@@ -7267,6 +7300,17 @@
               },
               {
                 "$ref": "#/components/schemas/CachePolicy"
+              }
+            ]
+          },
+          "compose": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ComposeSettings",
+                "description": "Compose/sending preferences (undo-send delay); overwrites the stored struct."
               }
             ]
           },
@@ -8496,6 +8540,13 @@
               "null"
             ]
           },
+          "sendAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Earliest submission time (RFC 3339). Absent (or in the past) the send is\ndue immediately — the pre-existing behavior. When set in the future the\nenqueued outbox send is HELD queued until due (undo-send = now + delay;\nsend-later = the chosen time; one mechanism), then flushed by the\nscheduler tick / next flush pass.\n\nLOCAL-FIRST OFFLINE SEMANTICS: this is not a server-side schedule. The\nsend fires on the first flush window at/after `send_at` while the app is\nrunning and online; if Posthaste is closed (or offline) at the due time,\nthe send fires when it is next running + connected. UI copy must say so\n(e.g. \"Sends when Posthaste is open\").\n\nNormalized at enqueue to UTC whole-second RFC 3339 (`...Z`) so stored\nvalues compare lexicographically; skipped from serialization when absent\nso an immediate send's payload stays byte-identical to before.\n\n@spec docs/L1-outbox#operation-model"
+          },
           "subject": {
             "type": "string"
           },
@@ -8504,6 +8555,28 @@
             "items": {
               "$ref": "#/components/schemas/Recipient"
             }
+          }
+        }
+      },
+      "SendMessageResponse": {
+        "type": "object",
+        "description": "Response body for `POST /v1/sources/{source_id}/commands/send`: the send\nwas accepted (enqueued local-first). `operation` is the enqueued outbox\nsend — its `id` is the CANCEL handle for a scheduled (`sendAt`) send\n(`DELETE /v1/sources/{source_id}/operations/{operation_id}` before it is\ndue), and `sendAt` echoes the normalized schedule. `null` only for a keyed\nreplay whose outcome predates operation-bearing send records.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "operation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Operation"
+              }
+            ]
           }
         }
       },

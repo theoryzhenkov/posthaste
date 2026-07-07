@@ -298,6 +298,25 @@ pub struct SendMessageRequest {
     /// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
     #[serde(default)]
     pub draft_id: Option<String>,
+    /// Earliest submission time (RFC 3339). Absent (or in the past) the send is
+    /// due immediately — the pre-existing behavior. When set in the future the
+    /// enqueued outbox send is HELD queued until due (undo-send = now + delay;
+    /// send-later = the chosen time; one mechanism), then flushed by the
+    /// scheduler tick / next flush pass.
+    ///
+    /// LOCAL-FIRST OFFLINE SEMANTICS: this is not a server-side schedule. The
+    /// send fires on the first flush window at/after `send_at` while the app is
+    /// running and online; if Posthaste is closed (or offline) at the due time,
+    /// the send fires when it is next running + connected. UI copy must say so
+    /// (e.g. "Sends when Posthaste is open").
+    ///
+    /// Normalized at enqueue to UTC whole-second RFC 3339 (`...Z`) so stored
+    /// values compare lexicographically; skipped from serialization when absent
+    /// so an immediate send's payload stays byte-identical to before.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_at: Option<String>,
 }
 
 #[cfg(test)]

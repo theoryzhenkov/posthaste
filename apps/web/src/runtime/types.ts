@@ -28,6 +28,7 @@ import type {
   Rule,
   SaveDraftInput,
   SendMessageInput,
+  SendMessageResponse,
   SmartMailbox,
   SmartMailboxSummary,
   StartOAuthResponse,
@@ -470,7 +471,7 @@ export interface RuntimeAdapter {
   moveMessageToMailboxRole(
     request: RuntimeMoveMessageToMailboxRoleRequest,
   ): Promise<MessageCommandResult>
-  sendMessage(request: RuntimeSendMessageRequest): Promise<OkResponse>
+  sendMessage(request: RuntimeSendMessageRequest): Promise<SendMessageResponse>
   saveDraft(request: RuntimeSaveDraftRequest): Promise<Operation>
   deleteDraft(request: RuntimeDeleteDraftRequest): Promise<Operation>
   listPendingOperations(sourceId: string): Promise<Operation[]>

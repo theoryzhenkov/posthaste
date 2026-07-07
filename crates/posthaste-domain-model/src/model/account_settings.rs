@@ -64,6 +64,36 @@ pub struct AppSettings {
     /// @spec docs/eph/RFC-L2-mailbox-management#a4
     #[serde(default)]
     pub mailbox_groups: Vec<MailboxGroup>,
+    /// Compose/sending preferences (undo-send delay). TOML source of truth;
+    /// absent keeps every compose default.
+    ///
+    /// @spec docs/eph/RFC-L2-configuration-matrix
+    #[serde(default)]
+    pub compose: Option<ComposeSettings>,
+}
+
+/// Compose/sending preferences.
+///
+/// @spec docs/eph/RFC-L2-configuration-matrix
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ComposeSettings {
+    /// Undo-send hold in seconds: after Send, the outbox holds the message
+    /// this long (`send_at = now + delay`) so the user can cancel before it
+    /// leaves. `None` = the app default (10s, applied by the client); `0`
+    /// sends immediately with no undo window (the pre-feature behavior).
+    /// Validated to [`ComposeSettings::MAX_UNDO_SEND_DELAY_SECONDS`] on patch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undo_send_delay_seconds: Option<u32>,
+}
+
+impl ComposeSettings {
+    /// Upper bound on the undo-send hold: beyond a couple of minutes an
+    /// "undoable send" is really a send-later schedule, which has its own
+    /// explicit affordance — and a silently huge default hold would look like
+    /// mail loss.
+    pub const MAX_UNDO_SEND_DELAY_SECONDS: u32 = 120;
 }
 
 /// A client-side sidebar Group (presentation only): a named cluster of a
