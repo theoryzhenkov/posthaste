@@ -166,7 +166,7 @@ fn caller_grants_mint(token: &str, root: &crate::token::RootKey) -> bool {
         return false;
     }
     let ctx = crate::authz::CaveatContext {
-        action: Action::Mint,
+        action: Some(Action::Mint),
         account: None,
         mailbox: None,
         message: None,

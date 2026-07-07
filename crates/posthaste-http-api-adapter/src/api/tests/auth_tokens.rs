@@ -109,7 +109,7 @@ fn derived(caller: Option<String>, predicates: &[&str]) -> Vec<macaroon::Caveat>
 
 fn ctx(action: Action) -> crate::authz::CaveatContext {
     crate::authz::CaveatContext {
-        action,
+        action: Some(action),
         account: None,
         mailbox: None,
         message: None,

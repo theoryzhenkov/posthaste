@@ -8,6 +8,8 @@
 // Run: POSTHASTE_PLAYWRIGHT_CLI=<nix devShell path> bun apps/web/e2e/compose-reply-all.mjs
 import { readFileSync } from 'node:fs'
 
+import { mintSessionToken } from './lib/session-token.mjs'
+
 const PW_CORE =
   process.env.POSTHASTE_PLAYWRIGHT_CLI?.replace(/\/cli\.js$/, '/index.mjs') ??
   'playwright-core'
@@ -16,9 +18,11 @@ const { chromium } = await import(PW_CORE)
 const URL = 'http://127.0.0.1:5173'
 const STATE_ROOT = process.env.POSTHASTE_STATE_ROOT || 'var/dev/posthaste/state'
 const daemon = JSON.parse(readFileSync(`${STATE_ROOT}/daemon.json`, 'utf8'))
+// daemon.token is the {mint, read} bootstrap — no write verbs; mint a session token.
+const token = await mintSessionToken(daemon)
 const SOURCE_ID = 'local-stalwart'
 const HEADERS = {
-  Authorization: `Bearer ${daemon.token}`,
+  Authorization: `Bearer ${token}`,
   'Content-Type': 'application/json',
 }
 const SELF_EMAIL = 'dev@example.org'
@@ -72,7 +76,7 @@ await page.addInitScript(
     window.__POSTHASTE_PORT__ = p
     window.__POSTHASTE_RUNTIME_MODE__ = 'loopback'
   },
-  [daemon.token, daemon.port],
+  [token, daemon.port],
 )
 
 const results = { consoleErrors: errs }

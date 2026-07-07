@@ -1,7 +1,7 @@
 use axum::extract::Request;
 use time::OffsetDateTime;
 
-use crate::authz::{CaveatContext, ResourceShape, RouteAuthz, ScopeMode};
+use crate::authz::{CaveatContext, ResourceShape, RouteAction, RouteAuthz, ScopeMode};
 
 /// Build the [`CaveatContext`] for a matched, authorized-pending request. For
 /// `Gate` routes the resource axes come from path params (matched against the
@@ -18,7 +18,13 @@ pub(crate) fn build_context(req: &Request, template: &str, authz: &RouteAuthz) -
         ScopeMode::Filter => extract_query_axes(req.uri().query(), &authz.resource),
     };
     CaveatContext {
-        action: authz.action,
+        action: match authz.action {
+            RouteAction::Static(action) => Some(action),
+            // Handler-derived route: the action axis is enforced by the
+            // handler against the parsed body (per-operation); the perimeter
+            // evaluates only the resource/expiry caveats here.
+            RouteAction::HandlerDerived => None,
+        },
         account,
         mailbox,
         message,

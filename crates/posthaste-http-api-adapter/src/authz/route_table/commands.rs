@@ -42,10 +42,18 @@ pub(super) const ROUTES: &[Entry] = &[
             ResourceShape::account_message("source_id", "message_id"),
         ),
     },
+    // Named-mutation funnel: this ONE route carries EVERY mutation op
+    // (setKeywords … replaceMailboxes … destroy … send), so no single static
+    // action can gate it — a static verb both under-gates (a tag-scoped token
+    // could destroy or send) and over-blocks (a move-scoped token could not
+    // archive). The action axis is handler-derived per operation instead
+    // (deny-by-default, exhaustive over `MailOperation` — see
+    // `authz::operation` and `api::runtime_stream::mutations`); the perimeter
+    // still enforces the account query-filter and expiry caveats here.
     Entry {
         method: "POST",
         template: "/runtime/sessions/{session_id}/mutations",
-        authz: filter(Action::Tag, ResourceShape::account("sourceId")),
+        authz: filter_handler_derived_action(ResourceShape::account("sourceId")),
     },
     Entry {
         method: "POST",
