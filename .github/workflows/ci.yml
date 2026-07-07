@@ -35,36 +35,64 @@ jobs:
       - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-client-node-wasm -- -D warnings
       - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-client-node-wasm
 
-  # Live Stalwart integration tests (mail-loss convergence + draft/discard).
-  # These targets early-`return` unless POSTHASTE_STALWART_INTEGRATION=1 and a
-  # real `stalwart` binary is on PATH, so without this job they are dead
-  # coverage. The nix devshell (nix/devshell.d/posthaste.nix -> pkgs.stalwart)
-  # provides the binary (named `stalwart`, matching the fixture's default PATH
-  # lookup in crates/posthaste-testkit/src/paths.rs) plus cargo/bash, so the
-  # gated tests run inside `nix develop`. The StalwartFixture spawns the process
-  # itself on dynamic loopback ports (no service container needed) and seeds via
-  # tools/dev/stalwart/{config.toml,seed.sh}.
+  # HARD send-path gate (RFC send-path-gate): a live-Stalwart end-to-end proof
+  # that a send FILES INTO SENT and NOT DRAFTS — the beta-blocking regression
+  # class (onSuccessUpdateEmail mis-keyed → every send stuck in Drafts,
+  # self-sends undelivered) that previously shipped because the only assertion
+  # was `sent || inbox` (masks exactly this bug) AND its CI job was soft-failed.
+  # This job is REQUIRED — no continue-on-error. It runs the dedicated
+  # regression test plus the parity test whose send assertions are now the exact
+  # filing invariants (in Sent, not in Drafts, inbox delivery asserted for the
+  # self-send). Stalwart is provisioned DETERMINISTICALLY (pinned version +
+  # SHA-256, no `latest`, no private nix flake) by the same script the dev stack
+  # documents; it fetches BOTH the server and stalwart-cli (seed.sh needs the CLI
+  # to import the fixture maildir — the old soft job fetched only the server and
+  # so silently failed at seed time). The StalwartFixture spawns the server on
+  # dynamic loopback ports (no service container), and delivery is local
+  # Stalwart→Stalwart, so no network is touched after provisioning.
+  send-path-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Reuse the `rust` job's build cache to keep this gate fast.
+          shared-key: ci-rust
+          cache-on-failure: true
+      - name: Provision pinned Stalwart (server + CLI)
+        run: bash tools/dev/stalwart/provision-ci.sh
+      - name: Send-path gate (regression + parity send assertions)
+        env:
+          POSTHASTE_STALWART_INTEGRATION: "1"
+        run: |
+          cargo test -p posthaste-server \
+            --test stalwart_send_regression \
+            --test stalwart_provider_parity
+
+  # Broader live Stalwart integration suite (mail-loss convergence +
+  # draft/discard). These targets early-`return` unless
+  # POSTHASTE_STALWART_INTEGRATION=1 and a real `stalwart` binary is available,
+  # so without this job they are dead coverage. Provisioned by the SAME pinned
+  # script as send-path-gate so CI and the dev stack never drift. The
+  # StalwartFixture spawns the process itself on dynamic loopback ports (no
+  # service container needed) and seeds via tools/dev/stalwart/{config.toml,seed.sh}.
   stalwart-integration:
     runs-on: ubuntu-latest
-    # Best-effort guardrail: runs the env-gated Stalwart integration tests so they
-    # are not dead coverage (AUDIT-L2-architecture-health). SOFT (continue-on-error)
-    # until the runner Stalwart provisioning is verified end-to-end — the private
-    # nix flake is unreachable from the runner, so we fetch the release binary
-    # directly. Harden to a required check once a green run is confirmed.
+    # SOFT (continue-on-error): the send path is now hard-gated above; this
+    # broader suite stays best-effort until its remaining flakes are triaged.
+    # Graduate individual tests to send-path-gate (or a new hard job) as they
+    # are proven reliable. See tools/dev/stalwart/provision-ci.sh.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-stalwart
+          shared-key: ci-rust
           cache-on-failure: true
-      - name: Provision Stalwart binary
-        run: |
-          set -eux
-          TAG=$(curl -fsSL https://api.github.com/repos/stalwartlabs/stalwart/releases/latest | jq -r .tag_name)
-          curl -fsSL "https://github.com/stalwartlabs/stalwart/releases/download/${TAG}/stalwart-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/stalwart.tar.gz
-          mkdir -p /tmp/stalwart && tar -xzf /tmp/stalwart.tar.gz -C /tmp/stalwart
-          echo "POSTHASTE_STALWART_BIN=$(find /tmp/stalwart -name stalwart -type f | head -1)" >> "$GITHUB_ENV"
+      - name: Provision pinned Stalwart (server + CLI)
+        run: bash tools/dev/stalwart/provision-ci.sh
       - name: Run live Stalwart integration tests
         env:
           POSTHASTE_STALWART_INTEGRATION: "1"

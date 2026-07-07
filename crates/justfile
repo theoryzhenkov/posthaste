@@ -20,6 +20,17 @@ build-release:
 test *args:
     cargo test --workspace --exclude posthaste-desktop {{args}}
 
+# Runs against the dev-stack Stalwart — the nix devshell puts `stalwart` +
+# `stalwart-cli` on PATH, which the StalwartFixture spawns on loopback ports.
+# For the pinned, checksum-verified binary CI uses, prefix with:
+#   eval "$(POSTHASTE_STALWART_ALLOW_PATH_FALLBACK=1 bash tools/dev/stalwart/provision-ci.sh)"
+# HARD send-path gate: the exact tests CI's `send-path-gate` job runs (a live
+# send must file into Sent and NOT Drafts; parity's self-send filing invariants).
+send-gate:
+    POSTHASTE_STALWART_INTEGRATION=1 cargo test -p posthaste-server \
+        --test stalwart_send_regression \
+        --test stalwart_provider_parity
+
 # Run clippy + check
 check:
     bash tools/dev/logs/check-rust-contract.sh
