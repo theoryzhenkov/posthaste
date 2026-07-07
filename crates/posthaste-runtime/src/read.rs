@@ -388,17 +388,21 @@ pub(crate) async fn run_authority_server_down_channel(
 /// (`BaseAssertion::event`, attached where the far node derives the assertion
 /// from the event) — republish THAT, restamped with the local live-stream seq,
 /// so the split runtime's clients receive the SAME enriched payload
-/// (`payload.projection` + absolute `payload.countDeltas`,
+/// (`payload.projection`, the body-free `MessageSummary` —
 /// `posthaste-store` `mutations/commands.rs`) the co-located bus delivers, and
-/// their mailbox counters move on their own mutations instead of freezing until
-/// a reload. The local seq only orders the live stream for fresh subscribers;
-/// authoritative seqs come via `replay_events` over the link (as before).
+/// their entity store can self-maintain mail-list ROWS on their own mutations
+/// instead of waiting for a re-serve. Counts no longer ride any event
+/// (RFC-L2-count-unification): a client reacts to this republished event by
+/// invalidating its mailbox-count query and refetching over the link. The
+/// local seq only orders the live stream for fresh subscribers; authoritative
+/// seqs come via `replay_events` over the link (as before).
 ///
 /// Without a carried event (an older far node), fall back to synthesizing a
 /// bare event: broad change flags — the view layer re-reads through the cache
 /// and suppresses no-op recomputes — and the account id (carried on the
 /// assertion) scoping per-account views like `messageDetail`. The bare shape
-/// has no `countDeltas`, so counters wait for the next replay/reload.
+/// still triggers the client's count invalidation; only the projection-fed row
+/// fold waits for the next re-serve.
 fn down_assertion_to_event(assertion: &BaseAssertion, seq: i64) -> DomainEvent {
     if let Some(event) = &assertion.event {
         let mut event = event.clone();
@@ -601,9 +605,9 @@ mod tests {
 
     /// The ENRICHED `message.updated` the store command authors in-tx
     /// (`posthaste-store` `mutations/commands.rs`) and the far node attaches to
-    /// its base assertion: `payload.projection` (the body-free summary) +
-    /// absolute `payload.countDeltas` — the exact fields the client's
-    /// `storeUpdatesFromEvent` reads to move the mailbox counters live.
+    /// its base assertion: `payload.projection` (the body-free summary) — the
+    /// field the client's `storeUpdatesFromEvent` reads to self-maintain the
+    /// mail-list ROWS. No counts ride the event (RFC-L2-count-unification).
     fn enriched_event(seq: i64, payload: serde_json::Value) -> DomainEvent {
         DomainEvent {
             seq,
@@ -617,7 +621,7 @@ mod tests {
     }
 
     /// A mark-read echo (`setKeywords` add `$seen`): the projection flips
-    /// `isRead` and the source mailbox's absolute unread count drops.
+    /// `isRead`. Counts ride no event (RFC-L2-count-unification).
     fn mark_read_event(seq: i64) -> DomainEvent {
         let mut projection = serde_json::to_value(summary("m1")).unwrap();
         projection["isRead"] = json!(true);
@@ -629,16 +633,12 @@ mod tests {
                 "changes": { "keywords": true },
                 "keywords": ["$seen"],
                 "projection": projection,
-                "countDeltas": [
-                    { "mailboxId": "inbox", "unreadCount": 4, "totalCount": 9 },
-                ],
             }),
         )
     }
 
     /// A move echo (`replaceMailboxes` inbox → archive): the projection carries
-    /// the new membership and BOTH affected mailboxes get absolute counts —
-    /// the source (decremented) and the target.
+    /// the new membership.
     fn move_event(seq: i64) -> DomainEvent {
         let mut projection = serde_json::to_value(summary("m1")).unwrap();
         projection["mailboxIds"] = json!(["archive"]);
@@ -650,19 +650,17 @@ mod tests {
                 "mailboxIds": ["archive"],
                 "arrivedMailboxIds": ["archive"],
                 "projection": projection,
-                "countDeltas": [
-                    { "mailboxId": "archive", "unreadCount": 3, "totalCount": 5 },
-                    { "mailboxId": "inbox", "unreadCount": 4, "totalCount": 9 },
-                ],
             }),
         )
     }
 
     // The split republish forwards the carried enriched event — same topic and
-    // scope, `projection` + `countDeltas` intact — restamped with the local
-    // live-stream seq. This is the split-mode twin of the bundled enriched echo
-    // (`queue_then_emit_message_operation`), so a split client's own mark-read
-    // moves its source-mailbox counter live instead of freezing until reload.
+    // scope, `projection` intact — restamped with the local live-stream seq.
+    // This is the split-mode twin of the bundled enriched echo
+    // (`queue_then_emit_message_operation`): the carried projection keeps the
+    // split client's mail-list ROWS self-maintaining, and the republished event
+    // is the trigger the client's count invalidation fires on (the counts
+    // themselves are refetched over the link, not carried).
     #[test]
     fn a_mark_read_assertion_republishes_the_enriched_event_with_the_local_seq() {
         let assertion = BaseAssertion {
@@ -679,17 +677,15 @@ mod tests {
         assert_eq!(event.seq, 7, "restamped with the local live-stream seq");
         assert_eq!(event.account_id.as_str(), "acct");
         assert_eq!(event.message_id.as_ref().map(MessageId::as_str), Some("m1"));
-        // The counter slice's food: absolute counts for the source mailbox.
-        assert_eq!(event.payload["countDeltas"][0]["mailboxId"], "inbox");
-        assert_eq!(event.payload["countDeltas"][0]["unreadCount"], 4);
-        assert_eq!(event.payload["countDeltas"][0]["totalCount"], 9);
         // The row's food: the projection reflects the mark-read.
         assert_eq!(event.payload["projection"]["isRead"], true);
         assert_eq!(event.payload["changes"]["keywords"], true);
+        // No counts on the wire — the client invalidates + refetches instead.
+        assert!(event.payload.get("countDeltas").is_none());
     }
 
     #[test]
-    fn a_move_assertion_republishes_counts_for_source_and_target_mailboxes() {
+    fn a_move_assertion_republishes_the_post_move_projection() {
         let assertion = BaseAssertion {
             account_id: "acct".into(),
             message_id: "m1".into(),
@@ -702,15 +698,12 @@ mod tests {
         let event = down_assertion_to_event(&assertion, 9);
         assert_eq!(event.seq, 9);
         assert_eq!(event.payload["changes"]["mailboxes"], true);
-        // Both sides of the move carry absolute counts (source decremented).
-        assert_eq!(event.payload["countDeltas"][0]["mailboxId"], "archive");
-        assert_eq!(event.payload["countDeltas"][1]["mailboxId"], "inbox");
-        assert_eq!(event.payload["countDeltas"][1]["unreadCount"], 4);
-        // The projection carries the post-move membership.
+        // The projection carries the post-move membership (row liveness).
         assert_eq!(
             event.payload["projection"]["mailboxIds"],
             json!(["archive"])
         );
+        assert!(event.payload.get("countDeltas").is_none());
     }
 
     // An assertion without a carried event (an older far node / synthetic frame)
@@ -727,7 +720,6 @@ mod tests {
         assert_eq!(event.topic, EVENT_TOPIC_MESSAGE_UPDATED);
         assert_eq!(event.payload["changes"]["keywords"], true);
         assert_eq!(event.payload["changes"]["mailboxes"], true);
-        assert!(event.payload.get("countDeltas").is_none());
 
         let removed = BaseAssertion {
             account_id: "acct".into(),
@@ -883,9 +875,9 @@ mod tests {
 
         // It republished the assertion's carried ENRICHED `message.updated`
         // domain event — scoped to the right account + message, with the
-        // `projection` + absolute `countDeltas` the client's counter slice
-        // consumes (the same shape as the bundled echo), restamped with the
-        // local live-stream seq.
+        // `projection` the client's row fold consumes (the same shape as the
+        // bundled echo), restamped with the local live-stream seq. No counts on
+        // the wire: this republished event is the count-invalidation trigger.
         let event = rx.try_recv().expect("an event was republished");
         assert_eq!(event.topic, EVENT_TOPIC_MESSAGE_UPDATED);
         assert_eq!(event.account_id.as_str(), "acct");
@@ -896,8 +888,7 @@ mod tests {
         );
         assert_eq!(event.payload["changes"]["keywords"], true);
         assert_eq!(event.payload["projection"]["isRead"], true);
-        assert_eq!(event.payload["countDeltas"][0]["mailboxId"], "inbox");
-        assert_eq!(event.payload["countDeltas"][0]["unreadCount"], 4);
+        assert!(event.payload.get("countDeltas").is_none());
 
         // And it evicted the cache: the next read re-fetches.
         cache.current_summary(&account, &message).await.unwrap();

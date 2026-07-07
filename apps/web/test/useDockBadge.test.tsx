@@ -14,10 +14,7 @@ import * as tauriWindow from '@tauri-apps/api/window'
 
 import type { AccountOverview, Mailbox } from '../src/api/types'
 import { queryKeys } from '../src/queryKeys'
-import {
-  __resetLiveStoreForTesting,
-  setMailboxCount,
-} from '../src/live-store/store'
+import { __resetLiveStoreForTesting } from '../src/live-store/store'
 import { accountInboxUnread, useDockBadge } from '../src/hooks/useDockBadge'
 import { DockBadge } from '../src/hooks/DockBadge'
 import { setupDomEnvironment } from './dom-env'
@@ -74,45 +71,62 @@ afterEach(() => {
 })
 
 describe('accountInboxUnread', () => {
-  it('sums inbox-role mailboxes only, preferring live counts over the read-model', () => {
+  it('sums inbox-role mailboxes only from the react-query rows', () => {
     const mailboxes = [
       mailbox('inbox', 'inbox', 2),
       mailbox('junk', 'junk', 5),
       mailbox('archive', 'archive', 9),
     ]
-    // Live count for the inbox overrides its read-model 2 -> 3; junk/archive
-    // never count even though they carry unread.
-    expect(
-      accountInboxUnread(mailboxes, { inbox: { unread: 3, total: 10 } }),
-    ).toBe(3)
+    // Only the inbox-role mailbox counts; junk/archive never inflate the badge
+    // even though they carry unread.
+    expect(accountInboxUnread(mailboxes)).toBe(2)
   })
 
-  it('falls back to the read-model server count when no live frame has seeded', () => {
-    expect(accountInboxUnread([mailbox('inbox', 'inbox', 4)], {})).toBe(4)
+  it('sums multiple inbox-role mailboxes', () => {
+    expect(
+      accountInboxUnread([
+        mailbox('inbox-a', 'inbox', 4),
+        mailbox('inbox-b', 'inbox', 3),
+      ]),
+    ).toBe(7)
   })
 })
 
 describe('DockBadge', () => {
-  it('sets the badge to the total inbox unread across accounts (live + fallback)', async () => {
+  it('sets the badge to the total inbox unread across accounts (react-query rows)', async () => {
     queryClient.setQueryData(queryKeys.accounts, [
       account('a', true),
       account('b', true),
     ])
     queryClient.setQueryData(queryKeys.mailboxes('a'), [
-      mailbox('a-inbox', 'inbox', 2),
+      mailbox('a-inbox', 'inbox', 3),
       mailbox('a-junk', 'junk', 5),
     ])
     queryClient.setQueryData(queryKeys.mailboxes('b'), [
       mailbox('b-inbox', 'inbox', 1),
     ])
-    // Live count for account a overrides read-model 2 -> 3; account b has no
-    // live frame, so its read-model unread (1) is used. junk excluded.
-    setMailboxCount('a', 'a-inbox', { unread: 3, total: 10 })
 
     render(<DockBadge />, { wrapper })
 
     await waitFor(() => expect(setBadgeCount).toHaveBeenCalled())
     expect(setBadgeCount).toHaveBeenLastCalledWith(4)
+  })
+
+  it('re-pushes the badge when the count query data moves (the overlay/refetch path)', async () => {
+    queryClient.setQueryData(queryKeys.accounts, [account('a', true)])
+    queryClient.setQueryData(queryKeys.mailboxes('a'), [
+      mailbox('a-inbox', 'inbox', 2),
+    ])
+
+    render(<DockBadge />, { wrapper })
+    await waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(2))
+
+    // A count-affecting change lands in the query cache (an invalidation
+    // refetch or the optimistic overlay's setQueryData): the badge follows.
+    queryClient.setQueryData(queryKeys.mailboxes('a'), [
+      mailbox('a-inbox', 'inbox', 1),
+    ])
+    await waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(1))
   })
 
   it('clears the badge (undefined) when the inbox unread is zero', async () => {

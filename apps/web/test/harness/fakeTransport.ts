@@ -97,17 +97,13 @@ function snapshot(
   }
 }
 
-/** Build a `message.updated` notification frame (the authoritative row+count
- *  path the store ingests). */
+/** Build a `message.updated` notification frame (the authoritative ROW path
+ *  the store ingests; counts ride no event — RFC-L2-count-unification). */
 export function messageUpdatedFrame(
   messageId: string,
   projection: Record<string, unknown>,
-  countDeltas: Array<{
-    mailboxId: string
-    unreadCount: number
-    totalCount: number
-  }> = [],
   accountId = 's',
+  changes: Record<string, boolean> = { keywords: true },
 ): RuntimeFrame<RuntimeMailListViewState> {
   return {
     type: 'notification',
@@ -118,7 +114,7 @@ export function messageUpdatedFrame(
       accountId,
       topic: 'message.updated',
       occurredAt: 'now',
-      payload: { messageId, projection, countDeltas },
+      payload: { messageId, projection, changes },
     },
   } as RuntimeFrame<RuntimeMailListViewState>
 }

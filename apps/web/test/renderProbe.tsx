@@ -523,7 +523,7 @@ export function messageUpdatedFrame(
       accountId: sourceId,
       topic: 'message.updated',
       occurredAt: 'now',
-      payload: { messageId, projection, countDeltas: [] },
+      payload: { messageId, projection },
     },
   }
 }

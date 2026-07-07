@@ -2,10 +2,11 @@
 /* eslint-disable */
 
 /**
- * A live reactive entity store owned by JS: messages, mailboxes (count
- * scalars), and views (ordered row lists + coverage), with a message optimism
- * fold. The host feeds it authoritative batches and reads the dirty keys to
- * drive the renderer.
+ * A live reactive entity store owned by JS: messages and views (ordered row
+ * lists + coverage), with a message optimism fold. The host feeds it
+ * authoritative batches and reads the dirty keys to drive the renderer.
+ * Mailbox counts are not held here (RFC-L2-count-unification): the client
+ * reads them via react-query invalidation of the runtime's canonical counts.
  */
 export class EntityStoreHandle {
     free(): void;
@@ -43,8 +44,8 @@ export class EntityStoreHandle {
     closeView(view_id: string): void;
     /**
      * Drain the keys changed since the last drain as a JSON array of
-     * `{"message":id}` / `{"mailbox":id}` / `{"view":id}`. The host re-reads
-     * these (re-project views, re-write counts). One drain per batch.
+     * `{"message":id}` / `{"view":id}`. The host re-reads these (re-project
+     * views). One drain per batch.
      */
     drainDirtyJson(): string;
     /**
@@ -61,16 +62,9 @@ export class EntityStoreHandle {
     /**
      * Apply an authoritative batch atomically: every update is applied before
      * any dirty key is reported. `batch_json` is a JSON array of
-     * `{"message":{messageId, projection, deleted, countDeltas:[{mailboxId,
-     * unreadCount, totalCount}]}}` and/or `{"mailboxCount":{mailboxId,
-     * unreadCount, totalCount}}`.
+     * `{"message":{messageId, projection, deleted}}`.
      */
     ingestBatchJson(batch_json: string): void;
-    /**
-     * A mailbox's server-authoritative counts as `{"unreadCount",
-     * "totalCount"}`, or `"null"` if the mailbox is not held.
-     */
-    mailboxJson(mailbox_id: string): string;
     /**
      * A message's optimistic projection as a JSON string, or `"null"` if the
      * message is not held or has been optimistically destroyed. The projection
@@ -210,7 +204,6 @@ export interface InitOutput {
     readonly entitystorehandle_drainRetiredJson: (a: number) => [number, number];
     readonly entitystorehandle_hasPending: (a: number) => number;
     readonly entitystorehandle_ingestBatchJson: (a: number, b: number, c: number) => [number, number];
-    readonly entitystorehandle_mailboxJson: (a: number, b: number, c: number) => [number, number];
     readonly entitystorehandle_messageJson: (a: number, b: number, c: number) => [number, number];
     readonly entitystorehandle_new: () => number;
     readonly entitystorehandle_projectViewJson: (a: number, b: number, c: number) => [number, number];
@@ -220,7 +213,7 @@ export interface InitOutput {
     readonly entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
     readonly invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
     readonly parseMailOperation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__h28e6bf82b92400ea: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__hcbd61467c748630e: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__ha35c10aed9720f95: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h454f628c0b88f09d: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h690adb9d64021208: (a: number, b: number) => void;

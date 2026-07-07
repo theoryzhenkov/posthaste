@@ -2,10 +2,9 @@
 //!
 //! Generalizes [`crate::MailListReplica`] from a single mail-list view into a
 //! normalized, keyed entity store with register-by-use / drain-dirty reactivity:
-//! `message[id]`, `mailbox[id]` (server-authoritative count scalars), and
-//! `view[viewId]` (an ordered row list plus coverage). The host feeds it
-//! authoritative batches — message mutations (carrying the full `MessageSummary`
-//! projection, per `firehose-carries-rows`) and count deltas — and the store
+//! `message[id]` and `view[viewId]` (an ordered row list plus coverage). The
+//! host feeds it authoritative batches — message mutations carrying the full
+//! `MessageSummary` projection, per `firehose-carries-rows` — and the store
 //! applies the whole batch atomically, then reports the keys that changed via
 //! [`EntityStore::drain_dirty`]. The host does the reactive fan-out (write the
 //! changed keys into the renderer cache); the store is a dumb dirty-tracker.
@@ -39,10 +38,10 @@
 //! an unrelated base update (a sibling arrival re-seeds only its own base; the
 //! outbox is untouched and re-folds).
 //!
-//! Counts are **not** derived: a mailbox entity holds server-authoritative count
-//! scalars (the store is partial, so a held-window count is not the true total).
-//! Optimism for counts is a later concern (mutation-id-end-to-end); today a count
-//! delta from the authority is the only path.
+//! Counts are **not** here at all (RFC-L2-count-unification): the store is
+//! partial, so a held-window count is never the true total, and the client
+//! reads mailbox counts via react-query invalidation of the runtime's
+//! canonical trigger-maintained mailbox rows — no per-event delta application.
 //!
 //! Coverage is held as the watermark `W` (the sort key of the last held row;
 //! `None` = reaches BOTTOM); the full multi-range `CoverageRange` shape is
@@ -59,30 +58,24 @@ use serde_json::Value;
 use posthaste_replica_core::{MessageAssertion, MutationId, SettlementOutcome, SettlementResult};
 
 use crate::mechanism::{BaseApplied, ReplicaMechanism};
-use crate::projection::{
-    CountDelta, DirtyKey, MailboxEntity, SortDirection, SortKey, ViewPredicate, ViewProjection,
-    ViewRow,
-};
+use crate::projection::{DirtyKey, SortDirection, SortKey, ViewPredicate, ViewProjection, ViewRow};
 
 /// One authoritative update in a batch.
 ///
 /// Serializes externally-tagged + camelCase: `{"message":{messageId,
-/// projection, deleted, countDeltas}}` / `{"mailboxCount":{mailboxId,...}}`.
+/// projection, deleted}}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StoreUpdate {
     /// A message mutation carrying the full projection (enough to evaluate
-    /// membership, compute the sort key, and render) plus the affected
-    /// mailboxes' new counts (`firehose-carries-rows`, `D2`).
+    /// membership, compute the sort key, and render) —
+    /// `firehose-carries-rows`, `D2`.
     #[serde(rename_all = "camelCase")]
     Message {
         message_id: String,
         projection: Value,
         deleted: bool,
-        count_deltas: Vec<CountDelta>,
     },
-    /// A standalone count delta (e.g. a mailbox metadata event).
-    MailboxCount(CountDelta),
 }
 
 /// The reactive entity store. Pure compute: no transport, no persistence.
@@ -142,14 +135,9 @@ impl EntityStore {
                     message_id,
                     projection,
                     deleted,
-                    count_deltas,
                 } => {
                     self.apply_message(&message_id, &projection, deleted);
-                    for delta in count_deltas {
-                        self.projection.apply_count_delta(&delta);
-                    }
                 }
-                StoreUpdate::MailboxCount(delta) => self.projection.apply_count_delta(&delta),
             }
         }
     }
@@ -218,11 +206,6 @@ impl EntityStore {
     /// Read a message's optimistic projection (None if not held or destroyed).
     pub fn message(&self, message_id: &str) -> Option<Value> {
         self.mechanism.optimistic_projection(message_id)
-    }
-
-    /// Read a mailbox's counts.
-    pub fn mailbox(&self, mailbox_id: &str) -> Option<&MailboxEntity> {
-        self.projection.mailbox(mailbox_id)
     }
 
     /// Read a view's rows.
@@ -303,7 +286,6 @@ mod tests {
             message_id: "m2".into(),
             projection: proj,
             deleted: false,
-            count_deltas: vec![],
         }]);
     }
 
@@ -318,7 +300,6 @@ mod tests {
             message_id: "m2".into(),
             projection: proj,
             deleted: false,
-            count_deltas: vec![],
         }]);
     }
 
@@ -332,7 +313,6 @@ mod tests {
             message_id: "m2".into(),
             projection: proj,
             deleted: false,
-            count_deltas: vec![],
         }]);
     }
 
@@ -353,7 +333,6 @@ mod tests {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         let ids: Vec<&str> = store
             .view_rows(view)
@@ -372,7 +351,6 @@ mod tests {
             message_id: "m3".into(),
             projection: summary("m3", "2026-04-27T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         let ids: Vec<&str> = store
             .view_rows(view)
@@ -414,7 +392,6 @@ mod tests {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         // m3 is older (at-or-below the watermark) → in range, placed before m2
         // in ascending order. The buggy comparison would drop it.
@@ -422,7 +399,6 @@ mod tests {
             message_id: "m3".into(),
             projection: summary("m3", "2026-04-27T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
 
         let ids: Vec<&str> = store
@@ -442,7 +418,6 @@ mod tests {
             message_id: "m2".into(),
             projection: summary("m2", "2026-04-28T12:00:00Z", &["archive"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         assert!(store.view_rows(view).unwrap().is_empty());
     }
@@ -454,28 +429,9 @@ mod tests {
             message_id: "m2".into(),
             projection: summary("m2", "2026-04-28T12:00:00Z", &["inbox"]),
             deleted: true,
-            count_deltas: vec![],
         }]);
         assert!(store.view_rows(view).unwrap().is_empty());
         assert!(store.message("m2").is_none());
-    }
-
-    #[test]
-    fn count_delta_updates_mailbox_and_is_dirty() {
-        let (mut store, _view) = inbox_view();
-        store.ingest_batch(vec![StoreUpdate::Message {
-            message_id: "m1".into(),
-            projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
-            deleted: false,
-            count_deltas: vec![CountDelta {
-                mailbox_id: "inbox".into(),
-                unread_count: 3,
-                total_count: 10,
-            }],
-        }]);
-        assert_eq!(store.mailbox("inbox").unwrap().unread_count, 3);
-        let dirty = store.drain_dirty();
-        assert!(dirty.contains(&DirtyKey::Mailbox("inbox".into())));
     }
 
     #[test]
@@ -487,17 +443,11 @@ mod tests {
                 message_id: "m1".into(),
                 projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
                 deleted: false,
-                count_deltas: vec![CountDelta {
-                    mailbox_id: "inbox".into(),
-                    unread_count: 2,
-                    total_count: 5,
-                }],
             },
             StoreUpdate::Message {
                 message_id: "m0".into(),
                 projection: summary("m0", "2026-04-30T10:00:00Z", &["inbox"]),
                 deleted: false,
-                count_deltas: vec![],
             },
         ]);
         let dirty = store.drain_dirty();
@@ -530,7 +480,6 @@ mod tests {
             message_id: "m9".into(),
             projection: summary("m9", "2020-01-01T00:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         assert_eq!(store.view_rows("all").unwrap().len(), 1);
     }
@@ -550,7 +499,6 @@ mod tests {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         // The host drives a deferred view via set_view_rows; a raw mutation
         // does not place a row.
@@ -575,13 +523,11 @@ mod tests {
                 message_id: "m-a".into(),
                 projection: summary("m-a", "2026-04-29T12:00:00Z", &["inbox-b"]),
                 deleted: false,
-                count_deltas: vec![],
             },
             StoreUpdate::Message {
                 message_id: "m-c".into(),
                 projection: summary("m-c", "2026-04-29T11:00:00Z", &["archive-a"]),
                 deleted: false,
-                count_deltas: vec![],
             },
         ]);
         let rows = store.view_rows("all-inboxes").unwrap();
@@ -660,7 +606,6 @@ mod tests {
             message_id: "m3".into(),
             projection: summary("m3", "2026-04-27T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         store.drain_dirty();
         assert!(views_of(&store, "m3").is_empty(), "m3 is in no view");
@@ -684,7 +629,6 @@ mod tests {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         assert_eq!(views_of(&store, "m1"), vec![view]);
 
@@ -693,7 +637,6 @@ mod tests {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["archive"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         assert!(
             views_of(&store, "m1").is_empty(),
@@ -705,14 +648,12 @@ mod tests {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
         assert_eq!(views_of(&store, "m1"), vec![view]);
         store.ingest_batch(vec![StoreUpdate::Message {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
             deleted: true,
-            count_deltas: vec![],
         }]);
         assert!(views_of(&store, "m1").is_empty(), "deleted row de-indexed");
     }
@@ -760,7 +701,6 @@ mod tests {
             message_id: "m2".into(),
             projection: json!(null),
             deleted: true,
-            count_deltas: vec![],
         }]);
 
         // The op is purged — it can neither fold into nor revert against a
@@ -928,7 +868,6 @@ mod tests {
             message_id: "m2".into(),
             projection: moved,
             deleted: false,
-            count_deltas: vec![],
         }]);
         assert!(store.view_rows(view).unwrap().is_empty()); // the blink: m2 gone
 
@@ -1024,7 +963,6 @@ mod tests {
             message_id: "m0".into(),
             projection: summary("m0", "2026-04-30T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![],
         }]);
 
         // m2's optimism survived the rebase (its pending was not cleared).
@@ -1091,11 +1029,6 @@ mod tests {
             message_id: "m1".into(),
             projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
             deleted: false,
-            count_deltas: vec![CountDelta {
-                mailbox_id: "inbox".into(),
-                unread_count: 3,
-                total_count: 10,
-            }],
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(
@@ -1104,26 +1037,31 @@ mod tests {
             "message update is externally-tagged + camelCase"
         );
         assert_eq!(json["message"]["deleted"], json!(false));
-        assert_eq!(
-            json["message"]["countDeltas"][0]["mailboxId"],
-            json!("inbox")
-        );
+        // The countDelta channel is deleted (RFC-L2-count-unification): a
+        // message update carries no counts on the wire.
+        assert!(json["message"].get("countDeltas").is_none());
         // Round-trips back unchanged.
         let back: StoreUpdate = serde_json::from_value(json).unwrap();
         assert_eq!(back, update);
     }
 
     #[test]
-    fn mailbox_count_update_round_trips() {
-        let update = StoreUpdate::MailboxCount(CountDelta {
-            mailbox_id: "inbox".into(),
-            unread_count: 1,
-            total_count: 2,
+    fn store_update_tolerates_a_legacy_count_deltas_field() {
+        // A stale producer (an old runtime still attaching countDeltas) must not
+        // brick ingestion: unknown fields are ignored by serde's default.
+        let json = json!({
+            "message": {
+                "messageId": "m1",
+                "projection": summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
+                "deleted": false,
+                "countDeltas": [
+                    {"mailboxId": "inbox", "unreadCount": 3, "totalCount": 10}
+                ]
+            }
         });
-        let json = serde_json::to_value(&update).unwrap();
-        assert_eq!(json["mailboxCount"]["unreadCount"], json!(1));
         let back: StoreUpdate = serde_json::from_value(json).unwrap();
-        assert_eq!(back, update);
+        let StoreUpdate::Message { message_id, .. } = back;
+        assert_eq!(message_id, "m1");
     }
 
     #[test]
@@ -1132,10 +1070,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(DirtyKey::Message("m1".into())).unwrap(),
             json!({"message": "m1"})
-        );
-        assert_eq!(
-            serde_json::to_value(DirtyKey::Mailbox("inbox".into())).unwrap(),
-            json!({"mailbox": "inbox"})
         );
         assert_eq!(
             serde_json::to_value(DirtyKey::View("inbox".into())).unwrap(),

@@ -36,7 +36,7 @@ fn default_capability_is_limited_to_posthaste_windows_and_minimal_plugins() {
         json_array_strings(&capability, "permissions"),
         vec![
             "core:default",
-            // The macOS Dock unread badge (useDockBadge → setBadgeCount).
+            // The Dock/taskbar unread badge sink (`setBadgeCount`, DockBadge).
             "core:window:allow-set-badge-count",
             "opener:allow-open-url",
             "updater:default",

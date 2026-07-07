@@ -2,13 +2,14 @@
 //!
 //! Wraps the [`posthaste_replica_core`] convergence engine with a normalized,
 //! keyed entity store ([client-link L2 §2](../replication/client-link/L2.md)):
-//! `message[id]`, `mailbox[id]` (server-authoritative count scalars), and
-//! `view[viewId]` (an ordered row list + coverage). The host feeds it
-//! authoritative batches — message mutations (carrying the full projection) +
-//! count deltas — and the store applies the batch atomically, self-maintains
+//! `message[id]` and `view[viewId]` (an ordered row list + coverage). The host
+//! feeds it authoritative batches — message mutations carrying the full
+//! projection — and the store applies the batch atomically, self-maintains
 //! each evaluable view's membership, then reports the changed keys. Optimism is
 //! a pure fold over the confirmed base (the shared predictor); the store never
-//! stores it as truth.
+//! stores it as truth. Mailbox counts are NOT held here: the client reads them
+//! via react-query invalidation of the runtime's canonical counts
+//! (RFC-L2-count-unification).
 //!
 //! Layered per RFC D36: [`mechanism`] is the accept/settle/retire plumbing
 //! over replica-core's `OptimisticReplica` kernel (layer 1 mount); [`projection`]
@@ -28,6 +29,4 @@ pub mod projection;
 
 pub use entity_store::{EntityStore, StoreUpdate};
 pub use mechanism::{apply_fold_to_projection, fold_state_from_projection, project_optimistic};
-pub use projection::{
-    CountDelta, DirtyKey, MailboxEntity, SortDirection, SortKey, ViewEntity, ViewPredicate, ViewRow,
-};
+pub use projection::{DirtyKey, SortDirection, SortKey, ViewEntity, ViewPredicate, ViewRow};

@@ -6,9 +6,9 @@
  * The badge shows the total INBOX unread across all enabled accounts — the
  * standard "unread mail" counter (Apple Mail behaviour): only mailboxes with the
  * `inbox` role are summed, so spam/archive/sent never inflate the count. The
- * count is live: it reads the live-store counts slice (`useMailboxCounts`, the
- * sidebar's owner), falling back to the mailbox read-model's server count for a
- * mailbox no live frame has seeded yet.
+ * count is live: it reads the react-query mailbox rows' `unreadEmails`
+ * (RFC-L2-count-unification), kept fresh by count invalidation on events plus
+ * the optimistic overlay's setQueryData for the user's own mutations.
  *
  * Tauri-only. Outside the desktop webview (browser build, dev, tests) it is a
  * pure no-op — the badge push is guarded on `isTauriRuntime()` and every call is
@@ -23,27 +23,21 @@ import { useEffect, useRef } from 'react'
 
 import type { Mailbox } from '@/api/types'
 import { isTauriRuntime } from '@/desktop'
-import type { AccountMailboxCounts } from '@/live-store/store'
 import { LOG_EVENTS, uiLogger } from '@/logger'
 
 const INBOX_ROLE = 'inbox'
 
 /**
- * Sum inbox-role unread for one account. The live-store count wins when present;
- * otherwise the read-model's server count seeds the mailbox until the first live
- * frame arrives. Non-inbox roles (junk/archive/sent/…) are excluded.
+ * Sum inbox-role unread for one account from the react-query mailbox rows.
+ * Non-inbox roles (junk/archive/sent/…) are excluded.
  */
-export function accountInboxUnread(
-  mailboxes: readonly Mailbox[],
-  liveCounts: AccountMailboxCounts,
-): number {
+export function accountInboxUnread(mailboxes: readonly Mailbox[]): number {
   let total = 0
   for (const mailbox of mailboxes) {
     if (mailbox.role !== INBOX_ROLE) {
       continue
     }
-    const live = liveCounts[mailbox.id]
-    total += live ? live.unread : mailbox.unreadEmails
+    total += mailbox.unreadEmails
   }
   return total
 }
