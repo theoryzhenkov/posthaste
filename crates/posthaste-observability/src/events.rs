@@ -75,6 +75,11 @@ pub const SERVER_LISTENING: LogEvent = LogEvent::new("server.listening");
 pub const LINK_SURFACE_SERVED: LogEvent = LogEvent::new("link.surface_served");
 pub const SEND_SENDER_CACHE_UPDATE_FAILED: LogEvent =
     LogEvent::new("send.sender_cache_update_failed");
+/// A JMAP send's submission committed but the server neither applied nor
+/// rejected the `onSuccessUpdateEmail` Drafts→Sent move (a silently-ignored
+/// reference). Non-fatal — the message WAS submitted — but the outgoing copy
+/// stays filed in Drafts, so the anomaly must be visible in the operator log.
+pub const SEND_SENT_MOVE_NOT_APPLIED: LogEvent = LogEvent::new("send.sent_move_not_applied");
 pub const OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("outbox.followup_sync_trigger_failed");
 
