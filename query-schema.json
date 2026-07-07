@@ -162,6 +162,13 @@
       ]
     },
     {
+      "field": "body",
+      "valueType": "text",
+      "operators": [
+        "contains"
+      ]
+    },
+    {
       "field": "receivedAt",
       "valueType": "date",
       "operators": [

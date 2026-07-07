@@ -1882,7 +1882,7 @@ export interface components {
          *     @spec docs/L1-accounts#condition-fields-and-operators
          * @enum {string}
          */
-        MailQueryField: "sourceId" | "sourceName" | "messageId" | "threadId" | "conversationId" | "mailboxId" | "mailboxName" | "mailboxRole" | "isRead" | "isFlagged" | "hasAttachment" | "keyword" | "fromName" | "fromEmail" | "to" | "subject" | "preview" | "receivedAt" | "size";
+        MailQueryField: "sourceId" | "sourceName" | "messageId" | "threadId" | "conversationId" | "mailboxId" | "mailboxName" | "mailboxRole" | "isRead" | "isFlagged" | "hasAttachment" | "keyword" | "fromName" | "fromEmail" | "to" | "subject" | "preview" | "body" | "receivedAt" | "size";
         /**
          * @description Boolean group node containing child conditions or nested groups.
          *

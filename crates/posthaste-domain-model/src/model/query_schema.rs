@@ -74,6 +74,11 @@ const EQ_IN: &[MailQueryOperator] = &[Equals, In];
 /// These belong with `contains`: they are text-shaped predicates over the same
 /// free-text columns (id columns keep the leaner [`EQ_IN`] set).
 const EQ_CONTAINS_IN: &[MailQueryOperator] = &[Equals, Contains, In, BeginsWith, EndsWith, Regex];
+/// `contains` only: the FTS-backed body field. The FTS5 index answers token /
+/// phrase containment; equality, prefix/suffix, regex, and `in` have no
+/// index-backed meaning over unstored (external-content) body text, so they
+/// are not offered rather than silently falling back to a full-body scan.
+const CONTAINS_ONLY: &[MailQueryOperator] = &[Contains];
 /// Boolean equality.
 const EQ_ONLY: &[MailQueryOperator] = &[Equals];
 /// The four ordered comparisons, reused for dates and numbers (`< > <= >=`).
@@ -103,6 +108,8 @@ pub const fn field_spec(field: MailQueryField) -> MailQueryFieldSpec {
         | F::To
         | F::Subject
         | F::Preview => (QueryValueType::Text, EQ_CONTAINS_IN),
+        // Full-text body: token/phrase containment via the FTS5 index only.
+        F::Body => (QueryValueType::Text, CONTAINS_ONLY),
         // Boolean flags.
         F::IsRead | F::IsFlagged | F::HasAttachment => (QueryValueType::Bool, EQ_ONLY),
         // Date column: ordered comparisons.
@@ -137,6 +144,7 @@ pub const ALL_QUERY_FIELDS: &[MailQueryField] = &[
     MailQueryField::To,
     MailQueryField::Subject,
     MailQueryField::Preview,
+    MailQueryField::Body,
     MailQueryField::ReceivedAt,
     MailQueryField::Size,
 ];
@@ -382,6 +390,7 @@ mod tests {
                 | F::To
                 | F::Subject
                 | F::Preview
+                | F::Body
                 | F::ReceivedAt
                 | F::Size => {}
             }

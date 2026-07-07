@@ -12,7 +12,7 @@ use posthaste_config::TomlConfigRepository;
 use posthaste_contract_core::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_domain_model::DomainEvent;
 use posthaste_domain_service::{ConfigRepository, MailService, MailStore, SecretStore};
-use posthaste_observability::{events, ph_warn};
+use posthaste_observability::{events, ph_info, ph_warn};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 
@@ -290,6 +290,25 @@ pub(crate) async fn build_authority_server_parts(
                     error = %error,
                     "deferred startup address-book backfill failed"
                 );
+            }
+            // One-time full-text-index repopulation after the body-indexing
+            // migration (init_schema drops the old header-only `message_fts`;
+            // this issues the FTS5 `rebuild` that re-indexes every message —
+            // headers AND already-cached bodies). Idempotent no-op on every
+            // non-upgrade startup; best effort like the two tasks above (the
+            // trigger-maintained index stays consistent for new writes, and
+            // the next startup retries the rebuild if this one fails).
+            match repair_store.backfill_message_fts() {
+                Ok(true) => ph_info!(
+                    events::STORE_STARTUP_MESSAGE_FTS_BACKFILL_COMPLETED,
+                    "deferred startup full-text-index rebuild completed"
+                ),
+                Ok(false) => {}
+                Err(error) => ph_warn!(
+                    events::STORE_STARTUP_MESSAGE_FTS_BACKFILL_FAILED,
+                    error = %error,
+                    "deferred startup full-text-index backfill failed"
+                ),
             }
         });
     }

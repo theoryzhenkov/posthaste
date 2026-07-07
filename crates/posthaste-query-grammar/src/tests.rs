@@ -70,10 +70,81 @@ fn test_parse_free_text() {
     assert_eq!(rule.root.nodes.len(), 1);
     if let MailQueryRuleNode::Group(g) = &rule.root.nodes[0] {
         assert_eq!(g.operator, MailQueryGroupOperator::Any);
-        assert_eq!(g.nodes.len(), 4); // FromName, FromEmail, Subject, Preview
+        // FromName, FromEmail, Subject, Preview, Body — a default unprefixed
+        // search includes full-text body matches.
+        assert_eq!(g.nodes.len(), 5);
+        let fields: Vec<MailQueryField> = g
+            .nodes
+            .iter()
+            .map(|node| match node {
+                MailQueryRuleNode::Condition(c) => c.field,
+                MailQueryRuleNode::Group(_) => panic!("expected flat conditions"),
+            })
+            .collect();
+        assert_eq!(
+            fields,
+            vec![
+                MailQueryField::FromName,
+                MailQueryField::FromEmail,
+                MailQueryField::Subject,
+                MailQueryField::Preview,
+                MailQueryField::Body,
+            ]
+        );
     } else {
         panic!("expected Group node for free text");
     }
+}
+
+#[test]
+fn test_parse_to_prefix() {
+    for query in ["to:alice@example.com", "recipient:alice@example.com"] {
+        let rule = parse_query(query).unwrap();
+        assert_eq!(rule.root.nodes.len(), 1, "{query}");
+        let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+            panic!("expected To condition for {query}");
+        };
+        assert_eq!(condition.field, MailQueryField::To);
+        assert_eq!(condition.operator, MailQueryOperator::Contains);
+        assert_eq!(
+            condition.value,
+            MailQueryValue::String("alice@example.com".to_string())
+        );
+        assert!(!condition.negated);
+    }
+}
+
+#[test]
+fn test_parse_negated_to_prefix() {
+    let rule = parse_query("-to:bob").unwrap();
+    let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+        panic!("expected To condition");
+    };
+    assert_eq!(condition.field, MailQueryField::To);
+    assert!(condition.negated);
+}
+
+/// `body:` is a true full-text body match; `preview:` stays pinned to the
+/// synced preview snippet — the two prefixes are no longer aliases.
+#[test]
+fn test_parse_body_and_preview_prefixes_are_distinct_fields() {
+    let rule = parse_query("body:receipt").unwrap();
+    let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+        panic!("expected Body condition");
+    };
+    assert_eq!(condition.field, MailQueryField::Body);
+    assert_eq!(condition.operator, MailQueryOperator::Contains);
+    assert_eq!(
+        condition.value,
+        MailQueryValue::String("receipt".to_string())
+    );
+
+    let rule = parse_query("preview:receipt").unwrap();
+    let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+        panic!("expected Preview condition");
+    };
+    assert_eq!(condition.field, MailQueryField::Preview);
+    assert_eq!(condition.operator, MailQueryOperator::Contains);
 }
 
 #[test]
