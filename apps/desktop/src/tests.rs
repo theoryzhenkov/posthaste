@@ -38,6 +38,14 @@ fn default_capability_is_limited_to_posthaste_windows_and_minimal_plugins() {
             "core:default",
             // The Dock/taskbar unread badge sink (`setBadgeCount`, DockBadge).
             "core:window:allow-set-badge-count",
+            // New-mail OS banners. DELIBERATE posture change: `notification:`
+            // used to sit in `forbidden_prefixes` below (it predated the
+            // NotificationsPane making alerts a product feature). Notifications
+            // are now first-class, so exactly `notification:default` is granted
+            // (notify + permission checks/request) and the prefix was removed
+            // from the forbidden list. The renderer drives delivery via the
+            // plugin JS API (`apps/web/src/notifications/osNotifier.ts`).
+            "notification:default",
             "opener:allow-open-url",
             "updater:default",
             "process:allow-restart",
@@ -49,13 +57,16 @@ fn default_capability_is_limited_to_posthaste_windows_and_minimal_plugins() {
     );
 
     let permissions = json_array_strings(&capability, "permissions");
+    // `notification:` is intentionally NOT in this list anymore: new-mail OS
+    // notifications became a first-class feature (see the pinned allowlist
+    // above), so the blanket ban was consciously lifted for that one plugin.
+    // Every other generic desktop capability remains forbidden.
     let forbidden_prefixes = [
         "fs:",
         "shell:",
         "http:",
         "clipboard-manager:",
         "global-shortcut:",
-        "notification:",
     ];
     for permission in permissions {
         assert!(
