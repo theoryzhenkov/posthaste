@@ -261,7 +261,9 @@ pub trait RuntimeMailWriteApi: Send + Sync {
         message_id: MessageId,
     ) -> Result<DraftContent, RuntimeError>;
 
-    /// Queue a local-first send for an account.
+    /// Queue a local-first send for an account, returning the enqueued outbox
+    /// operation — its id is the cancel handle for a scheduled (undo-send /
+    /// send-later) send, and it carries the normalized `send_at`.
     ///
     /// `idempotency_key` (RFC-L2-scripting ruling 24, extending the D53/S4 apply
     /// ledger to the send surface) is a client-supplied key making at-least-once
@@ -270,13 +272,18 @@ pub trait RuntimeMailWriteApi: Send + Sync {
     /// `None` keeps the pre-existing keyless behavior (no ledger; the header stays
     /// optional). This composes with M32's outbox-level exactly-once rather than
     /// duplicating it — see the `RuntimeHandle` impl doc.
+    ///
+    /// Returns `Ok(None)` only for a keyed REPLAY whose outcome was durably
+    /// recorded before sends stored their operation in the ledger (a legacy
+    /// row): the send applied exactly once, but the original operation is not
+    /// recoverable from that record.
     async fn send_message(
         &self,
         caller: RuntimeCaller,
         account_id: AccountId,
         request: SendMessageRequest,
         idempotency_key: Option<ClientMutationId>,
-    ) -> Result<(), RuntimeError>;
+    ) -> Result<Option<Operation>, RuntimeError>;
 
     /// Save a draft local-first, returning the enqueued operation. `draft_id` is
     /// `None` for a new draft or the existing draft's id for an edit.

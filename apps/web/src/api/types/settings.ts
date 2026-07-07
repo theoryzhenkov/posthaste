@@ -22,7 +22,23 @@ export interface AppSettings {
    *  source's mailboxes. Pure presentation; a Group never maps to a provider
    *  mailbox. */
   mailboxGroups: MailboxGroup[]
+  /** Compose/sending preferences (undo-send delay). Absent keeps defaults. */
+  compose?: ComposeSettings | null
 }
+
+/** Compose/sending preferences. */
+export interface ComposeSettings {
+  /**
+   * Undo-send hold in seconds: after Send the message is held this long so it
+   * can be canceled. Absent = the app default
+   * ({@link DEFAULT_UNDO_SEND_DELAY_SECONDS}); 0 sends immediately with no
+   * undo window. Server-validated to at most 120.
+   */
+  undoSendDelaySeconds?: number | null
+}
+
+/** The app-default undo-send hold when the setting is unset. */
+export const DEFAULT_UNDO_SEND_DELAY_SECONDS = 10
 
 /**
  * A client-side sidebar Group (presentation only): a named cluster of a

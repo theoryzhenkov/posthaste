@@ -68,10 +68,32 @@ export interface SendMessageInput {
   references: string | null
   attachments: SendMessageAttachmentInput[]
   /**
-   * Server-injected stable draft identity for a draft save; clients never set
-   * it (a sent message is a fresh message). Present for wire conformance.
+   * Stable draft identity. Server-injected for a draft save. On a SEND it
+   * names the originating draft: the backend consumes (deletes) that draft as
+   * a settlement effect once the send settles success (D126) — the scheduled
+   * (undo-send / send-later) path sets it so the draft kept for undo-restore
+   * is cleaned up when the send actually fires.
    */
   draftId?: string | null
+  /**
+   * Earliest submission time (RFC 3339). Absent = send now (the pre-existing
+   * behavior). Set, the send is enqueued and HELD until due — undo-send is
+   * `now + delay`, send-later is the chosen time; one mechanism. LOCAL-FIRST:
+   * not a server-side schedule — it fires when Posthaste is next running and
+   * online at/after this time.
+   */
+  sendAt?: string | null
+}
+
+/**
+ * Response of `POST .../commands/send`: `operation` is the enqueued outbox
+ * send — its `id` is the cancel handle a scheduled send's Undo discards, and
+ * `sendAt` echoes the normalized schedule. `null` only for an
+ * idempotency-key replay of a legacy record.
+ */
+export interface SendMessageResponse {
+  ok: boolean
+  operation: Operation | null
 }
 
 /** @spec docs/L1-outbox#operation-model */
@@ -118,6 +140,12 @@ export interface Operation {
   attempts: number
   lastError: string | null
   dependsOn: string | null
+  /**
+   * Scheduled-send hold (send ops only): the earliest flush time (normalized
+   * UTC RFC 3339). A pending op with `sendAt` in the future rests queued —
+   * visible and cancelable — until due. Absent for every other op.
+   */
+  sendAt?: string | null
   createdAt: string
   updatedAt: string
 }

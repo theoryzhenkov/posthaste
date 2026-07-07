@@ -33,6 +33,11 @@ pub(crate) async fn run_account_runtime(
         SNOOZE_INTERVAL,
     );
     snooze_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut scheduled_send_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + SCHEDULED_SEND_INITIAL_DELAY,
+        SCHEDULED_SEND_INTERVAL,
+    );
+    scheduled_send_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     shared
         .set_runtime_overview_for_generation(
             &account_id,
@@ -176,6 +181,16 @@ pub(crate) async fn run_account_runtime(
                     handle_snooze_tick(&shared, &account_id),
                 ).await.is_err() {
                     record_arm_timeout(&sync_state, &shared, &account_id, generation, "snooze", ARM_BUDGET_SNOOZE).await;
+                }
+            }
+            _ = scheduled_send_interval.tick() => {
+                // Budgeted like a sync arm: the tick itself is a point probe,
+                // but a DUE send triggers a full flush sync cycle inline.
+                if tokio::time::timeout(
+                    ARM_BUDGET_SYNC,
+                    handle_scheduled_send_tick(&sync_state, &shared, &account, generation, &mut connection),
+                ).await.is_err() {
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "scheduled_send", ARM_BUDGET_SYNC).await;
                 }
             }
             _ = async {
@@ -410,6 +425,60 @@ pub(crate) async fn handle_snooze_tick(shared: &Arc<SupervisorShared>, account_i
             );
         }
         _ => {}
+    }
+}
+
+/// Scheduled-send tick (undo-send / send-later): probe whether any held send
+/// has come due (`send_at <= now`) and, only then, trigger a flush sync so it
+/// fires promptly instead of waiting for the next poll window. The same
+/// pattern as [`handle_snooze_tick`] — a periodic due-check against the
+/// monotonic-anchored clock (the probe and the flush gate share
+/// `posthaste-domain-service`'s anchored "now", so they cannot disagree) —
+/// with the sync routed through the coalescer like every other trigger.
+///
+/// LOCAL-FIRST OFFLINE SEMANTICS: this tick only runs while the app is
+/// running; offline, the triggered flush stops on the transient error and the
+/// due send fires on the next connectivity window. A send is therefore
+/// delivered at the first moment Posthaste is running AND online at/after its
+/// `send_at` — never early, possibly late; it is not a server-side schedule.
+///
+/// @spec docs/L1-outbox#operation-model
+pub(crate) async fn handle_scheduled_send_tick(
+    sync_state: &Arc<SyncTriggerState>,
+    shared: &Arc<SupervisorShared>,
+    account: &AccountSettings,
+    generation: RuntimeGeneration,
+    connection: &mut AccountRuntimeConnectionState,
+) {
+    let account_id = account.id.clone();
+    match shared.service.has_due_scheduled_sends(&account_id) {
+        Ok(false) => {}
+        Ok(true) => {
+            ph_debug!(
+                events::SUPERVISOR_SCHEDULED_SEND_DUE,
+                account_id = %account_id,
+                "scheduled send due; triggering outbox flush sync"
+            );
+            let _ = process_sync_trigger_with_state(
+                sync_state,
+                shared,
+                account,
+                generation,
+                SyncTriggerRequest::new(SyncTrigger::Manual, SyncMode::Incremental),
+                connection,
+            )
+            .await;
+        }
+        Err(error) => {
+            // A failed probe only delays the send until a later tick/poll —
+            // the op itself is durable; log and keep ticking.
+            ph_warn!(
+                events::SUPERVISOR_SCHEDULED_SEND_PROBE_FAILED,
+                account_id = %account_id,
+                error = %error,
+                "scheduled-send due probe failed; the held send stays queued"
+            );
+        }
     }
 }
 

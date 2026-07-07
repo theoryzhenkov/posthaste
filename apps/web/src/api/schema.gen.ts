@@ -891,7 +891,7 @@ export interface paths {
         put?: never;
         /**
          * Send message
-         * @description Validates and submits a new email via the source gateway, then triggers a sync.
+         * @description Validates and enqueues a local-first send, then triggers a flush. With `sendAt` (RFC 3339) the send is HELD until due (undo-send / send-later) and can be canceled via the returned operation id while still queued. Local-first: a scheduled send fires when Posthaste is next running and online at/after `sendAt`, not via a server-side schedule.
          */
         post: operations["send_message"];
         delete?: never;
@@ -1400,6 +1400,7 @@ export interface components {
             automationDrafts?: components["schemas"]["AutomationRule"][];
             automationRules?: components["schemas"]["AutomationRule"][];
             cachePolicy?: components["schemas"]["CachePolicy"];
+            compose?: null | components["schemas"]["ComposeSettings"];
             defaultAccountId?: null | components["schemas"]["AccountId"];
             /**
              * @description Per-mailbox sidebar color overrides. Each entry overrides the renderer's
@@ -1579,6 +1580,22 @@ export interface components {
         CommandResult: {
             detail?: null | components["schemas"]["MessageDetail"];
             events: components["schemas"]["DomainEvent"][];
+        };
+        /**
+         * @description Compose/sending preferences.
+         *
+         *     @spec docs/eph/RFC-L2-configuration-matrix
+         */
+        ComposeSettings: {
+            /**
+             * Format: int32
+             * @description Undo-send hold in seconds: after Send, the outbox holds the message
+             *     this long (`send_at = now + delay`) so the user can cancel before it
+             *     leaves. `None` = the app default (10s, applied by the client); `0`
+             *     sends immediately with no undo window (the pre-feature behavior).
+             *     Validated to [`ComposeSettings::MAX_UNDO_SEND_DELAY_SECONDS`] on patch.
+             */
+            undoSendDelaySeconds?: number | null;
         };
         /**
          * @description Locally-derived identifier for a conversation (cross-source thread grouping).
@@ -2293,6 +2310,19 @@ export interface components {
              *     envelope stays uniform across kinds.
              */
             payload: Record<string, never>;
+            /**
+             * @description Scheduled-send hold (send ops only): the earliest flush time, normalized
+             *     UTC whole-second RFC 3339. A queued op with `send_at` in the future is
+             *     excluded from the flushable set (it rests `pending`, visible and
+             *     discardable) until due; `None` (every non-send op, and an immediate
+             *     send) keeps the pre-existing flush-now behavior. Persisted with the op,
+             *     so a schedule survives restart. Local-first: the send fires on the first
+             *     flush window at/after `send_at` while the app runs — not a server-side
+             *     schedule.
+             *
+             *     @spec docs/L1-outbox#operation-model
+             */
+            sendAt?: string | null;
             state: components["schemas"]["OperationState"];
             updatedAt: string;
         };
@@ -2383,6 +2413,7 @@ export interface components {
             automationDrafts?: components["schemas"]["AutomationRule"][] | null;
             automationRules?: components["schemas"]["AutomationRule"][] | null;
             cachePolicy?: null | components["schemas"]["CachePolicy"];
+            compose?: null | components["schemas"]["ComposeSettings"];
             defaultAccountId?: string | null;
             /**
              * @description When true, re-run the current backfill rules against existing messages
@@ -2855,8 +2886,40 @@ export interface components {
             from?: null | components["schemas"]["Recipient"];
             inReplyTo?: string | null;
             references?: string | null;
+            /**
+             * @description Earliest submission time (RFC 3339). Absent (or in the past) the send is
+             *     due immediately — the pre-existing behavior. When set in the future the
+             *     enqueued outbox send is HELD queued until due (undo-send = now + delay;
+             *     send-later = the chosen time; one mechanism), then flushed by the
+             *     scheduler tick / next flush pass.
+             *
+             *     LOCAL-FIRST OFFLINE SEMANTICS: this is not a server-side schedule. The
+             *     send fires on the first flush window at/after `send_at` while the app is
+             *     running and online; if Posthaste is closed (or offline) at the due time,
+             *     the send fires when it is next running + connected. UI copy must say so
+             *     (e.g. "Sends when Posthaste is open").
+             *
+             *     Normalized at enqueue to UTC whole-second RFC 3339 (`...Z`) so stored
+             *     values compare lexicographically; skipped from serialization when absent
+             *     so an immediate send's payload stays byte-identical to before.
+             *
+             *     @spec docs/L1-outbox#operation-model
+             */
+            sendAt?: string | null;
             subject: string;
             to: components["schemas"]["Recipient"][];
+        };
+        /**
+         * @description Response body for `POST /v1/sources/{source_id}/commands/send`: the send
+         *     was accepted (enqueued local-first). `operation` is the enqueued outbox
+         *     send — its `id` is the CANCEL handle for a scheduled (`sendAt`) send
+         *     (`DELETE /v1/sources/{source_id}/operations/{operation_id}` before it is
+         *     due), and `sendAt` echoes the normalized schedule. `null` only for a keyed
+         *     replay whose outcome predates operation-bearing send records.
+         */
+        SendMessageResponse: {
+            ok: boolean;
+            operation?: null | components["schemas"]["Operation"];
         };
         /**
          * @description Command to add and/or remove JMAP keywords on a message.
@@ -5497,16 +5560,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Message accepted for delivery */
+            /** @description Message accepted for delivery (or held until `sendAt`) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OkResponse"];
+                    "application/json": components["schemas"]["SendMessageResponse"];
                 };
             };
-            /** @description Invalid compose request */
+            /** @description Invalid compose request (including an invalid `sendAt`) */
             400: {
                 headers: {
                     [name: string]: unknown;

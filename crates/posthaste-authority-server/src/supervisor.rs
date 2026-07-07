@@ -55,8 +55,8 @@ use types::*;
 use manager::{run_watchdog, SpawnIncarnation, WatchdogPolicy};
 #[cfg(test)]
 use runtime::{
-    handle_cache_tick, handle_oauth_refresh_tick, handle_push_event, handle_snooze_tick,
-    process_sync_trigger_with_state, SyncTriggerRequest,
+    handle_cache_tick, handle_oauth_refresh_tick, handle_push_event, handle_scheduled_send_tick,
+    handle_snooze_tick, process_sync_trigger_with_state, SyncTriggerRequest,
 };
 #[cfg(test)]
 use sync_flow::sync_failure_stage;

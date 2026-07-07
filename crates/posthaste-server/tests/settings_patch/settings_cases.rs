@@ -29,6 +29,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,
@@ -83,6 +84,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,
@@ -118,6 +120,7 @@ async fn patch_settings_can_update_cache_policy() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,
@@ -176,6 +179,7 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,
@@ -214,6 +218,7 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
     let error = patch_settings(
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
+            compose: None,
             force_backfill: false,
             mailbox_groups: None,
             smart_mailbox_order: None,
@@ -260,6 +265,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
     let error = patch_settings(
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
+            compose: None,
             force_backfill: false,
             mailbox_groups: None,
             smart_mailbox_order: None,
@@ -308,6 +314,7 @@ async fn patch_settings_persists_appearance_to_app_toml() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,
@@ -387,6 +394,7 @@ async fn patch_settings_persists_mailbox_colors_to_app_toml() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,
@@ -429,6 +437,7 @@ async fn patch_settings_persists_tag_appearance_to_app_toml() {
         patch_settings(
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
+                compose: None,
                 force_backfill: false,
                 mailbox_groups: None,
                 smart_mailbox_order: None,

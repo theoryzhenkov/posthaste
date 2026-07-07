@@ -1,3 +1,5 @@
+use posthaste_domain_model::ComposeSettings;
+
 use super::*;
 
 /// Request body for `PATCH /v1/settings`.
@@ -21,6 +23,8 @@ pub struct PatchSettingsRequest {
     pub account_order: Option<Vec<AccountId>>,
     /// Client-side sidebar Groups (presentation only); overwrites the stored list.
     pub mailbox_groups: Option<Vec<MailboxGroup>>,
+    /// Compose/sending preferences (undo-send delay); overwrites the stored struct.
+    pub compose: Option<ComposeSettings>,
     /// When true, re-run the current backfill rules against existing messages
     /// after persisting (on-demand "backfill now").
     #[serde(default)]
@@ -137,6 +141,7 @@ pub async fn patch_settings(
                 smart_mailbox_order: request.smart_mailbox_order,
                 account_order: request.account_order,
                 mailbox_groups: request.mailbox_groups,
+                compose: request.compose,
                 force_backfill: request.force_backfill,
             },
         )

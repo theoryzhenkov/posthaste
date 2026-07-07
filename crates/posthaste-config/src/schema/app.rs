@@ -1,5 +1,6 @@
 use super::*;
 
+use posthaste_domain_model::ComposeSettings;
 use std::collections::HashMap;
 
 // -- app.toml --
@@ -40,6 +41,9 @@ pub struct AppToml {
     /// Client-side sidebar Groups (`[[mailbox_groups]]`). Presentation only.
     #[serde(default, rename = "mailbox_groups")]
     pub mailbox_groups: Vec<MailboxGroupToml>,
+    /// Compose/sending preferences (`[compose]`, e.g. the undo-send delay).
+    #[serde(default)]
+    pub compose: Option<ComposeToml>,
     #[serde(default)]
     pub link: LinkToml,
     /// Optional in-daemon TLS (`[tls]` cert+key). When present the daemon serves
@@ -337,6 +341,29 @@ impl NotificationsToml {
     }
 }
 
+/// TOML representation of `[compose]` (compose/sending preferences).
+///
+/// @spec docs/L1-accounts#apptoml
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ComposeToml {
+    /// Undo-send hold in seconds; absent = the app default, `0` = no hold.
+    pub undo_send_delay_seconds: Option<u32>,
+}
+
+impl ComposeToml {
+    fn to_compose_settings(&self) -> ComposeSettings {
+        ComposeSettings {
+            undo_send_delay_seconds: self.undo_send_delay_seconds,
+        }
+    }
+
+    fn from_compose_settings(compose: &ComposeSettings) -> Self {
+        Self {
+            undo_send_delay_seconds: compose.undo_send_delay_seconds,
+        }
+    }
+}
+
 /// Daemon-specific settings read only at startup (bind address, CORS, poll
 /// interval).
 ///
@@ -408,6 +435,7 @@ impl AppToml {
                 .iter()
                 .map(MailboxGroupToml::to_mailbox_group)
                 .collect(),
+            compose: self.compose.as_ref().map(ComposeToml::to_compose_settings),
         })
     }
 
@@ -468,6 +496,10 @@ impl AppToml {
                 .iter()
                 .map(MailboxGroupToml::from_mailbox_group)
                 .collect(),
+            compose: settings
+                .compose
+                .as_ref()
+                .map(ComposeToml::from_compose_settings),
             link: existing.link.clone(),
             // TLS is daemon-side config, never derived from AppSettings; preserve
             // whatever the existing file declared.

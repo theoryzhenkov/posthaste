@@ -255,6 +255,7 @@ fn app_toml_round_trips() {
         smart_mailbox_order: Vec::new(),
         account_order: Vec::new(),
         mailbox_groups: Vec::new(),
+        compose: None,
         link: LinkToml::default(),
         tls: None,
     };

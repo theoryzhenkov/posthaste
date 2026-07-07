@@ -9,7 +9,10 @@ pub(crate) mod drafts;
 pub(crate) mod operations;
 pub(crate) mod reads;
 
-pub use drafts::{delete_draft, save_draft, send_message, DeleteDraftRequest, SaveDraftRequest};
+pub use drafts::{
+    delete_draft, save_draft, send_message, DeleteDraftRequest, SaveDraftRequest,
+    SendMessageResponse,
+};
 pub use operations::{discard_operation, list_pending_operations, retry_operation};
 pub use reads::{get_draft_content, get_identity, get_reply_context, list_sender_addresses};
 

@@ -85,6 +85,7 @@ impl TomlConfigRepository {
             smart_mailbox_order: Vec::new(),
             account_order: Vec::new(),
             mailbox_groups: Vec::new(),
+            compose: None,
             link: Default::default(),
             tls: None,
         };

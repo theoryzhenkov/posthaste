@@ -25,23 +25,32 @@ impl MailService {
     }
 
     /// Remove a queued or failed outbox operation, giving the user an escape
-    /// hatch for a dead op. An in-flight op is never yanked (its provider call
+    /// hatch for a dead op — and the CANCEL path for a scheduled (undo-send /
+    /// send-later) send. An in-flight op is never yanked (its provider call
     /// may be mid-send). Discarding a failed op also unblocks its dependents: a
     /// missing dependency reads as satisfied, so a dependent no longer cancels.
     ///
+    /// Cancel-vs-flush has exactly one winner: the removal is a single guarded
+    /// statement (`remove_operation_unless_inflight`) racing the flusher's
+    /// guarded claim (`claim_operation_for_flush`) — whichever write the store
+    /// serializes first wins, the loser observes nothing to act on. There is no
+    /// check-then-remove window: if this returns `Ok(true)` the op can never be
+    /// pushed; if the flusher claimed first, this surfaces the in-flight error
+    /// (the op is being — or has been — sent).
+    ///
     /// @spec docs/L1-outbox#state-machine
     pub fn discard_operation(&self, operation_id: &OperationId) -> Result<bool, ServiceError> {
-        let Some(operation) = self.outbox.get_operation(operation_id)? else {
-            return Ok(false);
-        };
-        if operation.state == OperationState::Inflight {
-            return Err(GatewayError::Rejected(
-                "cannot discard an in-flight operation".to_string(),
-            )
-            .into());
+        if self.outbox.remove_operation_unless_inflight(operation_id)? {
+            return Ok(true);
         }
-        self.outbox.remove_operation(operation_id)?;
-        Ok(true)
+        // Nothing removed: either the op is gone (settled/never existed — the
+        // pre-existing `Ok(false)`), or it is in flight and must not be yanked.
+        match self.outbox.get_operation(operation_id)? {
+            Some(operation) if operation.state == OperationState::Inflight => Err(
+                GatewayError::Rejected("cannot discard an in-flight operation".to_string()).into(),
+            ),
+            _ => Ok(false),
+        }
     }
 
     /// Re-arm a failed or dispatch-uncertain outbox operation to `pending` so
@@ -86,6 +95,7 @@ impl MailService {
         entity: OperationEntity,
         kind: OperationKind,
         mut payload: serde_json::Value,
+        send_at: Option<String>,
     ) -> Result<Operation, ServiceError> {
         let depends_on = if kind.is_state_assertion() {
             // State assertions coalesce instead of chaining: a new assertion
@@ -112,6 +122,7 @@ impl MailService {
             attempts: 0,
             last_error: None,
             depends_on,
+            send_at,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -167,12 +178,34 @@ impl MailService {
     /// the operation its own idempotency unit so it never coalesces and is sent
     /// at most once (see the send-once recovery in [`Self::flush_account`]).
     ///
+    /// A `send_at` on the request (undo-send / send-later — one mechanism) is
+    /// validated and normalized here (canonical UTC whole-second RFC 3339;
+    /// invalid input rejects the request; a PAST time is accepted and simply
+    /// already due — the pinned choice) and stamped on the operation, which
+    /// then rests `pending` — visible, cancelable via
+    /// [`Self::discard_operation`] — until due. Persisted, so it survives
+    /// restart. LOCAL-FIRST: this is not a server-side schedule; the send
+    /// fires on the first flush window at/after `send_at` with the app
+    /// running + online.
+    ///
     /// @spec docs/L1-outbox#operation-model
     pub fn enqueue_send(
         &self,
         account_id: &AccountId,
-        request: SendMessageRequest,
+        mut request: SendMessageRequest,
     ) -> Result<Operation, ServiceError> {
+        let send_at = request
+            .send_at
+            .take()
+            .map(|raw| {
+                super::schedule::normalize_send_at(&raw)
+                    .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))
+            })
+            .transpose()?;
+        // The normalized hold lives on the OPERATION (the flush gate reads the
+        // indexed column); it is dropped from the payload so an immediate
+        // send's payload — and the bytes the gateway sees — stay identical to
+        // the pre-feature shape.
         let payload = encode_payload(request, "send request")?;
         self.queue_operation(
             account_id,
@@ -182,7 +215,19 @@ impl MailService {
             },
             OperationKind::Send,
             payload,
+            send_at,
         )
+    }
+
+    /// Whether any scheduled send is due (`send_at <= now`) and still queued —
+    /// the scheduler tick's probe. `true` tells the caller to trigger a flush
+    /// sync so the due send fires promptly instead of waiting for the next
+    /// poll window. Uses the same monotonic-anchored clock the flush gate
+    /// compares against, so probe and gate can never disagree on due-ness.
+    pub fn has_due_scheduled_sends(&self, account_id: &AccountId) -> Result<bool, ServiceError> {
+        let now = super::schedule::outbox_now_rfc3339()
+            .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))?;
+        Ok(self.outbox.count_due_scheduled_sends(account_id, &now)? > 0)
     }
 }
 

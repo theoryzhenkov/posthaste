@@ -4,6 +4,19 @@ use crate::api::message_commands::idempotency_key;
 
 use super::*;
 
+/// Response body for `POST /v1/sources/{source_id}/commands/send`: the send
+/// was accepted (enqueued local-first). `operation` is the enqueued outbox
+/// send — its `id` is the CANCEL handle for a scheduled (`sendAt`) send
+/// (`DELETE /v1/sources/{source_id}/operations/{operation_id}` before it is
+/// due), and `sendAt` echoes the normalized schedule. `null` only for a keyed
+/// replay whose outcome predates operation-bearing send records.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SendMessageResponse {
+    pub ok: bool,
+    pub operation: Option<Operation>,
+}
+
 /// POST /v1/sources/{source_id}/commands/send
 ///
 /// @spec docs/L1-api#compose
@@ -13,15 +26,15 @@ use super::*;
     path = "/v1/sources/{source_id}/commands/send",
     tag = "messages",
     summary = "Send message",
-    description = "Validates and submits a new email via the source gateway, then triggers a sync.",
+    description = "Validates and enqueues a local-first send, then triggers a flush. With `sendAt` (RFC 3339) the send is HELD until due (undo-send / send-later) and can be canceled via the returned operation id while still queued. Local-first: a scheduled send fires when Posthaste is next running and online at/after `sendAt`, not via a server-side schedule.",
     params(
         ("source_id" = String, Path, description = "Source (account) identifier"),
         ("Idempotency-Key" = Option<String>, Header, description = "Client-supplied idempotency key (RFC-L2-scripting ruling 24): a redelivery under the same key returns the first outcome instead of enqueuing a second outbox send; reusing a key with a different operation is 409 Conflict.")
     ),
     request_body = SendMessageRequest,
     responses(
-        (status = 200, description = "Message accepted for delivery", body = OkResponse),
-        (status = 400, description = "Invalid compose request", body = ApiErrorBody),
+        (status = 200, description = "Message accepted for delivery (or held until `sendAt`)", body = SendMessageResponse),
+        (status = 400, description = "Invalid compose request (including an invalid `sendAt`)", body = ApiErrorBody),
         (status = 409, description = "Idempotency key reused with a different operation", body = ApiErrorBody),
         (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
     )
@@ -31,7 +44,7 @@ pub async fn send_message(
     Path(source_id): Path<String>,
     headers: HeaderMap,
     Json(request): Json<SendMessageRequest>,
-) -> Result<Json<OkResponse>, ApiError> {
+) -> Result<Json<SendMessageResponse>, ApiError> {
     validate_send_message_request(&request)?;
     // Forward the `Idempotency-Key` (RFC-L2-scripting ruling 24) so an
     // at-least-once script's retried reply/send under the same key enqueues
@@ -39,7 +52,7 @@ pub async fn send_message(
     // one operation created); M32's outbox exactly-once (deterministic
     // `phsend-<op-id>`) then guards provider-side duplicates for that one
     // operation — they compose, key → one operation → one provider submission.
-    state
+    let operation = state
         .runtime
         .send_message(
             RuntimeCaller::api(),
@@ -49,7 +62,10 @@ pub async fn send_message(
         )
         .await
         .map_err(ApiError::from_runtime_error)?;
-    Ok(Json(OkResponse { ok: true }))
+    Ok(Json(SendMessageResponse {
+        ok: true,
+        operation,
+    }))
 }
 
 /// Request body for `POST /v1/sources/{source_id}/commands/save-draft`.

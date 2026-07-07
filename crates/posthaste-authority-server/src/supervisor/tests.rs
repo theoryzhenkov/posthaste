@@ -1866,3 +1866,67 @@ async fn oauth_refresh_single_flight_serializes_same_ref() {
         "the single-flight must admit at most one refresh of a ref at a time",
     );
 }
+
+// spec: docs/L1-outbox#operation-model
+#[tokio::test]
+async fn scheduled_send_tick_holds_until_due_then_flushes_exactly_one_send() {
+    // The scheduler-tick property for scheduled sends (undo-send/send-later):
+    // a held send is untouched by the tick before `send_at`, and once due the
+    // tick's probe triggers the flush sync that dispatches it — the same
+    // pattern as the snooze scheduler, on the same monotonic-anchored clock.
+    let account = test_account("primary");
+    let (shared, _root) = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    let sync_state = SyncTriggerState::new();
+    let mut connection = AccountRuntimeConnectionState::default();
+
+    let request = posthaste_domain_model::SendMessageRequest {
+        to: vec![posthaste_domain_model::Recipient {
+            name: None,
+            email: "to@example.test".to_string(),
+        }],
+        subject: "Scheduled".to_string(),
+        body: "Held until due".to_string(),
+        send_at: Some("2999-01-01T00:00:00Z".to_string()),
+        ..posthaste_domain_model::SendMessageRequest::default()
+    };
+    let held = shared
+        .service
+        .enqueue_send(&account.id, request.clone())
+        .expect("scheduled send should enqueue");
+
+    // Not due: the tick probes, finds nothing due, and must NOT flush it.
+    handle_scheduled_send_tick(&sync_state, &shared, &account, generation, &mut connection).await;
+    let pending = shared
+        .service
+        .list_pending_operations(&account.id)
+        .expect("pending should list");
+    assert_eq!(pending.len(), 1, "the held send must survive the tick");
+    assert_eq!(
+        pending[0].state,
+        posthaste_domain_model::OperationState::Pending
+    );
+
+    // Reschedule to a due time (cancel + re-enqueue — the client's "send now"
+    // shape) and tick again: the probe fires the flush and the send settles.
+    assert!(shared
+        .service
+        .discard_operation(&held.id)
+        .expect("cancel should succeed"));
+    let mut due_request = request;
+    due_request.send_at = Some("2020-01-01T00:00:00Z".to_string());
+    shared
+        .service
+        .enqueue_send(&account.id, due_request)
+        .expect("due send should enqueue");
+
+    handle_scheduled_send_tick(&sync_state, &shared, &account, generation, &mut connection).await;
+    assert!(
+        shared
+            .service
+            .list_pending_operations(&account.id)
+            .expect("pending should list")
+            .is_empty(),
+        "a due scheduled send must flush (and settle) on the tick"
+    );
+}
