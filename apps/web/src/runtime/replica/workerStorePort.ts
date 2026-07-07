@@ -352,8 +352,8 @@ export class WorkerStorePort implements StorePort {
   ): Promise<string> {
     return this.call('captureMutationDiffJson', [messageId, assertionJson])
   }
-  mailboxJson(mailboxId: string): Promise<string> {
-    return this.call('mailboxJson', [mailboxId])
+  messageJson(messageId: string): Promise<string> {
+    return this.call('messageJson', [messageId])
   }
   projectViewJson(viewId: string): Promise<string> {
     return this.call('projectViewJson', [viewId])

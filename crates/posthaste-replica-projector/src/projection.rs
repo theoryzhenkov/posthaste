@@ -1,7 +1,11 @@
 //! The view **projection** layer of the entity store (RFC D36 layer 2, the
 //! shared projector of D38): keyed view rows, membership predicates, coverage
-//! windowing, sort keys, mailbox count scalars, and the dirty-key reactivity
-//! bookkeeping.
+//! windowing, sort keys, and the dirty-key reactivity bookkeeping.
+//!
+//! Mailbox COUNTS are not held here (RFC-L2-count-unification): the store is
+//! partial, so it can never derive true counts, and the client reads them
+//! through react-query invalidation against the runtime's canonical
+//! trigger-maintained mailbox rows instead of applying per-event deltas.
 //!
 //! It reads folded (optimistic) state through the mechanism layer
 //! ([`crate::mechanism`]) and never touches the outbox lifecycle itself —
@@ -20,12 +24,11 @@ use crate::mechanism::ReplicaMechanism;
 /// A changed entity key, reported by `EntityStore::drain_dirty`.
 ///
 /// Serializes externally-tagged + camelCase so the WASM host can parse a drain
-/// as a JSON array of `{"message":id}` / `{"mailbox":id}` / `{"view":id}`.
+/// as a JSON array of `{"message":id}` / `{"view":id}`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DirtyKey {
     Message(String),
-    Mailbox(String),
     View(String),
 }
 
@@ -129,30 +132,11 @@ pub struct ViewEntity {
     pub rows: Vec<ViewRow>,
 }
 
-/// A mailbox entity: server-authoritative count scalars (the store is partial,
-/// so counts are never derived from the held message set).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MailboxEntity {
-    pub unread_count: i64,
-    pub total_count: i64,
-}
-
-/// A count delta shipped with a message event (atomic per batch — `D3`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CountDelta {
-    pub mailbox_id: String,
-    pub unread_count: i64,
-    pub total_count: i64,
-}
-
 /// The projection half of the entity store: views (ordered rows + coverage),
-/// mailbox count scalars, the reverse membership index, and the dirty set.
+/// the reverse membership index, and the dirty set.
 #[derive(Default)]
 pub(crate) struct ViewProjection {
     pub(crate) views: HashMap<String, ViewEntity>,
-    pub(crate) mailboxes: HashMap<String, MailboxEntity>,
     /// Reverse index `messageId -> set of viewIds the message currently appears
     /// in`, kept in sync as rows are inserted/removed/rederived. A content-only
     /// `rederive_message` (a flag/read toggle that leaves the sort key — and so
@@ -300,15 +284,6 @@ impl ViewProjection {
         }
     }
 
-    /// Apply a server-authoritative count delta and mark the mailbox dirty.
-    pub(crate) fn apply_count_delta(&mut self, delta: &CountDelta) {
-        let mailbox = self.mailboxes.entry(delta.mailbox_id.clone()).or_default();
-        mailbox.unread_count = delta.unread_count;
-        mailbox.total_count = delta.total_count;
-        self.dirty
-            .insert(DirtyKey::Mailbox(delta.mailbox_id.clone()));
-    }
-
     /// Re-evaluate a held message's placement across every evaluable view from
     /// its projected (folded) state, and mark it dirty. Assumes the message is
     /// held (in the mechanism's bases); callers gate on that so an un-ingested
@@ -411,11 +386,6 @@ impl ViewProjection {
     /// Mark a message's key dirty (its projection moved).
     pub(crate) fn mark_message_dirty(&mut self, message_id: &str) {
         self.dirty.insert(DirtyKey::Message(message_id.to_string()));
-    }
-
-    /// Read a mailbox's counts.
-    pub(crate) fn mailbox(&self, mailbox_id: &str) -> Option<&MailboxEntity> {
-        self.mailboxes.get(mailbox_id)
     }
 
     /// Read a view's rows.

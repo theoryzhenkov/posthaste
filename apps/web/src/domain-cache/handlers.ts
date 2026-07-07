@@ -15,6 +15,7 @@ import {
   invalidateSmartMailboxReadModels,
   invalidateTargetMessageReadModels,
 } from './invalidations'
+import { invalidateMailboxCountsDebounced } from './mailboxCounts'
 import { pushNotification } from '../notifications/store'
 import { payloadString } from './payload'
 import { applyResourceInvalidationsOrFallback, noop } from './resources'
@@ -128,47 +129,25 @@ const eventHandlers = {
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.MessageUpdated]: (queryClient, event) => {
-    // The entity store owns the mail-list rows (synthesized view frames) + the
-    // mailbox counts (`setQueryData`), so the store-owned invalidations are
-    // skipped to avoid a redundant REST refetch. Surfaces the store does not own
-    // (conversations, smart-mailboxes, tags, mail-navigation, message detail)
-    // still invalidate.
-    const skipStoreOwned = true
-    invalidateMessageListReadModels(queryClient, { skipStoreOwned })
+    // The entity store owns the mail-list ROWS (synthesized view frames), so
+    // the store-owned row invalidation is skipped. Mailbox COUNTS are
+    // react-query state (RFC-L2-count-unification): every count-affecting
+    // change — keyword flips, membership moves, arrivals, deletions — fires
+    // the count invalidation, and react-query refetches the runtime's
+    // canonical counts. This one trigger point serves every topology: the
+    // bundled echo, the sync re-emit, and the split runtime's down-channel
+    // republish all arrive here as `message.updated` (the class of all three
+    // countDelta bugs). Debounced per account so a sync burst coalesces into
+    // ~one refetch per window instead of a stampede.
+    invalidateMessageListReadModels(queryClient, { skipStoreOwned: true })
 
-    if (payloadChangeFlag(event, 'arrived')) {
-      invalidateMailboxReadModels(queryClient, event.accountId, {
-        skipStoreOwned,
-      })
-      invalidateMailNavigationBootstrapReadModels(queryClient)
-    }
-
-    if (payloadChangeFlag(event, 'mailboxes')) {
-      invalidateMailboxReadModels(queryClient, event.accountId, {
-        skipStoreOwned,
-      })
-      invalidateMailNavigationBootstrapReadModels(queryClient)
-    }
-
-    if (payloadChangeFlag(event, 'keywords')) {
-      // List/detail surfaces render from runtime view frames, which recompute
-      // on keyword events. When the entity store is active it owns the counts
-      // too (`setQueryData`); otherwise counts/sidebar invalidate here.
-      invalidateMailboxReadModels(queryClient, event.accountId, {
-        skipStoreOwned,
-      })
-      invalidateMailNavigationBootstrapReadModels(queryClient)
-    }
-
-    if (event.payload.deleted === true) {
-      // A destroy/expunge carries no `changes` object, so the membership
-      // branches above don't fire. Counts/sidebar are not view-backed and would
-      // otherwise lag until the next sync, so invalidate them on deletion too
-      // (unless the entity store owns them).
-      invalidateMailboxReadModels(queryClient, event.accountId, {
-        skipStoreOwned,
-      })
-      invalidateMailNavigationBootstrapReadModels(queryClient)
+    const countAffecting =
+      payloadChangeFlag(event, 'arrived') ||
+      payloadChangeFlag(event, 'mailboxes') ||
+      payloadChangeFlag(event, 'keywords') ||
+      event.payload.deleted === true
+    if (countAffecting) {
+      invalidateMailboxCountsDebounced(queryClient, event.accountId)
     }
 
     invalidateTargetMessageReadModels(queryClient, event)

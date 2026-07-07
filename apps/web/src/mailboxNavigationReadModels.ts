@@ -7,7 +7,6 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query'
 
-import { setMailboxCount } from './live-store/store'
 import { runtimeLinkClient } from './runtime/linkClient'
 import { createAccountDirectory } from './accountDirectory'
 import type {
@@ -126,35 +125,26 @@ function hydrateMailNavigationRead(
  * recovery edge — the completion of M44's reconcile pass for counts.
  *
  * The M44 recovery-edge reconcile (`runtimeLinkClient.onLinkReestablished`)
- * re-serves view ROWS but never counts, and REST invalidation of the counts
- * query is disabled by design (`invalidations.ts` `skipStoreOwned`). So a count
- * that drifted during a disconnect/missed-event stayed frozen until reload.
+ * re-serves view ROWS but never counts; an invalidation missed during the
+ * disconnect would otherwise leave a count stale until the next
+ * count-affecting event. On the recovery edge we refetch the authoritative
+ * counts — the source `mailboxes(accountId)` queries AND the `smartMailboxes`
+ * query, the same react-query keys every count consumer reads
+ * (RFC-L2-count-unification) — so a count that drifted during the gap heals
+ * without a reload. Post-countDelta there is no separate live-count owner to
+ * reseed: the refetched query data IS the count.
  *
- * On the recovery edge we:
- *  1. refetch the authoritative server counts — the source `mailboxes(accountId)`
- *     query AND the `smartMailboxes` query (the same count query keys, reused —
- *     no new count source); then
- *  2. RESEED the live-store counts slice from the fresh SOURCE counts. The live
- *     slice is the sidebar's owner (`useMailboxCounts`), so a stale seeded live
- *     count would permanently shadow the fresh server count unless the OWNER is
- *     overwritten — writing the owner is the shadow removal, and it heals every
- *     live-count consumer (per-mailbox rows AND the account-total header)
- *     uniformly. Smart counts ride react-query directly (SidebarContent reads
- *     the `smartMailboxes` query), so the refetch alone heals them.
- *
- * This fires ONLY on `onLinkReestablished`, never on a normal mutation, so
- * A(1)'s steady-state live-echo count updates (the fast path) are untouched: a
- * recovery-edge server refetch replaces a possibly-stale live count, while
- * steady-state deltas keep flowing into the same slice.
+ * This fires ONLY on `onLinkReestablished`, never on a normal mutation, so the
+ * steady-state event-driven invalidations (the fast path) are untouched.
  */
 export async function reconcileMailboxCountsOnRecovery(
   queryClient: QueryClient,
   accountIds: readonly string[],
 ): Promise<void> {
   // Refetch the authoritative counts against the FRESH link. `type: 'active'`
-  // drives the mounted sidebar observers' queryFns; then we read the settled
-  // data below. (Inactive-cache callers — e.g. tests — seed the fresh data
-  // directly; the reseed still runs off `getQueryData`.)
+  // drives the mounted sidebar observers' queryFns. A refetch failure on the
+  // recovery edge must not surface as an unhandled rejection — the next
+  // count-affecting event re-invalidates anyway.
   await Promise.all([
     ...accountIds.map((accountId) =>
       queryClient.refetchQueries({
@@ -166,20 +156,7 @@ export async function reconcileMailboxCountsOnRecovery(
       queryKey: queryKeys.smartMailboxes,
       type: 'active',
     }),
-    // A refetch failure on the recovery edge must not strand the reseed below
-    // (or surface as an unhandled rejection) — reseed off whatever's cached.
   ]).catch(() => {})
-  for (const accountId of accountIds) {
-    const mailboxes = queryClient.getQueryData<Mailbox[]>(
-      queryKeys.mailboxes(accountId),
-    )
-    for (const mailbox of mailboxes ?? []) {
-      setMailboxCount(accountId, mailbox.id, {
-        unread: mailbox.unreadEmails,
-        total: mailbox.totalEmails,
-      })
-    }
-  }
 }
 
 /**

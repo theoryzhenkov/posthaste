@@ -58,7 +58,6 @@ function ingest(
             receivedAt: '2026-06-28T00:00:00Z',
           },
           deleted: false,
-          countDeltas: [],
         },
       },
     ]),

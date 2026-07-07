@@ -64,8 +64,6 @@ export interface EntityStoreHandle {
    * it (non-invertible).
    */
   captureMutationDiffJson(messageId: string, assertionJson: string): string
-  /** A mailbox's counts `{unreadCount, totalCount}` JSON, or `"null"`. */
-  mailboxJson(mailboxId: string): string
   /** A view's rows JSON (`[{rowKey, messageId, sortKey}]`), or `"null"`. */
   viewRowsJson(viewId: string): string
   /**

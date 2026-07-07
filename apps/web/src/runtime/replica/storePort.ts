@@ -36,8 +36,8 @@ export interface StorePort {
     messageId: string,
     assertionJson: string,
   ): Promise<string>
-  /** A mailbox's counts `{unreadCount, totalCount}` JSON, or `"null"`. */
-  mailboxJson(mailboxId: string): Promise<string>
+  /** A message's optimistic projection JSON, or `"null"` when not held. */
+  messageJson(messageId: string): Promise<string>
   /** A view's projected rows JSON, or `"null"`. */
   projectViewJson(viewId: string): Promise<string>
   /** Drain the dirty keys since the last drain. */
@@ -110,8 +110,8 @@ export class InProcessStorePort implements StorePort {
     )
   }
 
-  mailboxJson(mailboxId: string): Promise<string> {
-    return Promise.resolve(this.handle.mailboxJson(mailboxId))
+  messageJson(messageId: string): Promise<string> {
+    return Promise.resolve(this.handle.messageJson(messageId))
   }
 
   projectViewJson(viewId: string): Promise<string> {

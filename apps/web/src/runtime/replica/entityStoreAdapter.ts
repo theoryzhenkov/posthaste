@@ -6,18 +6,24 @@
  * it still consumes `viewSnapshot`/`viewReplace` frames, which this adapter
  * synthesizes from the store's projected rows.
  *
- * The store is the single derivation for the mail list: `message.updated`
- * notification frames (carrying the full `projection` + `countDeltas`, per 2c/2b)
- * feed `ingest_batch`, and the store self-maintains each evaluable view's
+ * The store is the single derivation for the mail list ROWS: `message.updated`
+ * notification frames (carrying the full `projection`, per 2c/2b) feed
+ * `ingest_batch`, and the store self-maintains each evaluable view's
  * membership (place-or-ignore against the held coverage `[TOP, W]`). On each
  * drain the adapter re-projects open views + emits `viewReplace` for changed
- * ones (covers content-only mutations — P2 — without a message→rows index),
- * and mirrors the affected mailboxes' counts into the live store's counts slice
- * (`setMailboxCount`, D116) so the sidebar updates without a REST refetch and
- * without treating react-query as a live-state authority. Rows and counts
- * arrive on one stream, one batch — no divergence (I1). The view projection is
- * additionally mirrored into the store's view slice (D115); the synthesized
- * `viewReplace` sink path is kept until its consumers migrate (M49).
+ * ones (covers content-only mutations — P2 — without a message→rows index).
+ * The view projection is additionally mirrored into the store's view slice
+ * (D115); the synthesized `viewReplace` sink path is kept until its consumers
+ * migrate (M49).
+ *
+ * Mailbox COUNTS do not flow through the store (RFC-L2-count-unification):
+ * they are react-query state — `useDaemonEvents` invalidates the count keys on
+ * count-affecting events and react-query refetches the runtime's canonical
+ * counts. This adapter contributes only the THIN optimistic overlay for the
+ * user's OWN mutations (`setQueryData` adjustment on the affected count
+ * entries, reconciled by the settlement echo's invalidation refetch) and the
+ * revert-path reconcile (a failed mutation invalidates the count keys so the
+ * overlay is refetched away).
  *
  * Views open **non-delta-capable** (option i): the runtime serves full
  * `viewSnapshot`/`viewReplace`, and the store re-derives placement from
@@ -30,10 +36,11 @@ import type { QueryClient } from '@tanstack/react-query'
 
 import { queryClient as singletonQueryClient } from '@/app/queryClient'
 import {
-  clearViewProjection,
-  setMailboxCount,
-  setViewProjection,
-} from '@/live-store/store'
+  adjustMailboxCountsInCache,
+  invalidateAllMailboxCounts,
+} from '@/domain-cache/mailboxCounts'
+import { clearViewProjection, setViewProjection } from '@/live-store/store'
+import { mailboxCountAdjustments } from './countOverlay'
 import { LOG_EVENTS, syncLogger } from '@/logger'
 import type { Mailbox } from '@/api/types'
 import type { DomainEvent } from '@/api/types'
@@ -95,25 +102,16 @@ interface StoreViewRow {
 }
 
 /** One authoritative update in a batch (`ingestBatchJson` input). */
-type StoreUpdate =
-  | {
-      message: {
-        messageId: string
-        projection: unknown
-        deleted: boolean
-        countDeltas: CountDelta[]
-      }
-    }
-  | { mailboxCount: CountDelta }
-
-interface CountDelta {
-  mailboxId: string
-  unreadCount: number
-  totalCount: number
+type StoreUpdate = {
+  message: {
+    messageId: string
+    projection: unknown
+    deleted: boolean
+  }
 }
 
-/** A dirty key from `drainDirtyJson` (`{message|mailbox|view: id}`). */
-type DirtyKey = { message: string } | { mailbox: string } | { view: string }
+/** A dirty key from `drainDirtyJson` (`{message|view: id}`). */
+type DirtyKey = { message: string } | { view: string }
 
 /** Cancels a scheduled coalesced flush. */
 type FlushCanceller = () => void
@@ -227,14 +225,12 @@ function projectionBatchFromRows(
       messageId: row.projection.id,
       projection: row.projection,
       deleted: false,
-      countDeltas: [],
     },
   }))
 }
 
 class EntityStoreController {
   private readonly views = new Map<string, ViewEntry>()
-  private readonly mailboxAccount = new Map<string, string>()
   private sink: RuntimeFrameHandlers | null = null
   private seq = 1_000_000
   private readonly now: () => number
@@ -732,6 +728,12 @@ class EntityStoreController {
           diff = JSON.parse(diffJson) as MessageChangeDiff
         }
       }
+      // The count overlay's `before` must be read PRE-fold (after the accept
+      // the projection already carries this mutation's effect and the
+      // adjustment would compute as zero).
+      const countStateBefore = await this.messageCountState(
+        translated.messageId,
+      )
       await this.store.acceptMutationJson(
         JSON.stringify({
           mutationId: clientMutationId,
@@ -739,6 +741,7 @@ class EntityStoreController {
           assertion: translated.assertion,
         }),
       )
+      this.applyCountOverlay(request, translated.assertion, countStateBefore)
       try {
         await this.deps.pendingSet.put({
           clientMutationId,
@@ -763,6 +766,8 @@ class EntityStoreController {
         await this.store.settle(clientMutationId, 'failed')
         await this.clearRetired()
         await this.drainAndEmit()
+        // The count overlay applied above is now stale — refetch it away.
+        invalidateAllMailboxCounts(this.queryClient)
         // Normalize to a clear, uniform message ("storage full" vs an opaque
         // DOMException) regardless of which `PendingSetStore` impl raised it.
         const writeError = toPendingSetWriteError(error)
@@ -826,6 +831,9 @@ class EntityStoreController {
     }
     const foldId = request.clientMutationId
     await this.enqueue(async () => {
+      const countStateBefore = await this.messageCountState(
+        translated.messageId,
+      )
       await this.store.acceptMutationJson(
         JSON.stringify({
           mutationId: foldId,
@@ -833,6 +841,7 @@ class EntityStoreController {
           assertion: translated.assertion,
         }),
       )
+      this.applyCountOverlay(request, translated.assertion, countStateBefore)
       await this.drainAndEmit()
     })
     return foldId
@@ -850,6 +859,9 @@ class EntityStoreController {
       await this.clearRetired()
       await this.drainAndEmit()
     })
+    // Refetch away the fold's count overlay (thin: no per-fold bookkeeping —
+    // the authoritative counts never moved, so the refetch restores them).
+    invalidateAllMailboxCounts(this.queryClient)
   }
 
   /**
@@ -965,24 +977,19 @@ class EntityStoreController {
   }
 
   /** Build the store updates from a `message.updated` event (empty when there's
-   *  nothing to apply), tracking mailbox→account on the side. Extracted so a
-   *  coalesced flush can fold a whole burst into one ingest.
+   *  nothing to apply). Extracted so a coalesced flush can fold a whole burst
+   *  into one ingest.
    *
-   *  A projection (or a delete) materializes the row AND applies its
-   *  `countDeltas` in one `Message` update. A projection-LESS event that still
-   *  carries `countDeltas` — a count-only `message.updated` (a mailbox-metadata
-   *  event, or the split-runtime down-channel that re-publishes without a
-   *  projection) — must STILL move the source-mailbox counter: its `countDeltas`
-   *  are routed as standalone `MailboxCount` updates so the live-store counter
-   *  slice ingests them instead of the whole event (counts included) being
-   *  dropped. Previously such an event returned `null` and its counts were lost,
-   *  freezing the sidebar unread counter until a reload re-bootstrapped it. */
+   *  A projection (or a delete) materializes the ROW. Events carry no counts
+   *  (RFC-L2-count-unification) — mailbox counts are react-query state,
+   *  invalidated by `useDaemonEvents`' domain-cache handlers on the same
+   *  events — so a projection-less, non-deleted event has nothing for the
+   *  store and is dropped here without losing anything. */
   private storeUpdatesFromEvent(event: DomainEvent): StoreUpdate[] {
     const inner = event.payload as
       | {
           messageId?: string
           projection?: unknown
-          countDeltas?: CountDelta[]
           deleted?: boolean
         }
       | undefined
@@ -992,20 +999,10 @@ class EntityStoreController {
     }
     const deleted = inner?.deleted === true
     const projection = inner?.projection ?? null
-    const countDeltas = inner?.countDeltas ?? []
-    const accountId = event.accountId
-    if (accountId) {
-      for (const delta of countDeltas) {
-        this.mailboxAccount.set(delta.mailboxId, accountId)
-      }
-    }
     if (projection || deleted) {
-      return [{ message: { messageId, projection, deleted, countDeltas } }]
+      return [{ message: { messageId, projection, deleted } }]
     }
-    // No projection to materialize a row: apply the counts on their own so the
-    // counter slice still moves (the mark-read/move source-mailbox count is the
-    // motivating case).
-    return countDeltas.map((delta) => ({ mailboxCount: delta }))
+    return []
   }
 
   private async ingestMessageEvent(event: DomainEvent): Promise<void> {
@@ -1047,6 +1044,12 @@ class EntityStoreController {
       await this.clearRetired()
       await this.drainAndEmit()
     })
+    if (verdict === 'failed') {
+      // The mutation reverted: refetch away its optimistic count overlay (the
+      // authoritative counts never moved). Confirmed settlements need nothing —
+      // the settlement echo's `message.updated` already invalidated the keys.
+      invalidateAllMailboxCounts(this.queryClient)
+    }
   }
 
   /** Clear durable-pending-set records for ops the engine retired since the last
@@ -1059,7 +1062,7 @@ class EntityStoreController {
     }
   }
 
-  /** Drain the store's dirty keys, re-project the dirty views, and write counts. */
+  /** Drain the store's dirty keys and re-project the dirty views. */
   private async drainAndEmit(): Promise<void> {
     const dirty = JSON.parse(await this.store.drainDirtyJson()) as DirtyKey[]
     // Re-project ONLY the views the store flagged dirty. The store now marks a
@@ -1069,16 +1072,10 @@ class EntityStoreController {
     // (`adapter-reproject-all`). The JSON-diff gate in `emitChangedViews` stays
     // the safety net against a true no-op rederive.
     const dirtyViews = new Set<string>()
-    const dirtyMailboxes: string[] = []
     for (const key of dirty) {
       if ('view' in key) {
         dirtyViews.add(key.view)
-      } else if ('mailbox' in key) {
-        dirtyMailboxes.push(key.mailbox)
       }
-    }
-    for (const mailboxId of dirtyMailboxes) {
-      await this.writeMailboxCount(mailboxId)
     }
     await this.emitChangedViews(dirtyViews)
   }
@@ -1135,27 +1132,50 @@ class EntityStoreController {
     return { json, rows }
   }
 
-  /** Mirror a dirty mailbox's counts into the live store's counts slice (D116).
-   *  The replica owns the count; the store is the dumb main-thread mirror the
-   *  sidebar reads via `useMailboxCounts`. NOT react-query — live counts are no
-   *  longer request/response cache state (the setQueryData-for-counts path is
-   *  deleted; the M46 gate greps for its absence). */
-  private async writeMailboxCount(mailboxId: string): Promise<void> {
-    const accountId = this.mailboxAccount.get(mailboxId)
-    if (!accountId) {
-      return
-    }
-    const counts = JSON.parse(await this.store.mailboxJson(mailboxId)) as {
-      unreadCount: number
-      totalCount: number
+  /** The message's pre-fold count-relevant state (`mailboxIds` + `isRead`) from
+   *  the store's optimistic projection, or `null` when the message is not held
+   *  (the mutation is deferred — no overlay; the invalidation refetch covers
+   *  it). MUST be called inside the serialized store queue, BEFORE the
+   *  mutation's own fold is accepted. */
+  private async messageCountState(
+    messageId: string,
+  ): Promise<{ mailboxIds: string[]; isRead: boolean } | null> {
+    const projection = JSON.parse(await this.store.messageJson(messageId)) as {
+      mailboxIds?: unknown
+      isRead?: unknown
     } | null
-    if (!counts) {
+    if (!projection || !Array.isArray(projection.mailboxIds)) {
+      return null
+    }
+    return {
+      mailboxIds: projection.mailboxIds.filter(
+        (id): id is string => typeof id === 'string',
+      ),
+      isRead: projection.isRead === true,
+    }
+  }
+
+  /** D2 — the THIN optimistic count overlay for the user's own mutation:
+   *  `setQueryData`-adjust the affected `(source, mailbox)` count entries
+   *  immediately, reconciled by the invalidation refetch the settlement echo
+   *  triggers (or the failed-settle reconcile). No bookkeeping beyond the
+   *  adjustment; a skipped overlay (unknown source, un-held message) just means
+   *  the refetch lands the change a beat later. */
+  private applyCountOverlay(
+    request: RuntimeRunMutationRequest,
+    assertion: ReplicaAssertion,
+    before: { mailboxIds: string[]; isRead: boolean } | null,
+  ): void {
+    const sourceId = (request.args as { sourceId?: string } | undefined)
+      ?.sourceId
+    if (!sourceId || !before) {
       return
     }
-    setMailboxCount(accountId, mailboxId, {
-      unread: counts.unreadCount,
-      total: counts.totalCount,
-    })
+    adjustMailboxCountsInCache(
+      this.queryClient,
+      sourceId,
+      mailboxCountAdjustments(before, assertion),
+    )
   }
 
   private snapshotFrom(

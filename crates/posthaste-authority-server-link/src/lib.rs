@@ -119,11 +119,12 @@ pub struct BaseAssertion {
     /// The authoritative `message.updated` [`DomainEvent`] this assertion was
     /// derived from, carried whole so a split (remote) runtime republishes the
     /// SAME enriched event the co-located bus delivers — `payload.projection`
-    /// (the body-free `MessageSummary`) + `payload.countDeltas` (absolute
-    /// per-mailbox counts) included — instead of hand-building a bare
-    /// `{changes: {...}}` one that leaves the client's mailbox counters frozen.
-    /// `None` on frames from an older far node (or synthetic test frames); the
-    /// near node then falls back to the bare synthesized event.
+    /// (the body-free `MessageSummary`) included — instead of hand-building a
+    /// bare `{changes: {...}}` one that leaves the client's mail-list rows
+    /// waiting for a re-serve. Counts ride no event
+    /// (RFC-L2-count-unification); clients invalidate + refetch them. `None`
+    /// on frames from an older far node (or synthetic test frames); the near
+    /// node then falls back to the bare synthesized event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<DomainEvent>,
 }

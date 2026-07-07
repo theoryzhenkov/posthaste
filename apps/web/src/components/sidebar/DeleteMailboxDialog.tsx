@@ -13,7 +13,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useMailboxCounts } from '@/live-store/store'
 
 import { useDeleteMailboxMutation } from './useDeleteMailboxMutation'
 
@@ -40,10 +39,9 @@ export function DeleteMailboxDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const deleteMailbox = useDeleteMailboxMutation(sourceId)
-  // Live COUNTS drive the warning (D116) — fall back to the query's server count
-  // before the first frame seeds a live entry.
-  const liveCounts = useMailboxCounts(sourceId)[mailbox.id]
-  const total = liveCounts ? liveCounts.total : mailbox.totalEmails
+  // The warning count is the react-query mailbox row's total, kept live by
+  // count invalidation + the optimistic overlay (RFC-L2-count-unification).
+  const total = mailbox.totalEmails
   // A 409 backstop: the mailbox looked empty locally but the server rejected the
   // delete because it holds mail. Force the confirm-with-messages path even when
   // the local count still reads 0.

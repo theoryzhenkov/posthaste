@@ -84,11 +84,12 @@ pub(crate) fn base_frame_from_event(
 ///
 /// The assertion carries the source event whole (`BaseAssertion::event`): the
 /// store command authored it ENRICHED — `payload.projection` (the body-free
-/// `MessageSummary`) + `payload.countDeltas` (absolute per-mailbox counts),
-/// `posthaste-store` `mutations/commands.rs` — and a split (remote) runtime
-/// republishes it verbatim, so its clients' mailbox counters move on their own
-/// mutations exactly as a co-located runtime's do (which shares this bus
-/// directly).
+/// `MessageSummary`), `posthaste-store` `mutations/commands.rs` — and a split
+/// (remote) runtime republishes it verbatim, so its clients' mail-list ROWS
+/// self-maintain on their own mutations exactly as a co-located runtime's do
+/// (which shares this bus directly). Counts ride no event
+/// (RFC-L2-count-unification): the republished event is the trigger a client's
+/// mailbox-count invalidation fires on.
 pub(crate) fn message_event_to_assertion(
     event: &DomainEvent,
     current: Option<MessageFoldState>,
@@ -707,8 +708,8 @@ mod tests {
             assertion.update,
             BaseUpdate::Present(fold(&["$flagged"], &["inbox"]))
         );
-        // The source event rides the assertion whole, enrichment
-        // (projection/countDeltas) and all, for the split runtime's republish.
+        // The source event rides the assertion whole, enrichment (projection)
+        // and all, for the split runtime's republish.
         assert_eq!(assertion.event.as_ref(), Some(&event));
     }
 
@@ -717,8 +718,9 @@ mod tests {
         let event = message_event(json!({ "messageId": "m1", "deleted": true }));
         let assertion = message_event_to_assertion(&event, Some(fold(&[], &["inbox"]))).unwrap();
         assert_eq!(assertion.update, BaseUpdate::Removed);
-        // Deletions carry the source event too — its `countDeltas` still name
-        // the mailboxes the message left.
+        // Deletions carry the source event too — the republished `deleted:true`
+        // event is what removes the row (and triggers count invalidation) on a
+        // split client.
         assert_eq!(assertion.event.as_ref(), Some(&event));
     }
 

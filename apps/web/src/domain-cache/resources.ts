@@ -94,6 +94,8 @@ function applyResourceInvalidation(
       invalidateSmartMailboxReadModels(queryClient, resource.id)
       return true
     case 'mailbox':
+      // Rows stay entity-store-owned; the mailbox structure + counts query
+      // always refetches (RFC-L2-count-unification).
       invalidateMailboxReadModels(queryClient, accountId, {
         skipStoreOwned: true,
       })

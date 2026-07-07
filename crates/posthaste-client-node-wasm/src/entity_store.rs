@@ -32,10 +32,11 @@ use posthaste_replica_projector::{
     ViewRow,
 };
 
-/// A live reactive entity store owned by JS: messages, mailboxes (count
-/// scalars), and views (ordered row lists + coverage), with a message optimism
-/// fold. The host feeds it authoritative batches and reads the dirty keys to
-/// drive the renderer.
+/// A live reactive entity store owned by JS: messages and views (ordered row
+/// lists + coverage), with a message optimism fold. The host feeds it
+/// authoritative batches and reads the dirty keys to drive the renderer.
+/// Mailbox counts are not held here (RFC-L2-count-unification): the client
+/// reads them via react-query invalidation of the runtime's canonical counts.
 #[wasm_bindgen]
 pub struct EntityStoreHandle {
     inner: EntityStore,
@@ -122,9 +123,7 @@ impl EntityStoreHandle {
 
     /// Apply an authoritative batch atomically: every update is applied before
     /// any dirty key is reported. `batch_json` is a JSON array of
-    /// `{"message":{messageId, projection, deleted, countDeltas:[{mailboxId,
-    /// unreadCount, totalCount}]}}` and/or `{"mailboxCount":{mailboxId,
-    /// unreadCount, totalCount}}`.
+    /// `{"message":{messageId, projection, deleted}}`.
     #[wasm_bindgen(js_name = ingestBatchJson)]
     pub fn ingest_batch_json(&mut self, batch_json: &str) -> Result<(), JsError> {
         let updates: Vec<StoreUpdate> =
@@ -223,14 +222,6 @@ impl EntityStoreHandle {
         serde_json::to_string(&diff).map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// A mailbox's server-authoritative counts as `{"unreadCount",
-    /// "totalCount"}`, or `"null"` if the mailbox is not held.
-    #[wasm_bindgen(js_name = mailboxJson)]
-    pub fn mailbox_json(&self, mailbox_id: &str) -> String {
-        let counts = self.inner.mailbox(mailbox_id);
-        serde_json::to_string(&counts).unwrap_or_else(|_| "null".to_string())
-    }
-
     /// A view's rows as a JSON array of `{rowKey, messageId, sortKey}`, or
     /// `"null"` if the view is not registered.
     #[wasm_bindgen(js_name = viewRowsJson)]
@@ -266,8 +257,8 @@ impl EntityStoreHandle {
     }
 
     /// Drain the keys changed since the last drain as a JSON array of
-    /// `{"message":id}` / `{"mailbox":id}` / `{"view":id}`. The host re-reads
-    /// these (re-project views, re-write counts). One drain per batch.
+    /// `{"message":id}` / `{"view":id}`. The host re-reads these (re-project
+    /// views). One drain per batch.
     #[wasm_bindgen(js_name = drainDirtyJson)]
     pub fn drain_dirty_json(&mut self) -> String {
         let dirty = self.inner.drain_dirty();
@@ -302,10 +293,9 @@ mod tests {
     use serde_json::json;
 
     /// Drive the handle end-to-end through the JSON boundary: register a view,
-    /// place its rows, ingest an authoritative message batch (projection +
-    /// count delta), drain dirty, and read the projected message + view rows +
-    /// mailbox counts. Pins the wiring (the serde shapes themselves are pinned
-    /// in `posthaste-replica-projector`).
+    /// place its rows, ingest an authoritative message batch (projection),
+    /// drain dirty, and read the projected message + view rows. Pins the wiring
+    /// (the serde shapes themselves are pinned in `posthaste-replica-projector`).
     #[test]
     fn handle_round_trips_an_authoritative_batch() {
         let mut handle = EntityStoreHandle::new();
@@ -334,7 +324,7 @@ mod tests {
             )
             .unwrap();
 
-        // An authoritative message batch: the projection + the inbox count delta.
+        // An authoritative message batch: the projection.
         handle
             .ingest_batch_json(
                 &json!([{
@@ -350,34 +340,26 @@ mod tests {
                             "isFlagged": false,
                             "subject": "m1"
                         },
-                        "deleted": false,
-                        "countDeltas": [
-                            {"mailboxId": "inbox", "unreadCount": 1, "totalCount": 1}
-                        ]
+                        "deleted": false
                     }
                 }])
                 .to_string(),
             )
             .unwrap();
 
-        // The dirty drain reports the message, the mailbox, and the view.
+        // The dirty drain reports the message and the view.
         let dirty: Vec<serde_json::Value> =
             serde_json::from_str(&handle.drain_dirty_json()).unwrap();
         assert!(dirty.contains(&json!({"message": "m1"})));
-        assert!(dirty.contains(&json!({"mailbox": "inbox"})));
         assert!(dirty.contains(&json!({"view": "inbox"})));
 
-        // The projected message + view row + mailbox counts read back.
+        // The projected message + view row read back.
         let msg: serde_json::Value = serde_json::from_str(&handle.message_json("m1")).unwrap();
         assert_eq!(msg["subject"], json!("m1"));
         let rows: Vec<serde_json::Value> =
             serde_json::from_str(&handle.view_rows_json("inbox")).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["messageId"], json!("m1"));
-        let counts: serde_json::Value =
-            serde_json::from_str(&handle.mailbox_json("inbox")).unwrap();
-        assert_eq!(counts["unreadCount"], json!(1));
-        assert_eq!(counts["totalCount"], json!(1));
     }
 
     /// An optimistic flag folds into the projected message + stays pending.
@@ -407,7 +389,7 @@ mod tests {
                             "mailboxIds": ["inbox"], "keywords": [],
                             "isRead": false, "isFlagged": false, "subject": "m1"
                         },
-                        "deleted": false, "countDeltas": []
+                        "deleted": false
                     }
                 }])
                 .to_string(),
@@ -444,7 +426,7 @@ mod tests {
                             "mailboxIds": ["inbox"], "keywords": ["$flagged"],
                             "isRead": false, "isFlagged": true, "subject": "m1"
                         },
-                        "deleted": false, "countDeltas": []
+                        "deleted": false
                     }
                 }])
                 .to_string(),

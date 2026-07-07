@@ -14,7 +14,6 @@ import {
 import type { AccountHealth } from '@/accountHealth'
 import type { AccountAppearance, Mailbox, MailboxGroup } from '@/api/types'
 import { useMailboxColorLookup } from '@/hooks/useMailboxColors'
-import { useMailboxCounts } from '@/live-store/store'
 
 import { AccountMark } from '../AccountMark'
 import type { SidebarSelection } from '../Sidebar'
@@ -94,17 +93,13 @@ export function SourceSection({
     }
     return map
   }, [partition.groups])
-  // The account header's aggregate unread reflects live COUNTS (D116): sum each
-  // mailbox's live count, falling back to the query's server count when no frame
-  // has seeded a live entry yet (bootstrap).
-  const liveCounts = useMailboxCounts(source.id)
+  // The account header's aggregate unread sums the react-query mailbox rows'
+  // counts (RFC-L2-count-unification): invalidation + the optimistic overlay
+  // keep `unreadEmails` live, so no separate live-count source exists.
   const unreadTotal = useMemo(
     () =>
-      source.mailboxes.reduce((sum, mailbox) => {
-        const live = liveCounts[mailbox.id]
-        return sum + (live ? live.unread : mailbox.unreadEmails)
-      }, 0),
-    [source.mailboxes, liveCounts],
+      source.mailboxes.reduce((sum, mailbox) => sum + mailbox.unreadEmails, 0),
+    [source.mailboxes],
   )
 
   const headerButton = (

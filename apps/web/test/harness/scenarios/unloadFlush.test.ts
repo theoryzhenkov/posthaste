@@ -32,20 +32,16 @@ afterEach(() => {
 })
 
 const flagged = (id: string, receivedAt: string) =>
-  messageUpdatedFrame(
+  messageUpdatedFrame(id, {
     id,
-    {
-      id,
-      sourceId: 's',
-      receivedAt,
-      keywords: ['$flagged'],
-      mailboxIds: ['inbox'],
-      isRead: false,
-      isFlagged: true,
-      subject: id,
-    },
-    [{ mailboxId: 'inbox', unreadCount: 2, totalCount: 2 }],
-  )
+    sourceId: 's',
+    receivedAt,
+    keywords: ['$flagged'],
+    mailboxIds: ['inbox'],
+    isRead: false,
+    isFlagged: true,
+    subject: id,
+  })
 
 function reprojected(
   frames: RuntimeFrame<RuntimeMailListViewState>[],

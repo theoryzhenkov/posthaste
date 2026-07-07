@@ -41,25 +41,24 @@ impl MailService {
         kind: OperationKind,
         payload: serde_json::Value,
     ) -> Result<CommandAck, ServiceError> {
-        // Echo the store command's ENRICHED `message.updated` (projection +
-        // absolute `countDeltas`) instead of a bare `{changes:{keywords:true}}`
-        // one. The write-through store command
+        // Echo the store command's ENRICHED `message.updated` (the row-liveness
+        // `projection`) instead of a bare `{changes:{keywords:true}}` one. The
+        // write-through store command
         // (`set_keywords`/`replace_mailboxes`/`destroy_message`, `posthaste-store`
         // `mutations/commands.rs`) already computes and appends that event to the
         // log inside its transaction and hands it back in the `CommandResult`;
-        // we now publish it rather than discarding it. This is the SAME event
-        // shape the sync-apply path emits, so the client entity store ingests the
-        // echo identically → the source-mailbox live count moves on the echo
-        // (sub-second), not only when a later sync re-emits the countDeltas.
+        // we publish it rather than discarding it. This is the SAME event shape
+        // the sync-apply path emits, so the client entity store ingests the echo
+        // identically → the mail-list row moves on the echo (sub-second), not
+        // only when a later sync re-emits the event.
         //
-        // No double-count: `countDeltas` carry ABSOLUTE mailbox counts (the
-        // current row value, not a ±delta — `mailbox_counts_json_tx`), and the
-        // client applies them by assignment (`apply_count_delta`), so this echo
-        // and the follow-up sync's re-emitted event are idempotent — both set the
-        // same value. Revert on failure rides the existing settlement path: a
-        // rejected assertion settles from the provider readback, which rewrites
-        // canonical to the unchanged state and re-emits an enriched
-        // `message.updated` with the reverted absolute counts.
+        // Mailbox COUNTS ride no event (RFC-L2-count-unification): a client
+        // reacts to the echo by invalidating its mailbox-count query and
+        // re-reading the trigger-maintained canonical counts, which this
+        // command's transaction already updated. Revert on failure rides the
+        // existing settlement path: a rejected assertion settles from the
+        // provider readback, which rewrites canonical to the unchanged state and
+        // re-emits an enriched `message.updated` — another invalidation.
         //
         // The projection is the body-free `MessageSummary` (no HTML/text body),
         // so the settlement payload stays small — regression-gated by
@@ -84,11 +83,11 @@ impl MailService {
 
     /// Apply a message assertion's effect to the canonical row (optimistic
     /// write-through), deserializing the operation payload by kind, and return
-    /// the store command's enriched `message.updated` events (projection +
-    /// absolute `countDeltas`) so the caller can echo them to clients. Reuses the
-    /// `MessageCommandStore` local-write methods; the `CommandResult` those
-    /// return already carries the enriched event, so the optimistic echo and the
-    /// sync-apply path share one event shape.
+    /// the store command's enriched `message.updated` events (the row-liveness
+    /// projection; no counts — RFC-L2-count-unification) so the caller can echo
+    /// them to clients. Reuses the `MessageCommandStore` local-write methods;
+    /// the `CommandResult` those return already carries the enriched event, so
+    /// the optimistic echo and the sync-apply path share one event shape.
     ///
     /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
     async fn apply_assertion_to_canonical(
