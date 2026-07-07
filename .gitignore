@@ -52,3 +52,6 @@ apps/desktop/gen/schemas/
 Thumbs.db
 target-shared-note/
 target-hygiene/
+
+# per-workspace cargo target dirs (worker overflow; see target-shared-note/, target-hygiene/ above)
+/target-*
