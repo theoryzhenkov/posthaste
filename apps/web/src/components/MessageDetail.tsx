@@ -67,6 +67,8 @@ interface MessageDetailProps {
   onSelectMessage: (message: MessageSummary) => void
   onSearch?: (query: string, append?: boolean) => void
   onTag?: () => void
+  /** Open the composer prefilled from a `mailto:` unsubscribe URI. */
+  onUnsubscribeMailto?: (mailtoUri: string) => void
 }
 
 /**
@@ -86,6 +88,7 @@ export function MessageDetail({
   onSelectMessage,
   onSearch,
   onTag,
+  onUnsubscribeMailto,
 }: MessageDetailProps) {
   const queryClient = useQueryClient()
   const conversationQueryKey = useMemo(
@@ -200,6 +203,7 @@ export function MessageDetail({
         onOpenFocusedMessage={onOpenFocusedMessage}
         onReply={onReply}
         onReplyAll={onReplyAll}
+        onUnsubscribeMailto={onUnsubscribeMailto}
         onSearch={onSearch}
         onTag={onTag}
         threadMessages={threadMessages}

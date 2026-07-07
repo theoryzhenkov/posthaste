@@ -52,6 +52,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             in_reply_to: None,
             references: Vec::new(),
             draft_id: None,
+            list_unsubscribe: None,
         },
         MessageRecord {
             id: MessageId::from("em-002"),
@@ -74,6 +75,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             in_reply_to: Some("<em-001@mock>".to_string()),
             references: vec!["<em-001@mock>".to_string()],
             draft_id: None,
+            list_unsubscribe: None,
         },
         MessageRecord {
             id: MessageId::from("em-003"),
@@ -96,6 +98,13 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             in_reply_to: None,
             references: Vec::new(),
             draft_id: None,
+            // Newsletter-ish sample: exercises the Unsubscribe affordance in
+            // mock-provider demos (one-click https + mailto fallback).
+            list_unsubscribe: Some(posthaste_domain_model::ListUnsubscribe {
+                https: Some("https://billing.example.com/unsubscribe/em-003".to_string()),
+                mailto: Some("mailto:unsubscribe@billing.example.com?subject=unsubscribe".to_string()),
+                one_click: true,
+            }),
         },
     ]
 }

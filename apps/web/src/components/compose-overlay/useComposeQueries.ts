@@ -40,7 +40,12 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
         sortDir: 'desc',
       }),
   })
-  const isMessageBasedCompose = intent.kind !== 'new'
+  // The provider message this compose is anchored to (reply/reply-all/forward
+  // quote context, or the draft being resumed); null for the from-scratch kinds
+  // (`new`, `mailto`), which carry no messageId.
+  const anchoredMessageId =
+    intent.kind === 'new' || intent.kind === 'mailto' ? null : intent.messageId
+  const isMessageBasedCompose = anchoredMessageId !== null
   const requiresMessageContext =
     intent.kind === 'reply' ||
     intent.kind === 'replyAll' ||
@@ -112,12 +117,12 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   }, [intent.sourceId, plainReplyMessageId, queryClient])
   const replyContextQuery = useQuery({
     queryKey: requiresMessageContext
-      ? ['reply-context', intent.sourceId, intent.messageId]
+      ? ['reply-context', intent.sourceId, anchoredMessageId]
       : ['reply-context', null],
     queryFn: () =>
       runtimeViews.compose.replyContext({
         sourceId: intent.sourceId,
-        messageId: isMessageBasedCompose ? intent.messageId : '',
+        messageId: anchoredMessageId ?? '',
       }),
     enabled: requiresMessageContext,
     // A cache-built placeholder unblocks the quote immediately; react-query
@@ -126,9 +131,13 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
       ? { placeholderData: replyContextPlaceholder }
       : {}),
   })
-  const composeKey = isMessageBasedCompose
-    ? `${intent.kind}:${intent.sourceId}:${intent.messageId}`
-    : `new:${intent.sourceId}`
+  const composeKey =
+    anchoredMessageId !== null
+      ? `${intent.kind}:${intent.sourceId}:${anchoredMessageId}`
+      : intent.kind === 'mailto'
+        ? // Keyed by the URI so opening a different mailto reseeds the form.
+          `mailto:${intent.sourceId}:${intent.mailtoUri}`
+        : `new:${intent.sourceId}`
 
   const fromIdentity = useMemo(
     () =>

@@ -18,3 +18,4 @@ mod gmail_labels;
 mod mailbox_state;
 mod message_identity;
 mod qresync;
+mod unsubscribe;

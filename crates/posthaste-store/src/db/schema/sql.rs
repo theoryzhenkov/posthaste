@@ -38,6 +38,7 @@ pub(super) const SCHEMA_SQL: &str = "
                 in_reply_to TEXT,
                 references_json TEXT NOT NULL DEFAULT '[]',
                 draft_id TEXT,
+                list_unsubscribe TEXT,
                 PRIMARY KEY (account_id, id)
             );
 

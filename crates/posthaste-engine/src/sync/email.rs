@@ -471,7 +471,7 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
     Ok((ids, complete))
 }
 
-pub(crate) fn email_metadata_properties() -> [email::Property; 17] {
+pub(crate) fn email_metadata_properties() -> [email::Property; 19] {
     [
         email::Property::Id,
         email::Property::ThreadId,
@@ -494,5 +494,9 @@ pub(crate) fn email_metadata_properties() -> [email::Property; 17] {
             posthaste_domain_model::DRAFT_ID_HEADER,
             false,
         )),
+        // RFC 2369/8058 unsubscribe targets, fetched raw (`asRaw`) so encoded-
+        // word decoding can never mangle a URL; the shared parser unfolds.
+        email::Property::Header(email::Header::as_raw("List-Unsubscribe", false)),
+        email::Property::Header(email::Header::as_raw("List-Unsubscribe-Post", false)),
     ]
 }

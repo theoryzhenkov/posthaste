@@ -52,6 +52,11 @@ const EXPECTED_SURFACES: Record<string, string[]> = {
   // -- organize ---------------------------------------------------------------
   'message.tag': ['palette', 'keyboard', 'detail-header'],
   'message.snooze': ['palette', 'detail-header'],
+  // List-Unsubscribe: data-gated (the detail DTO's parsed targets) AND
+  // capability-gated (`services.unsubscribe`, bound only by confirm-honoring
+  // hosts — the detail header today), so listing menu/palette here does not
+  // light them up until a host binds the service there.
+  'message.unsubscribe': ['context-menu', 'palette', 'detail-header'],
   // -- app-level (palette-only global commands) -------------------------------
   'app.compose': ['palette'],
   'app.new-smart-mailbox': ['palette'],

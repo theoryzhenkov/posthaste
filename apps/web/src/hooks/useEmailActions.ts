@@ -27,6 +27,7 @@ import {
   SYSTEM_KEYWORD_PREFIX,
   SYSTEM_KEYWORDS,
 } from '../domainVocabulary'
+import { unsubscribeMessage } from '../api/client'
 import { deriveKeywordState, mailKeys, type MailSelection } from '../mailState'
 import { runtimeMutations } from '../runtime/mutations'
 
@@ -450,6 +451,30 @@ export function useEmailActions({ undo }: { undo: () => void }) {
             sourceId: target.sourceId,
           }),
       }),
+    /**
+     * RFC 8058 one-click unsubscribe: the BACKEND performs the POST to the
+     * list server (https-only, credential-free); this just triggers it and
+     * reports the outcome. Not a mailbox mutation — no optimistic fold, no
+     * undo — so it bypasses the runtime mutation pipeline. Callers must have
+     * confirmed with the user first (the action's `confirm` gate).
+     */
+    unsubscribe: (target: SourceMessageRef) => {
+      setErrorMessage(null)
+      setPending(1)
+      return unsubscribeMessage(target.sourceId, target.messageId)
+        .then(() => {
+          toast('Unsubscribe request sent', { duration: 5000 })
+        })
+        .catch((error: unknown) => {
+          toast(
+            `Unsubscribe failed: ${
+              error instanceof Error ? error.message : 'request failed'
+            }`,
+            { duration: 8000 },
+          )
+        })
+        .finally(() => setPending(-1))
+    },
     clearError: () => setErrorMessage(null),
     errorMessage,
     isPending,

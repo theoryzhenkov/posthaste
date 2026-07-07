@@ -333,6 +333,7 @@ export function MailClient({
           onRejectSearchPreview={handlers.handleRejectSearchPreview}
           onRemoveTag={handlers.handleRemoveTag}
           onReply={handlers.handleReply}
+          onUnsubscribeMailto={handlers.handleUnsubscribeMailto}
           onSearch={handlers.handleSearch}
           onSelectMessage={handlers.handleSelectMessage}
           onSelectMessageRef={handlers.handleSelectMessageRef}

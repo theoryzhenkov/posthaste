@@ -11,6 +11,7 @@ fn fetched_body(raw_mime: Option<&str>) -> FetchedBody {
         body_text: Some("hi".to_string()),
         raw_mime: raw_mime.map(str::to_string),
         attachments: Vec::new(),
+        list_unsubscribe: None,
     }
 }
 

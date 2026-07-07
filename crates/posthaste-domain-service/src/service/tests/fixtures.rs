@@ -138,6 +138,7 @@ pub(super) fn sample_fetched_body() -> FetchedBody {
         body_text: Some("Cached body".to_string()),
         raw_mime: None,
         attachments: Vec::new(),
+        list_unsubscribe: None,
     }
 }
 

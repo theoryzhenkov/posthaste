@@ -8,7 +8,7 @@ import {
 } from 'react'
 
 import type { Identity, Recipient, ReplyContext } from '@/api/types'
-import type { ComposeIntent } from '@/composeIntent'
+import type { ComposeIntent, MailtoSeed } from '@/composeIntent'
 
 import type { MarkdownComposerEditorHandle } from '../MarkdownComposerEditor'
 import {
@@ -61,6 +61,7 @@ export function useComposeFormState({
   identity,
   intentKind,
   isMessageBasedCompose,
+  mailtoSeed,
   replyContext,
   signature,
 }: {
@@ -79,6 +80,8 @@ export function useComposeFormState({
   identity: Identity | undefined
   intentKind: ComposeIntent['kind']
   isMessageBasedCompose: boolean
+  /** Parsed `mailto:` prefill (the `mailto` intent); undefined otherwise. */
+  mailtoSeed?: MailtoSeed
   replyContext: ReplyContext | undefined
   signature: string | null
 }) {
@@ -98,12 +101,22 @@ export function useComposeFormState({
           }
         : EMPTY_FORM
     }
+    // A mailto compose is a `new` message whose fields are already known —
+    // seed them synchronously (nothing streams in later).
+    if (intentKind === 'mailto' && mailtoSeed) {
+      return {
+        ...EMPTY_FORM,
+        to: mailtoSeed.to,
+        subject: mailtoSeed.subject,
+        body: mailtoSeed.body,
+      }
+    }
     // FIX2 — a reply/forward starts EMPTY and streams its quoted body +
     // recipients + subject in via the seed effect below (keyed to a STABLE
     // reset key), so the editor is usable the instant it opens and a late
     // `replyContext` never resets the form out from under early typing.
     return EMPTY_FORM
-  }, [draftSeed, intentKind])
+  }, [draftSeed, intentKind, mailtoSeed])
   // Only a DRAFT resume flips loading→ready (its loaded content REPLACES the
   // empty form). A reply/forward keeps a stable reset key: its quote streams in
   // via an effect, so the form must not reset (which would clobber early edits).
@@ -363,7 +376,8 @@ export function useComposeFormState({
     setForm((current) => ({
       ...current,
       body:
-        intentKind === 'new'
+        // A mailto compose has no quote — the signature appends like `new`.
+        intentKind === 'new' || intentKind === 'mailto'
           ? appendSignature(current.body, signature)
           : insertSignatureAboveQuote(
               current.body,

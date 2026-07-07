@@ -352,6 +352,7 @@ impl MailGateway for MockJmapGateway {
             body_text: message.body_text.clone(),
             raw_mime: message.raw_mime.clone(),
             attachments: sample_attachments(message.id.as_str()),
+            list_unsubscribe: message.list_unsubscribe.clone(),
         })
     }
 
@@ -647,6 +648,7 @@ impl MailGateway for MockJmapGateway {
                 .unwrap_or_default(),
             // Simulate the provider round-tripping the X-Posthaste-Draft-Id header.
             draft_id: request.draft_id.clone(),
+            list_unsubscribe: None,
         });
         Ok(new_id)
     }

@@ -59,6 +59,12 @@ pub(crate) async fn fetch_message_body(
         email::Property::Subject,
         email::Property::TextBody,
         email::Property::To,
+        // Unsubscribe headers ride along on the body fetch so messages synced
+        // before the `list_unsubscribe` column existed are backfilled at
+        // message-open (JMAP serves no raw RFC822 here, so headers must be
+        // requested explicitly).
+        email::Property::Header(email::Header::as_raw("List-Unsubscribe", false)),
+        email::Property::Header(email::Header::as_raw("List-Unsubscribe-Post", false)),
     ]);
     get_request
         .arguments()
@@ -136,6 +142,7 @@ pub(crate) async fn fetch_message_body(
         body_text,
         raw_mime: Some(raw_mime),
         attachments,
+        list_unsubscribe: crate::conversions::list_unsubscribe_from_email(&email),
     })
 }
 

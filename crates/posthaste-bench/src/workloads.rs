@@ -90,6 +90,7 @@ pub fn synthetic_messages(count: usize) -> Vec<MessageRecord> {
                 in_reply_to: None,
                 references: Vec::new(),
                 draft_id: None,
+                list_unsubscribe: None,
             }
         })
         .collect()

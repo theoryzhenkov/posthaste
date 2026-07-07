@@ -284,6 +284,7 @@ mod rev_log;
 mod rules;
 mod smart_mailboxes;
 mod sync;
+mod unsubscribe;
 
 pub use account_overview::*;
 pub use account_settings::*;
@@ -302,6 +303,7 @@ pub use rev_log::*;
 pub use rules::*;
 pub use smart_mailboxes::*;
 pub use sync::*;
+pub use unsubscribe::*;
 
 #[cfg(test)]
 mod tests;

@@ -129,6 +129,10 @@ pub(super) fn build_app(state: Arc<AppState>) -> Router {
             "/sources/{source_id}/commands/messages/{message_id}/destroy",
             post(ok),
         )
+        .route(
+            "/sources/{source_id}/commands/messages/{message_id}/unsubscribe",
+            post(ok),
+        )
         .route("/settings", patch(ok))
         .route("/config:reload", post(ok))
         .route("/auth/tokens", post(ok))
