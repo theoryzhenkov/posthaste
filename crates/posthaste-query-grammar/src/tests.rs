@@ -3,13 +3,13 @@ use super::*;
 #[test]
 fn test_parse_from_prefix() {
     let rule = parse_query("from:alice").unwrap();
-    assert_eq!(rule.root.operator, SmartMailboxGroupOperator::All);
+    assert_eq!(rule.root.operator, MailQueryGroupOperator::All);
     assert_eq!(rule.root.nodes.len(), 1);
 
     // from: produces an ANY group with two conditions
     let node = &rule.root.nodes[0];
-    if let SmartMailboxRuleNode::Group(g) = node {
-        assert_eq!(g.operator, SmartMailboxGroupOperator::Any);
+    if let MailQueryRuleNode::Group(g) = node {
+        assert_eq!(g.operator, MailQueryGroupOperator::Any);
         assert!(!g.negated);
         assert_eq!(g.nodes.len(), 2);
     } else {
@@ -20,13 +20,13 @@ fn test_parse_from_prefix() {
 #[test]
 fn test_parse_from_alias() {
     let rule = parse_query("f:alice").unwrap();
-    assert_eq!(rule.root.operator, SmartMailboxGroupOperator::All);
+    assert_eq!(rule.root.operator, MailQueryGroupOperator::All);
     assert_eq!(rule.root.nodes.len(), 1);
 
     assert!(matches!(
         &rule.root.nodes[0],
-        SmartMailboxRuleNode::Group(group)
-            if group.operator == SmartMailboxGroupOperator::Any && group.nodes.len() == 2
+        MailQueryRuleNode::Group(group)
+            if group.operator == MailQueryGroupOperator::Any && group.nodes.len() == 2
     ));
 }
 
@@ -35,16 +35,16 @@ fn test_parse_spaced_from_alias_value() {
     let rule = parse_query("Account Creation f: Posthaste Author subject:welcome").unwrap();
     assert_eq!(rule.root.nodes.len(), 4);
 
-    let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[2] else {
+    let MailQueryRuleNode::Group(group) = &rule.root.nodes[2] else {
         panic!("expected Group node for f: prefix");
     };
-    let SmartMailboxRuleNode::Condition(condition) = &group.nodes[0] else {
+    let MailQueryRuleNode::Condition(condition) = &group.nodes[0] else {
         panic!("expected FromEmail condition for f: prefix");
     };
 
     assert_eq!(
         condition.value,
-        SmartMailboxValue::String("Posthaste Author".to_string())
+        MailQueryValue::String("Posthaste Author".to_string())
     );
 }
 
@@ -53,14 +53,14 @@ fn test_parse_spaced_subject_value() {
     let rule = parse_query("subject: account creation from:posthaste").unwrap();
     assert_eq!(rule.root.nodes.len(), 2);
 
-    let SmartMailboxRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
         panic!("expected Subject condition for subject: prefix");
     };
 
-    assert_eq!(condition.field, SmartMailboxField::Subject);
+    assert_eq!(condition.field, MailQueryField::Subject);
     assert_eq!(
         condition.value,
-        SmartMailboxValue::String("account creation".to_string())
+        MailQueryValue::String("account creation".to_string())
     );
 }
 
@@ -68,8 +68,8 @@ fn test_parse_spaced_subject_value() {
 fn test_parse_free_text() {
     let rule = parse_query("hello").unwrap();
     assert_eq!(rule.root.nodes.len(), 1);
-    if let SmartMailboxRuleNode::Group(g) = &rule.root.nodes[0] {
-        assert_eq!(g.operator, SmartMailboxGroupOperator::Any);
+    if let MailQueryRuleNode::Group(g) = &rule.root.nodes[0] {
+        assert_eq!(g.operator, MailQueryGroupOperator::Any);
         assert_eq!(g.nodes.len(), 4); // FromName, FromEmail, Subject, Preview
     } else {
         panic!("expected Group node for free text");
@@ -80,10 +80,10 @@ fn test_parse_free_text() {
 fn test_parse_is_unread() {
     let rule = parse_query("is:unread").unwrap();
     assert_eq!(rule.root.nodes.len(), 1);
-    if let SmartMailboxRuleNode::Condition(c) = &rule.root.nodes[0] {
-        assert_eq!(c.field, SmartMailboxField::IsRead);
-        assert_eq!(c.operator, SmartMailboxOperator::Equals);
-        assert_eq!(c.value, SmartMailboxValue::Bool(false));
+    if let MailQueryRuleNode::Condition(c) = &rule.root.nodes[0] {
+        assert_eq!(c.field, MailQueryField::IsRead);
+        assert_eq!(c.operator, MailQueryOperator::Equals);
+        assert_eq!(c.value, MailQueryValue::Bool(false));
         assert!(!c.negated);
     } else {
         panic!("expected Condition node for is:unread");
@@ -94,10 +94,10 @@ fn test_parse_is_unread() {
 fn test_parse_is_read() {
     let rule = parse_query("is:read").unwrap();
     assert_eq!(rule.root.nodes.len(), 1);
-    if let SmartMailboxRuleNode::Condition(c) = &rule.root.nodes[0] {
-        assert_eq!(c.field, SmartMailboxField::IsRead);
-        assert_eq!(c.operator, SmartMailboxOperator::Equals);
-        assert_eq!(c.value, SmartMailboxValue::Bool(true));
+    if let MailQueryRuleNode::Condition(c) = &rule.root.nodes[0] {
+        assert_eq!(c.field, MailQueryField::IsRead);
+        assert_eq!(c.operator, MailQueryOperator::Equals);
+        assert_eq!(c.value, MailQueryValue::Bool(true));
     } else {
         panic!("expected Condition node for is:read");
     }
@@ -124,19 +124,19 @@ fn test_parse_all_static_state_queries() {
 fn test_parse_prefix_and_state_values_case_insensitively() {
     let rule = parse_query("IS:Read FROM: Posthaste").unwrap();
     assert_eq!(rule.root.nodes.len(), 2);
-    let SmartMailboxRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
         panic!("expected IsRead condition");
     };
-    assert_eq!(condition.field, SmartMailboxField::IsRead);
-    assert_eq!(condition.value, SmartMailboxValue::Bool(true));
+    assert_eq!(condition.field, MailQueryField::IsRead);
+    assert_eq!(condition.value, MailQueryValue::Bool(true));
 }
 
 #[test]
 fn test_parse_mailbox_filter() {
     let rule = parse_query("in:archive").unwrap();
     assert_eq!(rule.root.nodes.len(), 1);
-    if let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] {
-        assert_eq!(group.operator, SmartMailboxGroupOperator::Any);
+    if let MailQueryRuleNode::Group(group) = &rule.root.nodes[0] {
+        assert_eq!(group.operator, MailQueryGroupOperator::Any);
         assert_eq!(group.nodes.len(), 3);
     } else {
         panic!("expected Group node for in: prefix");
@@ -147,8 +147,8 @@ fn test_parse_mailbox_filter() {
 fn test_parse_source_filter() {
     let rule = parse_query("source: Primary Account").unwrap();
     assert_eq!(rule.root.nodes.len(), 1);
-    if let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] {
-        assert_eq!(group.operator, SmartMailboxGroupOperator::Any);
+    if let MailQueryRuleNode::Group(group) = &rule.root.nodes[0] {
+        assert_eq!(group.operator, MailQueryGroupOperator::Any);
         assert_eq!(group.nodes.len(), 2);
     } else {
         panic!("expected Group node for source: prefix");
@@ -160,24 +160,24 @@ fn test_parse_id_and_thread_filters() {
     let rule = parse_query("id:message-1 thread:thread-1").unwrap();
     assert_eq!(rule.root.nodes.len(), 2);
 
-    let SmartMailboxRuleNode::Condition(message_id) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Condition(message_id) = &rule.root.nodes[0] else {
         panic!("expected MessageId condition");
     };
-    let SmartMailboxRuleNode::Condition(thread_id) = &rule.root.nodes[1] else {
+    let MailQueryRuleNode::Condition(thread_id) = &rule.root.nodes[1] else {
         panic!("expected ThreadId condition");
     };
 
-    assert_eq!(message_id.field, SmartMailboxField::MessageId);
-    assert_eq!(thread_id.field, SmartMailboxField::ThreadId);
+    assert_eq!(message_id.field, MailQueryField::MessageId);
+    assert_eq!(thread_id.field, MailQueryField::ThreadId);
 }
 
 #[test]
 fn test_parse_conversation_filter() {
     let rule = parse_query("conversation:conv-1").unwrap();
-    let SmartMailboxRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
         panic!("expected ConversationId condition");
     };
-    assert_eq!(condition.field, SmartMailboxField::ConversationId);
+    assert_eq!(condition.field, MailQueryField::ConversationId);
 }
 
 #[test]
@@ -196,9 +196,9 @@ fn test_rejects_empty_prefixed_value() {
 fn test_parse_negation() {
     let rule = parse_query("-from:bob").unwrap();
     assert_eq!(rule.root.nodes.len(), 1);
-    if let SmartMailboxRuleNode::Group(g) = &rule.root.nodes[0] {
+    if let MailQueryRuleNode::Group(g) = &rule.root.nodes[0] {
         assert!(g.negated);
-        assert_eq!(g.operator, SmartMailboxGroupOperator::Any);
+        assert_eq!(g.operator, MailQueryGroupOperator::Any);
     } else {
         panic!("expected negated Group node");
     }
@@ -208,12 +208,9 @@ fn test_parse_negation() {
 fn test_parse_quoted_string() {
     let rule = parse_query("subject:\"weekly report\"").unwrap();
     assert_eq!(rule.root.nodes.len(), 1);
-    if let SmartMailboxRuleNode::Condition(c) = &rule.root.nodes[0] {
-        assert_eq!(c.field, SmartMailboxField::Subject);
-        assert_eq!(
-            c.value,
-            SmartMailboxValue::String("weekly report".to_string())
-        );
+    if let MailQueryRuleNode::Condition(c) = &rule.root.nodes[0] {
+        assert_eq!(c.field, MailQueryField::Subject);
+        assert_eq!(c.value, MailQueryValue::String("weekly report".to_string()));
     } else {
         panic!("expected Condition node for quoted subject");
     }
@@ -223,7 +220,7 @@ fn test_parse_quoted_string() {
 fn test_parse_multiple_tokens() {
     let rule = parse_query("from:alice is:unread subject:test").unwrap();
     assert_eq!(rule.root.nodes.len(), 3);
-    assert_eq!(rule.root.operator, SmartMailboxGroupOperator::All);
+    assert_eq!(rule.root.operator, MailQueryGroupOperator::All);
 }
 
 #[test]
@@ -247,10 +244,10 @@ fn test_with_scopes_extracts_quoted_in_selector() {
     assert!(!scopes[0].negated);
     let rule = rule.expect("remainder rule for quoted in: + from:");
     assert_eq!(rule.root.nodes.len(), 1);
-    let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Group(group) = &rule.root.nodes[0] else {
         panic!("expected from: ANY group");
     };
-    assert_eq!(group.operator, SmartMailboxGroupOperator::Any);
+    assert_eq!(group.operator, MailQueryGroupOperator::Any);
     assert_eq!(group.nodes.len(), 2);
 }
 
@@ -262,7 +259,7 @@ fn test_with_scopes_extracts_spaced_in_selector_until_next_prefix() {
     assert!(!scopes[0].negated);
     let rule = rule.expect("remainder rule for spaced in: + from:");
     assert_eq!(rule.root.nodes.len(), 1);
-    let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Group(group) = &rule.root.nodes[0] else {
         panic!("expected from: ANY group");
     };
     assert_eq!(group.nodes.len(), 2);
@@ -276,10 +273,10 @@ fn test_with_scopes_marks_negated_in_selector() {
     assert!(scopes[0].negated);
     let rule = rule.expect("remainder rule for -in: + subject:");
     assert_eq!(rule.root.nodes.len(), 1);
-    let SmartMailboxRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Condition(condition) = &rule.root.nodes[0] else {
         panic!("expected subject Condition");
     };
-    assert_eq!(condition.field, SmartMailboxField::Subject);
+    assert_eq!(condition.field, MailQueryField::Subject);
 }
 
 #[test]
@@ -290,7 +287,7 @@ fn test_with_scopes_leaves_in_prefix_as_rule_when_not_listed() {
     assert!(scopes.is_empty());
     let rule = rule.expect("in:archive yields a rule when not peeled");
     assert_eq!(rule.root.nodes.len(), 1);
-    let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[0] else {
+    let MailQueryRuleNode::Group(group) = &rule.root.nodes[0] else {
         panic!("expected in: mailbox group");
     };
     assert_eq!(group.nodes.len(), 3);

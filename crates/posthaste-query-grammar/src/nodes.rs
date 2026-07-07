@@ -2,7 +2,7 @@ use super::date::{date_node, relative_date_node};
 use super::tokenizer::Token;
 use super::*;
 
-pub(super) fn parse_token(token: &Token) -> Result<Vec<SmartMailboxRuleNode>, String> {
+pub(super) fn parse_token(token: &Token) -> Result<Vec<MailQueryRuleNode>, String> {
     match token.prefix.as_deref() {
         Some(prefix) => parse_prefixed(prefix, &token.value, token.negated),
         None => Ok(vec![free_text_node(&token.value, token.negated)]),
@@ -13,7 +13,7 @@ fn parse_prefixed(
     prefix: &str,
     value: &str,
     negated: bool,
-) -> Result<Vec<SmartMailboxRuleNode>, String> {
+) -> Result<Vec<MailQueryRuleNode>, String> {
     let value = value.trim();
     if value.is_empty() {
         return Err(format!("empty value for {prefix}:"));
@@ -24,23 +24,23 @@ fn parse_prefixed(
             Ok(vec![from_node(value, negated)])
         }
         _ if matches!(normalized_prefix.as_str(), "subject" | "s") => Ok(vec![condition_node(
-            SmartMailboxField::Subject,
-            SmartMailboxOperator::Contains,
-            SmartMailboxValue::String(value.to_string()),
+            MailQueryField::Subject,
+            MailQueryOperator::Contains,
+            MailQueryValue::String(value.to_string()),
             negated,
         )]),
         _ if matches!(normalized_prefix.as_str(), "body" | "preview") => Ok(vec![condition_node(
-            SmartMailboxField::Preview,
-            SmartMailboxOperator::Contains,
-            SmartMailboxValue::String(value.to_string()),
+            MailQueryField::Preview,
+            MailQueryOperator::Contains,
+            MailQueryValue::String(value.to_string()),
             negated,
         )]),
         _ if normalized_prefix == "is" => is_node(value, negated),
         _ if normalized_prefix == "has" => has_node(value, negated),
         _ if matches!(normalized_prefix.as_str(), "tag" | "keyword") => Ok(vec![condition_node(
-            SmartMailboxField::Keyword,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(value.to_string()),
+            MailQueryField::Keyword,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(value.to_string()),
             negated,
         )]),
         _ if matches!(normalized_prefix.as_str(), "in" | "mailbox") => {
@@ -50,16 +50,16 @@ fn parse_prefixed(
             Ok(vec![source_node(value, negated)])
         }
         _ if normalized_prefix == "id" => Ok(vec![condition_node(
-            SmartMailboxField::MessageId,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(value.to_string()),
+            MailQueryField::MessageId,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(value.to_string()),
             negated,
         )]),
         _ if matches!(normalized_prefix.as_str(), "thread" | "threadid") => {
             Ok(vec![condition_node(
-                SmartMailboxField::ThreadId,
-                SmartMailboxOperator::Equals,
-                SmartMailboxValue::String(value.to_string()),
+                MailQueryField::ThreadId,
+                MailQueryOperator::Equals,
+                MailQueryValue::String(value.to_string()),
                 negated,
             )])
         }
@@ -69,30 +69,30 @@ fn parse_prefixed(
         ) =>
         {
             Ok(vec![condition_node(
-                SmartMailboxField::ConversationId,
-                SmartMailboxOperator::Equals,
-                SmartMailboxValue::String(value.to_string()),
+                MailQueryField::ConversationId,
+                MailQueryOperator::Equals,
+                MailQueryValue::String(value.to_string()),
                 negated,
             )])
         }
         _ if normalized_prefix == "before" => Ok(vec![condition_node(
-            SmartMailboxField::ReceivedAt,
-            SmartMailboxOperator::Lt,
-            SmartMailboxValue::String(value.to_string()),
+            MailQueryField::ReceivedAt,
+            MailQueryOperator::Lt,
+            MailQueryValue::String(value.to_string()),
             negated,
         )]),
         _ if normalized_prefix == "after" => Ok(vec![condition_node(
-            SmartMailboxField::ReceivedAt,
-            SmartMailboxOperator::Gt,
-            SmartMailboxValue::String(value.to_string()),
+            MailQueryField::ReceivedAt,
+            MailQueryOperator::Gt,
+            MailQueryValue::String(value.to_string()),
             negated,
         )]),
         _ if normalized_prefix == "date" => date_node(value, negated),
         _ if normalized_prefix == "newer" => {
-            relative_date_node(value, SmartMailboxOperator::Gt, negated)
+            relative_date_node(value, MailQueryOperator::Gt, negated)
         }
         _ if normalized_prefix == "older" => {
-            relative_date_node(value, SmartMailboxOperator::Lt, negated)
+            relative_date_node(value, MailQueryOperator::Lt, negated)
         }
         _ => Err(format!("unknown search prefix: {prefix}")),
     }
@@ -101,12 +101,12 @@ fn parse_prefixed(
 // -- helpers ----------------------------------------------------------------
 
 pub(super) fn condition_node(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
     negated: bool,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated,
@@ -115,109 +115,109 @@ pub(super) fn condition_node(
 }
 
 /// `from:value` -> ANY(FromEmail contains, FromName contains)
-fn from_node(value: &str, negated: bool) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
+fn from_node(value: &str, negated: bool) -> MailQueryRuleNode {
+    MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::Any,
         negated,
         nodes: vec![
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::FromEmail,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::FromEmail,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::FromName,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::FromName,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
         ],
     })
 }
 
 /// `in:value` -> ANY(mailbox role exact, mailbox id exact, mailbox name contains)
-fn mailbox_node(value: &str, negated: bool) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
+fn mailbox_node(value: &str, negated: bool) -> MailQueryRuleNode {
+    MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::Any,
         negated,
         nodes: vec![
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::MailboxRole,
-                operator: SmartMailboxOperator::Equals,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::MailboxRole,
+                operator: MailQueryOperator::Equals,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::MailboxId,
-                operator: SmartMailboxOperator::Equals,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::MailboxId,
+                operator: MailQueryOperator::Equals,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::MailboxName,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::MailboxName,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
         ],
     })
 }
 
 /// `source:value` -> ANY(source id exact, source display name contains)
-fn source_node(value: &str, negated: bool) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
+fn source_node(value: &str, negated: bool) -> MailQueryRuleNode {
+    MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::Any,
         negated,
         nodes: vec![
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::SourceId,
-                operator: SmartMailboxOperator::Equals,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::SourceId,
+                operator: MailQueryOperator::Equals,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::SourceName,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::SourceName,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
         ],
     })
 }
 
 /// `is:unread` / `is:flagged`
-fn is_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, String> {
+fn is_node(value: &str, negated: bool) -> Result<Vec<MailQueryRuleNode>, String> {
     let value = value.to_ascii_lowercase();
     match value.as_str() {
         "unread" => Ok(vec![condition_node(
-            SmartMailboxField::IsRead,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(false),
+            MailQueryField::IsRead,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(false),
             negated,
         )]),
         "read" | "seen" => Ok(vec![condition_node(
-            SmartMailboxField::IsRead,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(true),
+            MailQueryField::IsRead,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(true),
             negated,
         )]),
         "flagged" => Ok(vec![condition_node(
-            SmartMailboxField::IsFlagged,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(true),
+            MailQueryField::IsFlagged,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(true),
             negated,
         )]),
         "unflagged" => Ok(vec![condition_node(
-            SmartMailboxField::IsFlagged,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(false),
+            MailQueryField::IsFlagged,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(false),
             negated,
         )]),
         "attachment" | "attachments" => Ok(vec![condition_node(
-            SmartMailboxField::HasAttachment,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(true),
+            MailQueryField::HasAttachment,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(true),
             negated,
         )]),
         _ => Err(format!("unknown is: value: {value}")),
@@ -225,13 +225,13 @@ fn is_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, Stri
 }
 
 /// `has:attachment`
-fn has_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, String> {
+fn has_node(value: &str, negated: bool) -> Result<Vec<MailQueryRuleNode>, String> {
     let value = value.to_ascii_lowercase();
     match value.as_str() {
         "attachment" | "attachments" => Ok(vec![condition_node(
-            SmartMailboxField::HasAttachment,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(true),
+            MailQueryField::HasAttachment,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(true),
             negated,
         )]),
         _ => Err(format!("unknown has: value: {value}")),
@@ -239,34 +239,34 @@ fn has_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, Str
 }
 
 /// Free text: search across FromName, FromEmail, Subject, Preview.
-fn free_text_node(value: &str, negated: bool) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
+fn free_text_node(value: &str, negated: bool) -> MailQueryRuleNode {
+    MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::Any,
         negated,
         nodes: vec![
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::FromName,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::FromName,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::FromEmail,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::FromEmail,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::Subject,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::Subject,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
-            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::Preview,
-                operator: SmartMailboxOperator::Contains,
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::Preview,
+                operator: MailQueryOperator::Contains,
                 negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
+                value: MailQueryValue::String(value.to_string()),
             }),
         ],
     })

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use super::*;
 use posthaste_domain_model::{
-    DateUnit, DateValue, MessageRecord, Recipient, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxValue, SyncCursor,
+    DateUnit, DateValue, MailQueryCondition, MailQueryField, MailQueryGroup,
+    MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue,
+    MessageRecord, Recipient, SyncCursor,
 };
 
 use crate::test_support::temp_root;
@@ -138,22 +138,22 @@ fn cache_child_count(
 }
 
 fn rule_condition(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
+    field: MailQueryField,
+    operator: MailQueryOperator,
     value: impl Into<String>,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: false,
-        value: SmartMailboxValue::String(value.into()),
+        value: MailQueryValue::String(value.into()),
     })
 }
 
-fn all_rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+fn all_rule(nodes: Vec<MailQueryRuleNode>) -> MailQueryRule {
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },

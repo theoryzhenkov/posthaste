@@ -13,7 +13,7 @@ export function normalizeAppliedSearchQuery(value: string): string {
 /**
  * Build the query that filters a view to a single message's conversation. The
  * backend search supports the `conversation:` prefix (matching
- * `SmartMailboxField::ConversationId`); conversation ids are whitespace-free
+ * `MailQueryField::ConversationId`); conversation ids are whitespace-free
  * tokens, so no quoting is needed.
  */
 export function conversationViewQuery(conversationId: string): string {

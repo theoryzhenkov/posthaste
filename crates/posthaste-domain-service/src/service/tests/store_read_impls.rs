@@ -96,14 +96,14 @@ impl TagReadStore for TestStore {
 impl SmartMailboxStore for TestStore {
     fn query_messages_by_rule(
         &self,
-        _rule: &SmartMailboxRule,
+        _rule: &MailQueryRule,
     ) -> Result<Vec<MessageSummary>, StoreError> {
         Ok(Vec::new())
     }
 
     fn query_messages_by_rule_sorted(
         &self,
-        _rule: &SmartMailboxRule,
+        _rule: &MailQueryRule,
         _sort_field: MessageSortField,
         _sort_direction: SortDirection,
     ) -> Result<Vec<MessageSummary>, StoreError> {
@@ -116,7 +116,7 @@ impl SmartMailboxStore for TestStore {
 
     fn query_message_page_by_rule(
         &self,
-        _rule: &SmartMailboxRule,
+        _rule: &MailQueryRule,
         limit: usize,
         _cursor: Option<&MessageCursor>,
         _sort_field: MessageSortField,
@@ -138,7 +138,7 @@ impl SmartMailboxStore for TestStore {
 
     fn query_conversations_by_rule(
         &self,
-        _rule: &SmartMailboxRule,
+        _rule: &MailQueryRule,
         _limit: usize,
         _cursor: Option<&ConversationCursor>,
         _sort_field: ConversationSortField,
@@ -150,10 +150,7 @@ impl SmartMailboxStore for TestStore {
         })
     }
 
-    fn query_smart_mailbox_counts(
-        &self,
-        _rule: &SmartMailboxRule,
-    ) -> Result<(i64, i64), StoreError> {
+    fn query_smart_mailbox_counts(&self, _rule: &MailQueryRule) -> Result<(i64, i64), StoreError> {
         self.smart_mailbox_counts_error
             .as_ref()
             .map_or(Ok((1, 2)), |error| Err(StoreError::Failure(error.clone())))

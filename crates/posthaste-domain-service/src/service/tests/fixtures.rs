@@ -8,15 +8,15 @@ pub(super) fn sample_smart_mailbox() -> SmartMailbox {
         default_key: Some("inbox".to_string()),
         role: None,
         parent_id: None,
-        rule: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+        rule: MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
-                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                    field: SmartMailboxField::MailboxRole,
-                    operator: SmartMailboxOperator::Equals,
+                nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                    field: MailQueryField::MailboxRole,
+                    operator: MailQueryOperator::Equals,
                     negated: false,
-                    value: SmartMailboxValue::String("inbox".to_string()),
+                    value: MailQueryValue::String("inbox".to_string()),
                 })],
             },
         },
@@ -147,22 +147,22 @@ pub(super) fn sample_automation_rule() -> AutomationRule {
         name: "Posthaste".to_string(),
         enabled: true,
         triggers: vec![AutomationTrigger::MessageArrived],
-        condition: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::Any,
+        condition: MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::Any,
                 negated: false,
                 nodes: vec![
-                    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                        field: SmartMailboxField::FromName,
-                        operator: SmartMailboxOperator::Contains,
+                    MailQueryRuleNode::Condition(MailQueryCondition {
+                        field: MailQueryField::FromName,
+                        operator: MailQueryOperator::Contains,
                         negated: false,
-                        value: SmartMailboxValue::String("posthaste".to_string()),
+                        value: MailQueryValue::String("posthaste".to_string()),
                     }),
-                    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                        field: SmartMailboxField::FromEmail,
-                        operator: SmartMailboxOperator::Contains,
+                    MailQueryRuleNode::Condition(MailQueryCondition {
+                        field: MailQueryField::FromEmail,
+                        operator: MailQueryOperator::Contains,
                         negated: false,
-                        value: SmartMailboxValue::String("posthaste".to_string()),
+                        value: MailQueryValue::String("posthaste".to_string()),
                     }),
                 ],
             },

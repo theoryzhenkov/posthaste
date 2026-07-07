@@ -33,7 +33,7 @@ pub struct PatchSettingsRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewAutomationRuleRequest {
-    pub condition: SmartMailboxRule,
+    pub condition: MailQueryRule,
     pub limit: Option<usize>,
 }
 

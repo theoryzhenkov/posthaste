@@ -1,8 +1,4 @@
-import type {
-  AutomationRule,
-  SmartMailbox,
-  SmartMailboxRule,
-} from '../api/types'
+import type { AutomationRule, SmartMailbox, MailQueryRule } from '../api/types'
 import {
   accountScopedCondition,
   cloneRule,
@@ -53,7 +49,7 @@ export function actionConditionFromSourceMailboxRule(
   rule: AutomationRule,
   accountId: string,
   mailboxId: string,
-): SmartMailboxRule {
+): MailQueryRule {
   const nodes = rule.condition.root.nodes
   const actionNode = nodes[2]
   if (
@@ -77,7 +73,7 @@ export function actionConditionFromSourceMailboxRule(
 export function actionConditionFromSmartMailboxRule(
   rule: AutomationRule,
   accountId: string,
-): SmartMailboxRule {
+): MailQueryRule {
   const nodes = rule.condition.root.nodes
   const smartMailboxAndActionNode = nodes[1]
   if (

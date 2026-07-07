@@ -1,9 +1,9 @@
 use super::*;
 
 /// Extracts a string value or returns a type error.
-fn expect_string_value(value: &SmartMailboxValue) -> Result<&str, StoreError> {
+fn expect_string_value(value: &MailQueryValue) -> Result<&str, StoreError> {
     match value {
-        SmartMailboxValue::String(value) => Ok(value.as_str()),
+        MailQueryValue::String(value) => Ok(value.as_str()),
         _ => Err(StoreError::Failure(
             "expected string smart mailbox value".to_string(),
         )),
@@ -11,9 +11,9 @@ fn expect_string_value(value: &SmartMailboxValue) -> Result<&str, StoreError> {
 }
 
 /// Extracts a string array value or returns a type error.
-fn expect_strings_value(value: &SmartMailboxValue) -> Result<&[String], StoreError> {
+fn expect_strings_value(value: &MailQueryValue) -> Result<&[String], StoreError> {
     match value {
-        SmartMailboxValue::Strings(values) => Ok(values.as_slice()),
+        MailQueryValue::Strings(values) => Ok(values.as_slice()),
         _ => Err(StoreError::Failure(
             "expected string array smart mailbox value".to_string(),
         )),
@@ -38,9 +38,9 @@ fn escape_like(input: &str) -> String {
 }
 
 /// Extracts a boolean value or returns a type error.
-fn expect_bool_value(value: &SmartMailboxValue) -> Result<bool, StoreError> {
+fn expect_bool_value(value: &MailQueryValue) -> Result<bool, StoreError> {
     match value {
-        SmartMailboxValue::Bool(value) => Ok(*value),
+        MailQueryValue::Bool(value) => Ok(*value),
         _ => Err(StoreError::Failure(
             "expected boolean smart mailbox value".to_string(),
         )),
@@ -50,17 +50,17 @@ fn expect_bool_value(value: &SmartMailboxValue) -> Result<bool, StoreError> {
 /// Compiles an `equals` or `in` condition against a simple column.
 pub(super) fn compile_simple_field(
     column: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     match condition.operator {
-        SmartMailboxOperator::Equals => {
+        MailQueryOperator::Equals => {
             params.push(SqlValue::Text(
                 expect_string_value(&condition.value)?.to_string(),
             ));
             Ok(format!("{column} = ?"))
         }
-        SmartMailboxOperator::In => {
+        MailQueryOperator::In => {
             let values = expect_strings_value(&condition.value)?;
             compile_in_clause(column, values, params)
         }
@@ -75,17 +75,17 @@ pub(super) fn compile_simple_field(
 /// case-insensitive `contains` via LOWER/LIKE.
 pub(super) fn compile_text_field(
     column: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     match condition.operator {
-        SmartMailboxOperator::Equals => {
+        MailQueryOperator::Equals => {
             params.push(SqlValue::Text(
                 expect_string_value(&condition.value)?.to_string(),
             ));
             Ok(format!("COALESCE({column}, '') = ?"))
         }
-        SmartMailboxOperator::Contains => {
+        MailQueryOperator::Contains => {
             params.push(SqlValue::Text(format!(
                 "%{}%",
                 expect_string_value(&condition.value)?.to_lowercase()
@@ -95,14 +95,14 @@ pub(super) fn compile_text_field(
         // Prefix/suffix matches: case-insensitive `LIKE` with the value's LIKE
         // metacharacters escaped (so a literal `%`/`_` is not a wildcard), paired
         // with `ESCAPE '\'`.
-        SmartMailboxOperator::BeginsWith => {
+        MailQueryOperator::BeginsWith => {
             params.push(SqlValue::Text(format!(
                 "{}%",
                 escape_like(&expect_string_value(&condition.value)?.to_lowercase())
             )));
             Ok(format!("LOWER(COALESCE({column}, '')) LIKE ? ESCAPE '\\'"))
         }
-        SmartMailboxOperator::EndsWith => {
+        MailQueryOperator::EndsWith => {
             params.push(SqlValue::Text(format!(
                 "%{}",
                 escape_like(&expect_string_value(&condition.value)?.to_lowercase())
@@ -116,13 +116,13 @@ pub(super) fn compile_text_field(
         // A malformed pattern is rejected at the write boundary (R5c
         // `validate_condition`), so it never reaches here; if one somehow did, the
         // scalar surfaces a `StoreError`, never a panic.
-        SmartMailboxOperator::Regex => {
+        MailQueryOperator::Regex => {
             params.push(SqlValue::Text(
                 expect_string_value(&condition.value)?.to_string(),
             ));
             Ok(format!("COALESCE({column}, '') REGEXP ?"))
         }
-        SmartMailboxOperator::In => {
+        MailQueryOperator::In => {
             let values = expect_strings_value(&condition.value)?;
             compile_in_clause(&format!("COALESCE({column}, '')"), values, params)
         }
@@ -136,7 +136,7 @@ pub(super) fn compile_text_field(
 /// Compiles a date comparison condition (before/after/on-or-before/on-or-after).
 ///
 /// Accepts three value shapes, back-compatibly:
-/// - a legacy bare [`SmartMailboxValue::String`] — an absolute RFC3339 instant
+/// - a legacy bare [`MailQueryValue::String`] — an absolute RFC3339 instant
 ///   compared against the stored `received_at` literally (unchanged behavior);
 /// - [`DateValue::Absolute`] — the same literal comparison, but typed;
 /// - [`DateValue::Relative`] — a *rolling* bound resolved at query time via
@@ -144,14 +144,14 @@ pub(super) fn compile_text_field(
 ///   the clock instead of freezing to a fixed instant at edit time.
 pub(super) fn compile_date_field(
     column: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     let comparator = match condition.operator {
-        SmartMailboxOperator::Lt => "<",
-        SmartMailboxOperator::Gt => ">",
-        SmartMailboxOperator::Le => "<=",
-        SmartMailboxOperator::Ge => ">=",
+        MailQueryOperator::Lt => "<",
+        MailQueryOperator::Gt => ">",
+        MailQueryOperator::Le => "<=",
+        MailQueryOperator::Ge => ">=",
         _ => {
             return Err(StoreError::Failure(format!(
                 "unsupported operator {:?} for field {:?}",
@@ -162,11 +162,11 @@ pub(super) fn compile_date_field(
     match &condition.value {
         // Legacy bare-string absolute date, and the typed absolute date, both
         // compare against the stored RFC3339 instant as-is.
-        SmartMailboxValue::String(instant) => {
+        MailQueryValue::String(instant) => {
             params.push(SqlValue::Text(instant.clone()));
             Ok(format!("{column} {comparator} ?"))
         }
-        SmartMailboxValue::Date(DateValue::Absolute { value }) => {
+        MailQueryValue::Date(DateValue::Absolute { value }) => {
             params.push(SqlValue::Text(value.clone()));
             Ok(format!("{column} {comparator} ?"))
         }
@@ -177,7 +177,7 @@ pub(super) fn compile_date_field(
         // digits only) and a fixed, validated unit string, then passed as a
         // *bound parameter* — no user text ever reaches the SQL, so there is no
         // injection surface.
-        SmartMailboxValue::Date(DateValue::Relative { amount, unit }) => {
+        MailQueryValue::Date(DateValue::Relative { amount, unit }) => {
             let modifier = match unit {
                 DateUnit::Minutes => format!("-{amount} minutes"),
                 DateUnit::Hours => format!("-{amount} hours"),
@@ -205,14 +205,14 @@ pub(super) fn compile_date_field(
 /// The wire value is a byte count encoded as a string.
 pub(super) fn compile_numeric_field(
     column: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     let comparator = match condition.operator {
-        SmartMailboxOperator::Lt => "<",
-        SmartMailboxOperator::Gt => ">",
-        SmartMailboxOperator::Le => "<=",
-        SmartMailboxOperator::Ge => ">=",
+        MailQueryOperator::Lt => "<",
+        MailQueryOperator::Gt => ">",
+        MailQueryOperator::Le => "<=",
+        MailQueryOperator::Ge => ">=",
         _ => {
             return Err(StoreError::Failure(format!(
                 "unsupported operator {:?} for field {:?}",
@@ -241,17 +241,17 @@ pub(super) fn compile_numeric_field(
 /// - `In` matches a recipient whose email is any of the listed values.
 pub(super) fn compile_recipient_json_field(
     column: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     let predicate = match condition.operator {
-        SmartMailboxOperator::Equals => {
+        MailQueryOperator::Equals => {
             params.push(SqlValue::Text(
                 expect_string_value(&condition.value)?.to_string(),
             ));
             "json_extract(r.value, '$.email') = ?".to_string()
         }
-        SmartMailboxOperator::Contains => {
+        MailQueryOperator::Contains => {
             let needle = format!(
                 "%{}%",
                 expect_string_value(&condition.value)?.to_lowercase()
@@ -265,9 +265,9 @@ pub(super) fn compile_recipient_json_field(
         }
         // Prefix/suffix against either address part (email or display name),
         // case-insensitive with LIKE metacharacters escaped.
-        SmartMailboxOperator::BeginsWith | SmartMailboxOperator::EndsWith => {
+        MailQueryOperator::BeginsWith | MailQueryOperator::EndsWith => {
             let escaped = escape_like(&expect_string_value(&condition.value)?.to_lowercase());
-            let needle = if condition.operator == SmartMailboxOperator::BeginsWith {
+            let needle = if condition.operator == MailQueryOperator::BeginsWith {
                 format!("{escaped}%")
             } else {
                 format!("%{escaped}")
@@ -280,7 +280,7 @@ pub(super) fn compile_recipient_json_field(
         }
         // Regex against either address part. Bound twice, once per part; PERF: a
         // full scan (no index), acceptable for a filter.
-        SmartMailboxOperator::Regex => {
+        MailQueryOperator::Regex => {
             let pattern = expect_string_value(&condition.value)?.to_string();
             params.push(SqlValue::Text(pattern.clone()));
             params.push(SqlValue::Text(pattern));
@@ -288,7 +288,7 @@ pub(super) fn compile_recipient_json_field(
              OR COALESCE(json_extract(r.value, '$.name'), '') REGEXP ?)"
                 .to_string()
         }
-        SmartMailboxOperator::In => {
+        MailQueryOperator::In => {
             let values = expect_strings_value(&condition.value)?;
             if values.is_empty() {
                 return Ok("1 = 0".to_string());
@@ -311,9 +311,9 @@ pub(super) fn compile_recipient_json_field(
 /// Compiles a boolean field equality check (integer 0/1).
 pub(super) fn compile_bool_field(
     column: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
 ) -> Result<String, StoreError> {
-    if !matches!(condition.operator, SmartMailboxOperator::Equals) {
+    if !matches!(condition.operator, MailQueryOperator::Equals) {
         return Err(StoreError::Failure(format!(
             "unsupported operator {:?} for field {:?}",
             condition.operator, condition.field
@@ -331,17 +331,17 @@ pub(super) fn compile_bool_field(
 /// (mailbox ID, keyword, or mailbox role).
 pub(super) fn compile_exists_membership(
     prefix: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     let suffix = match condition.operator {
-        SmartMailboxOperator::Equals => {
+        MailQueryOperator::Equals => {
             params.push(SqlValue::Text(
                 expect_string_value(&condition.value)?.to_string(),
             ));
             " = ?".to_string()
         }
-        SmartMailboxOperator::In => {
+        MailQueryOperator::In => {
             let values = expect_strings_value(&condition.value)?;
             let placeholders = push_placeholders(values, params);
             format!(" IN ({placeholders})")
@@ -360,17 +360,17 @@ pub(super) fn compile_exists_membership(
 /// display names.
 pub(super) fn compile_exists_text_membership(
     prefix: &str,
-    condition: &SmartMailboxCondition,
+    condition: &MailQueryCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
     let suffix = match condition.operator {
-        SmartMailboxOperator::Equals => {
+        MailQueryOperator::Equals => {
             params.push(SqlValue::Text(
                 expect_string_value(&condition.value)?.to_string(),
             ));
             " = ?".to_string()
         }
-        SmartMailboxOperator::Contains => {
+        MailQueryOperator::Contains => {
             params.push(SqlValue::Text(format!(
                 "%{}%",
                 expect_string_value(&condition.value)?.to_lowercase()
@@ -379,9 +379,9 @@ pub(super) fn compile_exists_text_membership(
                   AND LOWER(b.name) LIKE ?"
                 .to_string()
         }
-        SmartMailboxOperator::BeginsWith | SmartMailboxOperator::EndsWith => {
+        MailQueryOperator::BeginsWith | MailQueryOperator::EndsWith => {
             let escaped = escape_like(&expect_string_value(&condition.value)?.to_lowercase());
-            let needle = if condition.operator == SmartMailboxOperator::BeginsWith {
+            let needle = if condition.operator == MailQueryOperator::BeginsWith {
                 format!("{escaped}%")
             } else {
                 format!("%{escaped}")
@@ -391,7 +391,7 @@ pub(super) fn compile_exists_text_membership(
                   AND LOWER(b.name) LIKE ? ESCAPE '\\'"
                 .to_string()
         }
-        SmartMailboxOperator::Regex => {
+        MailQueryOperator::Regex => {
             params.push(SqlValue::Text(
                 expect_string_value(&condition.value)?.to_string(),
             ));
@@ -399,7 +399,7 @@ pub(super) fn compile_exists_text_membership(
                   AND b.name REGEXP ?"
                 .to_string()
         }
-        SmartMailboxOperator::In => {
+        MailQueryOperator::In => {
             let values = expect_strings_value(&condition.value)?;
             let placeholders = push_placeholders(values, params);
             format!(" IN ({placeholders})")

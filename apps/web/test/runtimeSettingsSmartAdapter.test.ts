@@ -6,13 +6,13 @@ import type {
   AutomationRulePreviewResponse,
   Mailbox,
   SmartMailbox,
-  SmartMailboxRule,
+  MailQueryRule,
 } from '../src/api/types'
 import { resetRuntimeAdapterForTesting } from '../src/runtime/adapter'
 import { runtimeMutations } from '../src/runtime/mutations'
 import { runtimeViews } from '../src/runtime/views'
 
-const emptyRule: SmartMailboxRule = {
+const emptyRule: MailQueryRule = {
   root: { operator: 'all', negated: false, nodes: [] },
 }
 

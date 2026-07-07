@@ -1,6 +1,6 @@
 //! The single source of truth for the mail-query field schema: for every
-//! [`SmartMailboxField`], its value *type* (the value-shape family the compiler
-//! validates against) and the set of [`SmartMailboxOperator`]s it accepts.
+//! [`MailQueryField`], its value *type* (the value-shape family the compiler
+//! validates against) and the set of [`MailQueryOperator`]s it accepts.
 //!
 //! Before R5b this "field X is type Y, allows operators [...]" matrix was encoded
 //! TWICE — once in the store SQL compiler (`rule_compiler.rs` dispatch + each
@@ -22,12 +22,12 @@
 
 use serde::Serialize;
 
-use super::smart_mailboxes::{
-    DateValue, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
+use super::mail_query::{
+    DateValue, MailQueryCondition, MailQueryField, MailQueryGroup, MailQueryOperator,
+    MailQueryRule, MailQueryRuleNode, MailQueryValue,
 };
 
-use SmartMailboxOperator::{BeginsWith, Contains, EndsWith, Equals, Ge, Gt, In, Le, Lt, Regex};
+use MailQueryOperator::{BeginsWith, Contains, EndsWith, Equals, Ge, Gt, In, Le, Lt, Regex};
 
 /// The value-shape family a field's condition value carries. This selects how the
 /// compiler validates and binds the value, and drives the web's coarse widget
@@ -60,7 +60,7 @@ pub enum QueryValueType {
 #[derive(Clone, Copy, Debug)]
 pub struct MailQueryFieldSpec {
     pub value_type: QueryValueType,
-    pub operators: &'static [SmartMailboxOperator],
+    pub operators: &'static [MailQueryOperator],
 }
 
 // The operator sets, named by the value-shape they gate. These are the ONE place
@@ -68,25 +68,24 @@ pub struct MailQueryFieldSpec {
 // is generated from them.
 
 /// Equality / membership only (identifier-shaped columns: ids, roles, keywords).
-const EQ_IN: &[SmartMailboxOperator] = &[Equals, In];
+const EQ_IN: &[MailQueryOperator] = &[Equals, In];
 /// Free-text columns: equality / substring / membership plus the additive text
 /// match operators (R4) — prefix (`beginsWith`), suffix (`endsWith`), and regex.
 /// These belong with `contains`: they are text-shaped predicates over the same
 /// free-text columns (id columns keep the leaner [`EQ_IN`] set).
-const EQ_CONTAINS_IN: &[SmartMailboxOperator] =
-    &[Equals, Contains, In, BeginsWith, EndsWith, Regex];
+const EQ_CONTAINS_IN: &[MailQueryOperator] = &[Equals, Contains, In, BeginsWith, EndsWith, Regex];
 /// Boolean equality.
-const EQ_ONLY: &[SmartMailboxOperator] = &[Equals];
+const EQ_ONLY: &[MailQueryOperator] = &[Equals];
 /// The four ordered comparisons, reused for dates and numbers (`< > <= >=`).
-const ORDERED: &[SmartMailboxOperator] = &[Lt, Gt, Le, Ge];
+const ORDERED: &[MailQueryOperator] = &[Lt, Gt, Le, Ge];
 
 /// The canonical field → `{ value_type, operators }` table. This match is the
 /// single source of truth; the compiler and the generated web registry both
 /// derive from it.
 ///
 /// @spec docs/L1-accounts#condition-fields-and-operators
-pub const fn field_spec(field: SmartMailboxField) -> MailQueryFieldSpec {
-    use SmartMailboxField as F;
+pub const fn field_spec(field: MailQueryField) -> MailQueryFieldSpec {
+    use MailQueryField as F;
     let (value_type, operators) = match field {
         // Identifier-shaped text columns: exact match or membership.
         F::SourceId
@@ -120,26 +119,26 @@ pub const fn field_spec(field: SmartMailboxField) -> MailQueryFieldSpec {
 /// Every query field, in a stable declaration order — the order the generated
 /// `query-schema.json` artifact (and thus the web registry) enumerate. Keep this
 /// exhaustive: [`all_fields_are_exhaustive`] asserts it covers the enum.
-pub const ALL_QUERY_FIELDS: &[SmartMailboxField] = &[
-    SmartMailboxField::SourceId,
-    SmartMailboxField::SourceName,
-    SmartMailboxField::MessageId,
-    SmartMailboxField::ThreadId,
-    SmartMailboxField::ConversationId,
-    SmartMailboxField::MailboxId,
-    SmartMailboxField::MailboxName,
-    SmartMailboxField::MailboxRole,
-    SmartMailboxField::IsRead,
-    SmartMailboxField::IsFlagged,
-    SmartMailboxField::HasAttachment,
-    SmartMailboxField::Keyword,
-    SmartMailboxField::FromName,
-    SmartMailboxField::FromEmail,
-    SmartMailboxField::To,
-    SmartMailboxField::Subject,
-    SmartMailboxField::Preview,
-    SmartMailboxField::ReceivedAt,
-    SmartMailboxField::Size,
+pub const ALL_QUERY_FIELDS: &[MailQueryField] = &[
+    MailQueryField::SourceId,
+    MailQueryField::SourceName,
+    MailQueryField::MessageId,
+    MailQueryField::ThreadId,
+    MailQueryField::ConversationId,
+    MailQueryField::MailboxId,
+    MailQueryField::MailboxName,
+    MailQueryField::MailboxRole,
+    MailQueryField::IsRead,
+    MailQueryField::IsFlagged,
+    MailQueryField::HasAttachment,
+    MailQueryField::Keyword,
+    MailQueryField::FromName,
+    MailQueryField::FromEmail,
+    MailQueryField::To,
+    MailQueryField::Subject,
+    MailQueryField::Preview,
+    MailQueryField::ReceivedAt,
+    MailQueryField::Size,
 ];
 
 /// One row of the serialized schema document (one field's spec), with the field
@@ -147,9 +146,9 @@ pub const ALL_QUERY_FIELDS: &[SmartMailboxField] = &[
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryFieldSchemaEntry {
-    pub field: SmartMailboxField,
+    pub field: MailQueryField,
     pub value_type: QueryValueType,
-    pub operators: Vec<SmartMailboxOperator>,
+    pub operators: Vec<MailQueryOperator>,
 }
 
 /// The serializable schema document emitted to `query-schema.json` and consumed
@@ -191,7 +190,7 @@ pub fn query_schema_json() -> String {
 // D5 — boundary validation
 // ---------------------------------------------------------------------------
 
-/// Why a [`SmartMailboxCondition`] failed [`validate_condition`]. Typed so the
+/// Why a [`MailQueryCondition`] failed [`validate_condition`]. Typed so the
 /// boundary can map it to a stable, machine-readable reason (the API's
 /// `query_invalid` body carries it alongside the field/operator).
 ///
@@ -231,8 +230,8 @@ impl QueryValidationReason {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryValidationError {
-    pub field: SmartMailboxField,
-    pub operator: SmartMailboxOperator,
+    pub field: MailQueryField,
+    pub operator: MailQueryOperator,
     pub reason: QueryValidationReason,
 }
 
@@ -262,23 +261,23 @@ impl std::fmt::Display for QueryValidationError {
 /// the same shape family the store compiler binds against, checked here up front
 /// so a mismatch is a boundary error, not a deep `StoreError`.
 ///
-/// `Date` accepts both the typed [`SmartMailboxValue::Date`] and a legacy bare
-/// [`SmartMailboxValue::String`] (R5a kept legacy absolute date-strings readable);
+/// `Date` accepts both the typed [`MailQueryValue::Date`] and a legacy bare
+/// [`MailQueryValue::String`] (R5a kept legacy absolute date-strings readable);
 /// `Number` is the stringly byte-count value R5a left untyped.
-fn value_matches_type(value_type: QueryValueType, value: &SmartMailboxValue) -> bool {
+fn value_matches_type(value_type: QueryValueType, value: &MailQueryValue) -> bool {
     match value_type {
         QueryValueType::Text => matches!(
             value,
-            SmartMailboxValue::String(_) | SmartMailboxValue::Strings(_)
+            MailQueryValue::String(_) | MailQueryValue::Strings(_)
         ),
-        QueryValueType::Bool => matches!(value, SmartMailboxValue::Bool(_)),
+        QueryValueType::Bool => matches!(value, MailQueryValue::Bool(_)),
         QueryValueType::Date => matches!(
             value,
-            SmartMailboxValue::Date(DateValue::Absolute { .. } | DateValue::Relative { .. })
-                | SmartMailboxValue::String(_)
+            MailQueryValue::Date(DateValue::Absolute { .. } | DateValue::Relative { .. })
+                | MailQueryValue::String(_)
         ),
         // `Size` stayed a byte-count string (R5a's no-migration model).
-        QueryValueType::Number => matches!(value, SmartMailboxValue::String(_)),
+        QueryValueType::Number => matches!(value, MailQueryValue::String(_)),
     }
 }
 
@@ -288,7 +287,7 @@ fn value_matches_type(value_type: QueryValueType, value: &SmartMailboxValue) -> 
 /// [`QueryValidationError`] carrying the field, operator, and reason.
 ///
 /// @spec docs/eph/RFC-L2-query-schema.md#d5--boundary-validation-invalid--rejected-at-the-edge
-pub fn validate_condition(condition: &SmartMailboxCondition) -> Result<(), QueryValidationError> {
+pub fn validate_condition(condition: &MailQueryCondition) -> Result<(), QueryValidationError> {
     let spec = field_spec(condition.field);
     if !spec.operators.contains(&condition.operator) {
         return Err(QueryValidationError {
@@ -307,9 +306,9 @@ pub fn validate_condition(condition: &SmartMailboxCondition) -> Result<(), Query
     // A `regex` operator's value must be a single, compilable pattern. A list
     // (`Strings`) has no scalar pattern to compile, and a pattern that does not
     // compile must be rejected here rather than failing per-row in the store.
-    if condition.operator == SmartMailboxOperator::Regex {
+    if condition.operator == MailQueryOperator::Regex {
         match &condition.value {
-            SmartMailboxValue::String(pattern) => {
+            MailQueryValue::String(pattern) => {
                 if regex::Regex::new(pattern).is_err() {
                     return Err(QueryValidationError {
                         field: condition.field,
@@ -332,23 +331,23 @@ pub fn validate_condition(condition: &SmartMailboxCondition) -> Result<(), Query
 
 /// Recurse a rule group, validating every leaf condition and descending into
 /// nested groups. The first invalid condition (depth-first) is returned.
-fn validate_group(group: &SmartMailboxGroup) -> Result<(), QueryValidationError> {
+fn validate_group(group: &MailQueryGroup) -> Result<(), QueryValidationError> {
     for node in &group.nodes {
         match node {
-            SmartMailboxRuleNode::Group(child) => validate_group(child)?,
-            SmartMailboxRuleNode::Condition(condition) => validate_condition(condition)?,
+            MailQueryRuleNode::Group(child) => validate_group(child)?,
+            MailQueryRuleNode::Condition(condition) => validate_condition(condition)?,
         }
     }
     Ok(())
 }
 
-/// Validate an entire query tree (a [`SmartMailboxRule`]) against the canonical
+/// Validate an entire query tree (a [`MailQueryRule`]) against the canonical
 /// schema, recursing through nested groups. This is the authoritative boundary
 /// check: a rule / smart mailbox that fails here must be rejected when SUBMITTED,
 /// so an invalid query is never stored for the compiler to later reject.
 ///
 /// @spec docs/eph/RFC-L2-query-schema.md#d5--boundary-validation-invalid--rejected-at-the-edge
-pub fn validate_query(rule: &SmartMailboxRule) -> Result<(), QueryValidationError> {
+pub fn validate_query(rule: &MailQueryRule) -> Result<(), QueryValidationError> {
     validate_group(&rule.root)
 }
 
@@ -358,12 +357,12 @@ mod tests {
 
     /// `ALL_QUERY_FIELDS` must list every enum variant exactly once — this pins
     /// the generated artifact's field set to the domain enum. If a field is added
-    /// to `SmartMailboxField`, this fails until it is given a spec + listed here.
+    /// to `MailQueryField`, this fails until it is given a spec + listed here.
     #[test]
     fn all_fields_are_exhaustive() {
-        // Exhaustive match: adding a variant to `SmartMailboxField` breaks this
+        // Exhaustive match: adding a variant to `MailQueryField` breaks this
         // arm and forces the author to extend `ALL_QUERY_FIELDS` + `field_spec`.
-        use SmartMailboxField as F;
+        use MailQueryField as F;
         for &field in ALL_QUERY_FIELDS {
             match field {
                 F::SourceId
@@ -410,11 +409,11 @@ mod tests {
     }
 
     fn condition(
-        field: SmartMailboxField,
-        operator: SmartMailboxOperator,
-        value: SmartMailboxValue,
-    ) -> SmartMailboxCondition {
-        SmartMailboxCondition {
+        field: MailQueryField,
+        operator: MailQueryOperator,
+        value: MailQueryValue,
+    ) -> MailQueryCondition {
+        MailQueryCondition {
             field,
             operator,
             negated: false,
@@ -422,10 +421,10 @@ mod tests {
         }
     }
 
-    fn rule_of(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
-        SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: super::super::smart_mailboxes::SmartMailboxGroupOperator::All,
+    fn rule_of(nodes: Vec<MailQueryRuleNode>) -> MailQueryRule {
+        MailQueryRule {
+            root: MailQueryGroup {
+                operator: super::super::mail_query::MailQueryGroupOperator::All,
                 negated: false,
                 nodes,
             },
@@ -436,13 +435,13 @@ mod tests {
     fn condition_with_operator_not_in_field_set_is_rejected() {
         // `contains` is not allowed on a boolean field.
         let err = validate_condition(&condition(
-            SmartMailboxField::IsRead,
-            SmartMailboxOperator::Contains,
-            SmartMailboxValue::Bool(true),
+            MailQueryField::IsRead,
+            MailQueryOperator::Contains,
+            MailQueryValue::Bool(true),
         ))
         .unwrap_err();
-        assert_eq!(err.field, SmartMailboxField::IsRead);
-        assert_eq!(err.operator, SmartMailboxOperator::Contains);
+        assert_eq!(err.field, MailQueryField::IsRead);
+        assert_eq!(err.operator, MailQueryOperator::Contains);
         assert_eq!(err.reason, QueryValidationReason::OperatorNotAllowed);
     }
 
@@ -450,9 +449,9 @@ mod tests {
     fn value_type_mismatch_is_rejected() {
         // A boolean field with a string value: valid operator, wrong value shape.
         let err = validate_condition(&condition(
-            SmartMailboxField::IsRead,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String("nope".to_string()),
+            MailQueryField::IsRead,
+            MailQueryOperator::Equals,
+            MailQueryValue::String("nope".to_string()),
         ))
         .unwrap_err();
         assert_eq!(err.reason, QueryValidationReason::ValueTypeMismatch);
@@ -463,37 +462,37 @@ mod tests {
         // Text scalar, text list, bool, number-as-string, date typed + legacy string.
         for cond in [
             condition(
-                SmartMailboxField::Subject,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String("hi".to_string()),
+                MailQueryField::Subject,
+                MailQueryOperator::Contains,
+                MailQueryValue::String("hi".to_string()),
             ),
             condition(
-                SmartMailboxField::Subject,
-                SmartMailboxOperator::In,
-                SmartMailboxValue::Strings(vec!["a".to_string()]),
+                MailQueryField::Subject,
+                MailQueryOperator::In,
+                MailQueryValue::Strings(vec!["a".to_string()]),
             ),
             condition(
-                SmartMailboxField::IsFlagged,
-                SmartMailboxOperator::Equals,
-                SmartMailboxValue::Bool(true),
+                MailQueryField::IsFlagged,
+                MailQueryOperator::Equals,
+                MailQueryValue::Bool(true),
             ),
             condition(
-                SmartMailboxField::Size,
-                SmartMailboxOperator::Gt,
-                SmartMailboxValue::String("1024".to_string()),
+                MailQueryField::Size,
+                MailQueryOperator::Gt,
+                MailQueryValue::String("1024".to_string()),
             ),
             condition(
-                SmartMailboxField::ReceivedAt,
-                SmartMailboxOperator::Lt,
-                SmartMailboxValue::Date(DateValue::Relative {
+                MailQueryField::ReceivedAt,
+                MailQueryOperator::Lt,
+                MailQueryValue::Date(DateValue::Relative {
                     amount: 7,
-                    unit: super::super::smart_mailboxes::DateUnit::Days,
+                    unit: super::super::mail_query::DateUnit::Days,
                 }),
             ),
             condition(
-                SmartMailboxField::ReceivedAt,
-                SmartMailboxOperator::Ge,
-                SmartMailboxValue::String("2026-07-06T00:00:00Z".to_string()),
+                MailQueryField::ReceivedAt,
+                MailQueryOperator::Ge,
+                MailQueryValue::String("2026-07-06T00:00:00Z".to_string()),
             ),
         ] {
             assert_eq!(validate_condition(&cond), Ok(()), "condition {cond:?}");
@@ -505,27 +504,27 @@ mod tests {
         // A well-formed anchored pattern on a text field validates.
         assert_eq!(
             validate_condition(&condition(
-                SmartMailboxField::Subject,
-                SmartMailboxOperator::Regex,
-                SmartMailboxValue::String("^foo.*bar$".to_string()),
+                MailQueryField::Subject,
+                MailQueryOperator::Regex,
+                MailQueryValue::String("^foo.*bar$".to_string()),
             )),
             Ok(())
         );
         // A malformed pattern (unclosed group) is a typed boundary error, NOT a
         // panic and NOT a deferred store failure.
         let err = validate_condition(&condition(
-            SmartMailboxField::Subject,
-            SmartMailboxOperator::Regex,
-            SmartMailboxValue::String("foo(".to_string()),
+            MailQueryField::Subject,
+            MailQueryOperator::Regex,
+            MailQueryValue::String("foo(".to_string()),
         ))
         .unwrap_err();
         assert_eq!(err.reason, QueryValidationReason::InvalidRegex);
-        assert_eq!(err.operator, SmartMailboxOperator::Regex);
+        assert_eq!(err.operator, MailQueryOperator::Regex);
         // A regex operator needs a scalar pattern — a list is a type mismatch.
         let err = validate_condition(&condition(
-            SmartMailboxField::Subject,
-            SmartMailboxOperator::Regex,
-            SmartMailboxValue::Strings(vec!["a".to_string()]),
+            MailQueryField::Subject,
+            MailQueryOperator::Regex,
+            MailQueryValue::Strings(vec!["a".to_string()]),
         ))
         .unwrap_err();
         assert_eq!(err.reason, QueryValidationReason::ValueTypeMismatch);
@@ -533,24 +532,21 @@ mod tests {
 
     #[test]
     fn text_match_operators_pass_on_free_text_fields() {
-        for operator in [
-            SmartMailboxOperator::BeginsWith,
-            SmartMailboxOperator::EndsWith,
-        ] {
+        for operator in [MailQueryOperator::BeginsWith, MailQueryOperator::EndsWith] {
             assert_eq!(
                 validate_condition(&condition(
-                    SmartMailboxField::FromEmail,
+                    MailQueryField::FromEmail,
                     operator,
-                    SmartMailboxValue::String("50%".to_string()),
+                    MailQueryValue::String("50%".to_string()),
                 )),
                 Ok(())
             );
         }
         // …but not on an identifier field (which keeps the leaner equals/in set).
         let err = validate_condition(&condition(
-            SmartMailboxField::MessageId,
-            SmartMailboxOperator::Regex,
-            SmartMailboxValue::String("x".to_string()),
+            MailQueryField::MessageId,
+            MailQueryOperator::Regex,
+            MailQueryValue::String("x".to_string()),
         ))
         .unwrap_err();
         assert_eq!(err.reason, QueryValidationReason::OperatorNotAllowed);
@@ -558,35 +554,35 @@ mod tests {
 
     #[test]
     fn validate_query_recurses_into_nested_groups() {
-        use super::super::smart_mailboxes::SmartMailboxGroupOperator;
+        use super::super::mail_query::MailQueryGroupOperator;
         // A valid outer condition and a nested group hiding an invalid one.
-        let nested = SmartMailboxRuleNode::Group(SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::Any,
+        let nested = MailQueryRuleNode::Group(MailQueryGroup {
+            operator: MailQueryGroupOperator::Any,
             negated: false,
-            nodes: vec![SmartMailboxRuleNode::Condition(condition(
+            nodes: vec![MailQueryRuleNode::Condition(condition(
                 // `before`/`lt` is not a valid operator for a boolean field.
-                SmartMailboxField::HasAttachment,
-                SmartMailboxOperator::Lt,
-                SmartMailboxValue::Bool(true),
+                MailQueryField::HasAttachment,
+                MailQueryOperator::Lt,
+                MailQueryValue::Bool(true),
             ))],
         });
         let rule = rule_of(vec![
-            SmartMailboxRuleNode::Condition(condition(
-                SmartMailboxField::Subject,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String("ok".to_string()),
+            MailQueryRuleNode::Condition(condition(
+                MailQueryField::Subject,
+                MailQueryOperator::Contains,
+                MailQueryValue::String("ok".to_string()),
             )),
             nested,
         ]);
         let err = validate_query(&rule).unwrap_err();
-        assert_eq!(err.field, SmartMailboxField::HasAttachment);
+        assert_eq!(err.field, MailQueryField::HasAttachment);
         assert_eq!(err.reason, QueryValidationReason::OperatorNotAllowed);
 
         // A fully valid tree passes.
-        let ok = rule_of(vec![SmartMailboxRuleNode::Condition(condition(
-            SmartMailboxField::Subject,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String("ok".to_string()),
+        let ok = rule_of(vec![MailQueryRuleNode::Condition(condition(
+            MailQueryField::Subject,
+            MailQueryOperator::Equals,
+            MailQueryValue::String("ok".to_string()),
         ))]);
         assert_eq!(validate_query(&ok), Ok(()));
     }
