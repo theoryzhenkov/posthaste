@@ -11,13 +11,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use posthaste_authority_server_link::AuthorityServerApi;
-use posthaste_contract_core::mutation_args::{MessageReplaceMailboxesArgs, MessageSetUserTagsArgs};
+use posthaste_contract_core::mutation_args::{
+    MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetReadStateArgs,
+    MessageSetUserTagsArgs, MessageTargetArgs,
+};
 use posthaste_contract_core::MailOperation;
 use posthaste_domain_model::{
-    now_iso8601, AccountId, DomainEvent, MailboxId, MessageId, MessageSortField, MessageSummary,
-    Rule, RuleAction, RuleDeliveryFailed, RuleFired, RuleOutcome, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection,
+    now_iso8601, AccountId, DomainEvent, MailboxId, MailboxRole, MessageId, MessageSortField,
+    MessageSummary, Rule, RuleAction, RuleDeliveryFailed, RuleFired, RuleOutcome,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection,
     EVENT_TOPIC_RULE_DELIVERY_FAILED, EVENT_TOPIC_RULE_FIRED,
 };
 use posthaste_link_far_end::down::FactLog;
@@ -339,6 +342,12 @@ impl EngineContext {
                 }
             };
             self.execute(rule, &event, &summary).await;
+            // Rule chaining (explicit semantics, documented on `Rule`): every
+            // matching rule runs in the deterministic load order UNLESS a
+            // matched rule says stop — then later rules never see this fact.
+            if rule.stop_processing {
+                break;
+            }
         }
     }
 
@@ -369,38 +378,51 @@ impl EngineContext {
     }
 
     /// Execute a matched rule's action and emit the `rule.fired` fact.
+    ///
+    /// Level-0 dispatch is registry-shaped: [`level0_operation`] is the ONE
+    /// pure `action → MailOperation` projection, so a new Level-0 action is a
+    /// projection arm (+ optionally a precondition arm) — never a new bespoke
+    /// apply path. Hooks and notify keep their dedicated paths (they are not
+    /// mail operations).
     async fn execute(&self, rule: &Rule, event: &DomainEvent, summary: &MessageSummary) {
         let outcome = match &rule.action {
-            RuleAction::Tag { tag } => self.apply_tag(summary, tag).await,
-            RuleAction::Move { mailbox_id } => self.apply_move(summary, mailbox_id).await,
             RuleAction::Notify { title, body } => self.apply_notify(rule, summary, title, body),
             // Emit takes no action beyond the `rule.fired` fact the caller emits.
             RuleAction::Emit => RuleOutcome::Applied,
             RuleAction::Webhook { .. } | RuleAction::Exec { .. } => {
                 self.run_hook(rule, event, summary).await
             }
+            action => {
+                match level0_operation(action, summary, &|role| {
+                    self.role_mailbox_id(&summary.source_id, role)
+                }) {
+                    Ok(op) => self.apply(op).await,
+                    Err(reason) => {
+                        ph_warn!(
+                            events::RULE_ACTION_APPLY_FAILED,
+                            rule_id = %rule.id,
+                            error = %reason,
+                            "rule level-0 action could not be projected onto an operation"
+                        );
+                        RuleOutcome::Failed
+                    }
+                }
+            }
         };
         self.emit_rule_fired(rule, event.seq, rule.action.kind_str(), outcome, summary)
             .await;
     }
 
-    async fn apply_tag(&self, summary: &MessageSummary, tag: &str) -> RuleOutcome {
-        let op = MailOperation::SetUserTags(MessageSetUserTagsArgs {
-            source_id: summary.source_id.to_string(),
-            message_id: summary.id.to_string(),
-            add: vec![tag.to_string()],
-            remove: Vec::new(),
-        });
-        self.apply(op).await
-    }
-
-    async fn apply_move(&self, summary: &MessageSummary, mailbox_id: &MailboxId) -> RuleOutcome {
-        let op = MailOperation::ReplaceMailboxes(MessageReplaceMailboxesArgs {
-            source_id: summary.source_id.to_string(),
-            message_id: summary.id.to_string(),
-            mailbox_ids: vec![mailbox_id.to_string()],
-        });
-        self.apply(op).await
+    /// Resolve a well-known role to the account's mailbox id (the same
+    /// resolution the far node's `move_message_to_role` performs — done here
+    /// because the direct-apply bridge deliberately carries no role map).
+    fn role_mailbox_id(&self, account_id: &AccountId, role: MailboxRole) -> Option<MailboxId> {
+        self.service
+            .list_mailboxes(account_id)
+            .ok()?
+            .into_iter()
+            .find(|mailbox| mailbox.role.as_deref() == Some(role.as_str()))
+            .map(|mailbox| mailbox.id)
     }
 
     async fn apply(&self, op: MailOperation) -> RuleOutcome {
@@ -537,6 +559,86 @@ pub(crate) fn idempotency_key(rule_id: &str, event_seq: i64) -> String {
     format!("rule:{rule_id}:{event_seq}")
 }
 
+/// The ONE pure projection from a Level-0 rule action onto the [`MailOperation`]
+/// it applies — the executor half of the action registry. Every operation-shaped
+/// action (tag / move / moveToRole / markRead / flag / destroy) is an arm here
+/// and NOWHERE else, so adding action N+1 to the executor is one arm in this
+/// match (plus, if it needs idempotence, one in [`action_precondition`]).
+///
+/// `role_mailbox` resolves a well-known role to the account's mailbox id (the
+/// only non-local input; injected so this stays a pure, unit-testable function).
+/// `Err` carries a human reason when the projection cannot be formed (an
+/// unmapped role) or the action is not operation-shaped (notify/emit/hooks —
+/// the caller dispatches those before reaching here, so hitting that arm is a
+/// wiring bug surfaced as a failed outcome, not a panic).
+///
+/// `Destroy` deliberately reuses the existing `message.destroy` operation — the
+/// same delete-permanently machinery every other destroy caller uses. No new
+/// deletion path, no bypass: it only ever runs on the message the
+/// boundary-validated WHEN-clause query just matched.
+fn level0_operation(
+    action: &RuleAction,
+    summary: &MessageSummary,
+    role_mailbox: &dyn Fn(MailboxRole) -> Option<MailboxId>,
+) -> Result<MailOperation, String> {
+    let source_id = summary.source_id.to_string();
+    let message_id = summary.id.to_string();
+    match action {
+        RuleAction::Tag { tag } => Ok(MailOperation::SetUserTags(MessageSetUserTagsArgs {
+            source_id,
+            message_id,
+            add: vec![tag.clone()],
+            remove: Vec::new(),
+        })),
+        RuleAction::Move { mailbox_id } => Ok(MailOperation::ReplaceMailboxes(
+            MessageReplaceMailboxesArgs {
+                source_id,
+                message_id,
+                mailbox_ids: vec![mailbox_id.to_string()],
+            },
+        )),
+        RuleAction::MoveToRole { role } => {
+            let mailbox_id = role_mailbox(*role).ok_or_else(|| {
+                format!(
+                    "account '{}' has no mailbox with role '{}'",
+                    summary.source_id,
+                    role.as_str()
+                )
+            })?;
+            Ok(MailOperation::ReplaceMailboxes(
+                MessageReplaceMailboxesArgs {
+                    source_id,
+                    message_id,
+                    mailbox_ids: vec![mailbox_id.to_string()],
+                },
+            ))
+        }
+        RuleAction::MarkRead { read } => Ok(MailOperation::SetReadState(MessageSetReadStateArgs {
+            source_id,
+            message_id,
+            read: *read,
+        })),
+        RuleAction::Flag { flagged } => {
+            Ok(MailOperation::SetFlaggedState(MessageSetFlaggedStateArgs {
+                source_id,
+                message_id,
+                flagged: *flagged,
+            }))
+        }
+        RuleAction::Destroy => Ok(MailOperation::Destroy(MessageTargetArgs {
+            source_id,
+            message_id,
+        })),
+        RuleAction::Notify { .. }
+        | RuleAction::Emit
+        | RuleAction::Webhook { .. }
+        | RuleAction::Exec { .. } => Err(format!(
+            "action '{}' is not an operation-shaped level-0 action",
+            action.kind_str()
+        )),
+    }
+}
+
 /// Build the single-message match query: `SourceId == account AND MessageId IN
 /// [id] AND (when) AND precondition(action)`. This mirrors the ingestion-time
 /// automation matcher (`automation_query_rule`) — the established predicate path.
@@ -587,7 +689,28 @@ fn action_precondition(action: &RuleAction) -> Option<SmartMailboxRuleNode> {
             SmartMailboxOperator::Equals,
             SmartMailboxValue::String(mailbox_id.to_string()),
         )),
-        RuleAction::Notify { .. }
+        // "Not already in a mailbox with this role" — idempotent and loop-free
+        // for archive/junk/trash/inbox moves, mirroring `Move`.
+        RuleAction::MoveToRole { role } => Some(negated_condition(
+            SmartMailboxField::MailboxRole,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::String(role.as_str().to_string()),
+        )),
+        // "Read state differs from the target" — skip when already read/unread.
+        RuleAction::MarkRead { read } => Some(negated_condition(
+            SmartMailboxField::IsRead,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::Bool(*read),
+        )),
+        RuleAction::Flag { flagged } => Some(negated_condition(
+            SmartMailboxField::IsFlagged,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::Bool(*flagged),
+        )),
+        // Destroy needs no precondition: a destroyed message has no row, so its
+        // own follow-up facts can never re-match the scoped query.
+        RuleAction::Destroy
+        | RuleAction::Notify { .. }
         | RuleAction::Emit
         | RuleAction::Webhook { .. }
         | RuleAction::Exec { .. } => None,
@@ -643,6 +766,100 @@ mod tests {
                 body: None,
             },
             enabled: true,
+            stop_processing: false,
+        }
+    }
+
+    fn summary(source_id: &str, id: &str) -> MessageSummary {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "sourceId": source_id, "sourceName": "Acct", "sourceThreadId": "t1",
+            "conversationId": "c1", "subject": "s", "fromName": null, "fromEmail": null,
+            "to": [], "preview": null, "receivedAt": "2026-07-01T00:00:00Z",
+            "hasAttachment": false, "isRead": false, "isFlagged": false,
+            "mailboxIds": ["inbox"], "keywords": []
+        }))
+        .expect("valid MessageSummary fixture")
+    }
+
+    /// The executor registry: every operation-shaped Level-0 action projects
+    /// onto exactly the MailOperation its semantics name — through the ONE
+    /// `level0_operation` function, with no bespoke per-action apply path.
+    #[test]
+    fn level0_operation_projects_every_operation_shaped_action() {
+        let s = summary("acct-1", "msg-1");
+        let no_roles = |_role: MailboxRole| -> Option<MailboxId> { None };
+        let roles = |role: MailboxRole| -> Option<MailboxId> {
+            (role == MailboxRole::Archive).then(|| MailboxId::from("mbx-archive"))
+        };
+
+        let tag = level0_operation(&RuleAction::Tag { tag: "x".into() }, &s, &no_roles)
+            .expect("tag projects");
+        match tag {
+            MailOperation::SetUserTags(args) => {
+                assert_eq!(args.add, vec!["x".to_string()]);
+                assert!(args.remove.is_empty());
+            }
+            other => panic!("expected SetUserTags, got {other:?}"),
+        }
+
+        let mark_unread = level0_operation(&RuleAction::MarkRead { read: false }, &s, &no_roles)
+            .expect("markRead projects");
+        assert!(
+            matches!(mark_unread, MailOperation::SetReadState(ref args) if !args.read),
+            "markRead(false) must project SetReadState(read=false): {mark_unread:?}"
+        );
+
+        let flag = level0_operation(&RuleAction::Flag { flagged: true }, &s, &no_roles)
+            .expect("flag projects");
+        assert!(matches!(flag, MailOperation::SetFlaggedState(ref args) if args.flagged));
+
+        let archive = level0_operation(
+            &RuleAction::MoveToRole {
+                role: MailboxRole::Archive,
+            },
+            &s,
+            &roles,
+        )
+        .expect("moveToRole projects when the role resolves");
+        match archive {
+            MailOperation::ReplaceMailboxes(args) => {
+                assert_eq!(args.mailbox_ids, vec!["mbx-archive".to_string()]);
+            }
+            other => panic!("expected ReplaceMailboxes, got {other:?}"),
+        }
+
+        // An unmapped role is a projection FAILURE (a failed outcome + warning),
+        // never a silent misfile.
+        let unmapped = level0_operation(
+            &RuleAction::MoveToRole {
+                role: MailboxRole::Trash,
+            },
+            &s,
+            &roles,
+        );
+        assert!(unmapped.is_err(), "unmapped role must fail the projection");
+
+        // Notify / emit / hooks are not operation-shaped — the projection
+        // refuses them rather than inventing an operation.
+        assert!(level0_operation(&RuleAction::Emit, &s, &no_roles).is_err());
+    }
+
+    /// Destroy projects onto the EXISTING `message.destroy` operation — the
+    /// same delete-permanently machinery the GUI uses, scoped to exactly the
+    /// matched message. This is destroy's destructive-path pin: no new deletion
+    /// primitive, correct target.
+    #[test]
+    fn destroy_projects_onto_the_existing_destroy_operation() {
+        let s = summary("acct-1", "msg-9");
+        let no_roles = |_role: MailboxRole| -> Option<MailboxId> { None };
+        let op = level0_operation(&RuleAction::Destroy, &s, &no_roles).expect("destroy projects");
+        assert_eq!(op.name(), "message.destroy");
+        match op {
+            MailOperation::Destroy(args) => {
+                assert_eq!(args.source_id, "acct-1");
+                assert_eq!(args.message_id, "msg-9");
+            }
+            other => panic!("expected Destroy, got {other:?}"),
         }
     }
 
@@ -715,6 +932,50 @@ mod tests {
             expiry_seconds: 60,
         })
         .is_none());
+    }
+
+    /// The new Level-0 actions carry the same idempotence/loop-break
+    /// preconditions the original tag/move actions pioneered: skip the message
+    /// when the effect already holds.
+    #[test]
+    fn new_level0_actions_have_idempotent_preconditions() {
+        let mark_read = action_precondition(&RuleAction::MarkRead { read: true })
+            .expect("markRead has a precondition");
+        match mark_read {
+            SmartMailboxRuleNode::Condition(condition) => {
+                assert_eq!(condition.field, SmartMailboxField::IsRead);
+                assert!(condition.negated);
+                assert_eq!(condition.value, SmartMailboxValue::Bool(true));
+            }
+            other => panic!("expected a condition, got {other:?}"),
+        }
+
+        let unflag = action_precondition(&RuleAction::Flag { flagged: false })
+            .expect("flag has a precondition");
+        match unflag {
+            SmartMailboxRuleNode::Condition(condition) => {
+                assert_eq!(condition.field, SmartMailboxField::IsFlagged);
+                assert!(condition.negated);
+                assert_eq!(condition.value, SmartMailboxValue::Bool(false));
+            }
+            other => panic!("expected a condition, got {other:?}"),
+        }
+
+        let archive = action_precondition(&RuleAction::MoveToRole {
+            role: MailboxRole::Archive,
+        })
+        .expect("moveToRole has a precondition");
+        match archive {
+            SmartMailboxRuleNode::Condition(condition) => {
+                assert_eq!(condition.field, SmartMailboxField::MailboxRole);
+                assert!(condition.negated);
+                assert_eq!(condition.value, SmartMailboxValue::String("archive".into()));
+            }
+            other => panic!("expected a condition, got {other:?}"),
+        }
+
+        // Destroy needs none: the destroyed row can never re-match.
+        assert!(action_precondition(&RuleAction::Destroy).is_none());
     }
 
     /// The deterministic idempotency key is `f(rule_id, event_seq)`, so a

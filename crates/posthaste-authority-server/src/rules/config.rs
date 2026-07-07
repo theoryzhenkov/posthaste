@@ -25,7 +25,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use posthaste_domain_model::{Rule, RuleAction};
+use posthaste_domain_model::{validate_rule_action, Rule, RuleAction};
 use serde::Deserialize;
 
 /// The `rules.toml` document: a list of `[[rule]]` tables.
@@ -49,6 +49,10 @@ struct RuleToml {
     #[serde(default = "default_enabled")]
     enabled: bool,
     action: RuleAction,
+    /// Rule chaining: stop evaluating later rules for a fact this rule matched.
+    /// Mirrors [`Rule::stop_processing`]; defaults to `false`.
+    #[serde(default)]
+    stop_processing: bool,
 }
 
 fn default_enabled() -> bool {
@@ -94,21 +98,34 @@ pub const MANAGED_RULES_DIR: &str = "rules.d";
 /// authored file). A single malformed or exec-carrying `rules.d` file is
 /// **skipped with a warning** rather than failing the whole load, so one bad
 /// GUI file cannot take down every rule (including the authored ones).
+/// Rules evaluate in the order this function returns them (the engine walks the
+/// snapshot front to back — the order `stop_processing` short-circuits over):
+/// authored `rules.toml` rules first, in file order (the operator controls it
+/// directly), then GUI-managed rules sorted by case-insensitive name, then id.
+/// Managed files come off `read_dir` in filesystem order, which is
+/// platform-arbitrary — sorting makes chaining deterministic across restarts.
 pub fn load_rules(config_root: &Path) -> Result<Vec<Rule>, RuleConfigError> {
     let mut rules = load_authored_rules(config_root)?;
     let authored_ids: HashSet<String> = rules.iter().map(|rule| rule.id.clone()).collect();
 
-    for managed in load_managed_rules(config_root) {
-        if authored_ids.contains(&managed.id) {
-            tracing::warn!(
-                rule_id = %managed.id,
-                "rules.d/{}.toml is shadowed by a rules.toml rule of the same id; ignoring the managed copy",
-                managed.id
-            );
-            continue;
-        }
-        rules.push(managed);
-    }
+    let mut managed_rules: Vec<Rule> = load_managed_rules(config_root)
+        .into_iter()
+        .filter(|managed| {
+            if authored_ids.contains(&managed.id) {
+                tracing::warn!(
+                    rule_id = %managed.id,
+                    "rules.d/{}.toml is shadowed by a rules.toml rule of the same id; ignoring the managed copy",
+                    managed.id
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    managed_rules
+        .sort_by(|a, b| (a.name.to_lowercase(), &a.id).cmp(&(b.name.to_lowercase(), &b.id)));
+    rules.extend(managed_rules);
     Ok(rules)
 }
 
@@ -163,22 +180,11 @@ fn parse_managed_rule(path: &Path) -> Result<Rule, String> {
     if matches!(rule.action, RuleAction::Exec { .. }) {
         return Err("exec actions are not permitted in rules.d (use rules.toml)".to_string());
     }
-    validate_rule_grants(&rule.action).map_err(|message| message.to_string())?;
+    // The shared action validation (domain model): empty-grant hooks (F1),
+    // unassignable moveToRole targets, and destroy-with-empty-when are all
+    // refused here exactly as at the write path and the authored loader.
+    validate_rule_action(&rule.action, &rule.when)?;
     Ok(rule)
-}
-
-/// The F1 (security review) rule: a webhook/exec action with empty grants would
-/// mint an action-unrestricted token. Shared by the authored loader, the managed
-/// loader, and the write path so no store can smuggle one onto the bus.
-pub(crate) fn validate_rule_grants(action: &RuleAction) -> Result<(), &'static str> {
-    let empty_grants = match action {
-        RuleAction::Webhook { grants, .. } | RuleAction::Exec { grants, .. } => grants.is_empty(),
-        _ => false,
-    };
-    if empty_grants {
-        return Err("a webhook/exec rule must declare at least one grant");
-    }
-    Ok(())
 }
 
 impl RuleToml {
@@ -189,11 +195,13 @@ impl RuleToml {
                 message,
             }
         })?;
-        // F1 (security review): reject an empty-grant hook at load so the
-        // misconfig never reaches the bus — defence-in-depth beside the minter.
-        validate_rule_grants(&self.action).map_err(|message| RuleConfigError::Query {
+        // The shared action validation (see `validate_rule_action`): reject an
+        // empty-grant hook (F1), an unassignable role move, or an unconditional
+        // destroy at load, so the misconfig never reaches the bus —
+        // defence-in-depth beside the minter and the write boundary.
+        validate_rule_action(&self.action, &when).map_err(|message| RuleConfigError::Query {
             rule_id: self.id.clone(),
-            message: message.to_string(),
+            message,
         })?;
         Ok(Rule {
             id: self.id,
@@ -202,6 +210,7 @@ impl RuleToml {
             on: self.on,
             action: self.action,
             enabled: self.enabled,
+            stop_processing: self.stop_processing,
         })
     }
 }
@@ -389,6 +398,81 @@ grants = ["read"]
         assert!(
             load_rules(dir.path()).expect("load").is_empty(),
             "an exec rule in rules.d must be skipped"
+        );
+    }
+
+    /// Evaluation order is deterministic (the order `stop_processing` walks):
+    /// authored rules first in file order, then managed rules sorted by
+    /// case-insensitive name (then id) — never the filesystem's read_dir order.
+    #[test]
+    fn merged_rules_are_ordered_authored_first_then_managed_by_name() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_rules(
+            dir.path(),
+            r#"
+[[rule]]
+id = "z-authored"
+name = "zz last by name but authored"
+when = "tag:a"
+action = { kind = "tag", tag = "a" }
+"#,
+        );
+        let managed_rule = |id: &str, name: &str| {
+            format!(
+                r#"
+id = "{id}"
+name = "{name}"
+enabled = true
+[when.root]
+operator = "all"
+negated = false
+nodes = []
+[action]
+kind = "emit"
+"#
+            )
+        };
+        write_managed(dir.path(), "m-bbb", &managed_rule("m-bbb", "Beta"));
+        write_managed(dir.path(), "m-aaa", &managed_rule("m-aaa", "alpha"));
+        let ids: Vec<_> = load_rules(dir.path())
+            .expect("load")
+            .into_iter()
+            .map(|rule| rule.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                "z-authored".to_string(), // authored first, despite sorting last by name
+                "m-aaa".to_string(),      // "alpha" < "Beta" case-insensitively
+                "m-bbb".to_string(),
+            ]
+        );
+    }
+
+    /// A managed `rules.d` destroy with a condition-free WHEN-clause is skipped
+    /// at load (the same shared guard the write path enforces), so a hand-
+    /// dropped unconditional destroy never runs.
+    #[test]
+    fn managed_unconditional_destroy_is_skipped_at_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_managed(
+            dir.path(),
+            "wipe",
+            r#"
+id = "wipe"
+name = "wipe"
+enabled = true
+[when.root]
+operator = "all"
+negated = false
+nodes = []
+[action]
+kind = "destroy"
+"#,
+        );
+        assert!(
+            load_rules(dir.path()).expect("load").is_empty(),
+            "an unconditional destroy in rules.d must be skipped"
         );
     }
 

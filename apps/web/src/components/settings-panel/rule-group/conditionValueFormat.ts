@@ -184,3 +184,40 @@ export function splitListValue(text: string): string[] {
     .map((entry) => entry.trim())
     .filter(Boolean)
 }
+
+// ---------------------------------------------------------------------------
+// `in` (list) value helpers — the generic list editor's pure core
+// ---------------------------------------------------------------------------
+
+/** Read a stored condition value as the `string[]` the `in` operator holds.
+ *  Tolerates a legacy scalar (one non-empty string becomes a one-entry list). */
+export function listValueEntries(value: SmartMailboxValue): string[] {
+  if (Array.isArray(value)) {
+    return value
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return [value.trim()]
+  }
+  return []
+}
+
+/**
+ * Append a drafted entry to an `in` list. The draft may itself be a
+ * comma-separated batch (paste convenience — splits exactly like the old text
+ * box); duplicates are dropped so a double-commit is a no-op. Returns the same
+ * `string[]` wire shape the old widget emitted.
+ */
+export function appendListEntries(values: string[], draft: string): string[] {
+  const next = [...values]
+  for (const entry of splitListValue(draft)) {
+    if (!next.includes(entry)) {
+      next.push(entry)
+    }
+  }
+  return next
+}
+
+/** Remove one entry (by index) from an `in` list. */
+export function removeListEntry(values: string[], index: number): string[] {
+  return values.filter((_, i) => i !== index)
+}

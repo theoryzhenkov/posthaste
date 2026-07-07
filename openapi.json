@@ -6244,6 +6244,19 @@
           }
         }
       },
+      "MailboxRole": {
+        "type": "string",
+        "description": "Well-known mailbox roles used by JMAP and local IMAP SPECIAL-USE mapping.\n\n@spec docs/L1-api#mailbox-metadata\n@spec docs/L1-accounts#smart-mailbox-defaults",
+        "enum": [
+          "inbox",
+          "archive",
+          "drafts",
+          "sent",
+          "junk",
+          "trash",
+          "snooze"
+        ]
+      },
       "MailboxSummary": {
         "type": "object",
         "description": "Lightweight mailbox view for sidebar and list endpoints.\n\n@spec docs/L1-api#navigation",
@@ -7452,6 +7465,10 @@
             },
             "description": "The event topics whose facts trigger evaluation. Empty ⇒\n[`DEFAULT_RULE_TRIGGER_TOPICS`] (the message-update family)."
           },
+          "stopProcessing": {
+            "type": "boolean",
+            "description": "Rule chaining (the explicit semantics): for one triggering fact, EVERY\nenabled rule whose topics + WHEN-clause match runs, in the engine's\ndeterministic order (authored `rules.toml` rules first, in file order;\nthen GUI-managed rules sorted by name, then id). A matched rule with\n`stop_processing = true` short-circuits that walk — no later rule is\nevaluated against this fact. Defaults to `false` (all matches run),\nwhich was the previous, implicit behaviour."
+          },
           "when": {
             "$ref": "#/components/schemas/SmartMailboxRule",
             "description": "The WHEN-clause: the shared query grammar's [`SmartMailboxRule`] output,\nreused (not wrapped). Evaluated against the message a triggering fact\nnames — a match means the action runs."
@@ -7500,6 +7517,63 @@
           },
           {
             "type": "object",
+            "description": "Level 0: move the matched message to the account's mailbox carrying a\nwell-known role — `archive`, `junk`, `trash`, or `inbox` (see\n[`ASSIGNABLE_RULE_MOVE_ROLES`]). This is how a rule archives, junks, or\ntrashes a message WITHOUT naming a per-account mailbox id, so one rule\nworks across every account. Trash is a recoverable move (the provider's\nTrash semantics) — permanent deletion is the separate, explicit\n[`Destroy`](Self::Destroy).",
+            "required": [
+              "role",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "moveToRole"
+                ]
+              },
+              "role": {
+                "$ref": "#/components/schemas/MailboxRole"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 0: set the matched message's read state (mark read / unread).",
+            "required": [
+              "read",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "markRead"
+                ]
+              },
+              "read": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 0: set the matched message's flagged state (flag / unflag).",
+            "required": [
+              "flagged",
+              "kind"
+            ],
+            "properties": {
+              "flagged": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "flag"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Level 0: raise a notification fact for the matched message. The notice\nsurfaces on the tap (`rule.fired`); no external side effect.",
             "required": [
               "title",
@@ -7520,6 +7594,21 @@
               },
               "title": {
                 "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Level 0, **mail-destructive**: permanently destroy the matched message\nthrough the existing delete-permanently machinery (`message.destroy` —\nthe same command the GUI's delete-permanently uses; no new deletion\npath). This is NOT \"move to Trash\" (that is\n[`MoveToRole`](Self::MoveToRole) with `trash`): a destroyed message is\nunrecoverable.\n\nGuard rails: the wire name is the distinct, explicit `destroy` (never\noverloaded onto move/trash), and [`validate_rule_action`] refuses a\ndestroy rule whose WHEN-clause has no conditions — a condition-free\ndestroy would match EVERY message the trigger topic names, and a rules\nengine that silently destroys all mail on an empty clause is the exact\nfailure mode to make unrepresentable. It executes only on a message the\nboundary-validated WHEN-clause query matched (the engine re-runs the\nscoped query per fact — no bypass around the stored, validated rule).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "destroy"
+                ]
               }
             }
           },
@@ -8987,6 +9076,63 @@
           },
           {
             "type": "object",
+            "description": "See [`RuleAction::MoveToRole`].",
+            "required": [
+              "role",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "moveToRole"
+                ]
+              },
+              "role": {
+                "$ref": "#/components/schemas/MailboxRole"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "See [`RuleAction::MarkRead`].",
+            "required": [
+              "read",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "markRead"
+                ]
+              },
+              "read": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "See [`RuleAction::Flag`].",
+            "required": [
+              "flagged",
+              "kind"
+            ],
+            "properties": {
+              "flagged": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "flag"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "See [`RuleAction::Notify`].",
             "required": [
               "title",
@@ -9007,6 +9153,21 @@
               },
               "title": {
                 "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "See [`RuleAction::Destroy`] — mail-destructive, guarded by\n[`validate_rule_action`] (a destroy rule must carry a non-empty\nWHEN-clause).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "destroy"
+                ]
               }
             }
           },
@@ -9090,6 +9251,10 @@
               "type": "string"
             },
             "description": "Trigger topics; empty ⇒ the message-update default family."
+          },
+          "stopProcessing": {
+            "type": "boolean",
+            "description": "Rule chaining: when this rule matches a fact, skip every later rule for\nthat fact. Defaults to false (all matching rules run)."
           },
           "when": {
             "$ref": "#/components/schemas/SmartMailboxRule",
