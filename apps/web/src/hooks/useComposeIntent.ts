@@ -78,6 +78,12 @@ export function useComposeIntent({
     setComposeIntent({ kind: 'draft', sourceId, messageId })
   }, [])
 
+  /** Open the composer prefilled from a `mailto:` URI (the List-Unsubscribe
+   *  mailto path). The user reviews and sends — nothing is auto-sent. */
+  const composeMailto = useCallback((sourceId: string, mailtoUri: string) => {
+    setComposeIntent({ kind: 'mailto', sourceId, mailtoUri })
+  }, [])
+
   const editSelectedDraft = useCallback(() => {
     if (!selectedMessage) {
       return
@@ -96,6 +102,7 @@ export function useComposeIntent({
   return {
     closeCompose,
     composeIntent,
+    composeMailto,
     editDraft,
     editSelectedDraft,
     forwardSelectedMessage,

@@ -36,6 +36,7 @@ import {
   Forward,
   Inbox,
   MailOpen,
+  MailX,
   Maximize2,
   MessagesSquare,
   Pencil,
@@ -45,6 +46,7 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react'
+import type { ListUnsubscribe, MessageDetail } from '../../api/types'
 import { snoozePresets } from '../../components/message-detail/snoozePresets'
 import { conversationViewQuery } from '../../searchQuery'
 import { registerActions } from '../registry'
@@ -66,6 +68,16 @@ function isRestorableRole(role: string | null): boolean {
  *  one target; `?? undefined` keeps the accessors total for the empty case. */
 function primaryTarget(ctx: ActionContext): MessageTarget | undefined {
   return ctx.targets[0]
+}
+
+/** The target's parsed List-Unsubscribe data. Only the DETAIL DTO carries it
+ *  (`listUnsubscribe`), so a plain list-row summary yields `undefined` — which
+ *  is the availability gate working as designed. */
+function unsubscribeTargets(ctx: ActionContext): ListUnsubscribe | undefined {
+  const summary = primaryTarget(ctx)?.summary as
+    | Partial<Pick<MessageDetail, 'listUnsubscribe'>>
+    | undefined
+  return summary?.listUnsubscribe ?? undefined
 }
 
 /** The subject passed to keyword-toggle handlers. Prefer the summary (carries
@@ -426,6 +438,60 @@ export const messageActions: readonly ActionDefinition[] = [
       const until = Number(param.id)
       if (!Number.isFinite(until)) return
       ctx.targets.forEach((t) => s.email.snooze(t.ref, until))
+    },
+  },
+  {
+    // List-Unsubscribe (RFC 2369/8058). DOUBLY gated: on the parsed targets
+    // riding the detail DTO (list summaries never carry them — so the chip
+    // appears only on list mail, never as a permanent icon) AND on the
+    // `services.unsubscribe` binding, which only hosts whose execution path
+    // honors the `confirm` gate may provide (the detail header today) — the
+    // one-click POST must never run without its confirmation dialog.
+    //
+    // Path priority in `run`: one-click (confirmed server-side POST — the
+    // RFC 8058 marker means the endpoint acts without a landing page), then
+    // mailto (composer prefilled; the user sends), then the plain https link
+    // in the system browser. Only the first path is machine-executed, hence
+    // only it confirms.
+    id: 'message.unsubscribe',
+    section: 'organize',
+    title: 'Unsubscribe',
+    icon: MailX,
+    keywords: 'unsubscribe mailing list stop newsletter',
+    surfaces: ['context-menu', 'palette', 'detail-header'],
+    isAvailable: (ctx, s) =>
+      Boolean(s.unsubscribe) &&
+      unsubscribeTargets(ctx) !== undefined &&
+      !hasDraftTarget(ctx),
+    isEnabled: requireTarget,
+    confirm: (ctx) => {
+      const targets = unsubscribeTargets(ctx)
+      if (!targets?.oneClick || !targets.https) {
+        // The mailto/browser paths are user-mediated — no dialog.
+        return undefined
+      }
+      const summary = primaryTarget(ctx)?.summary
+      const sender = summary?.fromName ?? summary?.fromEmail ?? 'this sender'
+      return {
+        title: `Unsubscribe from ${sender}?`,
+        description:
+          'Posthaste will send the standard one-click unsubscribe request to the mailing list on your behalf.',
+        confirmLabel: 'Unsubscribe',
+      }
+    },
+    run: (ctx, s) => {
+      const target = primaryTarget(ctx)
+      const targets = unsubscribeTargets(ctx)
+      if (!target || !targets || !s.unsubscribe) return
+      if (targets.oneClick && targets.https) {
+        return s.unsubscribe.oneClick(target.ref)
+      }
+      if (targets.mailto) {
+        return s.unsubscribe.mailto(targets.mailto)
+      }
+      if (targets.https) {
+        return s.unsubscribe.openLink(targets.https)
+      }
     },
   },
 ]

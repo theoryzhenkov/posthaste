@@ -34,7 +34,9 @@ function composeSurfaceRoute(surface: ComposeSurfaceDescriptor): string {
   const params = new URLSearchParams()
   params.set('composeKind', surface.params.kind)
   params.set('sourceId', surface.params.sourceId)
-  if (surface.params.kind !== 'new') {
+  if (surface.params.kind === 'mailto') {
+    params.set('mailtoUri', surface.params.mailtoUri)
+  } else if (surface.params.kind !== 'new') {
     params.set('messageId', surface.params.messageId)
   }
   return `/surface/compose?${params.toString()}`

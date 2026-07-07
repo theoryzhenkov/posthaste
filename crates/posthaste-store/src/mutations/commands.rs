@@ -21,6 +21,21 @@ pub(crate) fn apply_message_body_tx(
         raw_ref,
     )?;
     replace_attachments_tx(tx, account_id, message_id, &body.attachments)?;
+    // Old-mail backfill: a body fetch re-serves the headers, so a message
+    // ingested before the unsubscribe column existed gains its targets at
+    // message-open. Non-clobbering — a value parsed at ingest wins.
+    if let Some(list_unsubscribe) = &body.list_unsubscribe {
+        tx.execute_cached(
+            "UPDATE message SET list_unsubscribe = COALESCE(list_unsubscribe, ?3)
+             WHERE account_id = ?1 AND id = ?2",
+            params![
+                account_id.as_str(),
+                message_id.as_str(),
+                serde_json::to_string(list_unsubscribe).map_err(json_to_store_error)?
+            ],
+        )
+        .map_err(sql_to_store_error)?;
+    }
     ensure_body_cache_object_tx(
         tx,
         account_id,

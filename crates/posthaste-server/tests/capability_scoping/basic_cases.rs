@@ -133,6 +133,46 @@ async fn account_token_gates_by_path_source() {
     );
 }
 
+// -- unsubscribe (Send-class: an outbound communication in the user's name). --
+
+#[tokio::test]
+async fn unsubscribe_requires_send_action() {
+    // Read-only token → 403: a read-scoped integration must not be able to
+    // trigger the outbound one-click POST.
+    let read_only = attenuate(&full_scope(), "action = read").unwrap();
+    assert_eq!(
+        status(
+            &read_only,
+            "POST",
+            "/v1/sources/acct-a/commands/messages/m1/unsubscribe"
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    // A send-scoped token passes the perimeter.
+    let send_scoped = attenuate(&full_scope(), "action = send").unwrap();
+    assert_eq!(
+        status(
+            &send_scoped,
+            "POST",
+            "/v1/sources/acct-a/commands/messages/m1/unsubscribe"
+        )
+        .await,
+        StatusCode::OK
+    );
+    // Tag/Move/Delete verbs do not imply Send.
+    let tag_scoped = attenuate(&full_scope(), "action = tag,move,delete").unwrap();
+    assert_eq!(
+        status(
+            &tag_scoped,
+            "POST",
+            "/v1/sources/acct-a/commands/messages/m1/unsubscribe"
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+}
+
 // -- message caveat. --
 
 #[tokio::test]

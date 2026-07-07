@@ -25,6 +25,14 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
         "draft_id",
         "ALTER TABLE message ADD COLUMN draft_id TEXT",
     )?;
+    // Parsed List-Unsubscribe targets (RFC 2369/8058) as `ListUnsubscribe`
+    // JSON; NULL = no valid target known.
+    ensure_column(
+        connection,
+        "message",
+        "list_unsubscribe",
+        "ALTER TABLE message ADD COLUMN list_unsubscribe TEXT",
+    )?;
     ensure_column(
         connection,
         "cache_rescore_queue",

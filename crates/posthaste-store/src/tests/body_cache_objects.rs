@@ -70,6 +70,7 @@ fn apply_message_body_marks_body_cache_object_cached() -> Result<(), StoreError>
             body_text: Some("Hello".to_string()),
             attachments: Vec::new(),
             raw_mime: None,
+            list_unsubscribe: None,
         },
     )?;
 
@@ -117,6 +118,7 @@ fn read_raw_message_returns_cached_raw_bytes() -> Result<(), StoreError> {
             body_text: Some("Body".to_string()),
             attachments: Vec::new(),
             raw_mime: Some(raw.to_string()),
+            list_unsubscribe: None,
         },
     )?;
 

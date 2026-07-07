@@ -87,6 +87,17 @@ pub(super) const ROUTES: &[Entry] = &[
             ResourceShape::account_message("source_id", "message_id"),
         ),
     },
+    // One-click unsubscribe (RFC 8058) is an outbound communication to the
+    // list server in the user's name — Send-class, like the mailto-unsubscribe
+    // it substitutes for. A read-scoped token must not be able to trigger it.
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/messages/{message_id}/unsubscribe",
+        authz: gate(
+            Action::Send,
+            ResourceShape::account_message("source_id", "message_id"),
+        ),
+    },
     Entry {
         method: "POST",
         template: "/sources/{source_id}/commands/sync",

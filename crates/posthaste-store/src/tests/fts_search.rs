@@ -115,6 +115,7 @@ fn body_search_hits_only_after_body_cache_write() -> Result<(), StoreError> {
             body_text: Some("the zanzibar shipment arrived".to_string()),
             attachments: Vec::new(),
             raw_mime: None,
+            list_unsubscribe: None,
         },
     )?;
 
@@ -321,6 +322,7 @@ fn fts_index_stays_consistent_across_write_lifecycle() -> Result<(), StoreError>
             body_text: Some("first fetched body with a pangolin".to_string()),
             attachments: Vec::new(),
             raw_mime: None,
+            list_unsubscribe: None,
         },
     )?;
     // …then a re-fetch: message_body UPDATE replacing the text.
@@ -332,6 +334,7 @@ fn fts_index_stays_consistent_across_write_lifecycle() -> Result<(), StoreError>
             body_text: Some("second fetched body with an axolotl".to_string()),
             attachments: Vec::new(),
             raw_mime: None,
+            list_unsubscribe: None,
         },
     )?;
     assert!(search_ids(&store, "body:pangolin")?.is_empty());

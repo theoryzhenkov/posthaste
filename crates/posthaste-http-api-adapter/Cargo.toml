@@ -44,6 +44,9 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
+# Outbound RFC 8058 one-click unsubscribe POST (api::unsubscribe): a dedicated
+# locked-down client — https-only, no cookies, redirect policy pinned to https.
+reqwest = { workspace = true }
 url = "2.5.8"
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
@@ -58,7 +61,6 @@ posthaste-store = { path = "../posthaste-store" }
 posthaste-query-grammar = { path = "../posthaste-query-grammar" }
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
-reqwest = { workspace = true }
 # `test-util` gives the shutdown-sequence tests a paused clock so a bounded
 # hanging phase is verified without a real wall-clock wait.
 tokio = { workspace = true, features = ["test-util"] }

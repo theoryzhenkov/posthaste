@@ -122,6 +122,26 @@ export interface MessageAttachment {
 }
 
 /**
+ * Parsed `List-Unsubscribe` targets (RFC 2369) with the RFC 8058 one-click
+ * marker, validated at ingest. Carried on the DETAIL only — the affordance
+ * renders in the detail header; list summaries never carry it.
+ */
+export interface ListUnsubscribe {
+  /** Validated https target (no userinfo, no IP literal); absent otherwise. */
+  https?: string | null
+  /** Full `mailto:` URI (query params like `subject=` prefill the composer). */
+  mailto?: string | null
+  /** True when `List-Unsubscribe-Post: List-Unsubscribe=One-Click` accompanied
+   *  an https target — the backend may POST it (after user confirmation). */
+  oneClick: boolean
+}
+
+/** Response of the one-click unsubscribe endpoint (2xx from the list server). */
+export interface UnsubscribeAck {
+  httpStatus: number
+}
+
+/**
  * Full message detail including sanitized body HTML.
  * @spec docs/L1-api#message-body-sanitization
  */
@@ -130,6 +150,8 @@ export interface MessageDetail extends MessageSummary {
   bodyText: string | null
   rawMessage: RawMessageRef | null
   attachments: MessageAttachment[]
+  /** RFC 2369/8058 unsubscribe targets, when the message carries valid ones. */
+  listUnsubscribe?: ListUnsubscribe | null
 }
 
 /**

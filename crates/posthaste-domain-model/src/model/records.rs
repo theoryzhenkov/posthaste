@@ -50,6 +50,11 @@ pub struct MessageRecord {
     /// @spec docs/L1-outbox#temp-id-reconciliation
     #[serde(default)]
     pub draft_id: Option<String>,
+    /// Parsed `List-Unsubscribe` (+ `List-Unsubscribe-Post`) targets, when the
+    /// provider served the headers and they carried a valid target. `None`
+    /// means "no valid target known", never an error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_unsubscribe: Option<ListUnsubscribe>,
 }
 
 /// Builds a minimal RFC 2822 message from constituent parts for draft storage.
@@ -171,6 +176,12 @@ pub struct FetchedBody {
     pub body_text: Option<String>,
     pub raw_mime: Option<String>,
     pub attachments: Vec<MessageAttachment>,
+    /// `List-Unsubscribe` targets re-extracted from the fetched headers, when
+    /// the provider exposes them at body-fetch time. Lets a message stored
+    /// before the unsubscribe column existed be backfilled at message-open
+    /// without a provider-wide resync.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_unsubscribe: Option<ListUnsubscribe>,
 }
 
 /// An ordered domain event stored in `event_log` and published via SSE.
