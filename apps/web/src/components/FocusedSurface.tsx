@@ -51,6 +51,7 @@ export function FocusedSurface({
   const {
     closeCompose,
     composeIntent,
+    composeMailto,
     editDraft,
     forwardSelectedMessage,
     replyAllToSelectedMessage,
@@ -128,6 +129,9 @@ export function FocusedSurface({
         onReplyAll={replyAllToSelectedMessage}
         onSearch={onSearch}
         onSelectMessage={onSelectMessage ?? (() => {})}
+        onUnsubscribeMailto={(mailtoUri) =>
+          composeMailto(surface.params.sourceId, mailtoUri)
+        }
       />
       {composeIntent && (
         <ComposeOverlay intent={composeIntent} onClose={closeCompose} />

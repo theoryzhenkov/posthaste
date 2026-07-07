@@ -3131,6 +3131,78 @@
         }
       }
     },
+    "/v1/sources/{source_id}/commands/messages/{message_id}/unsubscribe": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "One-click unsubscribe",
+        "description": "Performs the RFC 8058 one-click unsubscribe POST for this message's stored List-Unsubscribe target. Server-side, https-only, credential-free; the response body of the list server is never surfaced.",
+        "operationId": "unsubscribe_message",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list server acknowledged the unsubscribe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnsubscribeAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The message has no valid one-click unsubscribe target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The list server did not accept the unsubscribe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sources/{source_id}/commands/save-draft": {
       "post": {
         "tags": [
@@ -5011,6 +5083,7 @@
           "not_found",
           "conflict",
           "mailbox_not_empty",
+          "unsubscribe_unavailable",
           "internal_error",
           "unauthorized",
           "forbidden",
@@ -6098,6 +6171,30 @@
           }
         }
       },
+      "ListUnsubscribe": {
+        "type": "object",
+        "description": "Parsed `List-Unsubscribe` targets for a message (RFC 2369), plus the\nRFC 8058 one-click marker derived from the companion\n`List-Unsubscribe-Post: List-Unsubscribe=One-Click` header.\n\nStored as JSON in the message row and surfaced on the message detail DTO so\nthe client can offer an Unsubscribe affordance. Targets are validated at\nparse time (conservatively — see [`parse_list_unsubscribe`]); the server\nre-validates `https` before performing the one-click POST.\n\n@spec docs/L1-api#conversations-and-messages",
+        "properties": {
+          "https": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First valid `https:` target from the header, if any. Guaranteed by the\nparser to be an ASCII https URL with no userinfo and a non-IP-literal\nhost. `http:` targets are dropped, never downgraded-to."
+          },
+          "mailto": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First valid `mailto:` target, kept as the full URI (query params such as\n`subject=` are needed to prefill the composer)."
+          },
+          "oneClick": {
+            "type": "boolean",
+            "description": "True when the message carries `List-Unsubscribe-Post:\nList-Unsubscribe=One-Click` (RFC 8058) *and* an https target exists —\nthe https URL may then be POSTed server-side without user navigation."
+          }
+        }
+      },
       "MailListDelta": {
         "type": "object",
         "description": "An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):\nthe rows that changed since the last snapshot, instead of the whole view. The\nclient reconciles it against its held rows — drop rows absent from `order`,\nreorder to `order`, then apply `upserts` by `row_key`. Emitted only to a\nlink that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),\nand only when the change is row-local (structural changes still send a whole\n`ViewReplace`).",
@@ -6546,6 +6643,17 @@
                 "type": [
                   "string",
                   "null"
+                ]
+              },
+              "listUnsubscribe": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ListUnsubscribe",
+                    "description": "Parsed `List-Unsubscribe` targets (RFC 2369/8058), when present.\nCarried on the detail only — the affordance renders in the detail\nheader, so list summaries stay untouched."
+                  }
                 ]
               },
               "rawMessage": {
@@ -8941,6 +9049,21 @@
           "cozy",
           "comfortable"
         ]
+      },
+      "UnsubscribeAck": {
+        "type": "object",
+        "description": "Result of a successful one-click unsubscribe POST.",
+        "required": [
+          "httpStatus"
+        ],
+        "properties": {
+          "httpStatus": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status the list server answered with (always 2xx here — a non-2xx\nanswer is surfaced as an error). The response body is never surfaced.",
+            "minimum": 0
+          }
+        }
       },
       "VerificationResponse": {
         "type": "object",

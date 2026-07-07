@@ -12,7 +12,8 @@ pub(crate) fn query_message_detail_tx(
         .prepare_cached(
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
-                    m.is_read, m.is_flagged, m.draft_id, m.rfc_message_id, m.in_reply_to
+                    m.is_read, m.is_flagged, m.draft_id, m.rfc_message_id, m.in_reply_to,
+                    m.list_unsubscribe
              FROM message m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
@@ -23,7 +24,7 @@ pub(crate) fn query_message_detail_tx(
     let detail = statement
         .query_row(params![account_id.as_str(), message_id.as_str()], |row| {
             Ok((
-                (),
+                row.get::<_, Option<String>>(17)?,
                 MessageSummary {
                     id: MessageId(row.get(0)?),
                     source_id: AccountId(row.get(1)?),
@@ -51,9 +52,13 @@ pub(crate) fn query_message_detail_tx(
         .optional()
         .map_err(sql_to_store_error)?;
 
-    let Some(((), mut summary)) = detail else {
+    let Some((list_unsubscribe_json, mut summary)) = detail else {
         return Ok(None);
     };
+    // Undeserializable JSON (schema drift) degrades to "no target" rather than
+    // failing the detail read.
+    let list_unsubscribe: Option<ListUnsubscribe> =
+        list_unsubscribe_json.and_then(|json| serde_json::from_str(&json).ok());
 
     summary.mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     summary.keywords = fetch_keywords_tx(tx, account_id, message_id)?;
@@ -96,6 +101,7 @@ pub(crate) fn query_message_detail_tx(
         body_text: body.as_ref().and_then(|tuple| tuple.1.clone()),
         raw_message: body.and_then(|tuple| tuple.2),
         attachments,
+        list_unsubscribe,
     }))
 }
 

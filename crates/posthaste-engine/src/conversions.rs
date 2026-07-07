@@ -99,7 +99,29 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
                 false,
             ))
             .and_then(header_text_value),
+        list_unsubscribe: list_unsubscribe_from_email(email),
     }
+}
+
+/// Extracts and parses the RFC 2369/8058 unsubscribe headers from a JMAP
+/// email's raw header properties. `None` when absent or without a valid
+/// target.
+pub(crate) fn list_unsubscribe_from_email(
+    email: &jmap_client::email::Email,
+) -> Option<posthaste_domain_model::ListUnsubscribe> {
+    let header = email
+        .header(&jmap_client::email::Header::as_raw(
+            "List-Unsubscribe",
+            false,
+        ))
+        .and_then(header_text_value)?;
+    let post = email
+        .header(&jmap_client::email::Header::as_raw(
+            "List-Unsubscribe-Post",
+            false,
+        ))
+        .and_then(header_text_value);
+    posthaste_domain_model::parse_list_unsubscribe(&header, post.as_deref())
 }
 
 /// Extract a single text value from a JMAP `asText` header.

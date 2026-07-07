@@ -6,6 +6,7 @@ pub(super) fn empty_body() -> FetchedBody {
         body_text: None,
         raw_mime: None,
         attachments: Vec::new(),
+        list_unsubscribe: None,
     }
 }
 
@@ -25,6 +26,7 @@ pub(super) fn parity_body() -> FetchedBody {
             cid: None,
             is_inline: false,
         }],
+        list_unsubscribe: None,
     }
 }
 

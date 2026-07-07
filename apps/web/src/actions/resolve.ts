@@ -13,6 +13,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { allActions } from './registry'
 import type {
+  ActionConfirmCopy,
   ActionContext,
   ActionDefinition,
   ActionParamOption,
@@ -27,6 +28,8 @@ export interface ResolvedAction {
   icon: LucideIcon
   enabled: boolean
   disabledReason?: string
+  /** Context-resolved confirmation copy; `undefined` = run without a dialog. */
+  confirm?: ActionConfirmCopy
   /** Context-resolved options of a PARAMETERIZED action (`def.resolveParams`);
    *  `undefined` for plain actions. Surfaces render these as their picker. */
   params?: ActionParamOption[]
@@ -68,12 +71,15 @@ function bind(
       ? enablement.reason
       : undefined
   const params = def.resolveParams?.(ctx, services)
+  const confirm =
+    typeof def.confirm === 'function' ? def.confirm(ctx) : def.confirm
   return {
     def,
     title,
     icon,
     enabled,
     disabledReason,
+    confirm,
     params,
     // Slice 1 ports carry no `confirm`, so this matches the old direct `run`.
     // The confirm-dialog host is wired in a later slice.

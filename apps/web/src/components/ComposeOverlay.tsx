@@ -4,9 +4,9 @@
  * @spec docs/L1-ui#component-hierarchy
  * @spec docs/L1-compose#mime-structure
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import type { ComposeIntent } from '@/composeIntent'
+import { parseMailtoUri, type ComposeIntent } from '@/composeIntent'
 
 import { FloatingPanel } from './FloatingPanel'
 import { ComposeAttachmentList } from './compose-overlay/ComposeAttachmentList'
@@ -42,6 +42,11 @@ export function ComposeOverlay({
     queries.accountsQuery.data?.find(
       (account) => account.id === intent.sourceId,
     )?.signature ?? null
+  const mailtoSeed = useMemo(
+    () =>
+      intent.kind === 'mailto' ? parseMailtoUri(intent.mailtoUri) : undefined,
+    [intent],
+  )
   const formState = useComposeFormState({
     composeKey: queries.composeKey,
     draftSeed: queries.draftSeed,
@@ -49,6 +54,7 @@ export function ComposeOverlay({
     identity: queries.identityQuery.data,
     intentKind: intent.kind,
     isMessageBasedCompose: queries.isMessageBasedCompose,
+    mailtoSeed,
     replyContext: queries.replyContextQuery.data,
     signature,
   })

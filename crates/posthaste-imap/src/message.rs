@@ -137,6 +137,7 @@ pub fn imap_header_message_record_with_gmail_metadata(
         in_reply_to,
         references,
         draft_id,
+        list_unsubscribe: list_unsubscribe_from_parsed(&parsed),
     };
     let location = ImapMessageLocation {
         message_id,
@@ -154,6 +155,17 @@ pub fn imap_header_message_record_with_gmail_metadata(
         mailbox_membership_source: ImapMailboxMembershipSource::SelectedMailbox,
         provider_absent_mailbox_ids: Vec::new(),
     })
+}
+
+/// Extracts and parses the RFC 2369/8058 unsubscribe headers from a parsed
+/// message's raw headers (`header_raw` keeps the value undecoded so encoded-
+/// word handling can never mangle a URL; the shared parser unfolds).
+pub(crate) fn list_unsubscribe_from_parsed(
+    parsed: &mail_parser::Message<'_>,
+) -> Option<posthaste_domain_model::ListUnsubscribe> {
+    let header = parsed.header_raw("List-Unsubscribe")?;
+    let post = parsed.header_raw("List-Unsubscribe-Post");
+    posthaste_domain_model::parse_list_unsubscribe(header, post)
 }
 
 /// Map IMAP system flags into the JMAP keyword vocabulary used by Posthaste.

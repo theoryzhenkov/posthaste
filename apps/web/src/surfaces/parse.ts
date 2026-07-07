@@ -139,6 +139,14 @@ function parseComposeIntent(params: URLSearchParams): ComposeIntent | null {
         ? { kind: 'forward', sourceId, messageId }
         : null
     }
+    case 'mailto': {
+      // The List-Unsubscribe mailto path — kept in lock-step with
+      // `composeSurfaceRoute` (the serializer) so the route round-trips.
+      const mailtoUri = params.get('mailtoUri')
+      return mailtoUri && hasOnlyComposeParams(params, ['mailtoUri'])
+        ? { kind: 'mailto', sourceId, mailtoUri }
+        : null
+    }
     default:
       return null
   }

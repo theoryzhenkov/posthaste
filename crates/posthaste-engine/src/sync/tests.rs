@@ -42,6 +42,19 @@ fn email_metadata_sync_requests_threading_headers_and_recipients() {
     assert!(properties.contains(&email::Property::MessageId));
     assert!(properties.contains(&email::Property::References));
     assert!(properties.contains(&email::Property::InReplyTo));
+    // RFC 2369/8058 unsubscribe headers, raw form.
+    assert!(
+        properties.contains(&email::Property::Header(email::Header::as_raw(
+            "List-Unsubscribe",
+            false
+        )))
+    );
+    assert!(
+        properties.contains(&email::Property::Header(email::Header::as_raw(
+            "List-Unsubscribe-Post",
+            false
+        )))
+    );
 }
 
 #[tokio::test]
@@ -160,6 +173,27 @@ async fn full_streamed_sync_emits_mailbox_then_message_chunks_and_a_reconciliati
     assert!(sink.chunks[1].mailboxes.is_empty());
     assert!(!sink.chunks[1].replace_all_messages);
     assert!(sink.chunks[1].cursors.is_empty());
+
+    // The metadata sync requested and parsed the unsubscribe headers: m1 (the
+    // mock's one-click newsletter) carries targets, m2 carries none.
+    let m1 = sink.chunks[1]
+        .messages
+        .iter()
+        .find(|message| message.id.as_str() == "m1")
+        .expect("m1 synced");
+    let targets = m1.list_unsubscribe.as_ref().expect("m1 parsed targets");
+    assert_eq!(
+        targets.https.as_deref(),
+        Some("https://news.example.com/unsub/m1")
+    );
+    assert_eq!(targets.mailto.as_deref(), Some("mailto:unsub@example.com"));
+    assert!(targets.one_click);
+    let m2 = sink.chunks[1]
+        .messages
+        .iter()
+        .find(|message| message.id.as_str() == "m2")
+        .expect("m2 synced");
+    assert_eq!(m2.list_unsubscribe, None);
 
     // A full snapshot of both object types yields a reconciliation set carrying
     // the complete remote ids, both prune flags, and the withheld cursors.
@@ -817,7 +851,7 @@ async fn mock_full_sync_api(
                 .iter()
                 .map(|id| {
                     let id = id.as_str().expect("id is string");
-                    json!({
+                    let mut email = json!({
                         "id": id,
                         "threadId": format!("t-{id}"),
                         "mailboxIds": { "inbox": true },
@@ -825,7 +859,16 @@ async fn mock_full_sync_api(
                         "subject": format!("Subject {id}"),
                         "receivedAt": "2026-03-31T10:00:00Z",
                         "size": 10
-                    })
+                    });
+                    // m1 is a one-click newsletter: exercises the raw header
+                    // properties riding the metadata sync.
+                    if id == "m1" {
+                        email["header:List-Unsubscribe"] = json!(
+                            "<https://news.example.com/unsub/m1>, <mailto:unsub@example.com>"
+                        );
+                        email["header:List-Unsubscribe-Post"] = json!("List-Unsubscribe=One-Click");
+                    }
+                    email
                 })
                 .collect();
             Json(json!({

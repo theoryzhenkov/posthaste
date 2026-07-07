@@ -840,6 +840,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sources/{source_id}/commands/messages/{message_id}/unsubscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * One-click unsubscribe
+         * @description Performs the RFC 8058 one-click unsubscribe POST for this message's stored List-Unsubscribe target. Server-side, https-only, credential-free; the response body of the list server is never surfaced.
+         */
+        post: operations["unsubscribe_message"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sources/{source_id}/commands/save-draft": {
         parameters: {
             query?: never;
@@ -1361,7 +1381,7 @@ export interface components {
          *     @spec docs/L1-api#error-code-mapping
          * @enum {string}
          */
-        ApiErrorCode: "invalid_query" | "query_invalid" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "mailbox_not_empty" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse";
+        ApiErrorCode: "invalid_query" | "query_invalid" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "mailbox_not_empty" | "unsubscribe_unavailable" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse";
         /**
          * @description Global application settings shared across all accounts.
          *
@@ -1836,6 +1856,37 @@ export interface components {
             security: components["schemas"]["TransportSecurity"];
         };
         /**
+         * @description Parsed `List-Unsubscribe` targets for a message (RFC 2369), plus the
+         *     RFC 8058 one-click marker derived from the companion
+         *     `List-Unsubscribe-Post: List-Unsubscribe=One-Click` header.
+         *
+         *     Stored as JSON in the message row and surfaced on the message detail DTO so
+         *     the client can offer an Unsubscribe affordance. Targets are validated at
+         *     parse time (conservatively — see [`parse_list_unsubscribe`]); the server
+         *     re-validates `https` before performing the one-click POST.
+         *
+         *     @spec docs/L1-api#conversations-and-messages
+         */
+        ListUnsubscribe: {
+            /**
+             * @description First valid `https:` target from the header, if any. Guaranteed by the
+             *     parser to be an ASCII https URL with no userinfo and a non-IP-literal
+             *     host. `http:` targets are dropped, never downgraded-to.
+             */
+            https?: string | null;
+            /**
+             * @description First valid `mailto:` target, kept as the full URI (query params such as
+             *     `subject=` are needed to prefill the composer).
+             */
+            mailto?: string | null;
+            /**
+             * @description True when the message carries `List-Unsubscribe-Post:
+             *     List-Unsubscribe=One-Click` (RFC 8058) *and* an https target exists —
+             *     the https URL may then be POSTed server-side without user navigation.
+             */
+            oneClick?: boolean;
+        };
+        /**
          * @description An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):
          *     the rows that changed since the last snapshot, instead of the whole view. The
          *     client reconciles it against its held rows — drop rows absent from `order`,
@@ -2054,6 +2105,7 @@ export interface components {
             attachments: components["schemas"]["MessageAttachment"][];
             bodyHtml?: string | null;
             bodyText?: string | null;
+            listUnsubscribe?: null | components["schemas"]["ListUnsubscribe"];
             rawMessage?: null | components["schemas"]["RawMessageRef"];
         };
         /**
@@ -3103,6 +3155,15 @@ export interface components {
          * @enum {string}
          */
         UiDensity: "compact" | "cozy" | "comfortable";
+        /** @description Result of a successful one-click unsubscribe POST. */
+        UnsubscribeAck: {
+            /**
+             * Format: int32
+             * @description HTTP status the list server answered with (always 2xx here — a non-2xx
+             *     answer is surfaced as an error). The response body is never surfaced.
+             */
+            httpStatus: number;
+        };
         /**
          * @description Response from `POST /v1/accounts/{id}/verify`.
          *
@@ -5299,6 +5360,58 @@ export interface operations {
             };
             /** @description Gateway unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    unsubscribe_message: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+                /** @description Message identifier */
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list server acknowledged the unsubscribe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnsubscribeAck"];
+                };
+            };
+            /** @description The message has no valid one-click unsubscribe target */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Message not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description The list server did not accept the unsubscribe */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

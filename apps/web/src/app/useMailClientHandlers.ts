@@ -198,6 +198,13 @@ export function useMailClientHandlers(input: {
     handleRejectSearchPreview: () => setSearchQuery(''),
     handleReply: compose.replyToSelectedMessage,
     handleReplyAll: compose.replyAllToSelectedMessage,
+    /** List-Unsubscribe mailto path: composer prefilled from the URI, sending
+     *  as the selected message's account. The user reviews and sends. */
+    handleUnsubscribeMailto: (mailtoUri: string) => {
+      if (selectedMessage) {
+        compose.composeMailto(selectedMessage.sourceId, mailtoUri)
+      }
+    },
     handleSearch: applySearchQuery,
     handleSelectMessage: (message: MessageSummary) => {
       setSelectedMessage({

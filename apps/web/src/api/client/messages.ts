@@ -8,6 +8,7 @@ import type {
   MessageCommandResult,
   MessageDetail,
   MessagePage,
+  UnsubscribeAck,
 } from '../types'
 
 /**
@@ -67,6 +68,22 @@ export async function fetchMessage(
   sourceId: string,
 ): Promise<MessageDetail> {
   return request<MessageDetail>(`/sources/${sourceId}/messages/${messageId}`)
+}
+
+/**
+ * Execute the message's RFC 8058 one-click unsubscribe. The POST to the list
+ * server happens BACKEND-side (https-only, credential-free, no redirect
+ * downgrade) — this endpoint only triggers and reports it. Call it exclusively
+ * after an explicit user confirmation.
+ */
+export async function unsubscribeMessage(
+  sourceId: string,
+  messageId: string,
+): Promise<UnsubscribeAck> {
+  return request<UnsubscribeAck>(
+    `/sources/${sourceId}/commands/messages/${messageId}/unsubscribe`,
+    { method: 'POST' },
+  )
 }
 
 /** @spec docs/L1-api#endpoint-table */

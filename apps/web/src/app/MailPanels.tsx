@@ -131,6 +131,7 @@ function MessagePanels(props: MailClientViewProps) {
                 onSelectMessage={props.onSelectMessage}
                 onSearch={props.onSearch}
                 onTag={() => props.onSetTagEditorOpen(true)}
+                onUnsubscribeMailto={props.onUnsubscribeMailto}
               />
             </div>
           </ResizablePanel>

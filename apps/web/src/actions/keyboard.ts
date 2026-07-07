@@ -13,9 +13,13 @@
  *
  * @spec docs/eph/PLAN-L2-action-registry.md
  */
-import type { ActionContext, ActionServices, ShortcutChord } from './types'
+import type {
+  ActionConfirmCopy,
+  ActionContext,
+  ActionServices,
+  ShortcutChord,
+} from './types'
 import { resolveActions, type ResolvedAction } from './resolve'
-import type { ActionDefinition } from './types'
 
 /** A `KeyboardEvent`-shaped subset — the only fields chord matching reads. Keeps
  *  the matcher testable with a plain object (no synthetic DOM events). */
@@ -93,8 +97,9 @@ function assertUniqueChord(event: ChordEvent, matches: ResolvedAction[]): void {
   console.error(message)
 }
 
-/** Confirmation copy carried by a destructive action. */
-export type ActionConfirm = NonNullable<ActionDefinition['confirm']>
+/** Confirmation copy carried by a destructive action (context-resolved — see
+ *  `ResolvedAction.confirm`). */
+export type ActionConfirm = ActionConfirmCopy
 
 /**
  * Run a resolved action, honoring its destructive `confirm` gate.
@@ -119,7 +124,7 @@ export function runResolvedWithConfirm(
     requestParam?.(resolved)
     return
   }
-  const confirm = resolved.def.confirm
+  const confirm = resolved.confirm
   if (confirm) {
     requestConfirm(confirm, () => void resolved.execute())
     return

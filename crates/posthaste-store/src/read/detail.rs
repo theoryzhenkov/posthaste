@@ -55,6 +55,27 @@ fn read_message_summary(
     Ok(hydrate_message_summaries(connection, rows)?.pop())
 }
 
+/// Reads the parsed `List-Unsubscribe` targets stored on the message row, if
+/// any. Detail-only projection — summaries never carry it.
+fn read_list_unsubscribe(
+    connection: &Connection,
+    account_id: &AccountId,
+    message_id: &MessageId,
+) -> Result<Option<ListUnsubscribe>, StoreError> {
+    let json = connection
+        .query_row(
+            "SELECT list_unsubscribe FROM message WHERE account_id = ?1 AND id = ?2",
+            params![account_id.as_str(), message_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(sql_to_store_error)?
+        .flatten();
+    // A row that fails to deserialize (schema drift) degrades to "no target"
+    // rather than failing the whole detail read.
+    Ok(json.and_then(|json| serde_json::from_str(&json).ok()))
+}
+
 impl MessageDetailStore for DatabaseStore {
     /// Returns full message detail including body (if fetched) and raw message
     /// reference.
@@ -100,6 +121,7 @@ impl MessageDetailStore for DatabaseStore {
             .optional()
             .map_err(sql_to_store_error)?;
         let attachments = fetch_message_attachments(&connection, account_id, message_id)?;
+        let list_unsubscribe = read_list_unsubscribe(&connection, account_id, message_id)?;
 
         Ok(Some(MessageDetail {
             summary,
@@ -107,6 +129,7 @@ impl MessageDetailStore for DatabaseStore {
             body_text: body.as_ref().and_then(|row| row.1.clone()),
             raw_message: body.and_then(|row| row.2),
             attachments,
+            list_unsubscribe,
         }))
     }
 
@@ -135,12 +158,14 @@ impl MessageDetailStore for DatabaseStore {
             return Ok(None);
         };
         let attachments = fetch_message_attachments(&connection, account_id, message_id)?;
+        let list_unsubscribe = read_list_unsubscribe(&connection, account_id, message_id)?;
         Ok(Some(MessageDetail {
             summary,
             body_html: None,
             body_text: None,
             raw_message: None,
             attachments,
+            list_unsubscribe,
         }))
     }
 
