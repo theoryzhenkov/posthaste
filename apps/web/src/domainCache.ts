@@ -10,6 +10,7 @@ export {
   removeAccountOverview,
 } from './domain-cache/accounts'
 export { applyDomainEvent } from './domain-cache/handlers'
+export { isDomainEventShape } from './domain-cache/payload'
 export {
   invalidateAccountReadModels,
   invalidateComposeSendReadModels,

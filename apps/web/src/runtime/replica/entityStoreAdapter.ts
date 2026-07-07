@@ -35,6 +35,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import { queryClient as singletonQueryClient } from '@/app/queryClient'
+import { applyDomainEvent, isDomainEventShape } from '@/domainCache'
 import {
   adjustMailboxCountsInCache,
   invalidateAllMailboxCounts,
@@ -697,7 +698,9 @@ class EntityStoreController {
       this.roleMapForRequest(request),
     )
     if (!translated) {
-      return this.deps.base.runRuntimeMutation(request)
+      const receipt = await this.deps.base.runRuntimeMutation(request)
+      this.dispatchReceiptEchoEvents(receipt)
+      return receipt
     }
     const clientMutationId = request.clientMutationId
     // Capture the invertible diff BEFORE folding the assertion (prev = current
@@ -902,7 +905,44 @@ class EntityStoreController {
       await this.settleAll(clientMutationId, 'failed')
       throw error
     }
+    this.dispatchReceiptEchoEvents(receipt)
     return receipt
+  }
+
+  /**
+   * Dispatch the mutation receipt's BUNDLED ECHO into the domain cache
+   * (RFC-L2-count-unification). A settled command's receipt carries the
+   * command's domain events verbatim (`CommandAck { detail, events }`
+   * serialized as `receipt.output` — `posthaste-store` `mutations/commands.rs`
+   * emits them; `forward_mutation_for` returns them on the receipt). Routing
+   * them through `applyDomainEvent` — the SAME dispatch the link-stream echo
+   * takes via `useDaemonEvents` — makes the user's OWN mutation reconcile the
+   * mailbox/smart-mailbox counts on the request/response path, which is
+   * DELIVERY-GUARANTEED: the link stream's echo is best-effort (the far end's
+   * lag/stale-cursor collapse re-serves view snapshots + the mutation window
+   * but never replays missed notification frames), and without this dispatch a
+   * dropped stream echo left the D2 count overlay unreconciled — sources
+   * merely LOOKED right while smart-mailbox counts froze (the v0.5.0 field
+   * regression). Double delivery when the stream echo also lands is safe: the
+   * count invalidation is debounced per account and every handler reaction is
+   * an idempotent invalidation.
+   */
+  private dispatchReceiptEchoEvents(receipt: RuntimeMutationReceipt): void {
+    // A failed/conflict receipt carries no effect to reconcile (the revert
+    // path already refetches the counts); a deferred send's `accepted` output
+    // has no events yet — its effects arrive via the settlement bridge.
+    if (receipt.state === 'failed' || receipt.state === 'conflict') {
+      return
+    }
+    const output = receipt.output as { events?: unknown[] } | null | undefined
+    if (!output || !Array.isArray(output.events)) {
+      return
+    }
+    for (const event of output.events) {
+      if (isDomainEventShape(event)) {
+        applyDomainEvent(this.queryClient, event)
+      }
+    }
   }
 
   private onBaseFrame(
