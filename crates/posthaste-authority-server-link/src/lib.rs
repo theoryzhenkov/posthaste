@@ -41,11 +41,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use posthaste_contract_core::{
-    AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
-    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailOperation,
-    MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
-    PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList,
-    RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
+    mutation_args::keyword_toggle, AccountScopeRequest, AccountVerificationResult,
+    AutomationRulePreviewMutation, AutomationRulePreviewResult, CreateAccountMutation,
+    CreateSmartMailboxMutation, MailOperation, MailQueryPage, MailQueryRequest,
+    MessageResourceKind, MutationReceipt, MutationRequest, PatchAccountMutation,
+    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
+    RuntimeErrorCode, RuntimeResourceBytes,
 };
 use posthaste_domain_model::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
@@ -1232,6 +1233,29 @@ impl MailCommandRequest {
                 message_id,
                 command: args.command,
             }),
+            // The keyword-shaped semantic operations are pure projections onto
+            // the SetKeywords command — the same folding `apply_operation` does
+            // on the far node. Without these arms a direct-apply caller (the
+            // rule engine's tag/markRead/flag actions) would be rejected as
+            // "replica-only" even though the effect is a plain keyword write.
+            MailOperation::SetUserTags(args) => Self::SetKeywords(SetKeywordsRequest {
+                account_id,
+                message_id,
+                command: SetKeywordsCommand {
+                    add: args.add,
+                    remove: args.remove,
+                },
+            }),
+            MailOperation::SetReadState(args) => Self::SetKeywords(SetKeywordsRequest {
+                account_id,
+                message_id,
+                command: keyword_toggle("$seen", args.read),
+            }),
+            MailOperation::SetFlaggedState(args) => Self::SetKeywords(SetKeywordsRequest {
+                account_id,
+                message_id,
+                command: keyword_toggle("$flagged", args.flagged),
+            }),
             MailOperation::AddToMailbox(args) => Self::AddToMailbox(AddToMailboxRequest {
                 account_id,
                 message_id,
@@ -1351,6 +1375,82 @@ impl DestroyMessageRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The keyword-shaped semantic ops (`setUserTags`, `setReadState`,
+    /// `setFlaggedState`) project onto the SetKeywords direct-apply command —
+    /// this is what lets the rule engine's tag / markRead / flag actions run
+    /// through `AuthorityServerApi::apply` (they used to be rejected as
+    /// "replica-only", which silently failed every Level-0 tag rule).
+    #[test]
+    fn keyword_shaped_operations_project_onto_set_keywords() {
+        use posthaste_contract_core::mutation_args::{
+            MessageSetFlaggedStateArgs, MessageSetReadStateArgs, MessageSetUserTagsArgs,
+        };
+
+        let tags = MailCommandRequest::from_operation(MailOperation::SetUserTags(
+            MessageSetUserTagsArgs {
+                source_id: "acct".into(),
+                message_id: "m1".into(),
+                add: vec!["receipt".into()],
+                remove: vec!["todo".into()],
+            },
+        ))
+        .expect("setUserTags must have a direct-apply projection");
+        match tags {
+            MailCommandRequest::SetKeywords(request) => {
+                assert_eq!(request.command.add, vec!["receipt".to_string()]);
+                assert_eq!(request.command.remove, vec!["todo".to_string()]);
+            }
+            other => panic!("expected SetKeywords, got {other:?}"),
+        }
+
+        let read = MailCommandRequest::from_operation(MailOperation::SetReadState(
+            MessageSetReadStateArgs {
+                source_id: "acct".into(),
+                message_id: "m1".into(),
+                read: true,
+            },
+        ))
+        .expect("setReadState must have a direct-apply projection");
+        match read {
+            MailCommandRequest::SetKeywords(request) => {
+                assert_eq!(request.command.add, vec!["$seen".to_string()]);
+                assert!(request.command.remove.is_empty());
+            }
+            other => panic!("expected SetKeywords, got {other:?}"),
+        }
+
+        let unflag = MailCommandRequest::from_operation(MailOperation::SetFlaggedState(
+            MessageSetFlaggedStateArgs {
+                source_id: "acct".into(),
+                message_id: "m1".into(),
+                flagged: false,
+            },
+        ))
+        .expect("setFlaggedState must have a direct-apply projection");
+        match unflag {
+            MailCommandRequest::SetKeywords(request) => {
+                assert!(request.command.add.is_empty());
+                assert_eq!(request.command.remove, vec!["$flagged".to_string()]);
+            }
+            other => panic!("expected SetKeywords, got {other:?}"),
+        }
+    }
+
+    /// Role moves stay replica-only on this bridge: they need the account's
+    /// role→mailbox map, which the direct-apply surface does not carry. (The
+    /// rule engine resolves the role itself and applies a ReplaceMailboxes.)
+    #[test]
+    fn role_moves_are_still_rejected_by_the_direct_apply_bridge() {
+        use posthaste_contract_core::mutation_args::MessageMoveToRoleArgs;
+        let result =
+            MailCommandRequest::from_operation(MailOperation::MoveToRole(MessageMoveToRoleArgs {
+                source_id: "acct".into(),
+                message_id: "m1".into(),
+                role: "archive".into(),
+            }));
+        assert!(result.is_err(), "moveToRole has no direct-apply command");
+    }
 
     #[test]
     fn down_frame_base_round_trips_through_json() {

@@ -83,6 +83,10 @@ pub struct WritableRuleInput {
     pub enabled: bool,
     /// The action — exec is unrepresentable here (structural gate).
     pub action: WritableRuleAction,
+    /// Rule chaining: when this rule matches a fact, skip every later rule for
+    /// that fact. Defaults to false (all matching rules run).
+    #[serde(default)]
+    pub stop_processing: bool,
 }
 
 fn default_enabled() -> bool {
@@ -100,6 +104,7 @@ impl WritableRuleInput {
             on: self.on,
             action: self.action.into(),
             enabled: self.enabled,
+            stop_processing: self.stop_processing,
         }
     }
 }

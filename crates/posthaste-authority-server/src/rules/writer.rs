@@ -16,9 +16,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use posthaste_domain_model::{Rule, RuleAction};
+use posthaste_domain_model::{validate_rule_action, Rule, RuleAction};
 
-use super::config::{validate_rule_grants, MANAGED_RULES_DIR};
+use super::config::MANAGED_RULES_DIR;
 
 /// A failure writing or deleting a GUI-managed rule file.
 #[derive(Debug)]
@@ -79,8 +79,11 @@ pub fn write_managed_rule(config_root: &Path, rule: &Rule) -> Result<(), RuleWri
             "exec actions are config-file-only and cannot be written via the managed store".into(),
         ));
     }
-    validate_rule_grants(&rule.action)
-        .map_err(|message| RuleWriteError::Invalid(message.to_string()))?;
+    // The shared action validation (domain model, `validate_rule_action`): the
+    // REST write boundary flows through here, so an empty-grant hook, an
+    // unassignable role move, or a destroy with a condition-free WHEN-clause
+    // is refused as a 400 before anything persists.
+    validate_rule_action(&rule.action, &rule.when).map_err(RuleWriteError::Invalid)?;
 
     let body = toml::to_string_pretty(rule)
         .map_err(|error| RuleWriteError::Io(format!("serializing rule: {error}")))?;
@@ -163,7 +166,104 @@ mod tests {
             on: Vec::new(),
             action,
             enabled: true,
+            stop_processing: false,
         }
+    }
+
+    /// The write boundary refuses a destroy rule with a condition-free
+    /// WHEN-clause (the shared `validate_rule_action` guard) — permanent mail
+    /// destruction must never be one empty clause away. With a real condition
+    /// the same rule persists fine.
+    #[test]
+    fn write_rejects_an_unconditional_destroy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let unconditional = rule("r-destroy", RuleAction::Destroy);
+        assert!(matches!(
+            write_managed_rule(dir.path(), &unconditional),
+            Err(RuleWriteError::Invalid(_))
+        ));
+
+        let mut guarded = rule("r-destroy", RuleAction::Destroy);
+        guarded.when =
+            posthaste_query_grammar::parse_query("from:noise@spam.example").expect("parse when");
+        write_managed_rule(dir.path(), &guarded).expect("a conditioned destroy persists");
+        let loaded = super::super::load_rules(dir.path()).expect("load");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].action, RuleAction::Destroy);
+    }
+
+    /// The write boundary refuses a `moveToRole` targeting a non-assignable
+    /// role (drafts/sent/snooze) and accepts the assignable set.
+    #[test]
+    fn write_validates_move_to_role_targets() {
+        use posthaste_domain_model::MailboxRole;
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(matches!(
+            write_managed_rule(
+                dir.path(),
+                &rule(
+                    "r-snooze",
+                    RuleAction::MoveToRole {
+                        role: MailboxRole::Snooze
+                    }
+                )
+            ),
+            Err(RuleWriteError::Invalid(_))
+        ));
+        write_managed_rule(
+            dir.path(),
+            &rule(
+                "r-archive",
+                RuleAction::MoveToRole {
+                    role: MailboxRole::Archive,
+                },
+            ),
+        )
+        .expect("archive role move persists");
+    }
+
+    /// Config round-trip for every NEW writable action kind: write the managed
+    /// file, re-load the merged ruleset, and get the identical action back
+    /// (the TOML mirror reuses the domain serde, so this pins the whole loop).
+    #[test]
+    fn new_action_kinds_round_trip_through_the_managed_store() {
+        use posthaste_domain_model::MailboxRole;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let actions = [
+            (
+                "r-role",
+                RuleAction::MoveToRole {
+                    role: MailboxRole::Junk,
+                },
+            ),
+            ("r-read", RuleAction::MarkRead { read: true }),
+            ("r-unread", RuleAction::MarkRead { read: false }),
+            ("r-flag", RuleAction::Flag { flagged: true }),
+        ];
+        for (id, action) in &actions {
+            write_managed_rule(dir.path(), &rule(id, action.clone())).expect("write");
+        }
+        let loaded = super::super::load_rules(dir.path()).expect("load");
+        assert_eq!(loaded.len(), actions.len());
+        for (id, action) in &actions {
+            let found = loaded
+                .iter()
+                .find(|rule| rule.id == *id)
+                .unwrap_or_else(|| panic!("rule {id} round-trips"));
+            assert_eq!(&found.action, action, "action for {id} round-trips");
+        }
+    }
+
+    /// `stopProcessing` survives the managed-store round trip.
+    #[test]
+    fn stop_processing_round_trips_through_the_managed_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut r = rule("r-stop", RuleAction::Tag { tag: "x".into() });
+        r.stop_processing = true;
+        write_managed_rule(dir.path(), &r).expect("write");
+        let loaded = super::super::load_rules(dir.path()).expect("load");
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].stop_processing);
     }
 
     #[test]

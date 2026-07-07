@@ -95,12 +95,26 @@ export function buildAddressBookSuggestionOptions(
   return options
 }
 
+/**
+ * Case-insensitive SUBSTRING filter over name, email, source label, and the
+ * combined "Name <email>" rendering — never a prefix-only match.
+ *
+ * `mode` controls what the needle is:
+ * * `'token'` (compose recipient fields): only the text after the last
+ *   comma/semicolon — the address currently being typed in a list.
+ * * `'whole'` (single-value inputs, e.g. a rule condition): the ENTIRE input.
+ *   A single-value field must never be comma-tokenized — a value like
+ *   `"Doe, John"` would otherwise silently filter on `"John"` only.
+ */
 export function filterAddressSuggestions(
   options: AddressSuggestionOption[],
   value: string,
   limit = 8,
+  mode: 'token' | 'whole' = 'token',
 ): AddressSuggestionOption[] {
-  const needle = currentAddressToken(value).toLowerCase()
+  const needle = (
+    mode === 'token' ? currentAddressToken(value) : value.trim()
+  ).toLowerCase()
   const filtered = needle
     ? options.filter((option) => {
         const label = formatAddressSuggestion(option).toLowerCase()

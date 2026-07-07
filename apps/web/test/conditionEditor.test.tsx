@@ -128,23 +128,68 @@ describe('ConditionEditor — type-directed value widget', () => {
     expect(getByRole('textbox', { name: 'Value' })).toBeDefined()
   })
 
-  it('renders the comma-separated list box for the in operator', () => {
+  it('renders the list editor with a text entry for the in operator', () => {
     const { getByTestId, getByRole, queryByTestId } = renderCondition(
       mkCondition('subject', 'in', []),
     )
     expect(getByTestId('value-widget-list')).toBeDefined()
-    expect(getByRole('textbox', { name: 'Value' })).toBeDefined()
-    // `in` keeps the multi-value box even when the field would otherwise get a
-    // single-value picker (mailboxId in below).
+    expect(getByRole('textbox', { name: 'Add value' })).toBeDefined()
     expect(queryByTestId('value-widget-text')).toBeNull()
   })
 
-  it('keeps the multi-value list box for `mailboxId in` (not the single picker)', () => {
-    const { getByTestId, queryByTestId } = renderCondition(
+  it('renders existing in-list entries as removable chips', () => {
+    const { getByTestId, getByRole } = renderCondition(
+      mkCondition('subject', 'in', ['invoice', 'receipt']),
+    )
+    const list = getByTestId('value-widget-list')
+    expect(list.textContent).toContain('invoice')
+    expect(list.textContent).toContain('receipt')
+    expect(getByRole('button', { name: 'Remove invoice' })).toBeDefined()
+    expect(getByRole('button', { name: 'Remove receipt' })).toBeDefined()
+  })
+
+  it('composes the mailbox PICKER with the in operator (registry, not a bare box)', () => {
+    // The old dispatch special-cased `in` into a comma-separated text box for
+    // every type — the mailbox picker (and every other capability) vanished.
+    // The registry composes valueType × arity, so `mailboxId in` gets the
+    // picker as its list-entry adder.
+    const mailboxes: Mailbox[] = [
+      { id: 'mbx-1', name: 'Receipts', role: null } as Mailbox,
+    ]
+    const { getByTestId, getByRole } = renderCondition(
       mkCondition('mailboxId', 'in', []),
+      { accountId: 'acct', mailboxes, accounts: [] },
     )
     expect(getByTestId('value-widget-list')).toBeDefined()
-    expect(queryByTestId('value-widget-mailbox')).toBeNull()
+    expect(getByRole('combobox', { name: 'Add value' })).toBeDefined()
+  })
+
+  it('keeps the address AUTOCOMPLETE under the in operator ("is one of")', () => {
+    // The owner-reported bug: switching an address field to "is one of"
+    // dropped to a dumb comma list with no suggestions. The address entry is
+    // now the same RecipientSuggestionInput the scalar path uses.
+    const { getByTestId, getByRole, queryByTestId } = renderCondition(
+      mkCondition('fromEmail', 'in', ['ada@example.com']),
+    )
+    expect(getByTestId('value-widget-list')).toBeDefined()
+    // The adder is a labelled text input (the autocomplete component), and the
+    // committed entry renders as a removable chip.
+    expect(getByRole('textbox', { name: 'Add value' })).toBeDefined()
+    expect(
+      getByRole('button', { name: 'Remove ada@example.com' }),
+    ).toBeDefined()
+    expect(queryByTestId('value-widget-address')).toBeNull()
+  })
+
+  it('offers the keyword suggestion input for keyword fields (scalar + in)', () => {
+    const scalar = renderCondition(mkCondition('keyword', 'equals', ''))
+    expect(scalar.getByTestId('value-widget-keyword')).toBeDefined()
+    expect(scalar.getByRole('textbox', { name: 'Value' })).toBeDefined()
+    scalar.unmount()
+
+    const list = renderCondition(mkCondition('keyword', 'in', []))
+    expect(list.getByTestId('value-widget-list')).toBeDefined()
+    expect(list.getByRole('textbox', { name: 'Add value' })).toBeDefined()
   })
 
   it('renders the number+unit widget for the size field (not a bare text box)', () => {

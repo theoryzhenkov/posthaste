@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// @spec docs/L1-api#mailbox-metadata
 /// @spec docs/L1-accounts#smart-mailbox-defaults
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum MailboxRole {
     #[serde(rename = "inbox")]
     Inbox,

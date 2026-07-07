@@ -16,11 +16,26 @@ import type { SmartMailboxRule } from './smartMailboxes'
 /** A capability a webhook token carries — least-privilege verbs only. */
 export type RuleGrant = 'read' | 'send' | 'tag' | 'move' | 'delete'
 
+/**
+ * The mailbox roles a `moveToRole` rule action may target — the server's
+ * `ASSIGNABLE_RULE_MOVE_ROLES` subset (drafts/sent are provider-managed;
+ * snooze needs the paired return time), NOT the full assignable-role set the
+ * mailbox editor uses.
+ */
+export const RULE_MOVE_ROLES = ['archive', 'junk', 'trash', 'inbox'] as const
+export type RuleMoveRole = (typeof RULE_MOVE_ROLES)[number]
+
 /** The safe action variants a GUI-created rule may carry. NO `exec`. */
 export type WritableRuleAction =
   | { kind: 'tag'; tag: string }
   | { kind: 'move'; mailboxId: string }
+  | { kind: 'moveToRole'; role: RuleMoveRole }
+  | { kind: 'markRead'; read: boolean }
+  | { kind: 'flag'; flagged: boolean }
   | { kind: 'notify'; title: string; body?: string | null }
+  /** Mail-DESTRUCTIVE: permanently deletes the matched message (not a move to
+   *  Trash). The server refuses it unless the WHEN-clause has ≥1 condition. */
+  | { kind: 'destroy' }
   | { kind: 'emit' }
   | {
       kind: 'webhook'
@@ -49,6 +64,10 @@ export interface Rule {
   on?: string[]
   action: RuleAction
   enabled: boolean
+  /** Rule chaining: when this rule matches a fact, later rules are skipped
+   *  for that fact. Rules run in order — authored (rules.toml) first in file
+   *  order, then GUI rules sorted by name. */
+  stopProcessing?: boolean
 }
 
 /** `GET /v1/rules` response. */
@@ -65,6 +84,8 @@ export interface WritableRuleInput {
   on?: string[]
   enabled?: boolean
   action: WritableRuleAction
+  /** See {@link Rule.stopProcessing}. Defaults to false. */
+  stopProcessing?: boolean
 }
 
 /** Whether an action is the read-only, GUI-uneditable `exec` variant (authored

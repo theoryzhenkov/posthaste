@@ -58,9 +58,10 @@ const DEFAULT_WIDGET: Record<QueryValueType, ConditionValueType> = {
  * Purely which widget to show — it never changes the emitted wire shape or the
  * allowed operators (those come from the generated schema).
  *
- * Tag/keyword and address autocomplete are follow-ons (no shared picker wired
- * yet), so `keyword`/`address` render as text boxes today; the distinct type is
- * kept so wiring the picker later is a one-line change here.
+ * Each widget value type maps to a registry row in `conditionValueWidgets.tsx`
+ * carrying BOTH arities (scalar + `in`-list entry) and any suggestion source
+ * (`address` → the compose address book, `keyword` → the live tag list), so a
+ * capability declared here composes with every operator the schema admits.
  */
 const WIDGET_OVERRIDE: Partial<Record<SmartMailboxField, ConditionValueType>> =
   {
