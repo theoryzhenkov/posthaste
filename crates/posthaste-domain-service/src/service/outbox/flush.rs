@@ -64,7 +64,14 @@ impl MailService {
         gateway: &dyn MailGateway,
         events: &mut Vec<DomainEvent>,
     ) -> Result<FlushPass, ServiceError> {
-        let queued = self.outbox.list_flushable_operations(account_id)?;
+        // Scheduled sends: the flushable set is gated on the monotonic-anchored
+        // "now" (see `schedule`), so a send whose `send_at` is still in the
+        // future is not even listed — it rests `pending` (cancelable) until
+        // due. Sampled once per pass; a send coming due mid-pass waits for the
+        // next pass/tick, which only ever delays, never fires early.
+        let now = super::schedule::outbox_now_rfc3339()
+            .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))?;
+        let queued = self.outbox.list_flushable_operations(account_id, &now)?;
         let mut follow_up_enqueued = false;
         for snapshot in queued {
             // Re-fetch fresh: an earlier op in this pass may have changed this
@@ -121,12 +128,16 @@ impl MailService {
                     continue;
                 }
             }
-            self.outbox.update_operation_state(
-                &operation.id,
-                OperationState::Inflight,
-                operation.attempts,
-                operation.last_error.as_deref(),
-            )?;
+            // The atomic flush gate (cancel-vs-flush, exactly one winner): claim
+            // the op `inflight` with a single guarded conditional write. A user
+            // cancel that already won removed the row, so the claim matches
+            // nothing and the op is skipped — a discarded (undone) send is never
+            // pushed. Once the claim wins, the discard path can no longer yank
+            // the row (its DELETE is guarded on `state != 'inflight'`), so the
+            // in-flight provider call is never orphaned either.
+            if !self.outbox.claim_operation_for_flush(&operation.id)? {
+                continue;
+            }
             match self.push_operation(account_id, &operation, gateway).await {
                 Ok(Pushed::Entity {
                     assigned_entity_id,

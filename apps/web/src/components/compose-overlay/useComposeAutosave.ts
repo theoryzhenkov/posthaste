@@ -152,5 +152,5 @@ export function useComposeAutosave({
     }
   }
 
-  return { saveDraft, discardDraft }
+  return { draftKey, saveDraft, discardDraft }
 }

@@ -92,11 +92,24 @@ pub trait OperationOutboxStore: Send + Sync {
     fn enqueue_operation(&self, operation: &Operation) -> Result<Operation, StoreError>;
 
     /// Operations eligible for flushing (pending) for an account, in insertion
-    /// order.
+    /// order. `now` (normalized UTC whole-second RFC 3339) gates scheduled
+    /// sends: an op whose `send_at` is after `now` is HELD out of the result —
+    /// it rests `pending` until due, so a not-yet-due send is never pushed.
     fn list_flushable_operations(
         &self,
         account_id: &AccountId,
+        now: &str,
     ) -> Result<Vec<Operation>, StoreError>;
+
+    /// Number of scheduled sends (`send_at` set) that are due (`send_at <=
+    /// now`) and still queued. The scheduler tick's probe: a non-zero count
+    /// triggers a flush sync so a due send fires promptly instead of waiting
+    /// for the next poll window.
+    fn count_due_scheduled_sends(
+        &self,
+        account_id: &AccountId,
+        now: &str,
+    ) -> Result<u64, StoreError>;
 
     /// Operations to surface as outstanding work in the outbox **UI**:
     /// everything except `applied`. An `applied` op is provider-accepted and
@@ -142,6 +155,19 @@ pub trait OperationOutboxStore: Send + Sync {
 
     /// Remove an operation after it has settled and been propagated downstream.
     fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError>;
+
+    /// Atomically transition a still-flushable operation to `inflight`,
+    /// returning whether the claim won. The flusher's entry gate for every
+    /// push: the state predicate and the write are one statement, so a
+    /// concurrent [`Self::remove_operation_unless_inflight`] (user cancel)
+    /// and this claim have exactly one winner — a discarded op is never
+    /// pushed, and a claimed op can no longer be discarded.
+    fn claim_operation_for_flush(&self, id: &OperationId) -> Result<bool, StoreError>;
+
+    /// Atomically remove an operation unless it is `inflight`, returning
+    /// whether a row was removed. The user-cancel half of the cancel-vs-flush
+    /// race — see [`Self::claim_operation_for_flush`].
+    fn remove_operation_unless_inflight(&self, id: &OperationId) -> Result<bool, StoreError>;
 }
 
 /// Account/source projection maintenance boundary.

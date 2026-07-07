@@ -14,6 +14,8 @@
 //! - [`push`]: per-`OperationKind` provider dispatch.
 //! - [`classify`]: gateway-error -> flush-disposition classification.
 //! - [`settle`]: readback settlement + settlement/uncertainty event emission.
+//! - [`schedule`]: scheduled-send (`send_at`) normalization + the
+//!   monotonic-anchored due clock (undo-send / send-later ride one hold).
 //!
 //! @spec docs/L1-outbox#operation-model
 //! @spec docs/L1-outbox#state-machine
@@ -23,4 +25,5 @@ mod draft;
 mod flush;
 mod push;
 mod queue;
+pub(crate) mod schedule;
 mod settle;

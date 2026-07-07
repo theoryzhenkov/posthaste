@@ -223,6 +223,7 @@ async fn flush_create_then_update_reconciles_temp_id_and_settles() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
     service
@@ -231,6 +232,7 @@ async fn flush_create_then_update_reconciles_temp_id_and_settles() {
             draft_entity("draft-temp"),
             OperationKind::DraftUpdate,
             serde_json::to_value(draft_request("Hello, edited")).unwrap(),
+            None,
         )
         .expect("queue update");
 
@@ -276,6 +278,7 @@ async fn transient_failure_keeps_op_pending_and_stops_draining() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
 
@@ -316,6 +319,7 @@ async fn draft_create_lost_response_retry_yields_one_draft() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
 
@@ -416,6 +420,7 @@ async fn permanent_failure_marks_op_failed_and_settles() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
 
@@ -456,6 +461,7 @@ async fn permanent_failure_of_a_message_assertion_emits_a_base_correction() {
             },
             OperationKind::SetKeywords,
             serde_json::json!({ "add": ["$flagged"], "remove": [] }),
+            None,
         )
         .expect("queue setKeywords");
 
@@ -504,6 +510,7 @@ async fn permanent_failure_of_a_draft_emits_no_base_correction() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
 
@@ -531,6 +538,7 @@ async fn queue_and_fail_one(
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
     service
@@ -582,6 +590,7 @@ async fn retry_rejects_a_non_failed_operation() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
     let pending = service.list_pending_operations(&account).expect("pending");
@@ -608,6 +617,7 @@ async fn failed_draft_predecessor_cancels_dependent_update() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
         )
         .expect("queue create");
     service
@@ -616,6 +626,7 @@ async fn failed_draft_predecessor_cancels_dependent_update() {
             draft_entity("draft-temp"),
             OperationKind::DraftUpdate,
             serde_json::to_value(draft_request("Hello again")).unwrap(),
+            None,
         )
         .expect("queue update");
 
@@ -687,6 +698,7 @@ async fn interrupted_inflight_send_parks_dispatch_uncertain_not_resent() {
             draft_entity("send-1"),
             OperationKind::Send,
             serde_json::to_value(draft_request("Outgoing")).unwrap(),
+            None,
         )
         .expect("queue send");
     store
@@ -1071,6 +1083,7 @@ async fn delete_draft_flushes_and_settles() {
             draft_entity("provider-7"),
             OperationKind::DraftDelete,
             serde_json::json!({ "idempotentRedelivery": true }),
+            None,
         )
         .expect("queue delete");
 
@@ -1436,4 +1449,196 @@ async fn settled_draft_delete_event_names_the_resolved_live_id() {
         .expect("DraftDelete settlement emits message.updated");
     assert_eq!(reconciling.payload["messageId"], "provider-draft-1");
     assert_eq!(reconciling.payload["deleted"], true);
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled sends (undo-send / send-later): one `send_at` hold on the send op.
+// @spec docs/L1-outbox#operation-model
+// ---------------------------------------------------------------------------
+
+fn scheduled_request(subject: &str, send_at: &str) -> SendMessageRequest {
+    SendMessageRequest {
+        send_at: Some(send_at.to_string()),
+        ..draft_request(subject)
+    }
+}
+
+#[tokio::test]
+async fn scheduled_send_is_held_until_due_and_survives_restart() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    let send = service
+        .enqueue_send(&account, scheduled_request("Later", "2999-01-01T00:00:00Z"))
+        .expect("scheduled send queues");
+    assert_eq!(send.state, OperationState::Pending);
+    assert_eq!(send.send_at.as_deref(), Some("2999-01-01T00:00:00Z"));
+
+    // Not due: the flush must not push it — it rests pending (cancelable).
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush");
+    assert!(events.is_empty());
+    assert!(gateway.send_calls.lock().unwrap().is_empty());
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].state, OperationState::Pending);
+
+    // "Restart": a fresh service over the same durable store still holds it.
+    let reborn = MailService::new(store, Arc::new(TestConfig::default()));
+    reborn
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush");
+    assert!(
+        gateway.send_calls.lock().unwrap().is_empty(),
+        "a not-yet-due schedule must survive a restart without firing"
+    );
+    assert_eq!(reborn.list_pending_operations(&account).unwrap().len(), 1);
+    assert!(
+        !reborn.has_due_scheduled_sends(&account).unwrap(),
+        "the scheduler probe must not fire for a future schedule"
+    );
+}
+
+#[tokio::test]
+async fn due_scheduled_send_flushes_and_a_past_send_at_sends_immediately() {
+    // The pinned past-time policy: a `send_at` already in the past is DUE — it
+    // sends on the next flush rather than rejecting (a lagging client clock
+    // must never bounce an "immediate" send).
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    service
+        .enqueue_send(&account, scheduled_request("Past", "2020-01-01T00:00:00Z"))
+        .expect("past-scheduled send queues");
+    assert!(
+        service.has_due_scheduled_sends(&account).unwrap(),
+        "the scheduler probe sees the due schedule"
+    );
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush");
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        *gateway.send_calls.lock().unwrap(),
+        vec!["Past".to_string()]
+    );
+    assert!(service
+        .list_pending_operations(&account)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn send_at_is_normalized_and_kept_out_of_the_payload() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    // Offset + sub-second input normalizes to canonical UTC whole seconds
+    // (rounded UP so the hold is never shorter than asked).
+    let send = service
+        .enqueue_send(
+            &account,
+            scheduled_request("Zoned", "2999-06-01T12:30:00.200+02:00"),
+        )
+        .expect("scheduled send queues");
+    assert_eq!(send.send_at.as_deref(), Some("2999-06-01T10:30:01Z"));
+
+    // The hold lives on the operation, not in the payload: the payload the
+    // gateway will see is byte-identical to an immediate send's.
+    let scheduled_payload = send.payload;
+    let immediate = service
+        .enqueue_send(&account, draft_request("Zoned"))
+        .expect("immediate send queues");
+    assert!(immediate.send_at.is_none());
+    assert_eq!(scheduled_payload, immediate.payload);
+    assert!(scheduled_payload.get("sendAt").is_none());
+}
+
+#[test]
+fn invalid_send_at_is_rejected_and_nothing_is_queued() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let error = service
+        .enqueue_send(&account, scheduled_request("Bad", "tomorrow-9am"))
+        .expect_err("invalid sendAt must reject");
+    assert!(error.to_string().contains("sendAt"));
+    assert!(service
+        .list_pending_operations(&account)
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn undo_before_due_cancels_cleanly_nothing_ever_submitted() {
+    // The undo-send property: within the hold window a discard cancels the
+    // send terminally — later flushes push nothing, the queue is empty.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    let send = service
+        .enqueue_send(
+            &account,
+            scheduled_request("Undone", "2999-01-01T00:00:00Z"),
+        )
+        .expect("scheduled send queues");
+
+    assert!(service.discard_operation(&send.id).expect("cancel"));
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush");
+    assert!(events.is_empty());
+    assert!(
+        gateway.send_calls.lock().unwrap().is_empty(),
+        "an undone send must never reach the provider"
+    );
+    assert!(service
+        .list_pending_operations(&account)
+        .unwrap()
+        .is_empty());
+    // A late duplicate cancel is a clean no-op (already gone), not an error.
+    assert!(!service.discard_operation(&send.id).expect("re-cancel"));
+}
+
+#[tokio::test]
+async fn cancel_loses_cleanly_once_the_flush_has_claimed_the_send() {
+    // The due boundary race, flush-wins side: once the op is claimed
+    // (`inflight`), a cancel is refused — it can no longer yank a send whose
+    // provider call may be mid-flight. (The cancel-wins side is
+    // `undo_before_due_cancels_cleanly_nothing_ever_submitted`; the two-sided
+    // atomicity of the primitives themselves is pinned in the store tests.)
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    let send = service
+        .enqueue_send(
+            &account,
+            scheduled_request("Racing", "2020-01-01T00:00:00Z"),
+        )
+        .expect("send queues");
+    assert!(
+        store.claim_operation_for_flush(&send.id).expect("claim"),
+        "the flusher claims the due send"
+    );
+
+    let error = service
+        .discard_operation(&send.id)
+        .expect_err("a claimed (inflight) send must not be discardable");
+    assert!(error.to_string().contains("in-flight"));
 }

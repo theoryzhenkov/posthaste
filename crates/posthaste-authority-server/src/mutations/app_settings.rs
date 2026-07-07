@@ -1,3 +1,5 @@
+use posthaste_domain_model::ComposeSettings;
+
 use super::*;
 
 impl AccountMutationService {
@@ -118,6 +120,17 @@ impl AccountMutationService {
                     Ok(())
                 }),
             },
+            AppSettingsFieldPatch {
+                name: "compose",
+                present: request.compose.is_some(),
+                apply: Box::new(|settings: &mut AppSettings| {
+                    if let Some(compose) = &request.compose {
+                        validate_compose_settings(compose)?;
+                        settings.compose = Some(compose.clone());
+                    }
+                    Ok(())
+                }),
+            },
         ];
 
         let mut changed = Vec::new();
@@ -195,4 +208,19 @@ struct AppSettingsFieldPatch<'a> {
 fn normalize_cache_policy(mut policy: CachePolicy) -> CachePolicy {
     policy.hard_cap_bytes = policy.hard_cap_bytes.max(policy.soft_cap_bytes);
     policy
+}
+
+/// Cap the undo-send hold (see
+/// [`ComposeSettings::MAX_UNDO_SEND_DELAY_SECONDS`]): a huge silent hold would
+/// read as mail loss — long waits belong to the explicit send-later schedule.
+fn validate_compose_settings(compose: &ComposeSettings) -> Result<(), RuntimeError> {
+    if let Some(delay) = compose.undo_send_delay_seconds {
+        if delay > ComposeSettings::MAX_UNDO_SEND_DELAY_SECONDS {
+            return Err(RuntimeError::invalid_mutation(format!(
+                "undoSendDelaySeconds must be at most {}",
+                ComposeSettings::MAX_UNDO_SEND_DELAY_SECONDS
+            )));
+        }
+    }
+    Ok(())
 }

@@ -614,12 +614,13 @@ pub trait AuthorityServerApi: Send + Sync {
         Err(write_channel_unsupported())
     }
 
-    /// Write: queue a local-first send for an account.
+    /// Write: queue a local-first send for an account, returning the enqueued
+    /// outbox operation (its id is a scheduled send's cancel handle).
     async fn send_message(
         &self,
         account_id: AccountId,
         request: SendMessageRequest,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Operation, RuntimeError> {
         let _ = (account_id, request);
         Err(write_channel_unsupported())
     }
@@ -1016,7 +1017,7 @@ macro_rules! for_each_link_api_op {
             send_message => "/v1/link/send-message" => SendMessageLinkRequest {
                 account_id: $crate::reexport::AccountId,
                 request: $crate::reexport::SendMessageRequest
-            } => ();
+            } => $crate::reexport::Operation;
             save_draft => "/v1/link/save-draft" => SaveDraftRequest {
                 account_id: $crate::reexport::AccountId,
                 draft_id: Option<$crate::reexport::MessageId>,

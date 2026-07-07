@@ -5,6 +5,10 @@ use serde_json::json;
 
 use super::*;
 
+/// The flush gate's "now" for tests: ops without `send_at` are due at any
+/// time, so any canonical instant works where no schedule is involved.
+const NOW: &str = "2026-06-21T00:00:00Z";
+
 fn operation(id: &str, entity_id: &str, kind: OperationKind, state: OperationState) -> Operation {
     Operation {
         id: OperationId::from(id),
@@ -19,9 +23,16 @@ fn operation(id: &str, entity_id: &str, kind: OperationKind, state: OperationSta
         attempts: 0,
         last_error: None,
         depends_on: None,
-        created_at: "2026-06-21T00:00:00Z".to_string(),
-        updated_at: "2026-06-21T00:00:00Z".to_string(),
+        send_at: None,
+        created_at: NOW.to_string(),
+        updated_at: NOW.to_string(),
     }
+}
+
+fn scheduled_send(id: &str, send_at: &str, state: OperationState) -> Operation {
+    let mut op = operation(id, &format!("send-{id}"), OperationKind::Send, state);
+    op.send_at = Some(send_at.to_string());
+    op
 }
 
 #[test]
@@ -85,7 +96,7 @@ fn flushable_lists_pending_and_inflight_in_insertion_order() -> Result<(), Store
         OperationState::Failed,
     ))?;
 
-    let flushable = store.list_flushable_operations(&account)?;
+    let flushable = store.list_flushable_operations(&account, NOW)?;
     let ids: Vec<&str> = flushable.iter().map(|op| op.id.as_str()).collect();
     // op-2 is applied and op-4 is failed, so both are excluded; order follows insertion.
     assert_eq!(ids, vec!["op-1", "op-3"]);
@@ -469,7 +480,7 @@ fn flushable_operations_are_limited_and_drain_across_cycles() -> Result<(), Stor
 
     // First "cycle": the store returns at most the batch limit, not the
     // whole backlog in one unbounded `Vec`.
-    let first_batch = store.list_flushable_operations(&account)?;
+    let first_batch = store.list_flushable_operations(&account, NOW)?;
     assert_eq!(first_batch.len(), OUTBOX_FLUSH_BATCH_LIMIT as usize);
 
     // The flush loop processes a batch by moving each op out of the
@@ -480,7 +491,7 @@ fn flushable_operations_are_limited_and_drain_across_cycles() -> Result<(), Stor
         store.update_operation_state(&op.id, OperationState::Applied, 0, None)?;
     }
 
-    let second_batch = store.list_flushable_operations(&account)?;
+    let second_batch = store.list_flushable_operations(&account, NOW)?;
     assert_eq!(
         second_batch.len(),
         total - OUTBOX_FLUSH_BATCH_LIMIT as usize,
@@ -493,5 +504,144 @@ fn flushable_operations_are_limited_and_drain_across_cycles() -> Result<(), Stor
     assert!(second_batch
         .iter()
         .all(|op| !first_ids.contains(op.id.as_str())));
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled sends (undo-send / send-later): the `send_at` hold + the atomic
+// cancel-vs-flush primitives. @spec docs/L1-outbox#operation-model
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scheduled_send_is_held_until_due_and_survives_reopen() -> Result<(), StoreError> {
+    let root = temp_root();
+    let account = AccountId::from("primary");
+    {
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        store.enqueue_operation(&scheduled_send(
+            "op-later",
+            "2026-06-21T00:00:10Z",
+            OperationState::Pending,
+        ))?;
+        // Before due: held out of the flushable set (but still pending/visible).
+        assert!(store
+            .list_flushable_operations(&account, "2026-06-21T00:00:09Z")?
+            .is_empty());
+        assert_eq!(store.list_pending_operations(&account)?.len(), 1);
+    }
+    // Simulated restart: a fresh store over the same database still holds the
+    // schedule (it is a persisted column, not process state) and releases it
+    // exactly at the boundary (`send_at <= now` — due AT the instant).
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    assert!(store
+        .list_flushable_operations(&account, "2026-06-21T00:00:09Z")?
+        .is_empty());
+    let due = store.list_flushable_operations(&account, "2026-06-21T00:00:10Z")?;
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].id.as_str(), "op-later");
+    assert_eq!(due[0].send_at.as_deref(), Some("2026-06-21T00:00:10Z"));
+    Ok(())
+}
+
+#[test]
+fn count_due_scheduled_sends_counts_only_due_queued_schedules() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+
+    store.enqueue_operation(&scheduled_send(
+        "op-due",
+        "2026-06-21T00:00:00Z",
+        OperationState::Pending,
+    ))?;
+    store.enqueue_operation(&scheduled_send(
+        "op-future",
+        "2026-06-21T01:00:00Z",
+        OperationState::Pending,
+    ))?;
+    // A parked (dispatch-uncertain) send is not auto-flushable and must not
+    // re-trigger the scheduler tick either.
+    store.enqueue_operation(&scheduled_send(
+        "op-parked",
+        "2026-06-21T00:00:00Z",
+        OperationState::DispatchUncertain,
+    ))?;
+    // An unscheduled op never counts.
+    store.enqueue_operation(&operation(
+        "op-plain",
+        "draft-1",
+        OperationKind::DraftCreate,
+        OperationState::Pending,
+    ))?;
+
+    assert_eq!(store.count_due_scheduled_sends(&account, NOW)?, 1);
+    assert_eq!(
+        store.count_due_scheduled_sends(&account, "2026-06-21T01:00:00Z")?,
+        2
+    );
+    assert_eq!(
+        store.count_due_scheduled_sends(&account, "2026-06-20T23:59:59Z")?,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn claim_then_cancel_has_exactly_one_winner() -> Result<(), StoreError> {
+    // Flush wins: after the guarded claim, the guarded cancel removes nothing.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let op = scheduled_send("op-race", "2026-06-21T00:00:00Z", OperationState::Pending);
+    store.enqueue_operation(&op)?;
+
+    assert!(
+        store.claim_operation_for_flush(&op.id)?,
+        "flush claims first"
+    );
+    assert!(
+        !store.remove_operation_unless_inflight(&op.id)?,
+        "a claimed (inflight) op must not be cancelable"
+    );
+    let stored = store.get_operation(&op.id)?.expect("still queued");
+    assert_eq!(stored.state, OperationState::Inflight);
+    Ok(())
+}
+
+#[test]
+fn cancel_then_claim_has_exactly_one_winner() -> Result<(), StoreError> {
+    // Cancel wins: after the guarded removal, the guarded claim matches
+    // nothing, so the flusher skips — the canceled send is never pushed.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let op = scheduled_send("op-race", "2026-06-21T00:00:00Z", OperationState::Pending);
+    store.enqueue_operation(&op)?;
+
+    assert!(
+        store.remove_operation_unless_inflight(&op.id)?,
+        "cancel wins"
+    );
+    assert!(
+        !store.claim_operation_for_flush(&op.id)?,
+        "a canceled op must not be claimable for flush"
+    );
+    assert!(store.get_operation(&op.id)?.is_none());
+    Ok(())
+}
+
+#[test]
+fn cancel_of_a_failed_or_missing_op_keeps_prior_semantics() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    // Missing: nothing to remove.
+    assert!(!store.remove_operation_unless_inflight(&OperationId::from("op-gone"))?);
+    // Failed: still discardable (the pre-existing dead-op escape hatch).
+    let op = operation(
+        "op-failed",
+        "draft-1",
+        OperationKind::DraftCreate,
+        OperationState::Failed,
+    );
+    store.enqueue_operation(&op)?;
+    assert!(store.remove_operation_unless_inflight(&op.id)?);
     Ok(())
 }

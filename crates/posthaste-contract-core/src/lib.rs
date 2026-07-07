@@ -16,9 +16,10 @@ pub use mail_query::*;
 
 use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, Appearance, AutomationRule,
-    CachePolicy, GatewayError, ImapTransportSettings, MailQueryRule, MailboxColor, MailboxGroup,
-    MessageAttachment, MessageSummary, Notifications, ProviderAuthKind, ProviderHint, ServiceError,
-    ServiceErrorKind, SmartMailboxId, SmtpTransportSettings, TagAppearance, ValidationError,
+    CachePolicy, ComposeSettings, GatewayError, ImapTransportSettings, MailQueryRule, MailboxColor,
+    MailboxGroup, MessageAttachment, MessageSummary, Notifications, ProviderAuthKind, ProviderHint,
+    ServiceError, ServiceErrorKind, SmartMailboxId, SmtpTransportSettings, TagAppearance,
+    ValidationError,
 };
 
 // Re-exported so the shared retryability vocabulary is reachable as
@@ -258,6 +259,10 @@ pub struct PatchAppSettingsMutation {
     /// Client-side sidebar Groups (presentation only). Overwrites the stored list
     /// wholesale, mirroring [`mailbox_colors`](Self::mailbox_colors).
     pub mailbox_groups: Option<Vec<MailboxGroup>>,
+    /// Compose/sending preferences (undo-send delay). Overwrites the stored
+    /// struct wholesale; validated on apply (the delay is capped).
+    #[serde(default)]
+    pub compose: Option<ComposeSettings>,
     /// Force the current backfill rules to re-run after persisting, even when
     /// the rule fingerprint is unchanged (on-demand "backfill now").
     #[serde(default)]

@@ -4,11 +4,11 @@ import type {
   CachedSenderAddress,
   DraftContent,
   Identity,
-  OkResponse,
   Operation,
   ReplyContext,
   SaveDraftInput,
   SendMessageInput,
+  SendMessageResponse,
 } from '../types'
 
 /** @spec docs/L1-api#compose */
@@ -41,12 +41,17 @@ export async function fetchDraftContent(
   )
 }
 
-/** @spec docs/L1-api#compose */
+/**
+ * Enqueue a local-first send. With `input.sendAt` the send is HELD until due
+ * (undo-send / send-later); the returned `operation.id` is the cancel handle.
+ *
+ * @spec docs/L1-api#compose
+ */
 export async function sendMessage(
   sourceId: string,
   input: SendMessageInput,
-): Promise<OkResponse> {
-  return jsonRequest<OkResponse>(
+): Promise<SendMessageResponse> {
+  return jsonRequest<SendMessageResponse>(
     `/sources/${sourceId}/commands/send`,
     'POST',
     input,

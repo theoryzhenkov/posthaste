@@ -29,12 +29,20 @@ interface ComposeOverlayProps {
   intent: ComposeIntent
   shell?: 'floating' | 'document'
   onClose: () => void
+  /**
+   * Reopen the composer on a kept draft after a scheduled send is undone
+   * (the undo-restores-compose path). Optional: shells without a compose
+   * router (e.g. a focused window) fall back to the draft simply remaining
+   * in Drafts.
+   */
+  onRestoreDraft?: (sourceId: string, draftKey: string) => void
 }
 
 export function ComposeOverlay({
   intent,
   shell = 'floating',
   onClose,
+  onRestoreDraft,
 }: ComposeOverlayProps) {
   const queries = useComposeQueries({ intent })
   const forwardAttachments = useForwardAttachments({ intent })
@@ -135,11 +143,16 @@ export function ComposeOverlay({
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
   })
 
-  const { handleSubmit, isSending } = useComposeSubmission({
+  const { handleSubmit, handleSubmitLater, isSending } = useComposeSubmission({
+    draftKey: autosave.draftKey,
     form: formState.form,
     intentKind: intent.kind,
     isPreparingMessage,
     onClose,
+    // Scheduled (undo-send / send-later) sends persist the compose as a draft
+    // first, so Undo can restore it with full fidelity.
+    onPersistDraft: autosave.saveDraft,
+    onRestoreDraft,
     onSent: autosave.discardDraft,
     replyContext: queries.replyContextQuery.data,
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
@@ -287,6 +300,7 @@ export function ComposeOverlay({
         onAttachFiles={formState.handleAttachFiles}
         onClose={requestClose}
         onSubmit={handleSubmit}
+        onSubmitLater={handleSubmitLater}
       />
       {isDragActive ? (
         <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-ring bg-background/75 text-sm font-medium text-foreground">
