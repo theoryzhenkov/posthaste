@@ -194,6 +194,16 @@ pub struct ReplyContext {
     pub forwarded_body: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
+    /// The original message's `From` recipients, verbatim. `to` holds the
+    /// *derived* reply recipient (today also the original `From`, but that
+    /// derivation may evolve, e.g. `Reply-To` handling); clients build the
+    /// reply attribution line ("On <date> <sender> wrote:") from this field so
+    /// it always names the actual sender.
+    #[serde(default)]
+    pub original_from: Vec<Recipient>,
+    /// The original message's date as RFC 3339 (`Date`/sent-at, falling back
+    /// to received-at). Clients localize it for the reply attribution line.
+    pub original_date: Option<String>,
 }
 
 /// Format a recipient list as a header value (`Name <email>, email, ...`).

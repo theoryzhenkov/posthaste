@@ -7581,6 +7581,20 @@
               "null"
             ]
           },
+          "originalDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The original message's date as RFC 3339 (`Date`/sent-at, falling back\nto received-at). Clients localize it for the reply attribution line."
+          },
+          "originalFrom": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            },
+            "description": "The original message's `From` recipients, verbatim. `to` holds the\n*derived* reply recipient (today also the original `From`, but that\nderivation may evolve, e.g. `Reply-To` handling); clients build the\nreply attribution line (\"On <date> <sender> wrote:\") from this field so\nit always names the actual sender."
+          },
           "originalTo": {
             "type": "array",
             "items": {

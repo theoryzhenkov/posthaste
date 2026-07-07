@@ -23,6 +23,14 @@ export interface ReplyContext {
   forwardedBody: string | null
   inReplyTo: string | null
   references: string | null
+  /**
+   * The original message's `From` recipients, verbatim. `to` holds the derived
+   * reply recipient; the attribution line ("On <date> <sender> wrote:") is
+   * built from this so it always names the actual sender.
+   */
+  originalFrom: Recipient[]
+  /** The original message's date (RFC 3339), localized into the attribution line. */
+  originalDate: string | null
 }
 
 /** Compose-ready content parsed from an existing provider draft. @spec docs/L1-outbox#operation-model */
