@@ -197,3 +197,24 @@ async fn set_mailbox_role_can_clear_existing_owner() {
     assert_eq!(cursor.object_type, SyncObject::Mailbox);
     assert_eq!(cursor.state, "mailbox-2");
 }
+
+#[tokio::test]
+async fn reply_context_carries_structured_attribution_fields() {
+    let gateway = MockJmapGateway::default();
+    let context = gateway
+        .fetch_reply_context(&AccountId::from("primary"), &MessageId::from("em-001"))
+        .await
+        .expect("reply context");
+
+    // Structured attribution: the verbatim original sender + the RFC 3339
+    // original date the client localizes into "On <date> <sender> wrote:".
+    assert_eq!(context.original_from.len(), 1);
+    assert_eq!(context.original_from[0].name.as_deref(), Some("Alice Chen"));
+    assert_eq!(context.original_from[0].email, "alice@example.com");
+    assert_eq!(
+        context.original_date.as_deref(),
+        Some("2026-03-31T09:00:00Z")
+    );
+    // The derived reply recipient still mirrors the original sender.
+    assert_eq!(context.to, context.original_from);
+}

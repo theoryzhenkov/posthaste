@@ -17,10 +17,12 @@ import {
   composeAttachmentFromFile,
   formatRecipient,
   formatRecipients,
+  formatReplyAttribution,
+  insertSignatureAboveQuote,
   type ComposeAttachment,
   type ComposeForm,
 } from '../composeFormHelpers'
-import { validateAttachmentLimits } from './attachments'
+import { validateAttachmentLimits, withPastedFileName } from './attachments'
 
 /**
  * Derive the reply-all recipient set: original From + To (minus self) go to
@@ -173,14 +175,27 @@ export function useComposeFormState({
     },
     [form.attachments, setField],
   )
-  const handleAttachFiles = useCallback(
-    (files: FileList | null) => {
-      if (!files || files.length === 0) {
+  // Monotonic per-session ordinal for naming unnamed pasted files
+  // (`pasted-image-<n>.png`), so two screenshots never collide.
+  const pastedFileOrdinalRef = useRef(0)
+  /**
+   * Shared attachment ingestion for every entry path — the picker, paste
+   * (Cmd+V) into the body editor or the fields, and drag-and-drop onto the
+   * composer. Unnamed clipboard images get a generated name; the send-path
+   * size caps are enforced here, surfacing the over-limit message in the
+   * footer instead of failing silently at send.
+   */
+  const ingestFiles = useCallback(
+    (files: File[]) => {
+      if (files.length === 0) {
         return
       }
+      const named = files.map((file) =>
+        withPastedFileName(file, ++pastedFileOrdinalRef.current),
+      )
       const nextAttachments = [
         ...form.attachments,
-        ...Array.from(files).map(composeAttachmentFromFile),
+        ...named.map(composeAttachmentFromFile),
       ]
       const error = validateAttachmentLimits(nextAttachments)
       if (error) {
@@ -189,18 +204,34 @@ export function useComposeFormState({
         setErrorMessage(null)
         setField('attachments', nextAttachments)
       }
+    },
+    [form.attachments, setErrorMessage, setField],
+  )
+  const handleAttachFiles = useCallback(
+    (files: FileList | null) => {
+      ingestFiles(files ? Array.from(files) : [])
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
     },
-    [form.attachments, setErrorMessage, setField],
+    [ingestFiles],
   )
 
   useEffect(() => {
     if (isMessageBasedCompose && replyContext) {
-      requestAnimationFrame(() => bodyRef.current?.focus())
+      requestAnimationFrame(() => {
+        // Top-posting: the caret starts on the empty line ABOVE the signature
+        // and quote. Only pin it while the body is still untouched — once the
+        // user has typed, refocusing (e.g. the placeholder→served context
+        // transition) must not yank the caret away.
+        if (editedResetKeyRef.current === formResetKey) {
+          bodyRef.current?.focus()
+        } else {
+          bodyRef.current?.focusAtStart()
+        }
+      })
     }
-  }, [composeKey, isMessageBasedCompose, replyContext])
+  }, [composeKey, isMessageBasedCompose, replyContext, formResetKey])
 
   useEffect(() => {
     if (!identity || form.from.trim().length > 0) {
@@ -218,7 +249,13 @@ export function useComposeFormState({
   }, [form.from, identity, setForm])
 
   useEffect(() => {
-    if (intentKind !== 'forward' || forwardAttachments.length === 0) {
+    // A forward re-sends the original files; a resumed draft restores the files
+    // it was saved with (without this, re-saving the draft would drop them —
+    // the attachment round-trip for pasted/picked files depends on it).
+    if (
+      (intentKind !== 'forward' && intentKind !== 'draft') ||
+      forwardAttachments.length === 0
+    ) {
       return
     }
     if (seededAttachmentsKeyRef.current === formResetKey) {
@@ -233,6 +270,10 @@ export function useComposeFormState({
   }, [intentKind, forwardAttachments, formResetKey, setForm])
 
   const seededReplyContextKeyRef = useRef<string | null>(null)
+  // The exact quote block this session seeded (attribution + `>`-quote, or the
+  // forwarded-message block). The signature effect inserts ABOVE it when the
+  // quote arrived first, keeping signature-above-quote in either effect order.
+  const seededQuoteBlockRef = useRef<string | null>(null)
   useEffect(() => {
     // FIX2 — stream the reply/forward quote + recipients + subject into the form
     // once `replyContext` is available (from the cache placeholder or the served
@@ -251,10 +292,26 @@ export function useComposeFormState({
       return
     }
     seededReplyContextKeyRef.current = formResetKey
+    // A reply's quote is headed by the localized attribution line ("On <date>
+    // <sender> wrote:"); a forward's block carries its own header, built
+    // server-side ("---------- Forwarded message ----------\nFrom: ...").
+    const attribution =
+      intentKind === 'forward'
+        ? null
+        : formatReplyAttribution(
+            replyContext.originalFrom[0] ?? replyContext.to[0] ?? null,
+            replyContext.originalDate,
+          )
+    const quotedWithAttribution = replyContext.quotedBody
+      ? attribution
+        ? `${attribution}\n${replyContext.quotedBody}`
+        : replyContext.quotedBody
+      : null
     const seed =
       intentKind === 'forward'
         ? replyContext.forwardedBody
-        : replyContext.quotedBody
+        : quotedWithAttribution
+    seededQuoteBlockRef.current = seed ?? null
     // Reply-all derives the full recipient set (original From + To, plus the
     // original Cc) with the user's own address excluded. A plain reply uses the
     // original From only; forward starts empty.
@@ -289,6 +346,12 @@ export function useComposeFormState({
     // the ref guard prevents re-inserting it across re-renders or account-list
     // reloads, so a user edit is never clobbered.
     //
+    // A new message appends at the end (which IS the top — there is no quote).
+    // A reply/reply-all/forward top-posts: the signature goes ABOVE the seeded
+    // quote/forward block. When the quote has not streamed in yet the signature
+    // is appended at the end and the later quote lands below it — the same
+    // final order either way.
+    //
     // @spec docs/L1-compose#sender-selection
     if (!signature || intentKind === 'draft') {
       return
@@ -299,7 +362,14 @@ export function useComposeFormState({
     seededSignatureKeyRef.current = formResetKey
     setForm((current) => ({
       ...current,
-      body: appendSignature(current.body, signature),
+      body:
+        intentKind === 'new'
+          ? appendSignature(current.body, signature)
+          : insertSignatureAboveQuote(
+              current.body,
+              signature,
+              seededQuoteBlockRef.current,
+            ),
     }))
   }, [signature, intentKind, formResetKey, setForm])
 
@@ -315,6 +385,7 @@ export function useComposeFormState({
     handleAttachFiles,
     handleBodyChange,
     hasUserEdited: editedResetKey === formResetKey,
+    ingestFiles,
     isReadingAttachments,
     removeAttachment,
     setErrorMessage,
