@@ -83,6 +83,8 @@ pub(crate) async fn fetch_reply_context(
         forwarded_body,
         in_reply_to: email.message_id().and_then(|ids| ids.first()).cloned(),
         references: email.references().map(|refs| refs.join(" ")),
+        original_from,
+        original_date: date,
     })
 }
 

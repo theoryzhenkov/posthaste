@@ -8,9 +8,12 @@ import type {
 import {
   EMPTY_FORM,
   accountFromOptions,
+  appendSignature,
   buildSendInput,
   formatRecipient,
   formatRecipients,
+  formatReplyAttribution,
+  insertSignatureAboveQuote,
   isConcreteEmailPattern,
   optionLabel,
   parseRecipients,
@@ -225,5 +228,84 @@ describe('compose form helpers', () => {
         replyContextFromCachedMessage(cachedDetail({ bodyText: '' })),
       ).toBeUndefined()
     })
+  })
+})
+
+describe('formatReplyAttribution', () => {
+  // Locale + timezone pinned so CI is deterministic; the app passes neither
+  // and gets the user's environment.
+  const pinned = { locale: 'en-US', timeZone: 'UTC' }
+
+  it('formats "On <localized date> Name <email> wrote:"', () => {
+    expect(
+      formatReplyAttribution(
+        { name: 'Theo Ryzhenkov', email: 'theor@theor.net' },
+        '2026-07-06T10:34:00Z',
+        pinned,
+      ),
+    ).toBe(
+      'On Mon, Jul 6, 2026, 10:34 AM Theo Ryzhenkov <theor@theor.net> wrote:',
+    )
+  })
+
+  it('falls back to the bare email when the sender has no display name', () => {
+    expect(
+      formatReplyAttribution(
+        { name: null, email: 'theor@theor.net' },
+        '2026-07-06T10:34:00Z',
+        pinned,
+      ),
+    ).toBe('On Mon, Jul 6, 2026, 10:34 AM theor@theor.net wrote:')
+  })
+
+  it('renders the date in the requested timezone', () => {
+    expect(
+      formatReplyAttribution(
+        { name: null, email: 'a@b.c' },
+        '2026-07-06T10:34:00Z',
+        { locale: 'en-US', timeZone: 'America/New_York' },
+      ),
+    ).toBe('On Mon, Jul 6, 2026, 6:34 AM a@b.c wrote:')
+  })
+
+  it('degrades to "<sender> wrote:" when the date is missing or unparseable', () => {
+    const ada = { name: 'Ada', email: 'ada@example.com' }
+    expect(formatReplyAttribution(ada, null, pinned)).toBe(
+      'Ada <ada@example.com> wrote:',
+    )
+    expect(formatReplyAttribution(ada, 'not-a-date', pinned)).toBe(
+      'Ada <ada@example.com> wrote:',
+    )
+  })
+
+  it('yields no attribution line at all without a sender', () => {
+    expect(
+      formatReplyAttribution(null, '2026-07-06T10:34:00Z', pinned),
+    ).toBeNull()
+  })
+})
+
+describe('insertSignatureAboveQuote', () => {
+  const quote = 'On Mon Ada wrote:\n> original line'
+
+  it('inserts the "-- " signature block ABOVE the seeded quote', () => {
+    expect(insertSignatureAboveQuote(`\n\n${quote}`, 'Sig', quote)).toBe(
+      `\n\n-- \nSig\n\n${quote}`,
+    )
+  })
+
+  it('keeps the user reply above the signature, quote below', () => {
+    expect(
+      insertSignatureAboveQuote(`My reply\n\n${quote}`, 'Sig', quote),
+    ).toBe(`My reply\n\n-- \nSig\n\n${quote}`)
+  })
+
+  it('appends at the end when the quote block is absent (not seeded yet / edited away)', () => {
+    expect(insertSignatureAboveQuote('My reply', 'Sig', quote)).toBe(
+      appendSignature('My reply', 'Sig'),
+    )
+    expect(insertSignatureAboveQuote('My reply', 'Sig', null)).toBe(
+      'My reply\n\n-- \nSig',
+    )
   })
 })

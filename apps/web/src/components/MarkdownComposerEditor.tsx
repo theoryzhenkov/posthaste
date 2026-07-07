@@ -19,6 +19,7 @@ import {
 
 import { cn } from '@/lib/utils'
 
+import { filesFromDataTransfer } from './compose-overlay/attachments'
 import { FormatMenuButton } from './markdown-composer/FormatMenuButton'
 import {
   FORMAT_COMMANDS,
@@ -31,11 +32,19 @@ import {
 
 export interface MarkdownComposerEditorHandle {
   focus: () => void
+  /** Focus with the caret pinned to the start of the document (top-posting). */
+  focusAtStart: () => void
 }
 
 interface MarkdownComposerEditorProps {
   className?: string
   onChange: (value: string) => void
+  /**
+   * Receives the `File`s of a paste (Cmd+V) or drop targeting the editor.
+   * When files are present the event is consumed here (CodeMirror's own
+   * text handling is skipped); text-only pastes/drops are untouched.
+   */
+  onFiles?: (files: File[]) => void
   placeholder?: string
   value: string
 }
@@ -49,7 +58,7 @@ export const MarkdownComposerEditor = forwardRef<
   MarkdownComposerEditorHandle,
   MarkdownComposerEditorProps
 >(function MarkdownComposerEditor(
-  { className, onChange, placeholder, value },
+  { className, onChange, onFiles, placeholder, value },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -58,6 +67,12 @@ export const MarkdownComposerEditor = forwardRef<
   const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(
     null,
   )
+  // Read through a ref so the (identity-sensitive) extensions array does not
+  // rebuild — and the editor does not remount — when the callback changes.
+  const onFilesRef = useRef(onFiles)
+  useEffect(() => {
+    onFilesRef.current = onFiles
+  })
 
   const handleEditorUpdate = useCallback(
     (update: ViewUpdate) => {
@@ -70,6 +85,30 @@ export const MarkdownComposerEditor = forwardRef<
 
   const extensions = useMemo<Extension[]>(
     () => [
+      // Registered ahead of CodeMirror's built-in handlers: returning true
+      // consumes the event, so a paste/drop CARRYING FILES becomes an
+      // attachment instead of text insertion, while plain text pastes/drops
+      // fall through to the default behavior untouched.
+      EditorView.domEventHandlers({
+        paste: (event) => {
+          const files = filesFromDataTransfer(event.clipboardData)
+          if (files.length === 0 || !onFilesRef.current) {
+            return false
+          }
+          event.preventDefault()
+          onFilesRef.current(files)
+          return true
+        },
+        drop: (event) => {
+          const files = filesFromDataTransfer(event.dataTransfer)
+          if (files.length === 0 || !onFilesRef.current) {
+            return false
+          }
+          event.preventDefault()
+          onFilesRef.current(files)
+          return true
+        },
+      }),
       history(),
       markdown({
         addKeymap: true,
@@ -129,6 +168,14 @@ export const MarkdownComposerEditor = forwardRef<
     ref,
     () => ({
       focus: () => editorRef.current?.focus(),
+      focusAtStart: () => {
+        const view = editorRef.current
+        if (!view) {
+          return
+        }
+        view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true })
+        view.focus()
+      },
     }),
     [],
   )

@@ -14,6 +14,7 @@ import type {
   Recipient,
   ReplyContext,
 } from '@/api/types'
+import { formatRecipient } from '@/composeMessage'
 
 export type { ComposeAttachment, ComposeForm } from '@/composeMessage'
 export {
@@ -65,6 +66,70 @@ export function optionLabel(option: FromAddressOption): string {
  * @spec docs/L1-compose#sender-selection */
 export function appendSignature(body: string, signature: string): string {
   return `${body}\n\n-- \n${signature}`
+}
+
+/**
+ * Insert a signature (with the conventional `-- ` RFC 3676 §4.3 delimiter)
+ * ABOVE the quoted block of a reply/forward body — standard top-posting — so
+ * the message reads: the user's reply, the signature, the attribution line,
+ * then the quote.
+ *
+ * `quoteBlock` is the exact block the compose seeded (attribution + quote, or
+ * the forwarded-message block). When it is absent from the body (not seeded
+ * yet, or edited away) the signature is appended at the end instead — a
+ * later-seeded quote then lands below it, producing the same final order.
+ */
+export function insertSignatureAboveQuote(
+  body: string,
+  signature: string,
+  quoteBlock: string | null,
+): string {
+  const index = quoteBlock ? body.indexOf(quoteBlock) : -1
+  if (index < 0) {
+    return appendSignature(body, signature)
+  }
+  const before = body.slice(0, index)
+  const separator = before.endsWith('\n\n')
+    ? ''
+    : before.endsWith('\n')
+      ? '\n'
+      : '\n\n'
+  return `${before}${separator}-- \n${signature}\n\n${body.slice(index)}`
+}
+
+/**
+ * Format the reply attribution line inserted directly above the `>`-quoted
+ * body: `On Mon, Jul 6, 2026, 10:34 AM Theo Ryzhenkov <theor@theor.net> wrote:`.
+ *
+ * The RFC 3339 `date` from the reply-context is localized with `Intl` (the
+ * user's locale/timezone by default; pin both in tests for determinism). The
+ * name falls back to the bare email when the sender has no display name; a
+ * missing or unparseable date degrades to `<sender> wrote:`; no sender at all
+ * yields no attribution line (null).
+ */
+export function formatReplyAttribution(
+  from: Recipient | null,
+  date: string | null,
+  options?: { locale?: string; timeZone?: string },
+): string | null {
+  if (!from) {
+    return null
+  }
+  const sender = formatRecipient(from)
+  const parsed = date ? new Date(date) : null
+  if (!parsed || Number.isNaN(parsed.getTime())) {
+    return `${sender} wrote:`
+  }
+  const formatted = new Intl.DateTimeFormat(options?.locale, {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: options?.timeZone,
+  }).format(parsed)
+  return `On ${formatted} ${sender} wrote:`
 }
 
 /** `>`-prefix every line of a body for reply quoting. Mirrors the engine's
@@ -124,6 +189,10 @@ export function replyContextFromCachedMessage(
     inReplyTo: detail.rfcMessageId ?? null,
     // Not in the cache; the served context supplies real threading before send.
     references: null,
+    originalFrom,
+    // The cache only has the received date; close enough for a provisional
+    // attribution line — the authoritative fetch carries the sent date.
+    originalDate: detail.receivedAt ?? null,
   }
 }
 

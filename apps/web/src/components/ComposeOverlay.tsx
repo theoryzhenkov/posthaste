@@ -17,6 +17,7 @@ import { ComposeFooter } from './compose-overlay/ComposeFooter'
 import { ComposeHeader } from './compose-overlay/ComposeHeader'
 import { shouldPromptBeforeClose } from './compose-overlay/composeCloseGuard'
 import { useComposeAutosave } from './compose-overlay/useComposeAutosave'
+import { useComposeFileDrop } from './compose-overlay/useComposeFileDrop'
 import { useComposeFormState } from './compose-overlay/useComposeFormState'
 import { useComposeQueries } from './compose-overlay/useComposeQueries'
 import { useDisplayedFromOptions } from './compose-overlay/useDisplayedFromOptions'
@@ -215,6 +216,12 @@ export function ComposeOverlay({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleSubmit])
 
+  // Paste (Cmd+V) and drag-and-drop attach files through the same ingestion
+  // path as the picker; disabled while the composer is not ready or sending.
+  const ingestFiles =
+    !fieldsDisabled && !isSending ? formState.ingestFiles : undefined
+  const { isDragActive, dropZoneProps } = useComposeFileDrop(ingestFiles)
+
   const panelLabel =
     intent.kind === 'reply'
       ? 'reply composer'
@@ -227,7 +234,7 @@ export function ComposeOverlay({
     <ComposeHeader fromLabel={fromLabel} intentKind={intent.kind} />
   )
   const content = (
-    <>
+    <div className="relative flex min-h-0 flex-1 flex-col" {...dropZoneProps}>
       <ComposeFields
         displayedFromOptions={displayedFromOptions}
         fieldsDisabled={fieldsDisabled}
@@ -239,6 +246,7 @@ export function ComposeOverlay({
         setFromInputFocused={formState.setFromInputFocused}
         setFromMenuOpen={formState.setFromMenuOpen}
         onFieldChange={formState.setField}
+        onPasteFiles={ingestFiles}
       />
       <ComposeBodyEditor
         bodyRef={formState.bodyRef}
@@ -248,6 +256,7 @@ export function ComposeOverlay({
         preparingLabel={preparingLabel}
         value={formState.form.body}
         onChange={formState.handleBodyChange}
+        onFiles={ingestFiles}
       />
       <ComposeAttachmentList
         attachments={formState.form.attachments}
@@ -273,7 +282,12 @@ export function ComposeOverlay({
         onClose={requestClose}
         onSubmit={handleSubmit}
       />
-    </>
+      {isDragActive ? (
+        <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-ring bg-background/75 text-sm font-medium text-foreground">
+          Drop files to attach
+        </div>
+      ) : null}
+    </div>
   )
 
   const closeConfirmDialog = (

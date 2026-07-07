@@ -185,6 +185,8 @@ describe('useComposeQueries — instant reply from cache', () => {
       forwardedBody: null,
       inReplyTo: '<orig@example.com>',
       references: '<root@example.com> <orig@example.com>',
+      originalFrom: [{ name: 'Ada Lovelace', email: 'ada@example.com' }],
+      originalDate: '2026-01-01T00:00:00Z',
     }
     const restore = stubComposeQueries(() => Promise.resolve(authoritative))
     try {

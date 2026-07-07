@@ -561,14 +561,15 @@ impl MailGateway for MockJmapGateway {
             .iter()
             .find(|message| &message.id == message_id)
             .ok_or_else(|| GatewayError::Rejected("unknown message".to_string()))?;
+        let original_from = vec![Recipient {
+            name: message.from_name.clone(),
+            email: message
+                .from_email
+                .clone()
+                .unwrap_or_else(|| "unknown@example.com".to_string()),
+        }];
         Ok(ReplyContext {
-            to: vec![Recipient {
-                name: message.from_name.clone(),
-                email: message
-                    .from_email
-                    .clone()
-                    .unwrap_or_else(|| "unknown@example.com".to_string()),
-            }],
+            to: original_from.clone(),
             cc: Vec::new(),
             original_to: Vec::new(),
             reply_subject: format!("Re: {}", message.subject.clone().unwrap_or_default()),
@@ -577,6 +578,8 @@ impl MailGateway for MockJmapGateway {
             forwarded_body: message.body_text.clone(),
             in_reply_to: Some(format!("<{}@mock>", message.id.as_str())),
             references: Some(format!("<{}@mock>", message.id.as_str())),
+            original_from,
+            original_date: Some(message.received_at.clone()),
         })
     }
 

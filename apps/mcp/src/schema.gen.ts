@@ -2495,6 +2495,19 @@ export interface components {
             forwardedBody?: string | null;
             inReplyTo?: string | null;
             /**
+             * @description The original message's date as RFC 3339 (`Date`/sent-at, falling back
+             *     to received-at). Clients localize it for the reply attribution line.
+             */
+            originalDate?: string | null;
+            /**
+             * @description The original message's `From` recipients, verbatim. `to` holds the
+             *     *derived* reply recipient (today also the original `From`, but that
+             *     derivation may evolve, e.g. `Reply-To` handling); clients build the
+             *     reply attribution line ("On <date> <sender> wrote:") from this field so
+             *     it always names the actual sender.
+             */
+            originalFrom?: components["schemas"]["Recipient"][];
+            /**
              * @description The original `To` recipients of the source message. `to` holds the
              *     derived reply recipient (the original `From`); `original_to` lets a
              *     client build a reply-all recipient set (original `From` + `To` + `Cc`,

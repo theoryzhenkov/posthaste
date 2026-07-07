@@ -39,16 +39,17 @@ pub fn imap_reply_context_from_raw_mime(
         .map(addresses_to_recipients)
         .unwrap_or_default();
     let original_to = parsed.to().map(addresses_to_recipients).unwrap_or_default();
+    let original_date = parsed.date().map(|date| date.to_rfc3339());
     let forwarded_body = Some(format_forwarded_body(
         recipients_to_header(&original_from).as_deref(),
-        parsed.date().map(|date| date.to_rfc3339()).as_deref(),
+        original_date.as_deref(),
         Some(subject),
         recipients_to_header(&original_to).as_deref(),
         plain_body.as_deref().unwrap_or_default(),
     ));
 
     Ok(ReplyContext {
-        to: original_from,
+        to: original_from.clone(),
         cc: parsed.cc().map(addresses_to_recipients).unwrap_or_default(),
         original_to,
         reply_subject: prefix_subject("Re:", subject),
@@ -63,6 +64,8 @@ pub fn imap_reply_context_from_raw_mime(
                 .collect::<Vec<_>>()
                 .join(" ")
         }),
+        original_from,
+        original_date,
     })
 }
 

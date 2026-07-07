@@ -5,6 +5,7 @@ fn builds_reply_context_from_raw_mime() {
     let raw = concat!(
         "From: Alice <alice@example.test>\r\n",
         "Cc: Bob <bob@example.test>, carol@example.test\r\n",
+        "Date: Mon, 06 Jul 2026 10:34:00 +0000\r\n",
         "Subject: Hello\r\n",
         "Message-ID: <m1@example.test>\r\n",
         "References: <root@example.test> <parent@example.test>\r\n",
@@ -29,6 +30,15 @@ fn builds_reply_context_from_raw_mime() {
     assert_eq!(
         context.quoted_body.as_deref(),
         Some("> Line one\n> Line two")
+    );
+    // Structured attribution fields: the verbatim original sender + RFC 3339
+    // date the client formats the "On <date> <sender> wrote:" line from.
+    assert_eq!(context.original_from.len(), 1);
+    assert_eq!(context.original_from[0].name.as_deref(), Some("Alice"));
+    assert_eq!(context.original_from[0].email, "alice@example.test");
+    assert_eq!(
+        context.original_date.as_deref(),
+        Some("2026-07-06T10:34:00Z")
     );
     assert_eq!(context.in_reply_to.as_deref(), Some("m1@example.test"));
     assert_eq!(
