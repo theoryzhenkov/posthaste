@@ -158,6 +158,14 @@ export interface FakeTransportOptions {
   rows?: TransportRow[]
   /** Rows the base serves from `extendRuntimeLinkView` (the extended window). */
   extendedRows?: TransportRow[]
+  /**
+   * Builds each mutation receipt's `output` — the authority's serialized
+   * `CommandAck { detail, events }`, i.e. the BUNDLED ECHO the entity-store
+   * adapter dispatches into the domain cache on settlement
+   * (RFC-L2-count-unification). Omitted = a bare receipt with no output (the
+   * pre-echo default the older scenarios assume).
+   */
+  mutationOutput?: (request: RuntimeRunMutationRequest) => unknown
 }
 
 /**
@@ -227,7 +235,13 @@ export function createFakeTransport(
     },
     runRuntimeMutation: async (request: RuntimeRunMutationRequest) => {
       forwardedMutations.push(request)
-      return { ...receipt, clientMutationId: request.clientMutationId }
+      return {
+        ...receipt,
+        clientMutationId: request.clientMutationId,
+        ...(options.mutationOutput
+          ? { output: options.mutationOutput(request) }
+          : {}),
+      }
     },
   } as unknown as RuntimeAdapter
 
