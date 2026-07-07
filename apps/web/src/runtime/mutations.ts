@@ -16,6 +16,7 @@ import type {
   Rule,
   SaveDraftInput,
   SendMessageInput,
+  SendMessageResponse,
   SmartMailbox,
   SmartMailboxSummary,
   StartOAuthResponse,
@@ -243,6 +244,25 @@ export const runtimeMutations = {
         sourceId: request.sourceId,
       })
       return confirmedMessageCommandResult(receipt)
+    },
+    /**
+     * Schedule a send (undo-send / send-later): enqueue with `sendAt` so the
+     * outbox HOLDS it until due, and return the enqueued operation — its id is
+     * the cancel handle an Undo discards. Deliberately NOT the `message.send`
+     * runtime-mutation path: that path's terminal verdict (and its optimistic
+     * draft-Destroy fold) settles only when the send actually flushes, which
+     * for a schedule is minutes-to-days away — the composer must not hang on
+     * it, and the draft kept for undo-restore must stay honestly visible in
+     * Drafts until the send really fires. The direct enqueue returns at
+     * accept-time; the draft is consumed server-side at settlement via
+     * `input.draftId` (D126), and the mail list converges through the ordinary
+     * settlement events.
+     */
+    scheduleSend(request: {
+      sourceId: string
+      input: SendMessageInput
+    }): Promise<SendMessageResponse> {
+      return getRuntimeAdapter().sendMessage(request)
     },
     /**
      * Save (create or update) a draft through the optimistic runtime-mutation

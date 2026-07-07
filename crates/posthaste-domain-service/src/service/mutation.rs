@@ -22,6 +22,7 @@ impl MailService {
             },
             kind,
             payload,
+            None,
         )
     }
 

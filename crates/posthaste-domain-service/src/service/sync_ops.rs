@@ -494,6 +494,7 @@ mod guard_tests {
             attempts: 0,
             last_error: None,
             depends_on: None,
+            send_at: None,
             created_at: String::new(),
             updated_at: String::new(),
         }

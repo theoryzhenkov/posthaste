@@ -46,6 +46,23 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
         "partial_initial_uid",
         "ALTER TABLE imap_mailbox_sync_state ADD COLUMN partial_initial_uid INTEGER",
     )?;
+    // Scheduled sends (undo-send / send-later): the earliest flush time for a
+    // held send op, normalized UTC whole-second RFC 3339 (NULL = flush now).
+    ensure_column(
+        connection,
+        "outbox_operation",
+        "send_at",
+        "ALTER TABLE outbox_operation ADD COLUMN send_at TEXT",
+    )?;
+    connection
+        .execute(
+            // Partial index for the scheduler tick's "any send due?" probe and
+            // the flush filter; only scheduled rows (a tiny minority) appear.
+            "CREATE INDEX IF NOT EXISTS idx_outbox_send_at
+             ON outbox_operation (account_id, send_at) WHERE send_at IS NOT NULL",
+            [],
+        )
+        .map_err(sql_to_store_error)?;
     connection
         .execute(
             "CREATE INDEX IF NOT EXISTS idx_cache_rescore_priority

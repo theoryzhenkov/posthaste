@@ -201,6 +201,15 @@ export function SettingsPanel({
       queryClient.setQueryData(queryKeys.settings, settings)
     },
   })
+  const composeSettingsMutation = useMutation({
+    mutationFn: (undoSendDelaySeconds: number) =>
+      runtimeMutations.settings.patch({
+        compose: { undoSendDelaySeconds },
+      }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.settings, settings)
+    },
+  })
   const commandMutation = useAccountCommandMutation({
     accounts,
     activeAccountId,
@@ -277,6 +286,10 @@ export function SettingsPanel({
         onDefaultAccountChange={(accountId) =>
           defaultMutation.mutate(accountId)
         }
+        onUndoSendDelayChange={(seconds) =>
+          composeSettingsMutation.mutate(seconds)
+        }
+        isComposePending={composeSettingsMutation.isPending}
         onDeletedSmartMailbox={async (mailboxId) => {
           await removeLinkedSmartMailboxAutomation({
             queryClient,

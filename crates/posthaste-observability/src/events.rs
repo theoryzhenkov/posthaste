@@ -248,6 +248,9 @@ pub const SUPERVISOR_AUTOMATION_BACKFILL_FAILED: LogEvent =
     LogEvent::new("supervisor.automation_backfill.failed");
 pub const SUPERVISOR_SNOOZE_AUTO_RETURNED: LogEvent =
     LogEvent::new("supervisor.snooze.auto_returned");
+pub const SUPERVISOR_SCHEDULED_SEND_DUE: LogEvent = LogEvent::new("supervisor.scheduled_send.due");
+pub const SUPERVISOR_SCHEDULED_SEND_PROBE_FAILED: LogEvent =
+    LogEvent::new("supervisor.scheduled_send.probe_failed");
 pub const SUPERVISOR_SYNC_COMPLETED: LogEvent = LogEvent::new("supervisor.sync.completed");
 pub const SUPERVISOR_SYNC_FAILED: LogEvent = LogEvent::new("supervisor.sync.failed");
 pub const SUPERVISOR_SYNC_STARTED: LogEvent = LogEvent::new("supervisor.sync.started");

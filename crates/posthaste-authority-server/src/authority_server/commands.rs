@@ -266,12 +266,15 @@ impl AuthorityServer {
     }
 
     /// Write: queue a local-first send and nudge a flush. No live gateway is
-    /// required to accept it; it flushes on the next connectivity window.
+    /// required to accept it; it flushes on the next connectivity window — or,
+    /// for a scheduled send (`send_at`), on the first flush window at/after the
+    /// due time. Returns the enqueued operation: its id is the send-bridge join
+    /// key AND the cancel handle a scheduled send's undo discards.
     pub(crate) async fn send_message(
         &self,
         account_id: AccountId,
         request: SendMessageRequest,
-    ) -> Result<OperationId, RuntimeError> {
+    ) -> Result<Operation, RuntimeError> {
         let sender = request.from.clone();
         // The enqueued send's operation id is the send-bridge join key: the async
         // flush emits `operation.settled`/`dispatch_uncertain` under it, and the
@@ -289,7 +292,7 @@ impl AuthorityServer {
             }
         }
         self.trigger_outbox_flush(&account_id).await;
-        Ok(operation.id)
+        Ok(operation)
     }
 
     /// Write: save (create or update) a draft and nudge a flush.
@@ -331,10 +334,19 @@ impl AuthorityServer {
         Ok(ack)
     }
 
-    /// Write: discard a pending outbox operation.
+    /// Write: discard a pending outbox operation. A missing operation is
+    /// `NotFound` — for a scheduled send's undo, "nothing to discard" means the
+    /// cancel LOST (the send already flushed and settled, or was never queued),
+    /// and the caller must be able to tell that apart from a successful cancel.
+    /// An in-flight operation surfaces the service's rejection unchanged.
     pub(crate) fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
-        self.service.discard_operation(&operation_id)?;
-        Ok(())
+        if self.service.discard_operation(&operation_id)? {
+            return Ok(());
+        }
+        Err(RuntimeError::new(
+            RuntimeErrorCode::NotFound,
+            "operation not found (already completed or discarded)",
+        ))
     }
 
     /// Write: re-arm a failed outbox operation to pending and nudge a flush.
@@ -772,8 +784,8 @@ impl AuthorityServer {
             // (ack ⇒ confirm; park/fail ⇒ revert — D125/D126), NOT here. Surface
             // the enqueued op id so the up-channel registers the deferred origin.
             MailOperation::Send(args) => {
-                let operation_id = self.send_message(account.clone(), args.request).await?;
-                deferred_settlement_op = Some(operation_id);
+                let operation = self.send_message(account.clone(), args.request).await?;
+                deferred_settlement_op = Some(operation.id);
                 Ok(CommandAck { events: Vec::new() })
             }
             // `message.applyDiff` is the undo/redo vehicle — see `apply_diff`.

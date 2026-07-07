@@ -15,9 +15,26 @@ import { queryKeys } from '@/queryKeys'
 import { runtimeMutations } from '@/runtime/mutations'
 import { runtimeViews } from '@/runtime/views'
 
+import { formatScheduledTime } from '../compose-overlay/sendLaterPresets'
 import { SettingsPage, SettingsPageHeader } from './shared'
 
 type OutboxEntry = { accountId: string; operation: Operation }
+
+/**
+ * A queued send that is being HELD for a future `sendAt` (undo-send /
+ * send-later): shown honestly as scheduled, with the local-first caveat, and
+ * cancelable (the ✕ discard) while still queued.
+ */
+function scheduledFor(operation: Operation): string | null {
+  if (
+    operation.kind !== 'send' ||
+    operation.state !== 'pending' ||
+    !operation.sendAt
+  ) {
+    return null
+  }
+  return formatScheduledTime(operation.sendAt)
+}
 
 const KIND_LABELS: Record<OperationKind, string> = {
   setKeywords: 'Flag change',
@@ -112,6 +129,7 @@ export function OutboxPane() {
         <ul className="flex flex-col gap-2">
           {entries.map(({ accountId, operation }) => {
             const parked = operation.state === 'dispatchUncertain'
+            const scheduled = scheduledFor(operation)
             return (
               <li
                 key={operation.id}
@@ -130,6 +148,12 @@ export function OutboxPane() {
                       This message may or may not have been delivered. Retry to
                       re-send it (duplicates are prevented where the provider
                       supports it), or discard it.
+                    </p>
+                  ) : null}
+                  {scheduled ? (
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                      Scheduled for {scheduled} — sends when Posthaste is open.
+                      Discard to cancel.
                     </p>
                   ) : null}
                   {operation.lastError ? (

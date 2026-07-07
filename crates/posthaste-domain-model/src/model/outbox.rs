@@ -194,6 +194,18 @@ pub struct Operation {
     pub last_error: Option<String>,
     /// The operation that must settle before this one (draft-chain ordering).
     pub depends_on: Option<OperationId>,
+    /// Scheduled-send hold (send ops only): the earliest flush time, normalized
+    /// UTC whole-second RFC 3339. A queued op with `send_at` in the future is
+    /// excluded from the flushable set (it rests `pending`, visible and
+    /// discardable) until due; `None` (every non-send op, and an immediate
+    /// send) keeps the pre-existing flush-now behavior. Persisted with the op,
+    /// so a schedule survives restart. Local-first: the send fires on the first
+    /// flush window at/after `send_at` while the app runs — not a server-side
+    /// schedule.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

@@ -138,13 +138,36 @@ impl OperationOutboxStore for TestStore {
     fn list_flushable_operations(
         &self,
         account_id: &AccountId,
+        now: &str,
     ) -> Result<Vec<Operation>, StoreError> {
         let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         Ok(ops
             .iter()
-            .filter(|op| &op.account_id == account_id && op.state.is_flushable())
+            .filter(|op| {
+                &op.account_id == account_id
+                    && op.state.is_flushable()
+                    // Mirrors the SQL hold: a scheduled send is flushable only
+                    // once due (canonical RFC 3339 strings order chronologically).
+                    && op.send_at.as_deref().is_none_or(|send_at| send_at <= now)
+            })
             .cloned()
             .collect())
+    }
+
+    fn count_due_scheduled_sends(
+        &self,
+        account_id: &AccountId,
+        now: &str,
+    ) -> Result<u64, StoreError> {
+        let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        Ok(ops
+            .iter()
+            .filter(|op| {
+                &op.account_id == account_id
+                    && op.state.is_flushable()
+                    && op.send_at.as_deref().is_some_and(|send_at| send_at <= now)
+            })
+            .count() as u64)
     }
 
     fn list_pending_operations(
@@ -215,6 +238,32 @@ impl OperationOutboxStore for TestStore {
         let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         ops.retain(|op| &op.id != id);
         Ok(())
+    }
+
+    fn claim_operation_for_flush(&self, id: &OperationId) -> Result<bool, StoreError> {
+        // Mirrors the real store's guarded conditional UPDATE: the mutex is the
+        // serialization point, the state predicate and the write are one
+        // critical section.
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        match ops
+            .iter_mut()
+            .find(|op| &op.id == id && op.state.is_flushable())
+        {
+            Some(op) => {
+                op.state = OperationState::Inflight;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    fn remove_operation_unless_inflight(&self, id: &OperationId) -> Result<bool, StoreError> {
+        // Mirrors the real store's guarded conditional DELETE (one critical
+        // section with the not-inflight predicate).
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        let before = ops.len();
+        ops.retain(|op| !(&op.id == id && op.state != OperationState::Inflight));
+        Ok(ops.len() != before)
     }
 }
 

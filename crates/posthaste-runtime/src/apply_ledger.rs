@@ -83,10 +83,16 @@ pub(crate) const DRAFT_DELETE_OP: &str = "draft.delete";
 #[derive(Clone)]
 pub(crate) enum AppliedOutcome {
     /// A direct-apply command ack (set-keywords, mailbox add/remove/replace,
-    /// destroy).
+    /// destroy). Also what a keyed `message.send` settled BEFORE sends stored
+    /// their operation — the send route tolerates such a legacy record on
+    /// replay (the send applied; only its operation payload is unavailable).
     Ack(CommandAck),
-    /// An enqueued draft operation (`draft.save` / `draft.delete`).
-    Draft(Operation),
+    /// An enqueued operation: `draft.save` / `draft.delete` — and, since
+    /// scheduled sends, `message.send` (a replayed keyed send re-observes the
+    /// SAME operation, so a scheduled send's cancel handle is stable across
+    /// redeliveries). Boxed: an `Operation` dwarfs the `Ack` variant
+    /// (clippy `large_enum_variant`); `Box<T>` serializes transparently.
+    Draft(Box<Operation>),
 }
 
 impl AppliedOutcome {
@@ -105,7 +111,7 @@ impl AppliedOutcome {
     /// [`into_ack`](Self::into_ack) for the mismatch discipline).
     pub(crate) fn into_draft(self) -> Result<Operation, RuntimeError> {
         match self {
-            AppliedOutcome::Draft(operation) => Ok(operation),
+            AppliedOutcome::Draft(operation) => Ok(*operation),
             AppliedOutcome::Ack(_) => Err(Self::variant_mismatch()),
         }
     }
@@ -201,7 +207,9 @@ pub trait DurableApplyStore: Send + Sync {
 #[serde(rename_all = "camelCase")]
 enum StoredOutcome {
     Ack(CommandAck),
-    Draft(Operation),
+    // Boxed for parity with `AppliedOutcome` (`Box<T>` is serde-transparent,
+    // so stored rows round-trip identically).
+    Draft(Box<Operation>),
 }
 
 impl From<&AppliedOutcome> for StoredOutcome {
@@ -620,7 +628,7 @@ mod tests {
         AppliedOutcome::Ack(CommandAck { events: vec![] })
     }
     fn draft_outcome(id: &str) -> AppliedOutcome {
-        AppliedOutcome::Draft(Operation {
+        AppliedOutcome::Draft(Box::new(Operation {
             id: OperationId::from(id),
             account_id: AccountId("acct".into()),
             entity: OperationEntity {
@@ -633,9 +641,10 @@ mod tests {
             attempts: 0,
             last_error: None,
             depends_on: None,
+            send_at: None,
             created_at: "1970-01-01T00:00:00Z".to_string(),
             updated_at: "1970-01-01T00:00:00Z".to_string(),
-        })
+        }))
     }
     fn destroy() -> &'static str {
         MailOperation::Destroy(MessageTargetArgs {
@@ -877,6 +886,57 @@ mod tests {
                 );
             }
             _ => panic!("the concurrent duplicate must not also execute (double-send)"),
+        }
+    }
+
+    // Scheduled sends: a keyed send stores its enqueued OPERATION, so a
+    // redelivery re-observes the SAME operation — id (the cancel handle) and
+    // all — never enqueuing a second scheduled send.
+    #[tokio::test]
+    async fn keyed_send_replay_returns_the_same_operation_id() {
+        let ledger = ApplyLedger::new();
+        let (c, k) = (caller(), key("send-sched"));
+        assert!(matches!(
+            ledger.reserve(&c, &k, send()).await,
+            Reserved::Execute
+        ));
+        ledger.settle(&c, &k, Ok(draft_outcome("op-send-1"))).await;
+        match ledger.reserve(&c, &k, send()).await {
+            Reserved::Return(result) => {
+                let operation = (*result.unwrap()).into_draft().expect("operation outcome");
+                assert_eq!(operation.id, OperationId::from("op-send-1"));
+            }
+            Reserved::Execute => panic!("a replayed send must re-observe the stored operation"),
+        }
+    }
+
+    // Undo-send cancel interaction: the ledger key settled Confirmed at
+    // ENQUEUE, and canceling (discarding) the outbox operation later does NOT
+    // un-settle it — a retry under the same key re-observes the original
+    // outcome and never creates (or sends) a second operation. The outbox row
+    // is gone; the ledger's terminal record is the guarantee that the key can
+    // never re-execute.
+    #[tokio::test]
+    async fn canceled_scheduled_send_key_stays_terminally_settled() {
+        let durable: Arc<MemoryDurable> = Arc::new(MemoryDurable::default());
+        let (c, k) = (caller(), key("send-undone"));
+        {
+            let ledger = ApplyLedger::with_durable(durable.clone());
+            ledger.reserve(&c, &k, send()).await;
+            ledger.settle(&c, &k, Ok(draft_outcome("op-undone"))).await;
+            // ... the user cancels: the OUTBOX op is discarded. Nothing here —
+            // the ledger record is deliberately untouched by a cancel.
+        }
+        // Same-process and post-restart replays both re-observe, never execute.
+        let reborn = ApplyLedger::with_durable(durable);
+        match reborn.reserve(&c, &k, send()).await {
+            Reserved::Return(result) => {
+                let operation = (*result.unwrap()).into_draft().expect("operation outcome");
+                assert_eq!(operation.id, OperationId::from("op-undone"));
+            }
+            Reserved::Execute => {
+                panic!("a canceled send's key must never re-execute (no resurrection)")
+            }
         }
     }
 
