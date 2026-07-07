@@ -48,16 +48,32 @@ function isMessageCommandResult(value: unknown): value is MessageCommandResult {
   return isObject(value) && Array.isArray(value.events)
 }
 
-function confirmedMessageCommandResult(
+/**
+ * Extract the command result from a non-failed mutation receipt.
+ *
+ * Tolerance (v0.5.0 field bug, defense in depth): an otherwise-valid output
+ * OBJECT whose `events` is merely absent is accepted as "no events" — the wire
+ * contract says a confirmed command receipt always carries `output.events`
+ * (empty array if none), but a peer that drops the array must not crash the
+ * caller ("<name> did not return a message command result"); it only costs the
+ * bundled count-reconciliation echo. A receipt whose output is genuinely
+ * absent or mis-shaped (null / non-object) still throws: there is no result to
+ * return, and pretending success would hide a broken settlement.
+ */
+export function confirmedMessageCommandResult(
   receipt: RuntimeMutationReceipt,
 ): MessageCommandResult {
   if (receipt.state === 'failed') {
     throw new Error(receipt.error?.message ?? `${receipt.name} failed`)
   }
-  if (!isMessageCommandResult(receipt.output)) {
-    throw new Error(`${receipt.name} did not return a message command result`)
+  const output = receipt.output
+  if (isMessageCommandResult(output)) {
+    return output
   }
-  return receipt.output
+  if (isObject(output) && output.events == null) {
+    return { detail: null, ...output, events: [] } as MessageCommandResult
+  }
+  throw new Error(`${receipt.name} did not return a message command result`)
 }
 
 /// Map a low-level message command to its runtime operation (`MailOperation`
