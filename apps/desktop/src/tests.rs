@@ -428,6 +428,98 @@ fn attachment_surface_route_uses_hash_route_and_encoded_params() {
 }
 
 #[test]
+fn surface_window_urls_load_the_bundled_document_with_the_route_in_the_fragment() {
+    // Every surface kind must load the ONE real bundled file (`index.html`)
+    // with the full route — query params included — inside the URL fragment.
+    // A bare `/surface/...` path would depend on asset-protocol SPA fallback
+    // behavior, which must never be load-bearing on any platform.
+    let surfaces = [
+        SurfaceDescriptor::Settings {
+            disposition: SurfaceDisposition::Focused,
+            params: SettingsSurfaceParams {
+                category: Some(SettingsSurfaceCategory::Accounts),
+                target: Some(SettingsSurfaceTarget::Account {
+                    account_id: "primary".to_string(),
+                }),
+            },
+        },
+        SurfaceDescriptor::Compose {
+            disposition: SurfaceDisposition::Focused,
+            params: ComposeSurfaceParams::Reply {
+                source_id: "source:primary".to_string(),
+                message_id: "message 1".to_string(),
+            },
+        },
+        SurfaceDescriptor::Message {
+            disposition: SurfaceDisposition::Focused,
+            params: MessageSurfaceParams {
+                conversation_id: "conversation/1".to_string(),
+                source_id: "source:primary".to_string(),
+                message_id: "message 1".to_string(),
+            },
+        },
+        SurfaceDescriptor::Attachment {
+            disposition: SurfaceDisposition::Focused,
+            params: AttachmentSurfaceParams {
+                source_id: "source:primary".to_string(),
+                message_id: "message 1".to_string(),
+                attachment_id: "part/2".to_string(),
+            },
+        },
+    ];
+
+    for surface in &surfaces {
+        let url = surface_window_url(surface);
+        assert!(
+            url.starts_with("index.html#/surface/"),
+            "surface window URL must be index.html plus a hash route, got: {url}"
+        );
+        assert_eq!(
+            url,
+            format!("index.html#{}", surface_route(surface)),
+            "the fragment must carry the whole route including query params"
+        );
+        assert!(
+            !url.starts_with('/'),
+            "surface window URL must never target a bare path, got: {url}"
+        );
+    }
+
+    // Pin one full shape end-to-end: params live INSIDE the fragment.
+    assert_eq!(
+        surface_window_url(&surfaces[0]),
+        "index.html#/surface/settings?category=accounts&targetKind=account&accountId=primary"
+    );
+}
+
+#[test]
+fn surface_close_action_force_destroys_never_booted_webviews() {
+    // A window whose frontend never ACKed boot has no JS close handling of any
+    // kind — it must be destroyed outright so it can never become unclosable.
+    assert_eq!(
+        surface_close_action(false),
+        SurfaceCloseAction::ForceDestroy
+    );
+    // A booted webview keeps the guarded close flow (compose close-guard).
+    assert_eq!(surface_close_action(true), SurfaceCloseAction::CloseGuarded);
+}
+
+#[test]
+fn webview_boot_acks_track_labels_and_reset_on_destroy() {
+    let acks = WebviewBootAcks::default();
+    assert!(!acks.is_booted("settings"));
+
+    acks.mark_booted("settings");
+    assert!(acks.is_booted("settings"));
+    assert!(!acks.is_booted("compose-0123456789abcdef"));
+
+    // Window destroyed: the stable label (e.g. "settings") must start un-booted
+    // when a future window reuses it.
+    acks.clear("settings");
+    assert!(!acks.is_booted("settings"));
+}
+
+#[test]
 fn closeable_window_labels_distinguish_main_and_surface_windows() {
     assert!(is_main_window_label("main"));
     assert!(!is_main_window_label("settings"));
