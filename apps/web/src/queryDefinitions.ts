@@ -27,6 +27,13 @@ export const PREFIX_DEFINITIONS = [
     valueHint: 'person@example.com',
   },
   {
+    primary: 'to',
+    aliases: ['recipient'],
+    label: 'to:',
+    description: 'Recipient name or email',
+    valueHint: 'person@example.com',
+  },
+  {
     primary: 'subject',
     aliases: ['s'],
     label: 'subject:',
@@ -35,8 +42,15 @@ export const PREFIX_DEFINITIONS = [
   },
   {
     primary: 'body',
-    aliases: ['preview'],
+    aliases: [],
     label: 'body:',
+    description: 'Message body text (full-text)',
+    valueHint: 'receipt',
+  },
+  {
+    primary: 'preview',
+    aliases: [],
+    label: 'preview:',
     description: 'Synced preview text',
     valueHint: 'receipt',
   },
@@ -144,6 +158,8 @@ export const SPACED_VALUE_PREFIXES = new Set([
   'from',
   'f',
   'sender',
+  'to',
+  'recipient',
   'subject',
   's',
   'body',
@@ -183,7 +199,9 @@ function help(
 
 export const HELP_ENTRIES: QueryHelpEntry[] = [
   help('from:', 'Sender name or email', 'from: ', 'f sender person email'),
+  help('to:', 'Recipient name or email', 'to: ', 'recipient person email'),
   help('subject:', 'Subject text, spaces allowed', 'subject: ', 's title'),
+  help('body:', 'Message body text (full-text)', 'body: ', 'text content full'),
   help('in:', 'Mailbox name, role, or ID', 'in: ', 'mailbox folder archive'),
   help('is:', 'read, unread, flagged, unflagged', 'is:', 'state status seen'),
   help('has:', 'attachment', 'has:', 'attachment'),
