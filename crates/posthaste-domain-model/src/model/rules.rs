@@ -13,6 +13,7 @@
 //! mailboxes, not a parallel rule language.
 
 use super::*;
+use crate::vocab::MailboxRole;
 
 /// The default trigger topics when a [`Rule`] leaves [`on`](Rule::on) empty: the
 /// message-update family. `message.updated` is the fact emitted whenever a
@@ -45,6 +46,15 @@ pub struct Rule {
     pub on: Vec<String>,
     pub action: RuleAction,
     pub enabled: bool,
+    /// Rule chaining (the explicit semantics): for one triggering fact, EVERY
+    /// enabled rule whose topics + WHEN-clause match runs, in the engine's
+    /// deterministic order (authored `rules.toml` rules first, in file order;
+    /// then GUI-managed rules sorted by name, then id). A matched rule with
+    /// `stop_processing = true` short-circuits that walk — no later rule is
+    /// evaluated against this fact. Defaults to `false` (all matches run),
+    /// which was the previous, implicit behaviour.
+    #[serde(default)]
+    pub stop_processing: bool,
 }
 
 impl Rule {
@@ -81,6 +91,18 @@ pub enum RuleAction {
         #[cfg_attr(feature = "openapi", schema(rename = "mailboxId"))]
         mailbox_id: MailboxId,
     },
+    /// Level 0: move the matched message to the account's mailbox carrying a
+    /// well-known role — `archive`, `junk`, `trash`, or `inbox` (see
+    /// [`ASSIGNABLE_RULE_MOVE_ROLES`]). This is how a rule archives, junks, or
+    /// trashes a message WITHOUT naming a per-account mailbox id, so one rule
+    /// works across every account. Trash is a recoverable move (the provider's
+    /// Trash semantics) — permanent deletion is the separate, explicit
+    /// [`Destroy`](Self::Destroy).
+    MoveToRole { role: MailboxRole },
+    /// Level 0: set the matched message's read state (mark read / unread).
+    MarkRead { read: bool },
+    /// Level 0: set the matched message's flagged state (flag / unflag).
+    Flag { flagged: bool },
     /// Level 0: raise a notification fact for the matched message. The notice
     /// surfaces on the tap (`rule.fired`); no external side effect.
     Notify {
@@ -88,6 +110,22 @@ pub enum RuleAction {
         #[serde(default)]
         body: Option<String>,
     },
+    /// Level 0, **mail-destructive**: permanently destroy the matched message
+    /// through the existing delete-permanently machinery (`message.destroy` —
+    /// the same command the GUI's delete-permanently uses; no new deletion
+    /// path). This is NOT "move to Trash" (that is
+    /// [`MoveToRole`](Self::MoveToRole) with `trash`): a destroyed message is
+    /// unrecoverable.
+    ///
+    /// Guard rails: the wire name is the distinct, explicit `destroy` (never
+    /// overloaded onto move/trash), and [`validate_rule_action`] refuses a
+    /// destroy rule whose WHEN-clause has no conditions — a condition-free
+    /// destroy would match EVERY message the trigger topic names, and a rules
+    /// engine that silently destroys all mail on an empty clause is the exact
+    /// failure mode to make unrepresentable. It executes only on a message the
+    /// boundary-validated WHEN-clause query matched (the engine re-runs the
+    /// scoped query per fact — no bypass around the stored, validated rule).
+    Destroy,
     /// Level 0: emit ONLY the `rule.fired` fact and take no other action — the
     /// **central-evaluate / edge-execute** primitive (RFC §7.19). Pair an `emit`
     /// rule at the always-on authority server with a client-side, rule-filtered
@@ -161,12 +199,22 @@ pub enum WritableRuleAction {
         #[cfg_attr(feature = "openapi", schema(rename = "mailboxId"))]
         mailbox_id: MailboxId,
     },
+    /// See [`RuleAction::MoveToRole`].
+    MoveToRole { role: MailboxRole },
+    /// See [`RuleAction::MarkRead`].
+    MarkRead { read: bool },
+    /// See [`RuleAction::Flag`].
+    Flag { flagged: bool },
     /// See [`RuleAction::Notify`].
     Notify {
         title: String,
         #[serde(default)]
         body: Option<String>,
     },
+    /// See [`RuleAction::Destroy`] — mail-destructive, guarded by
+    /// [`validate_rule_action`] (a destroy rule must carry a non-empty
+    /// WHEN-clause).
+    Destroy,
     /// See [`RuleAction::Emit`].
     Emit,
     /// See [`RuleAction::Webhook`].
@@ -186,7 +234,11 @@ impl From<WritableRuleAction> for RuleAction {
         match action {
             WritableRuleAction::Tag { tag } => RuleAction::Tag { tag },
             WritableRuleAction::Move { mailbox_id } => RuleAction::Move { mailbox_id },
+            WritableRuleAction::MoveToRole { role } => RuleAction::MoveToRole { role },
+            WritableRuleAction::MarkRead { read } => RuleAction::MarkRead { read },
+            WritableRuleAction::Flag { flagged } => RuleAction::Flag { flagged },
             WritableRuleAction::Notify { title, body } => RuleAction::Notify { title, body },
+            WritableRuleAction::Destroy => RuleAction::Destroy,
             WritableRuleAction::Emit => RuleAction::Emit,
             WritableRuleAction::Webhook {
                 url,
@@ -208,13 +260,17 @@ pub fn default_hook_expiry_seconds() -> u64 {
 }
 
 impl RuleAction {
-    /// A stable, lower-case discriminator for the `rule.fired` fact's
-    /// `actionKind` field and for logs.
+    /// A stable discriminator for the `rule.fired` fact's `actionKind` field and
+    /// for logs — always the serde wire tag of the variant.
     pub fn kind_str(&self) -> &'static str {
         match self {
             RuleAction::Tag { .. } => "tag",
             RuleAction::Move { .. } => "move",
+            RuleAction::MoveToRole { .. } => "moveToRole",
+            RuleAction::MarkRead { .. } => "markRead",
+            RuleAction::Flag { .. } => "flag",
             RuleAction::Notify { .. } => "notify",
+            RuleAction::Destroy => "destroy",
             RuleAction::Emit => "emit",
             RuleAction::Webhook { .. } => "webhook",
             RuleAction::Exec { .. } => "exec",
@@ -226,6 +282,76 @@ impl RuleAction {
     pub fn is_hook(&self) -> bool {
         matches!(self, RuleAction::Webhook { .. } | RuleAction::Exec { .. })
     }
+
+    /// Whether this action irreversibly destroys mail. Drives the extra
+    /// WHEN-clause guard in [`validate_rule_action`] and the editor's
+    /// destructive labelling.
+    pub fn is_destructive(&self) -> bool {
+        matches!(self, RuleAction::Destroy)
+    }
+}
+
+/// The mailbox roles a [`RuleAction::MoveToRole`] may target. Deliberately a
+/// subset of [`MailboxRole::ALL`]: `drafts`/`sent` are provider-managed
+/// surfaces a content rule has no business filing into, and `snooze` requires
+/// the paired return-time record the snooze command carries (a bare role move
+/// there would hide mail forever) — so all three are refused at validation.
+pub const ASSIGNABLE_RULE_MOVE_ROLES: &[MailboxRole] = &[
+    MailboxRole::Archive,
+    MailboxRole::Junk,
+    MailboxRole::Trash,
+    MailboxRole::Inbox,
+];
+
+/// Rule-action validation shared by EVERY path that persists or loads a rule —
+/// the authored `rules.toml` loader, the managed `rules.d` loader, and the
+/// managed write path the REST routes call. One definition, so no store can
+/// smuggle in a rule another store would refuse:
+///
+/// * a hook action (webhook/exec) must declare at least one grant (the F1
+///   security-review rule — empty grants would mint an action-unrestricted
+///   token);
+/// * a `moveToRole` must target an assignable role
+///   ([`ASSIGNABLE_RULE_MOVE_ROLES`]);
+/// * a `destroy` must be paired with a WHEN-clause that has at least one
+///   condition — a condition-free destroy matches every message on the
+///   trigger topic, and permanent mail destruction must never be one empty
+///   clause away.
+pub fn validate_rule_action(action: &RuleAction, when: &SmartMailboxRule) -> Result<(), String> {
+    match action {
+        RuleAction::Webhook { grants, .. } | RuleAction::Exec { grants, .. } => {
+            if grants.is_empty() {
+                return Err("a webhook/exec rule must declare at least one grant".to_string());
+            }
+        }
+        RuleAction::MoveToRole { role } => {
+            if !ASSIGNABLE_RULE_MOVE_ROLES.contains(role) {
+                return Err(format!(
+                    "a rule cannot move messages to the '{}' role (allowed: archive, junk, trash, inbox)",
+                    role.as_str()
+                ));
+            }
+        }
+        RuleAction::Destroy => {
+            if !group_has_condition(&when.root) {
+                return Err(
+                    "a destroy rule must have at least one condition in its when-clause — \
+                     an unconditional destroy would permanently delete every matching-topic message"
+                        .to_string(),
+                );
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Does this group (recursively) contain at least one leaf condition?
+fn group_has_condition(group: &SmartMailboxGroup) -> bool {
+    group.nodes.iter().any(|node| match node {
+        SmartMailboxRuleNode::Condition(_) => true,
+        SmartMailboxRuleNode::Group(inner) => group_has_condition(inner),
+    })
 }
 
 /// A single capability a hook action's per-invocation token carries. These are
@@ -318,11 +444,37 @@ mod tests {
             on: Vec::new(),
             action: RuleAction::Tag { tag: "x".into() },
             enabled: true,
+            stop_processing: false,
         };
         assert_eq!(
             rule.trigger_topics(),
             vec![EVENT_TOPIC_MESSAGE_UPDATED.to_string()]
         );
+    }
+
+    /// `stopProcessing` is additive and optional on the wire: a legacy rule
+    /// document without the field parses with the old (run-everything)
+    /// semantics.
+    #[test]
+    fn stop_processing_defaults_to_false_on_the_wire() {
+        let rule: Rule = serde_json::from_value(serde_json::json!({
+            "id": "r", "name": "r",
+            "when": { "root": { "operator": "all", "negated": false, "nodes": [] } },
+            "action": { "kind": "emit" },
+            "enabled": true,
+        }))
+        .expect("legacy rule without stopProcessing parses");
+        assert!(!rule.stop_processing);
+
+        let with_flag: Rule = serde_json::from_value(serde_json::json!({
+            "id": "r", "name": "r",
+            "when": { "root": { "operator": "all", "negated": false, "nodes": [] } },
+            "action": { "kind": "emit" },
+            "enabled": true,
+            "stopProcessing": true,
+        }))
+        .expect("rule with stopProcessing parses");
+        assert!(with_flag.stop_processing);
     }
 
     /// The security gate (ruling 23): a `{"kind":"exec",…}` body is
@@ -363,18 +515,139 @@ mod tests {
     }
 
     /// A safe action deserializes into `WritableRuleAction` exactly as it would
-    /// into `RuleAction` — the two share the wire shape for the four safe kinds.
+    /// into `RuleAction` — the two share the wire shape for every safe kind.
     #[test]
     fn writable_action_accepts_safe_kinds() {
         for body in [
             serde_json::json!({"kind": "tag", "tag": "x"}),
             serde_json::json!({"kind": "move", "mailboxId": "inbox"}),
+            serde_json::json!({"kind": "moveToRole", "role": "archive"}),
+            serde_json::json!({"kind": "markRead", "read": true}),
+            serde_json::json!({"kind": "markRead", "read": false}),
+            serde_json::json!({"kind": "flag", "flagged": true}),
             serde_json::json!({"kind": "notify", "title": "hi"}),
+            serde_json::json!({"kind": "destroy"}),
             serde_json::json!({"kind": "emit"}),
             serde_json::json!({"kind": "webhook", "url": "http://127.0.0.1/h", "grants": ["read"]}),
         ] {
             let parsed: Result<WritableRuleAction, _> = serde_json::from_value(body.clone());
             assert!(parsed.is_ok(), "safe action {body} must deserialize");
+            // Wire parity: the lifted RuleAction re-serializes with the same
+            // `kind` tag the writable body carried, and `kind_str` matches it.
+            let lifted: RuleAction = parsed.expect("parsed").into();
+            let round = serde_json::to_value(&lifted).expect("serialize");
+            assert_eq!(round["kind"], body["kind"], "kind tag drift for {body}");
+            assert_eq!(lifted.kind_str(), body["kind"].as_str().expect("kind"));
+        }
+    }
+
+    fn when_with_condition() -> SmartMailboxRule {
+        SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::All,
+                negated: false,
+                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                    field: SmartMailboxField::Keyword,
+                    operator: SmartMailboxOperator::Equals,
+                    negated: false,
+                    value: SmartMailboxValue::String("x".into()),
+                })],
+            },
+        }
+    }
+
+    fn empty_when() -> SmartMailboxRule {
+        SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::All,
+                negated: false,
+                nodes: Vec::new(),
+            },
+        }
+    }
+
+    /// The destroy guard rail: a destroy action with a condition-free
+    /// WHEN-clause is refused (it would permanently delete every message on the
+    /// trigger topic); with at least one condition — including one nested in a
+    /// sub-group — it validates.
+    #[test]
+    fn destroy_requires_a_non_empty_when_clause() {
+        assert!(validate_rule_action(&RuleAction::Destroy, &empty_when()).is_err());
+        assert!(validate_rule_action(&RuleAction::Destroy, &when_with_condition()).is_ok());
+
+        // A nested condition (inside a sub-group) also satisfies the guard.
+        let nested = SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::Any,
+                negated: false,
+                nodes: vec![SmartMailboxRuleNode::Group(when_with_condition().root)],
+            },
+        };
+        assert!(validate_rule_action(&RuleAction::Destroy, &nested).is_ok());
+
+        // An empty sub-group does NOT satisfy it — no leaf condition anywhere.
+        let empty_nested = SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::Any,
+                negated: false,
+                nodes: vec![SmartMailboxRuleNode::Group(empty_when().root)],
+            },
+        };
+        assert!(validate_rule_action(&RuleAction::Destroy, &empty_nested).is_err());
+    }
+
+    /// A non-destructive action is fine with an empty WHEN-clause (matches the
+    /// pre-existing behaviour — e.g. "emit on every update").
+    #[test]
+    fn non_destructive_actions_allow_an_empty_when_clause() {
+        assert!(validate_rule_action(&RuleAction::Emit, &empty_when()).is_ok());
+        assert!(validate_rule_action(&RuleAction::MarkRead { read: true }, &empty_when()).is_ok());
+    }
+
+    /// `moveToRole` only accepts the assignable roles: archive/junk/trash/inbox.
+    /// Drafts/sent are provider-managed; snooze needs the paired return time.
+    #[test]
+    fn move_to_role_is_restricted_to_assignable_roles() {
+        for role in [
+            MailboxRole::Archive,
+            MailboxRole::Junk,
+            MailboxRole::Trash,
+            MailboxRole::Inbox,
+        ] {
+            assert!(
+                validate_rule_action(&RuleAction::MoveToRole { role }, &when_with_condition())
+                    .is_ok(),
+                "{role:?} must be assignable"
+            );
+        }
+        for role in [MailboxRole::Drafts, MailboxRole::Sent, MailboxRole::Snooze] {
+            assert!(
+                validate_rule_action(&RuleAction::MoveToRole { role }, &when_with_condition())
+                    .is_err(),
+                "{role:?} must be refused"
+            );
+        }
+    }
+
+    /// Destroy is the ONLY destructive action, and it is Level 0 (no hook token).
+    #[test]
+    fn destroy_is_the_only_destructive_kind() {
+        assert!(RuleAction::Destroy.is_destructive());
+        assert!(!RuleAction::Destroy.is_hook());
+        for action in [
+            RuleAction::Tag { tag: "x".into() },
+            RuleAction::MoveToRole {
+                role: MailboxRole::Trash,
+            },
+            RuleAction::MarkRead { read: true },
+            RuleAction::Flag { flagged: false },
+            RuleAction::Emit,
+        ] {
+            assert!(
+                !action.is_destructive(),
+                "{} is not destructive",
+                action.kind_str()
+            );
         }
     }
 

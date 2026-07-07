@@ -1917,6 +1917,14 @@ export interface components {
             };
         };
         /**
+         * @description Well-known mailbox roles used by JMAP and local IMAP SPECIAL-USE mapping.
+         *
+         *     @spec docs/L1-api#mailbox-metadata
+         *     @spec docs/L1-accounts#smart-mailbox-defaults
+         * @enum {string}
+         */
+        MailboxRole: "inbox" | "archive" | "drafts" | "sent" | "junk" | "trash" | "snooze";
+        /**
          * @description Lightweight mailbox view for sidebar and list endpoints.
          *
          *     @spec docs/L1-api#navigation
@@ -2430,6 +2438,16 @@ export interface components {
              */
             on?: string[];
             /**
+             * @description Rule chaining (the explicit semantics): for one triggering fact, EVERY
+             *     enabled rule whose topics + WHEN-clause match runs, in the engine's
+             *     deterministic order (authored `rules.toml` rules first, in file order;
+             *     then GUI-managed rules sorted by name, then id). A matched rule with
+             *     `stop_processing = true` short-circuits that walk — no later rule is
+             *     evaluated against this fact. Defaults to `false` (all matches run),
+             *     which was the previous, implicit behaviour.
+             */
+            stopProcessing?: boolean;
+            /**
              * @description The WHEN-clause: the shared query grammar's [`SmartMailboxRule`] output,
              *     reused (not wrapped). Evaluated against the message a triggering fact
              *     names — a match means the action runs.
@@ -2451,10 +2469,25 @@ export interface components {
             kind: "move";
             mailboxId: components["schemas"]["MailboxId"];
         } | {
+            /** @enum {string} */
+            kind: "moveToRole";
+            role: components["schemas"]["MailboxRole"];
+        } | {
+            /** @enum {string} */
+            kind: "markRead";
+            read: boolean;
+        } | {
+            flagged: boolean;
+            /** @enum {string} */
+            kind: "flag";
+        } | {
             body?: string | null;
             /** @enum {string} */
             kind: "notify";
             title: string;
+        } | {
+            /** @enum {string} */
+            kind: "destroy";
         } | {
             /** @enum {string} */
             kind: "emit";
@@ -3123,10 +3156,25 @@ export interface components {
             kind: "move";
             mailboxId: components["schemas"]["MailboxId"];
         } | {
+            /** @enum {string} */
+            kind: "moveToRole";
+            role: components["schemas"]["MailboxRole"];
+        } | {
+            /** @enum {string} */
+            kind: "markRead";
+            read: boolean;
+        } | {
+            flagged: boolean;
+            /** @enum {string} */
+            kind: "flag";
+        } | {
             body?: string | null;
             /** @enum {string} */
             kind: "notify";
             title: string;
+        } | {
+            /** @enum {string} */
+            kind: "destroy";
         } | {
             /** @enum {string} */
             kind: "emit";
@@ -3156,6 +3204,11 @@ export interface components {
             name: string;
             /** @description Trigger topics; empty ⇒ the message-update default family. */
             on?: string[];
+            /**
+             * @description Rule chaining: when this rule matches a fact, skip every later rule for
+             *     that fact. Defaults to false (all matching rules run).
+             */
+            stopProcessing?: boolean;
             /** @description The WHEN-clause tree. */
             when: components["schemas"]["SmartMailboxRule"];
         };

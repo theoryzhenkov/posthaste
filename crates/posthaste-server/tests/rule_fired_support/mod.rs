@@ -281,6 +281,11 @@ impl Harness {
     }
 
     pub async fn tag_instruct(&self, account_id: &str, message_id: &str) {
+        self.tag(account_id, message_id, "instruct").await;
+    }
+
+    /// Add one keyword to a message (the generic form of [`tag_instruct`]).
+    pub async fn tag(&self, account_id: &str, message_id: &str, keyword: &str) {
         let (status, _) = post_json(
             &self.client,
             &format!(
@@ -288,10 +293,57 @@ impl Harness {
                 self.base
             ),
             &self.full_scope_token,
-            json!({ "add": ["instruct"], "remove": [] }),
+            json!({ "add": [keyword], "remove": [] }),
         )
         .await;
-        assert!(status.is_success(), "tagging instruct failed: {status}");
+        assert!(status.is_success(), "tagging {keyword} failed: {status}");
+    }
+
+    /// `POST {base}{path}` with the full-scope token.
+    pub async fn post(&self, path: &str, body: Value) -> (reqwest::StatusCode, Value) {
+        post_json(
+            &self.client,
+            &format!("{}{path}", self.base),
+            &self.full_scope_token,
+            body,
+        )
+        .await
+    }
+
+    /// `GET {base}{path}` with the full-scope token.
+    pub async fn get(&self, path: &str) -> Value {
+        get_json(
+            &self.client,
+            &format!("{}{path}", self.base),
+            &self.full_scope_token,
+        )
+        .await
+    }
+
+    /// The account's message summaries (`items`).
+    pub async fn list_messages(&self, account_id: &str) -> Value {
+        self.get(&format!("/sources/{account_id}/messages")).await
+    }
+
+    /// Poll the account's message list until `predicate` returns true for it,
+    /// or panic after ~10s. Returns the passing listing.
+    pub async fn wait_for_messages(
+        &self,
+        account_id: &str,
+        what: &str,
+        predicate: impl Fn(&Value) -> bool,
+    ) -> Value {
+        for _ in 0..100 {
+            let listing = self.list_messages(account_id).await;
+            if predicate(&listing) {
+                return listing;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!(
+            "timed out waiting for: {what}; final listing: {}",
+            self.list_messages(account_id).await
+        );
     }
 
     pub async fn delete_account(&self, account_id: &str) {

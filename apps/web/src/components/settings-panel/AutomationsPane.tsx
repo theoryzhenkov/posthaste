@@ -11,10 +11,11 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Trash2, Workflow } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import type {
   Rule,
+  SmartMailboxGroup,
   WritableRuleAction,
   WritableRuleInput,
 } from '../../api/types'
@@ -28,8 +29,10 @@ import { RuleActionEditor } from './automations/RuleActionEditor'
 import {
   actionSummary,
   defaultActionForKind,
+  isDestructiveActionKind,
 } from './automations/ruleActionHelpers'
 import { defaultEmptyRule } from './helpers'
+import { ConditionEditorContext } from './rule-group/conditionEditorContext'
 import { RuleGroupEditor } from './RuleGroupEditor'
 import {
   Field,
@@ -46,6 +49,16 @@ interface RuleForm {
   when: Rule['when']
   action: WritableRuleAction
   enabled: boolean
+  stopProcessing: boolean
+}
+
+/** Does the WHEN tree contain at least one leaf condition? Mirrors the server's
+ *  destroy guard (`validate_rule_action`), so the editor can refuse an
+ *  unconditional destroy BEFORE the request instead of surfacing a 400. */
+function groupHasCondition(group: SmartMailboxGroup): boolean {
+  return group.nodes.some((node) =>
+    node.type === 'condition' ? true : groupHasCondition(node),
+  )
 }
 
 type EditorState =
@@ -71,6 +84,7 @@ function formFromRule(rule: Rule): RuleForm {
     when: rule.when,
     action: writableActionOf(rule),
     enabled: rule.enabled,
+    stopProcessing: rule.stopProcessing === true,
   }
 }
 
@@ -80,6 +94,7 @@ function emptyForm(): RuleForm {
     when: defaultEmptyRule(),
     action: defaultActionForKind('tag'),
     enabled: true,
+    stopProcessing: false,
   }
 }
 
@@ -135,6 +150,7 @@ export function AutomationsPane() {
       when: form.when,
       action: form.action,
       enabled: form.enabled,
+      stopProcessing: form.stopProcessing,
     }
     saveMutation.mutate(
       editor.mode === 'edit' ? { id: editor.id, body } : { body },
@@ -252,7 +268,13 @@ function RuleRow({
             </Badge>
           )}
         </div>
-        <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+        <p
+          className={
+            isDestructiveActionKind(rule.action.kind)
+              ? 'mt-0.5 truncate font-mono text-[11px] font-medium text-destructive'
+              : 'mt-0.5 truncate font-mono text-[11px] text-muted-foreground'
+          }
+        >
           {actionSummary(rule.action)}
         </p>
       </div>
@@ -304,7 +326,34 @@ function RuleEditor({
   onCancel: () => void
   onSave: () => void
 }) {
-  const canSave = form.name.trim().length > 0 && !isPending
+  // Account context for the WHEN builder's pickers (the `sourceId` account
+  // picker especially) — the automations pane is account-agnostic, so mailboxes
+  // stay unscoped (`accountId: ''` disables the mailbox query; a stored id
+  // still round-trips as a raw entry).
+  const accountsQuery = useQuery({
+    queryKey: queryKeys.accounts,
+    queryFn: runtimeViews.accounts.list,
+  })
+  const conditionData = useMemo(
+    () => ({
+      accountId: '',
+      mailboxes: null,
+      accounts: (accountsQuery.data ?? []).map((account) => ({
+        id: account.id,
+        name: account.name,
+      })),
+    }),
+    [accountsQuery.data],
+  )
+
+  // Mirror of the server's destroy guard (`validate_rule_action`): a destroy
+  // rule must carry at least one condition — refuse the save locally with an
+  // explanation instead of round-tripping to a 400.
+  const unconditionalDestroy =
+    form.action.kind === 'destroy' && !groupHasCondition(form.when.root)
+  const canSave =
+    form.name.trim().length > 0 && !isPending && !unconditionalDestroy
+
   return (
     <SettingsPage>
       <SettingsBackButton ariaLabel="Back to automations" onClick={onCancel}>
@@ -327,10 +376,12 @@ function RuleEditor({
             When a message matches
           </h2>
           <div className="rounded-lg border border-border-soft bg-bg-elev/45 p-4">
-            <RuleGroupEditor
-              group={form.when.root}
-              onChange={(root) => onChange({ ...form, when: { root } })}
-            />
+            <ConditionEditorContext.Provider value={conditionData}>
+              <RuleGroupEditor
+                group={form.when.root}
+                onChange={(root) => onChange({ ...form, when: { root } })}
+              />
+            </ConditionEditorContext.Provider>
           </div>
           <p className="text-[12px] text-muted-foreground">
             Tip: scope to senders you trust (e.g.{' '}
@@ -349,6 +400,14 @@ function RuleEditor({
           />
         </section>
 
+        {unconditionalDestroy && (
+          <FeedbackBanner tone="error">
+            A destroy rule needs at least one condition — an unconditional rule
+            would permanently delete every incoming message. Add a condition
+            above.
+          </FeedbackBanner>
+        )}
+
         <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <Checkbox
             checked={form.enabled}
@@ -357,6 +416,23 @@ function RuleEditor({
             }
           />
           Enabled
+        </label>
+
+        <label className="flex items-start gap-2 text-[13px] text-muted-foreground">
+          <Checkbox
+            checked={form.stopProcessing}
+            onCheckedChange={(checked) =>
+              onChange({ ...form, stopProcessing: checked === true })
+            }
+          />
+          <span>
+            Stop processing more rules
+            <span className="block text-[12px] text-muted-foreground/80">
+              When this rule matches a message, skip every later rule for it.
+              Rules run in order: config-file rules first, then these, sorted by
+              name.
+            </span>
+          </span>
         </label>
 
         <div className="flex items-center gap-2 pt-2">
