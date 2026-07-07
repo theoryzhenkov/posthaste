@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import type {
   AccountOverview,
   Mailbox,
-  SmartMailboxRule,
+  MailQueryRule,
 } from '../../../api/types'
 import type { AutomationRuleDraft } from '../../../automationRules'
 import { cn } from '../../../lib/utils'
@@ -57,7 +57,7 @@ export function AutomationRuleList({
   onRemoveItem: (draft: AutomationRuleDraft) => void
   onBackfillItem: (draft: AutomationRuleDraft) => void
   backfillNoticeFor: string | null
-  previewConditionForDraft: (draft: AutomationRuleDraft) => SmartMailboxRule
+  previewConditionForDraft: (draft: AutomationRuleDraft) => MailQueryRule
 }) {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
 

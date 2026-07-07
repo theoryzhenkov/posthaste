@@ -3,7 +3,7 @@ use super::*;
 #[cfg(test)]
 pub(super) fn parse_optional_search_rule(
     query: Option<&str>,
-) -> Result<Option<SmartMailboxRule>, ApiError> {
+) -> Result<Option<MailQueryRule>, ApiError> {
     let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
         return Ok(None);
     };
@@ -85,24 +85,24 @@ fn prefixed_query(prefix: &str, value: impl AsRef<str>) -> String {
 pub(super) fn source_message_scope_rule(
     source_id: &str,
     mailbox_id: Option<&MailboxId>,
-) -> SmartMailboxRule {
-    let mut nodes = vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-        field: SmartMailboxField::SourceId,
-        operator: SmartMailboxOperator::Equals,
+) -> MailQueryRule {
+    let mut nodes = vec![MailQueryRuleNode::Condition(MailQueryCondition {
+        field: MailQueryField::SourceId,
+        operator: MailQueryOperator::Equals,
         negated: false,
-        value: SmartMailboxValue::String(source_id.to_string()),
+        value: MailQueryValue::String(source_id.to_string()),
     })];
     if let Some(mailbox_id) = mailbox_id {
-        nodes.push(SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-            field: SmartMailboxField::MailboxId,
-            operator: SmartMailboxOperator::Equals,
+        nodes.push(MailQueryRuleNode::Condition(MailQueryCondition {
+            field: MailQueryField::MailboxId,
+            operator: MailQueryOperator::Equals,
             negated: false,
-            value: SmartMailboxValue::String(mailbox_id.as_str().to_string()),
+            value: MailQueryValue::String(mailbox_id.as_str().to_string()),
         }));
     }
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },

@@ -1,7 +1,7 @@
 use posthaste_domain_model::{
-    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    MailQueryCondition, MailQueryField, MailQueryGroup, MailQueryGroupOperator, MailQueryOperator,
+    MailQueryRule, MailQueryRuleNode, MailQueryValue, SmartMailbox, SmartMailboxId,
+    SmartMailboxKind, RFC3339_EPOCH,
 };
 
 /// Returns the built-in smart mailboxes: Inbox, Archive, Drafts, Sent, Junk,
@@ -32,15 +32,15 @@ fn role_mailbox(id: &str, name: &str, default_key: &str, role: &str) -> SmartMai
         default_key: Some(default_key.to_string()),
         role: Some(role.to_string()),
         parent_id: None,
-        rule: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+        rule: MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
-                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                    field: SmartMailboxField::MailboxRole,
-                    operator: SmartMailboxOperator::Equals,
+                nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                    field: MailQueryField::MailboxRole,
+                    operator: MailQueryOperator::Equals,
                     negated: false,
-                    value: SmartMailboxValue::String(role.to_string()),
+                    value: MailQueryValue::String(role.to_string()),
                 })],
             },
         },
@@ -60,9 +60,9 @@ fn all_mail_mailbox() -> SmartMailbox {
         default_key: Some("all-mail".to_string()),
         role: None,
         parent_id: None,
-        rule: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
+        rule: MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::All,
                 negated: false,
                 nodes: Vec::new(),
             },

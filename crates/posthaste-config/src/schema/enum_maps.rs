@@ -27,13 +27,13 @@ macro_rules! bimap_enum {
 }
 
 bimap_enum!(SmartMailboxKindToml => SmartMailboxKind { Default, User });
-bimap_enum!(GroupOperatorToml => SmartMailboxGroupOperator { All, Any });
-bimap_enum!(FieldToml => SmartMailboxField {
+bimap_enum!(GroupOperatorToml => MailQueryGroupOperator { All, Any });
+bimap_enum!(FieldToml => MailQueryField {
     SourceId, SourceName, MessageId, ThreadId, ConversationId, MailboxId, MailboxName,
     MailboxRole, IsRead, IsFlagged, HasAttachment, Keyword, FromName, FromEmail, To, Subject,
     Preview, ReceivedAt, Size,
 });
-bimap_enum!(ConditionOperatorToml => SmartMailboxOperator {
+bimap_enum!(ConditionOperatorToml => MailQueryOperator {
     Equals, In, Contains, BeginsWith, EndsWith, Regex, Lt, Gt, Le, Ge,
 });
 bimap_enum!(DriverToml => AccountDriver { Jmap, ImapSmtp, Mock });

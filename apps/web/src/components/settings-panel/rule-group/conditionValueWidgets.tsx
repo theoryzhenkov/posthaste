@@ -16,7 +16,7 @@
  * exactly how "switch to 'is one of' and autocomplete stops working" happened.)
  *
  * WIRE-SHAPE PARITY (load-bearing): every widget emits the exact same
- * `SmartMailboxValue` the old text box did — a `string` for single-value ops, a
+ * `MailQueryValue` the old text box did — a `string` for single-value ops, a
  * `string[]` for the `in` operator, a `boolean` for boolean fields. The pickers
  * only change how the user enters that value, never its serialized shape, so
  * the compiler/evaluator and stored JSON are unchanged.
@@ -28,9 +28,9 @@ import { useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 
 import type {
-  SmartMailboxCondition,
-  SmartMailboxOperator,
-  SmartMailboxValue,
+  MailQueryCondition,
+  MailQueryOperator,
+  MailQueryValue,
 } from '../../../api/types'
 import { RecipientSuggestionInput } from '@/components/compose-overlay/RecipientSuggestionInput'
 import { ASSIGNABLE_MAILBOX_ROLES } from '../../../domainVocabulary'
@@ -72,8 +72,8 @@ const INPUT_CLASS =
   'h-8 rounded-md border-border bg-background text-[13px] shadow-none'
 
 type WidgetProps = {
-  condition: SmartMailboxCondition
-  onChange: (condition: SmartMailboxCondition) => void
+  condition: MailQueryCondition
+  onChange: (condition: MailQueryCondition) => void
 }
 
 /** Props for a type's `in`-list ENTRY widget: edit a draft, commit entries. */
@@ -123,8 +123,8 @@ export function ConditionValueEditor({
   condition,
   onChange,
 }: {
-  condition: SmartMailboxCondition
-  onChange: (condition: SmartMailboxCondition) => void
+  condition: MailQueryCondition
+  onChange: (condition: MailQueryCondition) => void
 }) {
   const valueType = valueTypeForField(condition.field)
   const spec = VALUE_WIDGETS[valueType]
@@ -137,9 +137,9 @@ export function ConditionValueEditor({
 }
 
 function emitValue(
-  condition: SmartMailboxCondition,
-  onChange: (condition: SmartMailboxCondition) => void,
-  value: SmartMailboxValue,
+  condition: MailQueryCondition,
+  onChange: (condition: MailQueryCondition) => void,
+  value: MailQueryValue,
 ) {
   onChange({ ...condition, value })
 }
@@ -377,7 +377,7 @@ type DateReading = {
   /** Optional trailing word after the amount/unit, e.g. "ago". */
   suffix?: string
   mode: 'absolute' | 'relative'
-  operator: SmartMailboxOperator
+  operator: MailQueryOperator
 }
 
 // The MODEL operators are neutral (`lt`/`gt`/`le`/`ge`); for date fields the
@@ -416,7 +416,7 @@ const DATE_READINGS: DateReading[] = [
 ]
 
 /** Derive the active reading from the stored condition (operator + value). */
-function readingForCondition(condition: SmartMailboxCondition): DateReading {
+function readingForCondition(condition: MailQueryCondition): DateReading {
   if (dateValueMode(condition.value) === 'relative') {
     // A relative value is either "in the last" (gt) or "more than … ago"
     // (lt), keyed off the neutral operator.

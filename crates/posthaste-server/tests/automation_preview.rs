@@ -8,10 +8,10 @@ use axum::Json;
 use posthaste_authority_server::AccountSupervisor;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::{
-    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, SecretRef, SecretStoreError, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SyncBatch, ThreadId, RFC3339_EPOCH,
+    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, MailQueryCondition,
+    MailQueryField, MailQueryGroup, MailQueryGroupOperator, MailQueryOperator, MailQueryRule,
+    MailQueryRuleNode, MailQueryValue, MailboxId, MailboxRecord, MessageId, MessageRecord,
+    SecretRef, SecretStoreError, SyncBatch, ThreadId, RFC3339_EPOCH,
 };
 use posthaste_domain_service::{
     ConfigRepository, MailService, MailStore, SecretStore, SyncWriteStore,
@@ -170,11 +170,11 @@ fn message(id: &str, from_name: &str, received_at: &str) -> MessageRecord {
 }
 
 fn condition(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: false,
@@ -182,37 +182,37 @@ fn condition(
     })
 }
 
-fn source_is(account_id: &str) -> SmartMailboxRuleNode {
+fn source_is(account_id: &str) -> MailQueryRuleNode {
     condition(
-        SmartMailboxField::SourceId,
-        SmartMailboxOperator::Equals,
-        SmartMailboxValue::String(account_id.to_string()),
+        MailQueryField::SourceId,
+        MailQueryOperator::Equals,
+        MailQueryValue::String(account_id.to_string()),
     )
 }
 
-fn from_contains(value: &str) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
+fn from_contains(value: &str) -> MailQueryRuleNode {
+    MailQueryRuleNode::Group(MailQueryGroup {
+        operator: MailQueryGroupOperator::Any,
         negated: false,
         nodes: vec![
             condition(
-                SmartMailboxField::FromName,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String(value.to_string()),
+                MailQueryField::FromName,
+                MailQueryOperator::Contains,
+                MailQueryValue::String(value.to_string()),
             ),
             condition(
-                SmartMailboxField::FromEmail,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String(value.to_string()),
+                MailQueryField::FromEmail,
+                MailQueryOperator::Contains,
+                MailQueryValue::String(value.to_string()),
             ),
         ],
     })
 }
 
-fn rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+fn rule(nodes: Vec<MailQueryRuleNode>) -> MailQueryRule {
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },

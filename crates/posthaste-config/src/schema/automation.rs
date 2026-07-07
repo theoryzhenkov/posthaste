@@ -10,7 +10,7 @@ pub(crate) fn convert_automation_rule(rule: &AutomationRuleToml) -> Result<Autom
             .iter()
             .map(convert_automation_trigger)
             .collect(),
-        condition: SmartMailboxRule {
+        condition: MailQueryRule {
             root: convert_rule_group(&rule.condition)?,
         },
         actions: rule.actions.iter().map(convert_automation_action).collect(),

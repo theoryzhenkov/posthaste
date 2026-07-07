@@ -1,4 +1,4 @@
-import type { AutomationRule, SmartMailboxRule } from '../../../api/types'
+import type { AutomationRule, MailQueryRule } from '../../../api/types'
 import { ruleToDraft } from '../../../automationRules'
 import type {
   AutomationRuleItem,
@@ -16,10 +16,7 @@ export function linkedAutomationRuleItems({
   drafts: AutomationRule[]
   isLinkedRule: (rule: AutomationRule) => boolean
   accountIdForRule: (rule: AutomationRule) => string
-  conditionForRule: (
-    rule: AutomationRule,
-    accountId: string,
-  ) => SmartMailboxRule
+  conditionForRule: (rule: AutomationRule, accountId: string) => MailQueryRule
 }): AutomationRuleItem[] {
   const mapItem =
     (state: AutomationRuleState) =>

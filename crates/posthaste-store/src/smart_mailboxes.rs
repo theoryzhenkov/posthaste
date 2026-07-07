@@ -10,4 +10,4 @@ pub(crate) use messages::{
     count_smart_mailbox_messages, query_message_page, query_message_page_by_rule,
     query_messages_by_rule, query_messages_by_rule_sorted,
 };
-pub(crate) use rule_compiler::compile_smart_mailbox_rule;
+pub(crate) use rule_compiler::compile_mail_query_rule;

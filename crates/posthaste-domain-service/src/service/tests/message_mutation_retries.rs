@@ -54,22 +54,22 @@ async fn archive_assertion_appears_in_rule_page_query_path() {
         .await
         .expect("archive assertion queues");
 
-    let archive_rule = SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    let archive_rule = MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes: vec![
-                SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                    field: SmartMailboxField::SourceId,
-                    operator: SmartMailboxOperator::Equals,
+                MailQueryRuleNode::Condition(MailQueryCondition {
+                    field: MailQueryField::SourceId,
+                    operator: MailQueryOperator::Equals,
                     negated: false,
-                    value: SmartMailboxValue::String("primary".to_string()),
+                    value: MailQueryValue::String("primary".to_string()),
                 }),
-                SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                    field: SmartMailboxField::MailboxId,
-                    operator: SmartMailboxOperator::Equals,
+                MailQueryRuleNode::Condition(MailQueryCondition {
+                    field: MailQueryField::MailboxId,
+                    operator: MailQueryOperator::Equals,
                     negated: false,
-                    value: SmartMailboxValue::String("archive".to_string()),
+                    value: MailQueryValue::String("archive".to_string()),
                 }),
             ],
         },
@@ -112,15 +112,15 @@ async fn archive_assertion_appears_in_role_based_rule_query_path() {
         .await
         .expect("archive assertion queues");
 
-    let archive_role_rule = SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    let archive_role_rule = MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
-            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::MailboxRole,
-                operator: SmartMailboxOperator::Equals,
+            nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::MailboxRole,
+                operator: MailQueryOperator::Equals,
                 negated: false,
-                value: SmartMailboxValue::String("archive".to_string()),
+                value: MailQueryValue::String("archive".to_string()),
             })],
         },
     };

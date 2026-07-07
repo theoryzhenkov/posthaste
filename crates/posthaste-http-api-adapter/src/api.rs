@@ -28,16 +28,16 @@ use posthaste_domain_model::{
     AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult,
     ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, DraftContent, EventFilter, Id, Identity,
-    ImapTransportSettings, MailboxColor, MailboxGroup, MailboxId, MailboxRole, MailboxSummary,
-    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
-    MessageSummary, Notifications, Operation, ProviderAuthKind, ProviderHint, Recipient,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef,
-    SecretStatus, SecretStorage, SendMessageRequest, ServiceError, ServiceErrorKind,
-    SetKeywordsCommand, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings,
-    SortDirection, SyncMode, TagAppearance, TagSummary, EVENT_TOPIC_ACCOUNT_CREATED,
-    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    ImapTransportSettings, MailQueryCondition, MailQueryField, MailQueryGroup,
+    MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue,
+    MailboxColor, MailboxGroup, MailboxId, MailboxRole, MailboxSummary, MessageAttachment,
+    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
+    Notifications, Operation, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
+    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox,
+    SmartMailboxId, SmartMailboxSummary, SmtpTransportSettings, SortDirection, SyncMode,
+    TagAppearance, TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use posthaste_runtime_api::{
     RuntimeAccountApi, RuntimeMailReadApi, RuntimeMailWriteApi, RuntimeSettingsApi,
@@ -150,7 +150,7 @@ pub struct CreateSmartMailboxRequest {
     pub name: String,
     #[serde(default)]
     pub role: Option<String>,
-    pub rule: SmartMailboxRule,
+    pub rule: MailQueryRule,
 }
 
 /// Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.
@@ -164,7 +164,7 @@ pub struct PatchSmartMailboxRequest {
     /// clears it.
     #[serde(default)]
     pub role: Option<String>,
-    pub rule: Option<SmartMailboxRule>,
+    pub rule: Option<MailQueryRule>,
 }
 
 /// Generic success response for mutating endpoints that return no domain data.

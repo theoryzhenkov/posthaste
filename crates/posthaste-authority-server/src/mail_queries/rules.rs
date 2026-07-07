@@ -1,8 +1,7 @@
 use posthaste_contract_core::RuntimeError;
 use posthaste_domain_model::{
-    AccountId, MailboxId, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue,
+    AccountId, MailQueryCondition, MailQueryField, MailQueryGroup, MailQueryGroupOperator,
+    MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue, MailboxId,
 };
 use posthaste_domain_service::MailService;
 use posthaste_query_grammar::parse_query_with_scopes;
@@ -13,10 +12,7 @@ use posthaste_query_grammar::parse_query_with_scopes;
 /// [`MailService`], which the service-free parser must not depend on.
 const SCOPE_PREFIXES: &[&str] = &["in"];
 
-pub(crate) fn compile(
-    service: &MailService,
-    query: &str,
-) -> Result<SmartMailboxRule, RuntimeError> {
+pub(crate) fn compile(service: &MailService, query: &str) -> Result<MailQueryRule, RuntimeError> {
     let (remainder, scopes) =
         parse_query_with_scopes(query, SCOPE_PREFIXES).map_err(RuntimeError::invalid_descriptor)?;
 
@@ -34,7 +30,7 @@ pub(crate) fn compile(
     Ok(combine(rules).unwrap_or_else(empty_rule))
 }
 
-fn resolve_in(service: &MailService, value: &str) -> Result<SmartMailboxRule, RuntimeError> {
+fn resolve_in(service: &MailService, value: &str) -> Result<MailQueryRule, RuntimeError> {
     let value = value.trim();
     if value.is_empty() {
         return Err(RuntimeError::invalid_descriptor(
@@ -62,59 +58,59 @@ fn resolve_in(service: &MailService, value: &str) -> Result<SmartMailboxRule, Ru
 pub(crate) fn source_scope_rule(
     account_id: &AccountId,
     mailbox_id: Option<&MailboxId>,
-) -> SmartMailboxRule {
+) -> MailQueryRule {
     let mut nodes = vec![condition(
-        SmartMailboxField::SourceId,
-        SmartMailboxOperator::Equals,
+        MailQueryField::SourceId,
+        MailQueryOperator::Equals,
         account_id.as_str(),
     )];
     if let Some(mailbox_id) = mailbox_id {
         nodes.push(condition(
-            SmartMailboxField::MailboxId,
-            SmartMailboxOperator::Equals,
+            MailQueryField::MailboxId,
+            MailQueryOperator::Equals,
             mailbox_id.as_str(),
         ));
     }
     all_rule(nodes)
 }
 
-pub(crate) fn combine(mut rules: Vec<SmartMailboxRule>) -> Option<SmartMailboxRule> {
+pub(crate) fn combine(mut rules: Vec<MailQueryRule>) -> Option<MailQueryRule> {
     match rules.len() {
         0 => None,
         1 => Some(rules.remove(0)),
         _ => Some(all_rule(
             rules
                 .into_iter()
-                .map(|rule| SmartMailboxRuleNode::Group(rule.root))
+                .map(|rule| MailQueryRuleNode::Group(rule.root))
                 .collect(),
         )),
     }
 }
 
 fn condition(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
+    field: MailQueryField,
+    operator: MailQueryOperator,
     value: impl Into<String>,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: false,
-        value: SmartMailboxValue::String(value.into()),
+        value: MailQueryValue::String(value.into()),
     })
 }
 
-fn all_rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+fn all_rule(nodes: Vec<MailQueryRuleNode>) -> MailQueryRule {
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },
     }
 }
 
-fn empty_rule() -> SmartMailboxRule {
+fn empty_rule() -> MailQueryRule {
     all_rule(Vec::new())
 }
 
@@ -126,7 +122,7 @@ mod tests {
     fn combine_preserves_single_rule_root_semantics() {
         let rule = any_subject_or_sender_rule();
         let combined = combine(vec![rule]).expect("rule should combine");
-        assert_eq!(combined.root.operator, SmartMailboxGroupOperator::Any);
+        assert_eq!(combined.root.operator, MailQueryGroupOperator::Any);
         assert!(!combined.root.negated);
     }
 
@@ -137,28 +133,28 @@ mod tests {
             source_scope_rule(&AccountId::from("acct-a"), None),
         ])
         .expect("rules should combine");
-        assert_eq!(combined.root.operator, SmartMailboxGroupOperator::All);
+        assert_eq!(combined.root.operator, MailQueryGroupOperator::All);
         assert_eq!(combined.root.nodes.len(), 2);
-        let SmartMailboxRuleNode::Group(saved_query_group) = &combined.root.nodes[0] else {
+        let MailQueryRuleNode::Group(saved_query_group) = &combined.root.nodes[0] else {
             panic!("expected saved query to remain grouped");
         };
-        assert_eq!(saved_query_group.operator, SmartMailboxGroupOperator::Any);
+        assert_eq!(saved_query_group.operator, MailQueryGroupOperator::Any);
     }
 
-    fn any_subject_or_sender_rule() -> SmartMailboxRule {
-        SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::Any,
+    fn any_subject_or_sender_rule() -> MailQueryRule {
+        MailQueryRule {
+            root: MailQueryGroup {
+                operator: MailQueryGroupOperator::Any,
                 negated: false,
                 nodes: vec![
                     condition(
-                        SmartMailboxField::Subject,
-                        SmartMailboxOperator::Contains,
+                        MailQueryField::Subject,
+                        MailQueryOperator::Contains,
                         "invoice",
                     ),
                     condition(
-                        SmartMailboxField::FromEmail,
-                        SmartMailboxOperator::Contains,
+                        MailQueryField::FromEmail,
+                        MailQueryOperator::Contains,
                         "billing@example.test",
                     ),
                 ],

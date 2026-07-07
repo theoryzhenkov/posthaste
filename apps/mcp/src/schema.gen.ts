@@ -1484,7 +1484,7 @@ export interface components {
         AutomationRule: {
             actions: components["schemas"]["AutomationAction"][];
             backfill: boolean;
-            condition: components["schemas"]["SmartMailboxRule"];
+            condition: components["schemas"]["MailQueryRule"];
             enabled: boolean;
             id: string;
             name: string;
@@ -1700,7 +1700,7 @@ export interface components {
         CreateSmartMailboxRequest: {
             name: string;
             role?: string | null;
-            rule: components["schemas"]["SmartMailboxRule"];
+            rule: components["schemas"]["MailQueryRule"];
         };
         /**
          * @description Time unit for a [`DateValue::Relative`] offset.
@@ -1712,7 +1712,7 @@ export interface components {
         /**
          * @description A date condition value. Tagged (internally, on `kind`) so absolute and
          *     relative dates are explicit, distinct JSON objects — this is what lets the
-         *     untagged [`SmartMailboxValue`] tell a date apart from a bare string.
+         *     untagged [`MailQueryValue`] tell a date apart from a bare string.
          *
          *     @spec docs/L1-accounts#condition-fields-and-operators
          */
@@ -1865,6 +1865,96 @@ export interface components {
             args?: Record<string, never>;
             name: string;
         };
+        /**
+         * @description Leaf condition matching a single field with an operator and value.
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         */
+        MailQueryCondition: {
+            field: components["schemas"]["MailQueryField"];
+            negated: boolean;
+            operator: components["schemas"]["MailQueryOperator"];
+            value: components["schemas"]["MailQueryValue"];
+        };
+        /**
+         * @description Message field that a smart mailbox condition can filter on.
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         * @enum {string}
+         */
+        MailQueryField: "sourceId" | "sourceName" | "messageId" | "threadId" | "conversationId" | "mailboxId" | "mailboxName" | "mailboxRole" | "isRead" | "isFlagged" | "hasAttachment" | "keyword" | "fromName" | "fromEmail" | "to" | "subject" | "preview" | "receivedAt" | "size";
+        /**
+         * @description Boolean group node containing child conditions or nested groups.
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         */
+        MailQueryGroup: {
+            negated: boolean;
+            nodes: components["schemas"]["MailQueryRuleNode"][];
+            operator: components["schemas"]["MailQueryGroupOperator"];
+        };
+        /**
+         * @description Boolean combinator for smart mailbox rule groups: `All` (AND) or `Any` (OR).
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         * @enum {string}
+         */
+        MailQueryGroupOperator: "all" | "any";
+        /**
+         * @description Comparison operator for a smart mailbox condition.
+         *
+         *     The four ordered comparisons are **neutral** (`Lt`/`Gt`/`Le`/`Ge`, i.e.
+         *     `< > <= >=`): the model no longer speaks "date" — dates and numbers share the
+         *     same comparators, and the editor labels them per field type ("before/after"
+         *     for dates, "smaller/larger than" for size). See D6 of RFC-L2-query-schema.
+         *
+         *     BACK-COMPAT (critical — these are stored wire names): the four ordered
+         *     variants carry a `#[serde(alias = ...)]` for their OLD camelCase names
+         *     (`before`/`after`/`onOrBefore`/`onOrAfter`), so smart mailboxes / rules
+         *     persisted before the rename still deserialize. Serialization emits the NEW
+         *     names (`lt`/`gt`/`le`/`ge`); no migration is needed — old data reads, re-saved
+         *     data uses the new names.
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         * @enum {string}
+         */
+        MailQueryOperator: "equals" | "in" | "contains" | "beginsWith" | "endsWith" | "regex" | "lt" | "gt" | "le" | "ge";
+        /**
+         * @description Top-level rule for a smart mailbox, wrapping a root group.
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         */
+        MailQueryRule: {
+            root: components["schemas"]["MailQueryGroup"];
+        };
+        /**
+         * @description Recursive rule tree node: either a [`MailQueryGroup`] or a [`MailQueryCondition`].
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         */
+        MailQueryRuleNode: (components["schemas"]["MailQueryGroup"] & {
+            /** @enum {string} */
+            type: "group";
+        }) | (components["schemas"]["MailQueryCondition"] & {
+            /** @enum {string} */
+            type: "condition";
+        });
+        /**
+         * @description Condition value: scalar string, string list (for `In`), boolean, or a typed
+         *     date value.
+         *
+         *     The enum is `#[serde(untagged)]`: each variant is distinguished by its JSON
+         *     *shape*, so the legacy `String`/`Strings`/`Bool` values still deserialize
+         *     exactly as before (a bare string, a string array, a bare boolean). The
+         *     [`Date`](Self::Date) variant is a JSON *object* carrying a `kind`
+         *     discriminator, a shape none of the scalar variants accept, so adding it is
+         *     fully back-compatible and needs no migration of stored data — legacy
+         *     absolute dates persisted as a bare `String` keep parsing (see the date field
+         *     compiler, which reads both the legacy string and the new `Date::Absolute`).
+         *
+         *     @spec docs/L1-accounts#condition-fields-and-operators
+         */
+        MailQueryValue: string | string[] | boolean | components["schemas"]["DateValue"];
         /**
          * @description A per-mailbox sidebar color override (presentation only). Overrides the
          *     renderer's default hash-derived color for the mailbox identified by
@@ -2268,7 +2358,7 @@ export interface components {
              *     clears it.
              */
             role?: string | null;
-            rule?: null | components["schemas"]["SmartMailboxRule"];
+            rule?: null | components["schemas"]["MailQueryRule"];
         };
         /**
          * @description Request body for `POST /v1/automation-rules:preview`.
@@ -2276,7 +2366,7 @@ export interface components {
          *     @spec docs/L1-api#application-settings
          */
         PreviewAutomationRuleRequest: {
-            condition: components["schemas"]["SmartMailboxRule"];
+            condition: components["schemas"]["MailQueryRule"];
             limit?: number | null;
         };
         /**
@@ -2448,11 +2538,11 @@ export interface components {
              */
             stopProcessing?: boolean;
             /**
-             * @description The WHEN-clause: the shared query grammar's [`SmartMailboxRule`] output,
+             * @description The WHEN-clause: the shared query grammar's [`MailQueryRule`] output,
              *     reused (not wrapped). Evaluated against the message a triggering fact
              *     names — a match means the action runs.
              */
-            when: components["schemas"]["SmartMailboxRule"];
+            when: components["schemas"]["MailQueryRule"];
         };
         /**
          * @description What a matched [`Rule`] does. Level 0 (`Tag`/`Move`/`Notify`) acts through the
@@ -2732,44 +2822,9 @@ export interface components {
              *     role defaults; `None` for All Mail and unassigned user smart mailboxes.
              */
             role?: string | null;
-            rule: components["schemas"]["SmartMailboxRule"];
+            rule: components["schemas"]["MailQueryRule"];
             updatedAt: string;
         };
-        /**
-         * @description Leaf condition matching a single field with an operator and value.
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         */
-        SmartMailboxCondition: {
-            field: components["schemas"]["SmartMailboxField"];
-            negated: boolean;
-            operator: components["schemas"]["SmartMailboxOperator"];
-            value: components["schemas"]["SmartMailboxValue"];
-        };
-        /**
-         * @description Message field that a smart mailbox condition can filter on.
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         * @enum {string}
-         */
-        SmartMailboxField: "sourceId" | "sourceName" | "messageId" | "threadId" | "conversationId" | "mailboxId" | "mailboxName" | "mailboxRole" | "isRead" | "isFlagged" | "hasAttachment" | "keyword" | "fromName" | "fromEmail" | "to" | "subject" | "preview" | "receivedAt" | "size";
-        /**
-         * @description Boolean group node containing child conditions or nested groups.
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         */
-        SmartMailboxGroup: {
-            negated: boolean;
-            nodes: components["schemas"]["SmartMailboxRuleNode"][];
-            operator: components["schemas"]["SmartMailboxGroupOperator"];
-        };
-        /**
-         * @description Boolean combinator for smart mailbox rule groups: `All` (AND) or `Any` (OR).
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         * @enum {string}
-         */
-        SmartMailboxGroupOperator: "all" | "any";
         /**
          * @description Identifier for a smart mailbox (saved query with display metadata).
          *
@@ -2786,45 +2841,6 @@ export interface components {
         SmartMailboxListReadResult: {
             items: components["schemas"]["SmartMailboxSummary"][];
         };
-        /**
-         * @description Comparison operator for a smart mailbox condition.
-         *
-         *     The four ordered comparisons are **neutral** (`Lt`/`Gt`/`Le`/`Ge`, i.e.
-         *     `< > <= >=`): the model no longer speaks "date" — dates and numbers share the
-         *     same comparators, and the editor labels them per field type ("before/after"
-         *     for dates, "smaller/larger than" for size). See D6 of RFC-L2-query-schema.
-         *
-         *     BACK-COMPAT (critical — these are stored wire names): the four ordered
-         *     variants carry a `#[serde(alias = ...)]` for their OLD camelCase names
-         *     (`before`/`after`/`onOrBefore`/`onOrAfter`), so smart mailboxes / rules
-         *     persisted before the rename still deserialize. Serialization emits the NEW
-         *     names (`lt`/`gt`/`le`/`ge`); no migration is needed — old data reads, re-saved
-         *     data uses the new names.
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         * @enum {string}
-         */
-        SmartMailboxOperator: "equals" | "in" | "contains" | "beginsWith" | "endsWith" | "regex" | "lt" | "gt" | "le" | "ge";
-        /**
-         * @description Top-level rule for a smart mailbox, wrapping a root group.
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         */
-        SmartMailboxRule: {
-            root: components["schemas"]["SmartMailboxGroup"];
-        };
-        /**
-         * @description Recursive rule tree node: either a [`SmartMailboxGroup`] or a [`SmartMailboxCondition`].
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         */
-        SmartMailboxRuleNode: (components["schemas"]["SmartMailboxGroup"] & {
-            /** @enum {string} */
-            type: "group";
-        }) | (components["schemas"]["SmartMailboxCondition"] & {
-            /** @enum {string} */
-            type: "condition";
-        });
         /**
          * @description Smart mailbox config with live unread/total counts from the store.
          *
@@ -2844,22 +2860,6 @@ export interface components {
             unreadMessages: number;
             updatedAt: string;
         };
-        /**
-         * @description Condition value: scalar string, string list (for `In`), boolean, or a typed
-         *     date value.
-         *
-         *     The enum is `#[serde(untagged)]`: each variant is distinguished by its JSON
-         *     *shape*, so the legacy `String`/`Strings`/`Bool` values still deserialize
-         *     exactly as before (a bare string, a string array, a bare boolean). The
-         *     [`Date`](Self::Date) variant is a JSON *object* carrying a `kind`
-         *     discriminator, a shape none of the scalar variants accept, so adding it is
-         *     fully back-compatible and needs no migration of stored data — legacy
-         *     absolute dates persisted as a bare `String` keep parsing (see the date field
-         *     compiler, which reads both the legacy string and the new `Date::Absolute`).
-         *
-         *     @spec docs/L1-accounts#condition-fields-and-operators
-         */
-        SmartMailboxValue: string | string[] | boolean | components["schemas"]["DateValue"];
         /**
          * @description SMTP endpoint settings for traditional provider submission.
          *
@@ -3190,7 +3190,7 @@ export interface components {
          * @description The write body for create/replace. Its `action` is a
          *     [`WritableRuleAction`], which has NO exec variant — that is the structural
          *     exec-exclusion gate (ruling 23). `when` is the shared query grammar's
-         *     [`SmartMailboxRule`] tree (the same the WHEN-clause builder emits).
+         *     [`MailQueryRule`] tree (the same the WHEN-clause builder emits).
          */
         WritableRuleInput: {
             /** @description The action — exec is unrepresentable here (structural gate). */
@@ -3210,7 +3210,7 @@ export interface components {
              */
             stopProcessing?: boolean;
             /** @description The WHEN-clause tree. */
-            when: components["schemas"]["SmartMailboxRule"];
+            when: components["schemas"]["MailQueryRule"];
         };
     };
     responses: never;

@@ -172,18 +172,18 @@ fn message_page_rule_query_filters_source_mailbox_and_text() -> Result<(), Store
     let page = store.query_message_page_by_rule(
         &all_rule(vec![
             rule_condition(
-                SmartMailboxField::SourceId,
-                SmartMailboxOperator::Equals,
+                MailQueryField::SourceId,
+                MailQueryOperator::Equals,
                 "primary",
             ),
             rule_condition(
-                SmartMailboxField::MailboxId,
-                SmartMailboxOperator::Equals,
+                MailQueryField::MailboxId,
+                MailQueryOperator::Equals,
                 "inbox",
             ),
             rule_condition(
-                SmartMailboxField::Subject,
-                SmartMailboxOperator::Contains,
+                MailQueryField::Subject,
+                MailQueryOperator::Contains,
                 "Posthaste",
             ),
         ]),

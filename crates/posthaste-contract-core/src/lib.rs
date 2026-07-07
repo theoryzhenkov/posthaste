@@ -16,10 +16,9 @@ pub use mail_query::*;
 
 use posthaste_domain_model::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, Appearance, AutomationRule,
-    CachePolicy, GatewayError, ImapTransportSettings, MailboxColor, MailboxGroup,
+    CachePolicy, GatewayError, ImapTransportSettings, MailQueryRule, MailboxColor, MailboxGroup,
     MessageAttachment, MessageSummary, Notifications, ProviderAuthKind, ProviderHint, ServiceError,
-    ServiceErrorKind, SmartMailboxId, SmartMailboxRule, SmtpTransportSettings, TagAppearance,
-    ValidationError,
+    ServiceErrorKind, SmartMailboxId, SmtpTransportSettings, TagAppearance, ValidationError,
 };
 
 // Re-exported so the shared retryability vocabulary is reachable as
@@ -268,7 +267,7 @@ pub struct PatchAppSettingsMutation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationRulePreviewMutation {
-    pub condition: SmartMailboxRule,
+    pub condition: MailQueryRule,
     pub limit: usize,
 }
 
@@ -288,7 +287,7 @@ pub struct CreateSmartMailboxMutation {
     /// saved query. Validated against the known mailbox roles.
     #[serde(default)]
     pub role: Option<String>,
-    pub rule: SmartMailboxRule,
+    pub rule: MailQueryRule,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -301,7 +300,7 @@ pub struct PatchSmartMailboxMutation {
     /// `null` from an absent field over the wire.)
     #[serde(default)]
     pub role: Option<String>,
-    pub rule: Option<SmartMailboxRule>,
+    pub rule: Option<MailQueryRule>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

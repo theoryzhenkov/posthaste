@@ -83,7 +83,10 @@ export const commandOperations: Operation[] = [
       apiFetch<Schemas["MailboxSummary"][]>(
         conn,
         `/sources/${encodeURIComponent(args.sourceId)}/mailboxes/${encodeURIComponent(args.mailboxId)}`,
-        { method: "DELETE", query: { removeEmails: String(args.removeEmails) } },
+        {
+          method: "DELETE",
+          query: { removeEmails: String(args.removeEmails) },
+        },
       ),
   }),
 

@@ -13,7 +13,7 @@ impl SmartMailboxToml {
             default_key: self.default_key.clone(),
             role: self.role.clone(),
             parent_id: self.parent_id.as_deref().map(SmartMailboxId::from),
-            rule: SmartMailboxRule {
+            rule: MailQueryRule {
                 root: convert_rule_group(&self.rule)?,
             },
             created_at: self
@@ -47,14 +47,14 @@ impl SmartMailboxToml {
 }
 
 /// Recursively converts a TOML rule group to the domain representation.
-pub(crate) fn convert_rule_group(group: &RuleGroupToml) -> Result<SmartMailboxGroup, String> {
+pub(crate) fn convert_rule_group(group: &RuleGroupToml) -> Result<MailQueryGroup, String> {
     let operator = group.operator.to_domain();
     let nodes = group
         .nodes
         .iter()
         .map(convert_rule_node)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(SmartMailboxGroup {
+    Ok(MailQueryGroup {
         operator,
         negated: group.negated,
         nodes,
@@ -62,24 +62,22 @@ pub(crate) fn convert_rule_group(group: &RuleGroupToml) -> Result<SmartMailboxGr
 }
 
 /// Converts a single TOML rule node (condition or group) to the domain type.
-pub(crate) fn convert_rule_node(node: &RuleNodeToml) -> Result<SmartMailboxRuleNode, String> {
+pub(crate) fn convert_rule_node(node: &RuleNodeToml) -> Result<MailQueryRuleNode, String> {
     match node {
-        RuleNodeToml::Condition(condition) => Ok(SmartMailboxRuleNode::Condition(
-            convert_condition(condition)?,
-        )),
-        RuleNodeToml::Group(group) => Ok(SmartMailboxRuleNode::Group(convert_rule_group(group)?)),
+        RuleNodeToml::Condition(condition) => {
+            Ok(MailQueryRuleNode::Condition(convert_condition(condition)?))
+        }
+        RuleNodeToml::Group(group) => Ok(MailQueryRuleNode::Group(convert_rule_group(group)?)),
     }
 }
 
-/// Converts a TOML condition to the domain `SmartMailboxCondition`, mapping
+/// Converts a TOML condition to the domain `MailQueryCondition`, mapping
 /// field/operator enums and parsing the TOML value.
-pub(crate) fn convert_condition(
-    condition: &ConditionToml,
-) -> Result<SmartMailboxCondition, String> {
+pub(crate) fn convert_condition(condition: &ConditionToml) -> Result<MailQueryCondition, String> {
     let field = condition.field.to_domain();
     let operator = condition.operator.to_domain();
     let value = convert_toml_value(&condition.value)?;
-    Ok(SmartMailboxCondition {
+    Ok(MailQueryCondition {
         field,
         operator,
         negated: condition.negated,
@@ -87,15 +85,15 @@ pub(crate) fn convert_condition(
     })
 }
 
-/// Converts a TOML value to a `SmartMailboxValue`. Supports string, boolean,
+/// Converts a TOML value to a `MailQueryValue`. Supports string, boolean,
 /// string arrays (for the `in` operator), and a typed date table (a `[table]`
 /// with a `kind` discriminator — `absolute`/`relative` — mirroring the
 /// [`DateValue`] wire shape). Legacy bare-string date values still load as a
 /// plain `String`, so no migration is required.
-pub(crate) fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValue, String> {
+pub(crate) fn convert_toml_value(value: &toml::Value) -> Result<MailQueryValue, String> {
     match value {
-        toml::Value::String(s) => Ok(SmartMailboxValue::String(s.clone())),
-        toml::Value::Boolean(b) => Ok(SmartMailboxValue::Bool(*b)),
+        toml::Value::String(s) => Ok(MailQueryValue::String(s.clone())),
+        toml::Value::Boolean(b) => Ok(MailQueryValue::Bool(*b)),
         toml::Value::Array(arr) => {
             let strings: Result<Vec<String>, _> = arr
                 .iter()
@@ -104,7 +102,7 @@ pub(crate) fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValu
                     _ => Err("array values must be strings".to_string()),
                 })
                 .collect();
-            Ok(SmartMailboxValue::Strings(strings?))
+            Ok(MailQueryValue::Strings(strings?))
         }
         toml::Value::Table(table) => convert_toml_date_table(table),
         _ => Err(format!("unsupported TOML value type: {value}")),
@@ -112,8 +110,8 @@ pub(crate) fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValu
 }
 
 /// Converts a TOML date table (`{ kind = "absolute"/"relative", ... }`) to a
-/// [`SmartMailboxValue::Date`].
-fn convert_toml_date_table(table: &toml::value::Table) -> Result<SmartMailboxValue, String> {
+/// [`MailQueryValue::Date`].
+fn convert_toml_date_table(table: &toml::value::Table) -> Result<MailQueryValue, String> {
     let kind = table
         .get("kind")
         .and_then(toml::Value::as_str)
@@ -146,7 +144,7 @@ fn convert_toml_date_table(table: &toml::value::Table) -> Result<SmartMailboxVal
         }
         other => return Err(format!("unknown date value kind: {other}")),
     };
-    Ok(SmartMailboxValue::Date(date))
+    Ok(MailQueryValue::Date(date))
 }
 
 /// Maps a TOML/wire `unit` string to a [`DateUnit`].
@@ -175,7 +173,7 @@ fn date_unit_str(unit: &DateUnit) -> &'static str {
 // -- Domain → TOML conversions --
 
 /// Recursively converts a domain rule group back to the TOML representation.
-pub(crate) fn convert_group_to_toml(group: &SmartMailboxGroup) -> RuleGroupToml {
+pub(crate) fn convert_group_to_toml(group: &MailQueryGroup) -> RuleGroupToml {
     RuleGroupToml {
         operator: GroupOperatorToml::from_domain(&group.operator),
         negated: group.negated,
@@ -184,17 +182,17 @@ pub(crate) fn convert_group_to_toml(group: &SmartMailboxGroup) -> RuleGroupToml 
 }
 
 /// Converts a single domain rule node back to TOML.
-pub(crate) fn convert_node_to_toml(node: &SmartMailboxRuleNode) -> RuleNodeToml {
+pub(crate) fn convert_node_to_toml(node: &MailQueryRuleNode) -> RuleNodeToml {
     match node {
-        SmartMailboxRuleNode::Condition(condition) => {
+        MailQueryRuleNode::Condition(condition) => {
             RuleNodeToml::Condition(convert_condition_to_toml(condition))
         }
-        SmartMailboxRuleNode::Group(group) => RuleNodeToml::Group(convert_group_to_toml(group)),
+        MailQueryRuleNode::Group(group) => RuleNodeToml::Group(convert_group_to_toml(group)),
     }
 }
 
 /// Converts a domain condition back to its TOML representation.
-pub(crate) fn convert_condition_to_toml(condition: &SmartMailboxCondition) -> ConditionToml {
+pub(crate) fn convert_condition_to_toml(condition: &MailQueryCondition) -> ConditionToml {
     let field = FieldToml::from_domain(&condition.field);
     let operator = ConditionOperatorToml::from_domain(&condition.operator);
     let value = convert_value_to_toml(&condition.value);
@@ -206,17 +204,17 @@ pub(crate) fn convert_condition_to_toml(condition: &SmartMailboxCondition) -> Co
     }
 }
 
-/// Converts a domain `SmartMailboxValue` back to a `toml::Value`. A `Date`
+/// Converts a domain `MailQueryValue` back to a `toml::Value`. A `Date`
 /// serializes to a `{ kind = ..., ... }` table (round-tripping
 /// [`convert_toml_date_table`]).
-pub(crate) fn convert_value_to_toml(value: &SmartMailboxValue) -> toml::Value {
+pub(crate) fn convert_value_to_toml(value: &MailQueryValue) -> toml::Value {
     match value {
-        SmartMailboxValue::String(s) => toml::Value::String(s.clone()),
-        SmartMailboxValue::Bool(b) => toml::Value::Boolean(*b),
-        SmartMailboxValue::Strings(arr) => {
+        MailQueryValue::String(s) => toml::Value::String(s.clone()),
+        MailQueryValue::Bool(b) => toml::Value::Boolean(*b),
+        MailQueryValue::Strings(arr) => {
             toml::Value::Array(arr.iter().map(|s| toml::Value::String(s.clone())).collect())
         }
-        SmartMailboxValue::Date(date) => {
+        MailQueryValue::Date(date) => {
             let mut table = toml::value::Table::new();
             match date {
                 DateValue::Absolute { value } => {

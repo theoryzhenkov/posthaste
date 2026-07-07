@@ -1,5 +1,5 @@
 import type { MessageSummary } from './mail'
-import type { SmartMailboxRule } from './smartMailboxes'
+import type { MailQueryRule } from './mailQuery'
 
 export type AutomationTrigger = 'messageArrived' | 'messageChanged' | 'manual'
 
@@ -19,14 +19,14 @@ export interface AutomationRule {
   name: string
   enabled: boolean
   triggers: AutomationTrigger[]
-  condition: SmartMailboxRule
+  condition: MailQueryRule
   actions: AutomationAction[]
   backfill: boolean
 }
 
 /** @spec docs/L1-api#application-settings */
 export interface AutomationRulePreviewInput {
-  condition: SmartMailboxRule
+  condition: MailQueryRule
   limit?: number
 }
 

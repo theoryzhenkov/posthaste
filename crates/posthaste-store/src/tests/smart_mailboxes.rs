@@ -43,15 +43,15 @@ fn smart_mailbox_queries_messages_across_enabled_sources() -> Result<(), StoreEr
         )?;
     }
 
-    let rule = SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    let rule = MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
-            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::MailboxRole,
-                operator: SmartMailboxOperator::Equals,
+            nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::MailboxRole,
+                operator: MailQueryOperator::Equals,
                 negated: false,
-                value: SmartMailboxValue::String("inbox".to_string()),
+                value: MailQueryValue::String("inbox".to_string()),
             })],
         },
     };
@@ -181,15 +181,15 @@ fn bulk_message_hydration_preserves_order_and_account_scoped_metadata() -> Resul
         vec!["$seen".to_string(), "alpha".to_string()]
     );
 
-    let queried = store.query_messages_by_rule(&SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    let queried = store.query_messages_by_rule(&MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
-            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::Keyword,
-                operator: SmartMailboxOperator::Equals,
+            nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::Keyword,
+                operator: MailQueryOperator::Equals,
                 negated: false,
-                value: SmartMailboxValue::String("beta".to_string()),
+                value: MailQueryValue::String("beta".to_string()),
             })],
         },
     })?;
@@ -203,15 +203,15 @@ fn bulk_message_hydration_preserves_order_and_account_scoped_metadata() -> Resul
 /// Wraps a single leaf condition in an `All` root group — the shape the editor
 /// emits for a one-condition rule.
 fn single_condition_rule(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRule {
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
-            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+            nodes: vec![MailQueryRuleNode::Condition(MailQueryCondition {
                 field,
                 operator,
                 negated: false,
@@ -250,9 +250,9 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
 
     // `After` (>) 1 MiB, encoded as a byte-count string on the wire.
     let over_1mib = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Size,
-        SmartMailboxOperator::Gt,
-        SmartMailboxValue::String("1048576".to_string()),
+        MailQueryField::Size,
+        MailQueryOperator::Gt,
+        MailQueryValue::String("1048576".to_string()),
     ))?;
     assert_eq!(
         over_1mib
@@ -264,9 +264,9 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
 
     // `OnOrAfter` (>=) is inclusive of the exact-boundary message.
     let at_least_1mib = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Size,
-        SmartMailboxOperator::Ge,
-        SmartMailboxValue::String("1048576".to_string()),
+        MailQueryField::Size,
+        MailQueryOperator::Ge,
+        MailQueryValue::String("1048576".to_string()),
     ))?;
     let mut ids: Vec<&str> = at_least_1mib.iter().map(|m| m.id.as_str()).collect();
     ids.sort_unstable();
@@ -274,9 +274,9 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
 
     // `Before` (<) compares numerically, not lexicographically: "500" < "1048576".
     let under_1mib = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Size,
-        SmartMailboxOperator::Lt,
-        SmartMailboxValue::String("1048576".to_string()),
+        MailQueryField::Size,
+        MailQueryOperator::Lt,
+        MailQueryValue::String("1048576".to_string()),
     ))?;
     assert_eq!(
         under_1mib
@@ -288,9 +288,9 @@ fn size_field_compiles_numeric_comparisons() -> Result<(), StoreError> {
 
     // A non-numeric wire value is a type error at evaluation time.
     let err = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Size,
-        SmartMailboxOperator::Lt,
-        SmartMailboxValue::String("not-a-number".to_string()),
+        MailQueryField::Size,
+        MailQueryOperator::Lt,
+        MailQueryValue::String("not-a-number".to_string()),
     ));
     assert!(err.is_err());
     Ok(())
@@ -333,9 +333,9 @@ fn to_field_matches_recipients_in_to_json() -> Result<(), StoreError> {
 
     // `Equals` matches an exact recipient email (structured per-recipient match).
     let exact = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::To,
-        SmartMailboxOperator::Equals,
-        SmartMailboxValue::String("carol@example.com".to_string()),
+        MailQueryField::To,
+        MailQueryOperator::Equals,
+        MailQueryValue::String("carol@example.com".to_string()),
     ))?;
     assert_eq!(
         exact.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
@@ -344,18 +344,18 @@ fn to_field_matches_recipients_in_to_json() -> Result<(), StoreError> {
 
     // `Contains` is case-insensitive and matches email OR display name.
     let by_domain = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::To,
-        SmartMailboxOperator::Contains,
-        SmartMailboxValue::String("EXAMPLE.COM".to_string()),
+        MailQueryField::To,
+        MailQueryOperator::Contains,
+        MailQueryValue::String("EXAMPLE.COM".to_string()),
     ))?;
     assert_eq!(
         by_domain.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         vec!["to-bob"]
     );
     let by_name = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::To,
-        SmartMailboxOperator::Contains,
-        SmartMailboxValue::String("dave".to_string()),
+        MailQueryField::To,
+        MailQueryOperator::Contains,
+        MailQueryValue::String("dave".to_string()),
     ))?;
     assert_eq!(
         by_name.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
@@ -364,9 +364,9 @@ fn to_field_matches_recipients_in_to_json() -> Result<(), StoreError> {
 
     // `In` matches any recipient whose email is in the list.
     let in_list = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::To,
-        SmartMailboxOperator::In,
-        SmartMailboxValue::Strings(vec![
+        MailQueryField::To,
+        MailQueryOperator::In,
+        MailQueryValue::Strings(vec![
             "dave@other.test".to_string(),
             "nobody@nowhere.test".to_string(),
         ]),
@@ -378,9 +378,9 @@ fn to_field_matches_recipients_in_to_json() -> Result<(), StoreError> {
 
     // No recipient match returns nothing.
     let none = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::To,
-        SmartMailboxOperator::Equals,
-        SmartMailboxValue::String("ghost@example.com".to_string()),
+        MailQueryField::To,
+        MailQueryOperator::Equals,
+        MailQueryValue::String("ghost@example.com".to_string()),
     ))?;
     assert!(none.is_empty());
     Ok(())
@@ -422,17 +422,17 @@ fn text_match_operators_begins_ends_regex() -> Result<(), StoreError> {
 
     // begins-with is case-insensitive and anchors at the start.
     let begins = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::BeginsWith,
-        SmartMailboxValue::String("invoice".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::BeginsWith,
+        MailQueryValue::String("invoice".to_string()),
     ))?;
     assert_eq!(ids(begins), vec!["invoice"]);
 
     // ends-with anchors at the end.
     let ends = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::EndsWith,
-        SmartMailboxValue::String("REPORT".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::EndsWith,
+        MailQueryValue::String("REPORT".to_string()),
     ))?;
     assert_eq!(ids(ends), vec!["report"]);
 
@@ -442,18 +442,18 @@ fn text_match_operators_begins_ends_regex() -> Result<(), StoreError> {
     // `50%` -> `50%%` would still exclude, but an unescaped bare `%` prefix
     // pattern like `%...` would over-match). Assert the literal match.
     let literal_percent = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::BeginsWith,
-        SmartMailboxValue::String("50%".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::BeginsWith,
+        MailQueryValue::String("50%".to_string()),
     ))?;
     assert_eq!(ids(literal_percent), vec!["sale"]);
 
     // A `%` that is NOT present literally matches nothing (proves the `%` is
     // escaped, not treated as "match anything").
     let percent_wildcard_defused = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::BeginsWith,
-        SmartMailboxValue::String("Invoice%".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::BeginsWith,
+        MailQueryValue::String("Invoice%".to_string()),
     ))?;
     assert!(
         percent_wildcard_defused.is_empty(),
@@ -462,17 +462,17 @@ fn text_match_operators_begins_ends_regex() -> Result<(), StoreError> {
 
     // regex: `^...$` anchors compile and match correctly.
     let regex = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::Regex,
-        SmartMailboxValue::String("^Invoice.*2026$".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::Regex,
+        MailQueryValue::String("^Invoice.*2026$".to_string()),
     ))?;
     assert_eq!(ids(regex), vec!["invoice"]);
 
     // regex alternation across two subjects.
     let regex_alt = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::Subject,
-        SmartMailboxOperator::Regex,
-        SmartMailboxValue::String("^(Invoice|Weekly)".to_string()),
+        MailQueryField::Subject,
+        MailQueryOperator::Regex,
+        MailQueryValue::String("^(Invoice|Weekly)".to_string()),
     ))?;
     assert_eq!(ids(regex_alt), vec!["invoice", "report"]);
 
@@ -524,9 +524,9 @@ fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
 
     let last_7_days = |operator| {
         single_condition_rule(
-            SmartMailboxField::ReceivedAt,
+            MailQueryField::ReceivedAt,
             operator,
-            SmartMailboxValue::Date(DateValue::Relative {
+            MailQueryValue::Date(DateValue::Relative {
                 amount: 7,
                 unit: DateUnit::Days,
             }),
@@ -534,7 +534,7 @@ fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
     };
 
     // "in the last 7 days" == received_at After (>) now-7days → only the recent one.
-    let within = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::Gt))?;
+    let within = store.query_messages_by_rule(&last_7_days(MailQueryOperator::Gt))?;
     assert_eq!(
         within.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         vec!["recent"],
@@ -542,7 +542,7 @@ fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
     );
 
     // "more than 7 days ago" == received_at Before (<) now-7days → only the old one.
-    let older = store.query_messages_by_rule(&last_7_days(SmartMailboxOperator::Lt))?;
+    let older = store.query_messages_by_rule(&last_7_days(MailQueryOperator::Lt))?;
     assert_eq!(
         older.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         vec!["old"]
@@ -552,9 +552,9 @@ fn relative_date_condition_rolls_with_now() -> Result<(), StoreError> {
     // the bound is computed from `now`, not a fixed instant baked in at edit
     // time — a frozen absolute could never widen to include the older message).
     let last_20_days = single_condition_rule(
-        SmartMailboxField::ReceivedAt,
-        SmartMailboxOperator::Gt,
-        SmartMailboxValue::Date(DateValue::Relative {
+        MailQueryField::ReceivedAt,
+        MailQueryOperator::Gt,
+        MailQueryValue::Date(DateValue::Relative {
             amount: 20,
             unit: DateUnit::Days,
         }),
@@ -591,9 +591,9 @@ fn date_field_accepts_legacy_string_and_typed_absolute() -> Result<(), StoreErro
 
     // Back-compat: a legacy bare-string absolute date still compiles + matches.
     let legacy = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::ReceivedAt,
-        SmartMailboxOperator::Lt,
-        SmartMailboxValue::String("2026-03-01T00:00:00Z".to_string()),
+        MailQueryField::ReceivedAt,
+        MailQueryOperator::Lt,
+        MailQueryValue::String("2026-03-01T00:00:00Z".to_string()),
     ))?;
     assert_eq!(
         legacy.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
@@ -602,9 +602,9 @@ fn date_field_accepts_legacy_string_and_typed_absolute() -> Result<(), StoreErro
 
     // The typed `Date::Absolute` matches identically.
     let typed = store.query_messages_by_rule(&single_condition_rule(
-        SmartMailboxField::ReceivedAt,
-        SmartMailboxOperator::Gt,
-        SmartMailboxValue::Date(DateValue::Absolute {
+        MailQueryField::ReceivedAt,
+        MailQueryOperator::Gt,
+        MailQueryValue::Date(DateValue::Absolute {
             value: "2026-03-01T00:00:00Z".to_string(),
         }),
     ))?;

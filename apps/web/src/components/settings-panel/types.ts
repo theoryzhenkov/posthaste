@@ -5,7 +5,7 @@
  */
 import type {
   AccountDriver,
-  SmartMailboxRule,
+  MailQueryRule,
   TransportSecurity,
 } from '../../api/types'
 
@@ -46,5 +46,5 @@ export interface SmartMailboxFormState {
   name: string
   /** Optional view role; `null` for a plain saved query. */
   role: string | null
-  rule: SmartMailboxRule
+  rule: MailQueryRule
 }

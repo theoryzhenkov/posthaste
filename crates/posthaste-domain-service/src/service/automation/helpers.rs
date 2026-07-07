@@ -1,11 +1,11 @@
 use super::*;
 
 fn condition_node(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: false,
@@ -14,11 +14,11 @@ fn condition_node(
 }
 
 fn negated_condition_node(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+    field: MailQueryField,
+    operator: MailQueryOperator,
+    value: MailQueryValue,
+) -> MailQueryRuleNode {
+    MailQueryRuleNode::Condition(MailQueryCondition {
         field,
         operator,
         negated: true,
@@ -31,21 +31,21 @@ pub(super) fn automation_query_rule(
     rule: &AutomationRule,
     action: &AutomationAction,
     message_ids: &[MessageId],
-) -> SmartMailboxRule {
+) -> MailQueryRule {
     let mut nodes = vec![
         condition_node(
-            SmartMailboxField::SourceId,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(account_id.to_string()),
+            MailQueryField::SourceId,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(account_id.to_string()),
         ),
-        SmartMailboxRuleNode::Group(rule.condition.root.clone()),
+        MailQueryRuleNode::Group(rule.condition.root.clone()),
     ];
 
     if !message_ids.is_empty() {
         nodes.push(condition_node(
-            SmartMailboxField::MessageId,
-            SmartMailboxOperator::In,
-            SmartMailboxValue::Strings(message_ids.iter().map(ToString::to_string).collect()),
+            MailQueryField::MessageId,
+            MailQueryOperator::In,
+            MailQueryValue::Strings(message_ids.iter().map(ToString::to_string).collect()),
         ));
     }
 
@@ -53,9 +53,9 @@ pub(super) fn automation_query_rule(
         nodes.push(precondition);
     }
 
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
+    MailQueryRule {
+        root: MailQueryGroup {
+            operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },
@@ -64,42 +64,42 @@ pub(super) fn automation_query_rule(
 
 pub(super) fn automation_action_precondition(
     action: &AutomationAction,
-) -> Option<SmartMailboxRuleNode> {
+) -> Option<MailQueryRuleNode> {
     match action {
         AutomationAction::ApplyTag { tag } => Some(negated_condition_node(
-            SmartMailboxField::Keyword,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(tag.clone()),
+            MailQueryField::Keyword,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(tag.clone()),
         )),
         AutomationAction::RemoveTag { tag } => Some(condition_node(
-            SmartMailboxField::Keyword,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(tag.clone()),
+            MailQueryField::Keyword,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(tag.clone()),
         )),
         AutomationAction::MarkRead => Some(condition_node(
-            SmartMailboxField::IsRead,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(false),
+            MailQueryField::IsRead,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(false),
         )),
         AutomationAction::MarkUnread => Some(condition_node(
-            SmartMailboxField::IsRead,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(true),
+            MailQueryField::IsRead,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(true),
         )),
         AutomationAction::Flag => Some(condition_node(
-            SmartMailboxField::IsFlagged,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(false),
+            MailQueryField::IsFlagged,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(false),
         )),
         AutomationAction::Unflag => Some(condition_node(
-            SmartMailboxField::IsFlagged,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::Bool(true),
+            MailQueryField::IsFlagged,
+            MailQueryOperator::Equals,
+            MailQueryValue::Bool(true),
         )),
         AutomationAction::MoveToMailbox { mailbox_id } => Some(negated_condition_node(
-            SmartMailboxField::MailboxId,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(mailbox_id.to_string()),
+            MailQueryField::MailboxId,
+            MailQueryOperator::Equals,
+            MailQueryValue::String(mailbox_id.to_string()),
         )),
     }
 }
