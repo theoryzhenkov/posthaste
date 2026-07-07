@@ -1,4 +1,73 @@
 use super::*;
+use std::collections::HashSet;
+
+/// Window labels whose webview ACKed frontend boot (`surface_webview_booted`).
+///
+/// Defense in depth for the close path: closing a window whose frontend never
+/// booted must not depend on JS close handling of any kind, so
+/// [`request_close_for_window_label`] force-destroys such a window instead of
+/// asking it to close gracefully. A booted webview keeps the guarded close
+/// flow (the compose close-guard listens to `tauri://close-requested`).
+#[derive(Default)]
+pub(crate) struct WebviewBootAcks {
+    booted: Mutex<HashSet<String>>,
+}
+
+impl WebviewBootAcks {
+    pub(crate) fn mark_booted(&self, label: impl Into<String>) {
+        self.booted
+            .lock()
+            .expect("boot ack lock poisoned")
+            .insert(label.into());
+    }
+
+    /// Forget a label when its window is destroyed, so a future window that
+    /// reuses the label (e.g. the stable "settings" label) starts un-booted.
+    pub(crate) fn clear(&self, label: &str) {
+        self.booted
+            .lock()
+            .expect("boot ack lock poisoned")
+            .remove(label);
+    }
+
+    pub(crate) fn is_booted(&self, label: &str) -> bool {
+        self.booted
+            .lock()
+            .expect("boot ack lock poisoned")
+            .contains(label)
+    }
+}
+
+/// How to honor a close request for a surface window.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SurfaceCloseAction {
+    /// The webview booted: request a graceful close so JS close guards
+    /// (`tauri://close-requested` listeners, e.g. compose) can intervene.
+    CloseGuarded,
+    /// The webview never ACKed boot: no JS is listening, destroy the window
+    /// outright so a frontend-load failure can never yield an unclosable
+    /// window.
+    ForceDestroy,
+}
+
+pub(crate) fn surface_close_action(webview_booted: bool) -> SurfaceCloseAction {
+    if webview_booted {
+        SurfaceCloseAction::CloseGuarded
+    } else {
+        SurfaceCloseAction::ForceDestroy
+    }
+}
+
+/// Frontend boot ACK, invoked from `main.tsx` as soon as the bundle executes.
+/// The window argument is supplied by tauri, so the label cannot be spoofed by
+/// the renderer for another window.
+#[tauri::command]
+pub(crate) fn surface_webview_booted(window: WebviewWindow) {
+    window
+        .app_handle()
+        .state::<WebviewBootAcks>()
+        .mark_booted(window.label());
+}
 
 #[tauri::command]
 pub(crate) fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
@@ -8,8 +77,20 @@ pub(crate) fn open_external_url(app: AppHandle, url: String) -> Result<(), Strin
         .map_err(|error| error.to_string())
 }
 
+/// Open (or focus + re-route) a standalone surface window.
+///
+/// MUST stay `async`: on Windows, creating a webview window inside a
+/// *synchronous* command deadlocks the app — the sync invoke handler runs on
+/// the main thread, `WebviewWindowBuilder::build` blocks that thread waiting
+/// for WebView2's async controller creation, and the completion is delivered
+/// via the same thread's message pump (tauri `webview/webview_window.rs`
+/// "Known issues" on `WebviewWindowBuilder::new`/`build`; wry issue #583).
+/// The symptom was the v0.4.0/v0.5.0 Windows bug: a black surface window with
+/// no webview attached, an event loop too wedged to process the titlebar X,
+/// and zero frontend JS. An `async` command runs on the async runtime thread
+/// pool, leaving the main thread free to pump the creation to completion.
 #[tauri::command]
-pub(crate) fn open_surface_window(
+pub(crate) async fn open_surface_window(
     app: AppHandle,
     surface: SurfaceDescriptor,
 ) -> Result<(), String> {
@@ -39,7 +120,7 @@ pub(crate) fn open_surface_window(
     build_window(
         &app,
         &label,
-        &format!("index.html#{route}"),
+        &surface_window_url(&surface),
         title,
         width,
         height,
@@ -65,10 +146,14 @@ pub(crate) fn remember_focused_window<R: Runtime>(window: &WebviewWindow<R>) {
     let app = window.app_handle().clone();
     let label = window.label().to_string();
     app.state::<FocusedWindowLabel>().set(label.clone());
-    window.on_window_event(move |event| {
-        if matches!(event, WindowEvent::Focused(true)) {
+    window.on_window_event(move |event| match event {
+        WindowEvent::Focused(true) => {
             app.state::<FocusedWindowLabel>().set(label.clone());
         }
+        WindowEvent::Destroyed => {
+            app.state::<WebviewBootAcks>().clear(&label);
+        }
+        _ => {}
     });
 }
 
@@ -111,7 +196,18 @@ pub(crate) fn toggle_devtools(_window: tauri::WebviewWindow) {
 }
 
 pub(crate) fn request_close_for_window_label<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    let webview_booted = app.state::<WebviewBootAcks>().is_booted(label);
+
     if is_main_window_label(label) {
+        if !webview_booted {
+            // No JS ever ran in the main webview, so nothing listens for the
+            // guarded close event — emitting it would be a no-op. Close the
+            // window natively instead.
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.close();
+            }
+            return true;
+        }
         let _ = app.emit_to(
             EventTarget::webview_window(MAIN_WINDOW_LABEL),
             CLOSE_WINDOW_REQUESTED_EVENT,
@@ -127,7 +223,14 @@ pub(crate) fn request_close_for_window_label<R: Runtime>(app: &AppHandle<R>, lab
     let Some(window) = app.get_webview_window(label) else {
         return false;
     };
-    let _ = window.close();
+    match surface_close_action(webview_booted) {
+        SurfaceCloseAction::CloseGuarded => {
+            let _ = window.close();
+        }
+        SurfaceCloseAction::ForceDestroy => {
+            let _ = window.destroy();
+        }
+    }
     true
 }
 
