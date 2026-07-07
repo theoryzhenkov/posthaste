@@ -36,9 +36,11 @@ export function invalidateMailNavigationBootstrapReadModels(
 export async function invalidateSyncStartedReadModels(
   queryClient: QueryClient,
 ) {
-  // `messagesRoot` (the mail list) + `mailboxes` (counts) are owned by the
-  // entity store — it drives them via SSE-fed frames + `setQueryData`, so they
-  // are not REST-invalidated here. The rest are not store-owned.
+  // `messagesRoot` (the mail list ROWS) is owned by the entity store — it
+  // drives rows via SSE-fed frames, so it is not REST-invalidated here. Counts
+  // (mailboxes/smart-mailboxes) are react-query state: the sync's
+  // `message.updated` events invalidate them (debounced) as changes land, so
+  // sync START only refreshes the navigation read models.
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
     queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
@@ -49,9 +51,11 @@ export async function invalidateSyncStartedReadModels(
 export async function invalidateComposeSendReadModels(
   queryClient: QueryClient,
 ) {
-  // `mailboxes` (counts) is store-owned — not REST-invalidated here. The rest
-  // are not (smart-mailbox/tag counts, sender addresses, conversations).
+  // A send moves drafts/sent counts, so the mailbox count read models refetch
+  // too (all accounts — the send path has no account id here; the root prefix
+  // covers every `mailboxes(accountId)` key).
   await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['mailboxes'] }),
     queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
     queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
     queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead }),
@@ -95,14 +99,13 @@ export function invalidateMailboxReadModels(
   accountId: string,
   options: { skipStoreOwned?: boolean } = {},
 ) {
-  // `mailboxes(accountId)` carries the counts the entity store owns when
-  // active (it writes them via `setQueryData`), so invalidating would refetch
-  // redundantly. Smart-mailboxes + the message list are not store-owned.
-  if (!options.skipStoreOwned) {
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.mailboxes(accountId),
-    })
-  }
+  // `mailboxes(accountId)` carries the canonical counts + structure
+  // (RFC-L2-count-unification): mailbox changes ALWAYS refetch it — there is
+  // no store-owned count carve-out anymore. `skipStoreOwned` now governs only
+  // the mail-list ROWS (entity-store-owned when active).
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.mailboxes(accountId),
+  })
   void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
   invalidateMessageListReadModels(queryClient, options)
 }
@@ -131,7 +134,12 @@ export function invalidateAccountReadModels(
     void queryClient.invalidateQueries({
       queryKey: queryKeys.identity(accountId),
     })
-    // `mailboxes(accountId)` (counts) is store-owned — not REST-invalidated.
+    // `mailboxes(accountId)` carries the canonical counts
+    // (RFC-L2-count-unification) — refetch them on account-level changes
+    // (sync completion routes through here, one of the count triggers).
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.mailboxes(accountId),
+    })
   }
   // The mail list is store-owned — skip its REST invalidation.
   invalidateMessageListReadModels(queryClient, { skipStoreOwned: true })

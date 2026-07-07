@@ -21,10 +21,9 @@ pub(crate) fn append_message_diff_events_tx(
     conversation_id: &ConversationId,
     before: &MessageBeforeApply,
     projection: Option<&posthaste_domain_model::MessageSummary>,
-    count_deltas: Value,
     events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
-    let diff = MessageEventDiff::new(message, conversation_id, before, projection, count_deltas);
+    let diff = MessageEventDiff::new(message, conversation_id, before, projection);
 
     events.record(
         EVENT_TOPIC_MESSAGE_UPDATED,
@@ -41,7 +40,6 @@ struct MessageEventDiff<'a> {
     conversation_id: &'a ConversationId,
     before: &'a MessageBeforeApply,
     projection: Option<&'a posthaste_domain_model::MessageSummary>,
-    count_deltas: Value,
     current_mailboxes: BTreeSet<MailboxId>,
     previous_mailboxes: BTreeSet<MailboxId>,
 }
@@ -52,14 +50,12 @@ impl<'a> MessageEventDiff<'a> {
         conversation_id: &'a ConversationId,
         before: &'a MessageBeforeApply,
         projection: Option<&'a posthaste_domain_model::MessageSummary>,
-        count_deltas: Value,
     ) -> Self {
         Self {
             message,
             conversation_id,
             before,
             projection,
-            count_deltas,
             current_mailboxes: message.mailbox_ids.iter().cloned().collect(),
             previous_mailboxes: before.mailboxes.iter().cloned().collect(),
         }
@@ -98,10 +94,9 @@ impl<'a> MessageEventDiff<'a> {
         if let Some(summary) = self.projection {
             payload["projection"] = serde_json::to_value(summary).unwrap_or(Value::Null);
         }
-        // The affected mailboxes' current counts (read in-tx at the emit
-        // site) so the store's `mailbox[id].count` updates in the same atomic
-        // batch as the row delta (`counts-on-the-stream`, `D3`).
-        payload["countDeltas"] = self.count_deltas.clone();
+        // No counts on the event (RFC-L2-count-unification): clients invalidate
+        // their mailbox-count queries on `message.updated` and re-read the
+        // trigger-maintained canonical counts instead of applying deltas.
         payload
     }
 
@@ -206,24 +201,19 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
         return Ok(());
     }
 
-    // Attach the post-removal projection + the removed mailbox's counts, like the
-    // command path: the reactive store drops projection-less events, so without
-    // these the store cannot self-maintain membership for an IMAP
-    // expunge/location-removal and the row only corrected on a full re-serve.
+    // Attach the post-removal projection, like the command path: the reactive
+    // store drops projection-less events, so without it the store cannot
+    // self-maintain membership for an IMAP expunge/location-removal and the row
+    // only corrected on a full re-serve. Counts ride no event — clients
+    // invalidate + re-read the canonical mailbox counts.
     let detail = query_message_detail_tx(tx, account_id, &location.message_id)?;
-    let count_deltas = crate::query::mailbox_counts_json_tx(
-        tx,
-        account_id,
-        std::iter::once(&location.mailbox_id),
-    )?;
-    let mut payload = json!({
+    let payload = json!({
         "messageId": location.message_id.as_str(),
         "changes": { "mailboxes": true },
         "mailboxIds": current_mailboxes.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
         "removedMailboxId": location.mailbox_id.as_str(),
         "projection": detail.as_ref().map(|detail| &detail.summary),
     });
-    payload["countDeltas"] = count_deltas;
     events.record(
         EVENT_TOPIC_MESSAGE_UPDATED,
         current_mailboxes.first(),

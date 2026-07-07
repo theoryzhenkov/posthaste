@@ -6,10 +6,7 @@ import { QueryClient } from '@tanstack/react-query'
 
 import type { OkResponse } from '../src/api/types'
 import type { Mailbox } from '../src/api/types'
-import {
-  __resetLiveStoreForTesting,
-  getMailboxCounts,
-} from '../src/live-store/store'
+import { __resetLiveStoreForTesting } from '../src/live-store/store'
 import { queryKeys } from '../src/queryKeys'
 import {
   createEntityStoreAdapter,
@@ -293,11 +290,6 @@ function keywordsOf(
 function messageUpdated(
   messageId: string,
   projection: Record<string, unknown>,
-  countDeltas: Array<{
-    mailboxId: string
-    unreadCount: number
-    totalCount: number
-  }> = [],
   accountId = 's',
 ): RuntimeFrame<RuntimeMailListViewState> {
   return {
@@ -309,7 +301,7 @@ function messageUpdated(
       accountId,
       topic: 'message.updated',
       occurredAt: 'now',
-      payload: { messageId, projection, countDeltas },
+      payload: { messageId, projection },
     },
   }
 }
@@ -826,20 +818,16 @@ describe('entityStoreAdapter', () => {
 
     // The base then catches up; still flagged, no revert anywhere.
     built.harness.push(
-      messageUpdated(
-        'm1',
-        {
-          id: 'm1',
-          sourceId: 's',
-          receivedAt: '2026-04-29T10:00:00Z',
-          keywords: ['$flagged'],
-          mailboxIds: ['inbox'],
-          isRead: false,
-          isFlagged: true,
-          subject: 'm1',
-        },
-        [],
-      ),
+      messageUpdated('m1', {
+        id: 'm1',
+        sourceId: 's',
+        receivedAt: '2026-04-29T10:00:00Z',
+        keywords: ['$flagged'],
+        mailboxIds: ['inbox'],
+        isRead: false,
+        isFlagged: true,
+        subject: 'm1',
+      }),
     )
     await tick()
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
@@ -903,20 +891,16 @@ describe('entityStoreAdapter', () => {
     // An authoritative message.updated: m1 gains $flagged + the inbox count
     // moves. The store ingests it (one batch) + the adapter re-projects.
     built.harness.push(
-      messageUpdated(
-        'm1',
-        {
-          id: 'm1',
-          sourceId: 's',
-          receivedAt: '2026-04-29T10:00:00Z',
-          keywords: ['$flagged'],
-          mailboxIds: ['inbox'],
-          isRead: false,
-          isFlagged: true,
-          subject: 'm1',
-        },
-        [{ mailboxId: 'inbox', unreadCount: 2, totalCount: 2 }],
-      ),
+      messageUpdated('m1', {
+        id: 'm1',
+        sourceId: 's',
+        receivedAt: '2026-04-29T10:00:00Z',
+        keywords: ['$flagged'],
+        mailboxIds: ['inbox'],
+        isRead: false,
+        isFlagged: true,
+        subject: 'm1',
+      }),
     )
     await tick()
 
@@ -931,20 +915,16 @@ describe('entityStoreAdapter', () => {
     // A notification frame enqueues its store op fire-and-forget (`void
     // this.enqueue(...)`) — nothing in the caller awaits it.
     built.harness.push(
-      messageUpdated(
-        'm1',
-        {
-          id: 'm1',
-          sourceId: 's',
-          receivedAt: '2026-04-29T10:00:00Z',
-          keywords: ['$flagged'],
-          mailboxIds: ['inbox'],
-          isRead: false,
-          isFlagged: true,
-          subject: 'm1',
-        },
-        [{ mailboxId: 'inbox', unreadCount: 2, totalCount: 2 }],
-      ),
+      messageUpdated('m1', {
+        id: 'm1',
+        sourceId: 's',
+        receivedAt: '2026-04-29T10:00:00Z',
+        keywords: ['$flagged'],
+        mailboxIds: ['inbox'],
+        isRead: false,
+        isFlagged: true,
+        subject: 'm1',
+      }),
     )
     // Immediately after the push, the queued re-projection hasn't run yet
     // (nothing emitted to the frame sink) — this is the race a bare
@@ -1135,37 +1115,74 @@ describe('entityStoreAdapter', () => {
     ])
   })
 
-  it('mirrors the count delta into the live store slice, NOT react-query (D116)', async () => {
+  it('applies the optimistic count overlay to the react-query mailbox row on a user mutation (D2)', async () => {
     const built = build()
     const { adapter, queryClient } = built
     await adapter.openRuntimeLinkMessageListView(viewRequest)
 
-    built.harness.push(
-      messageUpdated(
-        'm1',
-        {
-          id: 'm1',
-          sourceId: 's',
-          receivedAt: '2026-04-29T10:00:00Z',
-          keywords: ['$seen'],
-          mailboxIds: ['inbox'],
-          isRead: true,
-          isFlagged: false,
-          subject: 'm1',
+    // m1 is unread in inbox (seeded unreadEmails: 2). Marking it read adjusts
+    // the cached count row IMMEDIATELY (setQueryData) — no refetch round-trip
+    // for the user's own mutation (RFC-L2-count-unification D2).
+    await adapter.runRuntimeMutation({
+      linkId: 'sess',
+      name: 'message.setKeywords',
+      args: {
+        sourceId: 's',
+        messageId: 'm1',
+        command: { add: ['$seen'], remove: [] },
+      },
+      clientMutationId: 'c-overlay',
+    })
+
+    const inbox = queryClient
+      .getQueryData<Mailbox[]>(queryKeys.mailboxes('s'))
+      ?.find((m) => m.id === 'inbox')
+    expect(inbox?.unreadEmails).toBe(1)
+    expect(inbox?.totalEmails).toBe(2)
+  })
+
+  it('reconciles the count overlay via invalidation when the mutation is rejected', async () => {
+    const built = build()
+    const { adapter, queryClient } = built
+    await adapter.openRuntimeLinkMessageListView(viewRequest)
+
+    await adapter.runRuntimeMutation({
+      linkId: 'sess',
+      name: 'message.setKeywords',
+      args: {
+        sourceId: 's',
+        messageId: 'm1',
+        command: { add: ['$seen'], remove: [] },
+      },
+      clientMutationId: 'c-reject',
+    })
+    expect(
+      queryClient
+        .getQueryData<Mailbox[]>(queryKeys.mailboxes('s'))
+        ?.find((m) => m.id === 'inbox')?.unreadEmails,
+    ).toBe(1)
+
+    // The runtime rejects the mutation: the optimism reverts, and the count
+    // read models are INVALIDATED so the refetch discards the overlay (with an
+    // active observer the queryFn would re-serve the authoritative 2).
+    built.harness.push({
+      type: 'mutationNotification',
+      linkSeq: 101,
+      clientMutationId: 'c-reject',
+      notification: {
+        type: 'rejected',
+        error: {
+          code: 'conflict',
+          message: 'rejected by the authority',
+          terminality: 'permanent',
         },
-        [{ mailboxId: 'inbox', unreadCount: 1, totalCount: 2 }],
-      ),
-    )
+      },
+    })
     await tick()
 
-    // The count lands in the store's counts slice (the sidebar's read model).
-    expect(getMailboxCounts('s').inbox).toEqual({ unread: 1, total: 2 })
-    // react-query's mailbox row is NOT touched — live counts are no longer
-    // request/response cache state (the setQueryData-for-counts path is gone).
-    const mailboxes = queryClient.getQueryData<Mailbox[]>(
-      queryKeys.mailboxes('s'),
-    )
-    expect(mailboxes?.find((m) => m.id === 'inbox')?.unreadEmails).toBe(2)
+    expect(
+      queryClient.getQueryState(queryKeys.mailboxes('s'))?.isInvalidated,
+    ).toBe(true)
   })
 
   it('exposes never-dispatched records to the engine reconciler + links receipts (D44a)', async () => {

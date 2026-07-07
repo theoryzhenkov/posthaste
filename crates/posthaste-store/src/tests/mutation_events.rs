@@ -192,7 +192,12 @@ fn sync_message_updated_carries_projection() -> Result<(), StoreError> {
 }
 
 #[test]
-fn message_updated_carries_count_deltas_matching_served_counts() -> Result<(), StoreError> {
+fn message_updated_carries_no_count_deltas_and_served_counts_are_canonical(
+) -> Result<(), StoreError> {
+    // RFC-L2-count-unification: the countDelta channel is deleted. The event
+    // carries the row-liveness projection but NO counts; a client reacts by
+    // invalidating its mailbox-count query and re-reading the served (trigger-
+    // maintained) canonical counts — asserted correct below.
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -215,34 +220,25 @@ fn message_updated_carries_count_deltas_matching_served_counts() -> Result<(), S
         },
     )?;
 
-    let count_deltas = &result.events[0].payload["countDeltas"];
-    assert!(count_deltas.is_array(), "countDeltas attached to the event");
-    // Each delta matches the served mailbox count — one derivation (no second
-    // count path). The store reads these as `mailbox[id].count`.
+    let payload = &result.events[0].payload;
+    assert!(
+        payload.get("countDeltas").is_none(),
+        "message.updated no longer ships counts (invalidation model)"
+    );
+    // The row-liveness projection still rides the event (the fold's food).
+    assert_eq!(
+        payload["projection"]["mailboxIds"],
+        serde_json::json!(["archive"])
+    );
+
+    // The refetch target: the served canonical counts already reflect the move
+    // in the same transaction the event was recorded in.
     let served: std::collections::HashMap<String, (i64, i64)> = store
         .list_mailboxes(&account)?
         .into_iter()
         .map(|m| (m.id.as_str().to_string(), (m.unread_emails, m.total_emails)))
         .collect();
-    let by_id: std::collections::HashMap<&str, &serde_json::Value> = count_deltas
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|d| (d["mailboxId"].as_str().unwrap(), d))
-        .collect();
-    for (id, delta) in &by_id {
-        let (unread, total) = served[*id];
-        assert_eq!(
-            delta["unreadCount"], unread,
-            "unreadCount matches served for {id}"
-        );
-        assert_eq!(
-            delta["totalCount"], total,
-            "totalCount matches served for {id}"
-        );
-    }
-    // The move is reflected: inbox lost the message (total 0), archive gained it.
-    assert_eq!(by_id["inbox"]["totalCount"], 0, "inbox total dropped to 0");
-    assert_eq!(by_id["archive"]["totalCount"], 1, "archive total rose to 1");
+    assert_eq!(served["inbox"].1, 0, "inbox total dropped to 0");
+    assert_eq!(served["archive"].1, 1, "archive total rose to 1");
     Ok(())
 }

@@ -91,15 +91,17 @@ pub(crate) fn set_keywords_tx(
     let detail = query_message_detail_tx(tx, account_id, message_id)?
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     let assertion = posthaste_domain_model::MessageChangeAssertion::after(detail.summary.clone());
-    let count_deltas = crate::query::mailbox_counts_json_tx(tx, account_id, mailboxes.iter())?;
-    let mut payload = json!({
+    // No counts on the event (RFC-L2-count-unification): clients react to the
+    // event by INVALIDATING their mailbox-count query and re-reading the
+    // trigger-maintained canonical counts, so the payload carries only the
+    // row-liveness projection.
+    let payload = json!({
         "messageId": message_id.as_str(),
         "changes": { "keywords": true },
         "keywords": keywords.iter().cloned().collect::<Vec<_>>(),
         "assertion": assertion,
         "projection": &detail.summary,
     });
-    payload["countDeltas"] = count_deltas;
     let event = insert_event_tx(
         tx,
         account_id,
@@ -161,11 +163,7 @@ pub(crate) fn replace_mailboxes_tx(
         .collect::<Vec<_>>();
     let detail = query_message_detail_tx(tx, account_id, message_id)?
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
-    let affected_mailboxes: BTreeSet<MailboxId> =
-        previous_set.union(&current_set).cloned().collect();
-    let count_deltas =
-        crate::query::mailbox_counts_json_tx(tx, account_id, affected_mailboxes.iter())?;
-    let mut payload = json!({
+    let payload = json!({
         "messageId": message_id.as_str(),
         "changes": {
             "mailboxes": true,
@@ -175,7 +173,6 @@ pub(crate) fn replace_mailboxes_tx(
         "arrivedMailboxIds": arrived_mailbox_ids,
         "projection": &detail.summary,
     });
-    payload["countDeltas"] = count_deltas;
     let event = insert_event_tx(
         tx,
         account_id,
@@ -215,10 +212,7 @@ pub(crate) fn destroy_message_tx(
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     delete_message_tx(tx, account_id, message_id)?;
     refresh_thread_projection_tx(tx, account_id, &thread_id)?;
-    let count_deltas =
-        crate::query::mailbox_counts_json_tx(tx, account_id, previous_mailboxes.iter())?;
-    let mut payload = json!({ "messageId": message_id.as_str(), "deleted": true });
-    payload["countDeltas"] = count_deltas;
+    let payload = json!({ "messageId": message_id.as_str(), "deleted": true });
     let event = insert_event_tx(
         tx,
         account_id,

@@ -4,14 +4,15 @@ import { QueryClient } from '@tanstack/react-query'
 
 import type { DomainEvent } from '../src/api/types'
 import { applyDomainEvent } from '../src/domainCache'
+import { __resetCountInvalidationForTesting } from '../src/domain-cache/mailboxCounts'
 import { mailKeys } from '../src/mailState'
 import { queryKeys } from '../src/queryKeys'
 
-// `message.updated` is the event the entity store owns: it drives the mail-list
-// rows (synthesized view frames) + the mailbox counts (`setQueryData`). The
-// redundant REST invalidations for those store-owned keys are retired
-// unconditionally (the store has no REST fallback), while the surfaces the store
-// does not own (conversations, smart-mailboxes) still invalidate.
+// `message.updated` splits ownership (RFC-L2-count-unification): the entity
+// store owns the mail-list ROWS (synthesized view frames — their REST
+// invalidation stays retired), while mailbox COUNTS are react-query state — a
+// count-affecting event INVALIDATES the count keys (`mailboxes(accountId)`,
+// `smartMailboxes`) and react-query refetches the runtime's canonical counts.
 
 function messageUpdated(changes: {
   arrived?: boolean
@@ -53,7 +54,7 @@ function invalidated(
   return queryClient.getQueryState(key)?.isInvalidated ?? false
 }
 
-describe('applyDomainEvent message.updated (store-owned invalidations retired)', () => {
+describe('applyDomainEvent message.updated (rows store-owned; counts invalidate)', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
@@ -63,35 +64,36 @@ describe('applyDomainEvent message.updated (store-owned invalidations retired)',
   })
 
   afterEach(() => {
+    __resetCountInvalidationForTesting(queryClient)
     queryClient.clear()
   })
 
-  it('skips rows + counts (the store owns them)', () => {
+  it('invalidates counts (not rows) on an arrival', () => {
     seed(queryClient)
 
     applyDomainEvent(queryClient, messageUpdated({ arrived: true }))
 
-    // Store-owned: NOT invalidated (the store drives rows via view frames +
-    // counts via setQueryData).
+    // Store-owned ROWS: NOT invalidated (the store drives them via frames).
     expect(invalidated(queryClient, queryKeys.messagesRoot)).toBe(false)
-    expect(invalidated(queryClient, queryKeys.mailboxes('primary'))).toBe(false)
-    // Not store-owned: still invalidated.
-    expect(invalidated(queryClient, queryKeys.conversationsRoot)).toBe(true)
+    // COUNTS: invalidated → refetch the canonical counts.
+    expect(invalidated(queryClient, queryKeys.mailboxes('primary'))).toBe(true)
     expect(invalidated(queryClient, queryKeys.smartMailboxes)).toBe(true)
+    // Conversations remain non-store-owned: still invalidated.
+    expect(invalidated(queryClient, queryKeys.conversationsRoot)).toBe(true)
   })
 
-  it('skips rows + counts on a keyword-only change', () => {
+  it('invalidates counts on a keyword-only change (mark read/unread)', () => {
     seed(queryClient)
 
     applyDomainEvent(queryClient, messageUpdated({ keywords: true }))
 
     expect(invalidated(queryClient, queryKeys.messagesRoot)).toBe(false)
-    expect(invalidated(queryClient, queryKeys.mailboxes('primary'))).toBe(false)
-    expect(invalidated(queryClient, queryKeys.conversationsRoot)).toBe(true)
+    expect(invalidated(queryClient, queryKeys.mailboxes('primary'))).toBe(true)
     expect(invalidated(queryClient, queryKeys.smartMailboxes)).toBe(true)
+    expect(invalidated(queryClient, queryKeys.conversationsRoot)).toBe(true)
   })
 
-  it('skips rows + counts on a deletion', () => {
+  it('invalidates counts on a deletion (no changes object)', () => {
     seed(queryClient)
 
     const event = messageUpdated({})
@@ -99,8 +101,17 @@ describe('applyDomainEvent message.updated (store-owned invalidations retired)',
     applyDomainEvent(queryClient, event)
 
     expect(invalidated(queryClient, queryKeys.messagesRoot)).toBe(false)
+    expect(invalidated(queryClient, queryKeys.mailboxes('primary'))).toBe(true)
+    expect(invalidated(queryClient, queryKeys.smartMailboxes)).toBe(true)
+    expect(invalidated(queryClient, queryKeys.conversationsRoot)).toBe(true)
+  })
+
+  it('does NOT invalidate counts on a non-count-affecting update', () => {
+    seed(queryClient)
+
+    applyDomainEvent(queryClient, messageUpdated({}))
+
     expect(invalidated(queryClient, queryKeys.mailboxes('primary'))).toBe(false)
     expect(invalidated(queryClient, queryKeys.conversationsRoot)).toBe(true)
-    expect(invalidated(queryClient, queryKeys.smartMailboxes)).toBe(true)
   })
 })

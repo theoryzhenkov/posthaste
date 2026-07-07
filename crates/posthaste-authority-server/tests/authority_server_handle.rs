@@ -2989,17 +2989,16 @@ async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
     assert_eq!(row.projection["isFlagged"], true);
 }
 
-/// A(1) client-liveness (AUDIT-L2-client-liveness §0): the OPTIMISTIC client
-/// echo for a mark-read now carries the store command's ENRICHED
-/// `message.updated` — projection + absolute `countDeltas` — instead of a bare
-/// `{changes:{keywords:true}}` event. That makes a SOURCE (physical) mailbox's
-/// live unread counter move on the echo, sub-second, without waiting for the
-/// follow-up sync/flush round-trip that used to be the only carrier of the
-/// countDeltas (the ~10-15s lag). Because the counts are ABSOLUTE (the current
-/// mailbox row value, maintained by the `is_read` trigger), the echo and the
-/// later sync re-emit are idempotent — no double-count.
+/// A(1) client-liveness (AUDIT-L2-client-liveness §0, updated by
+/// RFC-L2-count-unification): the OPTIMISTIC client echo for a mark-read
+/// carries the store command's ENRICHED `message.updated` — the row-liveness
+/// `projection` — instead of a bare `{changes:{keywords:true}}` event, and it
+/// carries NO countDeltas (the delta channel is deleted). The client reacts to
+/// the echo by invalidating its mailbox-count query; the refetch target — the
+/// store's trigger-maintained canonical count — must already reflect the
+/// mark-read when the echo is observable, which this test asserts.
 #[tokio::test]
-async fn mark_read_echo_carries_enriched_source_mailbox_count_deltas() {
+async fn mark_read_echo_carries_projection_and_no_count_deltas() {
     let root = temp_root();
     let config =
         RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
@@ -3118,8 +3117,8 @@ async fn mark_read_echo_carries_enriched_source_mailbox_count_deltas() {
     assert_eq!(receipt.name, "message.setKeywords");
 
     // The optimistic echo — emitted before the follow-up sync — is a
-    // `message.updated` Notification carrying the enriched countDeltas for the
-    // SOURCE mailbox. Break on the first such frame (the echo).
+    // `message.updated` Notification carrying the enriched projection. Break
+    // on the first such frame (the echo).
     let payload = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             let frame = subscription
@@ -3143,21 +3142,32 @@ async fn mark_read_echo_carries_enriched_source_mailbox_count_deltas() {
         inner["projection"].is_object(),
         "the echo carries the message projection — the same enriched shape the sync path emits",
     );
-    let count_deltas = inner["countDeltas"]
-        .as_array()
-        .expect("the echo carries countDeltas (not the old bare event)");
-    let inbox = count_deltas
-        .iter()
-        .find(|delta| delta["mailboxId"] == "mb-inbox")
-        .expect("countDeltas include the source mailbox");
-    assert_eq!(
-        inbox["unreadCount"],
-        serde_json::json!(unread_before - 1),
-        "mark-read drops the source mailbox unread count by one on the echo — no sync wait",
+    assert!(
+        inner.get("countDeltas").is_none(),
+        "the countDelta channel is deleted (RFC-L2-count-unification): the echo carries no counts",
     );
     assert_eq!(
         inner["projection"]["isRead"], true,
         "the echoed projection reflects the applied mark-read",
+    );
+
+    // The invalidation refetch target: by the time the echo is observable, the
+    // canonical (trigger-maintained) source-mailbox unread count has already
+    // dropped — a client that invalidates on this echo refetches the correct
+    // value, no sync wait.
+    let unread_after = build
+        .api_bridge
+        .store
+        .list_mailboxes(&account.id)
+        .expect("list mailboxes")
+        .into_iter()
+        .find(|mailbox| mailbox.id == MailboxId::from("mb-inbox"))
+        .expect("mb-inbox exists")
+        .unread_emails;
+    assert_eq!(
+        unread_after,
+        unread_before - 1,
+        "mark-read drops the canonical source-mailbox unread count by one",
     );
 }
 

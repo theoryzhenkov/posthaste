@@ -1,33 +1,46 @@
 /**
- * Scenario — §0 client-liveness regression guard: the SOURCE mailbox unread
- * counter must move LIVE (no reload) when the user marks a message read.
+ * Scenario — counter-liveness regression guard, rewritten for the invalidation
+ * model (RFC-L2-count-unification).
  *
- * The 0.4.0 nightly has the §0 server-side fix (ff6b2d0d): the client-mutation
- * ECHO `message.updated` now carries projection + absolute `countDeltas`, the
- * SAME shape the sync-apply path emits. The owner still reproduces: marking a
- * message read flips the row's read-state but the sidebar mailbox unread COUNTER
- * does not decrement — neither on the optimistic echo NOR on a manual sync; only
- * a full reload fixes it.
+ * The countDelta subsystem produced the same bug three times (§0 source-lag,
+ * projection-less-drop, split-drop): every emit path had to attach deltas and
+ * the client had to apply each exactly-once — a single miss froze the counter
+ * until reload. It is DELETED. Counts now ride react-query invalidation: a
+ * count-affecting `message.updated` invalidates the affected mailbox count key
+ * and react-query refetches the runtime's canonical (trigger-maintained)
+ * count. Self-correcting by construction — there is nothing to drop.
  *
  * This drives the REAL entity-store adapter + real wasm store over the fake
- * transport and asserts the live-store counter slice (`useMailboxCounts` reads
- * `getMailboxCounts`) decrements from an enriched `message.updated`:
+ * transport, and feeds delivered notification frames through the REAL
+ * domain-cache event dispatch (`applyDomainEvent` — what `useDaemonEvents`
+ * calls), with an ACTIVE react-query observer on `mailboxes('s')` whose
+ * queryFn serves the scripted "server" (canonical) counts. Asserted behavior:
+ * event → key invalidated → refetched count correct, for
  *
- *  (a) SYNC path: an enriched `message.updated` arriving on the stream (a manual
- *      sync's re-emit) decrements the source counter, no reload.
- *  (b) ECHO path: a client `runMutation` mark-read followed by the enriched echo
- *      decrements the source counter, no reload.
+ *  (a) mark-read (unread--), sync-applied or echo — the same event shape;
+ *  (b) a move between mailboxes (both sides refetch correct);
+ *  (c) a trash/expunge (`deleted: true`, no projection);
+ *  (d) the SPLIT topology path — the bare down-channel republish (no
+ *      projection, broad change flags) still fires the invalidation (the
+ *      third bug's class: that event used to be dropped whole);
+ *  (e) a sync BURST coalesces into ~one refetch per window (leading +
+ *      trailing), landing the final correct count;
+ *  (f) the D2 overlay: the user's OWN mark-read adjusts the cached count
+ *      immediately, then the echo's invalidation reconciles it to the server
+ *      value.
  *
- * @spec docs/eph/AUDIT-L2-client-liveness.md (§0)
+ * @spec docs/eph/RFC-L2-count-unification.md
  */
 import { afterEach, describe, expect, it } from 'bun:test'
+import { QueryObserver } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 
 import { createClientHarness, messageUpdatedFrame } from '../index'
-import {
-  __resetLiveStoreForTesting,
-  getMailboxCounts,
-} from '../../../src/live-store/store'
-import type { Mailbox } from '../../../src/api/types'
+import { applyDomainEvent } from '../../../src/domainCache'
+import { __resetCountInvalidationForTesting } from '../../../src/domain-cache/mailboxCounts'
+import { __resetLiveStoreForTesting } from '../../../src/live-store/store'
+import { queryKeys } from '../../../src/queryKeys'
+import type { DomainEvent, Mailbox } from '../../../src/api/types'
 import type {
   RuntimeFrame,
   RuntimeLinkViewRequest,
@@ -46,16 +59,21 @@ const VIEW_REQUEST: RuntimeLinkViewRequest = {
   },
 }
 
-const inbox = (unread: number, total: number): Mailbox =>
+const mailbox = (
+  id: string,
+  role: string,
+  unread: number,
+  total: number,
+): Mailbox =>
   ({
-    id: 'inbox',
-    name: 'Inbox',
-    role: 'inbox',
+    id,
+    name: id,
+    role,
     unreadEmails: unread,
     totalEmails: total,
   }) as Mailbox
 
-/** m1 is unread in inbox; the seed row the view holds. */
+/** m1's post-mark-read projection (row liveness food; carries NO counts). */
 const m1Read = {
   id: 'm1',
   sourceId: 's',
@@ -83,114 +101,332 @@ function markRead(
   }
 }
 
-/** A `message.updated` that carries `countDeltas` but NO projection — the shape a
- *  count-only metadata event (or the split-runtime down-channel) emits. The
- *  client must still apply its counts, not drop the whole event. */
-function countOnlyFrame(
+/** The SPLIT topology's bare down-channel republish: an assertion WITHOUT a
+ *  carried event synthesizes `{changes:{keywords,mailboxes}}` with no
+ *  projection (`down_assertion_to_event`'s fallback). Under countDeltas this
+ *  shape was dropped whole (the third bug); under invalidation it must still
+ *  fire the count refetch. */
+function bareSplitFrame(
   messageId: string,
-  countDeltas: Array<{
-    mailboxId: string
-    unreadCount: number
-    totalCount: number
-  }>,
   accountId = 's',
 ): RuntimeFrame<RuntimeMailListViewState> {
   return {
     type: 'notification',
-    linkSeq: 101,
+    linkSeq: 102,
     kind: 'message.updated',
     payload: {
-      seq: 2,
+      seq: 3,
       accountId,
       topic: 'message.updated',
       occurredAt: 'now',
-      payload: { messageId, countDeltas },
+      payload: { messageId, changes: { keywords: true, mailboxes: true } },
     },
   } as RuntimeFrame<RuntimeMailListViewState>
 }
 
+/** A trash/expunge event: `deleted: true`, no `changes` object. */
+function deletedFrame(
+  messageId: string,
+  accountId = 's',
+): RuntimeFrame<RuntimeMailListViewState> {
+  return {
+    type: 'notification',
+    linkSeq: 103,
+    kind: 'message.updated',
+    payload: {
+      seq: 4,
+      accountId,
+      topic: 'message.updated',
+      occurredAt: 'now',
+      payload: { messageId, deleted: true },
+    },
+  } as RuntimeFrame<RuntimeMailListViewState>
+}
+
+/** Route delivered notification frames through the real domain-cache dispatch
+ *  (what `useDaemonEvents` does in production). */
+function dispatchNotifications(
+  queryClient: QueryClient,
+  frames: RuntimeFrame<RuntimeMailListViewState>[],
+  from = 0,
+): void {
+  for (const frame of frames.slice(from)) {
+    if (frame.type === 'notification') {
+      applyDomainEvent(queryClient, frame.payload as DomainEvent)
+    }
+  }
+}
+
+/** Poll until `predicate` holds (invalidation refetches settle async). */
+async function until(
+  predicate: () => boolean,
+  timeoutMs = 2000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error('condition not reached in time')
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
+/** Mount an active observer over `mailboxes('s')` whose queryFn serves the
+ *  scripted canonical counts, counting its fetches. */
+function mountCountObserver(
+  queryClient: QueryClient,
+  server: () => Mailbox[],
+): { fetches: () => number; unsubscribe: () => void } {
+  let fetches = 0
+  const observer = new QueryObserver<Mailbox[]>(queryClient, {
+    queryKey: queryKeys.mailboxes('s'),
+    queryFn: () => {
+      fetches += 1
+      return Promise.resolve(server())
+    },
+  })
+  const unsubscribe = observer.subscribe(() => {})
+  return { fetches: () => fetches, unsubscribe }
+}
+
+const inboxUnread = (queryClient: QueryClient): number | undefined =>
+  queryClient
+    .getQueryData<Mailbox[]>(queryKeys.mailboxes('s'))
+    ?.find((m) => m.id === 'inbox')?.unreadEmails
+
+let cleanup: (() => void)[] = []
+
 afterEach(() => {
+  // LIFO: observers unsubscribe before the harness (and its query client)
+  // dispose.
+  for (const fn of cleanup.reverse()) {
+    fn()
+  }
+  cleanup = []
   __resetLiveStoreForTesting()
 })
 
-describe('scenario §0: source-mailbox unread counter moves live on mark-read', () => {
-  it('(a) SYNC: an enriched message.updated decrements the source counter, no reload', async () => {
+describe('scenario: mailbox counts refetch on invalidation (RFC-L2-count-unification)', () => {
+  it('(a) a mark-read message.updated invalidates the count key and the refetch lands unread-1', async () => {
     const h = await createClientHarness({
-      mailboxes: [inbox(1, 1)],
+      mailboxes: [mailbox('inbox', 'inbox', 1, 1)],
       rows: [
         { messageId: 'm1', receivedAt: '2026-04-29T10:00:00Z', keywords: [] },
       ],
     })
+    cleanup.push(() => {
+      __resetCountInvalidationForTesting(h.queryClient)
+      h.dispose()
+    })
     await h.openView(VIEW_REQUEST)
 
-    // The manual sync re-emits an enriched message.updated: m1 now read, inbox
-    // unread drops to 0 (absolute count).
-    h.emitFrame(
-      messageUpdatedFrame('m1', m1Read, [
-        { mailboxId: 'inbox', unreadCount: 0, totalCount: 1 },
-      ]),
-    )
+    // The canonical count the store's triggers maintain: after the mark-read
+    // the server reads unread 0 / total 1.
+    let server = [mailbox('inbox', 'inbox', 1, 1)]
+    const observer = mountCountObserver(h.queryClient, () => server)
+    cleanup.push(observer.unsubscribe)
+    await until(() => observer.fetches() >= 1)
+
+    server = [mailbox('inbox', 'inbox', 0, 1)]
+    h.emitFrame(messageUpdatedFrame('m1', m1Read))
     await h.flush()
+    dispatchNotifications(h.queryClient, h.frames)
 
-    expect(getMailboxCounts('s').inbox).toEqual({ unread: 0, total: 1 })
-
-    h.dispose()
+    await until(() => inboxUnread(h.queryClient) === 0)
+    expect(inboxUnread(h.queryClient)).toBe(0)
   })
 
-  it('(b) ECHO: mark-read via runMutation + enriched echo decrements the source counter, no reload', async () => {
+  it('(b) a move invalidates once and the refetch lands BOTH sides correct', async () => {
     const h = await createClientHarness({
-      mailboxes: [inbox(1, 1)],
+      mailboxes: [
+        mailbox('inbox', 'inbox', 1, 1),
+        mailbox('archive', 'archive', 0, 0),
+      ],
       rows: [
         { messageId: 'm1', receivedAt: '2026-04-29T10:00:00Z', keywords: [] },
       ],
     })
+    cleanup.push(() => {
+      __resetCountInvalidationForTesting(h.queryClient)
+      h.dispose()
+    })
     await h.openView(VIEW_REQUEST)
 
-    // The user marks m1 read — the optimistic fold flips the row (read-state),
-    // but per §0 does NOT touch the count.
+    let server = [
+      mailbox('inbox', 'inbox', 1, 1),
+      mailbox('archive', 'archive', 0, 0),
+    ]
+    const observer = mountCountObserver(h.queryClient, () => server)
+    cleanup.push(observer.unsubscribe)
+    await until(() => observer.fetches() >= 1)
+
+    // The move lands server-side: inbox empties, archive gains the unread.
+    server = [
+      mailbox('inbox', 'inbox', 0, 0),
+      mailbox('archive', 'archive', 1, 1),
+    ]
+    h.emitFrame(
+      messageUpdatedFrame(
+        'm1',
+        { ...m1Read, keywords: [], isRead: false, mailboxIds: ['archive'] },
+        's',
+        { mailboxes: true, arrived: true },
+      ),
+    )
+    await h.flush()
+    dispatchNotifications(h.queryClient, h.frames)
+
+    await until(() => inboxUnread(h.queryClient) === 0)
+    const rows = h.queryClient.getQueryData<Mailbox[]>(queryKeys.mailboxes('s'))
+    expect(rows?.find((m) => m.id === 'inbox')?.totalEmails).toBe(0)
+    expect(rows?.find((m) => m.id === 'archive')?.unreadEmails).toBe(1)
+    expect(rows?.find((m) => m.id === 'archive')?.totalEmails).toBe(1)
+  })
+
+  it('(c) a trash/expunge (deleted:true, no changes object) still invalidates + refetches', async () => {
+    const h = await createClientHarness({
+      mailboxes: [mailbox('inbox', 'inbox', 1, 1)],
+      rows: [
+        { messageId: 'm1', receivedAt: '2026-04-29T10:00:00Z', keywords: [] },
+      ],
+    })
+    cleanup.push(() => {
+      __resetCountInvalidationForTesting(h.queryClient)
+      h.dispose()
+    })
+    await h.openView(VIEW_REQUEST)
+
+    let server = [mailbox('inbox', 'inbox', 1, 1)]
+    const observer = mountCountObserver(h.queryClient, () => server)
+    cleanup.push(observer.unsubscribe)
+    await until(() => observer.fetches() >= 1)
+
+    server = [mailbox('inbox', 'inbox', 0, 0)]
+    h.emitFrame(deletedFrame('m1'))
+    await h.flush()
+    dispatchNotifications(h.queryClient, h.frames)
+
+    await until(() => inboxUnread(h.queryClient) === 0)
+    expect(
+      h.queryClient
+        .getQueryData<Mailbox[]>(queryKeys.mailboxes('s'))
+        ?.find((m) => m.id === 'inbox')?.totalEmails,
+    ).toBe(0)
+  })
+
+  it('(d) SPLIT: the bare down-channel republish (no projection) still fires the invalidation', async () => {
+    // The third bug's class: a projection-less event over the link used to be
+    // dropped whole, counts included. Under invalidation the event itself is
+    // the trigger — no payload enrichment required.
+    const h = await createClientHarness({
+      mailboxes: [mailbox('inbox', 'inbox', 5, 9)],
+      rows: [
+        { messageId: 'm1', receivedAt: '2026-04-29T10:00:00Z', keywords: [] },
+      ],
+    })
+    cleanup.push(() => {
+      __resetCountInvalidationForTesting(h.queryClient)
+      h.dispose()
+    })
+    await h.openView(VIEW_REQUEST)
+
+    let server = [mailbox('inbox', 'inbox', 5, 9)]
+    const observer = mountCountObserver(h.queryClient, () => server)
+    cleanup.push(observer.unsubscribe)
+    await until(() => observer.fetches() >= 1)
+
+    // Another client marked a message read at the far node; the near node's
+    // refetch (over the link) serves the updated canonical count.
+    server = [mailbox('inbox', 'inbox', 4, 9)]
+    h.emitFrame(bareSplitFrame('m1'))
+    await h.flush()
+    dispatchNotifications(h.queryClient, h.frames)
+
+    await until(() => inboxUnread(h.queryClient) === 4)
+    expect(inboxUnread(h.queryClient)).toBe(4)
+  })
+
+  it('(e) a burst of events coalesces into ~one refetch per window, final count correct', async () => {
+    const h = await createClientHarness({
+      mailboxes: [mailbox('inbox', 'inbox', 40, 40)],
+      rows: [
+        { messageId: 'm1', receivedAt: '2026-04-29T10:00:00Z', keywords: [] },
+      ],
+    })
+    cleanup.push(() => {
+      __resetCountInvalidationForTesting(h.queryClient)
+      h.dispose()
+    })
+    await h.openView(VIEW_REQUEST)
+
+    let unread = 40
+    const observer = mountCountObserver(h.queryClient, () => [
+      mailbox('inbox', 'inbox', unread, 40),
+    ])
+    cleanup.push(observer.unsubscribe)
+    await until(() => observer.fetches() >= 1)
+    const before = observer.fetches()
+
+    // A sync burst: 20 count-affecting events land back-to-back while the
+    // canonical count drains to 20.
+    for (let i = 0; i < 20; i += 1) {
+      unread -= 1
+      h.emitFrame(
+        messageUpdatedFrame(`m${i}`, {
+          ...m1Read,
+          id: `m${i}`,
+          subject: `m${i}`,
+        }),
+      )
+    }
+    await h.flush()
+    dispatchNotifications(h.queryClient, h.frames)
+
+    // Leading fire lands immediately; the trailing fire (after the window)
+    // reconciles to the final value. 20 events must NOT mean 20 refetches.
+    await until(() => inboxUnread(h.queryClient) === 20, 3000)
+    const burstFetches = observer.fetches() - before
+    expect(burstFetches).toBeLessThanOrEqual(3)
+    expect(inboxUnread(h.queryClient)).toBe(20)
+  })
+
+  it("(f) OVERLAY: the user's own mark-read adjusts the count immediately, then the echo reconciles", async () => {
+    const h = await createClientHarness({
+      mailboxes: [mailbox('inbox', 'inbox', 1, 1)],
+      rows: [
+        { messageId: 'm1', receivedAt: '2026-04-29T10:00:00Z', keywords: [] },
+      ],
+    })
+    cleanup.push(() => {
+      __resetCountInvalidationForTesting(h.queryClient)
+      h.dispose()
+    })
+    await h.openView(VIEW_REQUEST)
+
+    let server = [mailbox('inbox', 'inbox', 1, 1)]
+    const observer = mountCountObserver(h.queryClient, () => server)
+    cleanup.push(observer.unsubscribe)
+    await until(() => observer.fetches() >= 1)
+
+    // The user marks m1 read: the overlay decrements the cached count
+    // IMMEDIATELY — before any event or refetch.
     await h.adapter.runRuntimeMutation(markRead('m1', 'c-mark-read'))
     await h.flush()
+    expect(inboxUnread(h.queryClient)).toBe(0)
 
-    // The client-mutation ECHO (the §0 fix's enriched event) arrives on the same
-    // notification channel the sync uses: projection isRead:true + absolute
-    // countDeltas unread 0.
-    h.emitFrame(
-      messageUpdatedFrame('m1', m1Read, [
-        { mailboxId: 'inbox', unreadCount: 0, totalCount: 1 },
-      ]),
-    )
+    // The settlement echo arrives (canonical already updated server-side):
+    // the invalidation refetch reconciles the overlay to the same value.
+    server = [mailbox('inbox', 'inbox', 0, 1)]
+    const frameCountBeforeEcho = h.frames.length
+    h.emitFrame(messageUpdatedFrame('m1', m1Read))
     await h.flush()
+    dispatchNotifications(h.queryClient, h.frames, frameCountBeforeEcho)
 
-    // The sidebar counter (getMailboxCounts / useMailboxCounts) must decrement
-    // LIVE — without a reload.
-    expect(getMailboxCounts('s').inbox).toEqual({ unread: 0, total: 1 })
-
-    h.dispose()
-  })
-
-  it('(c) COUNT-ONLY: a projection-less message.updated still applies its countDeltas (was dropped)', async () => {
-    // Fail-before / pass-after: `storeUpdatesFromEvent` used to return null for a
-    // non-deleted event with no projection, DROPPING its countDeltas — so the
-    // counter slice ingested live counts from no such source and the sidebar
-    // froze until reload. The fix routes the countDeltas as standalone
-    // MailboxCount updates so the counter still moves.
-    const h = await createClientHarness({
-      mailboxes: [inbox(1, 1)],
-      rows: [
-        { messageId: 'm1', receivedAt: '2026-04-29T10:00:00Z', keywords: [] },
-      ],
-    })
-    await h.openView(VIEW_REQUEST)
-
-    h.emitFrame(
-      countOnlyFrame('m1', [
-        { mailboxId: 'inbox', unreadCount: 0, totalCount: 1 },
-      ]),
+    await until(
+      () =>
+        h.queryClient.getQueryState(queryKeys.mailboxes('s'))?.isInvalidated ===
+          false && inboxUnread(h.queryClient) === 0,
     )
-    await h.flush()
-
-    expect(getMailboxCounts('s').inbox).toEqual({ unread: 0, total: 1 })
-
-    h.dispose()
+    expect(inboxUnread(h.queryClient)).toBe(0)
   })
 })
