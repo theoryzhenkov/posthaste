@@ -59,6 +59,16 @@ pub(crate) fn surface_route(surface: &SurfaceDescriptor) -> String {
     }
 }
 
+/// The URL a standalone surface window loads. Always the one real bundled
+/// document (`index.html`) with the surface route — query params included —
+/// carried in the URL FRAGMENT, so every window on every platform loads the
+/// same file and never depends on SPA path-fallback behavior in the asset
+/// protocol. The client reads the route (and its query) from `location.hash`
+/// (see `apps/web/src/surfaces/location.ts`).
+pub(crate) fn surface_window_url(surface: &SurfaceDescriptor) -> String {
+    format!("index.html#{}", surface_route(surface))
+}
+
 pub(crate) fn surface_window_navigation_script(route: &str) -> String {
     let route_json = serde_json::to_string(route).expect("surface route should serialize to JSON");
     format!(

@@ -110,6 +110,48 @@ describe('surface routes', () => {
     ).toEqual({ kind: 'none' })
   })
 
+  it('parses the query from inside the hash exactly like a pathname route', () => {
+    // Desktop surface windows load `index.html#/surface/...?...` — the whole
+    // route INCLUDING its query lives in location.hash and location.search is
+    // EMPTY. That must parse identically to the dev-server/e2e pathname form.
+    const routes = [
+      '/surface/settings?category=accounts&targetKind=account&accountId=primary',
+      '/surface/message?conversationId=conversation%2F1&sourceId=source%3Aprimary&messageId=message%201',
+      '/surface/compose?composeKind=reply&sourceId=source%3Aprimary&messageId=message%201',
+      '/surface/attachment?sourceId=source%3Aprimary&messageId=message%201&attachmentId=part%2F2',
+    ]
+
+    for (const route of routes) {
+      const [pathname, search] = route.split('?') as [string, string]
+      const fromHash = surfaceRouteStateFromLocation({
+        hash: `#${route}`,
+        pathname: '/',
+        search: '',
+      })
+      const fromPathname = surfaceRouteStateFromLocation({
+        hash: '',
+        pathname,
+        search: `?${search}`,
+      })
+
+      expect(fromHash.kind).toBe('valid')
+      expect(fromHash).toEqual(fromPathname)
+    }
+
+    // Target params extracted from the hash's own query, not location.search.
+    const settings = surfaceRouteStateFromLocation({
+      hash: '#/surface/settings?category=accounts&targetKind=account&accountId=primary',
+      pathname: '/',
+      search: '',
+    })
+    expect(settings).toEqual({
+      kind: 'valid',
+      route:
+        '/surface/settings?category=accounts&targetKind=account&accountId=primary',
+      surface: accountSettingsSurface('primary'),
+    })
+  })
+
   it('rejects incomplete message routes', () => {
     expect(parseSurfaceRoute('/surface/message?sourceId=primary')).toBeNull()
   })

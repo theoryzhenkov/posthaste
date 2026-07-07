@@ -19,14 +19,14 @@ use backend_injection::{
 };
 use desktop_windows::{
     build_window, close_remembered_webview_window, open_external_url, open_surface_window,
-    toggle_devtools,
+    surface_webview_booted, toggle_devtools, WebviewBootAcks,
 };
 use frontend_logging::log_from_frontend;
 #[cfg(test)]
 use frontend_logging::log_token;
 use surface_routes::{
     surface_route, surface_title, surface_window_label, surface_window_navigation_script,
-    surface_window_size, validate_surface_descriptor,
+    surface_window_size, surface_window_url, validate_surface_descriptor,
 };
 use surface_types::*;
 
@@ -114,6 +114,7 @@ pub fn run() {
         log_from_frontend,
         open_external_url,
         open_surface_window,
+        surface_webview_booted,
         toggle_devtools,
         release_channel,
         client_connection::client_connections_read,
@@ -133,6 +134,7 @@ pub fn run() {
         log_from_frontend,
         open_external_url,
         open_surface_window,
+        surface_webview_booted,
         toggle_devtools,
         release_channel,
         client_connection::client_connections_read,
@@ -216,6 +218,7 @@ pub fn run() {
         let backend = BackendInjection::none();
 
         app.manage(FocusedWindowLabel::new(MAIN_WINDOW_LABEL));
+        app.manage(WebviewBootAcks::default());
         #[cfg(feature = "e2e-testing")]
         app.manage(e2e::E2eBridgeState::default());
 
@@ -255,7 +258,7 @@ pub fn run() {
 #[cfg(test)]
 use desktop_windows::{
     is_closeable_surface_window_label, is_external_web_url, is_main_window_label,
-    validate_external_url,
+    surface_close_action, validate_external_url, SurfaceCloseAction,
 };
 
 #[cfg(test)]

@@ -101,6 +101,27 @@ export function surfacePopupFeatures(surface: SurfaceDescriptor): string {
   ].join(',')
 }
 
+/**
+ * ACK frontend boot to the desktop backend (`surface_webview_booted`).
+ *
+ * Close-path defense in depth: the backend force-destroys a window whose
+ * webview never ACKed when it is asked to close, so a frontend that fails to
+ * load can never leave an unclosable window. A booted webview keeps the
+ * guarded close flow (e.g. the compose close-guard). Fired from `main.tsx` as
+ * soon as the bundle executes; best-effort so a backend without the command
+ * can never break boot.
+ */
+export async function ackDesktopWebviewBoot(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return
+  }
+  try {
+    await invoke('surface_webview_booted')
+  } catch {
+    // Best-effort: boot must proceed even if the ACK command is unavailable.
+  }
+}
+
 export async function listenForDesktopCloseRequest(
   handler: () => void,
 ): Promise<() => void> {
