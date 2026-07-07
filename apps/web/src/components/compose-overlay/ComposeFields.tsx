@@ -11,6 +11,7 @@ import {
 } from '../composeFormHelpers'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
+import { filesFromDataTransfer } from './attachments'
 import { ComposeLine } from './ComposeLine'
 import { RecipientSuggestionInput } from './RecipientSuggestionInput'
 
@@ -28,6 +29,8 @@ interface ComposeFieldsProps {
     field: K,
     value: ComposeForm[K],
   ) => void
+  /** Files pasted (Cmd+V) while a recipient/subject field is focused → attachments. */
+  onPasteFiles?: (files: File[]) => void
 }
 
 export function ComposeFields({
@@ -41,9 +44,22 @@ export function ComposeFields({
   setFromInputFocused,
   setFromMenuOpen,
   onFieldChange,
+  onPasteFiles,
 }: ComposeFieldsProps) {
   return (
-    <div className="grid shrink-0 gap-2 border-b border-border/70 px-4 py-3">
+    <div
+      className="grid shrink-0 gap-2 border-b border-border/70 px-4 py-3"
+      onPaste={(event) => {
+        // Only intercept pastes that carry files (a copied file / screenshot)
+        // — plain text pastes into the inputs stay untouched.
+        const files = filesFromDataTransfer(event.clipboardData)
+        if (files.length === 0 || !onPasteFiles) {
+          return
+        }
+        event.preventDefault()
+        onPasteFiles(files)
+      }}
+    >
       <ComposeLine label="From">
         <div className="relative flex min-w-0 items-center gap-1">
           <Input

@@ -16,6 +16,7 @@ export function ComposeBodyEditor({
   noticeLabel,
   preparingLabel,
   onChange,
+  onFiles,
   value,
 }: {
   bodyRef: RefObject<MarkdownComposerEditorHandle | null>
@@ -30,6 +31,8 @@ export function ComposeBodyEditor({
   noticeLabel: string | null
   preparingLabel: string
   onChange: (value: string) => void
+  /** Files pasted (Cmd+V) into or dropped onto the body editor → attachments. */
+  onFiles?: (files: File[]) => void
   value: string
 }) {
   return (
@@ -64,6 +67,7 @@ export function ComposeBodyEditor({
                 ref={bodyRef}
                 value={value}
                 onChange={onChange}
+                onFiles={onFiles}
                 placeholder="Write Markdown"
               />
             </Suspense>

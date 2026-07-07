@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react'
 
 import {
   EMPTY_FORM,
+  composeAttachmentFromFile,
   type ComposeForm,
 } from '../src/components/composeFormHelpers'
 import { useComposeAutosave } from '../src/components/compose-overlay/useComposeAutosave'
@@ -143,5 +144,35 @@ describe('useComposeAutosave — traditional (no continuous autosave)', () => {
     })
     expect(deleteSpy).not.toHaveBeenCalled()
     deleteSpy.mockRestore()
+  })
+
+  it('serializes a pasted attachment into the saved draft (autosave round-trip, save half)', async () => {
+    const saveSpy = spyOn(
+      runtimeMutations.messages,
+      'saveDraft',
+    ).mockResolvedValue({} as never)
+    const pasted = composeAttachmentFromFile(
+      new File(['pasted bytes'], 'pasted-image-1.png', { type: 'image/png' }),
+    )
+    const { result } = renderAutosave({
+      form: form({ body: 'hi', attachments: [pasted] }),
+    })
+
+    await act(async () => {
+      await result.current.saveDraft()
+    })
+
+    // The draft carries the pasted file's name, MIME type and content — the
+    // reopen half (attachments seeded back into the form) is covered in
+    // composeFormStateForward.test.tsx.
+    const saved = saveSpy.mock.calls[0][0].input.message.attachments
+    expect(saved).toEqual([
+      {
+        filename: 'pasted-image-1.png',
+        mimeType: 'image/png',
+        contentBase64: btoa('pasted bytes'),
+      },
+    ])
+    saveSpy.mockRestore()
   })
 })

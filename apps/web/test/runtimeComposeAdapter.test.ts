@@ -17,11 +17,15 @@ const identity: Identity = {
 const replyContext: ReplyContext = {
   to: [],
   cc: [],
+  originalTo: [],
   replySubject: 'Re: Subject',
   forwardSubject: 'Fwd: Subject',
   quotedBody: null,
+  forwardedBody: null,
   inReplyTo: 'message-id',
   references: 'message-id',
+  originalFrom: [],
+  originalDate: null,
 }
 
 const sendInput: SendMessageInput = {
