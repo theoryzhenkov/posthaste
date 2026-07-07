@@ -208,6 +208,20 @@ pub const STORE_STARTUP_BODY_CACHE_REPAIR_FAILED: LogEvent =
 pub const STORE_STARTUP_ADDRESS_BOOK_BACKFILL_FAILED: LogEvent =
     LogEvent::new("store.startup.address_book_backfill_failed");
 
+/// The deferred post-startup full-text-index backfill (the FTS5 `rebuild`
+/// that repopulates `message_fts` after the body-indexing migration dropped
+/// the old header-only index) failed. Non-fatal — the store is serving and
+/// the trigger-maintained index stays consistent for NEW writes; the rebuild
+/// is idempotent and re-runs on the next startup, but until it succeeds text
+/// search on the upgraded database misses pre-upgrade mail.
+pub const STORE_STARTUP_MESSAGE_FTS_BACKFILL_FAILED: LogEvent =
+    LogEvent::new("store.startup.message_fts_backfill_failed");
+
+/// The deferred post-startup full-text-index backfill ran the one-time FTS5
+/// `rebuild` (upgrade path only: messages existed while the index was empty).
+pub const STORE_STARTUP_MESSAGE_FTS_BACKFILL_COMPLETED: LogEvent =
+    LogEvent::new("store.startup.message_fts_backfill_completed");
+
 pub const SUPERVISOR_ACCOUNT_DISABLED: LogEvent = LogEvent::new("supervisor.account.disabled");
 pub const SUPERVISOR_ACCOUNT_REMOVED: LogEvent = LogEvent::new("supervisor.account.removed");
 pub const SUPERVISOR_ACCOUNT_RUNTIME_STARTED: LogEvent =

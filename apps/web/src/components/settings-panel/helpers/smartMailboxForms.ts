@@ -71,6 +71,7 @@ export const FIELD_OPTIONS: Array<{ value: MailQueryField; label: string }> = [
   { value: 'to', label: 'To (recipient)' },
   { value: 'subject', label: 'Subject' },
   { value: 'preview', label: 'Preview' },
+  { value: 'body', label: 'Body (full-text)' },
   { value: 'receivedAt', label: 'Received at' },
   { value: 'size', label: 'Size' },
 ]

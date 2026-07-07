@@ -51,6 +51,13 @@ pub enum MailQueryField {
     To,
     Subject,
     Preview,
+    /// Full message body text, matched via the FTS5 `message_fts` index (the
+    /// `body` column, fed from the body cache's `message_body.body_text`).
+    /// `contains` is a *token/phrase* match (porter-stemmed, diacritics
+    /// removed, last token treated as a prefix) — not a raw substring `LIKE`
+    /// like [`Preview`](Self::Preview). A message whose body has not been
+    /// cached yet is not body-searchable until the cache warms it.
+    Body,
     ReceivedAt,
     /// Message byte size (`message.size`), compared numerically. Reuses the
     /// neutral ordered operators (`Lt`/`Gt`/`Le`/`Ge`) as `< > <= >=`; the

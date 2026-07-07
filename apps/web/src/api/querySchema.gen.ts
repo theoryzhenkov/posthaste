@@ -43,6 +43,7 @@ export const QUERY_FIELD_SCHEMA: Record<MailQueryField, QueryFieldSchema> = {
   to: { valueType: 'text', operators: ['equals', 'contains', 'in', 'beginsWith', 'endsWith', 'regex'] },
   subject: { valueType: 'text', operators: ['equals', 'contains', 'in', 'beginsWith', 'endsWith', 'regex'] },
   preview: { valueType: 'text', operators: ['equals', 'contains', 'in', 'beginsWith', 'endsWith', 'regex'] },
+  body: { valueType: 'text', operators: ['contains'] },
   receivedAt: { valueType: 'date', operators: ['lt', 'gt', 'le', 'ge'] },
   size: { valueType: 'number', operators: ['lt', 'gt', 'le', 'ge'] },
 }
@@ -66,6 +67,7 @@ export const ALL_QUERY_FIELDS: readonly MailQueryField[] = [
   'to',
   'subject',
   'preview',
+  'body',
   'receivedAt',
   'size',
 ]

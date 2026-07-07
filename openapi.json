@@ -6210,6 +6210,7 @@
           "to",
           "subject",
           "preview",
+          "body",
           "receivedAt",
           "size"
         ]
