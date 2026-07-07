@@ -281,7 +281,7 @@ fn m30_authz_deny_reason_is_logged() {
     let token = crate::token::mint_with_caveats(&root, &["account = acct-a"]);
     let presented = crate::auth::PresentedToken(token);
     let ctx = crate::authz::CaveatContext {
-        action: crate::authz::Action::Read,
+        action: Some(crate::authz::Action::Read),
         account: Some("acct-b".to_string()),
         mailbox: None,
         message: None,

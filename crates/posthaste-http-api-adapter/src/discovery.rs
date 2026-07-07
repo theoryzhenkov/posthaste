@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(caveats.len(), 1, "exactly one narrowing caveat");
 
         let ctx = |action: crate::authz::Action| crate::authz::CaveatContext {
-            action,
+            action: Some(action),
             account: None,
             mailbox: None,
             message: None,

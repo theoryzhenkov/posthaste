@@ -180,8 +180,16 @@ async fn runtime_link_routes_filter_on_source_id() {
     }
 }
 
+/// The mutation funnel's PERIMETER check: the resource filter (account via
+/// `sourceId`) keeps its full force, while the ACTION axis is deferred — the
+/// route is `RouteAction::HandlerDerived`, and the REAL handler derives and
+/// enforces the per-operation action (setKeywords→tag, destroy→delete, …)
+/// before dispatch. The stub handler here therefore answers 200 for any verb
+/// set; the per-operation matrix (including read-only → 403 on every op) is
+/// covered by `mutation_op_cases.rs` against the real router and by the
+/// handler-level unit tests in `posthaste-http-api-adapter`.
 #[tokio::test]
-async fn runtime_link_mutation_route_filters_on_source_id_and_tag_action() {
+async fn runtime_link_mutation_route_filters_on_source_id_with_action_deferred() {
     let t = mint_with_caveats(&test_root_key(), &["action = tag", "account = acct-a"]);
     assert_eq!(
         status(
@@ -206,10 +214,26 @@ async fn runtime_link_mutation_route_filters_on_source_id_and_tag_action() {
         StatusCode::FORBIDDEN
     );
 
+    // Action deferral at the perimeter: a read-only token passes the
+    // MIDDLEWARE (the stub answers 200)…
     let read_only = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
     assert_eq!(
         status(
             &read_only,
+            "POST",
+            "/v1/runtime/sessions/link-1/mutations?sourceId=acct-a",
+        )
+        .await,
+        StatusCode::OK
+    );
+    // …but its resource caveats still gate, and every expiry caveat too.
+    let expired = mint_with_caveats(
+        &test_root_key(),
+        &["action = tag", "expires = 2020-01-01T00:00:00Z"],
+    );
+    assert_eq!(
+        status(
+            &expired,
             "POST",
             "/v1/runtime/sessions/link-1/mutations?sourceId=acct-a",
         )
