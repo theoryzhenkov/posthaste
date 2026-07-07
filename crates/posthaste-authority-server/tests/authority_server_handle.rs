@@ -955,6 +955,13 @@ async fn runtime_mutation_streams_settlement_frames() {
         .expect("duplicate mutation should return existing receipt");
     assert_eq!(duplicate.runtime_mutation_id, Some(mutation_id));
     assert_eq!(duplicate.state, MutationSettlementState::Confirmed);
+    // Wire-contract pin (v0.5.0 field bug): the re-observed receipt carries the
+    // command result exactly like the first — `output.events` as an array.
+    assert!(
+        duplicate.output["events"].is_array(),
+        "a re-observed confirmed receipt must carry output.events as an array, got {}",
+        duplicate.output
+    );
 }
 
 /// Cost contract: a state-assertion mutation acknowledges the change; it must
@@ -2737,6 +2744,210 @@ async fn runtime_serves_optimistic_rows_from_its_pending_set_while_a_forward_is_
     assert!(
         !flagged(&mail_list_state(&settled), "message-1"),
         "the overlay should retire once the forward completes"
+    );
+}
+
+fn move_to_role_request(
+    link_id: &posthaste_contract_core::RuntimeLinkId,
+    client_mutation_id: &str,
+) -> MutationRequest {
+    MutationRequest {
+        link_id: Some(link_id.clone()),
+        operation: serde_json::from_value(serde_json::json!({
+            "name": "message.moveToRole",
+            "args": serde_json::json!({
+                "sourceId": "field-bug-account",
+                "messageId": "m-1",
+                "role": "archive",
+            }),
+        }))
+        .expect("typed operation parses"),
+        client_mutation_id: ClientMutationId::new(client_mutation_id),
+        context: None,
+    }
+}
+
+/// THE v0.5.0 field-bug regression pin ("message.moveToRole did not return a
+/// message command result"): a duplicate forward under the SAME
+/// `clientMutationId` arriving while the FIRST dispatch is still in flight —
+/// the near-end engine re-forwards after its request deadline while a slow
+/// first apply is still running — must not resolve with a result-less receipt
+/// (state `accepted`, `output: null`, the pre-fix answer the web client failed
+/// to parse). The duplicate WAITS for the original dispatch to settle and
+/// re-observes its terminal receipt, whose serialized wire shape carries
+/// `output.events` as an array.
+#[tokio::test]
+async fn in_flight_duplicate_forward_re_observes_the_settled_receipt_with_events() {
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let entered_for_transport = entered.clone();
+    let release_for_transport = release.clone();
+
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()))
+            .with_authority_server_transport_override(move |inner| {
+                posthaste_authority_server_link::AuthorityServerLinkHandle::new(Arc::new(
+                    DeferredTransport {
+                        inner,
+                        entered: entered_for_transport,
+                        release: release_for_transport,
+                    },
+                ))
+            });
+    let build = build_authority_server(config)
+        .await
+        .expect("authority runtime should build");
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
+
+    // Dispatch #1: enters the (gated) up-channel and stays in flight.
+    let first_handle = build.handle.clone();
+    let first_request = move_to_role_request(&link.link_id, "dup-move-1");
+    let first = tokio::spawn(async move {
+        first_handle
+            .forward_mutation(RuntimeCaller::test(), first_request)
+            .await
+    });
+    entered.notified().await;
+
+    // Dispatch #2: the SAME clientMutationId while #1 is still applying.
+    let second_handle = build.handle.clone();
+    let second_request = move_to_role_request(&link.link_id, "dup-move-1");
+    let mut second = tokio::spawn(async move {
+        second_handle
+            .forward_mutation(RuntimeCaller::test(), second_request)
+            .await
+    });
+
+    // The duplicate must WAIT for the original to settle. Pre-fix it resolved
+    // immediately with the pending record's receipt: state `accepted`,
+    // `output: null` — no command result for the client to parse.
+    if let Ok(early) = tokio::time::timeout(Duration::from_millis(300), &mut second).await {
+        let receipt = early
+            .expect("duplicate task should not panic")
+            .expect("duplicate forward should not error while the original is in flight");
+        panic!(
+            "the duplicate resolved before the original settled — a result-less \
+             receipt (state {:?}, output {}) is the v0.5.0 field bug",
+            receipt.state, receipt.output
+        );
+    }
+
+    // Release the original; both dispatches settle on ITS outcome.
+    release.notify_one();
+    let first_receipt = first
+        .await
+        .expect("first task should join")
+        .expect("first forward should settle");
+    assert_eq!(first_receipt.state, MutationSettlementState::Confirmed);
+
+    let duplicate_receipt = second
+        .await
+        .expect("duplicate task should join")
+        .expect("the duplicate re-observes the settled outcome");
+    assert_eq!(duplicate_receipt.state, MutationSettlementState::Confirmed);
+    let wire = serde_json::to_value(&duplicate_receipt).expect("receipt serializes");
+    assert!(
+        wire["output"]["events"].is_array(),
+        "a re-observed confirmed mail-command receipt must carry `output.events` \
+         as an array on the wire (empty ok, never absent); got {wire}"
+    );
+}
+
+/// An authority-server-link transport answering every forward with a
+/// result-less receipt: state `accepted`, `output: null` — the shape a pre-fix
+/// authority returns when a duplicate re-observes a still-pending (or
+/// cancellation-orphaned) dedup record.
+struct PendingEchoTransport {
+    inner: posthaste_authority_server_link::AuthorityServerLinkHandle,
+}
+
+#[async_trait::async_trait]
+impl posthaste_authority_server_link::AuthorityServerLink for PendingEchoTransport {
+    async fn forward_mutation(
+        &self,
+        mutation: MutationRequest,
+    ) -> Result<posthaste_contract_core::MutationReceipt, posthaste_contract_core::RuntimeError>
+    {
+        Ok(posthaste_contract_core::MutationReceipt {
+            runtime_mutation_id: Some(posthaste_contract_core::RuntimeMutationId::new(
+                "authority-pending-echo",
+            )),
+            client_mutation_id: mutation.client_mutation_id,
+            name: mutation.operation.name().to_string(),
+            state: MutationSettlementState::Accepted,
+            error: None,
+            output: serde_json::Value::Null,
+        })
+    }
+
+    async fn subscribe(
+        &self,
+        coverage: posthaste_authority_server_link::LinkCoverage,
+        after_seq: Option<u64>,
+    ) -> Result<posthaste_authority_server_link::DownStream, posthaste_contract_core::RuntimeError>
+    {
+        self.inner.subscribe(coverage, after_seq).await
+    }
+}
+
+#[async_trait::async_trait]
+impl posthaste_authority_server_link::AuthorityServerApi for PendingEchoTransport {}
+
+/// The wire-contract guard behind the same field bug, one hop down: an
+/// authority answering a forward with a result-less receipt (`output: null`,
+/// non-terminal) must NOT be promoted to a client-facing `Confirmed` receipt —
+/// pre-fix the runtime settled `Confirmed` around the null output, and the
+/// client threw "did not return a message command result" on a receipt that
+/// claimed success. It settles `Failed` with a retryable conflict instead, so
+/// the caller reverts its optimism and retries honestly.
+#[tokio::test]
+async fn a_result_less_authority_receipt_settles_failed_not_confirmed() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()))
+            .with_authority_server_transport_override(move |inner| {
+                posthaste_authority_server_link::AuthorityServerLinkHandle::new(Arc::new(
+                    PendingEchoTransport { inner },
+                ))
+            });
+    let build = build_authority_server(config)
+        .await
+        .expect("authority runtime should build");
+    let link = build
+        .handle
+        .open_link(RuntimeCaller::test())
+        .await
+        .expect("link should open");
+
+    let receipt = build
+        .handle
+        .forward_mutation(
+            RuntimeCaller::test(),
+            move_to_role_request(&link.link_id, "pending-echo-1"),
+        )
+        .await
+        .expect("the forward settles with a terminal receipt");
+    assert_eq!(
+        receipt.state,
+        MutationSettlementState::Failed,
+        "a result-less authority receipt must never surface as Confirmed \
+         (output {})",
+        receipt.output
+    );
+    let error = receipt
+        .error
+        .expect("the failed settlement carries the retryable conflict");
+    assert_eq!(error.code, RuntimeErrorCode::Conflict);
+    assert!(
+        error.terminality != posthaste_contract_core::Terminality::Permanent,
+        "the guard's verdict is retryable — the caller may retry the mutation"
     );
 }
 

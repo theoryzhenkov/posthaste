@@ -26,8 +26,8 @@ use posthaste_authority_server_link::{
     AuthorityServerFrame, AuthorityServerLinkId, SequencedFrame, WireSettlementOutcome,
 };
 use posthaste_contract_core::{
-    ClientMutationId, MutationReceipt, MutationSettlementState, RuntimeAdapterError,
-    RuntimeMutationId,
+    ClientMutationId, MutationReceipt, MutationSettlementState, RuntimeAdapterError, RuntimeError,
+    RuntimeErrorCode, RuntimeMutationId,
 };
 use posthaste_domain_model::OperationId;
 use posthaste_link_far_end::down::{ReplayStore, Resume};
@@ -95,11 +95,18 @@ pub(crate) enum ForwardAcceptance {
     New {
         runtime_mutation_id: RuntimeMutationId,
     },
-    /// Already accepted (pending or `Confirmed`): return the stored receipt
-    /// (idempotent — never apply the user intent twice).
+    /// Already accepted AND settled `Confirmed`: return the stored receipt —
+    /// its `output` carries the serialized `CommandAck` (idempotent — never
+    /// apply the user intent twice).
     Existing(MutationReceipt),
-    /// D47: a kept permanent rejection. The caller returns this same error and
-    /// does NOT re-execute.
+    /// The error to return WITHOUT executing. Two cases share the arm, told
+    /// apart by the envelope's terminality: a kept PERMANENT rejection (D47 —
+    /// a retry re-observes the same verdict), and a retryable in-flight
+    /// conflict for a duplicate whose first application has not settled yet —
+    /// a pending record has no outcome (its stored `output` is still `Null`),
+    /// and answering with its receipt would hand the runtime a non-failed,
+    /// result-less receipt (the v0.5.0 "did not return a message command
+    /// result" field bug).
     Rejected(RuntimeAdapterError),
 }
 
@@ -258,6 +265,20 @@ impl RuntimeRegistry {
             },
             Accept::Duplicate(stored) => match stored.error {
                 Some(error) => ForwardAcceptance::Rejected(error),
+                // Still pending (reserved, not yet settled — `output` is the
+                // reservation's `Null` marker): there is no outcome to
+                // re-observe, so refuse with a retryable conflict rather than
+                // answering with a result-less receipt. The duplicate's caller
+                // retries once the first application settles; the record
+                // itself is untouched (the in-flight apply settles it).
+                None if stored.output.is_null() => ForwardAcceptance::Rejected(
+                    RuntimeError::retryable(
+                        RuntimeErrorCode::Conflict,
+                        "a mutation with this client mutation id is still in flight; retry",
+                    )
+                    .envelope()
+                    .clone(),
+                ),
                 None => ForwardAcceptance::Existing(stored.receipt()),
             },
         }
@@ -465,6 +486,55 @@ mod tests {
                 assert_eq!(receipt.client_mutation_id, c);
             }
             _ => panic!("retry must dedup to Existing"),
+        }
+    }
+
+    // The v0.5.0 field-bug seam: a duplicate arriving while the FIRST
+    // application is still in flight (reserved, unsettled) must NOT be answered
+    // with the pending record's receipt — that receipt has no outcome
+    // (`output: Null`), and the runtime would settle its client-facing receipt
+    // `Confirmed` around it, producing the "did not return a message command
+    // result" client crash. The duplicate is refused with a RETRYABLE conflict;
+    // the pending record is untouched so the in-flight apply still settles it.
+    #[test]
+    fn an_in_flight_duplicate_is_a_retryable_conflict_not_a_result_less_receipt() {
+        let registry = RuntimeRegistry::new();
+        let (r, c) = (rid("rt-A"), cid("op-1"));
+        assert!(matches!(
+            registry.accept(&r, &c, "message.moveToRole"),
+            ForwardAcceptance::New { .. }
+        ));
+        match registry.accept(&r, &c, "message.moveToRole") {
+            ForwardAcceptance::Rejected(error) => {
+                assert_eq!(error.code, RuntimeErrorCode::Conflict);
+                assert_ne!(
+                    error.terminality,
+                    Terminality::Permanent,
+                    "an in-flight duplicate is retryable, not a verdict"
+                );
+            }
+            ForwardAcceptance::Existing(receipt) => panic!(
+                "a pending duplicate must not re-observe a result-less receipt \
+                 (output: {:?})",
+                receipt.output
+            ),
+            ForwardAcceptance::New { .. } => panic!("a duplicate must never re-execute"),
+        }
+        // The in-flight apply settles normally; a later duplicate then
+        // re-observes the real outcome — output.events present as an array
+        // (the wire-contract pin: a confirmed command receipt always carries
+        // `output.events`, empty array if none).
+        registry.settle_confirmed(&r, &c, serde_json::json!({ "events": [] }), 1);
+        match registry.accept(&r, &c, "message.moveToRole") {
+            ForwardAcceptance::Existing(receipt) => {
+                assert!(
+                    receipt.output["events"].is_array(),
+                    "a re-observed confirmed receipt must carry output.events as an array, \
+                     got {:?}",
+                    receipt.output
+                );
+            }
+            _ => panic!("a settled duplicate must re-observe the confirmed receipt"),
         }
     }
 
