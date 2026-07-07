@@ -2,10 +2,23 @@ name: Publish site image
 
 # Builds the public website (apps/site) into an nginx container and pushes it to
 # GHCR. tars' docker-auto-update timer pulls :latest within ~5 min and restarts
-# posthaste.theor.net. Release-note commits land on main via release-notes.yml,
-# which retriggers this through the content path filter — so new releases roll
-# out automatically.
-
+# posthaste.theor.net.
+#
+# Release notes are generated AT BUILD TIME here (the "Sync release notes" step
+# below), reconciling apps/site/src/content/releases/*.md against the live set of
+# GitHub releases with the workflow's GITHUB_TOKEN — so the deployed site is
+# always current and no bot ever commits generated content to main. The files
+# checked into the repo are a fallback snapshot: they seed local `astro dev`,
+# tokenless/local `docker build`, and this job if the GitHub API is unreachable.
+#
+# Triggers:
+#   * push to main touching site/docs sources — rebuild for content/design edits;
+#   * release edited/deleted — refresh or prune an entry (a *published* release is
+#     handled by release.yml's fan-in job AFTER all ~88 assets finish uploading,
+#     never by the racy `release: published` event which fires mid-upload);
+#   * weekly cron — safety net for releases deleted outside a workflow;
+#   * workflow_dispatch — the one-click "refresh the site" escape hatch, and the
+#     target release.yml dispatches when a release completes.
 on:
   push:
     branches: [main]
@@ -19,9 +32,20 @@ on:
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/site-publish.yml'
+  release:
+    # NOT `published` — that event fires before release.yml finishes uploading
+    # assets, so a build then would capture a half-empty release. Published
+    # releases arrive via release.yml's fan-in workflow_dispatch instead.
+    types: [edited, deleted]
+  schedule:
+    # Monday 04:17 UTC — safety net for releases deleted outside this workflow.
+    - cron: '17 4 * * 1'
   workflow_dispatch:
 
 concurrency:
+  # Coalesce overlapping triggers (a fan-in dispatch racing a release:edited, or
+  # a manual refresh) onto one build; the last one wins. Re-generation is a
+  # deterministic `--all` reconcile, so a superseded run is safe to cancel.
   group: site-publish
   cancel-in-progress: true
 
@@ -33,6 +57,21 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      # Regenerate the release content collection from the live GitHub releases
+      # before the image is built. The Docker context is the working tree
+      # (context: . below), so the files written here ride into the image; no
+      # commit is made. Best-effort: on an API outage the step is skipped over
+      # and the checked-in snapshot ships instead of failing the whole deploy.
+      - uses: oven-sh/setup-bun@v2
+      - name: Install workspace deps (gray-matter for the generator)
+        run: bun install --frozen-lockfile
+      - name: Sync release notes with live GitHub releases
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node apps/site/tools/generate-release-notes.mjs --all
+
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:

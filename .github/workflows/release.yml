@@ -1040,3 +1040,28 @@ jobs:
           make_latest: false
           fail_on_unmatched_files: true
           files: release-assets/install.sh
+
+  publish-site:
+    # Fan-in: fires only after `publish` — the job whose action-gh-release step
+    # uploads every versioned release asset — has completed. That step is the
+    # true asset-upload completion point, so the site's regenerated release notes
+    # capture the full installer set rather than a half-uploaded release (the
+    # `release: published` event fires mid-upload and must NOT be the trigger).
+    # `needs: publish` also skips this for the only_desktop_linux probe, since
+    # `publish` itself is skipped there.
+    name: Refresh public site
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      # workflow_dispatch is the documented exception to the rule that a
+      # GITHUB_TOKEN-driven event does not start new workflow runs, so this
+      # reliably triggers site-publish (auto-committing notes and relying on the
+      # push event would not). --ref main builds the latest site source, and
+      # site-publish regenerates every entry from the live API — so the
+      # just-published release appears and repeated dispatches stay idempotent.
+      - name: Dispatch site rebuild (regenerates release notes from live releases)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run site-publish.yml -R "$GITHUB_REPOSITORY" --ref main
