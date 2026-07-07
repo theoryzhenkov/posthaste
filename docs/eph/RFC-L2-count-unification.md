@@ -36,8 +36,20 @@ The client applies them incrementally to a live-store slice (`apps/web/src/live-
 - **Topology-agnostic**: bundled and split both just invalidate + refetch (split refetches over the link). The split-carry fix (this session) becomes unnecessary and can be removed.
 - **Deletes a subsystem**: the countDelta computation (server, 3 paths) + the live-store slice + the exactly-once application (client) all go away.
 
-## Considered alternative (rejected for now)
-**Metadata-complete client store → derive counts locally** (hold all message metadata, not bodies; count via triggers like the server). Fully local + instant, no round-trip — but expands the store's scope (currently a window) and is a bigger change. The invalidation model (D1) respects the partial store and is smaller; revisit local derivation only if the round-trip latency proves unacceptable.
+## Considered alternative (REJECTED — owner decision 2026-07-07)
+**Derive counts locally from a complete client-side count-index** (`message_id →
+{mailbox_ids, is_read}` for ALL messages; MessageSummary already carries both
+fields). Instant + offline + optimism-for-free — but **in a bundled deployment it
+duplicates data the runtime already holds and already maintains** (the complete
+replica + trigger-maintained canonical counts, in-process, one indexed row read
+away). Storing a second complete index on the client to re-derive what the
+runtime knows is exactly the redundancy the layered-store design should NOT
+extend: the client store earns its bundled-mode redundancy as a bounded *window*
+(optimistic UI + one client for both deployments); a *complete* index crosses
+that line. The bundled "round-trip" under D1 is an in-process loopback read of
+one indexed row — effectively free — so local derivation buys nothing there and
+costs a duplicated store everywhere. Revisit only if split-mode refetch latency
+proves unacceptable in practice.
 
 ## Slices
 - **C1** — `useMailboxCounts` → react-query (mirror the smart-count hook); dual-read alongside the slice behind a flag.
