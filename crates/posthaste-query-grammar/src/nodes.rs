@@ -29,7 +29,21 @@ fn parse_prefixed(
             MailQueryValue::String(value.to_string()),
             negated,
         )]),
-        _ if matches!(normalized_prefix.as_str(), "body" | "preview") => Ok(vec![condition_node(
+        _ if matches!(normalized_prefix.as_str(), "to" | "recipient") => Ok(vec![condition_node(
+            MailQueryField::To,
+            MailQueryOperator::Contains,
+            MailQueryValue::String(value.to_string()),
+            negated,
+        )]),
+        // `body:` is a true full-text body match (the FTS-indexed cached body
+        // text); `preview:` keeps matching only the synced preview snippet.
+        _ if normalized_prefix == "body" => Ok(vec![condition_node(
+            MailQueryField::Body,
+            MailQueryOperator::Contains,
+            MailQueryValue::String(value.to_string()),
+            negated,
+        )]),
+        _ if normalized_prefix == "preview" => Ok(vec![condition_node(
             MailQueryField::Preview,
             MailQueryOperator::Contains,
             MailQueryValue::String(value.to_string()),
@@ -238,7 +252,9 @@ fn has_node(value: &str, negated: bool) -> Result<Vec<MailQueryRuleNode>, String
     }
 }
 
-/// Free text: search across FromName, FromEmail, Subject, Preview.
+/// Free text: search across FromName, FromEmail, Subject, Preview, and the
+/// full-text-indexed Body (so a default, unprefixed search finds messages
+/// whose only hit is inside the cached body text).
 fn free_text_node(value: &str, negated: bool) -> MailQueryRuleNode {
     MailQueryRuleNode::Group(MailQueryGroup {
         operator: MailQueryGroupOperator::Any,
@@ -264,6 +280,12 @@ fn free_text_node(value: &str, negated: bool) -> MailQueryRuleNode {
             }),
             MailQueryRuleNode::Condition(MailQueryCondition {
                 field: MailQueryField::Preview,
+                operator: MailQueryOperator::Contains,
+                negated: false,
+                value: MailQueryValue::String(value.to_string()),
+            }),
+            MailQueryRuleNode::Condition(MailQueryCondition {
+                field: MailQueryField::Body,
                 operator: MailQueryOperator::Contains,
                 negated: false,
                 value: MailQueryValue::String(value.to_string()),

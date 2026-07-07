@@ -95,6 +95,8 @@ pub enum FieldToml {
     To,
     Subject,
     Preview,
+    /// Full-text match over the cached message body (FTS-backed `contains`).
+    Body,
     ReceivedAt,
     Size,
 }

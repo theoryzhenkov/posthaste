@@ -320,28 +320,100 @@ pub(super) const SCHEMA_SQL: &str = "
             CREATE INDEX IF NOT EXISTS idx_rev_log_account_seq
                 ON rev_log (account_id, seq);
 
-            -- Full-text search index over message header fields. External-content
-            -- FTS5 table linked to message.rowid; kept in sync by triggers so the
-            -- write path needs no changes. (Prototype: body_text lives in
-            -- message_body and is not yet indexed here.)
+            -- Full-text search index over message header fields AND the cached
+            -- body text. External-content FTS5 table (only the inverted index is
+            -- stored; column values are read back through the content view, so
+            -- body text is never duplicated) keyed by message.rowid. The view
+            -- joins the header row with its body-cache row (message_body,
+            -- body_text) — a message with no cached body indexes a NULL body and
+            -- becomes body-searchable when the cache warms it.
+            --
+            -- Sync is trigger-maintained from BOTH base tables. FTS5
+            -- external-content integrity rule: every 'delete' command must carry
+            -- exactly the values that were last inserted for that rowid. The
+            -- triggers below therefore keep one invariant: the indexed body for a
+            -- message.rowid always equals the CURRENT message_body.body_text (or
+            -- NULL when no row). Each message_body mutation re-indexes its
+            -- message row; each message mutation reads the live body via
+            -- subselect. Message deletes work in either order: if message_body
+            -- goes first its trigger re-indexes with a NULL body and the later
+            -- message trigger deletes with a NULL subselect; if message goes
+            -- first its trigger deletes with the still-present body and the
+            -- message_body trigger is a no-op (guarded on the message row).
+            CREATE VIEW IF NOT EXISTS message_fts_content AS
+                SELECT m.rowid AS rowid, m.subject, m.from_name, m.from_email, m.preview,
+                       (SELECT b.body_text FROM message_body b
+                         WHERE b.account_id = m.account_id AND b.message_id = m.id) AS body
+                FROM message m;
             CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
-                subject, from_name, from_email, preview,
-                content='message', content_rowid='rowid',
+                subject, from_name, from_email, preview, body,
+                content='message_fts_content', content_rowid='rowid',
                 tokenize='porter unicode61 remove_diacritics 2'
             );
             CREATE TRIGGER IF NOT EXISTS message_fts_ai AFTER INSERT ON message BEGIN
-                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview)
-                VALUES (new.rowid, new.subject, new.from_name, new.from_email, new.preview);
+                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview, body)
+                VALUES (new.rowid, new.subject, new.from_name, new.from_email, new.preview,
+                        (SELECT body_text FROM message_body
+                          WHERE account_id = new.account_id AND message_id = new.id));
             END;
             CREATE TRIGGER IF NOT EXISTS message_fts_ad AFTER DELETE ON message BEGIN
-                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview)
-                VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_email, old.preview);
+                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview, body)
+                VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_email, old.preview,
+                        (SELECT body_text FROM message_body
+                          WHERE account_id = old.account_id AND message_id = old.id));
             END;
             CREATE TRIGGER IF NOT EXISTS message_fts_au AFTER UPDATE ON message BEGIN
-                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview)
-                VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_email, old.preview);
-                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview)
-                VALUES (new.rowid, new.subject, new.from_name, new.from_email, new.preview);
+                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview, body)
+                VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_email, old.preview,
+                        (SELECT body_text FROM message_body
+                          WHERE account_id = old.account_id AND message_id = old.id));
+                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview, body)
+                VALUES (new.rowid, new.subject, new.from_name, new.from_email, new.preview,
+                        (SELECT body_text FROM message_body
+                          WHERE account_id = new.account_id AND message_id = new.id));
+            END;
+            -- Body-cache writes re-index the owning message row the moment a
+            -- body lands (the fetch path and the sync path both funnel through
+            -- one message_body upsert). Guarded on the message row existing:
+            -- a body row without its header row has no FTS row to maintain.
+            CREATE TRIGGER IF NOT EXISTS message_body_fts_ai AFTER INSERT ON message_body
+            WHEN EXISTS (SELECT 1 FROM message m
+                          WHERE m.account_id = new.account_id AND m.id = new.message_id)
+            BEGIN
+                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview, body)
+                SELECT 'delete', m.rowid, m.subject, m.from_name, m.from_email, m.preview, NULL
+                FROM message m
+                WHERE m.account_id = new.account_id AND m.id = new.message_id;
+                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview, body)
+                SELECT m.rowid, m.subject, m.from_name, m.from_email, m.preview, new.body_text
+                FROM message m
+                WHERE m.account_id = new.account_id AND m.id = new.message_id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS message_body_fts_au AFTER UPDATE ON message_body
+            WHEN EXISTS (SELECT 1 FROM message m
+                          WHERE m.account_id = new.account_id AND m.id = new.message_id)
+            BEGIN
+                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview, body)
+                SELECT 'delete', m.rowid, m.subject, m.from_name, m.from_email, m.preview, old.body_text
+                FROM message m
+                WHERE m.account_id = old.account_id AND m.id = old.message_id;
+                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview, body)
+                SELECT m.rowid, m.subject, m.from_name, m.from_email, m.preview, new.body_text
+                FROM message m
+                WHERE m.account_id = new.account_id AND m.id = new.message_id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS message_body_fts_ad AFTER DELETE ON message_body
+            WHEN EXISTS (SELECT 1 FROM message m
+                          WHERE m.account_id = old.account_id AND m.id = old.message_id)
+            BEGIN
+                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview, body)
+                SELECT 'delete', m.rowid, m.subject, m.from_name, m.from_email, m.preview, old.body_text
+                FROM message m
+                WHERE m.account_id = old.account_id AND m.id = old.message_id;
+                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview, body)
+                SELECT m.rowid, m.subject, m.from_name, m.from_email, m.preview, NULL
+                FROM message m
+                WHERE m.account_id = old.account_id AND m.id = old.message_id;
             END;
 
             -- Incrementally maintain mailbox counters. This replaces expensive

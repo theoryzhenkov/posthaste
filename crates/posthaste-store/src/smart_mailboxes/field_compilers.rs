@@ -37,6 +37,62 @@ fn escape_like(input: &str) -> String {
     escaped
 }
 
+/// Compiles a `contains` condition against the full-text-indexed body via the
+/// FTS5 `message_fts` index (its `body` column, fed from the body cache's
+/// `message_body.body_text`). Emitted as an uncorrelated rowid IN-subquery so
+/// it composes with any surrounding AND/OR/NOT group and the outer query's
+/// account scoping, and SQLite evaluates the MATCH once, not per row.
+///
+/// `contains` here is a token/phrase match (the index is porter-stemmed
+/// unicode61), not a substring `LIKE`: the value is tokenized in
+/// [`body_fts_match_expression`] and matched as a phrase with the last token
+/// as a prefix, so `body:invoi` still finds "invoice". A message whose body
+/// the cache has not stored yet has a NULL-body index entry and cannot match.
+pub(super) fn compile_body_fts_field(
+    condition: &MailQueryCondition,
+    params: &mut Vec<SqlValue>,
+) -> Result<String, StoreError> {
+    match condition.operator {
+        MailQueryOperator::Contains => {
+            let Some(match_expression) =
+                body_fts_match_expression(expect_string_value(&condition.value)?)
+            else {
+                // No indexable tokens (whitespace/punctuation only): nothing
+                // can match, and an empty FTS5 phrase would be a MATCH syntax
+                // error, so compile to a constant-false predicate instead.
+                return Ok("1 = 0".to_string());
+            };
+            params.push(SqlValue::Text(match_expression));
+            Ok("m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)".to_string())
+        }
+        _ => Err(StoreError::Failure(format!(
+            "unsupported operator {:?} for field {:?}",
+            condition.operator, condition.field
+        ))),
+    }
+}
+
+/// Builds the FTS5 MATCH expression for a body `contains` value:
+/// `body:"tok1 tok2 …"*` — a column-filtered phrase over the value's tokens
+/// with the trailing token matched as a prefix (search-as-you-type friendly).
+///
+/// The value is reduced to its alphanumeric token runs first, mirroring the
+/// index's unicode61 tokenizer (non-alphanumeric characters are separators
+/// there too). This makes the expression immune to FTS5 query-syntax
+/// metacharacters in user input (`"`, `*`, `(`, `-`, `:` …) — they can never
+/// produce a MATCH syntax error or smuggle in extra query operators. Returns
+/// `None` when no tokens remain.
+fn body_fts_match_expression(value: &str) -> Option<String> {
+    let tokens: Vec<&str> = value
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(format!("body:\"{}\"*", tokens.join(" ")))
+}
+
 /// Extracts a boolean value or returns a type error.
 fn expect_bool_value(value: &MailQueryValue) -> Result<bool, StoreError> {
     match value {

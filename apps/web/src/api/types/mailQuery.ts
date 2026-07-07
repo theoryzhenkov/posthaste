@@ -27,6 +27,7 @@ export type MailQueryField =
   | 'to'
   | 'subject'
   | 'preview'
+  | 'body'
   | 'receivedAt'
   | 'size'
 

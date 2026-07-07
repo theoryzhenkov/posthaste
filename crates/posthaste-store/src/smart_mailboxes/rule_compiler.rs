@@ -1,5 +1,5 @@
 use super::field_compilers::{
-    compile_bool_field, compile_date_field, compile_exists_membership,
+    compile_body_fts_field, compile_bool_field, compile_date_field, compile_exists_membership,
     compile_exists_text_membership, compile_numeric_field, compile_recipient_json_field,
     compile_simple_field, compile_text_field,
 };
@@ -85,6 +85,7 @@ fn compile_mail_query_condition(
         MailQueryField::To => compile_recipient_json_field("m.to_json", condition, params)?,
         MailQueryField::Subject => compile_text_field("m.subject", condition, params)?,
         MailQueryField::Preview => compile_text_field("m.preview", condition, params)?,
+        MailQueryField::Body => compile_body_fts_field(condition, params)?,
         MailQueryField::ReceivedAt => compile_date_field("m.received_at", condition, params)?,
         MailQueryField::Size => compile_numeric_field("m.size", condition, params)?,
         MailQueryField::IsRead => compile_bool_field("m.is_read", condition)?,
