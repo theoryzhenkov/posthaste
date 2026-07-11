@@ -76,6 +76,17 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
     connection
         .execute_batch(sql::EFFECTIVE_VIEWS_SQL)
         .map_err(sql_to_store_error)?;
+    // NS1: retire the incremental mailbox-counter triggers on legacy
+    // databases — counts are a live derivation over the `_effective` views
+    // now (see read/mailbox.rs). Removing them from SCHEMA_SQL alone would
+    // leave them firing (and drifting, DP-H12) on existing installs.
+    connection
+        .execute_batch(
+            "DROP TRIGGER IF EXISTS mailbox_counters_message_mailbox_ai;
+             DROP TRIGGER IF EXISTS mailbox_counters_message_mailbox_ad;
+             DROP TRIGGER IF EXISTS mailbox_counters_message_read_au;",
+        )
+        .map_err(sql_to_store_error)?;
     // The body-cache-object repair (three correlated `NOT EXISTS` full-table
     // scans against `message`) used to run right here, unconditionally, on
     // every open — blocking `DatabaseStore::open`'s return (and therefore
