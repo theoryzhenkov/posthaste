@@ -70,6 +70,12 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
             [],
         )
         .map_err(sql_to_store_error)?;
+    // Strictly after the ensure_column evolution above: these views reference
+    // late-added `message` columns, and CREATE VIEW validates its SELECT (see
+    // the constant's doc in sql.rs).
+    connection
+        .execute_batch(sql::EFFECTIVE_VIEWS_SQL)
+        .map_err(sql_to_store_error)?;
     // The body-cache-object repair (three correlated `NOT EXISTS` full-table
     // scans against `message`) used to run right here, unconditionally, on
     // every open — blocking `DatabaseStore::open`'s return (and therefore

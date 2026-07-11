@@ -94,7 +94,7 @@ fn compile_mail_query_condition(
         MailQueryField::MailboxId => compile_exists_membership(
             "EXISTS (
                 SELECT 1
-                FROM message_mailbox mm
+                FROM message_mailbox_effective mm
                 WHERE mm.account_id = m.account_id
                   AND mm.message_id = m.id
                   AND mm.mailbox_id",
@@ -104,7 +104,7 @@ fn compile_mail_query_condition(
         MailQueryField::MailboxName => compile_exists_text_membership(
             "EXISTS (
                 SELECT 1
-                FROM message_mailbox mm
+                FROM message_mailbox_effective mm
                 JOIN mailbox b
                   ON b.account_id = mm.account_id
                  AND b.id = mm.mailbox_id
@@ -117,7 +117,7 @@ fn compile_mail_query_condition(
         MailQueryField::Keyword => compile_exists_membership(
             "EXISTS (
                 SELECT 1
-                FROM message_keyword mk
+                FROM message_keyword_effective mk
                 WHERE mk.account_id = m.account_id
                   AND mk.message_id = m.id
                   AND mk.keyword",
@@ -127,7 +127,7 @@ fn compile_mail_query_condition(
         MailQueryField::MailboxRole => compile_exists_membership(
             "EXISTS (
                 SELECT 1
-                FROM message_mailbox mm
+                FROM message_mailbox_effective mm
                 JOIN mailbox b
                   ON b.account_id = mm.account_id
                  AND b.id = mm.mailbox_id
