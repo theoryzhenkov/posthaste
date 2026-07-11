@@ -1,52 +1,9 @@
 use super::*;
 
 impl MessageCommandStore for TestStore {
-    fn set_keywords(
-        &self,
-        _account_id: &AccountId,
-        message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-        command: &SetKeywordsCommand,
-    ) -> Result<CommandResult, StoreError> {
-        self.keyword_adds
-            .lock()
-            .expect("keyword adds lock poisoned")
-            .push((message_id.clone(), command.add.clone()));
-        if let Some(cursor) = cursor {
-            self.mutation_state
-                .lock()
-                .expect("mutation state lock poisoned")
-                .cursor = Some(cursor.clone());
-        }
-        Ok(CommandResult {
-            detail: None,
-            events: Vec::new(),
-        })
-    }
-
-    fn replace_mailboxes(
-        &self,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-        command: &ReplaceMailboxesCommand,
-    ) -> Result<CommandResult, StoreError> {
-        let mut state = self
-            .mutation_state
-            .lock()
-            .expect("mutation state lock poisoned");
-        state.mailbox_ids = command.mailbox_ids.clone();
-        if let Some(cursor) = cursor {
-            state.cursor = Some(cursor.clone());
-        }
-        Ok(CommandResult {
-            detail: None,
-            events: Vec::new(),
-        })
-    }
-
     fn destroy_message(
         &self,
+        _base: &BaseWrite,
         _account_id: &AccountId,
         _message_id: &MessageId,
         cursor: Option<&SyncCursor>,

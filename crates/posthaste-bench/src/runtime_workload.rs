@@ -27,7 +27,7 @@ use posthaste_contract_core::{
 };
 use posthaste_domain_model::{
     AccountDriver, AccountId, MessageId, MessageSortField, SecretRef, SecretStoreError,
-    SetKeywordsCommand, SortDirection,
+    SortDirection,
 };
 use posthaste_domain_service::SecretStore;
 use posthaste_runtime::RuntimeBuildConfig;
@@ -97,7 +97,7 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
     build
         .api_bridge
         .store
-        .apply_sync_batch(&account.id, &batch)
+        .apply_sync_batch(&posthaste_domain_service::BaseWrite::legacy("bench base seed"), &account.id, &batch)
         .map_err(|error| anyhow!("seed inbox: {error}"))?;
 
     let link = build
@@ -161,46 +161,48 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
 /// no `ViewReplace`/`ViewDelta` for a mail-list on a keyword change, so the old
 /// "drain until view frame" would hang.
 ///
-/// It triggers via `store.set_keywords` + manual event broadcast (the pattern
-/// the runtime's own `authority_server_handle` tests use) rather than
-/// `forward_mutation`: the full named-mutation pipeline's existence check
-/// (`get_message_mailboxes`) rejects bulk-seeded messages, and that pipeline is
-/// upstream of — not part of — the path we are profiling.
+/// It triggers via the NS1 mutation-path store write (an overlay fold) + a
+/// manually appended/broadcast echo event, rather than `forward_mutation`:
+/// the full named-mutation pipeline's existence check rejects bulk-seeded
+/// messages, and that pipeline is upstream of — not part of — the path we
+/// are profiling.
 pub async fn mutate_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -> Result<()> {
     inbox.toggle = !inbox.toggle;
     // Alternate add/remove so every iteration changes view state and forces a
     // real recompute + frame (an idempotent op would yield no frame).
-    let command = if inbox.toggle {
-        SetKeywordsCommand {
-            add: vec!["$flagged".to_string()],
-            remove: Vec::new(),
-        }
-    } else {
-        SetKeywordsCommand {
-            add: Vec::new(),
-            remove: vec!["$flagged".to_string()],
-        }
-    };
-
-    let ack = inbox
+    let message_id = MessageId::from(inbox.visible_id.clone());
+    let store = &inbox.build.api_bridge.store;
+    let mut record = store
+        .read_base_message_record(&inbox.account_id, &message_id)
+        .map_err(|error| anyhow!("read base record: {error}"))?
+        .ok_or_else(|| anyhow!("seeded message missing"))?;
+    record.keywords.retain(|keyword| keyword != "$flagged");
+    if inbox.toggle {
+        record.keywords.push("$flagged".to_string());
+    }
+    let keywords = record.keywords.clone();
+    store
+        .upsert_overlay_message(&inbox.account_id, &record)
+        .map_err(|error| anyhow!("upsert overlay row: {error}"))?;
+    let event = store
+        .append_event(
+            &inbox.account_id,
+            "message.updated",
+            None,
+            Some(&message_id),
+            serde_json::json!({
+                "messageId": message_id.as_str(),
+                "changes": { "keywords": true },
+                "keywords": keywords,
+            }),
+        )
+        .map_err(|error| anyhow!("append echo event: {error}"))?;
+    inbox
         .build
         .api_bridge
-        .store
-        .set_keywords(
-            &inbox.account_id,
-            &MessageId::from(inbox.visible_id.clone()),
-            None,
-            &command,
-        )
-        .map_err(|error| anyhow!("set_keywords: {error}"))?;
-    for event in ack.events {
-        inbox
-            .build
-            .api_bridge
-            .event_sender
-            .send(event)
-            .map_err(|error| anyhow!("broadcast event: {error}"))?;
-    }
+        .event_sender
+        .send(event)
+        .map_err(|error| anyhow!("broadcast event: {error}"))?;
 
     // Drain frames until the message.updated notification (the client's
     // self-maintenance input) lands. No view frame arrives for a mail-list under

@@ -13,8 +13,8 @@ impl MailService {
         account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, ServiceError> {
-        // Indexed SQL over canonical (optimism written through, S2); the mailbox
-        // filter runs in SQL, no read-time overlay fold.
+        // Indexed SQL over the EFFECTIVE views (NS1: base ∪ overlay merged in
+        // the store); the mailbox filter runs in SQL, no in-service fold.
         self.message_lister
             .list_messages(account_id, mailbox_id)
             .map_err(ServiceError::from)
@@ -32,8 +32,7 @@ impl MailService {
         sort_field: MessageSortField,
         sort_direction: SortDirection,
     ) -> Result<MessagePage, ServiceError> {
-        // Indexed SQL seek pagination over canonical (optimism written through,
-        // S2) — was list_messages + in-memory sort + skip/take.
+        // Indexed SQL seek pagination over the EFFECTIVE views (NS1).
         self.message_lister
             .list_message_page(
                 account_id,
@@ -89,8 +88,8 @@ impl MailService {
             .conversation_reader
             .get_conversation(conversation_id)?
             .not_found("conversation", conversation_id.as_str())?;
-        // Canonical holds optimistic state (written through, S2), so the
-        // conversation read reflects pending assertions with no overlay fold.
+        // The store read serves the EFFECTIVE plane (NS1), so pending
+        // assertions are already folded in — no in-service fold.
         Ok(view)
     }
 
@@ -114,7 +113,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, ServiceError> {
-        // Canonical holds optimism (written through, S2); no overlay fold.
+        // The store read serves the EFFECTIVE plane (NS1); no in-service fold.
         self.message_detail_reader
             .get_message_detail_without_body(account_id, message_id)
             .map_err(Into::into)
@@ -155,7 +154,12 @@ impl MailService {
         let owned_account_id = account_id.clone();
         let owned_message_id = message_id.clone();
         offload(move || {
-            sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched)
+            sync_writer.apply_message_body(
+                &crate::BaseWrite::reconciler(),
+                &owned_account_id,
+                &owned_message_id,
+                &fetched,
+            )
         })
         .await
         .map_err(Into::into)
@@ -202,7 +206,12 @@ impl MailService {
             let owned_account_id = account_id.clone();
             let owned_message_id = message_id.clone();
             let cache_result = offload(move || {
-                sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched)
+                sync_writer.apply_message_body(
+                &crate::BaseWrite::reconciler(),
+                &owned_account_id,
+                &owned_message_id,
+                &fetched,
+            )
             })
             .await?;
             events.extend(cache_result.events);

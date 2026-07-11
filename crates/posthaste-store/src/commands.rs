@@ -38,6 +38,7 @@ impl SyncWriteStore for DatabaseStore {
     /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
     fn apply_sync_batch(
         &self,
+        _base: &BaseWrite,
         account_id: &AccountId,
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError> {
@@ -74,6 +75,7 @@ impl SyncWriteStore for DatabaseStore {
     ///
     fn reconcile_sync(
         &self,
+        _base: &BaseWrite,
         account_id: &AccountId,
         reconciliation: &SyncReconciliation,
     ) -> Result<Vec<DomainEvent>, StoreError> {
@@ -105,6 +107,7 @@ impl SyncWriteStore for DatabaseStore {
     /// @spec docs/L1-sync#invariants
     fn apply_message_body(
         &self,
+        _base: &BaseWrite,
         account_id: &AccountId,
         message_id: &MessageId,
         body: &FetchedBody,
@@ -197,36 +200,13 @@ fn update_mailbox_role_tx(
 }
 
 impl MessageCommandStore for DatabaseStore {
-    /// Adds/removes keywords on a message and refreshes mailbox counters.
-    /// Optionally persists a new sync cursor atomically.
-    fn set_keywords(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-        command: &SetKeywordsCommand,
-    ) -> Result<CommandResult, StoreError> {
-        self.write_transaction(|tx| set_keywords_tx(tx, account_id, message_id, cursor, command))
-    }
-
-    /// Replaces a message's mailbox memberships, refreshes counters, and emits
-    /// arrival events for newly added mailboxes. Optionally persists a cursor.
-    fn replace_mailboxes(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-        command: &ReplaceMailboxesCommand,
-    ) -> Result<CommandResult, StoreError> {
-        self.write_transaction(|tx| {
-            replace_mailboxes_tx(tx, account_id, message_id, cursor, command)
-        })
-    }
-
     /// Permanently deletes a message and all its junction rows, refreshes
-    /// thread/mailbox projections, and optionally persists a cursor.
+    /// thread projections, and optionally persists a cursor. (NS1: the last
+    /// surviving direct base mutation — the draft-discard destroy, sealed
+    /// behind the witness until its NS2 cutover.)
     fn destroy_message(
         &self,
+        _base: &BaseWrite,
         account_id: &AccountId,
         message_id: &MessageId,
         cursor: Option<&SyncCursor>,

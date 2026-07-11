@@ -263,7 +263,12 @@ impl MailService {
             let owned_account_id = account_id.clone();
             let owned_message_id = message_id.clone();
             let result = match offload(move || {
-                sync_writer.apply_message_body(&owned_account_id, &owned_message_id, &fetched)
+                sync_writer.apply_message_body(
+                    &crate::BaseWrite::reconciler(),
+                    &owned_account_id,
+                    &owned_message_id,
+                    &fetched,
+                )
             })
             .await
             {

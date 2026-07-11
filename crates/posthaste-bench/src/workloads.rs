@@ -9,11 +9,11 @@
 use posthaste_domain_model::{
     AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid, ImapUidValidity,
     MailboxId, MailboxRecord, MessageId, MessagePage, MessageRecord, MessageSortField,
-    MessageSummary, Recipient, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
+    MessageSummary, Recipient, SortDirection, SyncBatch, SyncCursor,
     SyncObject, ThreadId,
 };
 use posthaste_domain_service::{
-    MessageCommandStore, MessageDetailStore, MessageListStore, SmartMailboxStore,
+    MessageDetailStore, MessageListStore, SmartMailboxStore,
     SourceProjectionStore, SyncWriteStore,
 };
 use posthaste_query_grammar::parse_query;
@@ -160,7 +160,7 @@ pub fn open_seeded(count: usize) -> Fixture {
     let fixture = open_empty();
     fixture
         .store
-        .apply_sync_batch(&fixture.account, &sync_batch(synthetic_messages(count)))
+        .apply_sync_batch(&posthaste_domain_service::BaseWrite::legacy("bench base seed"), &fixture.account, &sync_batch(synthetic_messages(count)))
         .expect("seed messages");
     fixture
 }
@@ -194,6 +194,7 @@ pub fn open_seeded_heavy(count: usize) -> Fixture {
     fixture
         .store
         .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("bench base seed"),
             &fixture.account,
             &sync_batch(synthetic_messages_heavy(count)),
         )
@@ -208,7 +209,7 @@ pub fn open_seeded_heavy(count: usize) -> Fixture {
 pub fn apply_batch(fixture: &Fixture, batch: &SyncBatch) {
     fixture
         .store
-        .apply_sync_batch(&fixture.account, batch)
+        .apply_sync_batch(&posthaste_domain_service::BaseWrite::legacy("bench base seed"), &fixture.account, batch)
         .expect("apply sync batch");
 }
 
@@ -267,35 +268,34 @@ pub fn mutate_full_detail(fixture: &Fixture, index: usize) {
         .store
         .get_message_detail(&fixture.account, &id)
         .expect("get message detail");
-    fixture
-        .store
-        .set_keywords(
-            &fixture.account,
-            &id,
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
-        .expect("set keywords");
+    overlay_flag_fold(fixture, &id);
 }
 
-/// Mutation path: toggle a keyword on a single message.
+/// Mutation path (NS1): fold a keyword flip into the OVERLAY plane — the
+/// store write the mutation path performs now (base is sync's alone).
 pub fn mutate(fixture: &Fixture, index: usize) {
     let id = MessageId::from(format!("msg-{index:06}"));
+    overlay_flag_fold(fixture, &id);
+}
+
+/// Read base, flip `$flagged`, upsert the folded row into the overlay — the
+/// NS1 mutation-path store write (`refresh_message_overlay`'s store half).
+fn overlay_flag_fold(fixture: &Fixture, id: &MessageId) {
+    use posthaste_domain_service::MessageOverlayStore;
+    let mut record = fixture
+        .store
+        .read_base_message_record(&fixture.account, id)
+        .expect("read base record")
+        .expect("seeded message exists");
+    if record.keywords.iter().any(|keyword| keyword == "$flagged") {
+        record.keywords.retain(|keyword| keyword != "$flagged");
+    } else {
+        record.keywords.push("$flagged".to_string());
+    }
     fixture
         .store
-        .set_keywords(
-            &fixture.account,
-            &id,
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
-        .expect("set keywords");
+        .upsert_overlay_message(&fixture.account, &record)
+        .expect("upsert overlay row");
 }
 
 /// Longer offline application loop: a user repeatedly opens an FTS-backed smart
