@@ -62,6 +62,13 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
         "hold_until_mono",
         "ALTER TABLE outbox_operation ADD COLUMN hold_until_mono INTEGER",
     )?;
+    // D155: the payload envelope version — existing rows are the v1 shapes.
+    ensure_column(
+        connection,
+        "outbox_operation",
+        "payload_version",
+        "ALTER TABLE outbox_operation ADD COLUMN payload_version INTEGER NOT NULL DEFAULT 1",
+    )?;
     connection
         .execute(
             // Partial index for the scheduler tick's "any send due?" probe and
@@ -154,7 +161,7 @@ fn migrate_legacy_message_fts(connection: &Connection) -> Result<(), StoreError>
 /// or TRANSFORMATIVE changes (drops, renames, data rewrites, trigger
 /// replacements) are numbered migrations below — run exactly once per
 /// database, each in its own transaction, in order.
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 
 /// The full open-time schema flow (replaces bare `init_schema` at the open
 /// call site):
@@ -207,6 +214,7 @@ pub(crate) fn prepare_schema(connection: &mut Connection) -> Result<(), StoreErr
 fn apply_migration(tx: &Connection, version: i64) -> Result<(), StoreError> {
     match version {
         1 => v1_retire_mailbox_counters(tx),
+        2 => v2_recover_conflicted_outbox_rows(tx),
         other => Err(StoreError::Failure(format!(
             "unknown schema migration {other}"
         ))),
@@ -240,6 +248,29 @@ fn v1_retire_mailbox_counters(tx: &Connection) -> Result<(), StoreError> {
             tx.execute_batch(&format!("ALTER TABLE mailbox DROP COLUMN {column}"))
                 .map_err(sql_to_store_error)?;
         }
+    }
+    Ok(())
+}
+
+/// v2 (D155): the first-outbox-design legacy state `"conflicted"` is rewritten
+/// to `"pending"` ONCE, replacing the silent read-time fudge the state parser
+/// carried ("conflicted" => Pending) — the parser is now strict, so an unknown
+/// state is an error instead of a guess.
+fn v2_recover_conflicted_outbox_rows(tx: &Connection) -> Result<(), StoreError> {
+    // Guard: the table may not exist on very old fixtures; IF-EXISTS via probe.
+    let has_table: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outbox_operation')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_to_store_error)?;
+    if has_table {
+        tx.execute(
+            "UPDATE outbox_operation SET state = 'pending' WHERE state = 'conflicted'",
+            [],
+        )
+        .map_err(sql_to_store_error)?;
     }
     Ok(())
 }

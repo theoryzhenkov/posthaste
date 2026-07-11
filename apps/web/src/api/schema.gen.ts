@@ -2315,9 +2315,15 @@ export interface components {
             lastError?: string | null;
             /**
              * @description Kind-specific payload (the wrapped command or draft body), as JSON so the
-             *     envelope stays uniform across kinds.
+             *     envelope stays uniform across kinds. Decode through
+             *     [`Operation::intent`], never ad hoc (NS2 Slice 2).
              */
             payload: Record<string, never>;
+            /**
+             * Format: int64
+             * @description D155 payload envelope version. v1 = the historical per-kind shapes.
+             */
+            payloadVersion?: number;
             /**
              * @description Scheduled-send hold (send ops only): the earliest flush time, normalized
              *     UTC whole-second RFC 3339. A queued op with `send_at` in the future is

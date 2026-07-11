@@ -59,6 +59,21 @@ fn downgrade_to_v0(path: &std::path::Path) {
              PRAGMA user_version = 0;",
         )
         .expect("synthetic v0 downgrade");
+    // A first-outbox-design legacy row parked as `conflicted` (pre-v2): the
+    // read-time fudge that used to recover it is gone; migration v2 must
+    // rewrite it durably.
+    connection
+        .execute(
+            "INSERT INTO outbox_operation (
+                 id, account_id, entity_kind, entity_id, kind, payload,
+                 state, attempts, last_error, depends_on, send_at,
+                 hold_until_mono, payload_version, created_at, updated_at
+             ) VALUES ('op-legacy', 'primary', 'message', 'message-1', 'setKeywords',
+                       '{}', 'conflicted', 0, NULL, NULL, NULL, NULL, 1,
+                       '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("seed legacy conflicted row");
 }
 
 #[test]
@@ -117,6 +132,16 @@ fn legacy_v0_database_migrates_once_on_open() -> Result<(), StoreError> {
             "migration v1 drops {trigger}"
         );
     }
+    // v2: the legacy `conflicted` row was durably rewritten to `pending` —
+    // the strict state parser (no read-time fudge) can read it.
+    let state: String = connection
+        .query_row(
+            "SELECT state FROM outbox_operation WHERE id = 'op-legacy'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy row present");
+    assert_eq!(state, "pending", "migration v2 recovers conflicted rows");
     Ok(())
 }
 
