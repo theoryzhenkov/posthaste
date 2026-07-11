@@ -155,15 +155,23 @@ impl MailService {
         }
         // Queue the provider destroy (non-idempotent) via the stable-id path.
         let operation = self.delete_draft(account_id, draft_key, false)?;
-        // Optimistic local removal (write-through) so canonical reflects the
-        // discard immediately, mirroring `destroy_message`. On a local failure,
-        // retract the op so the outbox and canonical do not diverge.
+        // THE LAST NON-RECONCILER BASE WRITER (NS1b): the draft-discard
+        // optimistic destroy still writes base directly — entity-op territory
+        // that cuts over with NS2 (send/draft as single intents), deleting
+        // this call and its legacy grant with it. On a local failure, retract
+        // the op so the outbox and canonical do not diverge.
         let message_commands = self.message_commands.clone();
         let owned_account = account_id.clone();
         let owned_message = message_id.clone();
-        if let Err(error) =
-            offload(move || message_commands.destroy_message(&owned_account, &owned_message, None))
-                .await
+        if let Err(error) = offload(move || {
+            message_commands.destroy_message(
+                &crate::BaseWrite::legacy("NS2 pending: draft-discard optimistic destroy"),
+                &owned_account,
+                &owned_message,
+                None,
+            )
+        })
+        .await
         {
             let _ = self.outbox.remove_operation(&operation.id);
             return Err(ServiceError::from(error));

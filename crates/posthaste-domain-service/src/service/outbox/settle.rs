@@ -60,7 +60,10 @@ impl MailService {
             let sync_writer = self.sync_writer.clone();
             let owned_account_id = account_id.clone();
             events.extend(
-                offload(move || sync_writer.apply_sync_batch(&owned_account_id, &batch)).await?,
+                offload(move || {
+                    sync_writer.apply_sync_batch(&BaseWrite::reconciler(), &owned_account_id, &batch)
+                })
+                .await?,
             );
         }
         // Overlay retire/refold. With a readback (or a rejection) base was just

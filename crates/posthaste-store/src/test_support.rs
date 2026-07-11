@@ -53,6 +53,95 @@ pub(crate) fn temp_root() -> TempDirGuard {
 }
 
 #[cfg(test)]
+/// NS1b test shadows: inherent methods take precedence over trait methods, so
+/// the store's ~100 existing test call sites keep calling
+/// `store.apply_sync_batch(...)` etc. with their pre-seal signatures — the one
+/// `BaseWrite::legacy` grant for test base-seeding lives HERE instead of at
+/// every site. (A store test legitimately plays the reconciler when it seeds
+/// base.) `set_keywords`/`replace_mailboxes` shadow the DELETED production
+/// methods onto the test-only `_tx` seed helpers.
+impl crate::DatabaseStore {
+    pub(crate) fn apply_sync_batch(
+        &self,
+        account_id: &posthaste_domain_model::AccountId,
+        batch: &posthaste_domain_model::SyncBatch,
+    ) -> Result<Vec<posthaste_domain_model::DomainEvent>, posthaste_domain_model::StoreError> {
+        posthaste_domain_service::SyncWriteStore::apply_sync_batch(
+            self,
+            &posthaste_domain_service::BaseWrite::legacy("store-test base seed"),
+            account_id,
+            batch,
+        )
+    }
+
+    pub(crate) fn reconcile_sync(
+        &self,
+        account_id: &posthaste_domain_model::AccountId,
+        reconciliation: &posthaste_domain_model::SyncReconciliation,
+    ) -> Result<Vec<posthaste_domain_model::DomainEvent>, posthaste_domain_model::StoreError> {
+        posthaste_domain_service::SyncWriteStore::reconcile_sync(
+            self,
+            &posthaste_domain_service::BaseWrite::legacy("store-test base seed"),
+            account_id,
+            reconciliation,
+        )
+    }
+
+    pub(crate) fn apply_message_body(
+        &self,
+        account_id: &posthaste_domain_model::AccountId,
+        message_id: &posthaste_domain_model::MessageId,
+        body: &posthaste_domain_model::FetchedBody,
+    ) -> Result<posthaste_domain_model::CommandResult, posthaste_domain_model::StoreError> {
+        posthaste_domain_service::SyncWriteStore::apply_message_body(
+            self,
+            &posthaste_domain_service::BaseWrite::legacy("store-test base seed"),
+            account_id,
+            message_id,
+            body,
+        )
+    }
+
+    pub(crate) fn destroy_message(
+        &self,
+        account_id: &posthaste_domain_model::AccountId,
+        message_id: &posthaste_domain_model::MessageId,
+        cursor: Option<&posthaste_domain_model::SyncCursor>,
+    ) -> Result<posthaste_domain_model::CommandResult, posthaste_domain_model::StoreError> {
+        posthaste_domain_service::MessageCommandStore::destroy_message(
+            self,
+            &posthaste_domain_service::BaseWrite::legacy("store-test base seed"),
+            account_id,
+            message_id,
+            cursor,
+        )
+    }
+
+    pub(crate) fn set_keywords(
+        &self,
+        account_id: &posthaste_domain_model::AccountId,
+        message_id: &posthaste_domain_model::MessageId,
+        cursor: Option<&posthaste_domain_model::SyncCursor>,
+        command: &posthaste_domain_model::SetKeywordsCommand,
+    ) -> Result<posthaste_domain_model::CommandResult, posthaste_domain_model::StoreError> {
+        self.write_transaction(|tx| {
+            crate::mutations::set_keywords_tx(tx, account_id, message_id, cursor, command)
+        })
+    }
+
+    pub(crate) fn replace_mailboxes(
+        &self,
+        account_id: &posthaste_domain_model::AccountId,
+        message_id: &posthaste_domain_model::MessageId,
+        cursor: Option<&posthaste_domain_model::SyncCursor>,
+        command: &posthaste_domain_model::ReplaceMailboxesCommand,
+    ) -> Result<posthaste_domain_model::CommandResult, posthaste_domain_model::StoreError> {
+        self.write_transaction(|tx| {
+            crate::mutations::replace_mailboxes_tx(tx, account_id, message_id, cursor, command)
+        })
+    }
+}
+
 mod tests {
     use super::*;
     use std::panic;

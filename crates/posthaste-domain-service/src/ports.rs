@@ -8,13 +8,14 @@ use posthaste_domain_model::{
     ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
     ImapMailboxSyncState, ImapMessageLocation, MailQueryRule, MailboxId, MailboxSummary,
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
-    MutationOutcome, Operation, OperationId, OperationState, Recipient, ReplaceMailboxesCommand,
+    MutationOutcome, Operation, OperationId, OperationState, Recipient,
     ReplyContext, RevLogSnapshot, SecretRef, SecretStoreError, SendMessageRequest,
     SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome,
     SyncProgress, SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
 use posthaste_domain_model::{DomainEvent, EventLogBounds, GatewayError, ServiceError, StoreError};
 
+mod base_write;
 mod cache_store;
 mod composite;
 mod draft_registry;
@@ -25,6 +26,7 @@ mod read_store;
 mod sync_store;
 mod write_store;
 
+pub use base_write::BaseWrite;
 pub use cache_store::CacheStore;
 pub use composite::{
     MailStore, SecretCasOutcome, SecretStore, ServiceResultExt, SharedGateway, SharedSecretStore,

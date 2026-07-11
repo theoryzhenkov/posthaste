@@ -299,6 +299,26 @@ aggregates have no readers (delete with M84 as dead machinery).
   survives for ONE caller: the draft-discard destroy (`outbox/draft.rs`) —
   an entity-op path that cuts over in NS2 (gets a legacy grant at seal time).
 
-Remaining in NS1: **NS1b — the `BaseWrite` type-system seal** (now cheap:
-sync + settlement-readback are the only base writers; the draft-discard path
-gets the one loud legacy grant).
+**NS1b LANDED (2026-07-11) — NS1 IS COMPLETE.** The `BaseWrite` capability
+witness (D165) seals every base-writing port method
+(`SyncWriteStore::{apply_sync_batch, reconcile_sync, apply_message_body}`,
+`MessageCommandStore::destroy_message`):
+- `BaseWrite::reconciler()` is `pub(crate)` to posthaste-domain-service — the
+  sync sink, the reconcile pass, the settlement readback, and the lazy body
+  persist mint it; **no other crate can** (teeth-checked: a foreign mint is
+  `E0624` at compile time).
+- `BaseWrite::legacy(reason)` is the loud escape hatch;
+  `rg 'BaseWrite::legacy'` IS the violation inventory. Production grants: ONE
+  (the draft-discard destroy, deleted with NS2). All others are test/bench
+  base-seeding (a test legitimately plays the reconciler).
+- The dead `MessageCommandStore::{set_keywords, replace_mailboxes}` port
+  methods are DELETED (their `_tx` bodies survive as `#[cfg(test)]` seed
+  helpers — follow-up: migrate those tests to sync-batch seeding and delete).
+- The store's ~100 test call sites kept their signatures via `#[cfg(test)]`
+  inherent shadows on `DatabaseStore` (inherent-over-trait precedence), so the
+  seal cost zero test churn in the store crate.
+
+The one-writer invariant is now a compile-time property. Next: **NS2** —
+send/draft as single intents on this substrate
+(RFC-L2-send-draft-state-machine M80–M83: the undo-send clock fix, intent-id
+reconciliation, `moved_to_sent`'s deletion, the draft-discard grant's removal).

@@ -51,7 +51,10 @@ impl SyncChunkSink for ServiceSyncSink<'_> {
         let account_id = self.account_id.clone();
         let owned_batch = batch.clone();
         let result =
-            offload(move || sync_writer.apply_sync_batch(&account_id, &owned_batch)).await;
+            offload(move || {
+                sync_writer.apply_sync_batch(&BaseWrite::reconciler(), &account_id, &owned_batch)
+            })
+            .await;
         match result {
             Ok(events) => {
                 (self.publish)(&events);
@@ -184,7 +187,11 @@ impl MailService {
             let owned_account_id = account_id.clone();
             let owned_reconciliation = reconciliation.clone();
             let reconcile_events = offload(move || {
-                sync_writer.reconcile_sync(&owned_account_id, &owned_reconciliation)
+                sync_writer.reconcile_sync(
+                    &BaseWrite::reconciler(),
+                    &owned_account_id,
+                    &owned_reconciliation,
+                )
             })
             .await?;
             publish(&reconcile_events);
@@ -310,7 +317,10 @@ impl MailService {
         let owned_account_id = account_id.clone();
         let owned_batch = batch.clone();
         events.extend(
-            offload(move || sync_writer.apply_sync_batch(&owned_account_id, &owned_batch)).await?,
+            offload(move || {
+                sync_writer.apply_sync_batch(&BaseWrite::reconciler(), &owned_account_id, &owned_batch)
+            })
+            .await?,
         );
         self.sweep_message_overlay(account_id).await?;
         Ok(events)

@@ -109,6 +109,7 @@ fn seed_inbox_message(
         .api_bridge
         .store
         .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             account,
             &SyncBatch {
                 mailboxes: vec![MailboxRecord {
@@ -284,6 +285,7 @@ async fn remote_runtime_forwards_a_mutation_into_the_authority_server_store() {
         .api_bridge
         .store
         .apply_sync_batch(
+           &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             &account.id,
             &SyncBatch {
                 mailboxes: vec![MailboxRecord {
@@ -629,6 +631,7 @@ async fn a_forwarded_mutation_settles_onto_the_originating_runtimes_down_stream(
         .api_bridge
         .store
         .apply_sync_batch(
+           &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             &account.id,
             &SyncBatch {
                 mailboxes: vec![MailboxRecord {
