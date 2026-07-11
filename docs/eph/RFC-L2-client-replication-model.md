@@ -278,9 +278,27 @@ pending M84. Conversation aggregates needed nothing — the wave-2 strangle
 already computes them live, and the stored `thread_view`/`conversation`
 aggregates have no readers (delete with M84 as dead machinery).
 
-**The read side of NS1 is COMPLETE and internally consistent** — every
-client-visible read (lists, pages, detail, tags, conversations, counts,
-search) serves one derivation over base ∪ overlay. Remaining, as ONE coherent
-cutover unit (owner sign-off per §5.4): the fold-engine overlay write path
-(accept/refold/retire) + delete the S2 write-through in the SAME change +
-collapse `_protected` → NS1b `BaseWrite` seal.
+**NS1 increment 4 LANDED (2026-07-11) — THE CUTOVER.** One coherent change:
+- Mutations write the OVERLAY, never base: `apply_assertion_to_overlay`
+  (mutation.rs) queues the op, re-derives the overlay entry via the single
+  lifecycle function `refresh_message_overlay`, and builds the echo event
+  from the EFFECTIVE read — echo, lists, and counts are one derivation.
+- Settlement writes the RAW readback to base (provider truth via the flush
+  channel — the reconciler role) and re-derives the overlay; the old
+  fold-remaining-ops-into-base is gone.
+- **Retire-on-confirmation is real**: `OverlayRetire::{Immediate,
+  ConfirmAgainstBase}` — a blind (no-readback, e.g. IMAP) settlement keeps
+  the folded entry until a sync writes the effect into base (found live by
+  the real-store `automation_rules` suite; prevents the settle→sync revert
+  flicker). Rejections retire immediately (revert now).
+- Sync writes raw truth only: `guard_unsettled` DELETED; the
+  `_protected` port/impl/param chain DELETED end to end (M35 obviated —
+  unsynced optimism never reaches base); post-sync `sweep_message_overlay`
+  refolds surviving entries over the fresh base, confirmation-gated.
+- S2 write-through call sites in mutation.rs are gone. `MessageCommandStore`
+  survives for ONE caller: the draft-discard destroy (`outbox/draft.rs`) —
+  an entity-op path that cuts over in NS2 (gets a legacy grant at seal time).
+
+Remaining in NS1: **NS1b — the `BaseWrite` type-system seal** (now cheap:
+sync + settlement-readback are the only base writers; the draft-discard path
+gets the one loud legacy grant).
