@@ -32,10 +32,6 @@ fn parse_operation_state(value: &str) -> Result<OperationState, StoreError> {
         "pending" => Ok(OperationState::Pending),
         "inflight" => Ok(OperationState::Inflight),
         "applied" => Ok(OperationState::Applied),
-        // Legacy dogfood rows from the first outbox design parked forever as
-        // `conflicted`; recover them into the new retryable state so they can
-        // drain under the assertion-based flush model.
-        "conflicted" => Ok(OperationState::Pending),
         "failed" => Ok(OperationState::Failed),
         "dispatchUncertain" => Ok(OperationState::DispatchUncertain),
         other => Err(StoreError::Failure(format!(
@@ -102,7 +98,8 @@ fn entity_kind_str(kind: OperationEntityKind) -> &'static str {
 
 /// Columns selected by every operation read, in struct order.
 const OPERATION_COLUMNS: &str = "id, account_id, entity_kind, entity_id, kind, payload, \
-     state, attempts, last_error, depends_on, send_at, hold_until_mono, created_at, updated_at";
+     payload_version, state, attempts, last_error, depends_on, send_at, hold_until_mono, \
+     created_at, updated_at";
 
 fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>> {
     // Extract every column first so all `rusqlite::Error`s surface through the
@@ -113,14 +110,15 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
     let entity_id: String = row.get(3)?;
     let kind_str: String = row.get(4)?;
     let payload_str: String = row.get(5)?;
-    let state_str: String = row.get(6)?;
-    let attempts: i64 = row.get(7)?;
-    let last_error: Option<String> = row.get(8)?;
-    let depends_on: Option<String> = row.get(9)?;
-    let send_at: Option<String> = row.get(10)?;
-    let hold_until_mono: Option<i64> = row.get(11)?;
-    let created_at: String = row.get(12)?;
-    let updated_at: String = row.get(13)?;
+    let payload_version: i64 = row.get(6)?;
+    let state_str: String = row.get(7)?;
+    let attempts: i64 = row.get(8)?;
+    let last_error: Option<String> = row.get(9)?;
+    let depends_on: Option<String> = row.get(10)?;
+    let send_at: Option<String> = row.get(11)?;
+    let hold_until_mono: Option<i64> = row.get(12)?;
+    let created_at: String = row.get(13)?;
+    let updated_at: String = row.get(14)?;
     Ok((|| {
         let payload: Value = serde_json::from_str(&payload_str)
             .map_err(|error| StoreError::Failure(format!("invalid outbox payload: {error}")))?;
@@ -133,6 +131,7 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
             },
             kind: parse_operation_kind(&kind_str)?,
             payload,
+            payload_version,
             state: parse_operation_state(&state_str)?,
             attempts: attempts.max(0) as u32,
             last_error,
@@ -170,10 +169,10 @@ impl OperationOutboxStore for DatabaseStore {
             tx.execute(
                 "INSERT OR IGNORE INTO outbox_operation (
                     id, account_id, entity_kind, entity_id, kind, payload,
-                    state, attempts, last_error, depends_on, send_at,
-                    hold_until_mono, created_at, updated_at
+                    payload_version, state, attempts, last_error, depends_on,
+                    send_at, hold_until_mono, created_at, updated_at
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     operation.id.as_str(),
                     operation.account_id.as_str(),
@@ -181,6 +180,7 @@ impl OperationOutboxStore for DatabaseStore {
                     operation.entity.id,
                     operation_kind_str(operation.kind),
                     payload,
+                    operation.payload_version,
                     operation_state_str(operation.state),
                     operation.attempts as i64,
                     operation.last_error,
@@ -215,7 +215,7 @@ impl OperationOutboxStore for DatabaseStore {
         let mut statement = connection
             .prepare(&format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
-                 WHERE account_id = ?1 AND state IN ('pending', 'inflight', 'conflicted')
+                 WHERE account_id = ?1 AND state IN ('pending', 'inflight')
                    AND (send_at IS NULL OR send_at <= ?2)
                    AND (hold_until_mono IS NULL OR hold_until_mono <= ?3)
                  ORDER BY rowid ASC
@@ -251,7 +251,7 @@ impl OperationOutboxStore for DatabaseStore {
                  WHERE account_id = ?1
                    AND ((send_at IS NOT NULL AND send_at <= ?2)
                         OR (hold_until_mono IS NOT NULL AND hold_until_mono <= ?3))
-                   AND state IN ('pending', 'inflight', 'conflicted')",
+                   AND state IN ('pending', 'inflight')",
             )
             .map_err(sql_to_store_error)?;
         statement
@@ -387,7 +387,7 @@ impl OperationOutboxStore for DatabaseStore {
                 .execute(
                     "UPDATE outbox_operation
                      SET state = 'inflight', updated_at = ?2
-                     WHERE id = ?1 AND state IN ('pending', 'inflight', 'conflicted')",
+                     WHERE id = ?1 AND state IN ('pending', 'inflight')",
                     params![id.as_str(), now_iso8601()?],
                 )
                 .map_err(sql_to_store_error)?;

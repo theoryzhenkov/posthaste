@@ -241,7 +241,10 @@ impl MailService {
         }
         // The payload decoded to push the send, so a failure here is
         // unreachable in practice; it must not un-settle the settled send.
-        let Ok(request) = serde_json::from_value::<SendMessageRequest>(operation.payload.clone())
+        let Ok(posthaste_domain_model::MailIntent::Send(request)) = operation.intent().map_err(|_| ()).and_then(|intent| match intent {
+            posthaste_domain_model::MailIntent::Send(_) => Ok(intent),
+            _ => Err(()),
+        })
         else {
             return Ok(None);
         };

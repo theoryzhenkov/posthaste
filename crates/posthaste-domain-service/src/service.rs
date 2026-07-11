@@ -17,7 +17,7 @@ use posthaste_domain_model::{
     DraftContent, DraftContentResult, GatewayError, Id, Identity, MailQueryRule, MailboxId,
     MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
     MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
-    OperationOutcome, OperationSettlement, OperationState, Recipient, ReplaceMailboxesCommand,
+    OperationOutcome, OperationSettlement, OperationState, Recipient,
     SendMessageRequest, ServiceError, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
     SmartMailboxSummary, SortDirection, StoreError, SyncMode, SyncObject, SyncTrigger, TagSummary,
     ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_UPDATED,
