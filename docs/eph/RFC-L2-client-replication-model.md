@@ -269,12 +269,18 @@ deliberately — they serve the write/sync plane's event scoping and the S2
 write-through readbacks, which die with the write-through. **The read-side
 sequencing gate is satisfied.**
 
-**Open design item GATING the overlay write path (needs owner sign-off):**
-mailbox counters (`mailbox.unread_emails/total_emails`) and the
-conversation/thread projections are base-plane aggregates maintained by the
-write-through today. Once the write-through is deleted, optimism stops
-showing in them until sync unless the fold engine gets a counts/conversation
-overlay story (candidates: fold-computed count deltas on the overlay plane;
-live COUNT over `_effective`; accept-the-lag + echo invalidation per
-RFC-L2-count-unification). Decide before wiring the write path. Then: write
-path → delete the S2 write-through → collapse `_protected` → NS1b seal.
+**NS1 increment 3 LANDED (2026-07-11) — the counts gate is RESOLVED:**
+mailbox counts are now a live derivation over the `_effective` plane
+(one GROUP BY in `list_mailboxes`); the incremental counter triggers are
+retired (dropped at open on legacy DBs), so the DP-H12 drift class is
+structurally gone; `mailbox.unread_emails/total_emails` are dead columns
+pending M84. Conversation aggregates needed nothing — the wave-2 strangle
+already computes them live, and the stored `thread_view`/`conversation`
+aggregates have no readers (delete with M84 as dead machinery).
+
+**The read side of NS1 is COMPLETE and internally consistent** — every
+client-visible read (lists, pages, detail, tags, conversations, counts,
+search) serves one derivation over base ∪ overlay. Remaining, as ONE coherent
+cutover unit (owner sign-off per §5.4): the fold-engine overlay write path
+(accept/refold/retire) + delete the S2 write-through in the SAME change +
+collapse `_protected` → NS1b `BaseWrite` seal.
