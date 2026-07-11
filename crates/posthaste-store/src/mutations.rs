@@ -17,8 +17,8 @@ mod events;
 mod mailbox_cleanup;
 mod message_apply;
 mod projection_tracking;
-mod sync_batch;
-mod types;
+pub(crate) mod sync_batch;
+pub(crate) mod types;
 
 pub(crate) use commands::{
     apply_message_body_tx, destroy_message_tx, replace_mailboxes_tx, set_keywords_tx,
