@@ -224,6 +224,7 @@ async fn flush_create_then_update_reconciles_temp_id_and_settles() {
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
             None,
+            None,
         )
         .expect("queue create");
     service
@@ -232,6 +233,7 @@ async fn flush_create_then_update_reconciles_temp_id_and_settles() {
             draft_entity("draft-temp"),
             OperationKind::DraftUpdate,
             serde_json::to_value(draft_request("Hello, edited")).unwrap(),
+            None,
             None,
         )
         .expect("queue update");
@@ -279,6 +281,7 @@ async fn transient_failure_keeps_op_pending_and_stops_draining() {
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
             None,
+            None,
         )
         .expect("queue create");
 
@@ -319,6 +322,7 @@ async fn draft_create_lost_response_retry_yields_one_draft() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
             None,
         )
         .expect("queue create");
@@ -421,6 +425,7 @@ async fn permanent_failure_marks_op_failed_and_settles() {
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
             None,
+            None,
         )
         .expect("queue create");
 
@@ -461,6 +466,7 @@ async fn permanent_failure_of_a_message_assertion_emits_a_base_correction() {
             },
             OperationKind::SetKeywords,
             serde_json::json!({ "add": ["$flagged"], "remove": [] }),
+            None,
             None,
         )
         .expect("queue setKeywords");
@@ -511,6 +517,7 @@ async fn permanent_failure_of_a_draft_emits_no_base_correction() {
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
             None,
+            None,
         )
         .expect("queue create");
 
@@ -538,6 +545,7 @@ async fn queue_and_fail_one(
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
+            None,
             None,
         )
         .expect("queue create");
@@ -591,6 +599,7 @@ async fn retry_rejects_a_non_failed_operation() {
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
             None,
+            None,
         )
         .expect("queue create");
     let pending = service.list_pending_operations(&account).expect("pending");
@@ -618,6 +627,7 @@ async fn failed_draft_predecessor_cancels_dependent_update() {
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
             None,
+            None,
         )
         .expect("queue create");
     service
@@ -626,6 +636,7 @@ async fn failed_draft_predecessor_cancels_dependent_update() {
             draft_entity("draft-temp"),
             OperationKind::DraftUpdate,
             serde_json::to_value(draft_request("Hello again")).unwrap(),
+            None,
             None,
         )
         .expect("queue update");
@@ -698,6 +709,7 @@ async fn interrupted_inflight_send_parks_dispatch_uncertain_not_resent() {
             draft_entity("send-1"),
             OperationKind::Send,
             serde_json::to_value(draft_request("Outgoing")).unwrap(),
+            None,
             None,
         )
         .expect("queue send");
@@ -1083,6 +1095,7 @@ async fn delete_draft_flushes_and_settles() {
             draft_entity("provider-7"),
             OperationKind::DraftDelete,
             serde_json::json!({ "idempotentRedelivery": true }),
+            None,
             None,
         )
         .expect("queue delete");
@@ -1641,4 +1654,93 @@ async fn cancel_loses_cleanly_once_the_flush_has_claimed_the_send() {
         .discard_operation(&send.id)
         .expect_err("a claimed (inflight) send must not be discardable");
     assert!(error.to_string().contains("in-flight"));
+}
+
+// --- D152 (NS2 Slice 1): the two-clock readiness split — the nightly P0 ------
+
+/// The P0 regression: an undo hold must be stamped AND judged on the daemon's
+/// monotonic clock. The request's client-supplied `sendAt` (potentially from a
+/// wildly skewed wall clock — the exact nightly failure shape) must NOT be
+/// stored, so no wall comparison can ever wedge the hold.
+#[tokio::test]
+async fn undo_hold_is_stamped_and_judged_on_the_monotonic_clock() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    let before = crate::service::outbox::schedule::monotonic_now_secs();
+    let send = service
+        .enqueue_send(
+            &account,
+            SendMessageRequest {
+                // A client wall clock light-years ahead of the daemon: under
+                // the old fused mechanism this send would NEVER fire.
+                send_at: Some("2999-01-01T00:00:00Z".to_string()),
+                undo_window_seconds: Some(10),
+                ..draft_request("Held")
+            },
+        )
+        .expect("undo-held send queues");
+    let after = crate::service::outbox::schedule::monotonic_now_secs();
+
+    assert_eq!(
+        send.send_at, None,
+        "an undo hold stores NO wall deadline — sendAt degrades to display metadata"
+    );
+    let hold = send
+        .hold_until_mono
+        .expect("undo hold carries the server-stamped monotonic deadline");
+    assert!(
+        (before + 10..=after + 10).contains(&hold),
+        "deadline = server mono now + window (got {hold}, window [{}, {}])",
+        before + 10,
+        after + 10
+    );
+
+    // Not yet due on the monotonic clock: held out of the flushable set even
+    // though every wall clock on earth is long past the client's sendAt.
+    let held = store
+        .list_flushable_operations(&account, "2999-06-01T00:00:00Z", hold - 1)
+        .expect("gate probe");
+    assert!(held.is_empty(), "hold releases on mono only, never on wall");
+
+    // Due on the monotonic clock: releases even with the wall clock far in
+    // the PAST (a suspend-lagged daemon — the other half of the skew).
+    let due = store
+        .list_flushable_operations(&account, "1970-01-01T00:00:00Z", hold)
+        .expect("gate probe");
+    assert_eq!(due.len(), 1, "a due undo hold releases regardless of wall");
+
+    // End to end: once due, the flush actually dispatches it.
+    let _ = service.flush_account(&account, &gateway).await;
+    drop(gateway);
+}
+
+/// Send-later stays wall-judged: a monotonic clock at zero (fresh daemon)
+/// must not hold back a wall schedule that has passed.
+#[test]
+fn wall_scheduled_send_is_judged_by_wall_regardless_of_monotonic_skew() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    let send = service
+        .enqueue_send(&account, scheduled_request("Later", "2020-01-01T00:00:00Z"))
+        .expect("send-later queues");
+    assert_eq!(send.send_at.as_deref(), Some("2020-01-01T00:00:00Z"));
+    assert_eq!(send.hold_until_mono, None);
+
+    let due = store
+        .list_flushable_operations(&account, "2026-01-01T00:00:00Z", 0)
+        .expect("gate probe");
+    assert_eq!(due.len(), 1, "a past wall schedule is due at mono zero");
+
+    let held = store
+        .list_flushable_operations(&account, "2019-01-01T00:00:00Z", i64::MAX)
+        .expect("gate probe");
+    assert!(
+        held.is_empty(),
+        "a future wall schedule holds no matter how large mono grows"
+    );
 }

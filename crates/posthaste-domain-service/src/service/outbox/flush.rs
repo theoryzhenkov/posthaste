@@ -64,14 +64,17 @@ impl MailService {
         gateway: &dyn MailGateway,
         events: &mut Vec<DomainEvent>,
     ) -> Result<FlushPass, ServiceError> {
-        // Scheduled sends: the flushable set is gated on the monotonic-anchored
-        // "now" (see `schedule`), so a send whose `send_at` is still in the
-        // future is not even listed — it rests `pending` (cancelable) until
-        // due. Sampled once per pass; a send coming due mid-pass waits for the
-        // next pass/tick, which only ever delays, never fires early.
-        let now = super::schedule::outbox_now_rfc3339()
+        // Held sends: two readiness gates on two clocks (D152) — send-later
+        // (`send_at`) against a RE-SAMPLED wall clock; undo holds
+        // (`hold_until_mono`) against the same monotonic anchor that stamped
+        // them. Sampled once per pass; a send coming due mid-pass waits for
+        // the next pass/tick, which only ever delays, never fires early.
+        let wall_now = super::schedule::wall_now_rfc3339()
             .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))?;
-        let queued = self.outbox.list_flushable_operations(account_id, &now)?;
+        let mono_now = super::schedule::monotonic_now_secs();
+        let queued = self
+            .outbox
+            .list_flushable_operations(account_id, &wall_now, mono_now)?;
         let mut follow_up_enqueued = false;
         for snapshot in queued {
             // Re-fetch fresh: an earlier op in this pass may have changed this

@@ -24,6 +24,7 @@ fn operation(id: &str, entity_id: &str, kind: OperationKind, state: OperationSta
         last_error: None,
         depends_on: None,
         send_at: None,
+            hold_until_mono: None,
         created_at: NOW.to_string(),
         updated_at: NOW.to_string(),
     }
@@ -96,7 +97,7 @@ fn flushable_lists_pending_and_inflight_in_insertion_order() -> Result<(), Store
         OperationState::Failed,
     ))?;
 
-    let flushable = store.list_flushable_operations(&account, NOW)?;
+    let flushable = store.list_flushable_operations(&account, NOW, 0)?;
     let ids: Vec<&str> = flushable.iter().map(|op| op.id.as_str()).collect();
     // op-2 is applied and op-4 is failed, so both are excluded; order follows insertion.
     assert_eq!(ids, vec!["op-1", "op-3"]);
@@ -480,7 +481,7 @@ fn flushable_operations_are_limited_and_drain_across_cycles() -> Result<(), Stor
 
     // First "cycle": the store returns at most the batch limit, not the
     // whole backlog in one unbounded `Vec`.
-    let first_batch = store.list_flushable_operations(&account, NOW)?;
+    let first_batch = store.list_flushable_operations(&account, NOW, 0)?;
     assert_eq!(first_batch.len(), OUTBOX_FLUSH_BATCH_LIMIT as usize);
 
     // The flush loop processes a batch by moving each op out of the
@@ -491,7 +492,7 @@ fn flushable_operations_are_limited_and_drain_across_cycles() -> Result<(), Stor
         store.update_operation_state(&op.id, OperationState::Applied, 0, None)?;
     }
 
-    let second_batch = store.list_flushable_operations(&account, NOW)?;
+    let second_batch = store.list_flushable_operations(&account, NOW, 0)?;
     assert_eq!(
         second_batch.len(),
         total - OUTBOX_FLUSH_BATCH_LIMIT as usize,
@@ -525,7 +526,7 @@ fn scheduled_send_is_held_until_due_and_survives_reopen() -> Result<(), StoreErr
         ))?;
         // Before due: held out of the flushable set (but still pending/visible).
         assert!(store
-            .list_flushable_operations(&account, "2026-06-21T00:00:09Z")?
+            .list_flushable_operations(&account, "2026-06-21T00:00:09Z", 0)?
             .is_empty());
         assert_eq!(store.list_pending_operations(&account)?.len(), 1);
     }
@@ -534,9 +535,9 @@ fn scheduled_send_is_held_until_due_and_survives_reopen() -> Result<(), StoreErr
     // exactly at the boundary (`send_at <= now` — due AT the instant).
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     assert!(store
-        .list_flushable_operations(&account, "2026-06-21T00:00:09Z")?
+        .list_flushable_operations(&account, "2026-06-21T00:00:09Z", 0)?
         .is_empty());
-    let due = store.list_flushable_operations(&account, "2026-06-21T00:00:10Z")?;
+    let due = store.list_flushable_operations(&account, "2026-06-21T00:00:10Z", 0)?;
     assert_eq!(due.len(), 1);
     assert_eq!(due[0].id.as_str(), "op-later");
     assert_eq!(due[0].send_at.as_deref(), Some("2026-06-21T00:00:10Z"));
@@ -574,13 +575,13 @@ fn count_due_scheduled_sends_counts_only_due_queued_schedules() -> Result<(), St
         OperationState::Pending,
     ))?;
 
-    assert_eq!(store.count_due_scheduled_sends(&account, NOW)?, 1);
+    assert_eq!(store.count_due_scheduled_sends(&account, NOW, 0)?, 1);
     assert_eq!(
-        store.count_due_scheduled_sends(&account, "2026-06-21T01:00:00Z")?,
+        store.count_due_scheduled_sends(&account, "2026-06-21T01:00:00Z", 0)?,
         2
     );
     assert_eq!(
-        store.count_due_scheduled_sends(&account, "2026-06-20T23:59:59Z")?,
+        store.count_due_scheduled_sends(&account, "2026-06-20T23:59:59Z", 0)?,
         0
     );
     Ok(())

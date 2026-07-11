@@ -70,6 +70,7 @@ impl MailService {
             kind,
             payload,
             None,
+            None,
         )
     }
 
@@ -108,6 +109,7 @@ impl MailService {
             },
             OperationKind::DraftDelete,
             serde_json::json!({ "idempotentRedelivery": idempotent_redelivery }),
+            None,
             None,
         )
     }
