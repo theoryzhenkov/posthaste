@@ -31,50 +31,19 @@ pub(crate) fn stage_sync_bodies(
         .collect()
 }
 
-/// Empty protected set shared by the unprotected `apply_sync_batch_tx`/
-/// `reconcile_sync_tx` entry points, so their prune passes behave exactly as
-/// before the S3 replace_all guard was added.
-fn no_protected_message_ids() -> HashSet<String> {
-    HashSet::new()
-}
+// NS1 cutover: the M35 `protected_message_ids` exemption is GONE from the
+// whole apply/reconcile/prune chain. Base holds only raw provider truth now —
+// a not-yet-uploaded local create never reaches base (it lives in the
+// overlay), and a pending-Destroy message still exists in base until the
+// provider confirms — so there is nothing for a snapshot prune to wrongly
+// delete. The floor guards (DS1/DP-C3/DP-C4) remain: they protect against a
+// LYING provider (truncated/empty listings), which is orthogonal to optimism.
 
 pub(crate) fn apply_sync_batch_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     batch: &SyncBatch,
     staged_bodies: &[Option<RawMessageRef>],
-) -> Result<Vec<DomainEvent>, StoreError> {
-    apply_sync_batch_tx_impl(
-        tx,
-        account_id,
-        batch,
-        staged_bodies,
-        &no_protected_message_ids(),
-    )
-}
-
-/// Like [`apply_sync_batch_tx`], but for a `replace_all_messages` snapshot:
-/// `protected_message_ids` (messages with an un-acked optimistic op) are
-/// excluded from the prune-by-absence pass (M35 durable snapshot guard, D93).
-/// The caller folds present rows in-batch and only omits absent/folded-to-
-/// removed ones; this exemption keeps the prune from treating those omissions
-/// as "deleted remotely".
-pub(crate) fn apply_sync_batch_protected_tx(
-    tx: &Transaction<'_>,
-    account_id: &AccountId,
-    batch: &SyncBatch,
-    staged_bodies: &[Option<RawMessageRef>],
-    protected_message_ids: &HashSet<String>,
-) -> Result<Vec<DomainEvent>, StoreError> {
-    apply_sync_batch_tx_impl(tx, account_id, batch, staged_bodies, protected_message_ids)
-}
-
-fn apply_sync_batch_tx_impl(
-    tx: &Transaction<'_>,
-    account_id: &AccountId,
-    batch: &SyncBatch,
-    staged_bodies: &[Option<RawMessageRef>],
-    protected_message_ids: &HashSet<String>,
 ) -> Result<Vec<DomainEvent>, StoreError> {
     let mut events =
         EventRecorder::with_capacity(tx, account_id, estimate_sync_event_count(batch))?;
@@ -99,7 +68,6 @@ fn apply_sync_batch_tx_impl(
             tx,
             account_id,
             &remote_message_ids,
-            protected_message_ids,
             // No wired explicit-full-resync signal today; the floor guard is
             // always active on this path (DS1).
             false,
@@ -132,11 +100,7 @@ fn apply_sync_batch_tx_impl(
     // drastically shrink the local store. A dropped/empty search makes the whole
     // local set look "absent", so refusing here preserves local mail while the
     // VANISHED path still deletes what the server actually reported gone.
-    let absence_prunable_count = batch
-        .absence_deleted_message_ids
-        .iter()
-        .filter(|id| !protected_message_ids.contains(id.as_str()))
-        .count();
+    let absence_prunable_count = batch.absence_deleted_message_ids.len();
     let apply_absence_deletions =
         imap_absence_prune_allowed_tx(tx, account_id, absence_prunable_count)?;
 
@@ -148,13 +112,7 @@ fn apply_sync_batch_tx_impl(
     let mut deleted_locations: Vec<&ImapMessageLocationKey> =
         batch.deleted_imap_message_locations.iter().collect();
     if apply_absence_deletions {
-        deleted_message_ids.extend(
-            batch
-                .absence_deleted_message_ids
-                .iter()
-                .filter(|id| !protected_message_ids.contains(id.as_str()))
-                .cloned(),
-        );
+        deleted_message_ids.extend(batch.absence_deleted_message_ids.iter().cloned());
         deleted_locations.extend(batch.absence_deleted_imap_message_locations.iter());
     }
 
@@ -421,13 +379,6 @@ pub(crate) fn prune_mailboxes_absent_from_remote_tx(
 /// `replace_all_messages` snapshot path and the streamed final-reconciliation
 /// pass.
 ///
-/// `protected_message_ids` (messages with an un-acked optimistic op, M35
-/// durable snapshot guard) are skipped even when absent from `remote_message_ids`:
-/// a not-yet-uploaded local message, or one the guard left out of the snapshot
-/// because it folded to removed (pending Destroy), must survive this pass and
-/// reconcile once its op settles. Rows the guard *did* fold into the snapshot
-/// are present in `remote_message_ids`, so they are not pruned regardless.
-///
 /// DS1 mail-loss floor guard: unless `force_full_prune` is set (an explicit
 /// full-resync signal), this refuses to run when `remote_message_ids` is empty
 /// or would delete more than [`MAX_ABSENCE_PRUNE_FRACTION`] of the local store.
@@ -437,11 +388,13 @@ pub(crate) fn prune_mailboxes_absent_from_remote_tx(
 /// than local) stays well under the floor and prunes normally; a legitimate
 /// mass deletion must arrive through `force_full_prune`, not an unbounded
 /// absence-prune.
+///
+/// (NS1: the M35 `protected_message_ids` exemption is gone — un-acked optimism
+/// lives in the overlay plane, which this base-plane prune cannot touch.)
 pub(crate) fn prune_messages_absent_from_remote_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     remote_message_ids: &BTreeSet<MessageId>,
-    protected_message_ids: &HashSet<String>,
     force_full_prune: bool,
     affected: &mut ProjectionInputs,
     events: &mut EventRecorder<'_, '_, '_>,
@@ -461,13 +414,7 @@ pub(crate) fn prune_messages_absent_from_remote_tx(
     if !force_full_prune {
         let local_count = local_message_ids.len();
         if local_count > 0 {
-            // Count only the rows this pass would actually DELETE: locals absent
-            // from remote and not exempted by the protected set (protected rows
-            // never prune, so they must not inflate the floor fraction).
-            let would_prune = local_message_ids
-                .difference(remote_message_ids)
-                .filter(|id| !protected_message_ids.contains(id.as_str()))
-                .count();
+            let would_prune = local_message_ids.difference(remote_message_ids).count();
             let over_floor =
                 (would_prune as f64) > (local_count as f64) * MAX_ABSENCE_PRUNE_FRACTION;
             if remote_message_ids.is_empty() || over_floor {
@@ -486,9 +433,6 @@ pub(crate) fn prune_messages_absent_from_remote_tx(
     }
 
     for message_id in local_message_ids.difference(remote_message_ids) {
-        if protected_message_ids.contains(message_id.as_str()) {
-            continue;
-        }
         delete_message_and_track_projection_inputs(tx, account_id, message_id, affected)?;
         write_through_draft_registry_on_message_delete_tx(tx, account_id, message_id)?;
         events.record(
@@ -606,29 +550,6 @@ pub(crate) fn reconcile_sync_tx(
     account_id: &AccountId,
     reconciliation: &SyncReconciliation,
 ) -> Result<Vec<DomainEvent>, StoreError> {
-    reconcile_sync_tx_impl(tx, account_id, reconciliation, &no_protected_message_ids())
-}
-
-/// Like [`reconcile_sync_tx`], but excludes `protected_message_ids` from the
-/// prune-by-absence pass, for the same reason as
-/// [`apply_sync_batch_protected_tx`]. Covers the streamed full-snapshot
-/// fallback (e.g. JMAP `cannotCalculateChanges`), whose pruning happens here
-/// rather than in an in-batch `replace_all_messages` pass.
-pub(crate) fn reconcile_sync_protected_tx(
-    tx: &Transaction<'_>,
-    account_id: &AccountId,
-    reconciliation: &SyncReconciliation,
-    protected_message_ids: &HashSet<String>,
-) -> Result<Vec<DomainEvent>, StoreError> {
-    reconcile_sync_tx_impl(tx, account_id, reconciliation, protected_message_ids)
-}
-
-fn reconcile_sync_tx_impl(
-    tx: &Transaction<'_>,
-    account_id: &AccountId,
-    reconciliation: &SyncReconciliation,
-    protected_message_ids: &HashSet<String>,
-) -> Result<Vec<DomainEvent>, StoreError> {
     let estimated = reconciliation.cursors.len()
         + if reconciliation.prune_mailboxes {
             reconciliation.remote_mailbox_ids.len()
@@ -655,7 +576,6 @@ fn reconcile_sync_tx_impl(
             tx,
             account_id,
             &remote_message_ids,
-            protected_message_ids,
             // No wired explicit-full-resync signal today; the floor guard is
             // always active on this path (DS1).
             false,

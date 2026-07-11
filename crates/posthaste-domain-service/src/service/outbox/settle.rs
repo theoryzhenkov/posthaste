@@ -1,8 +1,10 @@
-//! Settlement: fold the provider readback into canonical, and emit the
+//! Settlement: write the provider readback to base RAW (it is provider truth
+//! arriving via the flush channel — the reconciler role, NS1 D161), re-derive
+//! the message's overlay entry from the remaining unsettled ops, and emit the
 //! `operation.settled` / `operation.dispatch_uncertain` / failure-correction
 //! events.
 
-use crate::service::message_queries::project_record;
+use crate::service::mutation::refresh_message_overlay;
 use crate::service::*;
 use posthaste_domain_model::{
     MessageReadback, MessageRecord, OperationDispatchUncertain, SyncBatch,
@@ -28,13 +30,13 @@ fn delete_message_batch(message_id: &MessageId) -> SyncBatch {
 
 impl MailService {
     /// Settle a message state assertion from the provider readback: remove the
-    /// op, fold the remaining unsettled assertions for the message over the
-    /// readback (the new base), and write canonical via the sync write path.
-    /// `Removed`/folded-to-removed deletes the row; a `None` readback (a gateway
-    /// that did not read back, e.g. IMAP) leaves the optimistic write for a later
-    /// sync to reconcile.
+    /// op, write the RAW readback to base (provider truth — no optimism is
+    /// folded into base, NS1), and re-derive the message's overlay entry from
+    /// whatever ops remain unsettled. `Removed` deletes the base row; a `None`
+    /// readback (a gateway that did not read back, e.g. IMAP) writes nothing —
+    /// the overlay keeps serving the fold until a later sync reconciles base.
     ///
-    /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    /// @spec docs/eph/RFC-L2-client-replication-model#6-the-runtime-substrate-base--overlay--effective-d167d169
     pub(super) async fn settle_message_operation(
         &self,
         account_id: &AccountId,
@@ -43,25 +45,14 @@ impl MailService {
         rejected: Option<String>,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let message_id = MessageId::from(operation.entity.id.as_str());
-        // Remove the settled op FIRST so `remaining` excludes it and the
-        // canonical write is no longer guarded as unsettled (S3).
+        // Remove the settled op FIRST so the overlay re-derivation below sees
+        // only the ops that remain.
         self.outbox.remove_operation(&operation.id)?;
-        let remaining: Vec<Operation> = self
-            .outbox
-            .list_unsettled_operations(account_id)?
-            .into_iter()
-            .filter(|op| {
-                op.entity.kind == OperationEntityKind::Message
-                    && op.kind.is_state_assertion()
-                    && op.entity.id == message_id.as_str()
-            })
-            .collect();
         let mut events = Vec::new();
+        let had_readback = readback.is_some();
+        let rejected_settlement = rejected.is_some();
         let batch = match readback {
-            Some(MessageReadback::Present(record)) => match project_record(record, &remaining)? {
-                Some(record) => Some(upsert_message_batch(record)),
-                None => Some(delete_message_batch(&message_id)),
-            },
+            Some(MessageReadback::Present(record)) => Some(upsert_message_batch(record)),
             Some(MessageReadback::Removed) => Some(delete_message_batch(&message_id)),
             None => None,
         };
@@ -72,6 +63,25 @@ impl MailService {
                 offload(move || sync_writer.apply_sync_batch(&owned_account_id, &batch)).await?,
             );
         }
+        // Overlay retire/refold. With a readback (or a rejection) base was just
+        // made authoritative for this message → retire immediately (a rejection
+        // reverts the optimism NOW). Without one (e.g. IMAP settles blind), the
+        // settled effect has NOT reached base yet — retire only on confirmation
+        // (the sweep removes the entry once a sync writes the effect into
+        // base), so the row never flickers back between settle and sync.
+        let retire = if had_readback || rejected_settlement {
+            crate::service::mutation::OverlayRetire::Immediate
+        } else {
+            crate::service::mutation::OverlayRetire::ConfirmAgainstBase
+        };
+        refresh_message_overlay(
+            self.overlay.clone(),
+            self.outbox.clone(),
+            account_id.clone(),
+            message_id.clone(),
+            retire,
+        )
+        .await?;
         let settlement = OperationSettlement {
             id: operation.id.clone(),
             outcome: if rejected.is_some() {

@@ -24,10 +24,7 @@ pub(crate) use commands::{
     apply_message_body_tx, destroy_message_tx, replace_mailboxes_tx, set_keywords_tx,
 };
 pub(crate) use events::{event_log_bounds, list_events};
-pub(crate) use sync_batch::{
-    apply_sync_batch_protected_tx, apply_sync_batch_tx, reconcile_sync_protected_tx,
-    reconcile_sync_tx, stage_sync_bodies,
-};
+pub(crate) use sync_batch::{apply_sync_batch_tx, reconcile_sync_tx, stage_sync_bodies};
 
 use mailbox_cleanup::{
     delete_mailbox_and_track_projection_inputs, prune_stale_imap_message_locations_for_snapshot_tx,

@@ -25,14 +25,14 @@ pub(super) struct TestStore {
     pub(super) rule_page: Mutex<Vec<MessageSummary>>,
     pub(super) conversation_view: Mutex<Option<ConversationView>>,
     pub(super) mutation_state: Mutex<MutationStoreState>,
-    /// Each `apply_sync_batch_protected`/`reconcile_sync_protected` call's
-    /// `protected_message_ids` argument, in order — lets tests assert the M35
-    /// durable guard's ids reach the store boundary for full-snapshot syncs.
-    pub(super) protected_message_ids: Mutex<Vec<std::collections::HashSet<String>>>,
-    /// Every message record upserted through `apply_sync_batch(_protected)`, in
-    /// order — lets the M35 guard tests assert the *folded* row (server truth +
-    /// re-layered pending effect) actually reaches the store boundary.
+    /// Every message record upserted through `apply_sync_batch`, in order —
+    /// raw provider truth under NS1 (also serves as the overlay mock's "base"
+    /// for `read_base_message_record`: last write for an id wins).
     pub(super) applied_messages: Mutex<Vec<MessageRecord>>,
+    /// The overlay-plane mock (NS1): message id → (folded row or None for a
+    /// tombstone). Written only through the `MessageOverlayStore` impl, so
+    /// tests can assert the overlay lifecycle (accept/refold/retire).
+    pub(super) overlay_rows: Mutex<std::collections::BTreeMap<String, Option<MessageRecord>>>,
     pub(super) outbox_operations: Mutex<Vec<Operation>>,
     /// (account_id, draft_key, entity_id) draft-registry rows — the ONE
     /// authority for the stable-key → live-entity mapping (M69/D135). In the
@@ -69,8 +69,8 @@ impl Default for TestStore {
             rule_page: Mutex::new(Vec::new()),
             conversation_view: Mutex::new(None),
             mutation_state: Mutex::new(MutationStoreState::default()),
-            protected_message_ids: Mutex::new(Vec::new()),
             applied_messages: Mutex::new(Vec::new()),
+            overlay_rows: Mutex::new(std::collections::BTreeMap::new()),
             outbox_operations: Mutex::new(Vec::new()),
             draft_aliases: Mutex::new(Vec::new()),
             snoozes: Mutex::new(Vec::new()),

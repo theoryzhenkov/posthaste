@@ -159,6 +159,186 @@ impl MessageOverlayStore for DatabaseStore {
             .map_err(sql_to_store_error)?;
         Ok(ids)
     }
+
+    fn read_overlay_message(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<Option<posthaste_domain_model::MessageRecord>>, StoreError> {
+        let connection = self.read_connection()?;
+        let row = connection
+            .query_row(
+                "SELECT tombstone, thread_id, subject, from_name, from_email, received_at
+                 FROM message_overlay
+                 WHERE account_id = ?1 AND id = ?2",
+                params![account_id.as_str(), message_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sql_to_store_error)?;
+        let Some((tombstone, thread_id, subject, from_name, from_email, received_at)) = row else {
+            return Ok(None);
+        };
+        if tombstone != 0 {
+            return Ok(Some(None));
+        }
+        let mut mailbox_statement = connection
+            .prepare_cached(
+                "SELECT mailbox_id FROM message_mailbox_overlay
+                 WHERE account_id = ?1 AND message_id = ?2 ORDER BY mailbox_id",
+            )
+            .map_err(sql_to_store_error)?;
+        let mailbox_ids = mailbox_statement
+            .query_map(params![account_id.as_str(), message_id.as_str()], |row| {
+                row.get::<_, String>(0).map(MailboxId)
+            })
+            .map_err(sql_to_store_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)?;
+        let mut keyword_statement = connection
+            .prepare_cached(
+                "SELECT keyword FROM message_keyword_overlay
+                 WHERE account_id = ?1 AND message_id = ?2 ORDER BY keyword",
+            )
+            .map_err(sql_to_store_error)?;
+        let keywords = keyword_statement
+            .query_map(params![account_id.as_str(), message_id.as_str()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(sql_to_store_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)?;
+        Ok(Some(Some(posthaste_domain_model::MessageRecord {
+            id: message_id.clone(),
+            source_thread_id: ThreadId(thread_id),
+            subject,
+            from_name,
+            from_email,
+            received_at,
+            mailbox_ids,
+            keywords,
+            ..Default::default()
+        })))
+    }
+
+    fn read_base_message_record(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<posthaste_domain_model::MessageRecord>, StoreError> {
+        let connection = self.read_connection()?;
+        let row = connection
+            .query_row(
+                "SELECT thread_id, remote_blob_id, subject, from_name, from_email, to_json,
+                        preview, received_at, has_attachment, size, rfc_message_id, in_reply_to,
+                        references_json, draft_id, list_unsubscribe
+                 FROM message
+                 WHERE account_id = ?1 AND id = ?2",
+                params![account_id.as_str(), message_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, Option<String>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, String>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sql_to_store_error)?;
+        let Some((
+            thread_id,
+            remote_blob_id,
+            subject,
+            from_name,
+            from_email,
+            to_json,
+            preview,
+            received_at,
+            has_attachment,
+            size,
+            rfc_message_id,
+            in_reply_to,
+            references_json,
+            draft_id,
+            list_unsubscribe,
+        )) = row
+        else {
+            return Ok(None);
+        };
+        // Base-plane sets, deliberately NOT the `_effective` views: this is
+        // the fold's input, so it must be raw provider truth.
+        let mut mailbox_statement = connection
+            .prepare_cached(
+                "SELECT mailbox_id FROM message_mailbox
+                 WHERE account_id = ?1 AND message_id = ?2 ORDER BY mailbox_id",
+            )
+            .map_err(sql_to_store_error)?;
+        let mailbox_ids = mailbox_statement
+            .query_map(params![account_id.as_str(), message_id.as_str()], |row| {
+                row.get::<_, String>(0).map(MailboxId)
+            })
+            .map_err(sql_to_store_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)?;
+        let mut keyword_statement = connection
+            .prepare_cached(
+                "SELECT keyword FROM message_keyword
+                 WHERE account_id = ?1 AND message_id = ?2 ORDER BY keyword",
+            )
+            .map_err(sql_to_store_error)?;
+        let keywords = keyword_statement
+            .query_map(params![account_id.as_str(), message_id.as_str()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(sql_to_store_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)?;
+        Ok(Some(posthaste_domain_model::MessageRecord {
+            id: message_id.clone(),
+            source_thread_id: ThreadId(thread_id),
+            remote_blob_id: remote_blob_id.map(posthaste_domain_model::BlobId),
+            subject,
+            from_name,
+            from_email,
+            to: serde_json::from_str(&to_json).map_err(json_to_store_error)?,
+            preview,
+            received_at,
+            has_attachment: has_attachment != 0,
+            size,
+            mailbox_ids,
+            keywords,
+            body_html: None,
+            body_text: None,
+            raw_mime: None,
+            rfc_message_id,
+            in_reply_to,
+            references: serde_json::from_str(&references_json).map_err(json_to_store_error)?,
+            draft_id,
+            // Degrades to "no target" on schema drift, mirroring the detail read.
+            list_unsubscribe: list_unsubscribe.and_then(|json| serde_json::from_str(&json).ok()),
+        }))
+    }
 }
 
 /// Clears both overlay set tables for the message, then hands the caller

@@ -1,22 +1,22 @@
 //! Property-based coverage of the mail-safety prune/floor-guard invariants
-//! (`MAX_ABSENCE_PRUNE_FRACTION`, the empty-remote refusal, the protected-id
-//! exemption, and the `force_full_prune` bypass).
+//! (`MAX_ABSENCE_PRUNE_FRACTION`, the empty-remote refusal, and the
+//! `force_full_prune` bypass). (NS1: the M35 protected-id exemption is gone —
+//! optimism lives in the overlay plane, which the base prune cannot touch.)
 //!
 //! The fixed-example snapshot tests (`message_snapshots`, `mailbox_snapshots`)
 //! prove specific points; these generalize across random store sizes and prune
 //! fractions so the boundary cases the examples miss — exactly-at-the-floor
-//! deletions, protected rows near the fraction, empty-but-`Ok` remote sets —
-//! cannot silently regress. This is the guardrail the audit named for the DS1 /
+//! deletions, empty-but-`Ok` remote sets — cannot silently regress. This is the guardrail the audit named for the DS1 /
 //! DP-C2/C3/C4 mail-loss class ("DS1 was found by luck; zero proptest coverage").
 //!
 //! Two paths are exercised:
 //!   * the real `apply_sync_batch` snapshot entry (`replace_all_messages` /
 //!     `replace_all_mailboxes`) — the wiring that actually shipped the bugs;
 //!   * a direct call into `prune_messages_absent_from_remote_tx` for the
-//!     protected-id and `force_full_prune` invariants, which cannot be driven
-//!     through the public API (protected ids come from un-acked optimistic ops).
+//!     `force_full_prune` invariant, which cannot be driven through the
+//!     public API.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
 use proptest::prelude::*;
 
@@ -191,106 +191,11 @@ proptest! {
         }
     }
 
-    /// Direct-call invariant: a protected message (un-acked optimistic op) is
-    /// NEVER pruned, and protected rows do not inflate the floor fraction (they
-    /// are excluded from `would_prune`). (M35 durable snapshot guard.)
-    #[test]
-    fn protected_ids_never_pruned_and_excluded_from_floor(
-        (n, keep) in snapshot_case(16),
-        protect_seed in any::<u64>(),
-    ) {
-        let root = temp_root();
-        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap();
-        let account = AccountId::from("primary");
-        setup_source(&store, &account, "Primary").unwrap();
-
-        let ids: Vec<String> = (0..n).map(|i| format!("msg-{i:03}")).collect();
-        let seed = ids
-            .iter()
-            .map(|id| sample_message(id, "inbox", Some("mime")))
-            .collect();
-        seed_messages(&store, &account, seed, "seed-state").unwrap();
-
-        // Deterministically pick a protected subset from the seed (a cheap PRNG
-        // over the id index — proptest forbids ambient randomness).
-        let protected: HashSet<String> = ids
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| (protect_seed >> (i % 64)) & 1 == 1)
-            .map(|(_, id)| id.clone())
-            .collect();
-
-        let remote_ids: BTreeSet<MessageId> = ids
-            .iter()
-            .zip(&keep)
-            .filter(|(_, &k)| k)
-            .map(|(id, _)| MessageId::from(id.as_str()))
-            .collect();
-
-        store
-            .write_transaction(|tx| -> Result<(), StoreError> {
-                let mut events =
-                    crate::projections::EventRecorder::with_capacity(tx, &account, 64)?;
-                let mut affected = crate::mutations::types::ProjectionInputs::default();
-                crate::mutations::sync_batch::prune_messages_absent_from_remote_tx(
-                    tx,
-                    &account,
-                    &remote_ids,
-                    &protected,
-                    false,
-                    &mut affected,
-                    &mut events,
-                )
-            })
-            .unwrap();
-
-        let survivors: BTreeSet<String> = store
-            .list_messages(&account, None)
-            .unwrap()
-            .into_iter()
-            .map(|m| m.id.to_string())
-            .collect();
-
-        // Protected rows survive unconditionally.
-        for id in &protected {
-            prop_assert!(survivors.contains(id), "protected id {} was pruned", id);
-        }
-
-        // Oracle: would_prune counts only absent, NON-protected rows.
-        let remote_present: HashSet<&String> = ids
-            .iter()
-            .zip(&keep)
-            .filter(|(_, &k)| k)
-            .map(|(id, _)| id)
-            .collect();
-        let would_prune = ids
-            .iter()
-            .filter(|id| !remote_present.contains(id) && !protected.contains(*id))
-            .count();
-        let refused = guard_refuses(n, remote_ids.is_empty(), would_prune);
-
-        if refused {
-            prop_assert_eq!(survivors.len(), n, "refusal must preserve every local row");
-        } else {
-            let pruned = ids
-                .iter()
-                .filter(|id| !survivors.contains(*id))
-                .count();
-            prop_assert_eq!(
-                pruned,
-                would_prune,
-                "exactly the absent, non-protected rows are pruned"
-            );
-        }
-    }
-
     /// Direct-call invariant: `force_full_prune` bypasses the floor entirely
-    /// (an explicit full-resync may shrink the store past 50%), yet STILL never
-    /// prunes a protected row.
+    /// (an explicit full-resync may shrink the store past 50%).
     #[test]
-    fn force_full_prune_bypasses_floor_but_honors_protected(
+    fn force_full_prune_bypasses_floor(
         (n, keep) in snapshot_case(16),
-        protect_seed in any::<u64>(),
     ) {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap();
@@ -304,13 +209,7 @@ proptest! {
             .collect();
         seed_messages(&store, &account, seed, "seed-state").unwrap();
 
-        let protected: HashSet<String> = ids
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| (protect_seed >> (i % 64)) & 1 == 1)
-            .map(|(_, id)| id.clone())
-            .collect();
-        let remote_present: HashSet<&String> = ids
+        let remote_present: std::collections::HashSet<&String> = ids
             .iter()
             .zip(&keep)
             .filter(|(_, &k)| k)
@@ -328,7 +227,6 @@ proptest! {
                     tx,
                     &account,
                     &remote_ids,
-                    &protected,
                     true, // force_full_prune
                     &mut affected,
                     &mut events,
@@ -343,17 +241,14 @@ proptest! {
             .map(|m| m.id.to_string())
             .collect();
 
-        // Survivor set == (remote-present) ∪ (protected); everything else is gone,
-        // regardless of how large the deleted fraction is.
+        // Survivor set == remote-present; everything else is gone, regardless
+        // of how large the deleted fraction is.
         let expected: BTreeSet<String> = ids
             .iter()
-            .filter(|id| remote_present.contains(*id) || protected.contains(*id))
+            .filter(|id| remote_present.contains(*id))
             .cloned()
             .collect();
-        prop_assert_eq!(&survivors, &expected, "force prune keeps exactly remote ∪ protected");
-        for id in &protected {
-            prop_assert!(survivors.contains(id), "force prune deleted protected id {}", id);
-        }
+        prop_assert_eq!(&survivors, &expected, "force prune keeps exactly the remote-present set");
     }
 }
 

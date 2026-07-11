@@ -260,6 +260,10 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Test-only since the NS1 cutover: production overlay maintenance filters
+    /// inline in `mutation::refresh_message_overlay` (the one lifecycle
+    /// function); this projection is retained for lifecycle-assertion tests.
+    #[cfg(test)]
     pub(crate) fn overlay_operations(
         &self,
         account_id: &AccountId,

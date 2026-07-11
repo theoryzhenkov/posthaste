@@ -7,8 +7,9 @@ use crate::{
     AutomationBackfillStore, CacheStore, ConfigDiff, ConfigRepository, ConversationReadStore,
     DraftRegistry, EventStore, MailGateway, MailStore, MailboxReadStore, MailboxRoleOverrideStore,
     MessageCommandStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
-    OperationOutboxStore, ServiceResultExt, SharedConfigRepository, SmartMailboxStore, SnoozeStore,
-    SourceDataStore, SourceProjectionStore, SyncStateStore, SyncWriteStore, TagReadStore,
+    MessageOverlayStore, OperationOutboxStore, ServiceResultExt, SharedConfigRepository,
+    SmartMailboxStore, SnoozeStore, SourceDataStore, SourceProjectionStore, SyncStateStore,
+    SyncWriteStore, TagReadStore,
 };
 use posthaste_domain_model::{
     now_iso8601, AccountId, AccountSettings, AppSettings, CommandResult, ConversationCursor,
@@ -64,6 +65,7 @@ pub struct MailService {
     snooze_reader: Arc<dyn SnoozeStore>,
     outbox: Arc<dyn OperationOutboxStore>,
     draft_registry: Arc<dyn DraftRegistry>,
+    overlay: Arc<dyn MessageOverlayStore>,
 }
 
 impl MailService {
@@ -92,7 +94,8 @@ impl MailService {
             automation_backfills: store.clone(),
             snooze_reader: store.clone(),
             outbox: store.clone(),
-            draft_registry: store,
+            draft_registry: store.clone(),
+            overlay: store,
         }
     }
 }
