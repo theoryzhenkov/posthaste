@@ -120,6 +120,7 @@ impl MailService {
             entity,
             kind,
             payload,
+            payload_version: 1,
             state: OperationState::Pending,
             attempts: 0,
             last_error: None,

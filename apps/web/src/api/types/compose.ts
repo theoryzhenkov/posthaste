@@ -159,6 +159,8 @@ export interface Operation {
    * undo-held sends.
    */
   holdUntilMono?: number | null
+  /** D155 payload envelope version (v1 = the historical per-kind shapes). */
+  payloadVersion: number
   createdAt: string
   updatedAt: string
 }

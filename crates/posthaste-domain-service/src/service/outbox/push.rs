@@ -4,6 +4,7 @@
 
 use super::classify::{classify_gateway_error, FlushError};
 use crate::service::*;
+use posthaste_domain_model::MailIntent;
 use posthaste_domain_model::{MessageReadback, MutationOutcome};
 
 /// Result of pushing one operation to the provider.
@@ -55,9 +56,16 @@ impl MailService {
         operation: &Operation,
         gateway: &dyn MailGateway,
     ) -> Result<Pushed, FlushError> {
-        match operation.kind {
-            OperationKind::DraftCreate => {
-                let request = parse_payload::<SendMessageRequest>(operation)?;
+        // NS2 Slice 2: ONE decode boundary — the typed intent — instead of a
+        // per-arm parse_payload with per-site fallbacks.
+        let intent = operation
+            .intent()
+            .map_err(FlushError::permanent)?;
+        match intent {
+            MailIntent::SaveDraft {
+                create: true,
+                request,
+            } => {
                 // A create has no replace target, so the DS3 redelivery flag is
                 // irrelevant (no destroy outcome to mask). The operation id is the
                 // stable create identity (constant across retries): the gateway
@@ -73,8 +81,10 @@ impl MailService {
                     destroyed_entity_id: None,
                 })
             }
-            OperationKind::DraftUpdate => {
-                let request = parse_payload::<SendMessageRequest>(operation)?;
+            MailIntent::SaveDraft {
+                create: false,
+                request,
+            } => {
                 // M70 (D136): the op carries the stable draft key; resolve it
                 // to the CURRENT live id here, immediately before the gateway
                 // call, so the replace targets the freshest mapping (in-session
@@ -108,7 +118,9 @@ impl MailService {
                     destroyed_entity_id: None,
                 })
             }
-            OperationKind::DraftDelete => {
+            MailIntent::DiscardDraft {
+                idempotent_redelivery,
+            } => {
                 // M70 (D136): resolve the stable key to the live destroy target
                 // at flush (see [`Self::resolve_draft_flush_target`]) — a
                 // registry repoint between enqueue and flush retargets the
@@ -119,11 +131,6 @@ impl MailService {
                 // D133: only an idempotent redelivery (a send-consume re-enqueue)
                 // masks a provider `notFound` as success; a user discard's
                 // `notFound` surfaces as a retryable failure.
-                let idempotent_redelivery = operation
-                    .payload
-                    .get("idempotentRedelivery")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
                 gateway
                     .delete_draft(account_id, &target, idempotent_redelivery)
                     .await
@@ -133,8 +140,7 @@ impl MailService {
                     destroyed_entity_id: Some(target_id),
                 })
             }
-            OperationKind::Send => {
-                let request = parse_payload::<SendMessageRequest>(operation)?;
+            MailIntent::Send(request) => {
                 // The operation id is the send's stable idempotency identity
                 // (constant across retries): the gateway derives the JMAP
                 // EmailSubmission create-id + `ifInState` and the SMTP/JMAP
@@ -149,8 +155,7 @@ impl MailService {
                     destroyed_entity_id: None,
                 })
             }
-            OperationKind::SetKeywords => {
-                let command = parse_payload::<SetKeywordsCommand>(operation)?;
+            MailIntent::SetKeywords(command) => {
                 let target = MessageId::from(operation.entity.id.as_str());
                 message_pushed(
                     gateway
@@ -158,8 +163,7 @@ impl MailService {
                         .await,
                 )
             }
-            OperationKind::ReplaceMailboxes => {
-                let command = parse_payload::<ReplaceMailboxesCommand>(operation)?;
+            MailIntent::ReplaceMailboxes(command) => {
                 let target = MessageId::from(operation.entity.id.as_str());
                 message_pushed(
                     gateway
@@ -167,7 +171,7 @@ impl MailService {
                         .await,
                 )
             }
-            OperationKind::Destroy => {
+            MailIntent::Destroy => {
                 let target = MessageId::from(operation.entity.id.as_str());
                 message_pushed(gateway.destroy_message(account_id, &target, None).await)
             }
@@ -175,8 +179,4 @@ impl MailService {
     }
 }
 
-fn parse_payload<T: serde::de::DeserializeOwned>(operation: &Operation) -> Result<T, FlushError> {
-    serde_json::from_value(operation.payload.clone()).map_err(|error| {
-        FlushError::permanent(format!("invalid {:?} payload: {error}", operation.kind))
-    })
-}
+
