@@ -95,7 +95,8 @@ impl OperationOutboxStore for TestStore {
     fn list_flushable_operations(
         &self,
         account_id: &AccountId,
-        now: &str,
+        wall_now: &str,
+        mono_now: i64,
     ) -> Result<Vec<Operation>, StoreError> {
         let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         Ok(ops
@@ -103,9 +104,10 @@ impl OperationOutboxStore for TestStore {
             .filter(|op| {
                 &op.account_id == account_id
                     && op.state.is_flushable()
-                    // Mirrors the SQL hold: a scheduled send is flushable only
-                    // once due (canonical RFC 3339 strings order chronologically).
-                    && op.send_at.as_deref().is_none_or(|send_at| send_at <= now)
+                    // Mirrors the SQL two-clock gates (D152): send-later by
+                    // wall, undo holds by the monotonic deadline.
+                    && op.send_at.as_deref().is_none_or(|send_at| send_at <= wall_now)
+                    && op.hold_until_mono.is_none_or(|hold| hold <= mono_now)
             })
             .cloned()
             .collect())
@@ -114,7 +116,8 @@ impl OperationOutboxStore for TestStore {
     fn count_due_scheduled_sends(
         &self,
         account_id: &AccountId,
-        now: &str,
+        wall_now: &str,
+        mono_now: i64,
     ) -> Result<u64, StoreError> {
         let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         Ok(ops
@@ -122,7 +125,8 @@ impl OperationOutboxStore for TestStore {
             .filter(|op| {
                 &op.account_id == account_id
                     && op.state.is_flushable()
-                    && op.send_at.as_deref().is_some_and(|send_at| send_at <= now)
+                    && (op.send_at.as_deref().is_some_and(|send_at| send_at <= wall_now)
+                        || op.hold_until_mono.is_some_and(|hold| hold <= mono_now))
             })
             .count() as u64)
     }

@@ -54,12 +54,27 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
         "send_at",
         "ALTER TABLE outbox_operation ADD COLUMN send_at TEXT",
     )?;
+    // D152: undo-send hold deadline on the daemon's monotonic-anchored clock
+    // (send-later keeps `send_at`; the two are judged on their own clocks).
+    ensure_column(
+        connection,
+        "outbox_operation",
+        "hold_until_mono",
+        "ALTER TABLE outbox_operation ADD COLUMN hold_until_mono INTEGER",
+    )?;
     connection
         .execute(
             // Partial index for the scheduler tick's "any send due?" probe and
             // the flush filter; only scheduled rows (a tiny minority) appear.
             "CREATE INDEX IF NOT EXISTS idx_outbox_send_at
              ON outbox_operation (account_id, send_at) WHERE send_at IS NOT NULL",
+            [],
+        )
+        .map_err(sql_to_store_error)?;
+    connection
+        .execute(
+            "CREATE INDEX IF NOT EXISTS idx_outbox_hold_until_mono
+             ON outbox_operation (account_id, hold_until_mono) WHERE hold_until_mono IS NOT NULL",
             [],
         )
         .map_err(sql_to_store_error)?;

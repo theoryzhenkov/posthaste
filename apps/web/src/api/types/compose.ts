@@ -83,6 +83,13 @@ export interface SendMessageInput {
    * online at/after this time.
    */
   sendAt?: string | null
+  /**
+   * Undo-send hold as a DURATION in seconds (D152). The server stamps the
+   * deadline on ITS clock and judges it on that same clock — so client/daemon
+   * wall skew (the nightly nothing-sends bug) cannot wedge a held send. When
+   * present the server treats `sendAt` as display metadata only.
+   */
+  undoWindowSeconds?: number | null
 }
 
 /**
@@ -146,6 +153,12 @@ export interface Operation {
    * visible and cancelable — until due. Absent for every other op.
    */
   sendAt?: string | null
+  /**
+   * Undo-send hold deadline in the DAEMON's monotonic epoch seconds (D152) —
+   * not display data (clients render their own countdown); present only on
+   * undo-held sends.
+   */
+  holdUntilMono?: number | null
   createdAt: string
   updatedAt: string
 }
