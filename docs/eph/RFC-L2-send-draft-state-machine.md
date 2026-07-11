@@ -193,4 +193,14 @@ substrate this all stands on.
 
 ## 6. Status
 
-Slice 0 in progress. P0 mitigation until Slice 1: undo-send delay 0.
+**Slice 0 LANDED (2026-07-11):** `PRAGMA user_version` + the ordered migration
+runner + the downgrade guard (`Conflict`, never `Corruption` — a newer database
+is refused, not quarantined) in `db/schema.rs::prepare_schema`. Migration v1
+retires the counter-trigger open-time DROP and drops the dead mailbox counter
+columns. Covered by `tests/schema_migrations.rs`: a synthetically-downgraded
+v0 fixture upgrades once and stays functional; fresh opens stamp; the guard
+leaves newer databases untouched. Policy documented at `SCHEMA_VERSION`:
+additive = idempotent path; destructive/transformative = versioned migration.
+
+Next: Slice 1 (M80 — the clock fix; restores nightly send). P0 mitigation
+until then: undo-send delay 0.
