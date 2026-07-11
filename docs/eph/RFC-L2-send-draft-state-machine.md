@@ -210,7 +210,19 @@ Slice 2's intent envelope.
 deliberately no permanent quarantine (offline-safety). The last open audit
 HIGH is closed.
 
-**REMAINING (next session, in order): Slices 2–5.** Slice 2 (typed
+**Slice 2 CORE LANDED (2026-07-11):** `MailIntent` (domain-model) is the one
+decode boundary (`from_parts(kind, version, payload)`); the D155 envelope
+version column exists (v1 = historical shapes; unknown versions refused);
+every scattered payload reader (flush dispatch, the fold's assertion
+extraction — now `intent_fold_effect`, THE effect interpreter — echo
+building, send-consume, the DraftDelete flag) matches typed intents;
+migration v2 rewrote legacy `conflicted` rows and the parser fudge is gone.
+**Deviation noted:** the interpreter lives in domain-service, not
+replica-core — `MessageRecord`/command types cannot cross into the wasm-pure
+kernel; the shared-kernel effect vocabulary extension ships with Slices 3/4's
+multi-row effects, which is when the client prediction needs it.
+
+**REMAINING (next session, in order): Slices 3–5.** Slice 3 (draft
 `MailIntent` + versioned envelope + `fold_effects()` in replica-core + the
 one interpreter in `refresh_message_overlay`) is the largest single unit —
 start it with fresh context; everything it needs is specified in §2–§4 and
