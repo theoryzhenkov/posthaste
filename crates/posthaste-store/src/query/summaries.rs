@@ -161,7 +161,7 @@ fn fetch_threading_bulk(
             "WITH requested(row_index, account_id, message_id) AS (VALUES {})
              SELECT requested.row_index, m.rfc_message_id, m.in_reply_to, m.draft_id
                FROM requested
-               JOIN message m
+               JOIN message_effective m
                  ON m.account_id = requested.account_id
                 AND m.id = requested.message_id",
             values.join(", ")
@@ -220,7 +220,7 @@ fn fetch_mailbox_ids_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
 ) -> Result<Vec<Vec<MailboxId>>, StoreError> {
-    fetch_message_values_bulk(connection, rows, "message_mailbox", "mailbox_id", |row| {
+    fetch_message_values_bulk(connection, rows, "message_mailbox_effective", "mailbox_id", |row| {
         Ok(MailboxId(row.get(1)?))
     })
 }
@@ -230,7 +230,7 @@ fn fetch_keywords_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
 ) -> Result<Vec<Vec<String>>, StoreError> {
-    fetch_message_values_bulk(connection, rows, "message_keyword", "keyword", |row| {
+    fetch_message_values_bulk(connection, rows, "message_keyword_effective", "keyword", |row| {
         row.get(1)
     })
 }

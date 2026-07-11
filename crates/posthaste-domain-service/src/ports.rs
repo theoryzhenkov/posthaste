@@ -19,6 +19,7 @@ mod cache_store;
 mod composite;
 mod draft_registry;
 mod gateway;
+mod overlay_store;
 mod progress;
 mod read_store;
 mod sync_store;
@@ -30,6 +31,7 @@ pub use composite::{
 };
 pub use draft_registry::DraftRegistry;
 pub use gateway::{MailGateway, SyncChunkSink};
+pub use overlay_store::MessageOverlayStore;
 pub use progress::SyncProgressReporter;
 pub use read_store::{
     ConversationReadStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore,
