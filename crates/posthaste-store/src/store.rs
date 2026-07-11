@@ -302,7 +302,7 @@ impl DatabaseStore {
         let connection = Connection::open(db_path).map_err(sql_to_store_error)?;
         configure_connection(&connection)?;
         let mut connection = connection;
-        init_schema(&mut connection)?;
+        prepare_schema(&mut connection)?;
 
         ph_info!(
             events::DATABASE_OPENED,
