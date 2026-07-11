@@ -23,6 +23,11 @@ tracing = { workspace = true }
 # grammar to exercise `query_message_page_by_rule`; the store itself never
 # parses raw query strings — callers hand it an already-parsed rule.
 posthaste-query-grammar = { path = "../posthaste-query-grammar" }
+# Property-based coverage of the mail-safety prune/floor-guard invariants
+# (tests/prune_floor_guard.rs) — randomized across store sizes and prune
+# fractions to catch the boundary/absence cases the fixed-example snapshot tests
+# don't (the DS1 / DP-C2/C3/C4 mail-loss class).
+proptest = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]
