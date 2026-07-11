@@ -73,8 +73,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::db::{
-    bool_to_i64, configure_connection, init_schema, io_to_store_error, json_to_store_error,
-    now_iso8601, parse_sync_object, sql_to_store_error,
+    bool_to_i64, configure_connection, io_to_store_error, json_to_store_error, now_iso8601,
+    parse_sync_object, prepare_schema, sql_to_store_error,
 };
 use crate::mutations::{
     apply_message_body_tx, apply_sync_batch_tx, destroy_message_tx,
