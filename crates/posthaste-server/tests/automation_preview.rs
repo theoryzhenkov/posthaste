@@ -126,6 +126,7 @@ impl PreviewHarness {
     fn seed_messages(&self, account_id: &str, messages: Vec<MessageRecord>) {
         self.store
             .apply_sync_batch(
+                &posthaste_domain_service::BaseWrite::legacy("test base seed"),
                 &AccountId::from(account_id),
                 &SyncBatch {
                     mailboxes: vec![MailboxRecord {

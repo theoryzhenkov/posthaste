@@ -20,9 +20,9 @@ mod projection_tracking;
 pub(crate) mod sync_batch;
 pub(crate) mod types;
 
-pub(crate) use commands::{
-    apply_message_body_tx, destroy_message_tx, replace_mailboxes_tx, set_keywords_tx,
-};
+pub(crate) use commands::{apply_message_body_tx, destroy_message_tx};
+#[cfg(test)]
+pub(crate) use commands::{replace_mailboxes_tx, set_keywords_tx};
 pub(crate) use events::{event_log_bounds, list_events};
 pub(crate) use sync_batch::{apply_sync_batch_tx, reconcile_sync_tx, stage_sync_bodies};
 

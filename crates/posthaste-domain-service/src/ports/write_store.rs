@@ -13,34 +13,17 @@ use super::*;
 /// path — never occupies a tokio worker thread.
 ///
 /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
+/// NS1: `set_keywords`/`replace_mailboxes` are GONE — state assertions fold
+/// into the overlay plane and never write base. One method survives for the
+/// last non-reconciler base writer (the draft-discard destroy), sealed behind
+/// the [`BaseWrite`] witness until its NS2 cutover deletes it too.
 pub trait MessageCommandStore: Send + Sync {
-    /// Apply a keyword mutation locally, updating the sync cursor.
-    ///
-    /// @spec docs/L1-jmap#methods-used
-    fn set_keywords(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-        command: &SetKeywordsCommand,
-    ) -> Result<CommandResult, StoreError>;
-
-    /// Apply a mailbox replacement locally, updating the sync cursor.
-    ///
-    /// @spec docs/L1-jmap#methods-used
-    fn replace_mailboxes(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-        command: &ReplaceMailboxesCommand,
-    ) -> Result<CommandResult, StoreError>;
-
-    /// Delete a message locally, updating the sync cursor.
+    /// Delete a message row from BASE, updating the sync cursor.
     ///
     /// @spec docs/L1-jmap#methods-used
     fn destroy_message(
         &self,
+        base: &BaseWrite,
         account_id: &AccountId,
         message_id: &MessageId,
         cursor: Option<&SyncCursor>,

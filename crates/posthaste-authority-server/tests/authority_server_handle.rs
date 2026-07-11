@@ -18,7 +18,7 @@ use posthaste_contract_core::{
 use posthaste_domain_model::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
-    SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection, SyncBatch,
+    SecretStoreError, SmtpTransportSettings, SortDirection, SyncBatch,
     SyncCursor, SyncObject, SyncTrigger, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_MESSAGE_UPDATED,
 };
@@ -154,6 +154,7 @@ fn seed_message_batch(
         .api_bridge
         .store
         .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             account_id,
             &SyncBatch {
                 mailboxes: vec![MailboxRecord {
@@ -196,6 +197,7 @@ fn seed_single_message_batch(
         .api_bridge
         .store
         .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             account_id,
             &SyncBatch {
                 mailboxes: vec![MailboxRecord {
@@ -236,6 +238,7 @@ fn seed_message_with_snooze_mailbox(
         .api_bridge
         .store
         .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             account_id,
             &SyncBatch {
                 mailboxes: vec![
@@ -292,6 +295,7 @@ fn seed_heavy_body_message_batch(
         .api_bridge
         .store
         .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             account_id,
             &SyncBatch {
                 mailboxes: vec![MailboxRecord {
@@ -401,6 +405,45 @@ fn imap_smtp_account_mutation(
 // spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 // spec: docs/runtime/internals/L2#runtime-builder-transport-free
 // spec: docs/authority-server/L2#runtime-build-before-adapters
+/// NS1 test helper: simulate the provider flagging a message — a BASE write
+/// (sync-plane, legacy-witnessed) returning the sync-apply events for the test
+/// to broadcast. Replaces the deleted store-level `set_keywords` seam.
+trait FlagInBase {
+    fn flag_message_in_base(
+        &self,
+        account_id: &AccountId,
+        message_id: &str,
+    ) -> Result<posthaste_domain_model::CommandResult, posthaste_domain_model::StoreError>;
+}
+
+impl FlagInBase for std::sync::Arc<dyn posthaste_domain_service::MailStore> {
+    fn flag_message_in_base(
+        &self,
+        account_id: &AccountId,
+        message_id: &str,
+    ) -> Result<posthaste_domain_model::CommandResult, posthaste_domain_model::StoreError> {
+        let id = MessageId::from(message_id);
+        let mut row = self
+            .read_base_message_record(account_id, &id)?
+            .ok_or_else(|| posthaste_domain_model::StoreError::NotFound(id.to_string()))?;
+        if !row.keywords.iter().any(|keyword| keyword == "$flagged") {
+            row.keywords.push("$flagged".to_string());
+        }
+        let events = self.apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("test base seed"),
+            account_id,
+            &posthaste_domain_model::SyncBatch {
+                messages: vec![row],
+                ..Default::default()
+            },
+        )?;
+        Ok(posthaste_domain_model::CommandResult {
+            detail: None,
+            events,
+        })
+    }
+}
+
 #[tokio::test]
 async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
     let root = temp_root();
@@ -626,15 +669,7 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -786,15 +821,7 @@ async fn runtime_link_stream_carries_keyword_view_replace_frames() {
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -1100,15 +1127,7 @@ async fn message_detail_view_replaces_snapshot_after_keyword_event() {
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -1225,15 +1244,7 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -1681,15 +1692,7 @@ async fn mail_list_view_fans_out_keyword_replaces_to_all_subscribers() {
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -1758,15 +1761,7 @@ async fn mail_list_view_keeps_open_view_fresh_without_active_subscribers() {
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -1855,15 +1850,7 @@ async fn mail_list_view_replaces_snapshot_when_keyword_event_changes_membership(
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -1942,15 +1929,7 @@ async fn mail_list_view_ignores_keyword_events_for_messages_outside_window() {
     let result = build
         .api_bridge
         .store
-        .set_keywords(
-            &account.id,
-            &MessageId::from("message-1"),
-            None,
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            },
-        )
+        .flag_message_in_base(&account.id, "message-1")
         .expect("keyword command should write");
     for event in result.events {
         build
@@ -3238,6 +3217,7 @@ async fn mark_read_echo_carries_projection_and_no_count_deltas() {
         .api_bridge
         .store
         .apply_sync_batch(
+           &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             &account.id,
             &SyncBatch {
                 // Counts are maintained by the store's mailbox-counter triggers

@@ -115,6 +115,7 @@ pub(crate) fn delete_snooze_tx(
 /// orphaning when a snoozed message is moved out by any path. The sync path
 /// does NOT route through `replace_mailboxes_tx`, so provider re-sync never
 /// clobbers a snooze.
+#[cfg(test)]
 pub(crate) fn clear_snooze_on_mailbox_replace_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,

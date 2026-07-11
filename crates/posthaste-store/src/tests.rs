@@ -4,7 +4,7 @@ use super::*;
 use posthaste_domain_model::{
     DateUnit, DateValue, MailQueryCondition, MailQueryField, MailQueryGroup,
     MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue,
-    MessageRecord, Recipient, SyncCursor,
+    MessageRecord, Recipient, ReplaceMailboxesCommand, SetKeywordsCommand, SyncCursor,
 };
 
 use crate::test_support::temp_root;

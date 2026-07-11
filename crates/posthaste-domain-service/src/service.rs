@@ -4,7 +4,7 @@ use posthaste_observability::{events, ph_warn};
 use serde_json::json;
 
 use crate::{
-    AutomationBackfillStore, CacheStore, ConfigDiff, ConfigRepository, ConversationReadStore,
+    AutomationBackfillStore, BaseWrite, CacheStore, ConfigDiff, ConfigRepository, ConversationReadStore,
     DraftRegistry, EventStore, MailGateway, MailStore, MailboxReadStore, MailboxRoleOverrideStore,
     MessageCommandStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
     MessageOverlayStore, OperationOutboxStore, ServiceResultExt, SharedConfigRepository,
