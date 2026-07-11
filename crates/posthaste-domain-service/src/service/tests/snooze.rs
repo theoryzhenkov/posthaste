@@ -1,8 +1,9 @@
 //! Snooze scheduler: `MailService::auto_return_snoozed_messages` returns due
-//! snoozed messages to the Inbox. The store invariant (clearing the snooze row
-//! on a mailbox replace) is a `DatabaseStore` property covered in
-//! `posthaste-store`; here we assert the service orchestration — a due snooze
-//! moves to the Inbox, a not-yet-due one is left alone.
+//! snoozed messages to the Inbox via the same `replace_mailboxes` mutation path
+//! the client uses — under NS1 the move folds into the OVERLAY plane (base is
+//! sync-owned) and the snooze row clears immediately. Here we assert the
+//! service orchestration — a due snooze folds to Inbox membership, a
+//! not-yet-due one is left alone.
 //!
 //! @spec docs/eph/DESIGN-L2-snooze
 
@@ -24,12 +25,31 @@ async fn auto_return_moves_due_snoozed_messages_to_inbox() {
         .expect("auto-return");
 
     assert_eq!(count, 1, "one due snooze was returned");
+    // NS1: the auto-return move is an ordinary optimistic mutation — it queues
+    // the op and folds Inbox membership into the overlay row. Canonical/base
+    // stays untouched until sync (or a settle readback) rewrites it.
+    let overlay = store
+        .overlay_rows
+        .lock()
+        .expect("overlay rows lock poisoned");
+    let row = overlay
+        .get("m-1")
+        .expect("the move folds an overlay entry for the message")
+        .as_ref()
+        .expect("a mailbox replace folds to a row, not a tombstone");
     assert_eq!(
-        store
-            .get_message_mailboxes(&account, &MessageId::from("m-1"))
-            .expect("projection mailbox lookup"),
+        row.mailbox_ids,
         vec![MailboxId::from("inbox")],
-        "the due snoozed message is moved to the inbox",
+        "the due snoozed message's overlay row holds inbox membership",
+    );
+    drop(overlay);
+    assert!(
+        store
+            .snoozes
+            .lock()
+            .expect("snoozes lock poisoned")
+            .is_empty(),
+        "the mailbox replace cleared the snooze row immediately",
     );
 }
 

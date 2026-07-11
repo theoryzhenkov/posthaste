@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use super::*;
 use crate::{SyncChunkSink, SyncWriteStore};
-use posthaste_domain_model::{MessageRecord, Operation, SyncBatch};
+use posthaste_domain_model::{MessageRecord, SyncBatch};
 
 /// Applies and publishes each sync chunk as the gateway emits it, accumulating
 /// the per-chunk messages and counts the post-sync steps need. Chunk events are
@@ -21,13 +21,6 @@ use posthaste_domain_model::{MessageRecord, Operation, SyncBatch};
 struct ServiceSyncSink<'a> {
     sync_writer: Arc<dyn SyncWriteStore>,
     account_id: &'a AccountId,
-    /// Ids of messages with an un-acked optimistic op — the M35 durable guard's
-    /// protected set (also passed to the store as `protected_message_ids` so a
-    /// snapshot that *omits* such a message doesn't prune it as absent).
-    unsettled: std::collections::HashSet<String>,
-    /// The un-acked ops themselves, so a snapshot row for an unsettled message
-    /// can be folded (server truth + pending effect) rather than dropped.
-    unsettled_ops: Vec<Operation>,
     publish: &'a mut (dyn FnMut(&[DomainEvent]) + Send),
     applied_events: Vec<DomainEvent>,
     messages: Vec<MessageRecord>,
@@ -37,83 +30,28 @@ struct ServiceSyncSink<'a> {
     error: Option<ServiceError>,
 }
 
-/// Fold each un-acked local mutation over the provider snapshot rows — the M35
-/// durable snapshot guard (D93), the principled successor to the P1/S2 hotfix
-/// (which this supersedes). A provider snapshot, full or delta, is authoritative
-/// for *server* state, but an outbox operation the server has not yet acked must
-/// survive it: a message the user just flagged, whose flag hasn't round-tripped,
-/// must not revert when a snapshot lands.
-///
-/// For every snapshot row whose message has an unsettled op, the row is replaced
-/// by [`project_record`](super::message_queries::project_record)`(server_row,
-/// unsettled_ops)` — server truth with the pending assertions re-layered on top.
-/// This reuses the exact fold the settle write-back and read overlay use, so the
-/// optimistic effect is defined once. A row that folds to removed (a pending
-/// `Destroy`) is dropped from the upsert so the snapshot cannot resurrect a
-/// locally-destroyed message; a server delete-delta for an unsettled message is
-/// likewise dropped, the pending intent outranking it until it settles.
-///
-/// This composes with [`SyncWriteStore::apply_sync_batch_protected`]/
-/// [`SyncWriteStore::reconcile_sync_protected`]: a full snapshot that *omits* an
-/// unsettled message (a not-yet-uploaded local create, or a row that folded to
-/// removed) would otherwise be pruned as "absent from remote" — the caller
-/// passes this same `unsettled` set as `protected_message_ids` to exempt it from
-/// that prune pass. Rows present in the snapshot are folded in-batch here and so
-/// carry their own presence into the prune's remote set; only the omitted ones
-/// rely on the exemption.
-///
-/// The ack gate is [`overlay_operations`](super::MailService::overlay_operations)
-/// computed *after* the pre-observe FLUSH: a genuinely acked op has already been
-/// settled and removed, so it is absent from `unsettled`/`unsettled_ops` and its
-/// stale effect is *not* re-layered — the snapshot supersedes it cleanly.
-fn guard_unsettled(
-    batch: &mut SyncBatch,
-    unsettled: &std::collections::HashSet<String>,
-    unsettled_ops: &[Operation],
-) -> Result<(), ServiceError> {
-    if unsettled.is_empty() {
-        return Ok(());
-    }
-    let mut folded = Vec::with_capacity(batch.messages.len());
-    for message in std::mem::take(&mut batch.messages) {
-        if unsettled.contains(message.id.as_str()) {
-            // Server truth with the un-acked local mutation re-layered on top;
-            // `None` means it folded to removed (pending Destroy) — leave it out
-            // so the snapshot upsert cannot resurrect it.
-            if let Some(record) = super::message_queries::project_record(message, unsettled_ops)? {
-                folded.push(record);
-            }
-        } else {
-            folded.push(message);
-        }
-    }
-    batch.messages = folded;
-    batch
-        .deleted_message_ids
-        .retain(|id| !unsettled.contains(id.as_str()));
-    Ok(())
-}
+// NS1 cutover note: the M35 `guard_unsettled` sync-time fold and the
+// `protected_message_ids` prune exemption are GONE. Sync writes RAW provider
+// truth to base; un-acked optimism lives only in the overlay plane
+// (`message_overlay`), which every effective read folds in and which the
+// post-sync sweep below re-derives over the fresh base. A not-yet-settled
+// local effect therefore survives any snapshot without base ever holding
+// folded state: a pending flag rides the overlay; a pending Destroy is an
+// overlay tombstone the snapshot upsert cannot resurrect; a server
+// delete-delta for an overlaid message removes only the base row while the
+// overlay keeps serving the pending intent until its op settles.
 
 #[async_trait]
 impl SyncChunkSink for ServiceSyncSink<'_> {
     async fn emit(&mut self, mut batch: SyncBatch) -> Result<(), GatewayError> {
-        if let Err(error) = guard_unsettled(&mut batch, &self.unsettled, &self.unsettled_ops) {
-            self.error = Some(error);
-            return Err(GatewayError::Rejected(
-                "sync chunk could not be reconciled against pending ops".to_string(),
-            ));
-        }
         // Offloaded (D63/M23b): `batch` is cloned once into the 'static
         // closure spawn_blocking requires; `batch` itself stays owned here for
         // the post-apply counts/append below.
         let sync_writer = self.sync_writer.clone();
         let account_id = self.account_id.clone();
-        let unsettled = self.unsettled.clone();
         let owned_batch = batch.clone();
-        let result = offload(move || {
-            sync_writer.apply_sync_batch_protected(&account_id, &owned_batch, &unsettled)
-        })
-        .await;
+        let result =
+            offload(move || sync_writer.apply_sync_batch(&account_id, &owned_batch)).await;
         match result {
             Ok(events) => {
                 (self.publish)(&events);
@@ -193,20 +131,9 @@ impl MailService {
 
         // OBSERVE: stream the pull as chunks, applying + publishing each so mail
         // surfaces progressively. The sink accumulates messages/counts; the
-        // outcome carries any reconciliation set for the final pass.
-        //
-        // Computed after FLUSH above, so just-settled (acked) ops are excluded
-        // and the sync applies their authoritative effect. Reused below for the
-        // final reconciliation pass so a streamed full-snapshot fallback (e.g.
-        // JMAP `cannotCalculateChanges`) guards the same set of messages from
-        // its prune-by-absence pass as each chunk did. The ops are carried
-        // alongside the id set so each snapshot row can be folded (server truth
-        // + pending effect), not merely excluded.
-        let unsettled_ops = self.overlay_operations(account_id)?;
-        let unsettled: std::collections::HashSet<String> = unsettled_ops
-            .iter()
-            .map(|operation| operation.entity.id.clone())
-            .collect();
+        // outcome carries any reconciliation set for the final pass. Base
+        // receives RAW provider truth (NS1) — the overlay sweep below refolds
+        // any still-unsettled optimism over the fresh base afterwards.
         let (
             sync_messages,
             mailbox_count,
@@ -217,8 +144,6 @@ impl MailService {
             let mut sink = ServiceSyncSink {
                 sync_writer: self.sync_writer.clone(),
                 account_id,
-                unsettled: unsettled.clone(),
-                unsettled_ops,
                 publish,
                 applied_events: Vec::new(),
                 messages: Vec::new(),
@@ -258,13 +183,8 @@ impl MailService {
             let sync_writer = self.sync_writer.clone();
             let owned_account_id = account_id.clone();
             let owned_reconciliation = reconciliation.clone();
-            let owned_unsettled = unsettled.clone();
             let reconcile_events = offload(move || {
-                sync_writer.reconcile_sync_protected(
-                    &owned_account_id,
-                    &owned_reconciliation,
-                    &owned_unsettled,
-                )
+                sync_writer.reconcile_sync(&owned_account_id, &owned_reconciliation)
             })
             .await?;
             publish(&reconcile_events);
@@ -338,6 +258,10 @@ impl MailService {
                 post_commit_errors.push(error.code().to_string());
             }
         }
+        // NS1 overlay sweep: refold every still-overlaid message over the base
+        // this sync just rewrote (or drop entries whose ops settled during the
+        // flush legs). The inventory is bounded by the pending outbox — small.
+        self.sweep_message_overlay(account_id).await?;
         let sync_event = self.events.append_event(
         account_id,
         EVENT_TOPIC_SYNC_COMPLETED,
@@ -379,32 +303,41 @@ impl MailService {
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let mut events = self.flush_account(account_id, gateway).await?;
         let cursors = self.sync_state.get_sync_cursors(account_id)?;
-        let mut batch = gateway.sync(account_id, &cursors, None).await?;
-        // M35 durable snapshot guard: computed after FLUSH so acked ops are
-        // excluded. The ops fold un-acked local effect over each snapshot row;
-        // the id set is also passed to the protected apply below so a
-        // full-snapshot `batch` doesn't prune a message it omits.
-        let unsettled_ops = self.overlay_operations(account_id)?;
-        let unsettled: std::collections::HashSet<String> = unsettled_ops
-            .iter()
-            .map(|operation| operation.entity.id.clone())
-            .collect();
-        guard_unsettled(&mut batch, &unsettled, &unsettled_ops)?;
+        let batch = gateway.sync(account_id, &cursors, None).await?;
+        // NS1: raw provider truth to base; the sweep refolds any surviving
+        // optimism over it afterwards.
         let sync_writer = self.sync_writer.clone();
         let owned_account_id = account_id.clone();
         let owned_batch = batch.clone();
-        let owned_unsettled = unsettled.clone();
         events.extend(
-            offload(move || {
-                sync_writer.apply_sync_batch_protected(
-                    &owned_account_id,
-                    &owned_batch,
-                    &owned_unsettled,
-                )
-            })
-            .await?,
+            offload(move || sync_writer.apply_sync_batch(&owned_account_id, &owned_batch)).await?,
         );
+        self.sweep_message_overlay(account_id).await?;
         Ok(events)
+    }
+
+    /// Re-derive every overlaid message for the account (NS1): the sync-side
+    /// leg of the overlay lifecycle. Entries whose ops settled are removed;
+    /// entries with surviving ops are refolded over the just-written base.
+    async fn sweep_message_overlay(&self, account_id: &AccountId) -> Result<(), ServiceError> {
+        let overlay_ids = {
+            let overlay = self.overlay.clone();
+            let owned_account_id = account_id.clone();
+            offload(move || overlay.list_overlay_message_ids(&owned_account_id)).await?
+        };
+        for message_id in overlay_ids {
+            super::mutation::refresh_message_overlay(
+                self.overlay.clone(),
+                self.outbox.clone(),
+                account_id.clone(),
+                message_id,
+                // Retire-on-confirmation: an all-settled entry is removed only
+                // once this sync's base write actually carries its effect.
+                super::mutation::OverlayRetire::ConfirmAgainstBase,
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     /// Append a `sync.failed` event to the event log.
@@ -436,190 +369,5 @@ impl MailService {
             }),
         )
         .map_err(Into::into)
-    }
-}
-
-#[cfg(test)]
-mod guard_tests {
-    use super::guard_unsettled;
-    use posthaste_domain_model::{
-        AccountId, Id, MailboxId, MessageId, MessageRecord, Operation, OperationEntity,
-        OperationEntityKind, OperationId, OperationKind, OperationState, SetKeywordsCommand,
-        SyncBatch,
-    };
-    use std::collections::HashSet;
-
-    /// A snapshot row (server truth) for `id` with the given keywords + mailbox.
-    fn server_row(id: &str, keywords: &[&str], mailbox: &str) -> MessageRecord {
-        MessageRecord {
-            id: MessageId::from(id),
-            keywords: keywords.iter().map(|k| k.to_string()).collect(),
-            mailbox_ids: vec![MailboxId::from(mailbox)],
-            ..Default::default()
-        }
-    }
-
-    fn batch(
-        messages: Vec<MessageRecord>,
-        deletes: &[&str],
-        replace_all_messages: bool,
-    ) -> SyncBatch {
-        SyncBatch {
-            mailboxes: Vec::new(),
-            messages,
-            imap_mailbox_states: Vec::new(),
-            imap_message_locations: Vec::new(),
-            deleted_imap_message_locations: Vec::new(),
-            deleted_mailbox_ids: Vec::new(),
-            absence_deleted_imap_message_locations: Vec::new(),
-            absence_deleted_message_ids: Vec::new(),
-            deleted_message_ids: deletes.iter().map(|id| MessageId::from(*id)).collect(),
-            replace_all_mailboxes: false,
-            replace_all_messages,
-            cursors: Vec::new(),
-        }
-    }
-
-    fn op(message_id: &str, kind: OperationKind, payload: serde_json::Value) -> Operation {
-        Operation {
-            id: OperationId::from(Id::generate().to_string()),
-            account_id: AccountId::from("primary"),
-            entity: OperationEntity {
-                kind: OperationEntityKind::Message,
-                id: message_id.to_string(),
-            },
-            kind,
-            payload,
-            state: OperationState::Pending,
-            attempts: 0,
-            last_error: None,
-            depends_on: None,
-            send_at: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }
-    }
-
-    fn set_flagged(message_id: &str) -> Operation {
-        op(
-            message_id,
-            OperationKind::SetKeywords,
-            serde_json::to_value(SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
-            })
-            .expect("serialize set-keywords payload"),
-        )
-    }
-
-    fn keywords_of(batch: &SyncBatch, id: &str) -> HashSet<String> {
-        batch
-            .messages
-            .iter()
-            .find(|m| m.id.as_str() == id)
-            .map(|m| m.keywords.iter().cloned().collect())
-            .unwrap_or_default()
-    }
-
-    #[test]
-    fn folds_the_pending_flag_over_the_server_row() {
-        // THE M35 HEADLINE (D93): a snapshot that carries message-1 as server
-        // truth (unflagged) must not revert an un-acked local flag. The row is
-        // kept — server truth with the pending SetKeywords re-layered on top —
-        // not dropped, so a legitimate server field would also survive.
-        let unsettled = HashSet::from(["message-1".to_string()]);
-        let ops = vec![set_flagged("message-1")];
-        let mut b = batch(
-            vec![
-                server_row("message-1", &["$seen"], "inbox"),
-                server_row("message-2", &[], "inbox"),
-            ],
-            &[],
-            true,
-        );
-        guard_unsettled(&mut b, &unsettled, &ops).expect("fold succeeds");
-
-        // message-1 is still present (not dropped) and now carries BOTH the
-        // server keyword ($seen) and the un-acked local flag ($flagged).
-        assert!(
-            b.messages.iter().any(|m| m.id.as_str() == "message-1"),
-            "the pending row survives the snapshot as a fold, not a drop",
-        );
-        assert_eq!(
-            keywords_of(&b, "message-1"),
-            HashSet::from(["$seen".to_string(), "$flagged".to_string()]),
-            "server truth is applied AND the un-acked flag is re-layered on top",
-        );
-    }
-
-    #[test]
-    fn non_unsettled_rows_take_server_truth_unchanged() {
-        // The ack gate: message-2 has no un-acked op, so the snapshot supersedes
-        // it cleanly — no stale overlay folded in.
-        let unsettled = HashSet::from(["message-1".to_string()]);
-        let ops = vec![set_flagged("message-1")];
-        let mut b = batch(
-            vec![server_row("message-2", &["$seen"], "archive")],
-            &[],
-            true,
-        );
-        guard_unsettled(&mut b, &unsettled, &ops).expect("fold succeeds");
-        assert_eq!(
-            keywords_of(&b, "message-2"),
-            HashSet::from(["$seen".to_string()]),
-            "an acked/absent-from-pending message keeps exactly the server row",
-        );
-    }
-
-    #[test]
-    fn pending_destroy_drops_the_row_from_the_upsert() {
-        // A pending Destroy folds to removed: the snapshot must not resurrect a
-        // locally-destroyed message, so its row is dropped from the upsert (the
-        // caller's protected set then keeps the prune pass off it too).
-        let unsettled = HashSet::from(["message-1".to_string()]);
-        let ops = vec![op(
-            "message-1",
-            OperationKind::Destroy,
-            serde_json::Value::Null,
-        )];
-        let mut b = batch(vec![server_row("message-1", &[], "inbox")], &[], true);
-        guard_unsettled(&mut b, &unsettled, &ops).expect("fold succeeds");
-        assert!(
-            b.messages.is_empty(),
-            "the locally-destroyed message is not re-upserted from the snapshot",
-        );
-    }
-
-    #[test]
-    fn unsettled_message_is_dropped_from_server_deletes() {
-        // A server delete-delta for an unsettled message is ignored: the pending
-        // intent outranks it until it settles.
-        let unsettled = HashSet::from(["message-1".to_string()]);
-        let ops = vec![set_flagged("message-1")];
-        let mut b = batch(Vec::new(), &["message-1", "message-3"], false);
-        guard_unsettled(&mut b, &unsettled, &ops).expect("fold succeeds");
-        assert_eq!(
-            b.deleted_message_ids
-                .iter()
-                .map(|id| id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["message-3"],
-            "only the unsettled message is spared the server delete",
-        );
-    }
-
-    #[test]
-    fn keeps_everything_when_nothing_is_unsettled() {
-        let mut b = batch(
-            vec![
-                server_row("message-1", &["$seen"], "inbox"),
-                server_row("message-2", &[], "inbox"),
-            ],
-            &["message-1"],
-            false,
-        );
-        guard_unsettled(&mut b, &HashSet::new(), &[]).expect("no-op guard");
-        assert_eq!(b.messages.len(), 2);
-        assert_eq!(b.deleted_message_ids.len(), 1);
     }
 }
