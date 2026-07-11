@@ -223,6 +223,51 @@ fn tombstone_then_upsert_clears_the_tombstone() -> Result<(), StoreError> {
 }
 
 #[test]
+fn strangled_read_ports_serve_the_fold() -> Result<(), StoreError> {
+    // The second strangle wave: list/detail/tags/search read `_effective` too.
+    let root = temp_root();
+    let store = overlay_store(&root);
+    let account = AccountId::from("primary");
+    seeded(&store, &account)?;
+
+    // Fold: message-1 moved inbox→archive with a tag keyword, unread.
+    let mut folded = sample_message("message-1", "archive", None);
+    folded.keywords = vec!["urgent".to_string()];
+    store.upsert_overlay_message(&account, &folded)?;
+
+    // list_messages honors the folded membership on both filter branches.
+    let inbox = store.list_messages(&account, Some(&MailboxId::from("inbox")))?;
+    assert_eq!(inbox.len(), 1, "message-1 left inbox in the fold");
+    assert_eq!(inbox[0].id.as_str(), "message-2");
+    let archive = store.list_messages(&account, Some(&MailboxId::from("archive")))?;
+    assert_eq!(archive.len(), 1);
+    assert_eq!(archive[0].id.as_str(), "message-1");
+
+    // Detail/summary reads serve folded values.
+    let summary = store
+        .get_message_summary(&account, &MessageId::from("message-1"))?
+        .expect("summary for a folded message");
+    assert_eq!(summary.mailbox_ids, vec![MailboxId::from("archive")]);
+    assert!(!summary.is_read);
+
+    // Tag aggregation counts the folded (non-$) keyword.
+    let tags = store.list_tags(&account)?;
+    let urgent = tags
+        .iter()
+        .find(|tag| tag.name == "urgent")
+        .expect("folded tag appears");
+    assert_eq!((urgent.unread_messages, urgent.total_messages), (1, 1));
+
+    // FTS search: a tombstoned message drops out of results even though its
+    // base content is still indexed.
+    store.tombstone_overlay_message(&account, &MessageId::from("message-2"))?;
+    let hits = store.fts_search_messages(&account, "Hello", 10)?;
+    assert_eq!(hits.len(), 1, "tombstoned message hidden from search");
+    assert_eq!(hits[0].id.as_str(), "message-1");
+    Ok(())
+}
+
+#[test]
 fn list_overlay_message_ids_inventories_live_and_tombstoned() -> Result<(), StoreError> {
     let root = temp_root();
     let store = overlay_store(&root);
