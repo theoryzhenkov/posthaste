@@ -44,10 +44,17 @@ pub(crate) fn normalize_send_at(raw: &str) -> Result<String, String> {
     format_epoch_rfc3339(epoch)
 }
 
-/// The outbox's due-comparison "now" in the canonical stored form (see
-/// [`normalize_send_at`]), sampled from the monotonic-anchored clock.
-pub(crate) fn outbox_now_rfc3339() -> Result<String, String> {
-    format_epoch_rfc3339(monotonic_now_secs())
+/// The due-comparison "now" for WALL-scheduled sends (`At`, send-later), in
+/// the canonical stored form: a RE-SAMPLED wall clock, so a send-later target
+/// tracks real time across suspend/NTP steps (D152). A backward step merely
+/// delays an At send until the wall catches up — never fires early relative
+/// to wall time, never wedges (the old frozen-anchor bug).
+pub(crate) fn wall_now_rfc3339() -> Result<String, String> {
+    let epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|delta| delta.as_secs() as i64)
+        .unwrap_or(0);
+    format_epoch_rfc3339(epoch)
 }
 
 /// Format UNIX epoch seconds as canonical UTC whole-second RFC 3339 (`...Z`).
@@ -63,7 +70,7 @@ fn format_epoch_rfc3339(epoch: i64) -> Result<String, String> {
 /// `Instant::now()` at first use, then advanced only by monotonic elapsed
 /// time, so the value never regresses and never jumps forward with an OS
 /// clock correction for this process's lifetime.
-fn monotonic_now_secs() -> i64 {
+pub(crate) fn monotonic_now_secs() -> i64 {
     static ANCHOR: OnceLock<(Instant, SystemTime)> = OnceLock::new();
     let &(anchor_instant, anchor_wall) = ANCHOR.get_or_init(|| (Instant::now(), SystemTime::now()));
     let elapsed = Instant::now().saturating_duration_since(anchor_instant);
@@ -116,7 +123,7 @@ mod tests {
         let earlier = normalize_send_at("2026-07-07T09:59:59Z").unwrap();
         let later = normalize_send_at("2026-07-07T12:00:00+02:00").unwrap();
         assert!(earlier < later);
-        let now = outbox_now_rfc3339().unwrap();
+        let now = wall_now_rfc3339().unwrap();
         assert_eq!(now.len(), "2026-07-07T10:30:00Z".len());
         assert!(now.ends_with('Z'));
     }

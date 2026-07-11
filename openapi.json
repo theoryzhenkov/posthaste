@@ -7078,6 +7078,14 @@
           "entity": {
             "$ref": "#/components/schemas/OperationEntity"
           },
+          "holdUntilMono": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Undo-send hold deadline in the DAEMON's monotonic-anchored epoch\nseconds (D152): stamped and judged on one clock, meaningless across\nmachines (deliberately not display data — clients show their own local\ncountdown). `None` for immediate and wall-scheduled sends."
+          },
           "id": {
             "$ref": "#/components/schemas/OperationId"
           },
@@ -8555,6 +8563,15 @@
             "items": {
               "$ref": "#/components/schemas/Recipient"
             }
+          },
+          "undoWindowSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Undo-send hold as a DURATION (seconds), NOT a timestamp (D152): the\nserver stamps the deadline on ITS monotonic-anchored clock and judges\nit on that same clock, so client/daemon wall skew (the nightly\nnothing-sends P0) is unrepresentable. When present it takes precedence\nover `send_at`, which degrades to display metadata for this request.",
+            "minimum": 0
           }
         }
       },

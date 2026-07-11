@@ -147,6 +147,7 @@ impl MailService {
             kind,
             payload,
             None,
+            None,
         )
     }
 

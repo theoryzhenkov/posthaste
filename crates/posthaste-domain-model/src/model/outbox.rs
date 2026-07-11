@@ -206,6 +206,12 @@ pub struct Operation {
     /// @spec docs/L1-outbox#operation-model
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_at: Option<String>,
+    /// Undo-send hold deadline in the DAEMON's monotonic-anchored epoch
+    /// seconds (D152): stamped and judged on one clock, meaningless across
+    /// machines (deliberately not display data — clients show their own local
+    /// countdown). `None` for immediate and wall-scheduled sends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_until_mono: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
