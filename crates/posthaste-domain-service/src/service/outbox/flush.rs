@@ -278,7 +278,6 @@ impl MailService {
                         "transient-failing op past threshold; skipping so it \
                          cannot wedge the outbox (BE-H2)"
                     );
-                    continue;
                 }
                 Err(FlushError {
                     disposition: FlushDisposition::Uncertain,
