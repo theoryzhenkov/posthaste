@@ -1,181 +1,196 @@
-# RFC-L2-send-draft-state-machine — collapse the shadow state machines
+# RFC-L2-send-draft-state-machine — mail operations as intents (NS2)
 
-> **Status (2026-07-10): PROPOSED / DESIGN — not ratified, nothing implemented.**
-> Motivated by a **live P0 in the nightly build: clicking Send sends nothing**
-> (root cause in §1), and by the broader finding that the draft/send lifecycle is
-> patchwork. The core discovery: the two owning models — `OperationState` (a real
-> typed state machine with a `can_transition_to` validator) and `DraftRegistry`
-> (a real port) — are decent; **every live bug is state that *escaped* its owning
-> model into an ad-hoc shadow (a SQL predicate + a frozen clock, four resolution
-> seams, a warn-log).** The refactor is to pull each escaped piece back into its
-> typed owner.
+> **Status (2026-07-11): RATIFIED IN SHAPE (owner) — implementation started at
+> Slice 0.** REWRITTEN post-NS1 from the original shallow plan ("collapse the
+> shadow state machines", 2026-07-10) into the foundational form the owner
+> requested: mail operations become **typed intents with effects-as-data**, on
+> the NS1 substrate (base sealed to sync, overlay plane, effective reads,
+> confirmation-gated retire — RFC-L2-client-replication-model, NS1 COMPLETE).
+> This RFC is that parent's **NS2**.
 >
-> **Owner decision (2026-07-10):** the clock fix is NOT split into a standalone
-> hotfix — it rides Phase 1. Consequence: Phase 1 is on the critical path to
-> restore sending, so **M80 (the clock un-fusing) is sequenced to land first and
-> fast** within Phase 1.
+> **The nightly P0 (nothing sends) is STILL LIVE until Slice 1 lands.**
+> Interim mitigation: set the undo-send delay to 0.
 >
-> Extends/supersedes: RFC-L2-drafts (D125–D127 draft lifecycle), RFC-L2-drafts /
-> RFC-L2-draft-identity (D135–D141 identity), RFC-L2-provider-reliability
-> (D81–D87 send-exactly-once). Pairs with DESIGN-L2-test-taxonomy (the SEND grid)
-> and pulls in the parked SQLite schema-versioning guardrail (AUDIT-L2-architecture-health).
+> Supersedes/extends: RFC-L2-drafts (D125–D127), RFC-L2-draft-identity
+> (D135–D141), RFC-L2-provider-reliability D81–D87 (send-exactly-once).
+> Pairs with DESIGN-L2-test-taxonomy (the SEND grid — Slice 5 lands its cells).
 
-## 1. The symptom: nothing sends in nightly (verified)
+## 1. The live P0 (unchanged evidence, fixed by Slice 1)
 
-Every default send is now a *scheduled* send whose release clock can only run slow:
+Every default send is a *held* send whose release clock can only run slow:
+the client stamps `sendAt = Date.now() + delay` (browser wall clock,
+`useComposeSubmission.ts:260-272`); the flush gate judges it against
+`outbox_now_rfc3339()` — anchored ONCE at daemon start, advanced only by
+monotonic elapsed (`schedule.rs:66-71`), which **pauses across OS suspend** and
+therefore only ever lags. Stamp and judge are different clocks; `send_at <= now`
+can stay false forever; the 5s scheduled-send tick consults the same lagging
+clock. Tests used year-2020/2999 margins, so realistic skew was never exercised.
 
-1. **Every send gets a 10s hold.** `DEFAULT_UNDO_SEND_DELAY_SECONDS = 10`
-   (`apps/web/src/api/types/settings.ts:41`). `handleSubmit` takes the immediate
-   path only if the delay is `<= 0`; otherwise it stamps
-   `sendAt = new Date(Date.now() + delay*1000).toISOString()` — the **browser's
-   real wall clock** — and routes through the held-outbox path
-   (`apps/web/src/components/compose-overlay/useComposeSubmission.ts:260-272`).
-2. **The flush gate judges due-ness against a frozen clock.**
-   `list_flushable_operations` excludes any op with `send_at > now`
-   (`crates/posthaste-store/src/outbox.rs:213`), where `now = outbox_now_rfc3339()`
-   — a clock anchored **once** at daemon start and advanced only by `Instant`
-   (monotonic) elapsed (`crates/posthaste-domain-service/src/service/outbox/schedule.rs:66-71`).
-3. **That clock can only *lag* real time, never lead it** (by design, so a forward
-   NTP step can't fire a held send early). But `Instant`/`CLOCK_MONOTONIC` **pauses
-   during OS suspend**, so a long-lived daemon that survives laptop sleeps falls
-   behind real wall time by the total sleep duration.
-4. **Result:** the send is stamped at *real now + 10s* but judged against a clock
-   stuck minutes-to-hours behind real now → `send_at <= now` never becomes true.
-   The 5s scheduler tick and every flush path use the **same** lagging clock, so
-   nothing rescues it. The mail sits in the outbox.
+## 2. The intent model
 
-Passes CI, dies in nightly: the scheduled-send tests use `send_at` of year
-`2020`/`2999` (multi-year margins,
-`crates/posthaste-domain-service/src/service/tests/outbox.rs`), so realistic skew
-is never exercised; a fresh daemon has no accumulated lag; only a **long-lived
-instance across sleeps** — the nightly build in daily use — hits it.
+### 2.1 An intent has two outputs (D171)
 
-**Interim mitigation for users:** set the undo-send delay to `0` (Compose
-settings) → sends bypass the held path. (Restarting the daemon re-anchors the
-clock, until the next sleep.)
+```
+Intent ──┬── fold_effects(phase)  → what becomes VISIBLE (rows appear/vanish)
+         └── execution plan       → what happens AT THE PROVIDER (steps, ids)
+```
 
-## 2. The thesis: state that escaped its owning model
+**The boundary rule (D171):** *fold effects may depend only on the gesture +
+the replicated visible plane; materialization may additionally read
+authority-private state (draft registry, provider coordinates) — and decides
+only the execution plan, never the visible effect.*
 
-| Escaped state | Where it lives now (the shadow) | Owning model it escaped |
+Fold effects live in `replica-core` (the shared kernel), so **client, runtime,
+and authority compute the identical prediction from one implementation** — the
+authority's overlay fold IS the same function, run at the one node that also
+derives the provider plan.
+
+### 2.2 Effects are total (D172)
+
+`fold_effects(Send{key, content}) = [Tombstone(key), Upsert(provisional_sent)]`
+**unconditionally** — folding a tombstone over a nonexistent row is a no-op, so
+the client's prediction is never visually wrong even when it cannot know
+whether a draft exists. Effects are *phase-aware*: a HELD send folds as a
+draft-form row (honest: still cancelable), flipping to tombstone+sent at
+settlement — a flip that needs no new trigger (settlement already re-derives
+the overlay).
+
+### 2.3 Materialization is an authority-side admission step (D170)
+
+The client sends a **raw gesture** — `Send { compose_key, content,
+undo_window }` — resolving nothing. At admission (after the apply-ledger), the
+authority **materializes**: it consults the draft registry for `compose_key`
+and decides what this send *means* (consume-a-draft vs plain send; execution
+steps). One resolver, at the one node with authoritative state — the client's
+stale view is never load-bearing (the root fix for the draft-identity bug
+family; today's immediate-send path doesn't even pass a draftId, so a raced
+autosave's draft leaks). Admission is serialized and SaveDraft **reserves its
+registry key at admission**, so materialization is strictly better informed
+than any client.
+
+### 2.4 Three nodes, one recursive invariant
+
+`visible = fold(base, pending_intents)` holds at EVERY node, with "base" =
+what its upstream serves: client (base = runtime's frames; pending = not yet
+receipted) → runtime (base = authority assertions; pending = forwarded, not
+yet echoed; plus link idempotency admission) → authority (base = provider
+truth, compile-sealed; pending = the outbox, folded in the overlay).
+Each hop's optimism covers exactly its in-flight window and retires on
+absorption. **Client predicts, runtime predicts-and-relays, authority
+materializes, sync confirms.** The runtime gains NO materialization logic in
+NS2 — only the shared vocabulary extension it inherits from replica-core.
+
+### 2.5 Readiness (D152 revised)
+
+**Readiness is the earliest moment the irreversible provider action may run —
+nothing else.** It gates neither folds nor admission nor preparatory steps.
+
+```
+Readiness = None | Undo { not_before_mono } | At { wall_rfc3339 }
+```
+
+The client sends a **duration** (`undoWindowSeconds`); the **server** stamps
+`not_before_mono` on its own anchored clock and judges it on that same clock —
+stamp and judge share the anchor, so suspend/NTP skew cancels (relative holds
+are exactly what a monotonic anchor is right for). Send-later (`At`) is judged
+against a **re-sampled wall clock**. One pure
+`flushable(state, readiness, clock)` predicate serves the SQL prefilter and
+the in-Rust gate; the two-clocks bug becomes unrepresentable.
+
+### 2.6 Held sends: one row, two-step plan (D173)
+
+Cross-device visibility is required (owner ruling), and settlement-time
+fan-out is forbidden, so a held `Send` materializes into ONE outbox row with a
+deterministic two-step execution plan decided at admission:
+
+1. **ensure-draft** (eager, NOT held, idempotent by intent id): the draft is
+   written to the provider immediately — during the undo window the message is
+   a real provider draft, visible and editable on every device.
+2. **submit** (readiness-gated): the irreversible dispatch.
+   `DispatchUncertain` semantics apply to this step only.
+
+**Undo = cancel step 2** (the existing cancel-vs-flush single-winner gate);
+the provider draft simply remains. No client persist-then-schedule two-step,
+no `depends_on` pair, no demotion machinery.
+
+### 2.7 The send/draft matrix
+
+| Path | Materialization | During hold | On dispatch |
+|---|---|---|---|
+| Immediate, no registry draft | plain send | — | Upsert(provisional sent) |
+| Immediate, registry has draft | send-consuming | — | Tombstone(draft) + Upsert(sent) |
+| Held (undo / send-later) | ensure-draft + held submit | provider draft, cross-device | Tombstone(draft) + Upsert(sent) |
+| Undo | cancel submit step | draft persists | — |
+
+## 3. Decisions
+
+Carried from the 2026-07-10 draft (D150–D155, two revised), plus the NS2
+design round (D170–D175):
+
+- **D150 — One owning model per lifecycle concern; no shadow state.** (kept)
+- **D151 (REVISED) — Scheduling is a typed `Readiness` field + a derived
+  `effective_status(clock)`, NOT a state variant.** Execution phase and
+  scheduling are orthogonal; `OperationState` stays the minimal Copy enum with
+  its transition validator. The anti-shadow win is the single derived
+  predicate, not a new variant.
+- **D152 (REVISED) — Un-fuse the clock via `Readiness` (§2.5).** The client
+  sends durations, never timestamps; the server stamps and judges on one clock
+  per readiness kind.
+- **D153 — `DraftRegistry` is the sole identity authority**
+  (reserve-at-admission / rotate / forget / resolve; typed resolve misses;
+  the four seams, `unwrap_or_else(key)` fallback and `draft_message_exists`
+  probes deleted). (kept)
+- **D154 — Complete the send-outcome space; kill `moved_to_sent`.**
+  `SendOutcome = Delivered { filed: Filed | PendingFiling } |
+  Uncertain(cause: UncertainCause) | Failed(reason)`. `PendingFiling` keeps the
+  provisional Sent overlay row (confirmation-gated — machinery exists) and
+  reads "Sent — filing"; `UncertainCause` is a typed field
+  (PostWriteTimeout | CrashedInflight | …), NOT extra states. (kept, sharpened)
+- **D155 — Typed + versioned persistence.** The intent payload is stored as a
+  versioned envelope; the lossy `"conflicted" → Pending` parse fudge is
+  migrated away. Gated on M84 (Slice 0). (kept)
+- **D170 — Materialization is an authority-side admission step** (§2.3).
+  Client intents are unresolved gestures; the client fold is a non-load-bearing
+  prediction; convergence rides the existing echo/receipt/absorption paths.
+- **D171 — The two-output intent + the boundary rule** (§2.1).
+- **D172 — Fold effects are total and phase-aware** (§2.2); written once in
+  replica-core for all three nodes.
+- **D173 — Held sends are one row with a two-step execution plan** (§2.6);
+  eager ensure-draft for cross-device visibility; readiness gates only the
+  irreversible step; undo cancels the submit and keeps the draft.
+- **D174 — Same-key draft saves COALESCE; `depends_on` chains are deleted.**
+  A queued unsent save is replaced by a newer save on the same key
+  (last-writer-wins per compose session — the semantics real autosave wants).
+  *Adopted by default; reversible if provider-side draft version history turns
+  out to matter.*
+- **D175 — Lingering-draft self-repair (bounded).** If a send settled
+  Delivered but reconciliation later observes the consumed draft still in base
+  (e.g. IMAP expunge failed), enqueue ONE provider cleanup delete. *Adopted by
+  default over wait-for-sync-only (which would leak the provider copy behind a
+  permanent tombstone).*
+
+## 4. Slices (each lands green and whole)
+
+| Slice | Old M | Delivers / deletes |
 |---|---|---|
-| The scheduling / held sub-state | nullable `send_at` column + SQL `WHERE send_at <= now` gate + a frozen clock — invisible to the state enum | `OperationState` (claims `Pending` is flushable; a SQL predicate silently overrides) |
-| Draft identity resolution | 4 seams doing their own thing (`unwrap_or_else(key)` fallback, `draft_message_exists` projection probe) *around* the registry | `DraftRegistry` port (`crates/posthaste-domain-service/src/ports/draft_registry.rs`) |
-| The "delivered-but-unfiled" outcome | a `moved_to_sent` warn + `Ok(())` (`crates/posthaste-engine/src/live_compose/send.rs:211-217`) | `OperationOutcome` (only `{Applied, Failed}`) |
+| **0** | M84 | **Schema versioning**: `PRAGMA user_version` + ordered migration runner + downgrade guard + legacy-open fixture test. Migration v1 retires the open-time counter-trigger DROP and drops the dead mailbox counter columns. Policy: additive evolution stays idempotent (`ensure_column`); destructive/transformative changes are versioned migrations. |
+| **1** | M80 | **The clock fix** (restores nightly send): `Readiness` split on the current op shape; client sends `undoWindowSeconds`; regression test with a suspend-skewed anchor. |
+| **2** | M81/M85 | **Typed intents + effects-as-data**: `MailIntent` typed enum, versioned envelope, `fold_effects()` in replica-core, one effect interpreter in `refresh_message_overlay`. Rider: attempt cap/backoff/quarantine on the flush loop (closes BE-H2, the last open audit HIGH). |
+| **3** | M82 | **Draft intents**: SaveDraft (Upsert effect — instant drafts, kills the 10–15s lag / CL-H3 / D132), DiscardDraft (Tombstone effect — **deletes the last `BaseWrite::legacy` production grant**), registry sole authority, coalescing replaces chains (D174). |
+| **4** | M83 | **Send as one intent**: unconditional multi-row effects, materialization (D170), two-step held plan (D173), gateway-owned provider consumption (the `DraftDelete` settlement fan-out DELETED), `SendOutcome` (D154 — `moved_to_sent` deleted), reconcile-by-intent-id (+ adopt-by-header for non-dedup providers, closes S-EO-2/M72), D175 repair. |
+| **5** | — | **Verdict surfacing + tests**: client undo-send API change, "Sent — filing"/needs-attention states, DESIGN-L2-test-taxonomy SEND-grid L2 cells (S-CONV-2, S-VERD-2/3/4, S-EO-1/2, S-ISO-1) via the L2 fault seam. |
 
-The P0 is the purest instance: the typed machine says "Pending ⇒ flushable"
-(`domain-model/src/model/outbox.rs:105`), but a shadow predicate against a frozen
-clock silently overrides it, and the clock that *stamps* the hold (client wall)
-differs from the clock that *judges* it (daemon monotonic). The model can't see
-its own lie, so the bug is invisible to it.
+What does NOT change: the outbox exactly-once claim gate, DispatchUncertain
+parking discipline (D86), the apply-ledger, the link/receipt/frame flow, the
+client entity store's ingestion paths, and the NS1 base/overlay/effective
+substrate this all stands on.
 
-## 3. Decisions (proposed)
+## 5. Open items
 
-- **D150 — One owning model per lifecycle concern; no shadow state.** Every
-  lifecycle fact (is it held? which provider entity? did it file?) must live
-  inside a typed owner with an enforced transition/validation surface. No
-  lifecycle decision may live in a raw SQL `WHERE` clause, a nullable side
-  column read in isolation, or a warn-log.
+- Slice-5 UX copy for `PendingFiling` / parked sends (owner review at Slice 5).
+- Whether the FTS gap for held-send draft bodies (overlay-only until ensure-draft
+  flushes) needs a note in search docs — likely moot since ensure-draft is eager.
 
-- **D151 — Scheduling is a first-class state, not a column + gate.** Introduce a
-  resting `Scheduled { due }` state:
-  `Scheduled(due) ──(due)──► Pending ──► Inflight ──► {Applied | Failed | DispatchUncertain}`.
-  `flushable` becomes **one pure function** `fn flushable(&self, clock) -> bool`
-  consumed by *both* the SQL prefilter and the in-Rust gate, so they cannot
-  disagree. "Held" becomes visible to the UI (a truthful "scheduled / will send
-  when open") instead of an invisible Pending-that-isn't-flushable.
+## 6. Status
 
-- **D152 — Un-fuse the `send_at` mechanism (the P0 fix).** The "one send_at hold"
-  unification fused two different temporal contracts under one absolute timestamp
-  and one frozen clock that serves neither. Split them, and require the SAME clock
-  to stamp and to judge:
-  - **Undo-send (relative):** deadline = **enqueue instant + delay**, measured in
-    monotonic *elapsed*, computed **server-side** — not a client wall-clock
-    absolute. Suspend during the window just makes it due on wake (correct: the
-    user was away). Never early, never unboundedly late.
-  - **Send-later (absolute wall time):** fire when a **re-sampled** `SystemTime::now()`
-    ≥ target, with the monotonic anchor used only as a floor against a backward
-    step. Tracks real time; never stuck.
-
-- **D153 — `DraftRegistry` is the sole identity authority.** One owned lifecycle
-  replaces the four seams:
-  `reserve(account,key)->DraftRef · rotate(account,key,provider_id) · forget(account,key) · resolve(account,key)->Option<DraftRef>`.
-  `resolve` miss is a **typed outcome**, never a silent guess. Delete
-  `resolve_draft_flush_target`'s `unwrap_or_else(key)` fallback, the
-  `draft_message_exists` projection probe, and the alias / `message.draft_id` dual
-  source. Registry write-through happens in the **same store transaction** as the
-  canonical message write (the M69 intent — enforced; no second runtime-side write).
-
-- **D154 — Complete the send-outcome space; kill `moved_to_sent`.** Replace the
-  warn-and-return with a total outcome:
-  `SendOutcome = Delivered { filed: Filed | PendingFiling } | Uncertain(reason) | Failed(reason)`.
-  `Delivered { PendingFiling }` (== `moved_to_sent == false`) is a real state that
-  (a) surfaces truthfully ("Sent — filing"), (b) carries a **reconciliation
-  obligation** the next sync discharges (converge Drafts→Sent), (c) never blocks or
-  duplicates. Instantiates DESIGN-L2-test-taxonomy cells `S-CONV-2` / `S-VERD-3`.
-
-- **D155 — Typed + versioned persistence.** Persist states via a **total,
-  versioned** mapping; drop the lossy `"conflicted" → Pending` fudge
-  (`crates/posthaste-store/src/outbox.rs` parse) and migrate those rows
-  explicitly. Requires the SQLite schema-versioning guardrail (currently 🔴 open).
-
-## 4. Migration steps (phased)
-
-Per the owner decision there is **no standalone Phase 0 hotfix**; M80 is the first
-step of Phase 1 and is sequenced to land first so nightly send is restored early.
-
-**Phase 1 — restore send + collapse the scheduling shadow (D151, D152, D155)**
-- **M80 — Clock un-fusing (restores sending).** Implement D152: relative-elapsed
-  undo-send computed server-side; live wall clock for send-later; same clock
-  stamps and judges. Regression test with realistic skew (a `now+10s` hold against
-  a suspend-lagged monotonic anchor — the exact gap the year-margin tests miss).
-- **M81 — Scheduling-as-state.** Implement D151: the `Scheduled { due }` state, the
-  single `flushable(clock)` predicate, removal of the SQL shadow gate, and the
-  truthful "scheduled" UI surface.
-
-**Phase 2 — identity owner (D153)**
-- **M82 — `DraftRegistry` sole-owner.** Collapse the four seams to the one
-  lifecycle; delete the fallbacks/probes; enforce single-transaction write-through.
-
-**Phase 3 — send outcomes (D154)**
-- **M83 — Complete `SendOutcome`.** Kill the `moved_to_sent` warn; add
-  `Delivered { PendingFiling }` + its reconciliation obligation; wire the truthful
-  verdict to the UI.
-
-**Cross-cutting**
-- **M84 — Schema-versioning prerequisite (gates M81–M83's persistence changes).**
-  `PRAGMA user_version` + a migration runner (the parked guardrail, now with a
-  concrete driver). Drop/migrate the `"conflicted"` legacy state.
-- **M85 — Taxonomy L2 fault-tests per phase.** Each M lands with the SEND-grid
-  cells it satisfies (M80→S-VERD-4/liveness; M83→S-CONV-2/S-VERD-3; etc.), using
-  the L2 fault-injection seam (DESIGN-L2-test-taxonomy §5.2).
-
-## 5. Convergences
-
-- **Pulls in the schema-versioning guardrail** (M84) — the parked AUDIT item now
-  has a real driver.
-- **Instantiates the test taxonomy** — the `SendOutcome` states map 1:1 onto the
-  SEND grid's convergence/verdict cells.
-- **Retires the `moved_to_sent` smell** flagged across AUDIT-L2-architecture-health
-  (S2 canonical write-through) and BETA-READINESS (DS6, 🟠 PARTIAL).
-
-## 6. Open questions
-
-- **`Scheduled` as a distinct state vs. a typed `Schedule` field on the op.** A
-  distinct state is cleaner for the UI and the transition validator; a typed field
-  keeps the state enum small. D151 leans distinct-state — confirm.
-- **Undo-send relative-elapsed vs. absolute across a client/daemon split.** In
-  split (remote authority) mode, "enqueue instant" is the daemon's — is that the
-  desired anchor for a remote client's undo window? (Bundled app: same machine,
-  no issue.)
-- **`DispatchUncertain` currently fuses "post-write timeout" and "crashed
-  inflight."** Should M83 split them, or keep fused? (They differ in whether a
-  submission definitely left the socket.)
-- **RECOVER vs CONVERGE** (carried from the taxonomy) affects whether
-  `PendingFiling` reconciliation is modeled as its own obligation or as a
-  CONVERGE cell.
-
-## 7. Status / next
-
-DESIGN, not ratified. On ratification: implement Phase 1 (M80 first — restores
-nightly send), then M84 (versioning) gating Phases 2–3. Nothing is implemented
-under this RFC yet.
+Slice 0 in progress. P0 mitigation until Slice 1: undo-send delay 0.
