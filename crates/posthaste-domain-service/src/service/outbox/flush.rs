@@ -22,6 +22,11 @@ struct FlushPass {
     follow_up_enqueued: bool,
 }
 
+/// BE-H2: after this many consecutive transient failures an operation stops
+/// halting the drain — it is skipped (still pending, retried each pass) so a
+/// poisoned "transient" op cannot wedge the account's outbox behind it.
+const TRANSIENT_STOP_THRESHOLD: u32 = 3;
+
 impl MailService {
     /// Flush all flushable operations for an account to the provider, returning
     /// the `operation.settled` events to publish.
@@ -239,17 +244,41 @@ impl MailService {
                     // the op id) — so the retry re-issues the SAME create-id and the
                     // server no-ops the duplicate create instead of orphaning a twin
                     // draft. Rotating the op id here would break that idempotency.
+                    let attempts = operation.attempts + 1;
                     self.outbox.update_operation_state(
                         &operation.id,
                         OperationState::Pending,
-                        operation.attempts + 1,
+                        attempts,
                         Some(&message),
                     )?;
-                    // Offline: stop draining; the rest retries next window.
-                    return Ok(FlushPass {
-                        stopped: true,
-                        follow_up_enqueued,
-                    });
+                    // BE-H2 head-of-line guard: the first few transient
+                    // failures stop the drain (the offline-friendly default —
+                    // everything retries on the next connectivity window). An
+                    // op that keeps failing past the threshold is POISONED-OR-
+                    // UNLUCKY and no longer gets to wedge the account: it is
+                    // SKIPPED (still pending, still retried each pass, still
+                    // cancelable) and the drain continues to the ops behind
+                    // it. Deliberately no permanent quarantine: a real offline
+                    // stretch also accumulates attempts, and failing a user's
+                    // legitimate op for being offline too long would be worse
+                    // than one extra no-op provider call per flush window.
+                    if attempts < TRANSIENT_STOP_THRESHOLD {
+                        // Offline: stop draining; the rest retries next window.
+                        return Ok(FlushPass {
+                            stopped: true,
+                            follow_up_enqueued,
+                        });
+                    }
+                    ph_warn!(
+                        events::OUTBOX_TRANSIENT_OP_SKIPPED,
+                        account_id = %account_id,
+                        operation_id = %operation.id,
+                        attempts,
+                        error = %message,
+                        "transient-failing op past threshold; skipping so it \
+                         cannot wedge the outbox (BE-H2)"
+                    );
+                    continue;
                 }
                 Err(FlushError {
                     disposition: FlushDisposition::Uncertain,
