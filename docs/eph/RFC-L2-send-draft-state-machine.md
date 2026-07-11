@@ -193,6 +193,32 @@ substrate this all stands on.
 
 ## 6. Status
 
+**Slice 1 LANDED (2026-07-11) — NIGHTLY SEND RESTORED.** The two-clock
+readiness split (D152): undo holds are duration-stamped and judged on the
+daemon's monotonic clock (`hold_until_mono`, new column + partial index);
+send-later stays wall-judged against a RE-SAMPLED wall clock; the client's
+`sendAt` degrades to display metadata for undo holds and is not stored.
+Regression tests pin the P0 shape (a hold with a light-years-skewed client
+`sendAt` releases exactly at the mono deadline, both skew directions).
+`undoWindowSeconds` added to the wire (openapi + web types regenerated); web
+sends it through the schedule path. Full `Readiness` typing folds into
+Slice 2's intent envelope.
+
+**Slice 2 rider LANDED (2026-07-11):** BE-H2 head-of-line guard — after
+`TRANSIENT_STOP_THRESHOLD` consecutive transient failures an op is skipped
+(still pending/retryable/cancelable) instead of halting the drain;
+deliberately no permanent quarantine (offline-safety). The last open audit
+HIGH is closed.
+
+**REMAINING (next session, in order): Slices 2–5.** Slice 2 (typed
+`MailIntent` + versioned envelope + `fold_effects()` in replica-core + the
+one interpreter in `refresh_message_overlay`) is the largest single unit —
+start it with fresh context; everything it needs is specified in §2–§4 and
+the substrate (NS1 + Slices 0/1) is complete and green beneath it. Then
+Slice 3 (draft intents; the last `BaseWrite::legacy` production grant dies),
+Slice 4 (send-as-one-intent; `moved_to_sent` dies), Slice 5 (verdict
+surfacing + SEND-grid tests).
+
 **Slice 0 LANDED (2026-07-11):** `PRAGMA user_version` + the ordered migration
 runner + the downgrade guard (`Conflict`, never `Corruption` — a newer database
 is refused, not quarantined) in `db/schema.rs::prepare_schema`. Migration v1
@@ -202,5 +228,4 @@ v0 fixture upgrades once and stays functional; fresh opens stamp; the guard
 leaves newer databases untouched. Policy documented at `SCHEMA_VERSION`:
 additive = idempotent path; destructive/transformative = versioned migration.
 
-Next: Slice 1 (M80 — the clock fix; restores nightly send). P0 mitigation
-until then: undo-send delay 0.
+(Slice 1 has since landed — the P0 and its mitigation are history.)
