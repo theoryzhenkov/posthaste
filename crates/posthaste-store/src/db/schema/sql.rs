@@ -499,4 +499,110 @@ pub(super) const SCHEMA_SQL: &str = "
             CREATE INDEX IF NOT EXISTS idx_apply_ledger_settled_at
                 ON apply_ledger (settled_at)
                 WHERE settled_at IS NOT NULL;
+
+            -- NS1 (RFC-L2-client-replication-model D167): the optimistic
+            -- OVERLAY plane. Rows here are the FOLD'S OUTPUT — complete folded
+            -- message projections computed by the shared replica-core fold —
+            -- never partial deltas. Writer: the fold engine ONLY. The base
+            -- tables (message / message_mailbox / message_keyword) are written
+            -- by sync ONLY; the *_effective views below merge the two planes
+            -- for every SQL read (D168). An overlaid message takes its row,
+            -- membership AND keywords entirely from the overlay (the fold
+            -- emits complete state, so partial overlays cannot exist).
+            -- tombstone = 1 marks a pending optimistic Destroy: the message is
+            -- hidden from message_effective while base still holds it.
+            CREATE TABLE IF NOT EXISTS message_overlay (
+                account_id TEXT NOT NULL,
+                id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                conversation_id TEXT,
+                remote_blob_id TEXT,
+                subject TEXT,
+                normalized_subject TEXT,
+                from_name TEXT,
+                from_email TEXT,
+                to_json TEXT NOT NULL DEFAULT '[]',
+                preview TEXT,
+                received_at TEXT NOT NULL,
+                has_attachment INTEGER NOT NULL DEFAULT 0,
+                size INTEGER NOT NULL DEFAULT 0,
+                is_read INTEGER NOT NULL DEFAULT 1,
+                is_flagged INTEGER NOT NULL DEFAULT 0,
+                rfc_message_id TEXT,
+                in_reply_to TEXT,
+                references_json TEXT NOT NULL DEFAULT '[]',
+                draft_id TEXT,
+                list_unsubscribe TEXT,
+                tombstone INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, id)
+            );
+            CREATE TABLE IF NOT EXISTS message_mailbox_overlay (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                mailbox_id TEXT NOT NULL,
+                PRIMARY KEY (account_id, message_id, mailbox_id)
+            );
+            CREATE TABLE IF NOT EXISTS message_keyword_overlay (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                PRIMARY KEY (account_id, message_id, keyword)
+            );
+
+            ";
+
+/// The `*_effective` merged-read views (D168), created SEPARATELY from
+/// [`SCHEMA_SQL`] and strictly AFTER the `ensure_column` evolution calls in
+/// `init_schema`: `CREATE VIEW` validates its SELECT at creation time, so a
+/// view referencing late-added `message` columns (`draft_id`,
+/// `list_unsubscribe`, …) would fail the open on a legacy database whose
+/// columns are only added by `ensure_column` AFTER the main batch runs.
+pub(super) const EFFECTIVE_VIEWS_SQL: &str = "
+            -- The merged read (D168): base rows not overridden by the overlay,
+            -- plus non-tombstone overlay rows. Column lists match the base
+            -- tables exactly so a query can swap `message` for
+            -- `message_effective` without any other change. The overlay is
+            -- bounded by the pending outbox (small), so the NOT EXISTS probe
+            -- rides the overlay's primary key.
+            CREATE VIEW IF NOT EXISTS message_effective AS
+                SELECT m.account_id, m.id, m.thread_id, m.conversation_id,
+                       m.remote_blob_id, m.subject, m.normalized_subject,
+                       m.from_name, m.from_email, m.to_json, m.preview,
+                       m.received_at, m.has_attachment, m.size, m.is_read,
+                       m.is_flagged, m.rfc_message_id, m.in_reply_to,
+                       m.references_json, m.draft_id, m.list_unsubscribe
+                FROM message m
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM message_overlay o
+                    WHERE o.account_id = m.account_id AND o.id = m.id
+                )
+                UNION ALL
+                SELECT o.account_id, o.id, o.thread_id, o.conversation_id,
+                       o.remote_blob_id, o.subject, o.normalized_subject,
+                       o.from_name, o.from_email, o.to_json, o.preview,
+                       o.received_at, o.has_attachment, o.size, o.is_read,
+                       o.is_flagged, o.rfc_message_id, o.in_reply_to,
+                       o.references_json, o.draft_id, o.list_unsubscribe
+                FROM message_overlay o
+                WHERE o.tombstone = 0;
+            CREATE VIEW IF NOT EXISTS message_mailbox_effective AS
+                SELECT mm.account_id, mm.message_id, mm.mailbox_id
+                FROM message_mailbox mm
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM message_overlay o
+                    WHERE o.account_id = mm.account_id AND o.id = mm.message_id
+                )
+                UNION ALL
+                SELECT mo.account_id, mo.message_id, mo.mailbox_id
+                FROM message_mailbox_overlay mo;
+            CREATE VIEW IF NOT EXISTS message_keyword_effective AS
+                SELECT mk.account_id, mk.message_id, mk.keyword
+                FROM message_keyword mk
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM message_overlay o
+                    WHERE o.account_id = mk.account_id AND o.id = mk.message_id
+                )
+                UNION ALL
+                SELECT ko.account_id, ko.message_id, ko.keyword
+                FROM message_keyword_overlay ko;
             ";
