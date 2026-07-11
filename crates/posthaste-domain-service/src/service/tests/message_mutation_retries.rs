@@ -1,12 +1,11 @@
 use super::*;
 
 #[tokio::test]
-async fn archive_mutation_writes_through_to_canonical_projection() {
-    // S2 write-through: a message mutation applies its assertion to the canonical
-    // projection immediately (no longer overlay-only). That reads then reflect it
-    // is a store property (the indexed query/triggers read canonical) covered in
-    // posthaste-store; TestStore decouples its rule/list fixtures from the write
-    // path, so here we assert the write-through reaches the projection.
+async fn archive_mutation_folds_into_overlay() {
+    // NS1 overlay plane: a message mutation queues its op and folds base + the
+    // unsettled assertions into the OVERLAY row. Base/canonical is untouched —
+    // sync (and the settle readback) is its only writer; reads serve the
+    // effective (overlay-first) merge.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -22,12 +21,35 @@ async fn archive_mutation_writes_through_to_canonical_projection() {
         .await
         .expect("archive assertion applies");
 
+    let overlay = store
+        .overlay_rows
+        .lock()
+        .expect("overlay rows lock poisoned");
+    let row = overlay
+        .get("message-1")
+        .expect("the mutation folds an overlay entry for the message")
+        .as_ref()
+        .expect("a mailbox replace folds to a row, not a tombstone");
+    assert_eq!(
+        row.mailbox_ids,
+        vec![MailboxId::from("archive")],
+        "the overlay row holds the asserted membership",
+    );
+    drop(overlay);
     assert_eq!(
         store
             .get_message_mailboxes(&account, &MessageId::from("message-1"))
-            .expect("projection mailbox lookup"),
-        vec![MailboxId::from("archive")],
-        "the mutation writes its assertion through to the canonical projection",
+            .expect("base mailbox lookup"),
+        vec![MailboxId::from("inbox")],
+        "base/canonical is untouched by the mutation",
+    );
+    assert!(
+        store
+            .applied_messages
+            .lock()
+            .expect("applied messages lock poisoned")
+            .is_empty(),
+        "no base write rode the mutation",
     );
 }
 
@@ -211,7 +233,10 @@ async fn destroy_supersedes_pending_assertions() {
 }
 
 #[tokio::test]
-async fn mixed_message_mutations_write_through_to_projection() {
+async fn mixed_message_mutations_fold_cumulatively_into_overlay() {
+    // NS1: several unsettled assertions on one message fold in queue order
+    // into a single overlay row — the flag and the move are both visible in
+    // the cumulative fold, while base stays sync-owned.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let config = Arc::new(TestConfig::default());
@@ -246,14 +271,34 @@ async fn mixed_message_mutations_write_through_to_projection() {
             .expect("cursor should exist")
             .state,
         "message-1",
-        "provider cursor advances only by sync, not local optimistic write-through",
+        "provider cursor advances only by sync, not local optimistic mutations",
     );
+    {
+        let overlay = store
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned");
+        let row = overlay
+            .get("message-1")
+            .expect("the mutations fold an overlay entry for the message")
+            .as_ref()
+            .expect("state assertions fold to a row, not a tombstone");
+        assert!(
+            row.keywords.iter().any(|keyword| keyword == "$flagged"),
+            "the earlier keyword assertion is preserved in the cumulative fold",
+        );
+        assert_eq!(
+            row.mailbox_ids,
+            vec![MailboxId::from("archive")],
+            "the later mailbox assertion wins in the cumulative fold",
+        );
+    }
     assert_eq!(
         store
             .get_message_mailboxes(&account, &MessageId::from("message-1"))
-            .expect("mailbox lookup should succeed"),
-        vec![MailboxId::from("archive")],
-        "both assertions write through to the canonical projection (last one wins on mailbox)",
+            .expect("base mailbox lookup"),
+        vec![MailboxId::from("inbox")],
+        "base/canonical is untouched by the mutations",
     );
     let pending = service
         .list_pending_operations(&account)
@@ -312,11 +357,12 @@ async fn stale_local_cursor_does_not_conflict_message_assertion_flush() {
 
 #[tokio::test]
 async fn get_conversation_reads_canonical_without_overlay_fold() {
-    // S4: get_conversation returns the canonical conversation view directly — it
-    // no longer folds the outbox overlay over it. Optimism is written through to
-    // canonical, so the conversation_reader already reflects pending assertions
-    // in production; here (TestStore's conversation_view is a fixture decoupled
-    // from the write path) we assert get_conversation returns it verbatim.
+    // get_conversation returns the store's conversation view directly — the
+    // service performs no outbox fold of its own. Under NS1 optimism lives in
+    // the overlay plane and the real conversation reader serves the effective
+    // (overlay-folded) view in SQL; here (TestStore's conversation_view is a
+    // fixture decoupled from the write path) we assert get_conversation
+    // returns it verbatim.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     *store
@@ -329,8 +375,8 @@ async fn get_conversation_reads_canonical_without_overlay_fold() {
     });
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
 
-    // A pending archive does not fold into the read (no overlay); the view
-    // reflects whatever canonical holds.
+    // A pending archive does not fold into this service read; the view
+    // reflects whatever the store's view serves.
     service
         .replace_mailboxes(
             &account,
@@ -355,12 +401,12 @@ async fn get_conversation_reads_canonical_without_overlay_fold() {
 
 #[tokio::test]
 async fn flush_settles_message_assertion_from_readback_and_removes_it() {
-    // S2: a flushed message assertion settles from the provider readback (set+get)
-    // and is removed at flush — it no longer rests in `applied` awaiting a sync.
-    // The readback is the new base; remaining unsettled ops fold over it; canonical
-    // reflects the result.
+    // NS1: a flushed message assertion settles from the provider readback
+    // (set+get) and is removed at flush. The RAW readback is the new base
+    // (written via the sync write path); the overlay entry retires with the
+    // settled op, so reads show provider truth.
     //
-    // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    // @spec docs/eph/RFC-L2-client-replication-model#6-the-runtime-substrate-base--overlay--effective-d167d169
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     *store.rule_page.lock().expect("rule page lock poisoned") =
@@ -400,13 +446,22 @@ async fn flush_settles_message_assertion_from_readback_and_removes_it() {
         .expect("pending list")
         .is_empty());
 
-    // Canonical reflects the settled readback.
+    // Base reflects the settled readback (raw, via the sync write path) and
+    // the overlay entry retired with the op.
     assert_eq!(
         store
             .get_message_mailboxes(&account, &MessageId::from("message-1"))
-            .expect("projection lookup"),
+            .expect("base mailbox lookup"),
         vec![MailboxId::from("archive")],
-        "settle wrote the provider readback to canonical",
+        "settle wrote the raw provider readback to base",
+    );
+    assert!(
+        store
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .is_empty(),
+        "no overlay entry remains once the sole op settled",
     );
 }
 
@@ -435,12 +490,12 @@ fn observe_batch(record: MessageRecord) -> SyncBatch {
 
 #[tokio::test]
 async fn sync_flushes_and_settles_the_pending_assertion() {
-    // S2: `sync_account` flushes the outbox after observing, so a pending
+    // `sync_account` flushes the outbox after observing, so a pending
     // assertion settles from the readback and is removed — settlement rides the
     // flush whether triggered directly or by a sync's post-flush. (The old
     // rest-in-applied/no-premature-retire mechanism this test used is gone.)
     //
-    // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    // @spec docs/eph/RFC-L2-client-replication-model#6-the-runtime-substrate-base--overlay--effective-d167d169
     let account = sample_source();
     let account_id = account.id.clone();
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
@@ -487,11 +542,12 @@ async fn sync_flushes_and_settles_the_pending_assertion() {
     );
 }
 
-// --- S2: optimistic write-through + settle from readback -----------------------
+// --- NS1: optimistic fold into the overlay + settle from readback --------------
 
 #[tokio::test]
-async fn keyword_mutation_writes_through_to_projection() {
-    // S2 write-through for keywords: a setKeywords applies to canonical at once.
+async fn keyword_mutation_folds_into_overlay() {
+    // NS1: a setKeywords folds base + the queued assertion into the overlay
+    // row at once; base/canonical is never written by the mutation.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -508,23 +564,36 @@ async fn keyword_mutation_writes_through_to_projection() {
         .await
         .expect("keyword assertion queues");
 
-    let adds = store
-        .keyword_adds
+    let overlay = store
+        .overlay_rows
         .lock()
-        .expect("keyword adds lock poisoned");
-    assert_eq!(
-        adds.len(),
-        1,
-        "the keyword assertion writes through to canonical"
+        .expect("overlay rows lock poisoned");
+    let row = overlay
+        .get("message-1")
+        .expect("the mutation folds an overlay entry for the message")
+        .as_ref()
+        .expect("a keyword assertion folds to a row, not a tombstone");
+    assert!(
+        row.keywords.iter().any(|keyword| keyword == "$flagged"),
+        "the overlay row carries the flag folded over the synthetic base",
     );
-    assert!(adds[0].1.iter().any(|keyword| keyword == "$flagged"));
+    drop(overlay);
+    assert!(
+        store
+            .keyword_adds
+            .lock()
+            .expect("keyword adds lock poisoned")
+            .is_empty(),
+        "the mutation never writes base/canonical (sync is base's only writer)",
+    );
 }
 
 #[tokio::test]
 async fn settle_adopts_the_readback_over_the_optimistic_value() {
     // Settle is authoritative: when the provider's readback differs from the
-    // optimistic write-through (e.g. a server-side rule moved the message),
-    // canonical adopts the readback, not the local guess.
+    // optimistic fold (e.g. a server-side rule moved the message), base adopts
+    // the RAW readback verbatim — no optimism is folded into base (NS1) — and
+    // the overlay entry retires with its op, so reads show provider truth.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -535,7 +604,9 @@ async fn settle_adopts_the_readback_over_the_optimistic_value() {
         .readbacks
         .lock()
         .expect("readbacks lock poisoned")
-        .push(posthaste_domain_model::MessageReadback::Present(readback));
+        .push(posthaste_domain_model::MessageReadback::Present(
+            readback.clone(),
+        ));
 
     service
         .replace_mailboxes(
@@ -547,32 +618,58 @@ async fn settle_adopts_the_readback_over_the_optimistic_value() {
         )
         .await
         .expect("archive assertion queues");
-    assert_eq!(
-        store
-            .get_message_mailboxes(&account, &MessageId::from("message-1"))
-            .expect("projection lookup"),
-        vec![MailboxId::from("archive")],
-        "optimistic write-through before flush",
-    );
+    {
+        let overlay = store
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned");
+        let row = overlay
+            .get("message-1")
+            .expect("the mutation folds an overlay entry")
+            .as_ref()
+            .expect("a mailbox replace folds to a row, not a tombstone");
+        assert_eq!(
+            row.mailbox_ids,
+            vec![MailboxId::from("archive")],
+            "optimistic fold lives in the overlay before flush",
+        );
+    }
 
     service
         .flush_account(&account, &gateway)
         .await
         .expect("flush should succeed");
 
+    let applied = store
+        .applied_messages
+        .lock()
+        .expect("applied messages lock poisoned");
+    let settled = applied
+        .iter()
+        .rev()
+        .find(|record| record.id == MessageId::from("message-1"))
+        .expect("settle wrote the readback to base");
     assert_eq!(
-        store
-            .get_message_mailboxes(&account, &MessageId::from("message-1"))
-            .expect("projection lookup"),
-        vec![MailboxId::from("spam")],
-        "settle adopts the provider readback over the optimistic value",
+        serde_json::to_value(settled).expect("record serializes"),
+        serde_json::to_value(&readback).expect("record serializes"),
+        "base adopts the provider readback VERBATIM (raw, not folded)",
+    );
+    drop(applied);
+    assert!(
+        !store
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .contains_key("message-1"),
+        "the overlay entry retired with its settled op — base shows through",
     );
 }
 
 #[tokio::test]
-async fn settle_folds_remaining_unsettled_ops_over_the_readback() {
-    // settle-completeness: settling one op preserves the others. `project_record`
-    // folds the still-unsettled assertions over the provider readback.
+async fn settle_refolds_remaining_unsettled_ops_into_the_overlay() {
+    // settle-completeness (NS1): settling one op preserves the others — base
+    // receives the RAW readback (never a fold), and the still-unsettled
+    // assertions are RE-FOLDED over that new base in the OVERLAY entry.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -599,6 +696,8 @@ async fn settle_folds_remaining_unsettled_ops_over_the_readback() {
         .await
         .expect("archive assertion queues");
 
+    // Park the archive op outside the flushable set (still unsettled, still
+    // folded) so this flush settles ONLY the flag.
     let pending = service
         .list_pending_operations(&account)
         .expect("pending list");
@@ -607,34 +706,69 @@ async fn settle_folds_remaining_unsettled_ops_over_the_readback() {
         .find(|op| op.kind == OperationKind::ReplaceMailboxes)
         .expect("archive op should be pending")
         .clone();
+    store
+        .update_operation_state(&archive_op.id, OperationState::Applied, 1, None)
+        .expect("park the archive op as applied");
 
     // The flag's readback: the provider applied the flag but not (yet) the archive.
+    let gateway = MutationGateway::with_revision(1);
     let mut readback = sample_message_record("message-1", 0, false);
     readback.keywords = vec!["$flagged".to_string()];
-    let projected =
-        super::super::message_queries::project_record(readback, std::slice::from_ref(&archive_op))
-            .expect("project_record succeeds")
-            .expect("the message is still present");
+    gateway
+        .readbacks
+        .lock()
+        .expect("readbacks lock poisoned")
+        .push(posthaste_domain_model::MessageReadback::Present(
+            readback.clone(),
+        ));
 
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush settles the flag");
+
+    {
+        let applied = store
+            .applied_messages
+            .lock()
+            .expect("applied messages lock poisoned");
+        let settled = applied
+            .iter()
+            .rev()
+            .find(|record| record.id == MessageId::from("message-1"))
+            .expect("settle wrote the readback to base");
+        assert_eq!(
+            serde_json::to_value(settled).expect("record serializes"),
+            serde_json::to_value(&readback).expect("record serializes"),
+            "base received the RAW readback — the pending archive was not folded in",
+        );
+    }
+    let overlay = store
+        .overlay_rows
+        .lock()
+        .expect("overlay rows lock poisoned");
+    let row = overlay
+        .get("message-1")
+        .expect("the unsettled archive keeps an overlay entry")
+        .as_ref()
+        .expect("the refold is a row, not a tombstone");
     assert_eq!(
-        projected.mailbox_ids,
+        row.mailbox_ids,
         vec![MailboxId::from("archive")],
-        "the still-unsettled archive op is preserved when the flag settles",
+        "the still-unsettled archive op is refolded over the new base",
     );
     assert!(
-        projected
-            .keywords
-            .iter()
-            .any(|keyword| keyword == "$flagged"),
-        "the settled flag is carried in the readback base",
+        row.keywords.iter().any(|keyword| keyword == "$flagged"),
+        "the settled flag is carried in the readback base under the refold",
     );
 }
 
 #[tokio::test]
-async fn rejected_mutation_reverts_canonical_and_settles_failed() {
-    // A provider rejection still carries a readback (the unchanged state); settle
-    // writes it (reverting the optimistic change) and the settlement is Failed so
-    // the failure can surface.
+async fn rejected_mutation_settles_failed_and_bases_the_raw_readback() {
+    // A provider rejection still carries a readback (the unchanged server
+    // state); settle writes it to base RAW, the overlay entry retires with the
+    // settled op (the optimistic fold vanishes from reads), and the settlement
+    // is Failed so the failure can surface.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -644,7 +778,7 @@ async fn rejected_mutation_reverts_canonical_and_settles_failed() {
         .reject_next
         .lock()
         .expect("reject_next lock poisoned") = Some((
-        posthaste_domain_model::MessageReadback::Present(unchanged),
+        posthaste_domain_model::MessageReadback::Present(unchanged.clone()),
         "permission denied".to_string(),
     ));
 
@@ -658,25 +792,51 @@ async fn rejected_mutation_reverts_canonical_and_settles_failed() {
         )
         .await
         .expect("archive assertion queues");
-    assert_eq!(
-        store
-            .get_message_mailboxes(&account, &MessageId::from("message-1"))
-            .expect("projection lookup"),
-        vec![MailboxId::from("archive")],
-        "optimistic write-through before flush",
-    );
+    {
+        let overlay = store
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned");
+        let row = overlay
+            .get("message-1")
+            .expect("the mutation folds an overlay entry")
+            .as_ref()
+            .expect("a mailbox replace folds to a row, not a tombstone");
+        assert_eq!(
+            row.mailbox_ids,
+            vec![MailboxId::from("archive")],
+            "optimistic fold lives in the overlay before flush",
+        );
+    }
 
     let events = service
         .flush_account(&account, &gateway)
         .await
         .expect("flush should succeed");
 
-    assert_eq!(
-        store
-            .get_message_mailboxes(&account, &MessageId::from("message-1"))
-            .expect("projection lookup"),
-        vec![MailboxId::from("inbox")],
-        "the rejected change is reverted from the readback",
+    {
+        let applied = store
+            .applied_messages
+            .lock()
+            .expect("applied messages lock poisoned");
+        let settled = applied
+            .iter()
+            .rev()
+            .find(|record| record.id == MessageId::from("message-1"))
+            .expect("settle wrote the rejection readback to base");
+        assert_eq!(
+            serde_json::to_value(settled).expect("record serializes"),
+            serde_json::to_value(&unchanged).expect("record serializes"),
+            "base received the RAW readback — the unchanged server state",
+        );
+    }
+    assert!(
+        !store
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .contains_key("message-1"),
+        "the overlay entry is gone after settlement (no remaining ops)",
     );
     assert!(
         service
@@ -700,10 +860,10 @@ async fn rejected_mutation_reverts_canonical_and_settles_failed() {
 
 #[tokio::test]
 async fn unsettled_message_ids_tracks_queued_then_settled_assertions() {
-    // The M35 durable snapshot guard folds/protects exactly the messages this
-    // set names. A queued optimistic mutation puts its message in the set;
-    // settling it (flush/ack) removes it, so the sync applies plain provider
-    // state to that message (no stale overlay).
+    // The unsettled set names exactly the messages whose overlay entries the
+    // NS1 sweep re-derives. A queued optimistic mutation puts its message in
+    // the set; settling it (flush/ack) removes it, so the overlay retires and
+    // base (plain provider state) shows through for that message.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));

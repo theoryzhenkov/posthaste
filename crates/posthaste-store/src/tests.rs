@@ -189,7 +189,6 @@ mod snooze;
 mod source_visibility;
 mod store_close;
 mod tags_and_locations;
-mod unsettled_guard;
 mod unsubscribe_column;
 
 #[test]

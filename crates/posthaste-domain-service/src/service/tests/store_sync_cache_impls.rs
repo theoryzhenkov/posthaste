@@ -31,22 +31,6 @@ impl SyncWriteStore for TestStore {
         Ok(Vec::new())
     }
 
-    fn apply_sync_batch_protected(
-        &self,
-        account_id: &AccountId,
-        batch: &SyncBatch,
-        protected_message_ids: &std::collections::HashSet<String>,
-    ) -> Result<Vec<DomainEvent>, StoreError> {
-        // Record the protected set so tests can assert the guard's ids reached
-        // the store boundary; the real store also excludes them from the
-        // replace_all prune-by-absence pass (covered by store tests).
-        self.protected_message_ids
-            .lock()
-            .expect("protected message ids lock poisoned")
-            .push(protected_message_ids.clone());
-        self.apply_sync_batch(account_id, batch)
-    }
-
     fn reconcile_sync(
         &self,
         _account_id: &AccountId,
@@ -67,22 +51,6 @@ impl SyncWriteStore for TestStore {
             state.cursor = Some(cursor.clone());
         }
         Ok(Vec::new())
-    }
-
-    fn reconcile_sync_protected(
-        &self,
-        account_id: &AccountId,
-        reconciliation: &posthaste_domain_model::SyncReconciliation,
-        protected_message_ids: &std::collections::HashSet<String>,
-    ) -> Result<Vec<DomainEvent>, StoreError> {
-        // Record the protected set so tests can assert the streamed
-        // full-snapshot reconciliation pass also received the guard's ids; the
-        // real store excludes them from its prune-by-absence pass.
-        self.protected_message_ids
-            .lock()
-            .expect("protected message ids lock poisoned")
-            .push(protected_message_ids.clone());
-        self.reconcile_sync(account_id, reconciliation)
     }
 
     fn apply_message_body(
@@ -216,5 +184,106 @@ impl crate::CacheStore for TestStore {
             .cache_used_bytes
             .lock()
             .expect("cache used bytes lock poisoned"))
+    }
+}
+
+impl MessageOverlayStore for TestStore {
+    fn upsert_overlay_message(
+        &self,
+        _account_id: &AccountId,
+        message: &MessageRecord,
+    ) -> Result<(), StoreError> {
+        self.overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .insert(message.id.as_str().to_string(), Some(message.clone()));
+        Ok(())
+    }
+
+    fn tombstone_overlay_message(
+        &self,
+        _account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), StoreError> {
+        self.overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .insert(message_id.as_str().to_string(), None);
+        Ok(())
+    }
+
+    fn remove_overlay_message(
+        &self,
+        _account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), StoreError> {
+        self.overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .remove(message_id.as_str());
+        Ok(())
+    }
+
+    fn list_overlay_message_ids(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<Vec<MessageId>, StoreError> {
+        Ok(self
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .keys()
+            .map(|id| MessageId::from(id.as_str()))
+            .collect())
+    }
+
+    fn read_overlay_message(
+        &self,
+        _account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<Option<MessageRecord>>, StoreError> {
+        Ok(self
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .get(message_id.as_str())
+            .cloned())
+    }
+
+    fn read_base_message_record(
+        &self,
+        _account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageRecord>, StoreError> {
+        // "Base" in the mock is whatever sync last applied: the newest
+        // `apply_sync_batch` record for the id wins. Fixtures seeded via
+        // `with_message_state` (no applied record) fall back to a synthetic
+        // base carrying `mutation_state.mailbox_ids` — the same pretense the
+        // `get_message_mailboxes` mock has always made.
+        let applied = self
+            .applied_messages
+            .lock()
+            .expect("applied messages lock poisoned")
+            .iter()
+            .rev()
+            .find(|record| record.id == *message_id)
+            .cloned();
+        if let Some(record) = applied {
+            return Ok(Some(record));
+        }
+        let state = self
+            .mutation_state
+            .lock()
+            .expect("mutation state lock poisoned");
+        if state.mailbox_ids.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(MessageRecord {
+            id: message_id.clone(),
+            source_thread_id: posthaste_domain_model::ThreadId::from("thread-1"),
+            received_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
+            mailbox_ids: state.mailbox_ids.clone(),
+            ..Default::default()
+        }))
     }
 }

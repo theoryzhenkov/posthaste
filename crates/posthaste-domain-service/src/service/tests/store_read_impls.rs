@@ -194,12 +194,59 @@ impl MessageDetailStore for TestStore {
         Ok(None)
     }
 
+    /// EFFECTIVE-read mock (NS1): the overlay wins (a tombstone reads as
+    /// gone), else base — the same merge the real `_effective` views serve.
+    fn get_message_summary(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageSummary>, StoreError> {
+        if let Some(entry) = self
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .get(message_id.as_str())
+        {
+            return Ok(entry.as_ref().map(record_to_summary));
+        }
+        Ok(self
+            .read_base_message_record(account_id, message_id)?
+            .as_ref()
+            .map(record_to_summary))
+    }
+
     fn get_thread(
         &self,
         _account_id: &AccountId,
         _thread_id: &ThreadId,
     ) -> Result<Option<ThreadView>, StoreError> {
         Ok(None)
+    }
+}
+
+/// Mock-grade record→summary projection for the effective-read mock.
+fn record_to_summary(record: &MessageRecord) -> MessageSummary {
+    MessageSummary {
+        id: record.id.clone(),
+        source_id: AccountId::from("primary"),
+        source_name: "Primary".to_string(),
+        source_thread_id: record.source_thread_id.clone(),
+        conversation_id: posthaste_domain_model::ConversationId::from(record.id.as_str()),
+        subject: record.subject.clone(),
+        from_name: record.from_name.clone(),
+        from_email: record.from_email.clone(),
+        to: record.to.clone(),
+        preview: record.preview.clone(),
+        received_at: record.received_at.clone(),
+        has_attachment: record.has_attachment,
+        is_read: record.keywords.iter().any(|keyword| keyword == "$seen"),
+        is_flagged: record.keywords.iter().any(|keyword| keyword == "$flagged"),
+        mailbox_ids: record.mailbox_ids.clone(),
+        keywords: record.keywords.clone(),
+        version: None,
+        rfc_message_id: record.rfc_message_id.clone(),
+        in_reply_to: record.in_reply_to.clone(),
+        draft_id: record.draft_id.clone(),
     }
 }
 

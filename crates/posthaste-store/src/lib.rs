@@ -33,7 +33,7 @@ pub(crate) use crate::store::StagedBodyFiles;
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 pub use rev_log::MAX_REV_LOG_HISTORY;
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
@@ -77,10 +77,9 @@ use crate::db::{
     now_iso8601, parse_sync_object, sql_to_store_error,
 };
 use crate::mutations::{
-    apply_message_body_tx, apply_sync_batch_protected_tx, apply_sync_batch_tx, destroy_message_tx,
+    apply_message_body_tx, apply_sync_batch_tx, destroy_message_tx,
     event_log_bounds as event_log_bounds_query, list_events as list_events_for_filter,
-    reconcile_sync_protected_tx, reconcile_sync_tx, replace_mailboxes_tx, set_keywords_tx,
-    stage_sync_bodies,
+    reconcile_sync_tx, replace_mailboxes_tx, set_keywords_tx, stage_sync_bodies,
 };
 use crate::projections::{cleanup_orphan_conversations_tx, insert_event_tx, synthesize_raw_mime};
 use crate::query::{

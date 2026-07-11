@@ -57,6 +57,28 @@ pub trait MessageOverlayStore: Send + Sync {
         &self,
         account_id: &AccountId,
     ) -> Result<Vec<MessageId>, StoreError>;
+
+    /// Read the BASE-plane record for one message (raw provider truth: the
+    /// `message` row + base membership + base keywords — never the overlay).
+    /// This is the fold's INPUT: `refresh` folds the unsettled ops over it and
+    /// writes the result back through [`Self::upsert_overlay_message`]. Body
+    /// fields are not loaded (`None`) — the fold never touches them.
+    fn read_base_message_record(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageRecord>, StoreError>;
+
+    /// Read one overlay entry: `None` = no entry; `Some(None)` = a tombstone
+    /// (pending destroy); `Some(Some(record))` = a folded row (keywords +
+    /// mailbox sets loaded; body fields `None`). Drives retire-on-confirmation:
+    /// an entry whose ops all settled is removed only once base COVERS its
+    /// fold (or, for a tombstone, once the base row is gone).
+    fn read_overlay_message(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<Option<MessageRecord>>, StoreError>;
 }
 
 /// Object-safety guard: the service composes this port dynamically.
