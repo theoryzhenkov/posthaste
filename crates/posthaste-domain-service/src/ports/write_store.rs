@@ -75,23 +75,28 @@ pub trait OperationOutboxStore: Send + Sync {
     fn enqueue_operation(&self, operation: &Operation) -> Result<Operation, StoreError>;
 
     /// Operations eligible for flushing (pending) for an account, in insertion
-    /// order. `now` (normalized UTC whole-second RFC 3339) gates scheduled
-    /// sends: an op whose `send_at` is after `now` is HELD out of the result —
-    /// it rests `pending` until due, so a not-yet-due send is never pushed.
+    /// order. Two readiness gates on two clocks (D152): `wall_now` (normalized
+    /// RFC 3339, RE-SAMPLED wall time) gates wall-scheduled sends (`send_at`,
+    /// send-later); `mono_now` (the daemon's monotonic-anchored epoch seconds)
+    /// gates undo holds (`hold_until_mono`) — the same clock that STAMPED
+    /// them. A held op rests `pending` until due, so a not-yet-due send is
+    /// never pushed.
     fn list_flushable_operations(
         &self,
         account_id: &AccountId,
-        now: &str,
+        wall_now: &str,
+        mono_now: i64,
     ) -> Result<Vec<Operation>, StoreError>;
 
-    /// Number of scheduled sends (`send_at` set) that are due (`send_at <=
-    /// now`) and still queued. The scheduler tick's probe: a non-zero count
-    /// triggers a flush sync so a due send fires promptly instead of waiting
-    /// for the next poll window.
+    /// Number of held sends now due on EITHER clock (see
+    /// [`Self::list_flushable_operations`]) and still queued. The scheduler
+    /// tick's probe: a non-zero count triggers a flush sync so a due send
+    /// fires promptly instead of waiting for the next poll window.
     fn count_due_scheduled_sends(
         &self,
         account_id: &AccountId,
-        now: &str,
+        wall_now: &str,
+        mono_now: i64,
     ) -> Result<u64, StoreError>;
 
     /// Operations to surface as outstanding work in the outbox **UI**:

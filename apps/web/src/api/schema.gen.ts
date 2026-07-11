@@ -2302,6 +2302,14 @@ export interface components {
             createdAt: string;
             dependsOn?: null | components["schemas"]["OperationId"];
             entity: components["schemas"]["OperationEntity"];
+            /**
+             * Format: int64
+             * @description Undo-send hold deadline in the DAEMON's monotonic-anchored epoch
+             *     seconds (D152): stamped and judged on one clock, meaningless across
+             *     machines (deliberately not display data — clients show their own local
+             *     countdown). `None` for immediate and wall-scheduled sends.
+             */
+            holdUntilMono?: number | null;
             id: components["schemas"]["OperationId"];
             kind: components["schemas"]["OperationKind"];
             lastError?: string | null;
@@ -2908,6 +2916,15 @@ export interface components {
             sendAt?: string | null;
             subject: string;
             to: components["schemas"]["Recipient"][];
+            /**
+             * Format: int32
+             * @description Undo-send hold as a DURATION (seconds), NOT a timestamp (D152): the
+             *     server stamps the deadline on ITS monotonic-anchored clock and judges
+             *     it on that same clock, so client/daemon wall skew (the nightly
+             *     nothing-sends P0) is unrepresentable. When present it takes precedence
+             *     over `send_at`, which degrades to display metadata for this request.
+             */
+            undoWindowSeconds?: number | null;
         };
         /**
          * @description Response body for `POST /v1/sources/{source_id}/commands/send`: the send

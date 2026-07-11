@@ -152,7 +152,11 @@ export function useComposeSubmission({
           // The originating draft: consumed by the backend only when the
           // send actually fires (D126), so it stays restorable until then.
           draftId: draftKey,
+          // For undo-send the DURATION is authoritative (server-stamped
+          // deadline, D152); sendAt rides along as display metadata. For an
+          // explicit send-later, sendAt is the schedule.
           sendAt: variables.sendAt,
+          undoWindowSeconds: variables.undoWindowSeconds,
         },
       })
       return response

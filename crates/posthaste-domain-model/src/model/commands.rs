@@ -317,6 +317,13 @@ pub struct SendMessageRequest {
     /// @spec docs/L1-outbox#operation-model
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_at: Option<String>,
+    /// Undo-send hold as a DURATION (seconds), NOT a timestamp (D152): the
+    /// server stamps the deadline on ITS monotonic-anchored clock and judges
+    /// it on that same clock, so client/daemon wall skew (the nightly
+    /// nothing-sends P0) is unrepresentable. When present it takes precedence
+    /// over `send_at`, which degrades to display metadata for this request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undo_window_seconds: Option<u32>,
 }
 
 #[cfg(test)]

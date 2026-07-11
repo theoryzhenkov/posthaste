@@ -89,6 +89,7 @@ impl MailService {
     /// ordering draft chains after the latest still-pending op for the same entity.
     ///
     /// @spec docs/L1-outbox#operation-model
+    #[allow(clippy::too_many_arguments)]
     pub fn queue_operation(
         &self,
         account_id: &AccountId,
@@ -96,6 +97,7 @@ impl MailService {
         kind: OperationKind,
         mut payload: serde_json::Value,
         send_at: Option<String>,
+        hold_until_mono: Option<i64>,
     ) -> Result<Operation, ServiceError> {
         let depends_on = if kind.is_state_assertion() {
             // State assertions coalesce instead of chaining: a new assertion
@@ -123,6 +125,7 @@ impl MailService {
             last_error: None,
             depends_on,
             send_at,
+            hold_until_mono,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -194,14 +197,28 @@ impl MailService {
         account_id: &AccountId,
         mut request: SendMessageRequest,
     ) -> Result<Operation, ServiceError> {
-        let send_at = request
-            .send_at
-            .take()
-            .map(|raw| {
-                super::schedule::normalize_send_at(&raw)
-                    .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))
-            })
-            .transpose()?;
+        // D152: an undo hold is a DURATION stamped on the daemon's monotonic
+        // clock (the same clock that later judges it); `send_at` then degrades
+        // to display metadata and is NOT stored (it must never gate the
+        // flush — that was the nightly cross-clock P0). Send-later keeps the
+        // normalized wall target, judged against a re-sampled wall clock.
+        let undo_window = request.undo_window_seconds.take();
+        let raw_send_at = request.send_at.take();
+        let (send_at, hold_until_mono) = match undo_window {
+            Some(window) => (
+                None,
+                Some(super::schedule::monotonic_now_secs() + i64::from(window)),
+            ),
+            None => (
+                raw_send_at
+                    .map(|raw| {
+                        super::schedule::normalize_send_at(&raw)
+                            .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))
+                    })
+                    .transpose()?,
+                None,
+            ),
+        };
         // The normalized hold lives on the OPERATION (the flush gate reads the
         // indexed column); it is dropped from the payload so an immediate
         // send's payload — and the bytes the gateway sees — stay identical to
@@ -216,6 +233,7 @@ impl MailService {
             OperationKind::Send,
             payload,
             send_at,
+            hold_until_mono,
         )
     }
 
@@ -225,9 +243,13 @@ impl MailService {
     /// poll window. Uses the same monotonic-anchored clock the flush gate
     /// compares against, so probe and gate can never disagree on due-ness.
     pub fn has_due_scheduled_sends(&self, account_id: &AccountId) -> Result<bool, ServiceError> {
-        let now = super::schedule::outbox_now_rfc3339()
+        let wall_now = super::schedule::wall_now_rfc3339()
             .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))?;
-        Ok(self.outbox.count_due_scheduled_sends(account_id, &now)? > 0)
+        let mono_now = super::schedule::monotonic_now_secs();
+        Ok(self
+            .outbox
+            .count_due_scheduled_sends(account_id, &wall_now, mono_now)?
+            > 0)
     }
 }
 

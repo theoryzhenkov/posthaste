@@ -102,7 +102,7 @@ fn entity_kind_str(kind: OperationEntityKind) -> &'static str {
 
 /// Columns selected by every operation read, in struct order.
 const OPERATION_COLUMNS: &str = "id, account_id, entity_kind, entity_id, kind, payload, \
-     state, attempts, last_error, depends_on, send_at, created_at, updated_at";
+     state, attempts, last_error, depends_on, send_at, hold_until_mono, created_at, updated_at";
 
 fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>> {
     // Extract every column first so all `rusqlite::Error`s surface through the
@@ -118,8 +118,9 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
     let last_error: Option<String> = row.get(8)?;
     let depends_on: Option<String> = row.get(9)?;
     let send_at: Option<String> = row.get(10)?;
-    let created_at: String = row.get(11)?;
-    let updated_at: String = row.get(12)?;
+    let hold_until_mono: Option<i64> = row.get(11)?;
+    let created_at: String = row.get(12)?;
+    let updated_at: String = row.get(13)?;
     Ok((|| {
         let payload: Value = serde_json::from_str(&payload_str)
             .map_err(|error| StoreError::Failure(format!("invalid outbox payload: {error}")))?;
@@ -137,6 +138,7 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
             last_error,
             depends_on: depends_on.map(OperationId::from),
             send_at,
+            hold_until_mono,
             created_at,
             updated_at,
         })
@@ -169,9 +171,9 @@ impl OperationOutboxStore for DatabaseStore {
                 "INSERT OR IGNORE INTO outbox_operation (
                     id, account_id, entity_kind, entity_id, kind, payload,
                     state, attempts, last_error, depends_on, send_at,
-                    created_at, updated_at
+                    hold_until_mono, created_at, updated_at
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     operation.id.as_str(),
                     operation.account_id.as_str(),
@@ -184,6 +186,7 @@ impl OperationOutboxStore for DatabaseStore {
                     operation.last_error,
                     operation.depends_on.as_ref().map(OperationId::as_str),
                     operation.send_at,
+                    operation.hold_until_mono,
                     operation.created_at,
                     operation.updated_at,
                 ],
@@ -198,26 +201,30 @@ impl OperationOutboxStore for DatabaseStore {
     fn list_flushable_operations(
         &self,
         account_id: &AccountId,
-        now: &str,
+        wall_now: &str,
+        mono_now: i64,
     ) -> Result<Vec<Operation>, StoreError> {
         let connection = self.read_connection()?;
-        // A scheduled send (`send_at` in the future relative to the caller's
-        // monotonic-anchored `now`) is HELD out of the flushable set: it rests
-        // `pending` — visible, discardable — until due. Both sides of the
-        // comparison are normalized UTC whole-second RFC 3339, so the string
-        // comparison is exact chronological order.
+        // Two readiness gates on two clocks (D152): a wall-scheduled send
+        // (`send_at`, send-later) is judged against the caller's RE-SAMPLED
+        // wall clock; an undo hold (`hold_until_mono`) against the daemon's
+        // monotonic-anchored clock that also STAMPED it. Stamp and judge share
+        // a clock per kind, so cross-clock skew (the nightly nothing-sends
+        // P0) is unrepresentable. Held rows rest `pending` — visible,
+        // discardable — until due.
         let mut statement = connection
             .prepare(&format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
                  WHERE account_id = ?1 AND state IN ('pending', 'inflight', 'conflicted')
                    AND (send_at IS NULL OR send_at <= ?2)
+                   AND (hold_until_mono IS NULL OR hold_until_mono <= ?3)
                  ORDER BY rowid ASC
-                 LIMIT ?3"
+                 LIMIT ?4"
             ))
             .map_err(sql_to_store_error)?;
         let rows = statement
             .query_map(
-                params![account_id.as_str(), now, OUTBOX_FLUSH_BATCH_LIMIT],
+                params![account_id.as_str(), wall_now, mono_now, OUTBOX_FLUSH_BATCH_LIMIT],
                 row_to_operation,
             )
             .map_err(sql_to_store_error)?;
@@ -231,21 +238,24 @@ impl OperationOutboxStore for DatabaseStore {
     fn count_due_scheduled_sends(
         &self,
         account_id: &AccountId,
-        now: &str,
+        wall_now: &str,
+        mono_now: i64,
     ) -> Result<u64, StoreError> {
         let connection = self.read_connection()?;
-        // The scheduler tick's probe: any held send now due? Served by the
-        // partial `idx_outbox_send_at` index (scheduled rows only), so the
+        // The scheduler tick's probe: any held send now due, on either clock?
+        // Served by the partial hold indexes (scheduled rows only), so the
         // frequent tick stays a point read.
         let mut statement = connection
             .prepare(
                 "SELECT COUNT(*) FROM outbox_operation
-                 WHERE account_id = ?1 AND send_at IS NOT NULL AND send_at <= ?2
+                 WHERE account_id = ?1
+                   AND ((send_at IS NOT NULL AND send_at <= ?2)
+                        OR (hold_until_mono IS NOT NULL AND hold_until_mono <= ?3))
                    AND state IN ('pending', 'inflight', 'conflicted')",
             )
             .map_err(sql_to_store_error)?;
         statement
-            .query_row(params![account_id.as_str(), now], |row| {
+            .query_row(params![account_id.as_str(), wall_now, mono_now], |row| {
                 row.get::<_, i64>(0)
             })
             .map(|count| count.max(0) as u64)
