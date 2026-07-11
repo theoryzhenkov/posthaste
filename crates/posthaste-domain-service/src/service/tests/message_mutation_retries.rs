@@ -901,3 +901,73 @@ async fn unsettled_message_ids_tracks_queued_then_settled_assertions() {
         "once settled, the message is no longer unsettled and sync applies to it",
     );
 }
+
+/// BE-H2: a transient-failing ("poisoned") op stops halting the drain after
+/// the skip threshold — the ops behind it flush, and it stays pending
+/// (retryable, cancelable) rather than wedging the account forever.
+#[tokio::test]
+async fn poisoned_transient_op_stops_wedging_the_outbox_after_threshold() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("state-1", &["inbox"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    // The first queued op is poisoned: its next three gateway calls fail with
+    // a NETWORK (transient) error; the healthy op behind it succeeds via the
+    // default revision path once the queue of scripted errors is drained.
+    let gateway = MutationGateway::with_revision(1);
+    for _ in 0..3 {
+        gateway
+            .set_keywords_results
+            .lock()
+            .unwrap()
+            .push(Err(GatewayError::Network("poisoned".to_string())));
+    }
+    service
+        .set_keywords(
+            &account,
+            &MessageId::from("message-1"),
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("poisoned op queues");
+    service
+        .set_keywords(
+            &account,
+            &MessageId::from("message-2"),
+            &SetKeywordsCommand {
+                add: vec!["$seen".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("healthy op queues");
+
+    // Two passes below the threshold: the drain stops at the poisoned head
+    // (offline-safe default), so BOTH ops remain pending.
+    for _ in 0..2 {
+        let _ = service.flush_account(&account, &gateway).await;
+    }
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert!(
+        pending.iter().any(|op| op.entity.id == "message-2"),
+        "below threshold the healthy op is still stuck behind the poison"
+    );
+
+    // Third pass crosses the threshold: the poisoned op is SKIPPED and the
+    // healthy op behind it flushes and settles.
+    let _ = service.flush_account(&account, &gateway).await;
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert!(
+        pending.iter().all(|op| op.entity.id != "message-2"),
+        "past threshold the healthy op behind the poison flushed: {pending:?}"
+    );
+    assert!(
+        pending
+            .iter()
+            .any(|op| op.entity.id == "message-1" && op.state == OperationState::Pending),
+        "the poisoned op stays pending (retryable/cancelable), not failed"
+    );
+}
