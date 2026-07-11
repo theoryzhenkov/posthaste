@@ -261,10 +261,20 @@ stay body-searchable via their base content). Covered by
 `store/src/tests/overlay.rs` (merge semantics) + the untouched existing suite
 (empty-overlay differential).
 
-**Sequencing gate for the next increment:** the remaining base-table read
-paths (`list_messages`, conversation queries, detail reads, mailbox counts,
-FTS `search_messages`) MUST be strangled onto `_effective` BEFORE the fold
-engine gains its overlay write path — a partially-strangled read surface with
-a populated overlay would show a tombstoned row in one view and hide it in
-another. Then: delete the S2 write-through, collapse `_protected`, land the
-NS1b seal.
+**NS1 increment 2 LANDED (2026-07-11):** every remaining client-visible SQL
+read strangled onto `_effective` (list/page, thread/conversation,
+summary/detail + list_unsubscribe, tags, conversation-by-rule, FTS search via
+a base-rowid→effective join). The shared `_tx` helpers stay on BASE
+deliberately — they serve the write/sync plane's event scoping and the S2
+write-through readbacks, which die with the write-through. **The read-side
+sequencing gate is satisfied.**
+
+**Open design item GATING the overlay write path (needs owner sign-off):**
+mailbox counters (`mailbox.unread_emails/total_emails`) and the
+conversation/thread projections are base-plane aggregates maintained by the
+write-through today. Once the write-through is deleted, optimism stops
+showing in them until sync unless the fold engine gets a counts/conversation
+overlay story (candidates: fold-computed count deltas on the overlay plane;
+live COUNT over `_effective`; accept-the-lag + echo invalidation per
+RFC-L2-count-unification). Decide before wiring the write path. Then: write
+path → delete the S2 write-through → collapse `_protected` → NS1b seal.
