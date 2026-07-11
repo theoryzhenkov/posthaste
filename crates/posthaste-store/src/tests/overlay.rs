@@ -268,6 +268,68 @@ fn strangled_read_ports_serve_the_fold() -> Result<(), StoreError> {
 }
 
 #[test]
+fn mailbox_counts_track_the_fold_instantly() -> Result<(), StoreError> {
+    // The send-fix behavior (NS2): counts and lists are ONE derivation over
+    // the effective plane, so a fold moves counts in the same read that moves
+    // the rows — no materialized counter, no lag, nothing to drift.
+    let root = temp_root();
+    let store = overlay_store(&root);
+    let account = AccountId::from("primary");
+    seeded(&store, &account)?;
+
+    let counts = |store: &DatabaseStore| -> Result<Vec<(String, i64, i64)>, StoreError> {
+        Ok(store
+            .list_mailboxes(&account)?
+            .into_iter()
+            .map(|mailbox| {
+                (
+                    mailbox.id.as_str().to_string(),
+                    mailbox.unread_emails,
+                    mailbox.total_emails,
+                )
+            })
+            .collect())
+    };
+
+    // Seeded: two read ($seen) messages in inbox; archive empty.
+    assert!(counts(&store)?
+        .iter()
+        .any(|(id, unread, total)| id == "inbox" && *unread == 0 && *total == 2));
+
+    // Fold: message-1 moves inbox→archive AND goes unread.
+    let mut folded = sample_message("message-1", "archive", None);
+    folded.keywords = vec![];
+    store.upsert_overlay_message(&account, &folded)?;
+    let after_fold = counts(&store)?;
+    assert!(
+        after_fold
+            .iter()
+            .any(|(id, unread, total)| id == "inbox" && *unread == 0 && *total == 1),
+        "inbox count drops the instant the fold lands: {after_fold:?}"
+    );
+    assert!(
+        after_fold
+            .iter()
+            .any(|(id, unread, total)| id == "archive" && *unread == 1 && *total == 1),
+        "archive gains the unread folded row: {after_fold:?}"
+    );
+
+    // Tombstone (pending destroy): message-2 leaves the counts too.
+    store.tombstone_overlay_message(&account, &MessageId::from("message-2"))?;
+    assert!(counts(&store)?
+        .iter()
+        .any(|(id, _, total)| id == "inbox" && *total == 0));
+
+    // Retire both: base counts show through unchanged.
+    store.remove_overlay_message(&account, &MessageId::from("message-1"))?;
+    store.remove_overlay_message(&account, &MessageId::from("message-2"))?;
+    assert!(counts(&store)?
+        .iter()
+        .any(|(id, unread, total)| id == "inbox" && *unread == 0 && *total == 2));
+    Ok(())
+}
+
+#[test]
 fn list_overlay_message_ids_inventories_live_and_tombstoned() -> Result<(), StoreError> {
     let root = temp_root();
     let store = overlay_store(&root);
