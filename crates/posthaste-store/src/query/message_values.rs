@@ -1,5 +1,9 @@
 use super::*;
 
+/// Client-read variant: reads the EFFECTIVE membership (overlay-aware, NS1).
+/// The `_tx` siblings below deliberately stay on the base tables — they serve
+/// the write/sync plane (event scoping, the S2 write-through's readbacks),
+/// which reasons about base state by definition.
 pub(crate) fn fetch_mailbox_ids(
     connection: &Connection,
     account_id: &AccountId,
@@ -8,7 +12,7 @@ pub(crate) fn fetch_mailbox_ids(
     let mut statement = connection
         .prepare_cached(
             "SELECT mailbox_id
-             FROM message_mailbox
+             FROM message_mailbox_effective
              WHERE account_id = ?1 AND message_id = ?2
              ORDER BY mailbox_id",
         )
