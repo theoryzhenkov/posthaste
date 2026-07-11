@@ -637,6 +637,7 @@ mod tests {
             },
             kind: OperationKind::DraftCreate,
             payload: serde_json::json!({}),
+            payload_version: 1,
             state: OperationState::Pending,
             attempts: 0,
             last_error: None,

@@ -11,6 +11,7 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::commands::{ReplaceMailboxesCommand, SendMessageRequest, SetKeywordsCommand};
 use super::AccountId;
 
 string_id!(
@@ -186,9 +187,13 @@ pub struct Operation {
     pub entity: OperationEntity,
     pub kind: OperationKind,
     /// Kind-specific payload (the wrapped command or draft body), as JSON so the
-    /// envelope stays uniform across kinds.
+    /// envelope stays uniform across kinds. Decode through
+    /// [`Operation::intent`], never ad hoc (NS2 Slice 2).
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub payload: Value,
+    /// D155 payload envelope version. v1 = the historical per-kind shapes.
+    #[serde(default = "default_payload_version")]
+    pub payload_version: i64,
     pub state: OperationState,
     pub attempts: u32,
     pub last_error: Option<String>,
@@ -257,6 +262,102 @@ pub struct OperationDispatchUncertain {
     pub reason: String,
 }
 
+/// The TYPED intent an outbox operation carries (NS2 Slice 2, D155/D171):
+/// the single vocabulary behind the `(kind, payload)` persistence envelope.
+///
+/// [`MailIntent::from_parts`] is THE ONE decode boundary — every consumer
+/// (flush dispatch, the overlay fold, coalescing, settlement effects) matches
+/// on this enum instead of re-deriving meaning from JSON at its own site,
+/// which is the divergence class behind the draft-identity bug family. The
+/// persistence shape is unchanged (envelope v1 == the historical payload
+/// bytes per kind), so existing outbox rows decode as-is.
+#[derive(Clone, Debug)]
+pub enum MailIntent {
+    SetKeywords(SetKeywordsCommand),
+    ReplaceMailboxes(ReplaceMailboxesCommand),
+    Destroy,
+    /// `create` distinguishes DraftCreate (mints an entity) from DraftUpdate.
+    SaveDraft {
+        create: bool,
+        request: SendMessageRequest,
+    },
+    /// A draft removal: the send-consume settlement effect (idempotent
+    /// redelivery masks provider `notFound`, D133) or a user discard (which
+    /// surfaces it).
+    DiscardDraft { idempotent_redelivery: bool },
+    Send(SendMessageRequest),
+}
+
+impl MailIntent {
+    /// THE decode boundary: envelope `(kind, version, payload)` → typed
+    /// intent. `version` is the D155 payload envelope version; only v1 (the
+    /// historical shapes) exists today — an unknown version is a hard error
+    /// (a newer build wrote it; refuse rather than misread).
+    pub fn from_parts(
+        kind: OperationKind,
+        version: i64,
+        payload: &serde_json::Value,
+    ) -> Result<Self, String> {
+        if version != 1 {
+            return Err(format!(
+                "unknown outbox payload envelope version {version} for {kind:?}"
+            ));
+        }
+        let decode_error = |error: serde_json::Error| format!("invalid {kind:?} payload: {error}");
+        Ok(match kind {
+            OperationKind::SetKeywords => {
+                Self::SetKeywords(serde_json::from_value(payload.clone()).map_err(decode_error)?)
+            }
+            OperationKind::ReplaceMailboxes => Self::ReplaceMailboxes(
+                serde_json::from_value(payload.clone()).map_err(decode_error)?,
+            ),
+            OperationKind::Destroy => Self::Destroy,
+            OperationKind::DraftCreate => Self::SaveDraft {
+                create: true,
+                request: serde_json::from_value(payload.clone()).map_err(decode_error)?,
+            },
+            OperationKind::DraftUpdate => Self::SaveDraft {
+                create: false,
+                request: serde_json::from_value(payload.clone()).map_err(decode_error)?,
+            },
+            OperationKind::DraftDelete => Self::DiscardDraft {
+                idempotent_redelivery: payload
+                    .get("idempotentRedelivery")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+            },
+            OperationKind::Send => {
+                Self::Send(serde_json::from_value(payload.clone()).map_err(decode_error)?)
+            }
+        })
+    }
+
+    /// The persistence kind this intent serializes under.
+    pub fn kind(&self) -> OperationKind {
+        match self {
+            Self::SetKeywords(_) => OperationKind::SetKeywords,
+            Self::ReplaceMailboxes(_) => OperationKind::ReplaceMailboxes,
+            Self::Destroy => OperationKind::Destroy,
+            Self::SaveDraft { create: true, .. } => OperationKind::DraftCreate,
+            Self::SaveDraft { create: false, .. } => OperationKind::DraftUpdate,
+            Self::DiscardDraft { .. } => OperationKind::DraftDelete,
+            Self::Send(_) => OperationKind::Send,
+        }
+    }
+}
+
+impl Operation {
+    /// Decode this operation's typed intent (envelope v1 — see
+    /// [`MailIntent::from_parts`]).
+    pub fn intent(&self) -> Result<MailIntent, String> {
+        MailIntent::from_parts(self.kind, self.payload_version, &self.payload)
+    }
+}
+
+fn default_payload_version() -> i64 {
+    1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +413,50 @@ mod tests {
         assert!(OperationKind::DraftCreate.creates_entity());
         assert!(!OperationKind::DraftUpdate.creates_entity());
         assert!(!OperationKind::SetKeywords.creates_entity());
+    }
+
+    #[test]
+    fn intent_decodes_every_kind_from_its_historical_payload_shape() {
+        use serde_json::json;
+        let cases = vec![
+            (
+                OperationKind::SetKeywords,
+                json!({ "add": ["$flagged"], "remove": [] }),
+            ),
+            (
+                OperationKind::ReplaceMailboxes,
+                json!({ "mailboxIds": ["archive"] }),
+            ),
+            (OperationKind::Destroy, json!({})),
+            (
+                OperationKind::DraftDelete,
+                json!({ "idempotentRedelivery": true }),
+            ),
+        ];
+        for (kind, payload) in cases {
+            let intent = MailIntent::from_parts(kind, 1, &payload)
+                .unwrap_or_else(|error| panic!("{kind:?}: {error}"));
+            assert_eq!(intent.kind(), kind, "kind round-trips for {kind:?}");
+        }
+        match MailIntent::from_parts(
+            OperationKind::DraftDelete,
+            1,
+            &json!({ "idempotentRedelivery": true }),
+        )
+        .unwrap()
+        {
+            MailIntent::DiscardDraft {
+                idempotent_redelivery,
+            } => assert!(idempotent_redelivery),
+            other => panic!("wrong intent: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn intent_refuses_an_unknown_envelope_version() {
+        let error = MailIntent::from_parts(OperationKind::Destroy, 2, &serde_json::json!({}))
+            .expect_err("a future envelope version must refuse, not misread");
+        assert!(error.contains("version 2"), "{error}");
     }
 
     #[test]

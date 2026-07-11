@@ -7100,7 +7100,12 @@
           },
           "payload": {
             "type": "object",
-            "description": "Kind-specific payload (the wrapped command or draft body), as JSON so the\nenvelope stays uniform across kinds."
+            "description": "Kind-specific payload (the wrapped command or draft body), as JSON so the\nenvelope stays uniform across kinds. Decode through\n[`Operation::intent`], never ad hoc (NS2 Slice 2)."
+          },
+          "payloadVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "D155 payload envelope version. v1 = the historical per-kind shapes."
           },
           "sendAt": {
             "type": [

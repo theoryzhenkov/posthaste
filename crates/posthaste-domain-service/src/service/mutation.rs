@@ -9,7 +9,7 @@ use posthaste_domain_model::{
 use serde_json::json;
 
 use super::message_queries::project_record;
-use super::{decode_payload, encode_payload, offload, MailService};
+use super::{encode_payload, offload, MailService};
 use crate::{MessageOverlayStore, OperationOutboxStore};
 
 /// Re-derive one message's OVERLAY entry from base + its unsettled state
@@ -254,8 +254,13 @@ impl MailService {
                 )
             }
             OperationKind::ReplaceMailboxes => {
-                let command: ReplaceMailboxesCommand =
-                    decode_payload(operation.payload.clone(), "replaceMailboxes payload")?;
+                let posthaste_domain_model::MailIntent::ReplaceMailboxes(command) =
+                    operation.intent().map_err(|error| {
+                        ServiceError::from(posthaste_domain_model::GatewayError::Internal(error))
+                    })?
+                else {
+                    unreachable!("guarded by operation.kind above");
+                };
                 // Parity with the write-through's store invariant: a mailbox
                 // replace clears any snooze row (message.snooze re-inserts
                 // after its own move). Local-plane write, not provider truth.

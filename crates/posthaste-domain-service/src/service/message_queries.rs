@@ -340,35 +340,44 @@ pub(crate) fn message_assertions(
         .iter()
         .filter(|operation| operation.entity.id == message_id)
     {
-        match operation.kind {
-            OperationKind::SetKeywords => {
-                let command = decode_payload::<SetKeywordsCommand>(
-                    operation.payload.clone(),
-                    "setKeywords overlay payload",
-                )?;
-                assertions.push(MessageAssertion::SetKeywords {
-                    add: command.add,
-                    remove: command.remove,
-                });
-            }
-            OperationKind::ReplaceMailboxes => {
-                let command = decode_payload::<ReplaceMailboxesCommand>(
-                    operation.payload.clone(),
-                    "replaceMailboxes overlay payload",
-                )?;
-                assertions.push(MessageAssertion::ReplaceMailboxes {
-                    mailbox_ids: command
-                        .mailbox_ids
-                        .into_iter()
-                        .map(|mailbox_id| mailbox_id.0)
-                        .collect(),
-                });
-            }
-            OperationKind::Destroy => assertions.push(MessageAssertion::Destroy),
-            _ => {}
+        if let Some(assertion) = intent_fold_effect(operation)? {
+            assertions.push(assertion);
         }
     }
     Ok(assertions)
+}
+
+/// NS2 Slice 2: THE effect interpreter for the overlay fold — the one place a
+/// typed intent maps to its fold effect. State assertions yield a
+/// [`MessageAssertion`]; entity intents (drafts/sends) yield `None` today —
+/// their multi-row effects land with Slices 3/4 (D172/D173).
+pub(crate) fn intent_fold_effect(
+    operation: &Operation,
+) -> Result<Option<MessageAssertion>, ServiceError> {
+    let intent = operation.intent().map_err(|error| {
+        ServiceError::from(posthaste_domain_model::GatewayError::Internal(error))
+    })?;
+    Ok(match intent {
+        posthaste_domain_model::MailIntent::SetKeywords(command) => {
+            Some(MessageAssertion::SetKeywords {
+                add: command.add,
+                remove: command.remove,
+            })
+        }
+        posthaste_domain_model::MailIntent::ReplaceMailboxes(command) => {
+            Some(MessageAssertion::ReplaceMailboxes {
+                mailbox_ids: command
+                    .mailbox_ids
+                    .into_iter()
+                    .map(|mailbox_id| mailbox_id.0)
+                    .collect(),
+            })
+        }
+        posthaste_domain_model::MailIntent::Destroy => Some(MessageAssertion::Destroy),
+        posthaste_domain_model::MailIntent::SaveDraft { .. }
+        | posthaste_domain_model::MailIntent::DiscardDraft { .. }
+        | posthaste_domain_model::MailIntent::Send(_) => None,
+    })
 }
 
 /// Settle write-back: fold the still-unsettled assertions over a provider
