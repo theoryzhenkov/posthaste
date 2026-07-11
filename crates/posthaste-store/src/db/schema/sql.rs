@@ -4,8 +4,6 @@ pub(super) const SCHEMA_SQL: &str = "
                 id TEXT NOT NULL,
                 name TEXT NOT NULL,
                 role TEXT,
-                unread_emails INTEGER NOT NULL DEFAULT 0,
-                total_emails INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (account_id, id)
             );
 

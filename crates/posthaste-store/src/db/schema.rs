@@ -76,17 +76,6 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
     connection
         .execute_batch(sql::EFFECTIVE_VIEWS_SQL)
         .map_err(sql_to_store_error)?;
-    // NS1: retire the incremental mailbox-counter triggers on legacy
-    // databases — counts are a live derivation over the `_effective` views
-    // now (see read/mailbox.rs). Removing them from SCHEMA_SQL alone would
-    // leave them firing (and drifting, DP-H12) on existing installs.
-    connection
-        .execute_batch(
-            "DROP TRIGGER IF EXISTS mailbox_counters_message_mailbox_ai;
-             DROP TRIGGER IF EXISTS mailbox_counters_message_mailbox_ad;
-             DROP TRIGGER IF EXISTS mailbox_counters_message_read_au;",
-        )
-        .map_err(sql_to_store_error)?;
     // The body-cache-object repair (three correlated `NOT EXISTS` full-table
     // scans against `message`) used to run right here, unconditionally, on
     // every open — blocking `DatabaseStore::open`'s return (and therefore
@@ -141,5 +130,101 @@ fn migrate_legacy_message_fts(connection: &Connection) -> Result<(), StoreError>
              DROP TABLE message_fts;",
         )
         .map_err(sql_to_store_error)?;
+    Ok(())
+}
+
+/// The store's schema version (M84 / NS2 Slice 0), stamped into SQLite's
+/// `PRAGMA user_version`. Policy: ADDITIVE evolution (new tables/columns/
+/// views/indexes) stays in the idempotent [`init_schema`] path; DESTRUCTIVE
+/// or TRANSFORMATIVE changes (drops, renames, data rewrites, trigger
+/// replacements) are numbered migrations below — run exactly once per
+/// database, each in its own transaction, in order.
+pub(crate) const SCHEMA_VERSION: i64 = 1;
+
+/// The full open-time schema flow (replaces bare `init_schema` at the open
+/// call site):
+///
+/// - FRESH database (no `message` table): create the current shape and stamp
+///   [`SCHEMA_VERSION`] — no migrations to run.
+/// - NEWER database (`user_version` above ours): refuse with
+///   [`StoreError::Conflict`] — deliberately NOT `Corruption`, so the repair
+///   path never quarantines a database written by a newer build.
+/// - OLDER database: run each pending migration in its own transaction,
+///   stamping `user_version` atomically with it, then run the idempotent
+///   additive evolution.
+pub(crate) fn prepare_schema(connection: &mut Connection) -> Result<(), StoreError> {
+    let fresh: bool = connection
+        .query_row(
+            "SELECT NOT EXISTS(
+                 SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_to_store_error)?;
+    if fresh {
+        init_schema(connection)?;
+        connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION)
+            .map_err(sql_to_store_error)?;
+        return Ok(());
+    }
+
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(sql_to_store_error)?;
+    if version > SCHEMA_VERSION {
+        return Err(StoreError::Conflict(format!(
+            "database schema version {version} is newer than this build supports \
+             ({SCHEMA_VERSION}); refusing to open (downgrade guard)"
+        )));
+    }
+    for next in (version + 1)..=SCHEMA_VERSION {
+        let tx = connection.transaction().map_err(sql_to_store_error)?;
+        apply_migration(&tx, next)?;
+        tx.pragma_update(None, "user_version", next)
+            .map_err(sql_to_store_error)?;
+        tx.commit().map_err(sql_to_store_error)?;
+    }
+    init_schema(connection)
+}
+
+fn apply_migration(tx: &Connection, version: i64) -> Result<(), StoreError> {
+    match version {
+        1 => v1_retire_mailbox_counters(tx),
+        other => Err(StoreError::Failure(format!(
+            "unknown schema migration {other}"
+        ))),
+    }
+}
+
+/// v1 (NS1 wave 3 → M84): the incremental mailbox-counter machinery is
+/// retired — counts are a live derivation over the `_effective` views
+/// (read/mailbox.rs). Drops the maintenance triggers (previously DROPped
+/// unconditionally on every open) and the dead counter columns. Trigger drops
+/// MUST precede the column drops (SQLite refuses to drop a column a trigger
+/// references).
+fn v1_retire_mailbox_counters(tx: &Connection) -> Result<(), StoreError> {
+    tx.execute_batch(
+        "DROP TRIGGER IF EXISTS mailbox_counters_message_mailbox_ai;
+         DROP TRIGGER IF EXISTS mailbox_counters_message_mailbox_ad;
+         DROP TRIGGER IF EXISTS mailbox_counters_message_read_au;",
+    )
+    .map_err(sql_to_store_error)?;
+    for column in ["unread_emails", "total_emails"] {
+        let exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM pragma_table_info('mailbox') WHERE name = ?1
+                 )",
+                [column],
+                |row| row.get(0),
+            )
+            .map_err(sql_to_store_error)?;
+        if exists {
+            tx.execute_batch(&format!("ALTER TABLE mailbox DROP COLUMN {column}"))
+                .map_err(sql_to_store_error)?;
+        }
+    }
     Ok(())
 }

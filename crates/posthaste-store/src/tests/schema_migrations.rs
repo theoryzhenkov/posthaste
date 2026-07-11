@@ -1,0 +1,148 @@
+// M84 / NS2 Slice 0: the versioned-migration flow. The legacy fixture is a
+// CURRENT database synthetically downgraded to v0 (counter columns + counter
+// triggers restored, `user_version` zeroed) — the class of test whose absence
+// let the effective-views CREATE order break legacy opens during NS1.
+use super::*;
+
+fn raw(path: &std::path::Path) -> Connection {
+    Connection::open(path).expect("raw sqlite open")
+}
+
+fn user_version(connection: &Connection) -> i64 {
+    connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("user_version")
+}
+
+fn mailbox_has_column(connection: &Connection, column: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('mailbox') WHERE name = ?1)",
+            [column],
+            |row| row.get(0),
+        )
+        .expect("column probe")
+}
+
+fn trigger_exists(connection: &Connection, name: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?1)",
+            [name],
+            |row| row.get(0),
+        )
+        .expect("trigger probe")
+}
+
+/// Rewind a current-shape database to the pre-M84 (v0) world: counter columns
+/// back on `mailbox`, the counter-maintenance triggers present, version 0.
+fn downgrade_to_v0(path: &std::path::Path) {
+    let connection = raw(path);
+    connection
+        .execute_batch(
+            "ALTER TABLE mailbox ADD COLUMN unread_emails INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE mailbox ADD COLUMN total_emails INTEGER NOT NULL DEFAULT 0;
+             CREATE TRIGGER mailbox_counters_message_mailbox_ai
+             AFTER INSERT ON message_mailbox BEGIN
+                 UPDATE mailbox SET total_emails = total_emails + 1
+                  WHERE account_id = new.account_id AND id = new.mailbox_id;
+             END;
+             CREATE TRIGGER mailbox_counters_message_mailbox_ad
+             AFTER DELETE ON message_mailbox BEGIN
+                 UPDATE mailbox SET total_emails = total_emails - 1
+                  WHERE account_id = old.account_id AND id = old.mailbox_id;
+             END;
+             CREATE TRIGGER mailbox_counters_message_read_au
+             AFTER UPDATE OF is_read ON message BEGIN
+                 UPDATE mailbox SET unread_emails = unread_emails WHERE 0;
+             END;
+             PRAGMA user_version = 0;",
+        )
+        .expect("synthetic v0 downgrade");
+}
+
+#[test]
+fn fresh_open_stamps_the_current_schema_version() -> Result<(), StoreError> {
+    let root = temp_root();
+    let db_path = root.join("mail.sqlite");
+    let store = DatabaseStore::open(&db_path, root.join("data"))?;
+    drop(store);
+    assert_eq!(user_version(&raw(&db_path)), crate::db::SCHEMA_VERSION);
+    Ok(())
+}
+
+#[test]
+fn legacy_v0_database_migrates_once_on_open() -> Result<(), StoreError> {
+    let root = temp_root();
+    let db_path = root.join("mail.sqlite");
+
+    // Build a working store, seed it, then rewind it to v0.
+    {
+        let store = DatabaseStore::open(&db_path, root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+        seed_messages(
+            &store,
+            &account,
+            vec![sample_message("message-1", "inbox", None)],
+            "seed",
+        )?;
+    }
+    downgrade_to_v0(&db_path);
+
+    // Reopen: migration v1 must run — triggers dropped, columns dropped,
+    // version stamped — and the store must remain fully functional.
+    let store = DatabaseStore::open(&db_path, root.join("data"))?;
+    let account = AccountId::from("primary");
+    let mailboxes = store.list_mailboxes(&account)?;
+    assert!(
+        mailboxes
+            .iter()
+            .any(|mailbox| mailbox.id.as_str() == "inbox" && mailbox.total_emails == 1),
+        "migrated store serves live counts: {mailboxes:?}"
+    );
+    drop(store);
+
+    let connection = raw(&db_path);
+    assert_eq!(user_version(&connection), crate::db::SCHEMA_VERSION);
+    assert!(!mailbox_has_column(&connection, "unread_emails"));
+    assert!(!mailbox_has_column(&connection, "total_emails"));
+    for trigger in [
+        "mailbox_counters_message_mailbox_ai",
+        "mailbox_counters_message_mailbox_ad",
+        "mailbox_counters_message_read_au",
+    ] {
+        assert!(
+            !trigger_exists(&connection, trigger),
+            "migration v1 drops {trigger}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn downgrade_guard_refuses_a_newer_database_without_quarantining_it() -> Result<(), StoreError> {
+    let root = temp_root();
+    let db_path = root.join("mail.sqlite");
+    drop(DatabaseStore::open(&db_path, root.join("data"))?);
+    raw(&db_path)
+        .pragma_update(None, "user_version", 9999)
+        .expect("bump version");
+
+    let error = DatabaseStore::open_with_repair(&db_path, root.join("data"))
+        .map(|_| ())
+        .expect_err("a newer database must refuse to open");
+    assert!(
+        matches!(error, StoreError::Conflict(_)),
+        "downgrade guard must be Conflict (never Corruption): {error:?}"
+    );
+    // The file must be untouched — the repair path must NOT quarantine a
+    // database written by a newer build.
+    assert!(db_path.exists(), "newer database left in place");
+    assert_eq!(
+        user_version(&raw(&db_path)),
+        9999,
+        "newer database unmodified"
+    );
+    Ok(())
+}

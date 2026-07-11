@@ -184,6 +184,7 @@ mod reads_events_integrity;
 mod reconcile;
 mod repair;
 mod rev_log;
+mod schema_migrations;
 mod smart_mailboxes;
 mod snooze;
 mod source_visibility;
