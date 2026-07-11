@@ -39,9 +39,17 @@ fn escape_like(input: &str) -> String {
 
 /// Compiles a `contains` condition against the full-text-indexed body via the
 /// FTS5 `message_fts` index (its `body` column, fed from the body cache's
-/// `message_body.body_text`). Emitted as an uncorrelated rowid IN-subquery so
-/// it composes with any surrounding AND/OR/NOT group and the outer query's
+/// `message_body.body_text`). Emitted as an uncorrelated IN-subquery so it
+/// composes with any surrounding AND/OR/NOT group and the outer query's
 /// account scoping, and SQLite evaluates the MATCH once, not per row.
+///
+/// The FTS index is rowid-keyed against the BASE `message` table, but the
+/// outer query's `m` is the `message_effective` view (NS1), which has no
+/// rowid — so the subquery maps fts rowids back to `(account_id, id)` through
+/// base and correlates by row-value. An overlaid (pending-edit) message stays
+/// body-searchable via its synced base content; an overlay-only row (pending
+/// draft create) has no indexed body yet and cannot match — the documented
+/// NS1 FTS gap.
 ///
 /// `contains` here is a token/phrase match (the index is porter-stemmed
 /// unicode61), not a substring `LIKE`: the value is tokenized in
@@ -63,7 +71,12 @@ pub(super) fn compile_body_fts_field(
                 return Ok("1 = 0".to_string());
             };
             params.push(SqlValue::Text(match_expression));
-            Ok("m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)".to_string())
+            Ok("(m.account_id, m.id) IN (
+                SELECT msg.account_id, msg.id
+                FROM message_fts
+                JOIN message msg ON msg.rowid = message_fts.rowid
+                WHERE message_fts MATCH ?)"
+                .to_string())
         }
         _ => Err(StoreError::Failure(format!(
             "unsupported operator {:?} for field {:?}",
