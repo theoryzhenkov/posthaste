@@ -3,6 +3,7 @@ use super::*;
 impl SyncWriteStore for TestStore {
     fn apply_sync_batch(
         &self,
+        _base: &BaseWrite,
         _account_id: &AccountId,
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError> {
@@ -33,6 +34,7 @@ impl SyncWriteStore for TestStore {
 
     fn reconcile_sync(
         &self,
+        _base: &BaseWrite,
         _account_id: &AccountId,
         reconciliation: &posthaste_domain_model::SyncReconciliation,
     ) -> Result<Vec<DomainEvent>, StoreError> {
@@ -55,6 +57,7 @@ impl SyncWriteStore for TestStore {
 
     fn apply_message_body(
         &self,
+        _base: &BaseWrite,
         _account_id: &AccountId,
         message_id: &MessageId,
         body: &FetchedBody,

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use posthaste_domain_model::{ReplaceMailboxesCommand, SetKeywordsCommand};
 use crate::sql_cache::CachedSql;
 
 /// Stores a lazily fetched body (HTML, text, raw ref), emits
@@ -62,6 +64,10 @@ pub(crate) fn apply_message_body_tx(
 
 /// Adds and removes keywords on a message, updates the `is_read`/`is_flagged`
 /// denormalized columns, and emits a coalesced `message.updated` metadata event.
+/// TEST-ONLY since NS1 (the production write-through is deleted): store
+/// tests use this to seed base keyword state directly. Follow-up: migrate
+/// those tests to `apply_sync_batch` seeding and delete this.
+#[cfg(test)]
 pub(crate) fn set_keywords_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -136,6 +142,8 @@ pub(crate) fn set_keywords_tx(
 
 /// Replaces a message's mailbox memberships and emits one coalesced
 /// `message.updated` metadata event.
+/// TEST-ONLY since NS1 — see `set_keywords_tx`.
+#[cfg(test)]
 pub(crate) fn replace_mailboxes_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,

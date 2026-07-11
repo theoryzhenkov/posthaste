@@ -223,7 +223,11 @@ impl RuntimeHarness {
         self.build
             .api_bridge
             .store
-            .apply_sync_batch(account_id, &batch)
+            .apply_sync_batch(
+                &posthaste_domain_service::BaseWrite::legacy("testkit fixture seed"),
+                account_id,
+                &batch,
+            )
             .expect("seed batch should apply");
     }
 

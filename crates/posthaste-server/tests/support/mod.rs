@@ -219,6 +219,7 @@ impl Harness {
     pub fn seed_messages(&self, account: &str, mailbox: &str, messages: Vec<MessageRecord>) {
         self.db
             .apply_sync_batch(
+                &posthaste_domain_service::BaseWrite::legacy("server-test base seed"),
                 &AccountId::from(account),
                 &SyncBatch {
                     mailboxes: vec![MailboxRecord {

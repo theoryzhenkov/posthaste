@@ -114,10 +114,13 @@ pub trait MessageMailboxStore: Send + Sync {
 /// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
 pub trait SyncWriteStore: Send + Sync {
     /// Apply a sync batch atomically within a single SQLite transaction.
+    /// Demands the [`BaseWrite`] witness (NS1b): base holds only provider
+    /// truth, and only the reconciler role can assert it.
     ///
     /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
     fn apply_sync_batch(
         &self,
+        base: &BaseWrite,
         account_id: &AccountId,
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError>;
@@ -130,15 +133,17 @@ pub trait SyncWriteStore: Send + Sync {
     ///
     fn reconcile_sync(
         &self,
+        base: &BaseWrite,
         account_id: &AccountId,
         reconciliation: &SyncReconciliation,
     ) -> Result<Vec<DomainEvent>, StoreError>;
 
-    /// Persist a lazily-fetched message body.
+    /// Persist a lazily-fetched message body (provider content — base plane).
     ///
     /// @spec docs/L1-sync#body-lazy
     fn apply_message_body(
         &self,
+        base: &BaseWrite,
         account_id: &AccountId,
         message_id: &MessageId,
         body: &FetchedBody,
