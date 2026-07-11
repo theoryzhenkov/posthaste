@@ -18,6 +18,12 @@ impl DatabaseStore {
     /// Returns summaries ranked by weighted bm25 relevance
     /// ([`FTS_BM25_WEIGHTS`]: subject/sender hits above body-only hits),
     /// newest-first among equal ranks, capped at `limit`.
+    /// NS1: the FTS index is rowid-keyed against the BASE `message` table (an
+    /// external-content FTS5 cannot key a view), so the match maps rowids back
+    /// to `(account_id, id)` through base and joins `message_effective` for
+    /// the served values — folded rows stay searchable via their synced
+    /// content, tombstoned rows drop out, overlay-only rows (no indexed body
+    /// yet) cannot match.
     pub fn fts_search_messages(
         &self,
         account_id: &AccountId,
@@ -31,7 +37,10 @@ impl DatabaseStore {
                         m.from_name, m.from_email, m.to_json, m.preview, m.received_at,
                         m.has_attachment, m.is_read, m.is_flagged
                  FROM message_fts
-                 JOIN message m ON m.rowid = message_fts.rowid
+                 JOIN message base_map ON base_map.rowid = message_fts.rowid
+                 JOIN message_effective m
+                   ON m.account_id = base_map.account_id
+                  AND m.id = base_map.id
                  LEFT JOIN source_projection a ON a.source_id = m.account_id
                  WHERE m.account_id = ?1 AND message_fts MATCH ?2
                  ORDER BY bm25(message_fts, {FTS_BM25_WEIGHTS}), m.received_at DESC

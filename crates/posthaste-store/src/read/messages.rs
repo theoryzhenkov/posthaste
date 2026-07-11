@@ -13,10 +13,10 @@ impl MessageListStore for DatabaseStore {
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
-             FROM message m
+             FROM message_effective m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
-             JOIN message_mailbox mm
+             JOIN message_mailbox_effective mm
                ON mm.account_id = m.account_id
               AND mm.message_id = m.id
              WHERE m.account_id = ?1 AND mm.mailbox_id = ?2
@@ -25,7 +25,7 @@ impl MessageListStore for DatabaseStore {
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
-             FROM message m
+             FROM message_effective m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
              WHERE m.account_id = ?1
@@ -63,7 +63,7 @@ impl MessageListStore for DatabaseStore {
                AND (
                  ?2 IS NULL OR EXISTS (
                      SELECT 1
-                     FROM message_mailbox mm
+                     FROM message_mailbox_effective mm
                      WHERE mm.account_id = m.account_id
                        AND mm.message_id = m.id
                        AND mm.mailbox_id = ?2
