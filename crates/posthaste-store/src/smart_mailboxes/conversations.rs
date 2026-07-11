@@ -118,7 +118,7 @@ pub(crate) fn query_conversations(
                 m.has_attachment,
                 m.is_read,
                 m.is_flagged
-            FROM message m
+            FROM message_effective m
             LEFT JOIN source_projection a
               ON a.source_id = m.account_id
             {where_clause}

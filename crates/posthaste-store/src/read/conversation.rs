@@ -21,7 +21,7 @@ impl ConversationReadStore for DatabaseStore {
                AND (
                  ?2 IS NULL OR EXISTS (
                      SELECT 1
-                     FROM message_mailbox mm
+                     FROM message_mailbox_effective mm
                      WHERE mm.account_id = m.account_id
                        AND mm.message_id = m.id
                        AND mm.mailbox_id = ?2
@@ -57,7 +57,7 @@ impl ConversationReadStore for DatabaseStore {
                         m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                         m.is_read, m.is_flagged
                  FROM conversation_message cm
-                 JOIN message m
+                 JOIN message_effective m
                    ON m.account_id = cm.account_id
                   AND m.id = cm.message_id
                  LEFT JOIN source_projection a

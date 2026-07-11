@@ -8,8 +8,8 @@ impl TagReadStore for DatabaseStore {
                 "SELECT TRIM(mk.keyword) AS keyword,
                         COUNT(DISTINCT CASE WHEN m.is_read = 0 THEN m.id END) AS unread_messages,
                         COUNT(DISTINCT m.id) AS total_messages
-                 FROM message_keyword mk
-                 JOIN message m
+                 FROM message_keyword_effective mk
+                 JOIN message_effective m
                    ON m.account_id = mk.account_id
                   AND m.id = mk.message_id
                  WHERE mk.account_id = ?1
