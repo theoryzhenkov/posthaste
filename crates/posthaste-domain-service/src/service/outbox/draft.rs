@@ -316,7 +316,7 @@ impl MailService {
     /// local key. Used to edit such a draft in place instead of duplicating it.
     /// Mailbox membership is the light existence proxy: a draft always sits in
     /// the Drafts mailbox.
-    fn draft_message_exists(
+    pub(super) fn draft_message_exists(
         &self,
         account_id: &AccountId,
         draft_key: &str,
@@ -328,63 +328,109 @@ impl MailService {
             .is_empty())
     }
 
-    /// D126: draft destruction is a settlement effect of the send. When a
-    /// settled-successful `Send` carries the originating draft's stable id
-    /// (`SendMessageRequest::draft_id`), enqueue the draft's delete so the
-    /// consumed draft leaves the provider's Drafts mailbox — and, since Slice
-    /// 3, the local Drafts list immediately (the delete's tombstone fold).
-    /// Enqueued — not pushed inline — so a transient destroy failure is
-    /// retried with the outbox/settlement machinery, never silent, and never
-    /// re-runs the send. Returns whether a follow-up op was enqueued.
+    /// Post-settlement overlay maintenance for a SEND (NS2 Slice 4): pin the
+    /// provisional Sent row at the send's entity id (visible until sync lands
+    /// the provider copy — adoption matches the transport-shared `Message-ID`
+    /// prefix), and retire the consumed draft. The provider copy of the draft
+    /// was destroyed inside the send's own gateway execution (gateway-owned
+    /// consumption — the D126 settlement fan-out op is gone), so this is
+    /// local-plane work only: registry forget, tombstone/remove, echoes.
     ///
-    /// Idempotent across settlement redelivery (ruling 24): once the consumed
-    /// draft's destroy settles, its registry mapping is forgotten (M70 —
-    /// settlement-time forget), and the gateways treat an already-gone draft as
-    /// destroyed, so a redelivered send settlement enqueues nothing (unknown
-    /// draft) or settles an at-worst harmless second delete.
-    ///
-    /// On a parked send (`DispatchUncertain`) this is never reached — the draft
-    /// is KEPT as the user's recovery artifact (D125); destruction happens only
-    /// on settled success.
-    ///
-    /// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
-    pub(super) async fn consume_draft_after_send(
+    /// On a parked send (`DispatchUncertain`) this is never reached — the
+    /// draft is KEPT as the user's recovery artifact (D125); consumption
+    /// happens only on settled success.
+    pub(super) async fn settle_send_overlay(
         &self,
         account_id: &AccountId,
         operation: &Operation,
         events: &mut Vec<DomainEvent>,
-    ) -> Result<bool, ServiceError> {
-        if operation.kind != OperationKind::Send {
-            return Ok(false);
-        }
+    ) -> Result<(), ServiceError> {
         // The payload decoded to push the send, so a failure here is
         // unreachable in practice; it must not un-settle the settled send.
         let Ok(posthaste_domain_model::MailIntent::Send(request)) = operation.intent() else {
-            return Ok(false);
+            return Ok(());
         };
-        let Some(key) = request
+        // Consumed draft: forget the mapping (confirmed destruction — the
+        // gateway destroyed the provider copy), hide/drop the local row, and
+        // echo the deletion so the client's Drafts list prunes.
+        if let Some(key) = request
             .draft_id
             .as_deref()
             .map(str::trim)
             .filter(|key| !key.is_empty())
-        else {
-            return Ok(false);
-        };
-        // A key that resolves to no alias and no projected message names a
-        // draft already consumed (redelivery) or never saved — nothing to do.
-        let known = self
-            .draft_registry
-            .resolve_draft_entity(account_id, key)?
-            .is_some()
-            || self.draft_message_exists(account_id, key)?;
-        if !known {
-            return Ok(false);
+        {
+            let live = self
+                .draft_registry
+                .resolve_draft_entity(account_id, key)?
+                .unwrap_or_else(|| key.to_string());
+            let live_id = MessageId::from(live.as_str());
+            self.draft_registry.remove_draft_alias(account_id, key)?;
+            let base_has_row = {
+                let overlay = self.overlay.clone();
+                let owned_account = account_id.clone();
+                let owned_message = live_id.clone();
+                offload(move || overlay.read_base_message_record(&owned_account, &owned_message))
+                    .await?
+                    .is_some()
+            };
+            {
+                let overlay = self.overlay.clone();
+                let owned_account = account_id.clone();
+                let owned_message = live_id.clone();
+                offload(move || {
+                    if base_has_row {
+                        // Hide the destroyed provider copy until sync prunes
+                        // it from base.
+                        overlay.tombstone_overlay_message(&owned_account, &owned_message)
+                    } else {
+                        overlay.remove_overlay_message(&owned_account, &owned_message)
+                    }
+                })
+                .await?;
+            }
+            events.push(self.events.append_event(
+                account_id,
+                EVENT_TOPIC_MESSAGE_UPDATED,
+                None,
+                Some(&live_id),
+                serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
+            )?);
         }
-        let (_operation, delete_events) = self
-            .delete_draft(account_id, MessageId::from(key), true)
-            .await?;
-        events.extend(delete_events);
-        Ok(true)
+        // Pin the provisional Sent row: the op is settled (no longer folded),
+        // so the entry is the "applied awaiting convergence" representation;
+        // the sweep's adoption retires it once the provider copy lands in
+        // base under its own id.
+        let send_row_id = MessageId::from(operation.entity.id.as_str());
+        let sent_mailbox = self.mailbox_id_by_role(account_id, "sent")?;
+        let record = crate::service::mutation::synthesize_sent_record(
+            &request,
+            operation,
+            sent_mailbox.as_ref(),
+            &send_row_id,
+        );
+        {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            offload(move || overlay.upsert_overlay_message(&owned_account, &record)).await?;
+        }
+        if let Some(summary) = self
+            .message_detail_reader
+            .get_message_summary(account_id, &send_row_id)?
+        {
+            let scope = summary.mailbox_ids.first().cloned();
+            events.push(self.events.append_event(
+                account_id,
+                EVENT_TOPIC_MESSAGE_UPDATED,
+                scope.as_ref(),
+                Some(&send_row_id),
+                serde_json::json!({
+                    "messageId": send_row_id.as_str(),
+                    "changes": { "mailboxes": true },
+                    "projection": &summary,
+                }),
+            )?);
+        }
+        Ok(())
     }
 
     /// M70 (D136): resolve a draft op's stable key to the live entity id at

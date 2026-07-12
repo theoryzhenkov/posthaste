@@ -203,10 +203,18 @@ pub trait MailGateway: Send + Sync {
     ///
     /// @spec docs/L1-jmap#methods-used
     /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
+    /// `consume_draft` is the originating draft's LIVE provider id, resolved
+    /// at flush (NS2 Slice 4 — gateway-owned consumption): the implementation
+    /// destroys it as part of the send's own provider execution (JMAP batches
+    /// the `Email/set` destroy into the submission request; IMAP expunges
+    /// after the Sent append). Best-effort AFTER the submission commits — a
+    /// failed consume never fails the send (D175's lingering-draft repair
+    /// cleans up); an already-gone draft is benign.
     async fn send_message(
         &self,
         account_id: &AccountId,
         request: &SendMessageRequest,
+        consume_draft: Option<&MessageId>,
         idempotency_key: &str,
     ) -> Result<SendFiling, GatewayError>;
 

@@ -7,16 +7,6 @@ use super::classify::{FlushDisposition, FlushError};
 use super::push::Pushed;
 use crate::service::*;
 
-/// Outcome of one [`MailService::flush_pass`] over the flushable operations.
-struct FlushPass {
-    /// The drain stopped early on a transient/uncertain failure — the caller
-    /// must not re-pass; the rest retries on the next connectivity window.
-    stopped: bool,
-    /// A settlement effect enqueued a follow-up operation this pass (a settled
-    /// send consumed its draft — D126), so the caller drains once more.
-    follow_up_enqueued: bool,
-}
-
 /// BE-H2: after this many consecutive transient failures an operation stops
 /// halting the drain — it is skipped (still pending, retried each pass) so a
 /// poisoned "transient" op cannot wedge the account's outbox behind it.
@@ -30,40 +20,31 @@ impl MailService {
     /// retried together on the next connectivity window. Per-entity ordering is
     /// the insertion-order drain (D174 — no dependency edges).
     ///
-    /// A settlement effect can enqueue a follow-up operation mid-pass (a settled
-    /// send consumes its draft — D126); the outer loop re-lists and drains those
-    /// follow-ups in the same call so the draft leaves the provider before this
-    /// flush's caller (the sync cycle) pulls. Bounded: it re-passes only when
-    /// this pass enqueued a follow-up, and follow-ups (draft deletes) enqueue
-    /// nothing themselves.
+    /// Draft consumption is GATEWAY-OWNED (NS2 Slice 4): a consuming send
+    /// destroys its draft inside its own provider execution, so no settlement
+    /// fan-out op exists and one pass drains everything queued.
     ///
     /// @spec docs/L1-outbox#state-machine
-    /// @spec docs/eph/RFC-L2-drafts#3-decisions-proposed
     pub async fn flush_account(
         &self,
         account_id: &AccountId,
         gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let mut events = Vec::new();
-        loop {
-            let pass = self.flush_pass(account_id, gateway, &mut events).await?;
-            if pass.stopped || !pass.follow_up_enqueued {
-                break;
-            }
-        }
+        self.flush_pass(account_id, gateway, &mut events).await?;
         Ok(events)
     }
 
-    /// One drain pass over the currently-flushable operations. Appends the
-    /// settlement events to `events` and reports whether the drain stopped
-    /// early (transient/uncertain) and whether a settlement effect enqueued a
-    /// follow-up operation ([`Self::flush_account`] re-passes on the latter).
+    /// One drain pass over the currently-flushable operations, appending the
+    /// settlement events to `events`. Returns early (without error) when the
+    /// drain stops on a transient/uncertain failure — the rest retries on the
+    /// next connectivity window.
     async fn flush_pass(
         &self,
         account_id: &AccountId,
         gateway: &dyn MailGateway,
         events: &mut Vec<DomainEvent>,
-    ) -> Result<FlushPass, ServiceError> {
+    ) -> Result<(), ServiceError> {
         // Held sends: two readiness gates on two clocks (D152) — send-later
         // (`send_at`) against a RE-SAMPLED wall clock; undo holds
         // (`hold_until_mono`) against the same monotonic anchor that stamped
@@ -75,7 +56,6 @@ impl MailService {
         let queued = self
             .outbox
             .list_flushable_operations(account_id, &wall_now, mono_now)?;
-        let mut follow_up_enqueued = false;
         for snapshot in queued {
             // Re-fetch fresh: an earlier op in this pass may have changed this
             // op's state (draft entity ids no longer rotate — M70: draft ops
@@ -204,14 +184,12 @@ impl MailService {
                         )
                         .await?;
                     }
-                    // D126: a settled send consumes its originating draft — the
-                    // destroy is enqueued as a follow-up op so it is retried
-                    // with the outbox discipline, never silently dropped.
-                    if self
-                        .consume_draft_after_send(account_id, &operation, events)
-                        .await?
-                    {
-                        follow_up_enqueued = true;
+                    // NS2 Slice 4: a settled send pins its provisional Sent
+                    // row and retires the consumed draft (the gateway already
+                    // destroyed the provider copy in the send's execution).
+                    if operation.kind == OperationKind::Send {
+                        self.settle_send_overlay(account_id, &operation, events)
+                            .await?;
                     }
                 }
                 Ok(Pushed::Message { readback, rejected }) => {
@@ -259,10 +237,7 @@ impl MailService {
                     // than one extra no-op provider call per flush window.
                     if attempts < TRANSIENT_STOP_THRESHOLD {
                         // Offline: stop draining; the rest retries next window.
-                        return Ok(FlushPass {
-                            stopped: true,
-                            follow_up_enqueued,
-                        });
+                        return Ok(());
                     }
                     ph_warn!(
                         events::OUTBOX_TRANSIENT_OP_SKIPPED,
@@ -287,12 +262,13 @@ impl MailService {
                         Some(&message),
                     )?;
                     events.push(self.emit_dispatch_uncertain(account_id, &operation, message)?);
+                    // D125: the parked send's fold unwinds — the draft row
+                    // returns (the recovery artifact) and the provisional
+                    // Sent row leaves until an explicit retry settles.
+                    events.extend(self.unwind_send_fold(&operation).await?);
                     // A send timeout signals a struggling link; stop draining so
                     // the rest retries on the next connectivity window.
-                    return Ok(FlushPass {
-                        stopped: true,
-                        follow_up_enqueued,
-                    });
+                    return Ok(());
                 }
                 Err(FlushError {
                     disposition: FlushDisposition::Permanent,
@@ -317,12 +293,15 @@ impl MailService {
                     {
                         events.push(correction);
                     }
+                    // A permanently failed send never went out: unwind its
+                    // fold so the provisional Sent row leaves and the
+                    // consumed draft returns.
+                    if operation.kind == OperationKind::Send {
+                        events.extend(self.unwind_send_fold(&operation).await?);
+                    }
                 }
             }
         }
-        Ok(FlushPass {
-            stopped: false,
-            follow_up_enqueued,
-        })
+        Ok(())
     }
 }

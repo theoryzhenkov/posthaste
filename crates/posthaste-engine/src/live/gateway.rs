@@ -192,9 +192,10 @@ impl MailGateway for LiveJmapGateway {
         &self,
         _account_id: &AccountId,
         request_data: &SendMessageRequest,
+        consume_draft: Option<&MessageId>,
         idempotency_key: &str,
     ) -> Result<SendFiling, GatewayError> {
-        crate::live_compose::send_message(self, request_data, idempotency_key).await
+        crate::live_compose::send_message(self, request_data, consume_draft, idempotency_key).await
     }
 
     /// Persist a draft to the Drafts mailbox via `Email/set`, returning the

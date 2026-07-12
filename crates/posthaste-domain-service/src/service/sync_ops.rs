@@ -267,7 +267,9 @@ impl MailService {
         // NS1 overlay sweep: refold every still-overlaid message over the base
         // this sync just rewrote (or drop entries whose ops settled during the
         // flush legs). The inventory is bounded by the pending outbox — small.
-        self.sweep_message_overlay(account_id).await?;
+        let sweep_events = self.sweep_message_overlay(account_id).await?;
+        publish(&sweep_events);
+        events.extend(sweep_events);
         let sync_event = self.events.append_event(
         account_id,
         EVENT_TOPIC_SYNC_COMPLETED,
@@ -325,20 +327,37 @@ impl MailService {
             })
             .await?,
         );
-        self.sweep_message_overlay(account_id).await?;
+        events.extend(self.sweep_message_overlay(account_id).await?);
         Ok(events)
     }
 
     /// Re-derive every overlaid message for the account (NS1): the sync-side
     /// leg of the overlay lifecycle. Entries whose ops settled are removed;
     /// entries with surviving ops are refolded over the just-written base.
-    async fn sweep_message_overlay(&self, account_id: &AccountId) -> Result<(), ServiceError> {
+    /// Returns the adoption prune echoes (NS2 Slice 4) for the caller to
+    /// publish.
+    async fn sweep_message_overlay(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
         let overlay_ids = {
             let overlay = self.overlay.clone();
             let owned_account_id = account_id.clone();
             offload(move || overlay.list_overlay_message_ids(&owned_account_id)).await?
         };
+        let mut events = Vec::new();
         for message_id in overlay_ids {
+            // NS2 Slice 4 adoption: a provisional Sent row whose provider
+            // copy landed in base (matched by the transport-shared
+            // Message-ID prefix) retires WITH a prune echo — the visible row
+            // changes identity, so the client must drop the provisional id.
+            if let Some(event) = self
+                .try_adopt_provisional_sent(account_id, &message_id)
+                .await?
+            {
+                events.push(event);
+                continue;
+            }
             // Retire-on-confirmation: an all-settled entry is removed only
             // once this sync's base write actually carries its effect.
             self.refresh_message_overlay(
@@ -348,7 +367,72 @@ impl MailService {
             )
             .await?;
         }
-        Ok(())
+        Ok(events)
+    }
+
+    /// Retire a provisional Sent overlay row whose provider copy has arrived
+    /// in base under its own id (NS2 Slice 4, reconcile-by-intent-id +
+    /// adopt-by-header). `None` = not such a row / not adopted yet.
+    async fn try_adopt_provisional_sent(
+        &self,
+        account_id: &AccountId,
+        row_id: &MessageId,
+    ) -> Result<Option<DomainEvent>, ServiceError> {
+        let entry = {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_row = row_id.clone();
+            offload(move || overlay.read_overlay_message(&owned_account, &owned_row)).await?
+        };
+        let Some(Some(folded)) = entry else {
+            return Ok(None);
+        };
+        // Only send-minted rows: the transport-shared identity token, and
+        // never a draft row (those retire via base coverage).
+        let Some(prefix) = folded
+            .rfc_message_id
+            .as_deref()
+            .filter(|rfc| rfc.starts_with("phsend-"))
+            .and_then(|rfc| rfc.split_once('@'))
+            .map(|(token, _)| format!("{token}@"))
+        else {
+            return Ok(None);
+        };
+        if folded.draft_id.is_some() {
+            return Ok(None);
+        }
+        // A live op still keyed here (pending/held/parked send) owns the
+        // entry — adoption applies only to settled rows awaiting the sync.
+        let has_live_op = self
+            .outbox
+            .list_unsettled_operations(account_id)?
+            .into_iter()
+            .any(|op| op.entity.id == row_id.as_str());
+        if has_live_op {
+            return Ok(None);
+        }
+        let adopted = {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            offload(move || overlay.find_base_message_id_by_rfc_prefix(&owned_account, &prefix))
+                .await?
+        };
+        if adopted.is_none() {
+            return Ok(None);
+        }
+        {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_row = row_id.clone();
+            offload(move || overlay.remove_overlay_message(&owned_account, &owned_row)).await?;
+        }
+        Ok(Some(self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            None,
+            Some(row_id),
+            json!({ "messageId": row_id.as_str(), "deleted": true }),
+        )?))
     }
 
     /// Append a `sync.failed` event to the event log.

@@ -279,7 +279,8 @@ impl AuthorityServer {
         // The enqueued send's operation id is the send-bridge join key: the async
         // flush emits `operation.settled`/`dispatch_uncertain` under it, and the
         // bridge resolves the deferred origin by it to route the terminal frame.
-        let operation = self.service.enqueue_send(&account_id, request)?;
+        let (operation, events) = self.service.enqueue_send(&account_id, request).await?;
+        self.publish_events(&events);
         if let Some(sender) = &sender {
             if let Err(error) = self.store.remember_sender_address(&account_id, sender) {
                 ph_warn!(
@@ -353,8 +354,14 @@ impl AuthorityServer {
     /// cancel LOST (the send already flushed and settled, or was never queued),
     /// and the caller must be able to tell that apart from a successful cancel.
     /// An in-flight operation surfaces the service's rejection unchanged.
-    pub(crate) fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
-        if self.service.discard_operation(&operation_id)? {
+    pub(crate) async fn discard_operation(
+        &self,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        if let Some(events) = self.service.discard_operation(&operation_id).await? {
+            // NS2 Slice 4: an undone send's fold unwinds — publish the
+            // echoes so the client's rows converge without a sync.
+            self.publish_events(&events);
             return Ok(());
         }
         Err(RuntimeError::new(

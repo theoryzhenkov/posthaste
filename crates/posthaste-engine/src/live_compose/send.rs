@@ -8,17 +8,7 @@ use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 use crate::live_compose::attachments::upload_send_attachments;
 use crate::live_compose::identity::fetch_send_identity;
 
-/// Derive the JMAP `EmailSubmission`/`Email` create-id and the RFC5322
-/// `Message-ID` from the outbox operation id, so every retry of the same send
-/// carries the *same* identity (D84/D85). Sanitized to the JMAP creation-id
-/// charset (a leading letter keeps it a valid id on strict servers).
-fn send_identity_token(idempotency_key: &str) -> String {
-    let sanitized: String = idempotency_key
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
-    format!("phsend-{sanitized}")
-}
+use posthaste_domain_model::send_identity_token;
 
 /// Map a send-dispatch failure to a typed [`GatewayError`]. A send-class
 /// timeout — or a response so short/reordered that the submission's fate is
@@ -51,17 +41,16 @@ fn dispatch_uncertain(reason: impl Into<String>) -> GatewayError {
 /// create-id + `Message-ID` are the field-proving foundation for the future
 /// bounded-auto-retry (D87/O1 Option B).
 ///
-/// Draft consumption (D126): the request's `draft_id` is deliberately NOT
-/// destroyed here via `onSuccessDestroyEmail`. The fork exposes the builder
-/// (`SetArguments::on_success_destroy_email`), but RFC 8621 §7.5 scopes that
-/// field to EmailSubmission ids — it destroys the *submitted* Email, and this
-/// send submits a freshly created Email (the compose buffer is the source of
-/// truth; the server-side draft may be stale), not the draft. Destroying the
-/// originating draft atomically would require submitting the draft Email
-/// itself, which JMAP's Email immutability rules out for edited content. The
-/// draft is instead consumed as a settlement effect: the outbox enqueues a
-/// draft-delete once this send settles success (idempotent `Email/set`
-/// destroy — see `delete_draft`), and keeps the draft on `DispatchUncertain`
+/// Draft consumption (NS2 Slice 4 — gateway-owned): `consume_draft` (the
+/// originating draft's live provider id, resolved at flush) is destroyed via
+/// an explicit `Email/set` destroy batched into THIS request, as the method
+/// after the submission. `onSuccessDestroyEmail` cannot express this — RFC
+/// 8621 §7.5 scopes it to EmailSubmission ids (it would destroy the
+/// *submitted* Email, and this send submits a freshly created Email; the
+/// compose buffer is the source of truth, the server-side draft may be
+/// stale). The destroy result is tolerated (notFound = already gone; any
+/// other failure = warn + D175 repair) — it can never fail the committed
+/// send. On `DispatchUncertain` the send never settles, so the draft is kept
 /// (D125).
 ///
 /// @spec docs/L1-compose#mime-structure
@@ -70,6 +59,7 @@ fn dispatch_uncertain(reason: impl Into<String>) -> GatewayError {
 pub(crate) async fn send_message(
     gateway: &LiveJmapGateway,
     request_data: &SendMessageRequest,
+    consume_draft: Option<&posthaste_domain_model::MessageId>,
     idempotency_key: &str,
 ) -> Result<SendFiling, GatewayError> {
     let identity = fetch_send_identity(gateway, request_data.from.as_ref()).await?;
@@ -159,6 +149,16 @@ pub(crate) async fn send_message(
         .mailbox_id(drafts_mailbox_id.as_str(), false)
         .mailbox_id(sent_mailbox_id.as_str(), true);
 
+    // Gateway-owned draft consumption (NS2 Slice 4): destroy the originating
+    // draft in the SAME request, as the method AFTER the submission — the
+    // submission commits first in JMAP's sequential method processing, so a
+    // failed destroy can never fail (or precede) the send. `notFound` and any
+    // other destroy error are tolerated below: the draft may already be gone,
+    // and a lingering copy is D175-repaired, never a send failure.
+    if let Some(consume) = consume_draft {
+        request.set_email().destroy([consume.as_str()]);
+    }
+
     // Bound the dispatch by the send-class deadline AND classify any failure by
     // PHASE via `send_request_dispatch`: a transport error at/after the request
     // write (incl. jmap-client's inner request timeout that fires before this
@@ -201,6 +201,25 @@ pub(crate) async fn send_message(
     sent_update
         .unwrap_update_errors()
         .map_err(map_gateway_error)?;
+    // The batched draft-consume destroy (when requested): the submission has
+    // already committed by the time this response is read, so nothing here
+    // may fail the send. A missing/failed destroy (notFound = already gone;
+    // anything else = the draft lingers until D175 repairs it) only warns.
+    if let Some(consume) = consume_draft {
+        let destroy_applied = (!responses.is_empty())
+            .then(|| responses.remove(0))
+            .and_then(|response| response.unwrap_set_email().ok())
+            .map(|mut destroy_set| destroy_set.destroyed(consume.as_str()).is_ok())
+            .unwrap_or(false);
+        if !destroy_applied {
+            ph_warn!(
+                events::SEND_DRAFT_CONSUME_NOT_APPLIED,
+                draft_id = %consume,
+                "send committed but the batched draft consume did not apply \
+                 (already gone, or lingering until repair)"
+            );
+        }
+    }
     // A sent-update the server neither applied nor rejected (an unresolvable
     // `onSuccessUpdateEmail` reference — the exact silent no-op the pre-fix
     // wrong-key bug produced): the submission has already committed, so this is

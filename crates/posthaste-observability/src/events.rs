@@ -80,6 +80,10 @@ pub const SEND_SENDER_CACHE_UPDATE_FAILED: LogEvent =
 /// reference). Non-fatal — the message WAS submitted — but the outgoing copy
 /// stays filed in Drafts, so the anomaly must be visible in the operator log.
 pub const SEND_SENT_MOVE_NOT_APPLIED: LogEvent = LogEvent::new("send.sent_move_not_applied");
+/// A committed send's batched draft-consume destroy did not apply (already
+/// gone, or lingering until the D175 repair) — never a send failure.
+pub const SEND_DRAFT_CONSUME_NOT_APPLIED: LogEvent =
+    LogEvent::new("send.draft_consume_not_applied");
 pub const OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("outbox.followup_sync_trigger_failed");
 
