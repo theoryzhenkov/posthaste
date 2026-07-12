@@ -33,23 +33,136 @@ impl MailService {
     /// statement (`remove_operation_unless_inflight`) racing the flusher's
     /// guarded claim (`claim_operation_for_flush`) — whichever write the store
     /// serializes first wins, the loser observes nothing to act on. There is no
-    /// check-then-remove window: if this returns `Ok(true)` the op can never be
-    /// pushed; if the flusher claimed first, this surfaces the in-flight error
-    /// (the op is being — or has been — sent).
+    /// check-then-remove window: if this returns `Ok(Some(_))` the op can never
+    /// be pushed; if the flusher claimed first, this surfaces the in-flight
+    /// error (the op is being — or has been — sent).
+    ///
+    /// Returns `Some(events)` when the op was removed (`None` = nothing to
+    /// remove). NS2 Slice 4: discarding a SEND also unwinds its folded
+    /// effects — a due send's provisional Sent row is dropped and the
+    /// consumed draft's row returns — with the echoes to publish.
     ///
     /// @spec docs/L1-outbox#state-machine
-    pub fn discard_operation(&self, operation_id: &OperationId) -> Result<bool, ServiceError> {
+    pub async fn discard_operation(
+        &self,
+        operation_id: &OperationId,
+    ) -> Result<Option<Vec<DomainEvent>>, ServiceError> {
+        // Snapshot BEFORE the guarded removal (for the send-fold cleanup
+        // targets); the removal itself remains the single racing statement.
+        let snapshot = self.outbox.get_operation(operation_id)?;
         if self.outbox.remove_operation_unless_inflight(operation_id)? {
-            return Ok(true);
+            let mut events = Vec::new();
+            if let Some(operation) = snapshot {
+                if operation.kind == OperationKind::Send {
+                    events = self.unwind_send_fold(&operation).await?;
+                }
+            }
+            return Ok(Some(events));
         }
         // Nothing removed: either the op is gone (settled/never existed — the
-        // pre-existing `Ok(false)`), or it is in flight and must not be yanked.
+        // pre-existing `None`), or it is in flight and must not be yanked.
         match self.outbox.get_operation(operation_id)? {
             Some(operation) if operation.state == OperationState::Inflight => Err(
                 GatewayError::Rejected("cannot discard an in-flight operation".to_string()).into(),
             ),
-            _ => Ok(false),
+            _ => Ok(None),
         }
+    }
+
+    /// Unwind a send's folded effects after its op stopped being foldable
+    /// (discarded/undone, parked `DispatchUncertain` — D125 keeps the draft
+    /// as the recovery artifact — or permanently failed): refresh the
+    /// provisional Sent row (entry removed) and the consumed draft's live row
+    /// (the tombstone lifts; the draft is visible again), echoing both so the
+    /// client converges without a sync. A HELD send folded nothing, so both
+    /// refreshes are no-ops for the common undo.
+    pub(super) async fn unwind_send_fold(
+        &self,
+        operation: &Operation,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let account_id = &operation.account_id;
+        let mut events = Vec::new();
+        let send_row_id = MessageId::from(operation.entity.id.as_str());
+        let send_row_was_visible = self
+            .message_detail_reader
+            .get_message_summary(account_id, &send_row_id)?
+            .is_some();
+        self.refresh_message_overlay(
+            account_id,
+            &send_row_id,
+            crate::service::mutation::OverlayRetire::Immediate,
+        )
+        .await?;
+        if send_row_was_visible {
+            events.push(self.events.append_event(
+                account_id,
+                EVENT_TOPIC_MESSAGE_UPDATED,
+                None,
+                Some(&send_row_id),
+                serde_json::json!({ "messageId": send_row_id.as_str(), "deleted": true }),
+            )?);
+        }
+        if let Ok(posthaste_domain_model::MailIntent::Send(request)) = operation.intent() {
+            if let Some(key) = request
+                .draft_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+            {
+                let live = self
+                    .draft_registry
+                    .resolve_draft_entity(account_id, key)?
+                    .unwrap_or_else(|| key.to_string());
+                let live_id = MessageId::from(live.as_str());
+                self.refresh_message_overlay(
+                    account_id,
+                    &live_id,
+                    crate::service::mutation::OverlayRetire::Immediate,
+                )
+                .await?;
+                if self
+                    .message_detail_reader
+                    .get_message_summary(account_id, &live_id)?
+                    .is_none()
+                {
+                    // The consume fold overwrote the settled save's pinned
+                    // row and base has not absorbed the draft yet: re-pin the
+                    // recovery artifact from the send's own content (which IS
+                    // the draft's content) so it never blinks out.
+                    let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
+                    let record = crate::service::mutation::synthesize_draft_record(
+                        None,
+                        &request,
+                        operation,
+                        drafts_mailbox.as_ref(),
+                        &live_id,
+                        key,
+                    );
+                    let overlay = self.overlay.clone();
+                    let owned_account = account_id.clone();
+                    offload(move || overlay.upsert_overlay_message(&owned_account, &record))
+                        .await?;
+                }
+                if let Some(summary) = self
+                    .message_detail_reader
+                    .get_message_summary(account_id, &live_id)?
+                {
+                    let scope = summary.mailbox_ids.first().cloned();
+                    events.push(self.events.append_event(
+                        account_id,
+                        EVENT_TOPIC_MESSAGE_UPDATED,
+                        scope.as_ref(),
+                        Some(&live_id),
+                        serde_json::json!({
+                            "messageId": live_id.as_str(),
+                            "changes": { "mailboxes": true },
+                            "projection": &summary,
+                        }),
+                    )?);
+                }
+            }
+        }
+        Ok(events)
     }
 
     /// Re-arm a failed or dispatch-uncertain outbox operation to `pending` so
@@ -168,12 +281,23 @@ impl MailService {
         Ok(())
     }
 
-    /// Enqueue an outgoing message local-first.
+    /// Enqueue an outgoing message local-first, materializing what the send
+    /// MEANS at admission (D170), folding its effects into the overlay plane,
+    /// and returning the projection echoes.
     ///
     /// The send is queued and flushed to the provider on the next connectivity
     /// window; the caller does not need a live gateway. A unique entity id makes
     /// the operation its own idempotency unit so it never coalesces and is sent
     /// at most once (see the send-once recovery in [`Self::flush_account`]).
+    ///
+    /// MATERIALIZATION (D170): the client's `draftId` is an unresolved
+    /// compose-key gesture. Admission consults the one identity authority —
+    /// the draft registry (+ the projection for headerless resumed drafts) —
+    /// and stamps the decision: a key that names a known draft makes this a
+    /// CONSUMING send (the fold tombstones the draft's live row when due; the
+    /// flush destroys the provider copy in the send's own execution); an
+    /// unknown key is dropped (a plain send). The client's stale view is
+    /// never load-bearing.
     ///
     /// A `send_at` on the request (undo-send / send-later — one mechanism) is
     /// validated and normalized here (canonical UTC whole-second RFC 3339;
@@ -186,11 +310,11 @@ impl MailService {
     /// running + online.
     ///
     /// @spec docs/L1-outbox#operation-model
-    pub fn enqueue_send(
+    pub async fn enqueue_send(
         &self,
         account_id: &AccountId,
         mut request: SendMessageRequest,
-    ) -> Result<Operation, ServiceError> {
+    ) -> Result<(Operation, Vec<DomainEvent>), ServiceError> {
         // D152: an undo hold is a DURATION stamped on the daemon's monotonic
         // clock (the same clock that later judges it); `send_at` then degrades
         // to display metadata and is NOT stored (it must never gate the
@@ -213,12 +337,40 @@ impl MailService {
                 None,
             ),
         };
+        // D170 materialization: resolve the compose key against the registry
+        // (+ projection). Known → a consuming send, and the key is RESERVED
+        // (self-mapped) if the registry does not hold it yet, so the flush
+        // resolve is total; unknown → a plain send, key dropped.
+        let compose_key = request
+            .draft_id
+            .take()
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty());
+        let consumes_key = match compose_key {
+            Some(key) => {
+                let registered = self
+                    .draft_registry
+                    .resolve_draft_entity(account_id, &key)?
+                    .is_some();
+                if registered || self.draft_message_exists(account_id, &key)? {
+                    if !registered {
+                        self.draft_registry
+                            .set_draft_alias(account_id, &key, &key)?;
+                    }
+                    Some(key)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        request.draft_id = consumes_key.clone();
         // The normalized hold lives on the OPERATION (the flush gate reads the
         // indexed column); it is dropped from the payload so an immediate
         // send's payload — and the bytes the gateway sees — stay identical to
         // the pre-feature shape.
         let payload = encode_payload(request, "send request")?;
-        self.queue_operation(
+        let operation = self.queue_operation(
             account_id,
             OperationEntity {
                 kind: OperationEntityKind::Message,
@@ -228,7 +380,77 @@ impl MailService {
             payload,
             send_at,
             hold_until_mono,
+        )?;
+        // Fold the send's effects (D172, phase-aware: a held send folds
+        // nothing — the draft stays visible and cancelable; a due send
+        // tombstones the consumed draft and upserts the provisional Sent
+        // row) and echo the changed rows from the effective read.
+        let mut events = Vec::new();
+        let send_row_id = MessageId::from(operation.entity.id.as_str());
+        let consumed_live = match &consumes_key {
+            Some(key) => Some(MessageId::from(
+                self.draft_registry
+                    .resolve_draft_entity(account_id, key)?
+                    .unwrap_or_else(|| key.clone())
+                    .as_str(),
+            )),
+            None => None,
+        };
+        let consumed_was_visible = match &consumed_live {
+            Some(live_id) => self
+                .message_detail_reader
+                .get_message_summary(account_id, live_id)?
+                .is_some(),
+            None => false,
+        };
+        self.refresh_message_overlay(
+            account_id,
+            &send_row_id,
+            crate::service::mutation::OverlayRetire::Immediate,
         )
+        .await?;
+        if let Some(live_id) = &consumed_live {
+            self.refresh_message_overlay(
+                account_id,
+                live_id,
+                crate::service::mutation::OverlayRetire::Immediate,
+            )
+            .await?;
+            // Deleted echo only when the fold actually hid a visible row (a
+            // held send leaves the draft alone).
+            if consumed_was_visible
+                && self
+                    .message_detail_reader
+                    .get_message_summary(account_id, live_id)?
+                    .is_none()
+            {
+                events.push(self.events.append_event(
+                    account_id,
+                    EVENT_TOPIC_MESSAGE_UPDATED,
+                    None,
+                    Some(live_id),
+                    serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
+                )?);
+            }
+        }
+        if let Some(summary) = self
+            .message_detail_reader
+            .get_message_summary(account_id, &send_row_id)?
+        {
+            let scope = summary.mailbox_ids.first().cloned();
+            events.push(self.events.append_event(
+                account_id,
+                EVENT_TOPIC_MESSAGE_UPDATED,
+                scope.as_ref(),
+                Some(&send_row_id),
+                serde_json::json!({
+                    "messageId": send_row_id.as_str(),
+                    "changes": { "mailboxes": true },
+                    "projection": &summary,
+                }),
+            )?);
+        }
+        Ok((operation, events))
     }
 
     /// Whether any scheduled send is due (`send_at <= now`) and still queued —

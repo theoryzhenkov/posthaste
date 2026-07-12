@@ -22,6 +22,82 @@ pub(crate) enum OverlayRetire {
     ConfirmAgainstBase,
 }
 
+/// The role a visible row plays for an entity-intent op in the fold (NS2
+/// Slice 4): draft ops address their key's live row; a send addresses TWO
+/// rows — its own provisional Sent row and the consumed draft's live row.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EntityFoldRole {
+    /// The row a draft save/discard's stable key currently maps to.
+    DraftKey,
+    /// The send op's own entity id: the provisional Sent row.
+    SendRow,
+    /// The live row of the draft a send consumes.
+    SendConsumedDraft,
+}
+
+/// Synthesize the provisional Sent overlay row a due/dispatched send folds to
+/// (NS2 Slice 4, D172): visible in Sent from dispatch, adopted (retired) once
+/// sync lands the provider copy — matched by the transport-shared
+/// `Message-ID` prefix ([`posthaste_domain_model::send_identity_prefix`]).
+/// The domain half of the stamped id is a best-effort guess from the sender
+/// (adoption ignores it).
+pub(crate) fn synthesize_sent_record(
+    request: &SendMessageRequest,
+    operation: &Operation,
+    sent_mailbox: Option<&MailboxId>,
+    row_id: &MessageId,
+) -> MessageRecord {
+    const PREVIEW_CHARS: usize = 180;
+    let preview: String = request.body.trim().chars().take(PREVIEW_CHARS).collect();
+    let token = posthaste_domain_model::send_identity_token(operation.id.as_str());
+    let domain = request
+        .from
+        .as_ref()
+        .and_then(|recipient| recipient.email.rsplit_once('@'))
+        .map(|(_, domain)| domain)
+        .filter(|domain| !domain.is_empty())
+        .unwrap_or("posthaste.local");
+    MessageRecord {
+        id: row_id.clone(),
+        source_thread_id: ThreadId::from(row_id.as_str()),
+        remote_blob_id: None,
+        subject: {
+            let subject = request.subject.trim();
+            (!subject.is_empty()).then(|| subject.to_string())
+        },
+        from_name: request
+            .from
+            .as_ref()
+            .and_then(|recipient| recipient.name.clone()),
+        from_email: request
+            .from
+            .as_ref()
+            .map(|recipient| recipient.email.clone()),
+        to: request.to.clone(),
+        preview: (!preview.is_empty()).then_some(preview),
+        received_at: operation.updated_at.clone(),
+        has_attachment: !request.attachments.is_empty(),
+        size: request.body.len() as i64,
+        mailbox_ids: sent_mailbox
+            .map(|mailbox_id| vec![mailbox_id.clone()])
+            .unwrap_or_default(),
+        // Own sent mail is read (IMAP/JMAP convention).
+        keywords: vec!["$seen".to_string()],
+        body_html: None,
+        body_text: None,
+        raw_mime: None,
+        rfc_message_id: Some(format!("{token}@{domain}")),
+        in_reply_to: request.in_reply_to.clone(),
+        references: request
+            .references
+            .as_deref()
+            .map(|references| references.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default(),
+        draft_id: None,
+        list_unsubscribe: None,
+    }
+}
+
 /// Synthesize the overlay row a queued draft save folds to (NS2 Slice 3): the
 /// draft is VISIBLE the moment its op is queued — no provider round trip, no
 /// sync lag. Body fields stay `None` (the overlay never carries bodies); the
@@ -119,7 +195,11 @@ impl MailService {
             offload(move || outbox.list_unsettled_operations(&account_id)).await?
         };
         let mut message_ops: Vec<Operation> = Vec::new();
-        let mut draft_ops: Vec<Operation> = Vec::new();
+        // Entity-intent ops relevant to this row, in insertion order, tagged
+        // with the ROLE this row plays for them (NS2 Slice 4: a send is
+        // multi-row — its own provisional Sent row AND the consumed draft's
+        // live row).
+        let mut entity_ops: Vec<(Operation, EntityFoldRole)> = Vec::new();
         for op in unsettled {
             if !matches!(
                 op.state,
@@ -128,6 +208,23 @@ impl MailService {
                 continue;
             }
             match op.entity.kind {
+                OperationEntityKind::Message if op.kind == OperationKind::Send => {
+                    if op.entity.id == message_id.as_str() {
+                        entity_ops.push((op, EntityFoldRole::SendRow));
+                    } else if let Ok(Some(FoldEffect::SendEffects {
+                        consumes_draft_key: Some(key),
+                        ..
+                    })) = intent_fold_effect(&op)
+                    {
+                        let consumed_live = self
+                            .draft_registry
+                            .resolve_draft_entity(account_id, &key)?
+                            .unwrap_or(key);
+                        if consumed_live == message_id.as_str() {
+                            entity_ops.push((op, EntityFoldRole::SendConsumedDraft));
+                        }
+                    }
+                }
                 OperationEntityKind::Message => {
                     if op.kind.is_state_assertion() && op.entity.id == message_id.as_str() {
                         message_ops.push(op);
@@ -139,12 +236,12 @@ impl MailService {
                         .resolve_draft_entity(account_id, &op.entity.id)?
                         .unwrap_or_else(|| op.entity.id.clone());
                     if live == message_id.as_str() {
-                        draft_ops.push(op);
+                        entity_ops.push((op, EntityFoldRole::DraftKey));
                     }
                 }
             }
         }
-        if message_ops.is_empty() && draft_ops.is_empty() {
+        if message_ops.is_empty() && entity_ops.is_empty() {
             if retire == OverlayRetire::ConfirmAgainstBase {
                 let confirmed = {
                     let overlay = overlay.clone();
@@ -204,15 +301,40 @@ impl MailService {
             let message_id = message_id.clone();
             offload(move || overlay.read_base_message_record(&account_id, &message_id)).await?
         };
-        // Draft-plane fold first (each effect is total — D172): the last
-        // queued save wins the row's content; a discard folds the row away.
-        // Message assertions then replay on top of whatever row survives.
+        // Entity-plane fold first (each effect is total — D172), in insertion
+        // order: the last queued save wins the row's content; a discard (or a
+        // due send's consume) folds the row away; a due send upserts its
+        // provisional Sent row. Message assertions then replay on top of
+        // whatever row survives. Send phase (D172, phase-aware): a HELD send
+        // folds NOTHING — the draft stays visible and cancelable; the flip to
+        // tombstone+sent needs no new trigger (coming due re-derives via the
+        // flush/settle refreshes).
+        let needs_clocks = entity_ops
+            .iter()
+            .any(|(op, _)| op.kind == OperationKind::Send);
+        let (wall_now, mono_now) = if needs_clocks {
+            let wall = super::outbox::schedule::wall_now_rfc3339().map_err(|error| {
+                ServiceError::from(posthaste_domain_model::GatewayError::Rejected(error))
+            })?;
+            (wall, super::outbox::schedule::monotonic_now_secs())
+        } else {
+            (String::new(), 0)
+        };
+        let send_is_held = |op: &Operation| {
+            op.state == OperationState::Pending
+                && (op
+                    .send_at
+                    .as_deref()
+                    .is_some_and(|send_at| send_at > wall_now.as_str())
+                    || op.hold_until_mono.is_some_and(|hold| hold > mono_now))
+        };
         let mut state = base.clone();
         let mut discarded_by_draft_op = false;
         let mut drafts_mailbox: Option<Option<MailboxId>> = None;
-        for op in &draft_ops {
-            match intent_fold_effect(op)? {
-                Some(FoldEffect::UpsertDraft(request)) => {
+        let mut sent_mailbox: Option<Option<MailboxId>> = None;
+        for (op, role) in &entity_ops {
+            match (intent_fold_effect(op)?, role) {
+                (Some(FoldEffect::UpsertDraft(request)), EntityFoldRole::DraftKey) => {
                     let drafts_mailbox = match &drafts_mailbox {
                         Some(resolved) => resolved.clone(),
                         None => drafts_mailbox
@@ -229,9 +351,34 @@ impl MailService {
                     ));
                     discarded_by_draft_op = false;
                 }
-                Some(FoldEffect::TombstoneDraft) => {
+                (Some(FoldEffect::TombstoneDraft), EntityFoldRole::DraftKey) => {
                     state = None;
                     discarded_by_draft_op = true;
+                }
+                (Some(FoldEffect::SendEffects { request, .. }), EntityFoldRole::SendRow) => {
+                    if !send_is_held(op) {
+                        let sent_mailbox = match &sent_mailbox {
+                            Some(resolved) => resolved.clone(),
+                            None => sent_mailbox
+                                .insert(self.mailbox_id_by_role(account_id, "sent")?)
+                                .clone(),
+                        };
+                        state = Some(synthesize_sent_record(
+                            &request,
+                            op,
+                            sent_mailbox.as_ref(),
+                            message_id,
+                        ));
+                        discarded_by_draft_op = false;
+                    }
+                }
+                (Some(FoldEffect::SendEffects { .. }), EntityFoldRole::SendConsumedDraft) => {
+                    if !send_is_held(op) {
+                        // The due send consumes its draft: the row leaves
+                        // Drafts optimistically with the dispatch.
+                        state = None;
+                        discarded_by_draft_op = true;
+                    }
                 }
                 _ => {}
             }
@@ -274,17 +421,26 @@ impl MailService {
         Ok(())
     }
 
-    /// The account's Drafts mailbox id by role, when discovered.
-    pub(crate) fn drafts_mailbox_id(
+    /// The account's mailbox id for a role, when discovered.
+    pub(crate) fn mailbox_id_by_role(
         &self,
         account_id: &AccountId,
+        role: &str,
     ) -> Result<Option<MailboxId>, ServiceError> {
         Ok(self
             .mailbox_reader
             .list_mailboxes(account_id)?
             .into_iter()
-            .find(|mailbox| mailbox.role.as_deref() == Some("drafts"))
+            .find(|mailbox| mailbox.role.as_deref() == Some(role))
             .map(|mailbox| mailbox.id))
+    }
+
+    /// The account's Drafts mailbox id by role, when discovered.
+    pub(crate) fn drafts_mailbox_id(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<MailboxId>, ServiceError> {
+        self.mailbox_id_by_role(account_id, "drafts")
     }
     fn queue_message_operation(
         &self,

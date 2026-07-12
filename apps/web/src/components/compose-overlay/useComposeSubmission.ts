@@ -261,8 +261,14 @@ export function useComposeSubmission({
         return
       }
       const sourceId = resolveSubmissionSourceId(input.from)
+      // The compose key rides EVERY send (D170): the backend materializes
+      // what it means at admission — a key naming a known draft makes this a
+      // consuming send (the raced-autosave draft can no longer leak); an
+      // unknown key is dropped server-side. The client's view is never
+      // load-bearing.
+      input.draftId = draftKey
       if (undoSendDelaySeconds <= 0) {
-        // No hold configured: the pre-feature immediate send, unchanged.
+        // No hold configured: the pre-feature immediate send path.
         sendMutation.mutate({ sourceId, input })
         return
       }
@@ -276,6 +282,7 @@ export function useComposeSubmission({
       })
     })()
   }, [
+    draftKey,
     prepareInput,
     resolveSubmissionSourceId,
     scheduleMutation,
