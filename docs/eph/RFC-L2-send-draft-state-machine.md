@@ -271,12 +271,61 @@ registry-resolved LIVE id:
   role-lookup store method is the obvious optimization if profiling ever
   cares.
 
-**REMAINING (in order): Slices 4–5.** Slice 4 (send-as-one-intent:
-multi-row effects — which is when the shared-kernel `fold_effects()` moves
-into replica-core for the client prediction — materialization D170, two-step
-held plan D173, gateway-owned consumption, `SendOutcome`/D154 killing
-`moved_to_sent`, reconcile-by-intent-id, D175 repair), then Slice 5 (verdict
-surfacing + SEND-grid L2 tests).
+**Slice 4 LANDED (2026-07-12) — send is one intent, in four commits
+(4a–4d):**
+
+- **4a (D154):** `MailGateway::send_message` returns `SendFiling`
+  (`Filed | PendingFiling`); `OperationSettlement.sendFiling` carries it.
+  `moved_to_sent`'s warn-and-forget is dead; with `Uncertain` = the D86 park
+  and `Failed` = the failed settlement, the outcome space is complete.
+- **4b (D170/D172):** admission MATERIALIZES the compose key (known →
+  consuming + reserved; unknown → dropped; the web passes `draftId` on every
+  send, killing the immediate-path raced-autosave leak). The fold is
+  multi-row and phase-aware: a due send folds
+  `[Tombstone(consumed draft's live row), Upsert(provisional Sent row)]` at
+  queue time — sent mail is in Sent before any provider call; a HELD send
+  folds nothing. Undo/park (D125)/permanent-failure all UNWIND the fold with
+  echoes (the park re-pins the draft from the send's own content).
+  Consumption is GATEWAY-OWNED: JMAP batches the destroy after the
+  submission in one request, IMAP expunges after the Sent append; the D126
+  settlement fan-out and the flush follow-up re-pass are deleted.
+  Reconcile-by-intent-id: `send_identity_token` lives in domain-model (ONE
+  derivation for the gateways' `Message-ID` stamp and the sweep's adoption
+  match); the provisional Sent row retires with a prune echo once base
+  carries the token-prefixed provider copy.
+- **4c (D173):** a held send is ONE row with a two-step plan: eager
+  ensure-draft each flush pass (the provider draft exists during the hold —
+  cross-device visibility) + the readiness-gated submit. NO schema: the
+  registry is the step ledger (done = key rotated to a provider id; DS2's
+  deterministic create-id makes crash-retry safe). Admission mints/reserves
+  a compose key for every held send; a queued save op on the key IS the
+  ensure step. Undo cancels the submit; the ensured draft remains.
+- **4d (D175):** the sweep repairs a tombstone whose base row survived the
+  sync (lost expunge / silent destroy no-op) with ONE idempotent
+  notFound-masked delete, gated on no outstanding op — never stacks, safe
+  when premature, uniform across discard/consume/destroy tombstones.
+
+**Slice 4 deviations/notes:**
+- The shared-kernel `fold_effects()` move into replica-core did NOT ship
+  (deviation carried from Slice 2, now explicit): the interpreter +
+  synthesizers stay in domain-service. The client's optimism arrives via the
+  sub-second projection echoes, so client-side prediction is not
+  load-bearing (D170); move the vocabulary into the wasm kernel only when a
+  truly offline client-side fold is wanted.
+- The JMAP batched consume-destroy assumes the implicit `onSuccessUpdateEmail`
+  response precedes the explicit destroy response (documented at the parse
+  site; degrades to a warn + PendingFiling misread, never a failure). Pin
+  against real Stalwart in Slice 5's L3 pass.
+- A RETRIED failed/parked send does not re-fold until settlement (the row
+  reappears then) — cosmetic, noted for Slice 5's verdict surfacing.
+- Pre-adoption, the provisional Sent row's body read 404s at the provider
+  (the row exists only locally); the window is one sync. Slice 5's
+  "Sent — filing"/pending copy should account for it.
+
+**REMAINING: Slice 5** — verdict surfacing (client undo-send API, "Sent —
+filing"/needs-attention states over `sendFiling` + `dispatch_uncertain`) +
+the DESIGN-L2-test-taxonomy SEND-grid L2 cells (S-CONV-2, S-VERD-2/3/4,
+S-EO-1/2, S-ISO-1) via the L2 fault seam.
 
 **Slice 0 LANDED (2026-07-11):** `PRAGMA user_version` + the ordered migration
 runner + the downgrade guard (`Conflict`, never `Corruption` — a newer database
