@@ -2289,9 +2289,10 @@ export interface components {
         /**
          * @description A single local-first command.
          *
-         *     `id` provides runtime/provider idempotency. `depends_on` preserves draft
-         *     chains only; state assertions coalesce instead of depending on earlier
-         *     assertions.
+         *     `id` provides runtime/provider idempotency. There is no cross-operation
+         *     dependency edge (D174): state assertions coalesce, same-key draft saves
+         *     coalesce (last-writer-wins per compose session), and everything else
+         *     relies on the flusher's insertion-order drain.
          *
          *     @spec docs/L1-outbox#operation-model
          */
@@ -2300,7 +2301,6 @@ export interface components {
             /** Format: int32 */
             attempts: number;
             createdAt: string;
-            dependsOn?: null | components["schemas"]["OperationId"];
             entity: components["schemas"]["OperationEntity"];
             /**
              * Format: int64

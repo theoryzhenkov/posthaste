@@ -220,9 +220,13 @@ fn fetch_mailbox_ids_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
 ) -> Result<Vec<Vec<MailboxId>>, StoreError> {
-    fetch_message_values_bulk(connection, rows, "message_mailbox_effective", "mailbox_id", |row| {
-        Ok(MailboxId(row.get(1)?))
-    })
+    fetch_message_values_bulk(
+        connection,
+        rows,
+        "message_mailbox_effective",
+        "mailbox_id",
+        |row| Ok(MailboxId(row.get(1)?)),
+    )
 }
 
 /// Bulk-fetches keywords for a set of messages in chunks.
@@ -230,9 +234,13 @@ fn fetch_keywords_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
 ) -> Result<Vec<Vec<String>>, StoreError> {
-    fetch_message_values_bulk(connection, rows, "message_keyword_effective", "keyword", |row| {
-        row.get(1)
-    })
+    fetch_message_values_bulk(
+        connection,
+        rows,
+        "message_keyword_effective",
+        "keyword",
+        |row| row.get(1),
+    )
 }
 
 /// Generic bulk-fetch for message-associated values (mailbox IDs or keywords).

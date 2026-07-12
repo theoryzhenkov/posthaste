@@ -52,16 +52,16 @@ use posthaste_domain_model::{
     MailQueryGroupOperator, MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue,
     MailboxId, MailboxRole, MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage,
     MessageSortField, MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId,
-    OperationKind, OperationState, RawMessageRef, Recipient, RevCursor,
-    RevLogSnapshot, RevLogStep, SortDirection, StoreError, SyncBatch,
-    SyncCursor, SyncObject, SyncReconciliation, TagSummary, ThreadId, ThreadView,
-    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
+    OperationKind, OperationState, RawMessageRef, Recipient, RevCursor, RevLogSnapshot, RevLogStep,
+    SortDirection, StoreError, SyncBatch, SyncCursor, SyncObject, SyncReconciliation, TagSummary,
+    ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_domain_service::{
-    cache_signal_rescore_priority, AutomationBackfillStore, CacheStore, ConversationReadStore,
-    DraftRegistry, EventStore, ImapMessageLocationStore, ImapMessageLocationWriteStore,
-    ImapSyncStateStore, ImapSyncStateWriteStore, MailboxReadStore, MailboxRoleOverrideStore,
-    BaseWrite, MessageCommandStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
+    cache_signal_rescore_priority, AutomationBackfillStore, BaseWrite, CacheStore,
+    ConversationReadStore, DraftRegistry, EventStore, ImapMessageLocationStore,
+    ImapMessageLocationWriteStore, ImapSyncStateStore, ImapSyncStateWriteStore, MailboxReadStore,
+    MailboxRoleOverrideStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
     MessageOverlayStore, OperationOutboxStore, RevLogStore, SenderAddressCacheStore,
     SmartMailboxStore, SourceDataStore, SourceProjectionStore, SyncStateStore, SyncWriteStore,
     TagReadStore,
@@ -77,9 +77,8 @@ use crate::db::{
     parse_sync_object, prepare_schema, sql_to_store_error,
 };
 use crate::mutations::{
-    apply_message_body_tx, apply_sync_batch_tx, destroy_message_tx,
-    event_log_bounds as event_log_bounds_query, list_events as list_events_for_filter,
-    reconcile_sync_tx, stage_sync_bodies,
+    apply_message_body_tx, apply_sync_batch_tx, event_log_bounds as event_log_bounds_query,
+    list_events as list_events_for_filter, reconcile_sync_tx, stage_sync_bodies,
 };
 use crate::projections::{cleanup_orphan_conversations_tx, insert_event_tx, synthesize_raw_mime};
 use crate::query::{

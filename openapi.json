@@ -7040,7 +7040,7 @@
       },
       "Operation": {
         "type": "object",
-        "description": "A single local-first command.\n\n`id` provides runtime/provider idempotency. `depends_on` preserves draft\nchains only; state assertions coalesce instead of depending on earlier\nassertions.\n\n@spec docs/L1-outbox#operation-model",
+        "description": "A single local-first command.\n\n`id` provides runtime/provider idempotency. There is no cross-operation\ndependency edge (D174): state assertions coalesce, same-key draft saves\ncoalesce (last-writer-wins per compose session), and everything else\nrelies on the flusher's insertion-order drain.\n\n@spec docs/L1-outbox#operation-model",
         "required": [
           "id",
           "accountId",
@@ -7063,17 +7063,6 @@
           },
           "createdAt": {
             "type": "string"
-          },
-          "dependsOn": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/OperationId",
-                "description": "The operation that must settle before this one (draft-chain ordering)."
-              }
-            ]
           },
           "entity": {
             "$ref": "#/components/schemas/OperationEntity"

@@ -4,7 +4,6 @@
 //! `operation.settled` / `operation.dispatch_uncertain` / failure-correction
 //! events.
 
-use crate::service::mutation::refresh_message_overlay;
 use crate::service::*;
 use posthaste_domain_model::{
     MessageReadback, MessageRecord, OperationDispatchUncertain, SyncBatch,
@@ -61,7 +60,11 @@ impl MailService {
             let owned_account_id = account_id.clone();
             events.extend(
                 offload(move || {
-                    sync_writer.apply_sync_batch(&BaseWrite::reconciler(), &owned_account_id, &batch)
+                    sync_writer.apply_sync_batch(
+                        &BaseWrite::reconciler(),
+                        &owned_account_id,
+                        &batch,
+                    )
                 })
                 .await?,
             );
@@ -77,14 +80,8 @@ impl MailService {
         } else {
             crate::service::mutation::OverlayRetire::ConfirmAgainstBase
         };
-        refresh_message_overlay(
-            self.overlay.clone(),
-            self.outbox.clone(),
-            account_id.clone(),
-            message_id.clone(),
-            retire,
-        )
-        .await?;
+        self.refresh_message_overlay(account_id, &message_id, retire)
+            .await?;
         let settlement = OperationSettlement {
             id: operation.id.clone(),
             outcome: if rejected.is_some() {

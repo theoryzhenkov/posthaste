@@ -1,29 +1,14 @@
-use std::sync::Arc;
-
 use posthaste_domain_model::{
     AccountId, AddToMailboxCommand, CommandAck, DomainEvent, MailboxId, MessageChangeAssertion,
-    MessageId, Operation, OperationEntity, OperationEntityKind, OperationKind, OperationState,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand,
-    StoreError, EVENT_TOPIC_MESSAGE_UPDATED,
+    MessageId, MessageRecord, Operation, OperationEntity, OperationEntityKind, OperationKind,
+    OperationState, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, StoreError, ThreadId, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use serde_json::json;
 
-use super::message_queries::project_record;
+use super::message_queries::{intent_fold_effect, project_record, FoldEffect};
 use super::{encode_payload, offload, MailService};
-use crate::{MessageOverlayStore, OperationOutboxStore};
 
-/// Re-derive one message's OVERLAY entry from base + its unsettled state
-/// assertions (NS1 cutover, RFC-L2-client-replication-model D167): the single
-/// maintenance function for the optimistic plane, called at every lifecycle
-/// moment that can change the fold's inputs — mutation queue, op settlement,
-/// and a sync batch touching an overlaid id.
-///
-/// No unsettled ops → the entry is removed (base shows through).
-/// Folded-to-removed → tombstone. No base row with a pending Destroy →
-/// tombstone (hide the last-known row). No base row otherwise → any existing
-/// entry stays as the last-known fold (e.g. a pending flag racing a remote
-/// delete) until its op settles and this runs again.
-///
 /// How a refresh treats an overlay entry whose ops have ALL settled.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OverlayRetire {
@@ -37,100 +22,270 @@ pub(crate) enum OverlayRetire {
     ConfirmAgainstBase,
 }
 
-/// An associated fn over cloned `Arc`s (not `&self`) so the sync sink can
-/// call it without holding the service.
-pub(crate) async fn refresh_message_overlay(
-    overlay: Arc<dyn MessageOverlayStore>,
-    outbox: Arc<dyn OperationOutboxStore>,
-    account_id: AccountId,
-    message_id: MessageId,
-    retire: OverlayRetire,
-) -> Result<(), ServiceError> {
-    let unsettled = {
-        let outbox = outbox.clone();
-        let account_id = account_id.clone();
-        offload(move || outbox.list_unsettled_operations(&account_id)).await?
-    };
-    let ops_for_message: Vec<Operation> = unsettled
-        .into_iter()
-        .filter(|op| {
-            op.entity.kind == OperationEntityKind::Message
-                && op.kind.is_state_assertion()
-                && matches!(
-                    op.state,
-                    OperationState::Pending | OperationState::Inflight | OperationState::Applied
-                )
-                && op.entity.id == message_id.as_str()
-        })
-        .collect();
-    if ops_for_message.is_empty() {
-        if retire == OverlayRetire::ConfirmAgainstBase {
-            let confirmed = {
-                let overlay = overlay.clone();
-                let account_id = account_id.clone();
-                let message_id = message_id.clone();
-                offload(move || {
-                    let Some(entry) = overlay.read_overlay_message(&account_id, &message_id)?
-                    else {
-                        return Ok::<bool, StoreError>(true); // nothing to retire
-                    };
-                    let base = overlay.read_base_message_record(&account_id, &message_id)?;
-                    Ok(match (entry, base) {
-                        // Tombstone: confirmed once the base row is gone.
-                        (None, base) => base.is_none(),
-                        // Folded row: confirmed once base carries the same
-                        // keyword + mailbox sets.
-                        (Some(mut folded), Some(mut base)) => {
-                            folded.keywords.sort();
-                            base.keywords.sort();
-                            folded.mailbox_ids.sort();
-                            base.mailbox_ids.sort();
-                            folded.keywords == base.keywords
-                                && folded.mailbox_ids == base.mailbox_ids
-                        }
-                        // Folded row but no base row: not yet confirmed.
-                        (Some(_), None) => false,
-                    })
-                })
-                .await?
-            };
-            if !confirmed {
-                return Ok(());
-            }
-        }
-        offload(move || overlay.remove_overlay_message(&account_id, &message_id)).await?;
-        return Ok(());
-    }
-    let base = {
-        let overlay = overlay.clone();
-        let account_id = account_id.clone();
-        let message_id = message_id.clone();
-        offload(move || overlay.read_base_message_record(&account_id, &message_id)).await?
-    };
-    match base {
-        Some(record) => match project_record(record, &ops_for_message)? {
-            Some(folded) => {
-                offload(move || overlay.upsert_overlay_message(&account_id, &folded)).await?;
-            }
-            None => {
-                offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
-                    .await?;
-            }
+/// Synthesize the overlay row a queued draft save folds to (NS2 Slice 3): the
+/// draft is VISIBLE the moment its op is queued — no provider round trip, no
+/// sync lag. Body fields stay `None` (the overlay never carries bodies); the
+/// queued request itself is the content authority until the save settles
+/// (`get_draft_content` reads it back from the op payload).
+pub(crate) fn synthesize_draft_record(
+    prior: Option<MessageRecord>,
+    request: &SendMessageRequest,
+    operation: &Operation,
+    drafts_mailbox: Option<&MailboxId>,
+    live_id: &MessageId,
+    stable_key: &str,
+) -> MessageRecord {
+    const PREVIEW_CHARS: usize = 180;
+    let preview: String = request.body.trim().chars().take(PREVIEW_CHARS).collect();
+    // The Drafts mailbox by role; a prior row's membership as fallback (e.g. a
+    // pre-discovery save) so the row does not vanish from every list.
+    let mailbox_ids = drafts_mailbox
+        .map(|mailbox_id| vec![mailbox_id.clone()])
+        .or_else(|| prior.as_ref().map(|record| record.mailbox_ids.clone()))
+        .unwrap_or_default();
+    MessageRecord {
+        id: live_id.clone(),
+        source_thread_id: prior
+            .as_ref()
+            .map(|record| record.source_thread_id.clone())
+            .unwrap_or_else(|| ThreadId::from(live_id.as_str())),
+        remote_blob_id: None,
+        subject: {
+            let subject = request.subject.trim();
+            (!subject.is_empty()).then(|| subject.to_string())
         },
-        None => {
-            if ops_for_message
-                .iter()
-                .any(|op| op.kind == OperationKind::Destroy)
-            {
-                offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
-                    .await?;
-            }
-        }
+        from_name: request
+            .from
+            .as_ref()
+            .and_then(|recipient| recipient.name.clone()),
+        from_email: request
+            .from
+            .as_ref()
+            .map(|recipient| recipient.email.clone()),
+        to: request.to.clone(),
+        preview: (!preview.is_empty()).then_some(preview),
+        // Each coalesced save bumps the op's `updated_at`, so the draft sorts
+        // like real autosave (most recently edited first).
+        received_at: operation.updated_at.clone(),
+        has_attachment: !request.attachments.is_empty(),
+        size: request.body.len() as i64,
+        mailbox_ids,
+        // `$seen` matches the gateways' save semantics (an own draft is never
+        // "new mail"); the retire compare treats it as soft (IMAP appends
+        // `\Draft` only).
+        keywords: vec!["$draft".to_string(), "$seen".to_string()],
+        body_html: None,
+        body_text: None,
+        raw_mime: None,
+        rfc_message_id: None,
+        in_reply_to: request.in_reply_to.clone(),
+        references: request
+            .references
+            .as_deref()
+            .map(|references| references.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default(),
+        draft_id: Some(stable_key.to_string()),
+        list_unsubscribe: None,
     }
-    Ok(())
 }
 
 impl MailService {
+    /// Re-derive one visible row's OVERLAY entry from base + its unsettled
+    /// intents (NS1 D167, extended to the draft plane in NS2 Slice 3): the
+    /// single maintenance function for the optimistic plane, called at every
+    /// lifecycle moment that can change the fold's inputs — mutation queue,
+    /// draft save/discard queue, op settlement, and the post-sync sweep.
+    ///
+    /// `message_id` is the row's LIVE id: for message assertions the op's
+    /// entity id; for draft intents the registry-resolved live id their stable
+    /// key currently maps to (draft ops carry the KEY, the overlay is keyed by
+    /// the visible row).
+    ///
+    /// No unsettled ops → the entry is removed (base shows through), subject
+    /// to `retire`. Folded-to-removed → tombstone. A discard folding over no
+    /// base row removes the entry (nothing to hide). No base row otherwise →
+    /// any existing entry stays as the last-known fold (e.g. a pending flag
+    /// racing a remote delete) until its op settles and this runs again.
+    pub(crate) async fn refresh_message_overlay(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        retire: OverlayRetire,
+    ) -> Result<(), ServiceError> {
+        let overlay = self.overlay.clone();
+        let unsettled = {
+            let outbox = self.outbox.clone();
+            let account_id = account_id.clone();
+            offload(move || outbox.list_unsettled_operations(&account_id)).await?
+        };
+        let mut message_ops: Vec<Operation> = Vec::new();
+        let mut draft_ops: Vec<Operation> = Vec::new();
+        for op in unsettled {
+            if !matches!(
+                op.state,
+                OperationState::Pending | OperationState::Inflight | OperationState::Applied
+            ) {
+                continue;
+            }
+            match op.entity.kind {
+                OperationEntityKind::Message => {
+                    if op.kind.is_state_assertion() && op.entity.id == message_id.as_str() {
+                        message_ops.push(op);
+                    }
+                }
+                OperationEntityKind::Draft => {
+                    let live = self
+                        .draft_registry
+                        .resolve_draft_entity(account_id, &op.entity.id)?
+                        .unwrap_or_else(|| op.entity.id.clone());
+                    if live == message_id.as_str() {
+                        draft_ops.push(op);
+                    }
+                }
+            }
+        }
+        if message_ops.is_empty() && draft_ops.is_empty() {
+            if retire == OverlayRetire::ConfirmAgainstBase {
+                let confirmed = {
+                    let overlay = overlay.clone();
+                    let account_id = account_id.clone();
+                    let message_id = message_id.clone();
+                    offload(move || {
+                        let Some(entry) = overlay.read_overlay_message(&account_id, &message_id)?
+                        else {
+                            return Ok::<bool, StoreError>(true); // nothing to retire
+                        };
+                        let base = overlay.read_base_message_record(&account_id, &message_id)?;
+                        Ok(match (entry, base) {
+                            // Tombstone: confirmed once the base row is gone.
+                            (None, base) => base.is_none(),
+                            // Folded row: confirmed once base carries the same
+                            // keyword + mailbox sets. A draft row compares
+                            // keywords modulo `$seen`: IMAP appends `\Draft`
+                            // only, so the synthesized `$seen` would otherwise
+                            // never be covered and the entry would linger.
+                            (Some(mut folded), Some(mut base)) => {
+                                folded.keywords.sort();
+                                base.keywords.sort();
+                                folded.mailbox_ids.sort();
+                                base.mailbox_ids.sort();
+                                let keywords_covered = if folded.draft_id.is_some() {
+                                    let soft = |keywords: &[String]| {
+                                        keywords
+                                            .iter()
+                                            .filter(|keyword| keyword.as_str() != "$seen")
+                                            .cloned()
+                                            .collect::<Vec<_>>()
+                                    };
+                                    soft(&folded.keywords) == soft(&base.keywords)
+                                } else {
+                                    folded.keywords == base.keywords
+                                };
+                                keywords_covered && folded.mailbox_ids == base.mailbox_ids
+                            }
+                            // Folded row but no base row: not yet confirmed.
+                            (Some(_), None) => false,
+                        })
+                    })
+                    .await?
+                };
+                if !confirmed {
+                    return Ok(());
+                }
+            }
+            let account_id = account_id.clone();
+            let message_id = message_id.clone();
+            offload(move || overlay.remove_overlay_message(&account_id, &message_id)).await?;
+            return Ok(());
+        }
+        let base = {
+            let overlay = overlay.clone();
+            let account_id = account_id.clone();
+            let message_id = message_id.clone();
+            offload(move || overlay.read_base_message_record(&account_id, &message_id)).await?
+        };
+        // Draft-plane fold first (each effect is total — D172): the last
+        // queued save wins the row's content; a discard folds the row away.
+        // Message assertions then replay on top of whatever row survives.
+        let mut state = base.clone();
+        let mut discarded_by_draft_op = false;
+        let mut drafts_mailbox: Option<Option<MailboxId>> = None;
+        for op in &draft_ops {
+            match intent_fold_effect(op)? {
+                Some(FoldEffect::UpsertDraft(request)) => {
+                    let drafts_mailbox = match &drafts_mailbox {
+                        Some(resolved) => resolved.clone(),
+                        None => drafts_mailbox
+                            .insert(self.drafts_mailbox_id(account_id)?)
+                            .clone(),
+                    };
+                    state = Some(synthesize_draft_record(
+                        state.take(),
+                        &request,
+                        op,
+                        drafts_mailbox.as_ref(),
+                        message_id,
+                        &op.entity.id,
+                    ));
+                    discarded_by_draft_op = false;
+                }
+                Some(FoldEffect::TombstoneDraft) => {
+                    state = None;
+                    discarded_by_draft_op = true;
+                }
+                _ => {}
+            }
+        }
+        let base_exists = base.is_some();
+        let account_id = account_id.clone();
+        let message_id = message_id.clone();
+        match state {
+            Some(record) => match project_record(record, &message_ops)? {
+                Some(folded) => {
+                    offload(move || overlay.upsert_overlay_message(&account_id, &folded)).await?;
+                }
+                None => {
+                    offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
+                        .await?;
+                }
+            },
+            None if discarded_by_draft_op => {
+                if base_exists {
+                    // Hide the base row until the provider destroy is
+                    // confirmed into base by sync.
+                    offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
+                        .await?;
+                } else {
+                    // Discard of a never-synced draft: nothing to hide.
+                    offload(move || overlay.remove_overlay_message(&account_id, &message_id))
+                        .await?;
+                }
+            }
+            None => {
+                if message_ops
+                    .iter()
+                    .any(|op| op.kind == OperationKind::Destroy)
+                {
+                    offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
+                        .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The account's Drafts mailbox id by role, when discovered.
+    pub(crate) fn drafts_mailbox_id(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<MailboxId>, ServiceError> {
+        Ok(self
+            .mailbox_reader
+            .list_mailboxes(account_id)?
+            .into_iter()
+            .find(|mailbox| mailbox.role.as_deref() == Some("drafts"))
+            .map(|mailbox| mailbox.id))
+    }
     fn queue_message_operation(
         &self,
         account_id: &AccountId,
@@ -221,16 +376,10 @@ impl MailService {
             ))));
         }
 
-        refresh_message_overlay(
-            self.overlay.clone(),
-            self.outbox.clone(),
-            account_id.clone(),
-            message_id.clone(),
-            // Ops are non-empty here (one was just queued), so no retire
-            // decision arises.
-            OverlayRetire::Immediate,
-        )
-        .await?;
+        // Ops are non-empty here (one was just queued), so no retire decision
+        // arises.
+        self.refresh_message_overlay(account_id, message_id, OverlayRetire::Immediate)
+            .await?;
 
         let (payload, scope_mailbox) = match operation.kind {
             OperationKind::SetKeywords => {

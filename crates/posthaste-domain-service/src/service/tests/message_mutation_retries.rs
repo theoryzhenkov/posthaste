@@ -306,7 +306,6 @@ async fn mixed_message_mutations_fold_cumulatively_into_overlay() {
     assert_eq!(pending.len(), 2);
     assert_eq!(pending[0].kind, OperationKind::SetKeywords);
     assert_eq!(pending[1].kind, OperationKind::ReplaceMailboxes);
-    assert!(pending.iter().all(|op| op.depends_on.is_none()));
 }
 
 #[tokio::test]

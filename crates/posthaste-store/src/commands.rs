@@ -199,22 +199,6 @@ fn update_mailbox_role_tx(
     Ok(())
 }
 
-impl MessageCommandStore for DatabaseStore {
-    /// Permanently deletes a message and all its junction rows, refreshes
-    /// thread projections, and optionally persists a cursor. (NS1: the last
-    /// surviving direct base mutation — the draft-discard destroy, sealed
-    /// behind the witness until its NS2 cutover.)
-    fn destroy_message(
-        &self,
-        _base: &BaseWrite,
-        account_id: &AccountId,
-        message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-    ) -> Result<CommandResult, StoreError> {
-        self.write_transaction(|tx| destroy_message_tx(tx, account_id, message_id, cursor))
-    }
-}
-
 impl EventStore for DatabaseStore {
     /// Queries the event log, supporting `afterSeq` cursor-based replay.
     ///

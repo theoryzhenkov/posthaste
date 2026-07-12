@@ -9,12 +9,10 @@
 use posthaste_domain_model::{
     AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid, ImapUidValidity,
     MailboxId, MailboxRecord, MessageId, MessagePage, MessageRecord, MessageSortField,
-    MessageSummary, Recipient, SortDirection, SyncBatch, SyncCursor,
-    SyncObject, ThreadId,
+    MessageSummary, Recipient, SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId,
 };
 use posthaste_domain_service::{
-    MessageDetailStore, MessageListStore, SmartMailboxStore,
-    SourceProjectionStore, SyncWriteStore,
+    MessageDetailStore, MessageListStore, SmartMailboxStore, SourceProjectionStore, SyncWriteStore,
 };
 use posthaste_query_grammar::parse_query;
 use posthaste_store::DatabaseStore;
@@ -160,7 +158,11 @@ pub fn open_seeded(count: usize) -> Fixture {
     let fixture = open_empty();
     fixture
         .store
-        .apply_sync_batch(&posthaste_domain_service::BaseWrite::legacy("bench base seed"), &fixture.account, &sync_batch(synthetic_messages(count)))
+        .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("bench base seed"),
+            &fixture.account,
+            &sync_batch(synthetic_messages(count)),
+        )
         .expect("seed messages");
     fixture
 }
@@ -209,7 +211,11 @@ pub fn open_seeded_heavy(count: usize) -> Fixture {
 pub fn apply_batch(fixture: &Fixture, batch: &SyncBatch) {
     fixture
         .store
-        .apply_sync_batch(&posthaste_domain_service::BaseWrite::legacy("bench base seed"), &fixture.account, batch)
+        .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("bench base seed"),
+            &fixture.account,
+            batch,
+        )
         .expect("apply sync batch");
 }
 

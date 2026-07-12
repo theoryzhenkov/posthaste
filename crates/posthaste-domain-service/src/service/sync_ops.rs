@@ -50,11 +50,10 @@ impl SyncChunkSink for ServiceSyncSink<'_> {
         let sync_writer = self.sync_writer.clone();
         let account_id = self.account_id.clone();
         let owned_batch = batch.clone();
-        let result =
-            offload(move || {
-                sync_writer.apply_sync_batch(&BaseWrite::reconciler(), &account_id, &owned_batch)
-            })
-            .await;
+        let result = offload(move || {
+            sync_writer.apply_sync_batch(&BaseWrite::reconciler(), &account_id, &owned_batch)
+        })
+        .await;
         match result {
             Ok(events) => {
                 (self.publish)(&events);
@@ -318,7 +317,11 @@ impl MailService {
         let owned_batch = batch.clone();
         events.extend(
             offload(move || {
-                sync_writer.apply_sync_batch(&BaseWrite::reconciler(), &owned_account_id, &owned_batch)
+                sync_writer.apply_sync_batch(
+                    &BaseWrite::reconciler(),
+                    &owned_account_id,
+                    &owned_batch,
+                )
             })
             .await?,
         );
@@ -336,13 +339,11 @@ impl MailService {
             offload(move || overlay.list_overlay_message_ids(&owned_account_id)).await?
         };
         for message_id in overlay_ids {
-            super::mutation::refresh_message_overlay(
-                self.overlay.clone(),
-                self.outbox.clone(),
-                account_id.clone(),
-                message_id,
-                // Retire-on-confirmation: an all-settled entry is removed only
-                // once this sync's base write actually carries its effect.
+            // Retire-on-confirmation: an all-settled entry is removed only
+            // once this sync's base write actually carries its effect.
+            self.refresh_message_overlay(
+                account_id,
+                &message_id,
                 super::mutation::OverlayRetire::ConfirmAgainstBase,
             )
             .await?;
