@@ -589,6 +589,7 @@ impl MailGateway for MockJmapGateway {
         &self,
         _account_id: &AccountId,
         _request: &SendMessageRequest,
+        _consume_draft: Option<&MessageId>,
         _idempotency_key: &str,
     ) -> Result<posthaste_domain_model::SendFiling, GatewayError> {
         Ok(posthaste_domain_model::SendFiling::Filed)

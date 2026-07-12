@@ -191,6 +191,7 @@ impl MailGateway for StaticGateway {
         &self,
         _account_id: &AccountId,
         _request: &SendMessageRequest,
+        _consume_draft: Option<&MessageId>,
         _idempotency_key: &str,
     ) -> Result<posthaste_domain_model::SendFiling, GatewayError> {
         Err(GatewayError::Rejected("unused".to_string()))

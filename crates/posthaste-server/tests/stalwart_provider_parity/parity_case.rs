@@ -271,6 +271,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 ..Default::default()
             },
         )
+        .await
         .expect("JMAP send should queue");
     harness
         .service
@@ -325,6 +326,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 ..Default::default()
             },
         )
+        .await
         .expect("SMTP send should queue");
     harness
         .service

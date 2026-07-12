@@ -79,6 +79,17 @@ pub trait MessageOverlayStore: Send + Sync {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<Option<MessageRecord>>, StoreError>;
+
+    /// Find a BASE message whose `rfc_message_id` starts with `prefix` — the
+    /// provisional Sent row's adoption probe (NS2 Slice 4,
+    /// reconcile-by-intent-id): the transport-shared send identity
+    /// (`phsend-<op>@`, [`posthaste_domain_model::send_identity_prefix`])
+    /// matches the synced provider copy in any domain.
+    fn find_base_message_id_by_rfc_prefix(
+        &self,
+        account_id: &AccountId,
+        prefix: &str,
+    ) -> Result<Option<MessageId>, StoreError>;
 }
 
 /// Object-safety guard: the service composes this port dynamically.

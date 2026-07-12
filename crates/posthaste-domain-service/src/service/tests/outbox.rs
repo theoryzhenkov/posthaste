@@ -611,7 +611,11 @@ async fn discard_removes_a_failed_operation() {
     let gateway = MutationGateway::with_revision(1);
     let id = queue_and_fail_one(&service, &account, &gateway).await;
 
-    assert!(service.discard_operation(&id).expect("discard"));
+    assert!(service
+        .discard_operation(&id)
+        .await
+        .expect("discard")
+        .is_some());
     assert!(service
         .list_pending_operations(&account)
         .expect("pending")
@@ -722,7 +726,9 @@ async fn enqueue_send_queues_then_flushes_once() {
 
     let send = service
         .enqueue_send(&account, draft_request("Outgoing"))
-        .expect("send queues");
+        .await
+        .expect("send queues")
+        .0;
     assert_eq!(send.kind, OperationKind::Send);
     assert_eq!(send.state, OperationState::Pending);
     assert!(send.entity.id.starts_with("send-"));
@@ -732,14 +738,21 @@ async fn enqueue_send_queues_then_flushes_once() {
         .await
         .expect("flush ok");
 
-    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        1
+    );
     assert_eq!(
         *gateway.send_calls.lock().unwrap(),
         vec!["Outgoing".to_string()]
     );
-    assert!(
-        gateway.delete_draft_calls.lock().unwrap().is_empty(),
-        "a send without draft_id must not touch any draft (D126 is opt-in)"
+    assert_eq!(
+        gateway.send_consume_calls.lock().unwrap().as_slice(),
+        &[None],
+        "a send without a compose key consumes nothing"
     );
     assert!(service
         .list_pending_operations(&account)
@@ -815,7 +828,9 @@ async fn s1_dispatch_uncertain_send_never_duplicates_across_reflush_and_retry() 
 
     let send = service
         .enqueue_send(&account, draft_request("Outgoing"))
-        .expect("send queues");
+        .await
+        .expect("send queues")
+        .0;
 
     // Flush 1: times out after commit -> parked; exactly one submission.
     let events = service
@@ -892,7 +907,9 @@ async fn pre_write_network_send_error_retries_not_parked() {
 
     let send = service
         .enqueue_send(&account, draft_request("Outgoing"))
-        .expect("send queues");
+        .await
+        .expect("send queues")
+        .0;
 
     // Flush 1: transient failure -> back to Pending, never parked, no
     // dispatch-uncertain surfaced.
@@ -938,9 +955,10 @@ fn send_request_consuming(subject: &str, draft_key: &str) -> SendMessageRequest 
     }
 }
 
-/// D126: a settled-successful send consumes its originating draft — the draft
-/// delete is enqueued as a settlement effect and flushed by the follow-up pass
-/// of the SAME `flush_account` call, against the provider-assigned draft id.
+/// NS2 Slice 4 (gateway-owned consumption): a consuming send destroys its
+/// originating draft inside its OWN provider execution — resolved to the
+/// provider-assigned live id at flush — and the settlement forgets the
+/// registry mapping. No follow-up DraftDelete op exists anymore.
 #[tokio::test]
 async fn send_settlement_consumes_the_saved_draft_in_one_flush() {
     let account = AccountId::from("primary");
@@ -960,6 +978,7 @@ async fn send_settlement_consumes_the_saved_draft_in_one_flush() {
 
     service
         .enqueue_send(&account, send_request_consuming("Outgoing", key.as_str()))
+        .await
         .expect("send queues");
     let events = service
         .flush_account(&account, &gateway)
@@ -968,17 +987,21 @@ async fn send_settlement_consumes_the_saved_draft_in_one_flush() {
 
     assert_eq!(gateway.send_calls.lock().unwrap().len(), 1);
     assert_eq!(
-        gateway.delete_draft_calls.lock().unwrap().as_slice(),
-        &[MessageId::from("provider-draft-1")],
-        "the settled send must destroy the provider draft it originated from"
+        gateway.send_consume_calls.lock().unwrap().as_slice(),
+        &[Some(MessageId::from("provider-draft-1"))],
+        "the send's own execution destroys the provider draft it consumes"
+    );
+    assert!(
+        gateway.delete_draft_calls.lock().unwrap().is_empty(),
+        "no follow-up DraftDelete fan-out exists (gateway-owned consumption)"
     );
     assert_eq!(
         events
             .iter()
             .filter(|event| event.topic == "operation.settled")
             .count(),
-        2,
-        "both the send and its follow-up draft delete settle in one flush call"
+        1,
+        "one send, one settlement"
     );
     assert!(
         service
@@ -996,7 +1019,7 @@ async fn send_settlement_consumes_the_saved_draft_in_one_flush() {
 async fn parked_send_keeps_the_draft_until_settled_success() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
-    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
     let key = MessageId::from("draft-local-parked");
 
@@ -1018,40 +1041,51 @@ async fn parked_send_keeps_the_draft_until_settled_success() {
         )));
     let send = service
         .enqueue_send(&account, send_request_consuming("Outgoing", key.as_str()))
-        .expect("send queues");
+        .await
+        .expect("send queues")
+        .0;
     service
         .flush_account(&account, &gateway)
         .await
         .expect("flush parks");
 
-    // Parked: the draft is untouched — no destroy pushed, no delete enqueued.
-    assert!(
-        gateway.delete_draft_calls.lock().unwrap().is_empty(),
-        "a parked send must not destroy its draft"
-    );
+    // Parked: the draft survives locally (D125 — the fold unwinds, the row
+    // is the user's recovery artifact) and its registry identity is kept.
     let pending = service.list_pending_operations(&account).expect("pending");
     assert_eq!(pending.len(), 1, "only the parked send remains queued");
     assert_eq!(pending[0].state, OperationState::DispatchUncertain);
+    assert!(
+        store
+            .get_message_summary(&account, &MessageId::from("provider-draft-1"))
+            .expect("effective read")
+            .is_some(),
+        "a parked send keeps the draft visible (D125)"
+    );
 
-    // Explicit user retry settles the send (deduplicated) — only now is the
-    // draft consumed.
+    // Explicit user retry settles the send (deduplicated submission) — only
+    // now is the draft consumed and its row retired.
     assert!(service.retry_operation(&send.id).expect("retry"));
     service
         .flush_account(&account, &gateway)
         .await
         .expect("flush retry");
-    assert_eq!(
-        gateway.delete_draft_calls.lock().unwrap().as_slice(),
-        &[MessageId::from("provider-draft-1")]
-    );
     assert!(service
         .list_pending_operations(&account)
         .unwrap()
         .is_empty());
+    assert!(
+        store
+            .get_message_summary(&account, &MessageId::from("provider-draft-1"))
+            .expect("effective read")
+            .is_none(),
+        "the settled retry consumes the draft"
+    );
 }
 
-/// Ruling 24 / D126 idempotency: a redelivered send (same operation id) that
-/// settles again must not double-destroy the already-consumed draft or error.
+/// Ruling 24 idempotency: a redelivered send (same operation id) that
+/// settles again must not double-destroy the already-consumed draft — the
+/// registry forgot the mapping at the first settlement, so the redelivered
+/// flush resolves no consume target.
 #[tokio::test]
 async fn redelivered_send_settlement_does_not_double_destroy() {
     let account = AccountId::from("primary");
@@ -1070,17 +1104,22 @@ async fn redelivered_send_settlement_does_not_double_destroy() {
         .expect("flush draft");
     let send = service
         .enqueue_send(&account, send_request_consuming("Outgoing", key.as_str()))
-        .expect("send queues");
+        .await
+        .expect("send queues")
+        .0;
     service
         .flush_account(&account, &gateway)
         .await
         .expect("flush send");
-    assert_eq!(gateway.delete_draft_calls.lock().unwrap().len(), 1);
+    assert_eq!(
+        gateway.send_consume_calls.lock().unwrap().as_slice(),
+        &[Some(MessageId::from("provider-draft-1"))]
+    );
 
     // Redelivery: the same send operation re-enqueued under its original id
     // (the settled original was pruned). The gateway dedups the submission;
-    // the settlement effect finds the draft already consumed (alias gone, no
-    // projected message) and enqueues nothing.
+    // the registry mapping is gone, so the redelivered push resolves NO
+    // consume target.
     service.enqueue_operation(send).expect("redelivered send");
     service
         .flush_account(&account, &gateway)
@@ -1093,8 +1132,8 @@ async fn redelivered_send_settlement_does_not_double_destroy() {
         "the redelivered send is deduplicated, not resubmitted"
     );
     assert_eq!(
-        gateway.delete_draft_calls.lock().unwrap().len(),
-        1,
+        gateway.send_consume_calls.lock().unwrap().as_slice(),
+        &[Some(MessageId::from("provider-draft-1")), None],
         "the consumed draft must not be destroyed a second time"
     );
     let pending = service.list_pending_operations(&account).expect("pending");
@@ -1118,6 +1157,7 @@ async fn send_with_an_unknown_draft_id_settles_without_a_destroy() {
             &account,
             send_request_consuming("Outgoing", "draft-never-saved"),
         )
+        .await
         .expect("send queues");
     let events = service
         .flush_account(&account, &gateway)
@@ -1550,7 +1590,9 @@ async fn scheduled_send_is_held_until_due_and_survives_restart() {
 
     let send = service
         .enqueue_send(&account, scheduled_request("Later", "2999-01-01T00:00:00Z"))
-        .expect("scheduled send queues");
+        .await
+        .expect("scheduled send queues")
+        .0;
     assert_eq!(send.state, OperationState::Pending);
     assert_eq!(send.send_at.as_deref(), Some("2999-01-01T00:00:00Z"));
 
@@ -1594,6 +1636,7 @@ async fn due_scheduled_send_flushes_and_a_past_send_at_sends_immediately() {
 
     service
         .enqueue_send(&account, scheduled_request("Past", "2020-01-01T00:00:00Z"))
+        .await
         .expect("past-scheduled send queues");
     assert!(
         service.has_due_scheduled_sends(&account).unwrap(),
@@ -1604,7 +1647,13 @@ async fn due_scheduled_send_flushes_and_a_past_send_at_sends_immediately() {
         .flush_account(&account, &gateway)
         .await
         .expect("flush");
-    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        1
+    );
     assert_eq!(
         *gateway.send_calls.lock().unwrap(),
         vec!["Past".to_string()]
@@ -1615,8 +1664,8 @@ async fn due_scheduled_send_flushes_and_a_past_send_at_sends_immediately() {
         .is_empty());
 }
 
-#[test]
-fn send_at_is_normalized_and_kept_out_of_the_payload() {
+#[tokio::test]
+async fn send_at_is_normalized_and_kept_out_of_the_payload() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store, Arc::new(TestConfig::default()));
@@ -1628,7 +1677,9 @@ fn send_at_is_normalized_and_kept_out_of_the_payload() {
             &account,
             scheduled_request("Zoned", "2999-06-01T12:30:00.200+02:00"),
         )
-        .expect("scheduled send queues");
+        .await
+        .expect("scheduled send queues")
+        .0;
     assert_eq!(send.send_at.as_deref(), Some("2999-06-01T10:30:01Z"));
 
     // The hold lives on the operation, not in the payload: the payload the
@@ -1636,20 +1687,23 @@ fn send_at_is_normalized_and_kept_out_of_the_payload() {
     let scheduled_payload = send.payload;
     let immediate = service
         .enqueue_send(&account, draft_request("Zoned"))
-        .expect("immediate send queues");
+        .await
+        .expect("immediate send queues")
+        .0;
     assert!(immediate.send_at.is_none());
     assert_eq!(scheduled_payload, immediate.payload);
     assert!(scheduled_payload.get("sendAt").is_none());
 }
 
-#[test]
-fn invalid_send_at_is_rejected_and_nothing_is_queued() {
+#[tokio::test]
+async fn invalid_send_at_is_rejected_and_nothing_is_queued() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store, Arc::new(TestConfig::default()));
 
     let error = service
         .enqueue_send(&account, scheduled_request("Bad", "tomorrow-9am"))
+        .await
         .expect_err("invalid sendAt must reject");
     assert!(error.to_string().contains("sendAt"));
     assert!(service
@@ -1672,9 +1726,15 @@ async fn undo_before_due_cancels_cleanly_nothing_ever_submitted() {
             &account,
             scheduled_request("Undone", "2999-01-01T00:00:00Z"),
         )
-        .expect("scheduled send queues");
+        .await
+        .expect("scheduled send queues")
+        .0;
 
-    assert!(service.discard_operation(&send.id).expect("cancel"));
+    assert!(service
+        .discard_operation(&send.id)
+        .await
+        .expect("cancel")
+        .is_some());
 
     let events = service
         .flush_account(&account, &gateway)
@@ -1690,7 +1750,11 @@ async fn undo_before_due_cancels_cleanly_nothing_ever_submitted() {
         .unwrap()
         .is_empty());
     // A late duplicate cancel is a clean no-op (already gone), not an error.
-    assert!(!service.discard_operation(&send.id).expect("re-cancel"));
+    assert!(service
+        .discard_operation(&send.id)
+        .await
+        .expect("re-cancel")
+        .is_none());
 }
 
 #[tokio::test]
@@ -1709,7 +1773,9 @@ async fn cancel_loses_cleanly_once_the_flush_has_claimed_the_send() {
             &account,
             scheduled_request("Racing", "2020-01-01T00:00:00Z"),
         )
-        .expect("send queues");
+        .await
+        .expect("send queues")
+        .0;
     assert!(
         store.claim_operation_for_flush(&send.id).expect("claim"),
         "the flusher claims the due send"
@@ -1717,6 +1783,7 @@ async fn cancel_loses_cleanly_once_the_flush_has_claimed_the_send() {
 
     let error = service
         .discard_operation(&send.id)
+        .await
         .expect_err("a claimed (inflight) send must not be discardable");
     assert!(error.to_string().contains("in-flight"));
 }
@@ -1746,7 +1813,9 @@ async fn undo_hold_is_stamped_and_judged_on_the_monotonic_clock() {
                 ..draft_request("Held")
             },
         )
-        .expect("undo-held send queues");
+        .await
+        .expect("undo-held send queues")
+        .0;
     let after = crate::service::outbox::schedule::monotonic_now_secs();
 
     assert_eq!(
@@ -1784,15 +1853,17 @@ async fn undo_hold_is_stamped_and_judged_on_the_monotonic_clock() {
 
 /// Send-later stays wall-judged: a monotonic clock at zero (fresh daemon)
 /// must not hold back a wall schedule that has passed.
-#[test]
-fn wall_scheduled_send_is_judged_by_wall_regardless_of_monotonic_skew() {
+#[tokio::test]
+async fn wall_scheduled_send_is_judged_by_wall_regardless_of_monotonic_skew() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
 
     let send = service
         .enqueue_send(&account, scheduled_request("Later", "2020-01-01T00:00:00Z"))
-        .expect("send-later queues");
+        .await
+        .expect("send-later queues")
+        .0;
     assert_eq!(send.send_at.as_deref(), Some("2020-01-01T00:00:00Z"));
     assert_eq!(send.hold_until_mono, None);
 
@@ -2033,6 +2104,7 @@ async fn send_settlement_carries_the_typed_filing_outcome() {
 
     service
         .enqueue_send(&account, draft_request("Outgoing"))
+        .await
         .expect("send queues");
     let events = service
         .flush_account(&account, &gateway)
@@ -2048,5 +2120,182 @@ async fn send_settlement_carries_the_typed_filing_outcome() {
         settled.payload["sendFiling"], "pendingFiling",
         "the filing outcome rides the settlement: {:?}",
         settled.payload
+    );
+}
+
+// ---------------------------------------------------------------------------
+// NS2 Slice 4: send as one intent — multi-row phase-aware fold + adoption.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn immediate_send_folds_the_sent_row_and_consumes_the_draft_instantly() {
+    // D172: an immediate (due) send's fold is [Tombstone(draft live row),
+    // Upsert(provisional Sent row)] the moment it is queued — before any
+    // provider call.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let key = MessageId::from("draft-local-instant");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .await
+        .expect("save draft");
+    let (send, events) = service
+        .enqueue_send(&account, send_request_consuming("Outgoing", key.as_str()))
+        .await
+        .expect("send queues");
+
+    let send_row_id = MessageId::from(send.entity.id.as_str());
+    let sent_row = store
+        .get_message_summary(&account, &send_row_id)
+        .expect("effective read")
+        .expect("the provisional Sent row exists from admission");
+    assert_eq!(sent_row.subject.as_deref(), Some("Outgoing"));
+    assert!(
+        store
+            .get_message_summary(&account, &key)
+            .expect("effective read")
+            .is_none(),
+        "the consumed draft leaves Drafts with the queued dispatch"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.payload["messageId"] == key.as_str()
+                && event.payload["deleted"] == serde_json::json!(true)
+        }),
+        "the draft prune is echoed"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.payload["messageId"] == send.entity.id.as_str()
+                && event.payload["projection"].is_object()
+        }),
+        "the provisional Sent row is echoed"
+    );
+}
+
+#[tokio::test]
+async fn held_send_folds_nothing_and_undo_needs_no_repair() {
+    // D172 phase-awareness: a HELD send leaves the draft visible and creates
+    // no Sent row — honest (still cancelable). Undo just removes the op.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let key = MessageId::from("draft-local-held");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .await
+        .expect("save draft");
+    let mut request = send_request_consuming("Outgoing", key.as_str());
+    request.undo_window_seconds = Some(3600);
+    let (send, _) = service
+        .enqueue_send(&account, request)
+        .await
+        .expect("held send queues");
+
+    assert!(
+        store
+            .get_message_summary(&account, &key)
+            .expect("effective read")
+            .is_some(),
+        "a held send leaves the draft visible (still cancelable)"
+    );
+    assert!(
+        store
+            .get_message_summary(&account, &MessageId::from(send.entity.id.as_str()))
+            .expect("effective read")
+            .is_none(),
+        "a held send creates no provisional Sent row"
+    );
+
+    let events = service
+        .discard_operation(&send.id)
+        .await
+        .expect("undo")
+        .expect("the held send was discarded");
+    assert!(
+        events
+            .iter()
+            .all(|event| event.payload["deleted"] != serde_json::json!(true)),
+        "no row is pruned by a held-send undo (nothing was folded)"
+    );
+    assert!(
+        store
+            .get_message_summary(&account, &key)
+            .expect("effective read")
+            .is_some(),
+        "the draft survives the undo untouched"
+    );
+}
+
+#[tokio::test]
+async fn provisional_sent_row_is_adopted_when_the_provider_copy_syncs() {
+    // Reconcile-by-intent-id: the settled send pins its provisional Sent row;
+    // when sync lands the provider copy (matched by the transport-shared
+    // Message-ID prefix), the sweep retires the provisional row with a prune
+    // echo.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::default());
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+    let gateway = MutationGateway::with_revision(1);
+
+    let (send, _) = service
+        .enqueue_send(&account_id, draft_request("Outgoing"))
+        .await
+        .expect("send queues");
+    service
+        .flush_account(&account_id, &gateway)
+        .await
+        .expect("flush settles the send");
+    let send_row_id = MessageId::from(send.entity.id.as_str());
+    assert!(
+        store
+            .get_message_summary(&account_id, &send_row_id)
+            .expect("effective read")
+            .is_some(),
+        "the settled send pins the provisional Sent row until sync"
+    );
+
+    // The provider copy arrives with the transport-shared Message-ID.
+    let token = posthaste_domain_model::send_identity_token(send.id.as_str());
+    let mut provider_copy = sample_message_record("provider-sent-1", 512, false);
+    provider_copy.rfc_message_id = Some(format!("{token}@real-domain.example"));
+    let gateway = MutationGateway::with_sync_batch(
+        2,
+        SyncBatch {
+            messages: vec![provider_copy],
+            ..SyncBatch::default()
+        },
+    );
+    let events = service
+        .flush_and_observe(&account_id, &gateway)
+        .await
+        .expect("observe adopts");
+
+    // Direct overlay assertion: the TestStore base mock synthesizes a row
+    // for ANY id once a sync applied (its long-standing pretense), so the
+    // effective read is not meaningful here — the invariant is that the
+    // provisional ENTRY retired.
+    assert!(
+        !store
+            .overlay_rows
+            .lock()
+            .expect("overlay lock")
+            .contains_key(send_row_id.as_str()),
+        "the provisional entry retires once the provider copy is in base"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.payload["messageId"] == send.entity.id.as_str()
+                && event.payload["deleted"] == serde_json::json!(true)
+        }),
+        "the adoption prunes the provisional id client-side"
     );
 }

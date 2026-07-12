@@ -173,7 +173,8 @@ impl MessageOverlayStore for DatabaseStore {
         let connection = self.read_connection()?;
         let row = connection
             .query_row(
-                "SELECT tombstone, thread_id, subject, from_name, from_email, received_at
+                "SELECT tombstone, thread_id, subject, from_name, from_email, received_at,
+                        draft_id, rfc_message_id
                  FROM message_overlay
                  WHERE account_id = ?1 AND id = ?2",
                 params![account_id.as_str(), message_id.as_str()],
@@ -185,12 +186,24 @@ impl MessageOverlayStore for DatabaseStore {
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, Option<String>>(4)?,
                         row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
                     ))
                 },
             )
             .optional()
             .map_err(sql_to_store_error)?;
-        let Some((tombstone, thread_id, subject, from_name, from_email, received_at)) = row else {
+        let Some((
+            tombstone,
+            thread_id,
+            subject,
+            from_name,
+            from_email,
+            received_at,
+            draft_id,
+            rfc_message_id,
+        )) = row
+        else {
             return Ok(None);
         };
         if tombstone != 0 {
@@ -231,8 +244,38 @@ impl MessageOverlayStore for DatabaseStore {
             received_at,
             mailbox_ids,
             keywords,
+            // Identity columns the retire/adoption logic keys on: `draft_id`
+            // discriminates the draft-aware keyword compare; `rfc_message_id`
+            // carries the provisional Sent row's adoption token.
+            draft_id,
+            rfc_message_id,
             ..Default::default()
         })))
+    }
+
+    fn find_base_message_id_by_rfc_prefix(
+        &self,
+        account_id: &AccountId,
+        prefix: &str,
+    ) -> Result<Option<MessageId>, StoreError> {
+        let connection = self.read_connection()?;
+        // Escape LIKE metacharacters in the token (`_` appears in sanitized
+        // op ids). Unindexed scan — acceptable: this probe runs only while a
+        // provisional Sent entry exists (short-lived, low cardinality).
+        let escaped = prefix
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        connection
+            .query_row(
+                "SELECT id FROM message
+                 WHERE account_id = ?1 AND rfc_message_id LIKE ?2 || '%' ESCAPE '\\'
+                 LIMIT 1",
+                params![account_id.as_str(), escaped],
+                |row| row.get::<_, String>(0).map(MessageId),
+            )
+            .optional()
+            .map_err(sql_to_store_error)
     }
 
     fn read_base_message_record(

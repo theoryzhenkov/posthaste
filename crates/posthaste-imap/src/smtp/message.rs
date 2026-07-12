@@ -174,17 +174,14 @@ fn smtp_mailbox(name: Option<String>, email: &str) -> Result<Mailbox, ImapAdapte
 ///
 /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
 pub fn smtp_stable_message_id(idempotency_key: &str, config: &SmtpConnectionConfig) -> String {
-    let sanitized: String = idempotency_key
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
+    let token = posthaste_domain_model::send_identity_token(idempotency_key);
     let domain = config
         .sender_email
         .rsplit_once('@')
         .map(|(_, domain)| domain)
         .filter(|domain| !domain.is_empty())
         .unwrap_or("posthaste.local");
-    format!("phsend-{sanitized}@{domain}")
+    format!("{token}@{domain}")
 }
 
 fn smtp_message_id_header_value(id: &str) -> String {

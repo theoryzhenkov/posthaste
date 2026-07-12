@@ -79,6 +79,7 @@ async fn jmap_send_without_prior_draft_settles_into_sent_and_leaves_drafts_empty
                 ..Default::default()
             },
         )
+        .await
         .expect("send queues");
 
     // The provider push: the send must EXECUTE and settle applied — nothing

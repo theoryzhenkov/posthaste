@@ -390,6 +390,30 @@ fn default_payload_version() -> i64 {
     1
 }
 
+/// The transport-shared send identity token derived from the outbox operation
+/// id (D84/D85): both gateways stamp `<token>@<domain>` as the outgoing
+/// RFC5322 `Message-ID` (and JMAP derives its create-ids from it), so every
+/// retry of the same send carries the same identity. Sanitized to the JMAP
+/// creation-id charset (the leading letters keep it valid on strict servers).
+///
+/// ONE derivation for the stamp side (gateways) and the match side (the
+/// overlay's provisional Sent-row adoption, which matches base rows by
+/// [`send_identity_prefix`] — domain-independent), so they cannot drift.
+pub fn send_identity_token(operation_id: &str) -> String {
+    let sanitized: String = operation_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    format!("phsend-{sanitized}")
+}
+
+/// The `Message-ID` prefix (`<token>@`) a send's provider copy carries in any
+/// domain — the adoption key for the provisional Sent overlay row (NS2
+/// Slice 4: reconcile-by-intent-id).
+pub fn send_identity_prefix(operation_id: &str) -> String {
+    format!("{}@", send_identity_token(operation_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
