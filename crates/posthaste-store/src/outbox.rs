@@ -98,7 +98,7 @@ fn entity_kind_str(kind: OperationEntityKind) -> &'static str {
 
 /// Columns selected by every operation read, in struct order.
 const OPERATION_COLUMNS: &str = "id, account_id, entity_kind, entity_id, kind, payload, \
-     payload_version, state, attempts, last_error, depends_on, send_at, hold_until_mono, \
+     payload_version, state, attempts, last_error, send_at, hold_until_mono, \
      created_at, updated_at";
 
 fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>> {
@@ -114,11 +114,10 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
     let state_str: String = row.get(7)?;
     let attempts: i64 = row.get(8)?;
     let last_error: Option<String> = row.get(9)?;
-    let depends_on: Option<String> = row.get(10)?;
-    let send_at: Option<String> = row.get(11)?;
-    let hold_until_mono: Option<i64> = row.get(12)?;
-    let created_at: String = row.get(13)?;
-    let updated_at: String = row.get(14)?;
+    let send_at: Option<String> = row.get(10)?;
+    let hold_until_mono: Option<i64> = row.get(11)?;
+    let created_at: String = row.get(12)?;
+    let updated_at: String = row.get(13)?;
     Ok((|| {
         let payload: Value = serde_json::from_str(&payload_str)
             .map_err(|error| StoreError::Failure(format!("invalid outbox payload: {error}")))?;
@@ -135,7 +134,6 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
             state: parse_operation_state(&state_str)?,
             attempts: attempts.max(0) as u32,
             last_error,
-            depends_on: depends_on.map(OperationId::from),
             send_at,
             hold_until_mono,
             created_at,
@@ -169,10 +167,10 @@ impl OperationOutboxStore for DatabaseStore {
             tx.execute(
                 "INSERT OR IGNORE INTO outbox_operation (
                     id, account_id, entity_kind, entity_id, kind, payload,
-                    payload_version, state, attempts, last_error, depends_on,
+                    payload_version, state, attempts, last_error,
                     send_at, hold_until_mono, created_at, updated_at
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     operation.id.as_str(),
                     operation.account_id.as_str(),
@@ -184,7 +182,6 @@ impl OperationOutboxStore for DatabaseStore {
                     operation_state_str(operation.state),
                     operation.attempts as i64,
                     operation.last_error,
-                    operation.depends_on.as_ref().map(OperationId::as_str),
                     operation.send_at,
                     operation.hold_until_mono,
                     operation.created_at,
@@ -224,7 +221,12 @@ impl OperationOutboxStore for DatabaseStore {
             .map_err(sql_to_store_error)?;
         let rows = statement
             .query_map(
-                params![account_id.as_str(), wall_now, mono_now, OUTBOX_FLUSH_BATCH_LIMIT],
+                params![
+                    account_id.as_str(),
+                    wall_now,
+                    mono_now,
+                    OUTBOX_FLUSH_BATCH_LIMIT
+                ],
                 row_to_operation,
             )
             .map_err(sql_to_store_error)?;
@@ -334,6 +336,31 @@ impl OperationOutboxStore for DatabaseStore {
             )
             .map_err(sql_to_store_error)?;
             Ok(())
+        })
+    }
+
+    fn replace_operation_payload(
+        &self,
+        id: &OperationId,
+        payload: &Value,
+    ) -> Result<bool, StoreError> {
+        let payload = serde_json::to_string(payload)
+            .map_err(|error| StoreError::Failure(format!("invalid outbox payload: {error}")))?;
+        // D174 draft-save coalescing: the payload swap and the still-`pending`
+        // predicate are ONE statement, racing the flusher's guarded claim the
+        // same way cancel does — a claimed (inflight) save is never rewritten
+        // mid-push, and a swap that lands keeps the operation's id (its create
+        // idempotency identity) and kind.
+        self.write_transaction(|tx| {
+            let replaced = tx
+                .execute(
+                    "UPDATE outbox_operation
+                     SET payload = ?2, attempts = 0, last_error = NULL, updated_at = ?3
+                     WHERE id = ?1 AND state = 'pending'",
+                    params![id.as_str(), payload, now_iso8601()?],
+                )
+                .map_err(sql_to_store_error)?;
+            Ok(replaced > 0)
         })
     }
 

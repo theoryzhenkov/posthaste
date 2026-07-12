@@ -58,9 +58,7 @@ impl MailService {
     ) -> Result<Pushed, FlushError> {
         // NS2 Slice 2: ONE decode boundary — the typed intent — instead of a
         // per-arm parse_payload with per-site fallbacks.
-        let intent = operation
-            .intent()
-            .map_err(FlushError::permanent)?;
+        let intent = operation.intent().map_err(FlushError::permanent)?;
         match intent {
             MailIntent::SaveDraft {
                 create: true,
@@ -88,10 +86,14 @@ impl MailService {
                 // M70 (D136): the op carries the stable draft key; resolve it
                 // to the CURRENT live id here, immediately before the gateway
                 // call, so the replace targets the freshest mapping (in-session
-                // rotations and sync-observed ones alike).
+                // rotations and sync-observed ones alike). A typed miss (D153)
+                // means the draft was CONFIRMED destroyed since enqueue (e.g.
+                // deleted on another device) — the queued edit still wants
+                // saving, so push it as a fresh create (last-writer-wins; the
+                // settlement re-registers the mapping).
                 let replace_id =
                     self.resolve_draft_flush_target(account_id, &operation.entity.id)?;
-                let replace = MessageId::from(replace_id.as_str());
+                let replace = replace_id.as_deref().map(MessageId::from);
                 // DS3/D133: a re-flush of this save (attempts > 0) may have already
                 // committed the prior-draft destroy on an earlier attempt, so an
                 // already-gone replace target is benign; a first delivery's failed
@@ -107,7 +109,7 @@ impl MailService {
                     .save_draft(
                         account_id,
                         &request,
-                        Some(&replace),
+                        replace.as_ref(),
                         idempotent_redelivery,
                         operation.id.as_str(),
                     )
@@ -124,9 +126,18 @@ impl MailService {
                 // M70 (D136): resolve the stable key to the live destroy target
                 // at flush (see [`Self::resolve_draft_flush_target`]) — a
                 // registry repoint between enqueue and flush retargets the
-                // destroy to the draft's current live id.
-                let target_id =
-                    self.resolve_draft_flush_target(account_id, &operation.entity.id)?;
+                // destroy to the draft's current live id. A typed miss (D153):
+                // the registry forgets only on CONFIRMED destruction, so the
+                // draft is already gone — settle as done without a provider
+                // call.
+                let Some(target_id) =
+                    self.resolve_draft_flush_target(account_id, &operation.entity.id)?
+                else {
+                    return Ok(Pushed::Entity {
+                        assigned_entity_id: None,
+                        destroyed_entity_id: Some(operation.entity.id.clone()),
+                    });
+                };
                 let target = MessageId::from(target_id.as_str());
                 // D133: only an idempotent redelivery (a send-consume re-enqueue)
                 // masks a provider `notFound` as success; a user discard's
@@ -178,5 +189,3 @@ impl MailService {
         }
     }
 }
-
-

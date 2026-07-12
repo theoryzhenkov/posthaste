@@ -295,34 +295,48 @@ impl AuthorityServer {
         Ok(operation)
     }
 
-    /// Write: save (create or update) a draft and nudge a flush.
+    /// Write: save (create or update) a draft and nudge a flush. The service
+    /// folds the save into the overlay plane and returns the projection echo
+    /// (NS2 Slice 3 — instant drafts); publishing it is what moves the
+    /// client's Drafts list before any provider round trip.
     pub(crate) async fn save_draft(
         &self,
         account_id: AccountId,
         draft_id: Option<MessageId>,
         request: SendMessageRequest,
     ) -> Result<Operation, RuntimeError> {
-        let operation = self.service.save_draft(&account_id, draft_id, request)?;
+        let (operation, events) = self
+            .service
+            .save_draft(&account_id, draft_id, request)
+            .await?;
+        self.publish_events(&events);
         self.trigger_outbox_flush(&account_id).await;
         Ok(operation)
     }
 
     /// Write: delete a draft and nudge a flush (the direct REST command path —
     /// user-initiated, so a provider `notFound` surfaces rather than masking,
-    /// D133).
+    /// D133). The tombstone fold hides the row immediately; the deletion echo
+    /// is published here.
     pub(crate) async fn delete_draft(
         &self,
         account_id: AccountId,
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
-        let operation = self.service.delete_draft(&account_id, draft_id, false)?;
+        let (operation, events) = self
+            .service
+            .delete_draft(&account_id, draft_id, false)
+            .await?;
+        self.publish_events(&events);
         self.trigger_outbox_flush(&account_id).await;
         Ok(operation)
     }
 
     /// Write: discard a draft through the optimistic runtime-mutation path
-    /// (D130) — resolves the stable id, removes the local row + emits the
-    /// reconciling event, and queues the non-idempotent provider destroy.
+    /// (D130/NS2 Slice 3) — resolves the stable id, folds the tombstone into
+    /// the overlay + emits the reconciling event, and queues the
+    /// non-idempotent provider destroy (or discards purely locally when the
+    /// draft never reached the provider).
     pub(crate) async fn discard_draft(
         &self,
         account_id: AccountId,

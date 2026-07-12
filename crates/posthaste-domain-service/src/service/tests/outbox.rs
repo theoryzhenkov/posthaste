@@ -15,15 +15,17 @@ fn draft_entity(id: &str) -> OperationEntity {
     }
 }
 
-#[test]
-fn save_draft_without_id_enqueues_a_create_with_a_temp_id() {
+#[tokio::test]
+async fn save_draft_without_id_enqueues_a_create_with_a_temp_id() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store, Arc::new(TestConfig::default()));
 
     let op = service
         .save_draft(&account, None, draft_request("Hello"))
-        .expect("save draft");
+        .await
+        .expect("save draft")
+        .0;
 
     assert_eq!(op.kind, OperationKind::DraftCreate);
     assert_eq!(op.entity.kind, OperationEntityKind::Draft);
@@ -31,27 +33,46 @@ fn save_draft_without_id_enqueues_a_create_with_a_temp_id() {
     assert_eq!(op.state, OperationState::Pending);
 }
 
-#[test]
-fn save_draft_with_id_enqueues_an_update_ordered_after_pending_ops() {
+#[tokio::test]
+async fn save_draft_on_the_same_key_coalesces_into_the_queued_save() {
+    // D174: a second save while the first is still queued REPLACES its payload
+    // in place — same op id (the create idempotency identity), same kind — so
+    // the outbox holds at most one queued save per compose session and no
+    // dependency chain exists.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store, Arc::new(TestConfig::default()));
 
     let create = service
         .save_draft(&account, None, draft_request("Hello"))
-        .expect("create");
+        .await
+        .expect("create")
+        .0;
     let draft_id = MessageId::from(create.entity.id.as_str());
-    let update = service
+    let coalesced = service
         .save_draft(&account, Some(draft_id), draft_request("Edited"))
-        .expect("update");
+        .await
+        .expect("coalesced save")
+        .0;
 
-    assert_eq!(update.kind, OperationKind::DraftUpdate);
-    assert_eq!(update.entity.id, create.entity.id);
-    assert_eq!(update.depends_on.as_ref(), Some(&create.id));
+    assert_eq!(coalesced.id, create.id, "same operation, payload replaced");
+    assert_eq!(
+        coalesced.kind,
+        OperationKind::DraftCreate,
+        "kind never changes on a coalesce"
+    );
+    assert_eq!(coalesced.entity.id, create.entity.id);
+    let request: SendMessageRequest =
+        serde_json::from_value(coalesced.payload).expect("payload decodes");
+    assert_eq!(request.subject, "Edited", "last writer wins");
+    let pending = service
+        .list_pending_operations(&account)
+        .expect("pending list");
+    assert_eq!(pending.len(), 1, "one queued save per compose session");
 }
 
-#[test]
-fn save_draft_resuming_an_existing_provider_draft_updates_in_place() {
+#[tokio::test]
+async fn save_draft_resuming_an_existing_provider_draft_updates_in_place() {
     // A draft resumed by its provider id (no alias — a legacy draft saved before
     // stable ids, or one created elsewhere) must edit in place, not duplicate.
     // `mailbox_ids` non-empty makes the draft "exist" in the projection.
@@ -65,14 +86,16 @@ fn save_draft_resuming_an_existing_provider_draft_updates_in_place() {
             Some(MessageId::from("provider-draft-42")),
             draft_request("Edited"),
         )
-        .expect("save draft");
+        .await
+        .expect("save draft")
+        .0;
 
     assert_eq!(op.kind, OperationKind::DraftUpdate);
     assert_eq!(op.entity.id, "provider-draft-42");
 }
 
-#[test]
-fn save_draft_for_a_brand_new_key_still_creates() {
+#[tokio::test]
+async fn save_draft_for_a_brand_new_key_still_creates() {
     // The same path with no existing message (empty mailbox set) is a genuine
     // new draft, so it creates rather than trying to replace a non-existent id.
     let account = AccountId::from("primary");
@@ -85,13 +108,15 @@ fn save_draft_for_a_brand_new_key_still_creates() {
             Some(MessageId::from("draft-local-new")),
             draft_request("Hello"),
         )
-        .expect("save draft");
+        .await
+        .expect("save draft")
+        .0;
 
     assert_eq!(op.kind, OperationKind::DraftCreate);
 }
 
-#[test]
-fn save_draft_stamps_the_stable_id_into_the_payload() {
+#[tokio::test]
+async fn save_draft_stamps_the_stable_id_into_the_payload() {
     // The stable key is injected into the request payload so the gateway writes
     // it as the X-Posthaste-Draft-Id header.
     let account = AccountId::from("primary");
@@ -104,7 +129,9 @@ fn save_draft_stamps_the_stable_id_into_the_payload() {
             Some(MessageId::from("draft-local-xyz")),
             draft_request("Hello"),
         )
-        .expect("save draft");
+        .await
+        .expect("save draft")
+        .0;
 
     let request: SendMessageRequest =
         serde_json::from_value(op.payload).expect("payload is a SendMessageRequest");
@@ -122,6 +149,7 @@ async fn stable_draft_key_reuses_provider_id_across_flush() {
     // First save creates; flushing assigns a provider id and updates the alias.
     service
         .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .await
         .expect("create");
     service
         .flush_account(&account, &gateway)
@@ -133,7 +161,9 @@ async fn stable_draft_key_reuses_provider_id_across_flush() {
     // carries the STABLE key (M70); the provider id is resolved at flush.
     let edit = service
         .save_draft(&account, Some(key.clone()), draft_request("Edited"))
-        .expect("edit");
+        .await
+        .expect("edit")
+        .0;
     assert_eq!(edit.kind, OperationKind::DraftUpdate);
     assert_eq!(edit.entity.id, key.as_str());
 
@@ -165,6 +195,7 @@ async fn ds3_draft_update_redelivery_flag_tracks_attempts() {
     // Create + flush. A create carries no replace target → the flag is false.
     service
         .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .await
         .expect("create");
     service
         .flush_account(&account, &gateway)
@@ -175,6 +206,7 @@ async fn ds3_draft_update_redelivery_flag_tracks_attempts() {
     // retries, making the second attempt a genuine redelivery.
     service
         .save_draft(&account, Some(key), draft_request("v2"))
+        .await
         .expect("edit");
     gateway
         .save_draft_results
@@ -195,15 +227,17 @@ async fn ds3_draft_update_redelivery_flag_tracks_attempts() {
     assert_eq!(flags.as_slice(), &[false, false, true]);
 }
 
-#[test]
-fn delete_draft_enqueues_a_delete() {
+#[tokio::test]
+async fn delete_draft_enqueues_a_delete() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store, Arc::new(TestConfig::default()));
 
     let op = service
         .delete_draft(&account, MessageId::from("provider-7"), false)
-        .expect("delete draft");
+        .await
+        .expect("delete draft")
+        .0;
 
     assert_eq!(op.kind, OperationKind::DraftDelete);
     assert_eq!(op.entity.id, "provider-7");
@@ -243,11 +277,15 @@ async fn flush_create_then_update_reconciles_temp_id_and_settles() {
         .await
         .expect("flush should succeed");
 
-    // Both ops settled and were pruned.
-    assert_eq!(events.len(), 2);
-    assert!(events
-        .iter()
-        .all(|event| event.topic == "operation.settled"));
+    // Both ops settled and were pruned. (Slice 3: each settlement also emits
+    // message.updated echoes — the rotation prune + the projection swap.)
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        2
+    );
     assert!(service
         .list_pending_operations(&account)
         .expect("list pending")
@@ -343,8 +381,13 @@ async fn draft_create_lost_response_retry_yields_one_draft() {
         .flush_account(&account, &gateway)
         .await
         .expect("retry flush settles");
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].topic, "operation.settled");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        1
+    );
     assert!(service
         .list_pending_operations(&account)
         .expect("pending")
@@ -370,6 +413,7 @@ async fn draft_update_lost_response_retry_yields_one_draft() {
     // Create + flush → provider-draft-1.
     service
         .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .await
         .expect("create");
     service
         .flush_account(&account, &gateway)
@@ -380,6 +424,7 @@ async fn draft_update_lost_response_retry_yields_one_draft() {
     // response.
     service
         .save_draft(&account, Some(key), draft_request("v2"))
+        .await
         .expect("edit");
     gateway
         .save_draft_results
@@ -609,7 +654,10 @@ async fn retry_rejects_a_non_failed_operation() {
 }
 
 #[tokio::test]
-async fn failed_draft_predecessor_cancels_dependent_update() {
+async fn failed_draft_save_no_longer_blocks_later_ops() {
+    // D174: dependency chains are gone. A permanently-failed save rests
+    // Failed (retryable/discardable), and a later save on the same key
+    // flushes independently instead of being cancelled behind it.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -646,16 +694,22 @@ async fn failed_draft_predecessor_cancels_dependent_update() {
         .await
         .expect("flush returns ok");
 
-    assert_eq!(events.len(), 2);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        2,
+        "both ops settle: one failed, one applied"
+    );
     let pending = service.list_pending_operations(&account).expect("pending");
-    assert_eq!(pending.len(), 2);
-    assert!(pending
-        .iter()
-        .all(|operation| operation.state == OperationState::Failed));
+    assert_eq!(pending.len(), 1, "only the failed create remains");
+    assert_eq!(pending[0].state, OperationState::Failed);
+    assert_eq!(pending[0].kind, OperationKind::DraftCreate);
     assert_eq!(
         gateway.save_draft_calls.lock().unwrap().len(),
-        1,
-        "dependent update must not flush after create failure",
+        2,
+        "the later save flushed despite the earlier failure",
     );
 }
 
@@ -897,6 +951,7 @@ async fn send_settlement_consumes_the_saved_draft_in_one_flush() {
 
     service
         .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .await
         .expect("save draft");
     service
         .flush_account(&account, &gateway)
@@ -947,6 +1002,7 @@ async fn parked_send_keeps_the_draft_until_settled_success() {
 
     service
         .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .await
         .expect("save draft");
     service
         .flush_account(&account, &gateway)
@@ -1006,6 +1062,7 @@ async fn redelivered_send_settlement_does_not_double_destroy() {
 
     service
         .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .await
         .expect("save draft");
     service
         .flush_account(&account, &gateway)
@@ -1089,15 +1146,12 @@ async fn delete_draft_flushes_and_settles() {
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
 
+    // Through the service API (not raw queue_operation): admission reserves
+    // the registry mapping, so the flush-time resolve targets the key itself
+    // for this never-rotated provider id.
     service
-        .queue_operation(
-            &account,
-            draft_entity("provider-7"),
-            OperationKind::DraftDelete,
-            serde_json::json!({ "idempotentRedelivery": true }),
-            None,
-            None,
-        )
+        .delete_draft(&account, MessageId::from("provider-7"), true)
+        .await
         .expect("queue delete");
 
     let events = service
@@ -1252,6 +1306,7 @@ async fn draft_delete_resolves_the_post_rotation_live_id_at_flush() {
     // Save + flush: the registry maps the key to provider-draft-1.
     service
         .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .await
         .expect("save");
     service
         .flush_account(&account, &gateway)
@@ -1261,7 +1316,9 @@ async fn draft_delete_resolves_the_post_rotation_live_id_at_flush() {
     // Enqueue the delete. It carries the stable key, not a resolved snapshot.
     let delete = service
         .delete_draft(&account, key.clone(), false)
-        .expect("delete enqueues");
+        .await
+        .expect("delete enqueues")
+        .0;
     assert_eq!(
         delete.entity.id,
         key.as_str(),
@@ -1298,6 +1355,7 @@ async fn draft_mapping_survives_enqueue_and_is_forgotten_at_settlement() {
 
     service
         .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .await
         .expect("save");
     service
         .flush_account(&account, &gateway)
@@ -1306,6 +1364,7 @@ async fn draft_mapping_survives_enqueue_and_is_forgotten_at_settlement() {
 
     service
         .delete_draft(&account, key.clone(), false)
+        .await
         .expect("delete enqueues");
     assert_eq!(
         store
@@ -1346,6 +1405,7 @@ async fn failed_draft_delete_keeps_the_mapping() {
 
     service
         .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .await
         .expect("save");
     service
         .flush_account(&account, &gateway)
@@ -1354,6 +1414,7 @@ async fn failed_draft_delete_keeps_the_mapping() {
 
     service
         .delete_draft(&account, key.clone(), false)
+        .await
         .expect("delete enqueues");
     gateway
         .delete_draft_results
@@ -1393,6 +1454,7 @@ async fn settlement_forget_converges_with_the_sync_observed_forget() {
 
     service
         .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .await
         .expect("save");
     service
         .flush_account(&account, &gateway)
@@ -1400,6 +1462,7 @@ async fn settlement_forget_converges_with_the_sync_observed_forget() {
         .expect("save flush");
     service
         .delete_draft(&account, key.clone(), true)
+        .await
         .expect("delete enqueues");
 
     // Sync observes the draft confirmed-gone FIRST (M69's prune-half forget).
@@ -1443,6 +1506,7 @@ async fn settled_draft_delete_event_names_the_resolved_live_id() {
 
     service
         .save_draft(&account, Some(key.clone()), draft_request("v1"))
+        .await
         .expect("save");
     service
         .flush_account(&account, &gateway)
@@ -1450,6 +1514,7 @@ async fn settled_draft_delete_event_names_the_resolved_live_id() {
         .expect("save flush");
     service
         .delete_draft(&account, key.clone(), false)
+        .await
         .expect("delete enqueues");
 
     let events = service
@@ -1742,5 +1807,211 @@ fn wall_scheduled_send_is_judged_by_wall_regardless_of_monotonic_skew() {
     assert!(
         held.is_empty(),
         "a future wall schedule holds no matter how large mono grows"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// NS2 Slice 3: draft intents fold into the overlay plane.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn save_draft_folds_an_instant_overlay_row() {
+    // The draft is VISIBLE the moment the save is queued: the fold writes the
+    // overlay row and the returned echo carries the projection — no provider
+    // round trip, no sync lag (the old 10-15s draft appearance).
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    let (operation, events) = service
+        .save_draft(&account, None, draft_request("Hello"))
+        .await
+        .expect("save draft");
+    let live_id = MessageId::from(operation.entity.id.as_str());
+
+    let summary = store
+        .get_message_summary(&account, &live_id)
+        .expect("effective read")
+        .expect("the queued save IS a visible draft row");
+    assert_eq!(summary.subject.as_deref(), Some("Hello"));
+    assert!(summary.keywords.iter().any(|keyword| keyword == "$draft"));
+    assert_eq!(
+        summary.draft_id.as_deref(),
+        Some(operation.entity.id.as_str())
+    );
+
+    let echo = events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MESSAGE_UPDATED)
+        .expect("the save emits a projection echo");
+    assert_eq!(echo.payload["messageId"], operation.entity.id.as_str());
+    assert!(
+        echo.payload["projection"].is_object(),
+        "echo carries the folded projection: {:?}",
+        echo.payload
+    );
+}
+
+#[tokio::test]
+async fn discard_of_a_never_flushed_draft_is_purely_local() {
+    // A draft that never reached the provider (no base row, no save in
+    // flight) discards with NO provider op at all: saves superseded, registry
+    // forgotten, overlay entry removed, deletion echoed.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    let (operation, _) = service
+        .save_draft(&account, None, draft_request("Hello"))
+        .await
+        .expect("save draft");
+    let key = MessageId::from(operation.entity.id.as_str());
+
+    let ack = service
+        .discard_draft(&account, key.clone())
+        .await
+        .expect("discard");
+
+    assert!(
+        service
+            .list_pending_operations(&account)
+            .expect("pending")
+            .is_empty(),
+        "no provider op: the queued save is superseded, no delete is enqueued"
+    );
+    assert!(
+        store
+            .get_message_summary(&account, &key)
+            .expect("effective read")
+            .is_none(),
+        "the draft row is gone from every effective view"
+    );
+    assert!(ack
+        .events
+        .iter()
+        .any(|event| event.payload["deleted"] == serde_json::json!(true)));
+
+    // The registry forgot the key: a re-save under it is a fresh CREATE.
+    let (resaved, _) = service
+        .save_draft(&account, Some(key), draft_request("Again"))
+        .await
+        .expect("re-save");
+    assert_eq!(resaved.kind, OperationKind::DraftCreate);
+}
+
+#[tokio::test]
+async fn discard_of_a_synced_draft_tombstones_and_enqueues_the_destroy() {
+    // Base has the draft (synced provider truth): the discard hides it via
+    // the overlay tombstone and queues the non-idempotent provider destroy —
+    // base itself is UNTOUCHED (the NS1 seal; the old path's direct
+    // destroy_message base write is dead).
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("state-1", &["drafts"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let key = MessageId::from("provider-draft-42");
+
+    let ack = service
+        .discard_draft(&account, key.clone())
+        .await
+        .expect("discard");
+
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].kind, OperationKind::DraftDelete);
+    assert!(
+        store
+            .get_message_summary(&account, &key)
+            .expect("effective read")
+            .is_none(),
+        "the tombstone hides the base row from every effective view"
+    );
+    assert!(
+        store
+            .read_base_message_record(&account, &key)
+            .expect("base read")
+            .is_some(),
+        "base is sync-owned and untouched by the discard"
+    );
+    assert!(ack
+        .events
+        .iter()
+        .any(|event| event.payload["deleted"] == serde_json::json!(true)));
+}
+
+#[tokio::test]
+async fn draft_save_settlement_carries_the_row_across_the_id_rotation() {
+    // At settlement the provider assigned a new id (JMAP update = create-new
+    // + destroy-old). The overlay entry moves: old id dropped (+ prune echo),
+    // new id pinned with the settled fold (+ projection echo) — the draft
+    // never blinks out between settlement and the next sync.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-rotate");
+
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .await
+        .expect("save");
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush");
+
+    let overlay = store.overlay_rows.lock().expect("overlay lock");
+    assert!(
+        !overlay.contains_key(key.as_str()),
+        "the pre-flush entry under the stable key is gone"
+    );
+    let pinned = overlay
+        .get("provider-draft-1")
+        .expect("the settled fold is pinned at the assigned provider id");
+    let pinned = pinned.as_ref().expect("a folded row, not a tombstone");
+    assert_eq!(pinned.subject.as_deref(), Some("Hello"));
+    assert_eq!(pinned.draft_id.as_deref(), Some(key.as_str()));
+    drop(overlay);
+
+    assert!(
+        events.iter().any(|event| {
+            event.topic == EVENT_TOPIC_MESSAGE_UPDATED
+                && event.payload["messageId"] == key.as_str()
+                && event.payload["deleted"] == serde_json::json!(true)
+        }),
+        "the stale pre-rotation row is pruned client-side"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.topic == EVENT_TOPIC_MESSAGE_UPDATED
+                && event.payload["messageId"] == "provider-draft-1"
+                && event.payload["projection"].is_object()
+        }),
+        "the settled row is projected at its new id"
+    );
+}
+
+#[tokio::test]
+async fn draft_content_resumes_from_the_queued_save() {
+    // Offline compose resume: the overlay row carries no body, so the queued
+    // save's payload IS the content authority until it settles.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let (operation, _) = service
+        .save_draft(&account, None, draft_request("Hello"))
+        .await
+        .expect("save draft");
+    let live_id = MessageId::from(operation.entity.id.as_str());
+
+    let result = service
+        .get_draft_content(&account, &live_id, None)
+        .await
+        .expect("draft content");
+    assert_eq!(result.content.subject, "Hello");
+    assert_eq!(result.content.body, "draft body");
+    assert_eq!(
+        result.content.draft_id.as_deref(),
+        Some(operation.entity.id.as_str())
     );
 }

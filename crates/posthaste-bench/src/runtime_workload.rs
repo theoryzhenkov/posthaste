@@ -97,7 +97,11 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
     build
         .api_bridge
         .store
-        .apply_sync_batch(&posthaste_domain_service::BaseWrite::legacy("bench base seed"), &account.id, &batch)
+        .apply_sync_batch(
+            &posthaste_domain_service::BaseWrite::legacy("bench base seed"),
+            &account.id,
+            &batch,
+        )
         .map_err(|error| anyhow!("seed inbox: {error}"))?;
 
     let link = build

@@ -18,8 +18,8 @@ use posthaste_contract_core::{
 use posthaste_domain_model::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
-    SecretStoreError, SmtpTransportSettings, SortDirection, SyncBatch,
-    SyncCursor, SyncObject, SyncTrigger, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
+    SecretStoreError, SmtpTransportSettings, SortDirection, SyncBatch, SyncCursor, SyncObject,
+    SyncTrigger, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_domain_service::SecretStore;
@@ -3217,7 +3217,7 @@ async fn mark_read_echo_carries_projection_and_no_count_deltas() {
         .api_bridge
         .store
         .apply_sync_batch(
-           &posthaste_domain_service::BaseWrite::legacy("test base seed"),
+            &posthaste_domain_service::BaseWrite::legacy("test base seed"),
             &account.id,
             &SyncBatch {
                 // Counts are maintained by the store's mailbox-counter triggers

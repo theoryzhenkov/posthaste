@@ -85,8 +85,7 @@ pub const OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
 
 /// BE-H2: a transient-failing outbox op crossed the skip threshold and no
 /// longer halts the account's flush drain.
-pub const OUTBOX_TRANSIENT_OP_SKIPPED: LogEvent =
-    LogEvent::new("outbox.transient_op_skipped");
+pub const OUTBOX_TRANSIENT_OP_SKIPPED: LogEvent = LogEvent::new("outbox.transient_op_skipped");
 
 pub const JMAP_EMAIL_DELTA_COMPLETED: LogEvent = LogEvent::new("jmap.email.delta.completed");
 pub const JMAP_EMAIL_DELTA_STARTED: LogEvent = LogEvent::new("jmap.email.delta.started");

@@ -179,6 +179,16 @@ impl MailService {
         message_id: &MessageId,
         gateway: Option<&dyn MailGateway>,
     ) -> Result<DraftContentResult, ServiceError> {
+        // NS2 Slice 3: a still-queued save is the FRESHEST content — serve it
+        // straight from the op payload. Offline compose resume depends on
+        // this: the instant-draft overlay row carries no body, and the
+        // provider copy (if any) predates the queued edit.
+        if let Some(content) = self.queued_draft_content(account_id, message_id)? {
+            return Ok(DraftContentResult {
+                content,
+                events: Vec::new(),
+            });
+        }
         let result = self
             .get_message_detail(account_id, message_id, gateway)
             .await?;
@@ -207,11 +217,11 @@ impl MailService {
             let owned_message_id = message_id.clone();
             let cache_result = offload(move || {
                 sync_writer.apply_message_body(
-                &crate::BaseWrite::reconciler(),
-                &owned_account_id,
-                &owned_message_id,
-                &fetched,
-            )
+                    &crate::BaseWrite::reconciler(),
+                    &owned_account_id,
+                    &owned_message_id,
+                    &fetched,
+                )
             })
             .await?;
             events.extend(cache_result.events);
@@ -239,6 +249,54 @@ impl MailService {
             },
             events,
         })
+    }
+
+    /// The content of the newest still-queued save for the draft `message_id`
+    /// names, decoded from the op payload — `None` when no save is queued
+    /// (the projection/raw-MIME paths serve then). `message_id` may be the
+    /// live row id (the list row the user clicked) or the stable key itself;
+    /// the projected `draft_id` bridges the two.
+    fn queued_draft_content(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<DraftContent>, ServiceError> {
+        let key = self
+            .message_detail_reader
+            .get_message_summary(account_id, message_id)?
+            .and_then(|summary| summary.draft_id)
+            .unwrap_or_else(|| message_id.to_string());
+        let newest_save = self
+            .outbox
+            .list_unsettled_operations(account_id)?
+            .into_iter()
+            .rfind(|operation| {
+                operation.entity.kind == OperationEntityKind::Draft
+                    && operation.entity.id == key
+                    && operation.kind.is_draft_save()
+                    && matches!(
+                        operation.state,
+                        OperationState::Pending
+                            | OperationState::Inflight
+                            | OperationState::Applied
+                    )
+            });
+        let Some(operation) = newest_save else {
+            return Ok(None);
+        };
+        let Ok(posthaste_domain_model::MailIntent::SaveDraft { request, .. }) = operation.intent()
+        else {
+            return Ok(None);
+        };
+        Ok(Some(DraftContent {
+            from: request.from,
+            to: request.to,
+            cc: request.cc,
+            bcc: request.bcc,
+            subject: request.subject,
+            body: request.body,
+            draft_id: Some(key),
+        }))
     }
 
     /// Download a blob for a message, preferring already-cached raw bytes.
@@ -340,43 +398,59 @@ pub(crate) fn message_assertions(
         .iter()
         .filter(|operation| operation.entity.id == message_id)
     {
-        if let Some(assertion) = intent_fold_effect(operation)? {
+        if let Some(FoldEffect::Assert(assertion)) = intent_fold_effect(operation)? {
             assertions.push(assertion);
         }
     }
     Ok(assertions)
 }
 
-/// NS2 Slice 2: THE effect interpreter for the overlay fold — the one place a
-/// typed intent maps to its fold effect. State assertions yield a
-/// [`MessageAssertion`]; entity intents (drafts/sends) yield `None` today —
-/// their multi-row effects land with Slices 3/4 (D172/D173).
+/// The fold effect a typed intent contributes to the overlay plane (NS2
+/// D171/D172): what becomes VISIBLE, decided from the gesture + the replicated
+/// plane only. `Send` yields `None` until Slice 4 lands its multi-row effects.
+pub(crate) enum FoldEffect {
+    /// A message state assertion, replayed by the shared predictor.
+    Assert(MessageAssertion),
+    /// A queued draft save: the overlay upserts a row synthesized from the
+    /// request (instant drafts — the row exists the moment the op is queued).
+    UpsertDraft(posthaste_domain_model::SendMessageRequest),
+    /// A queued draft removal: the overlay tombstones the draft's live row.
+    TombstoneDraft,
+}
+
+/// NS2 Slices 2+3: THE effect interpreter for the overlay fold — the one place
+/// a typed intent maps to its fold effect (D172: effects are total — folding a
+/// tombstone over a nonexistent row is a no-op downstream).
 pub(crate) fn intent_fold_effect(
     operation: &Operation,
-) -> Result<Option<MessageAssertion>, ServiceError> {
+) -> Result<Option<FoldEffect>, ServiceError> {
     let intent = operation.intent().map_err(|error| {
         ServiceError::from(posthaste_domain_model::GatewayError::Internal(error))
     })?;
     Ok(match intent {
         posthaste_domain_model::MailIntent::SetKeywords(command) => {
-            Some(MessageAssertion::SetKeywords {
+            Some(FoldEffect::Assert(MessageAssertion::SetKeywords {
                 add: command.add,
                 remove: command.remove,
-            })
+            }))
         }
         posthaste_domain_model::MailIntent::ReplaceMailboxes(command) => {
-            Some(MessageAssertion::ReplaceMailboxes {
+            Some(FoldEffect::Assert(MessageAssertion::ReplaceMailboxes {
                 mailbox_ids: command
                     .mailbox_ids
                     .into_iter()
                     .map(|mailbox_id| mailbox_id.0)
                     .collect(),
-            })
+            }))
         }
-        posthaste_domain_model::MailIntent::Destroy => Some(MessageAssertion::Destroy),
-        posthaste_domain_model::MailIntent::SaveDraft { .. }
-        | posthaste_domain_model::MailIntent::DiscardDraft { .. }
-        | posthaste_domain_model::MailIntent::Send(_) => None,
+        posthaste_domain_model::MailIntent::Destroy => {
+            Some(FoldEffect::Assert(MessageAssertion::Destroy))
+        }
+        posthaste_domain_model::MailIntent::SaveDraft { request, .. } => {
+            Some(FoldEffect::UpsertDraft(request))
+        }
+        posthaste_domain_model::MailIntent::DiscardDraft { .. } => Some(FoldEffect::TombstoneDraft),
+        posthaste_domain_model::MailIntent::Send(_) => None,
     })
 }
 

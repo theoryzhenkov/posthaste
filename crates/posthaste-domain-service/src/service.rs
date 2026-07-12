@@ -4,9 +4,9 @@ use posthaste_observability::{events, ph_warn};
 use serde_json::json;
 
 use crate::{
-    AutomationBackfillStore, BaseWrite, CacheStore, ConfigDiff, ConfigRepository, ConversationReadStore,
-    DraftRegistry, EventStore, MailGateway, MailStore, MailboxReadStore, MailboxRoleOverrideStore,
-    MessageCommandStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
+    AutomationBackfillStore, BaseWrite, CacheStore, ConfigDiff, ConfigRepository,
+    ConversationReadStore, DraftRegistry, EventStore, MailGateway, MailStore, MailboxReadStore,
+    MailboxRoleOverrideStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
     MessageOverlayStore, OperationOutboxStore, ServiceResultExt, SharedConfigRepository,
     SmartMailboxStore, SnoozeStore, SourceDataStore, SourceProjectionStore, SyncStateStore,
     SyncWriteStore, TagReadStore,
@@ -17,11 +17,11 @@ use posthaste_domain_model::{
     DraftContent, DraftContentResult, GatewayError, Id, Identity, MailQueryRule, MailboxId,
     MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
     MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
-    OperationOutcome, OperationSettlement, OperationState, Recipient,
-    SendMessageRequest, ServiceError, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
-    SmartMailboxSummary, SortDirection, StoreError, SyncMode, SyncObject, SyncTrigger, TagSummary,
-    ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_UPDATED,
-    EVENT_TOPIC_OPERATION_SETTLED, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    OperationOutcome, OperationSettlement, OperationState, Recipient, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    SortDirection, StoreError, SyncMode, SyncObject, SyncTrigger, TagSummary, ThreadId, ThreadView,
+    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_OPERATION_SETTLED,
+    EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 
 mod automation;
@@ -55,7 +55,6 @@ pub struct MailService {
     smart_mailboxes: Arc<dyn SmartMailboxStore>,
     sync_state: Arc<dyn SyncStateStore>,
     message_mailboxes: Arc<dyn MessageMailboxStore>,
-    message_commands: Arc<dyn MessageCommandStore>,
     sync_writer: Arc<dyn SyncWriteStore>,
     events: Arc<dyn EventStore>,
     source_projections: Arc<dyn SourceProjectionStore>,
@@ -85,7 +84,6 @@ impl MailService {
             smart_mailboxes: store.clone(),
             sync_state: store.clone(),
             message_mailboxes: store.clone(),
-            message_commands: store.clone(),
             sync_writer: store.clone(),
             events: store.clone(),
             source_projections: store.clone(),
@@ -100,7 +98,7 @@ impl MailService {
     }
 }
 
-/// Runs a synchronous `SyncWriteStore`/`MessageCommandStore` call on the tokio
+/// Runs a synchronous `SyncWriteStore` (or other sync-port) call on the tokio
 /// **blocking pool** via [`tokio::task::spawn_blocking`] (D63/M23b): those
 /// ports stay plain `&self` sync traits (so `posthaste-store`'s own unit
 /// tests keep calling them with no `Arc`/runtime — see the ports' doc
