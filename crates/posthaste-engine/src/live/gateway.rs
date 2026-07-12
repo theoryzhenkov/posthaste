@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use posthaste_domain_model::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailboxId, MessageId, MutationOutcome,
-    ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncOutcome,
+    ReplyContext, SendFiling, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor,
+    SyncOutcome,
 };
 use posthaste_domain_service::{MailGateway, PushTransport, SyncChunkSink};
 
@@ -192,7 +193,7 @@ impl MailGateway for LiveJmapGateway {
         _account_id: &AccountId,
         request_data: &SendMessageRequest,
         idempotency_key: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<SendFiling, GatewayError> {
         crate::live_compose::send_message(self, request_data, idempotency_key).await
     }
 

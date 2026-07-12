@@ -20,6 +20,8 @@ pub(super) enum Pushed {
     Entity {
         assigned_entity_id: Option<String>,
         destroyed_entity_id: Option<String>,
+        /// For an applied send: the typed Sent-copy filing outcome (D154).
+        send_filing: Option<posthaste_domain_model::SendFiling>,
     },
     /// A message state assertion: settle now via the provider readback.
     /// `rejected` is `Some(reason)` when the provider rejected the change — the
@@ -77,6 +79,7 @@ impl MailService {
                 Ok(Pushed::Entity {
                     assigned_entity_id: Some(new_id.to_string()),
                     destroyed_entity_id: None,
+                    send_filing: None,
                 })
             }
             MailIntent::SaveDraft {
@@ -118,6 +121,7 @@ impl MailService {
                 Ok(Pushed::Entity {
                     assigned_entity_id: Some(new_id.to_string()),
                     destroyed_entity_id: None,
+                    send_filing: None,
                 })
             }
             MailIntent::DiscardDraft {
@@ -136,6 +140,7 @@ impl MailService {
                     return Ok(Pushed::Entity {
                         assigned_entity_id: None,
                         destroyed_entity_id: Some(operation.entity.id.clone()),
+                        send_filing: None,
                     });
                 };
                 let target = MessageId::from(target_id.as_str());
@@ -149,6 +154,7 @@ impl MailService {
                 Ok(Pushed::Entity {
                     assigned_entity_id: None,
                     destroyed_entity_id: Some(target_id),
+                    send_filing: None,
                 })
             }
             MailIntent::Send(request) => {
@@ -157,13 +163,14 @@ impl MailService {
                 // EmailSubmission create-id + `ifInState` and the SMTP/JMAP
                 // Message-ID from it (D84/D85), so a re-forward of a send that
                 // already committed is deduplicated, not duplicated.
-                gateway
+                let filing = gateway
                     .send_message(account_id, &request, operation.id.as_str())
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {
                     assigned_entity_id: None,
                     destroyed_entity_id: None,
+                    send_filing: Some(filing),
                 })
             }
             MailIntent::SetKeywords(command) => {

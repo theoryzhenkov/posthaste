@@ -196,6 +196,11 @@ pub trait MailGateway: Send + Sync {
     /// implementation returns [`GatewayError::DispatchUncertain`] so the outbox
     /// parks the send instead of blind-resending it (D86).
     ///
+    /// Success returns how the Sent copy was filed (D154): `Filed` when the
+    /// provider confirmed placement, `PendingFiling` when delivery committed
+    /// but the Sent copy is not confirmed filed — typed, never a
+    /// warn-and-forget.
+    ///
     /// @spec docs/L1-jmap#methods-used
     /// @spec docs/eph/RFC-L2-provider-reliability#32-send-exactly-once
     async fn send_message(
@@ -203,7 +208,7 @@ pub trait MailGateway: Send + Sync {
         account_id: &AccountId,
         request: &SendMessageRequest,
         idempotency_key: &str,
-    ) -> Result<(), GatewayError>;
+    ) -> Result<SendFiling, GatewayError>;
 
     /// Persist a draft to the provider's Drafts mailbox, returning the new
     /// message id. When `replace` is set, the prior draft message is removed

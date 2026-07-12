@@ -120,6 +120,7 @@ impl MailService {
                 Ok(Pushed::Entity {
                     assigned_entity_id,
                     destroyed_entity_id,
+                    send_filing,
                 }) => {
                     // The live id the draft's visible row is keyed under going
                     // INTO this settlement (pre-repoint) — the overlay entry a
@@ -156,6 +157,7 @@ impl MailService {
                         outcome: OperationOutcome::Applied,
                         assigned_entity_id,
                         error: None,
+                        send_filing,
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
                     if operation.kind == OperationKind::DraftDelete {
@@ -307,6 +309,7 @@ impl MailService {
                         outcome: OperationOutcome::Failed,
                         assigned_entity_id: None,
                         error: Some(message),
+                        send_filing: None,
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
                     if let Some(correction) =
