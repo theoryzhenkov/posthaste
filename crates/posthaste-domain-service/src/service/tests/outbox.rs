@@ -1766,11 +1766,16 @@ async fn undo_before_due_cancels_cleanly_nothing_ever_submitted() {
         .flush_account(&account, &gateway)
         .await
         .expect("flush");
-    assert!(events.is_empty());
     assert!(
         gateway.send_calls.lock().unwrap().is_empty(),
         "an undone send must never reach the provider"
     );
+    // Slice 5: the undo re-queued the compose as a durable draft save (the
+    // restore artifact); it flushes as an ordinary draft — never a send.
+    assert!(events
+        .iter()
+        .all(|event| event.topic != "operation.dispatch_uncertain"));
+    assert_eq!(gateway.save_draft_calls.lock().unwrap().len(), 1);
     assert!(service
         .list_pending_operations(&account)
         .unwrap()
@@ -2467,5 +2472,191 @@ async fn lingering_destroyed_draft_is_repaired_with_one_idempotent_delete() {
     assert!(
         pending_after.iter().all(|op| op.id != repair_id),
         "the settled repair is pruned"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// NS2 Slice 5: SEND-grid L2 cells (DESIGN-L2-test-taxonomy §5).
+// ---------------------------------------------------------------------------
+
+/// S-CONV-2 (`send_l2_nofile_reconciles`): a delivered-but-UNFILED send
+/// (`PendingFiling` — the server ignored the Drafts→Sent move) still
+/// converges to Sent on the later reconcile: adoption retires the
+/// provisional row AND files the synced copy with an ordinary mailbox
+/// assertion.
+#[tokio::test]
+async fn send_l2_nofile_reconciles() {
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::default());
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Ok(posthaste_domain_model::SendFiling::PendingFiling));
+
+    let (send, _) = service
+        .enqueue_send(&account_id, draft_request("Unfiled"))
+        .await
+        .expect("send queues");
+    service
+        .flush_account(&account_id, &gateway)
+        .await
+        .expect("flush settles pendingFiling");
+
+    // The provider copy syncs back OUTSIDE Sent (the unfiled Drafts ghost).
+    let token = posthaste_domain_model::send_identity_token(send.id.as_str());
+    let mut ghost = sample_message_record("ghost-1", 256, false);
+    ghost.rfc_message_id = Some(format!("{token}@real.example"));
+    ghost.mailbox_ids = vec![MailboxId::from("drafts")];
+    let sync_gateway = MutationGateway::with_sync_batch(
+        2,
+        SyncBatch {
+            messages: vec![ghost],
+            ..SyncBatch::default()
+        },
+    );
+    service
+        .flush_and_observe(&account_id, &sync_gateway)
+        .await
+        .expect("observe adopts + files");
+
+    // Adoption retired the provisional row and queued the filing repair.
+    assert!(
+        !store
+            .overlay_rows
+            .lock()
+            .expect("overlay")
+            .contains_key(send.entity.id.as_str()),
+        "the provisional Sent row retired on adoption"
+    );
+    let pending = service
+        .list_pending_operations(&account_id)
+        .expect("pending");
+    assert_eq!(pending.len(), 1, "one filing repair queued: {pending:?}");
+    assert_eq!(pending[0].kind, OperationKind::ReplaceMailboxes);
+    assert_eq!(pending[0].entity.id, "ghost-1");
+    // The effective read already shows the copy IN SENT (the fold).
+    let filed = store
+        .get_message_summary(&account_id, &MessageId::from("ghost-1"))
+        .expect("effective read")
+        .expect("adopted copy visible");
+    assert_eq!(
+        filed.mailbox_ids,
+        vec![MailboxId::from("sent")],
+        "Drafts→Sent converges on reconcile (no silent Drafts ghost)"
+    );
+}
+
+/// S-VERD-4 (`send_l2_verdict_survives_restart`): the parked verdict is
+/// DURABLE — a fresh service over the same store still shows the
+/// dispatch-uncertain op with its reason, and an explicit retry resolves it.
+#[tokio::test]
+async fn send_l2_verdict_survives_restart() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::DispatchUncertain(
+            "send timed out; delivery uncertain".to_string(),
+        )));
+
+    let (send, _) = service
+        .enqueue_send(&account, draft_request("Parked"))
+        .await
+        .expect("send queues");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush parks");
+
+    // "Restart": the verdict is re-derivable from the durable outbox alone —
+    // no volatile bridge state required.
+    let reborn = MailService::new(store, Arc::new(TestConfig::default()));
+    let pending = reborn.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].state, OperationState::DispatchUncertain);
+    assert!(
+        pending[0]
+            .last_error
+            .as_deref()
+            .is_some_and(|reason| reason.contains("uncertain")),
+        "the parked reason survives: {:?}",
+        pending[0].last_error
+    );
+
+    // The explicit retry re-arms and settles (deduplicated submission).
+    assert!(reborn.retry_operation(&send.id).expect("retry"));
+    reborn
+        .flush_account(&account, &gateway)
+        .await
+        .expect("retry flush");
+    assert!(reborn
+        .list_pending_operations(&account)
+        .expect("pending")
+        .is_empty());
+    assert_eq!(
+        gateway.committed_send_keys.lock().unwrap().len(),
+        1,
+        "one delivery across park + retry (S-EO-1)"
+    );
+}
+
+/// S-ISO-1 (`send_l2_poison_does_not_wedge_outbox`): a permanently-poisoned
+/// send settles Failed and the drain CONTINUES — the op queued behind it
+/// still flushes in the same pass.
+#[tokio::test]
+async fn send_l2_poison_does_not_wedge_outbox() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected(
+            "poisoned: recipient domain refused".to_string(),
+        )));
+
+    service
+        .enqueue_send(&account, draft_request("Poisoned"))
+        .await
+        .expect("poison queues");
+    service
+        .enqueue_send(&account, draft_request("Healthy"))
+        .await
+        .expect("healthy queues");
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("one pass");
+
+    assert_eq!(
+        gateway.send_calls.lock().unwrap().as_slice(),
+        &["Poisoned".to_string(), "Healthy".to_string()],
+        "the healthy send flushed in the SAME pass, behind the poison"
+    );
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1, "only the poisoned send remains");
+    assert_eq!(pending[0].state, OperationState::Failed);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.topic == "operation.settled")
+            .count(),
+        2,
+        "both ops settled: one failed, one applied"
     );
 }
