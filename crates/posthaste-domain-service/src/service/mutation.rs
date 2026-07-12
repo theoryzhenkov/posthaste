@@ -280,8 +280,23 @@ impl MailService {
                                 };
                                 keywords_covered && folded.mailbox_ids == base.mailbox_ids
                             }
-                            // Folded row but no base row: not yet confirmed.
-                            (Some(_), None) => false,
+                            // Folded row but no base row. PINNED rows stay: a
+                            // settled draft save awaiting its provider copy
+                            // (`draft_id` set) or a provisional Sent row
+                            // awaiting adoption (`phsend-` identity). Anything
+                            // else is a GHOST — its op settled and base no
+                            // longer holds the id, so the provider row either
+                            // rotated (IMAP moves re-key the id; the new row is
+                            // already in base) or was removed remotely. Keeping
+                            // it duplicated moved IMAP messages forever (caught
+                            // by the Stalwart parity suite).
+                            (Some(folded), None) => {
+                                folded.draft_id.is_none()
+                                    && !folded
+                                        .rfc_message_id
+                                        .as_deref()
+                                        .is_some_and(|rfc| rfc.starts_with("phsend-"))
+                            }
                         })
                     })
                     .await?
