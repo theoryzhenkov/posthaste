@@ -1,7 +1,7 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 #[cfg(test)]
 use posthaste_domain_model::{ReplaceMailboxesCommand, SetKeywordsCommand};
-use crate::sql_cache::CachedSql;
 
 /// Stores a lazily fetched body (HTML, text, raw ref), emits
 /// `EVENT_TOPIC_MESSAGE_BODY_CACHED`, and returns the updated message detail.
@@ -216,6 +216,7 @@ pub(crate) fn replace_mailboxes_tx(
 
 /// Deletes a message and all junction rows, refreshes thread/mailbox
 /// projections, and emits a deletion event.
+#[cfg(test)]
 pub(crate) fn destroy_message_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,

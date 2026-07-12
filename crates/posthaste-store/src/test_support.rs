@@ -102,19 +102,18 @@ impl crate::DatabaseStore {
         )
     }
 
+    // NS2 Slice 3: the `MessageCommandStore` port died with the draft-discard
+    // cutover (no production base writer besides the reconciler remains);
+    // base-deletion tests reach the transaction helper directly.
     pub(crate) fn destroy_message(
         &self,
         account_id: &posthaste_domain_model::AccountId,
         message_id: &posthaste_domain_model::MessageId,
         cursor: Option<&posthaste_domain_model::SyncCursor>,
     ) -> Result<posthaste_domain_model::CommandResult, posthaste_domain_model::StoreError> {
-        posthaste_domain_service::MessageCommandStore::destroy_message(
-            self,
-            &posthaste_domain_service::BaseWrite::legacy("store-test base seed"),
-            account_id,
-            message_id,
-            cursor,
-        )
+        self.write_transaction(|tx| {
+            crate::mutations::destroy_message_tx(tx, account_id, message_id, cursor)
+        })
     }
 
     pub(crate) fn set_keywords(

@@ -45,7 +45,6 @@ async fn consecutive_keyword_assertions_keep_local_cursor_and_do_not_chain() {
     // The two keyword assertions coalesce into a single merged op.
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].kind, OperationKind::SetKeywords);
-    assert!(pending[0].depends_on.is_none());
     let command =
         serde_json::from_value::<SetKeywordsCommand>(pending[0].payload.clone()).expect("payload");
     assert!(command.add.is_empty(), "flag then unflag nets no additions");

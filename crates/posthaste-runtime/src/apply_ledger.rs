@@ -641,7 +641,6 @@ mod tests {
             state: OperationState::Pending,
             attempts: 0,
             last_error: None,
-            depends_on: None,
             send_at: None,
             hold_until_mono: None,
             created_at: "1970-01-01T00:00:00Z".to_string(),

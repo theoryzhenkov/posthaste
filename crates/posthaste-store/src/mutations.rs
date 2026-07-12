@@ -20,7 +20,11 @@ mod projection_tracking;
 pub(crate) mod sync_batch;
 pub(crate) mod types;
 
-pub(crate) use commands::{apply_message_body_tx, destroy_message_tx};
+pub(crate) use commands::apply_message_body_tx;
+// NS2 Slice 3: production base deletion is sync-only; the destroy helper
+// survives for base-seeding tests (`test_support`).
+#[cfg(test)]
+pub(crate) use commands::destroy_message_tx;
 #[cfg(test)]
 pub(crate) use commands::{replace_mailboxes_tx, set_keywords_tx};
 pub(crate) use events::{event_log_bounds, list_events};

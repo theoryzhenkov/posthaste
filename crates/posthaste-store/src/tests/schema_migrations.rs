@@ -56,12 +56,14 @@ fn downgrade_to_v0(path: &std::path::Path) {
              AFTER UPDATE OF is_read ON message BEGIN
                  UPDATE mailbox SET unread_emails = unread_emails WHERE 0;
              END;
+             ALTER TABLE outbox_operation ADD COLUMN depends_on TEXT;
              PRAGMA user_version = 0;",
         )
         .expect("synthetic v0 downgrade");
-    // A first-outbox-design legacy row parked as `conflicted` (pre-v2): the
-    // read-time fudge that used to recover it is gone; migration v2 must
-    // rewrite it durably.
+    // A first-outbox-design legacy row parked as `conflicted` (pre-v2), with a
+    // chain edge (pre-v3): the read-time fudge that used to recover the state
+    // is gone; migration v2 must rewrite it durably, and migration v3 must
+    // drop the `depends_on` column.
     connection
         .execute(
             "INSERT INTO outbox_operation (
@@ -142,6 +144,17 @@ fn legacy_v0_database_migrates_once_on_open() -> Result<(), StoreError> {
         )
         .expect("legacy row present");
     assert_eq!(state, "pending", "migration v2 recovers conflicted rows");
+    // v3 (D174): dependency chains are gone — the column with them.
+    let has_depends_on: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM pragma_table_info('outbox_operation') WHERE name = 'depends_on'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .expect("column probe");
+    assert!(!has_depends_on, "migration v3 drops depends_on");
     Ok(())
 }
 

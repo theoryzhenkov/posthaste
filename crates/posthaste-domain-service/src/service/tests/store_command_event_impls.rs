@@ -1,28 +1,5 @@
 use super::*;
 
-impl MessageCommandStore for TestStore {
-    fn destroy_message(
-        &self,
-        _base: &BaseWrite,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-    ) -> Result<CommandResult, StoreError> {
-        let mut state = self
-            .mutation_state
-            .lock()
-            .expect("mutation state lock poisoned");
-        state.mailbox_ids.clear();
-        if let Some(cursor) = cursor {
-            state.cursor = Some(cursor.clone());
-        }
-        Ok(CommandResult {
-            detail: None,
-            events: Vec::new(),
-        })
-    }
-}
-
 impl EventStore for TestStore {
     fn list_events(&self, _filter: &EventFilter) -> Result<Vec<DomainEvent>, StoreError> {
         Ok(Vec::new())
@@ -125,10 +102,30 @@ impl OperationOutboxStore for TestStore {
             .filter(|op| {
                 &op.account_id == account_id
                     && op.state.is_flushable()
-                    && (op.send_at.as_deref().is_some_and(|send_at| send_at <= wall_now)
+                    && (op
+                        .send_at
+                        .as_deref()
+                        .is_some_and(|send_at| send_at <= wall_now)
                         || op.hold_until_mono.is_some_and(|hold| hold <= mono_now))
             })
             .count() as u64)
+    }
+
+    fn replace_operation_payload(
+        &self,
+        id: &OperationId,
+        payload: &serde_json::Value,
+    ) -> Result<bool, StoreError> {
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        for op in ops.iter_mut() {
+            if &op.id == id && op.state == OperationState::Pending {
+                op.payload = payload.clone();
+                op.attempts = 0;
+                op.last_error = None;
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn list_pending_operations(

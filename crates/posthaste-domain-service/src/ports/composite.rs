@@ -21,7 +21,6 @@ pub trait MailStore:
     + MessageMailboxStore
     + SyncWriteStore
     + CacheStore
-    + MessageCommandStore
     + EventStore
     + SourceProjectionStore
     + SourceDataStore
@@ -50,7 +49,6 @@ impl<T> MailStore for T where
         + MessageMailboxStore
         + SyncWriteStore
         + CacheStore
-        + MessageCommandStore
         + EventStore
         + SourceProjectionStore
         + SourceDataStore

@@ -1,34 +1,9 @@
 use super::*;
 
-/// Local message mutation persistence boundary.
-///
-/// Stays plain synchronous `&self` (not `async`, D63/M23b design note): like
-/// [`SyncWriteStore`](super::SyncWriteStore), `posthaste-store`'s own unit
-/// tests call these directly on a bare `DatabaseStore` with no runtime — an
-/// `async` port would force every one of those tests to acquire one. The
-/// async offload lives at the call site instead: `MailService` reaches these
-/// through `Arc<dyn MessageCommandStore>` and, from its async methods, wraps
-/// the call in `tokio::task::spawn_blocking` (`apply_assertion_to_canonical`)
-/// so the per-message-action write — invoked directly from the HTTP request
-/// path — never occupies a tokio worker thread.
-///
-/// @spec docs/eph/RFC-L2-lifecycle-and-errors#d63
-/// NS1: `set_keywords`/`replace_mailboxes` are GONE — state assertions fold
-/// into the overlay plane and never write base. One method survives for the
-/// last non-reconciler base writer (the draft-discard destroy), sealed behind
-/// the [`BaseWrite`] witness until its NS2 cutover deletes it too.
-pub trait MessageCommandStore: Send + Sync {
-    /// Delete a message row from BASE, updating the sync cursor.
-    ///
-    /// @spec docs/L1-jmap#methods-used
-    fn destroy_message(
-        &self,
-        base: &BaseWrite,
-        account_id: &AccountId,
-        message_id: &MessageId,
-        cursor: Option<&SyncCursor>,
-    ) -> Result<CommandResult, StoreError>;
-}
+// NS1 → NS2 Slice 3: `MessageCommandStore` is GONE. State assertions fold
+// into the overlay plane (NS1), and the last non-reconciler base writer — the
+// draft-discard optimistic destroy — died when discards became tombstone
+// folds. Sync's reconciler is the only production base writer left.
 
 /// Domain event log boundary.
 pub trait EventStore: Send + Sync {
@@ -131,6 +106,17 @@ pub trait OperationOutboxStore: Send + Sync {
         attempts: u32,
         last_error: Option<&str>,
     ) -> Result<(), StoreError>;
+
+    /// Atomically replace a still-`pending` operation's payload (D174 draft-save
+    /// coalescing: last-writer-wins per compose session), returning whether the
+    /// swap landed. `false` means the flusher claimed the op concurrently — the
+    /// caller enqueues a fresh operation instead. Resets `attempts`/`last_error`
+    /// (the new payload is a new piece of work). Never changes id or kind.
+    fn replace_operation_payload(
+        &self,
+        id: &OperationId,
+        payload: &serde_json::Value,
+    ) -> Result<bool, StoreError>;
 
     /// Rewrite a temporary entity id to its reconciled provider id across all of
     /// an account's operations (temp-id reconciliation after first flush).
