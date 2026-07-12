@@ -92,6 +92,9 @@ pub const OUTBOX_HELD_SEND_ENSURE_FAILED: LogEvent =
 /// idempotent cleanup delete was enqueued (D175 lingering-destruction repair).
 pub const OUTBOX_LINGERING_TOMBSTONE_REPAIRED: LogEvent =
     LogEvent::new("outbox.lingering_tombstone_repaired");
+/// An adopted sent copy synced back OUTSIDE Sent (unfiled delivery) — a
+/// mailbox assertion files it (S-CONV-2 convergence repair).
+pub const SEND_ADOPTED_COPY_UNFILED: LogEvent = LogEvent::new("send.adopted_copy_unfiled");
 pub const OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("outbox.followup_sync_trigger_failed");
 

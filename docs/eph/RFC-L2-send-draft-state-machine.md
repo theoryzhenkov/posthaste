@@ -322,10 +322,38 @@ registry-resolved LIVE id:
   (the row exists only locally); the window is one sync. Slice 5's
   "Sent — filing"/pending copy should account for it.
 
-**REMAINING: Slice 5** — verdict surfacing (client undo-send API, "Sent —
-filing"/needs-attention states over `sendFiling` + `dispatch_uncertain`) +
-the DESIGN-L2-test-taxonomy SEND-grid L2 cells (S-CONV-2, S-VERD-2/3/4,
-S-EO-1/2, S-ISO-1) via the L2 fault seam.
+**Slice 5 LANDED (2026-07-12) — NS2 COMPLETE.**
+
+- **Verdict surfacing:** `sendFiling == pendingFiling` raises a truthful
+  "Sent — still filing the Sent-folder copy" notification (S-VERD-3's L4
+  half); dispatch-uncertain already had its needs-attention notification +
+  Outbox affordance (S-VERD-2).
+- **S-CONV-2 convergence repair:** adoption now FILES a Drafts ghost — an
+  adopted provider copy that is in Drafts and not in Sent gets one ordinary
+  mailbox assertion (Sent ADDED, only Drafts dropped; never a wholesale
+  replace — the first cut stripped All-Mail-style memberships, which deletes
+  the copy on Gmail semantics; caught by the testkit IMAP suite).
+- **Undo-send is truly one intent:** the client's persist-then-schedule
+  two-step is DELETED. A held send folds a DRAFT-FORM row (D172 as ratified
+  — offline-visible/cancelable with no client save), the eager ensure
+  mirrors it provider-side, and an UNDO re-queues the send's own content as
+  a durable draft save (last-writer-wins) — restorable offline via
+  `get_draft_content`, which now also resolves stable keys through the
+  registry and falls back to a parked/failed send op's payload (D125's
+  content authority).
+- **SEND-grid L2 cells:** `send_l2_nofile_reconciles` (S-CONV-2),
+  `send_l2_verdict_survives_restart` (S-VERD-4, the durable-outbox half),
+  `send_l2_poison_does_not_wedge_outbox` (S-ISO-1) — plus the Slice 4
+  cells already covering S-VERD-3, S-EO-1/2. Grid statuses updated in
+  DESIGN-L2-test-taxonomy §5. The domain-service TestStore now serves
+  drafts/sent roles, so the fold's mailbox membership is exercised for real.
+
+**Remaining after NS2 (tracked in the taxonomy grid, not this RFC):** the
+L3/L4 confirming rows (real-Stalwart + e2e — incl. pinning the JMAP
+implicit-response ordering assumption), BE-H3's client-side send-bridge
+durability (the L2 verdict itself is durable), S-ATOM-1 crash-atomicity
+injection, and the replica-core fold-vocabulary move if offline client-side
+prediction is ever wanted.
 
 **Slice 0 LANDED (2026-07-11):** `PRAGMA user_version` + the ordered migration
 runner + the downgrade guard (`Conflict`, never `Corruption` — a newer database

@@ -372,8 +372,35 @@ impl MailService {
                         discarded_by_draft_op = false;
                     }
                 }
-                (Some(FoldEffect::SendEffects { .. }), EntityFoldRole::SendConsumedDraft) => {
-                    if !send_is_held(op) {
+                (
+                    Some(FoldEffect::SendEffects {
+                        request,
+                        consumes_draft_key,
+                    }),
+                    EntityFoldRole::SendConsumedDraft,
+                ) => {
+                    if send_is_held(op) {
+                        // D172 as ratified: a HELD send folds a DRAFT-FORM
+                        // row — the hold's content is visible and cancelable
+                        // even with no client-side save (the eager ensure
+                        // step mirrors it provider-side, D173).
+                        let drafts_mailbox = match &drafts_mailbox {
+                            Some(resolved) => resolved.clone(),
+                            None => drafts_mailbox
+                                .insert(self.drafts_mailbox_id(account_id)?)
+                                .clone(),
+                        };
+                        let key = consumes_draft_key.unwrap_or_default();
+                        state = Some(synthesize_draft_record(
+                            state.take(),
+                            &request,
+                            op,
+                            drafts_mailbox.as_ref(),
+                            message_id,
+                            &key,
+                        ));
+                        discarded_by_draft_op = false;
+                    } else {
                         // The due send consumes its draft: the row leaves
                         // Drafts optimistically with the dispatch.
                         state = None;
