@@ -189,6 +189,26 @@ impl MailService {
                 events: Vec::new(),
             });
         }
+        // NS2 Slice 5: the caller may address the draft by its STABLE key —
+        // the undo-restore path reopens the kept/ensured draft by compose key
+        // (D173). When no row lives at the given id but the registry maps it,
+        // read the LIVE row instead.
+        let message_id = if self
+            .message_detail_reader
+            .get_message_summary(account_id, message_id)?
+            .is_none()
+        {
+            match self
+                .draft_registry
+                .resolve_draft_entity(account_id, message_id.as_str())?
+            {
+                Some(live) if live != message_id.as_str() => MessageId::from(live.as_str()),
+                _ => message_id.clone(),
+            }
+        } else {
+            message_id.clone()
+        };
+        let message_id = &message_id;
         let result = self
             .get_message_detail(account_id, message_id, gateway)
             .await?;
@@ -281,11 +301,35 @@ impl MailService {
                             | OperationState::Applied
                     )
             });
-        let Some(operation) = newest_save else {
-            return Ok(None);
+        let request = match newest_save {
+            Some(operation) => {
+                let Ok(posthaste_domain_model::MailIntent::SaveDraft { request, .. }) =
+                    operation.intent()
+                else {
+                    return Ok(None);
+                };
+                Some(request)
+            }
+            // No queued save: a parked/failed SEND op still carries the
+            // newest content for this key (D125 — the recovery artifact's
+            // content authority while the op rests).
+            None => self
+                .outbox
+                .list_pending_operations(account_id)?
+                .into_iter()
+                .rev()
+                .find_map(|operation| {
+                    if operation.kind != OperationKind::Send {
+                        return None;
+                    }
+                    let Ok(posthaste_domain_model::MailIntent::Send(request)) = operation.intent()
+                    else {
+                        return None;
+                    };
+                    (request.draft_id.as_deref() == Some(key.as_str())).then_some(request)
+                }),
         };
-        let Ok(posthaste_domain_model::MailIntent::SaveDraft { request, .. }) = operation.intent()
-        else {
+        let Some(request) = request else {
             return Ok(None);
         };
         Ok(Some(DraftContent {

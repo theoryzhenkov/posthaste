@@ -55,6 +55,30 @@ impl MailService {
             if let Some(operation) = snapshot {
                 if operation.kind == OperationKind::Send {
                     events = self.unwind_send_fold(&operation).await?;
+                    // Undo restores the FULL compose durably: the send's
+                    // content (the newest edit, D174 last-writer-wins) is
+                    // re-queued as an ordinary draft save under its compose
+                    // key — resumable offline, ensured provider-side on the
+                    // next flush. No client persist-then-schedule needed.
+                    if let Ok(posthaste_domain_model::MailIntent::Send(request)) =
+                        operation.intent()
+                    {
+                        if let Some(key) = request
+                            .draft_id
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|key| !key.is_empty())
+                        {
+                            let (_save, save_events) = self
+                                .save_draft(
+                                    &operation.account_id,
+                                    Some(MessageId::from(key)),
+                                    request.clone(),
+                                )
+                                .await?;
+                            events.extend(save_events);
+                        }
+                    }
                 }
             }
             return Ok(Some(events));
@@ -434,21 +458,37 @@ impl MailService {
                 crate::service::mutation::OverlayRetire::Immediate,
             )
             .await?;
-            // Deleted echo only when the fold actually hid a visible row (a
-            // held send leaves the draft alone).
-            if consumed_was_visible
-                && self
-                    .message_detail_reader
-                    .get_message_summary(account_id, live_id)?
-                    .is_none()
+            match self
+                .message_detail_reader
+                .get_message_summary(account_id, live_id)?
             {
-                events.push(self.events.append_event(
-                    account_id,
-                    EVENT_TOPIC_MESSAGE_UPDATED,
-                    None,
-                    Some(live_id),
-                    serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
-                )?);
+                // The fold hid a visible row (a due consuming send): prune it.
+                None if consumed_was_visible => {
+                    events.push(self.events.append_event(
+                        account_id,
+                        EVENT_TOPIC_MESSAGE_UPDATED,
+                        None,
+                        Some(live_id),
+                        serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
+                    )?);
+                }
+                // A held send's draft-form row (appeared or refreshed):
+                // project it so the hold is visible without any client save.
+                Some(summary) => {
+                    let scope = summary.mailbox_ids.first().cloned();
+                    events.push(self.events.append_event(
+                        account_id,
+                        EVENT_TOPIC_MESSAGE_UPDATED,
+                        scope.as_ref(),
+                        Some(live_id),
+                        serde_json::json!({
+                            "messageId": live_id.as_str(),
+                            "changes": { "mailboxes": true },
+                            "projection": &summary,
+                        }),
+                    )?);
+                }
+                None => {}
             }
         }
         if let Some(summary) = self

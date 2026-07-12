@@ -351,11 +351,11 @@ impl MailService {
             // copy landed in base (matched by the transport-shared
             // Message-ID prefix) retires WITH a prune echo — the visible row
             // changes identity, so the client must drop the provisional id.
-            if let Some(event) = self
+            if let Some(adoption_events) = self
                 .try_adopt_provisional_sent(account_id, &message_id)
                 .await?
             {
-                events.push(event);
+                events.extend(adoption_events);
                 continue;
             }
             // D175 lingering-destruction repair: a TOMBSTONE whose base row
@@ -435,12 +435,13 @@ impl MailService {
 
     /// Retire a provisional Sent overlay row whose provider copy has arrived
     /// in base under its own id (NS2 Slice 4, reconcile-by-intent-id +
-    /// adopt-by-header). `None` = not such a row / not adopted yet.
+    /// adopt-by-header), filing an unfiled copy into Sent (S-CONV-2).
+    /// `None` = not such a row / not adopted yet.
     async fn try_adopt_provisional_sent(
         &self,
         account_id: &AccountId,
         row_id: &MessageId,
-    ) -> Result<Option<DomainEvent>, ServiceError> {
+    ) -> Result<Option<Vec<DomainEvent>>, ServiceError> {
         let entry = {
             let overlay = self.overlay.clone();
             let owned_account = account_id.clone();
@@ -480,22 +481,70 @@ impl MailService {
             offload(move || overlay.find_base_message_id_by_rfc_prefix(&owned_account, &prefix))
                 .await?
         };
-        if adopted.is_none() {
+        let Some(adopted_id) = adopted else {
             return Ok(None);
-        }
+        };
         {
             let overlay = self.overlay.clone();
             let owned_account = account_id.clone();
             let owned_row = row_id.clone();
             offload(move || overlay.remove_overlay_message(&owned_account, &owned_row)).await?;
         }
-        Ok(Some(self.events.append_event(
+        let mut events = vec![self.events.append_event(
             account_id,
             EVENT_TOPIC_MESSAGE_UPDATED,
             None,
             Some(row_id),
             json!({ "messageId": row_id.as_str(), "deleted": true }),
-        )?))
+        )?];
+        // S-CONV-2: a delivered-but-UNFILED copy — the server ignored the
+        // Drafts→Sent move / the Sent append failed, so the copy syncs back
+        // AS A DRAFTS GHOST. File it with one ordinary mailbox assertion:
+        // Sent is ADDED and only Drafts dropped (never a wholesale replace —
+        // stripping other memberships would delete the copy on
+        // all-mail-style providers). Triggered strictly on the ghost shape
+        // (in Drafts, not in Sent): partially-applied mid-sync memberships
+        // must never fire it.
+        if let (Some(sent_mailbox), Some(drafts_mailbox)) = (
+            self.mailbox_id_by_role(account_id, "sent")?,
+            self.drafts_mailbox_id(account_id)?,
+        ) {
+            let adopted_record = {
+                let overlay = self.overlay.clone();
+                let owned_account = account_id.clone();
+                let owned_adopted = adopted_id.clone();
+                offload(move || overlay.read_base_message_record(&owned_account, &owned_adopted))
+                    .await?
+            };
+            if let Some(record) = adopted_record {
+                let is_drafts_ghost = record.mailbox_ids.contains(&drafts_mailbox)
+                    && !record.mailbox_ids.contains(&sent_mailbox);
+                if is_drafts_ghost {
+                    ph_warn!(
+                        events::SEND_ADOPTED_COPY_UNFILED,
+                        account_id = %account_id,
+                        message_id = %adopted_id,
+                        "adopted sent copy is a Drafts ghost; filing it (S-CONV-2)"
+                    );
+                    let mut mailbox_ids: Vec<MailboxId> = record
+                        .mailbox_ids
+                        .iter()
+                        .filter(|mailbox_id| **mailbox_id != drafts_mailbox)
+                        .cloned()
+                        .collect();
+                    mailbox_ids.push(sent_mailbox);
+                    let ack = self
+                        .replace_mailboxes(
+                            account_id,
+                            &adopted_id,
+                            &posthaste_domain_model::ReplaceMailboxesCommand { mailbox_ids },
+                        )
+                        .await?;
+                    events.extend(ack.events);
+                }
+            }
+        }
+        Ok(Some(events))
     }
 
     /// Append a `sync.failed` event to the event log.

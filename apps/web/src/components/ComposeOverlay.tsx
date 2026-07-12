@@ -151,7 +151,6 @@ export function ComposeOverlay({
     onClose,
     // Scheduled (undo-send / send-later) sends persist the compose as a draft
     // first, so Undo can restore it with full fidelity.
-    onPersistDraft: autosave.saveDraft,
     onRestoreDraft,
     onSent: autosave.discardDraft,
     replyContext: queries.replyContextQuery.data,

@@ -166,12 +166,28 @@ const eventHandlers = {
     invalidateAccountRuntimeReadModels(queryClient, event.accountId)
   },
   [EVENT_TOPICS.OperationSettled]: (_queryClient, event) => {
-    // Surface only failures; a successful flush settles silently.
     const outcome = payloadString(event.payload, 'outcome')
+    const id = payloadString(event.payload, 'id') ?? event.accountId
+    // S-VERD-3 (D154): a delivered send whose Sent copy is NOT confirmed
+    // filed gets a truthful verdict instead of a silent Drafts ghost — the
+    // message went out; only the Sent-folder copy is still reconciling.
+    if (
+      outcome === 'applied' &&
+      payloadString(event.payload, 'sendFiling') === 'pendingFiling'
+    ) {
+      pushNotification({
+        severity: 'warning',
+        title: 'Sent — still filing the Sent-folder copy',
+        message:
+          'The message was delivered, but the server has not confirmed the Sent copy yet. It reconciles on a later sync.',
+        dedupeKey: `operation.settled:${id}`,
+      })
+      return
+    }
+    // Otherwise surface only failures; a successful flush settles silently.
     if (outcome !== 'failed') {
       return
     }
-    const id = payloadString(event.payload, 'id') ?? event.accountId
     const detail = payloadString(event.payload, 'error')
     pushNotification({
       severity: 'error',
