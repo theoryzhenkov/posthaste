@@ -1596,18 +1596,26 @@ async fn scheduled_send_is_held_until_due_and_survives_restart() {
     assert_eq!(send.state, OperationState::Pending);
     assert_eq!(send.send_at.as_deref(), Some("2999-01-01T00:00:00Z"));
 
-    // Not due: the flush must not push it — it rests pending (cancelable).
-    let events = service
+    // Not due: the flush must not push the SEND — it rests pending
+    // (cancelable). The D173 ensure-draft step DOES run: during the hold the
+    // message is a real provider draft (cross-device visibility).
+    service
         .flush_account(&account, &gateway)
         .await
         .expect("flush");
-    assert!(events.is_empty());
     assert!(gateway.send_calls.lock().unwrap().is_empty());
+    assert_eq!(
+        gateway.save_draft_calls.lock().unwrap().len(),
+        1,
+        "the hold's eager ensure-draft creates the provider copy"
+    );
     let pending = service.list_pending_operations(&account).expect("pending");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].state, OperationState::Pending);
 
-    // "Restart": a fresh service over the same durable store still holds it.
+    // "Restart": a fresh service over the same durable store still holds it,
+    // and the ensure step does NOT re-run (the registry rotation is the
+    // durable step-complete marker).
     let reborn = MailService::new(store, Arc::new(TestConfig::default()));
     reborn
         .flush_account(&account, &gateway)
@@ -1616,6 +1624,11 @@ async fn scheduled_send_is_held_until_due_and_survives_restart() {
     assert!(
         gateway.send_calls.lock().unwrap().is_empty(),
         "a not-yet-due schedule must survive a restart without firing"
+    );
+    assert_eq!(
+        gateway.save_draft_calls.lock().unwrap().len(),
+        1,
+        "the ensure step is once-only across restarts"
     );
     assert_eq!(reborn.list_pending_operations(&account).unwrap().len(), 1);
     assert!(
@@ -1682,9 +1695,23 @@ async fn send_at_is_normalized_and_kept_out_of_the_payload() {
         .0;
     assert_eq!(send.send_at.as_deref(), Some("2999-06-01T10:30:01Z"));
 
-    // The hold lives on the operation, not in the payload: the payload the
-    // gateway will see is byte-identical to an immediate send's.
-    let scheduled_payload = send.payload;
+    // The hold lives on the operation, not in the payload (D152). The held
+    // payload additionally carries the compose key D173's admission minted
+    // (its ensure/consume identity) — never the schedule itself.
+    let mut scheduled_payload = send.payload;
+    assert!(scheduled_payload.get("sendAt").is_none());
+    assert!(scheduled_payload.get("undoWindowSeconds").is_none());
+    assert!(
+        scheduled_payload
+            .get("draftId")
+            .and_then(|value| value.as_str())
+            .is_some_and(|key| key.starts_with("draft-local-")),
+        "a held send materializes a compose key at admission (D173)"
+    );
+    scheduled_payload
+        .as_object_mut()
+        .expect("payload object")
+        .insert("draftId".to_string(), serde_json::Value::Null);
     let immediate = service
         .enqueue_send(&account, draft_request("Zoned"))
         .await
@@ -1692,7 +1719,6 @@ async fn send_at_is_normalized_and_kept_out_of_the_payload() {
         .0;
     assert!(immediate.send_at.is_none());
     assert_eq!(scheduled_payload, immediate.payload);
-    assert!(scheduled_payload.get("sendAt").is_none());
 }
 
 #[tokio::test]
@@ -2297,5 +2323,66 @@ async fn provisional_sent_row_is_adopted_when_the_provider_copy_syncs() {
                 && event.payload["deleted"] == serde_json::json!(true)
         }),
         "the adoption prunes the provisional id client-side"
+    );
+}
+
+#[tokio::test]
+async fn undo_of_a_held_send_keeps_the_ensured_provider_draft() {
+    // D173: one row, two steps — ensure-draft (eager) + submit (gated). Undo
+    // cancels the SUBMIT; the ensured provider draft simply remains, still
+    // reachable under its compose key.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    // A key-less held send: admission mints the compose key (D170+D173).
+    let mut request = draft_request("Held outgoing");
+    request.undo_window_seconds = Some(3600);
+    let (send, _) = service
+        .enqueue_send(&account, request)
+        .await
+        .expect("held send queues");
+    let key = serde_json::from_value::<SendMessageRequest>(send.payload.clone())
+        .expect("payload decodes")
+        .draft_id
+        .expect("admission minted a compose key");
+
+    // The flush runs step 1 only: the provider draft exists, the send holds.
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush");
+    assert_eq!(gateway.save_draft_calls.lock().unwrap().len(), 1);
+    assert!(gateway.send_calls.lock().unwrap().is_empty());
+    assert!(
+        store
+            .get_message_summary(&account, &MessageId::from("provider-draft-1"))
+            .expect("effective read")
+            .is_some(),
+        "the ensured draft is visible locally at its provider id"
+    );
+
+    // Undo: the submit is cancelled; the draft remains.
+    service
+        .discard_operation(&send.id)
+        .await
+        .expect("undo")
+        .expect("the held send was discarded");
+    assert!(
+        store
+            .get_message_summary(&account, &MessageId::from("provider-draft-1"))
+            .expect("effective read")
+            .is_some(),
+        "undo cancels the submit only — the ensured draft remains (D173)"
+    );
+    let kept = store
+        .get_message_summary(&account, &MessageId::from("provider-draft-1"))
+        .expect("effective read")
+        .expect("kept draft row");
+    assert_eq!(
+        kept.draft_id.as_deref(),
+        Some(key.as_str()),
+        "the kept draft still carries its compose key (resumable identity)"
     );
 }
