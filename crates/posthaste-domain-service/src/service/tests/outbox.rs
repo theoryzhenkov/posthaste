@@ -2015,3 +2015,38 @@ async fn draft_content_resumes_from_the_queued_save() {
         Some(operation.entity.id.as_str())
     );
 }
+
+#[tokio::test]
+async fn send_settlement_carries_the_typed_filing_outcome() {
+    // D154: the Sent-copy filing is a typed settlement field, not a
+    // warn-and-forget boolean. Filed and PendingFiling both settle Applied —
+    // only the filing detail differs.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Ok(posthaste_domain_model::SendFiling::PendingFiling));
+
+    service
+        .enqueue_send(&account, draft_request("Outgoing"))
+        .expect("send queues");
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush ok");
+
+    let settled = events
+        .iter()
+        .find(|event| event.topic == "operation.settled")
+        .expect("send settles");
+    assert_eq!(settled.payload["outcome"], "applied");
+    assert_eq!(
+        settled.payload["sendFiling"], "pendingFiling",
+        "the filing outcome rides the settlement: {:?}",
+        settled.payload
+    );
+}

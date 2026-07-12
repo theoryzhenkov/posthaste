@@ -1,4 +1,5 @@
 use super::*;
+use posthaste_domain_model::SendFiling;
 
 pub(super) struct MutationGateway {
     pub(super) revision: Mutex<u64>,
@@ -50,7 +51,7 @@ pub(super) struct MutationGateway {
     /// popped front-first; empty falls back to `Ok`. An `Err` here models a send
     /// that committed but whose response was lost (e.g.
     /// `GatewayError::DispatchUncertain`).
-    pub(super) send_results: Mutex<Vec<Result<(), GatewayError>>>,
+    pub(super) send_results: Mutex<Vec<Result<SendFiling, GatewayError>>>,
     /// Results returned by `set_keywords`, popped front-first; empty falls back
     /// to the revision-based success path.
     pub(super) set_keywords_results: Mutex<Vec<Result<MutationOutcome, GatewayError>>>,
@@ -325,7 +326,7 @@ impl MailGateway for MutationGateway {
         _account_id: &AccountId,
         request: &SendMessageRequest,
         idempotency_key: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<SendFiling, GatewayError> {
         self.send_calls
             .lock()
             .expect("send calls poisoned")
@@ -337,7 +338,7 @@ impl MailGateway for MutationGateway {
         if committed.iter().any(|key| key == idempotency_key) {
             // The prior attempt already committed under this identity; a
             // re-forward is deduplicated — no second submission (D84/D85).
-            return Ok(());
+            return Ok(SendFiling::Filed);
         }
         // Record the commit *before* applying the configured outcome, so an
         // `Err` outcome models "committed server-side but the response was lost."
@@ -345,7 +346,7 @@ impl MailGateway for MutationGateway {
         drop(committed);
         let mut results = self.send_results.lock().expect("send results poisoned");
         if results.is_empty() {
-            Ok(())
+            Ok(SendFiling::Filed)
         } else {
             results.remove(0)
         }

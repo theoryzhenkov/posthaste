@@ -1,5 +1,5 @@
 use jmap_client::mailbox;
-use posthaste_domain_model::{GatewayError, SendMessageRequest};
+use posthaste_domain_model::{GatewayError, SendFiling, SendMessageRequest};
 use posthaste_observability::{events, ph_warn};
 use posthaste_provider_call::SEND_TOTAL;
 
@@ -71,7 +71,7 @@ pub(crate) async fn send_message(
     gateway: &LiveJmapGateway,
     request_data: &SendMessageRequest,
     idempotency_key: &str,
-) -> Result<(), GatewayError> {
+) -> Result<SendFiling, GatewayError> {
     let identity = fetch_send_identity(gateway, request_data.from.as_ref()).await?;
     let drafts_mailbox_id = gateway
         .fetch_mailbox_id_by_role(mailbox::Role::Drafts)
@@ -205,15 +205,17 @@ pub(crate) async fn send_message(
     // `onSuccessUpdateEmail` reference — the exact silent no-op the pre-fix
     // wrong-key bug produced): the submission has already committed, so this is
     // NOT a send failure and must not fail the op (a user retry of a delivered
-    // send risks a duplicate on servers without create-id dedup). Surface it in
-    // the log instead — the message stays filed in Drafts until the next sync
-    // reconciles, and a regression of this class must never again be invisible.
+    // send risks a duplicate on servers without create-id dedup). It IS a
+    // typed outcome (D154): `PendingFiling` — the settlement carries it, the
+    // provisional Sent overlay row stays confirmation-gated, and the log line
+    // keeps the regression class visible.
     if !moved_to_sent {
         ph_warn!(
             events::SEND_SENT_MOVE_NOT_APPLIED,
             message_id = %message_id,
             "send submitted but the server did not apply the Drafts→Sent move"
         );
+        return Ok(SendFiling::PendingFiling);
     }
-    Ok(())
+    Ok(SendFiling::Filed)
 }

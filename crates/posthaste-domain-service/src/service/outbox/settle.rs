@@ -91,6 +91,7 @@ impl MailService {
             },
             assigned_entity_id: None,
             error: rejected,
+            send_filing: None,
         };
         events.push(self.emit_settlement(account_id, operation, &settlement)?);
         Ok(events)

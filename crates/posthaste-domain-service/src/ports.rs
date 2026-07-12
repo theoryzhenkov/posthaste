@@ -9,9 +9,9 @@ use posthaste_domain_model::{
     ImapMailboxSyncState, ImapMessageLocation, MailQueryRule, MailboxId, MailboxSummary,
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
     MutationOutcome, Operation, OperationId, OperationState, Recipient, ReplyContext,
-    RevLogSnapshot, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
-    SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome, SyncProgress,
-    SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
+    RevLogSnapshot, SecretRef, SecretStoreError, SendFiling, SendMessageRequest,
+    SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome,
+    SyncProgress, SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
 use posthaste_domain_model::{DomainEvent, EventLogBounds, GatewayError, ServiceError, StoreError};
 
