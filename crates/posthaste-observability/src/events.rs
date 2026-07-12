@@ -88,6 +88,10 @@ pub const SEND_DRAFT_CONSUME_NOT_APPLIED: LogEvent =
 /// window — never fails the held send itself.
 pub const OUTBOX_HELD_SEND_ENSURE_FAILED: LogEvent =
     LogEvent::new("outbox.held_send_ensure_failed");
+/// A destroyed message's base row survived a sync behind its tombstone — one
+/// idempotent cleanup delete was enqueued (D175 lingering-destruction repair).
+pub const OUTBOX_LINGERING_TOMBSTONE_REPAIRED: LogEvent =
+    LogEvent::new("outbox.lingering_tombstone_repaired");
 pub const OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("outbox.followup_sync_trigger_failed");
 

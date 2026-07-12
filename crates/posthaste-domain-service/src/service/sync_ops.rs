@@ -358,6 +358,19 @@ impl MailService {
                 events.push(event);
                 continue;
             }
+            // D175 lingering-destruction repair: a TOMBSTONE whose base row
+            // survived the sync this sweep follows means the provider still
+            // holds what we committed to destroying (a lost IMAP expunge, a
+            // silently no-opped JMAP destroy). One idempotent cleanup delete
+            // re-asserts it — without this, the copy leaks behind a
+            // permanent tombstone.
+            if let Some(repair_events) = self
+                .try_repair_lingering_tombstone(account_id, &message_id)
+                .await?
+            {
+                events.extend(repair_events);
+                continue;
+            }
             // Retire-on-confirmation: an all-settled entry is removed only
             // once this sync's base write actually carries its effect.
             self.refresh_message_overlay(
@@ -368,6 +381,56 @@ impl MailService {
             .await?;
         }
         Ok(events)
+    }
+
+    /// D175: enqueue ONE idempotent provider delete for an orphaned tombstone
+    /// (no outstanding op, base row still present after the sync). Bounded:
+    /// any existing op keyed to the row — including a previous repair, even a
+    /// failed one — blocks a re-enqueue; a premature repair is safe (the
+    /// delete is `notFound`-masked). `None` = not such an entry.
+    async fn try_repair_lingering_tombstone(
+        &self,
+        account_id: &AccountId,
+        row_id: &MessageId,
+    ) -> Result<Option<Vec<DomainEvent>>, ServiceError> {
+        let entry = {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_row = row_id.clone();
+            offload(move || overlay.read_overlay_message(&owned_account, &owned_row)).await?
+        };
+        if !matches!(entry, Some(None)) {
+            return Ok(None); // not a tombstone
+        }
+        let base_survives = {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_row = row_id.clone();
+            offload(move || overlay.read_base_message_record(&owned_account, &owned_row))
+                .await?
+                .is_some()
+        };
+        if !base_survives {
+            return Ok(None); // sync pruned it — the ordinary retire handles this
+        }
+        let has_op = self
+            .outbox
+            .list_pending_operations(account_id)?
+            .into_iter()
+            .any(|op| op.entity.id == row_id.as_str());
+        if has_op {
+            return Ok(None); // its own lifecycle (or a prior repair) owns it
+        }
+        ph_warn!(
+            events::OUTBOX_LINGERING_TOMBSTONE_REPAIRED,
+            account_id = %account_id,
+            message_id = %row_id,
+            "destroyed message survived the sync in base; enqueueing one \
+             idempotent cleanup delete (D175)"
+        );
+        let (_operation, delete_events) =
+            self.delete_draft(account_id, row_id.clone(), true).await?;
+        Ok(Some(delete_events))
     }
 
     /// Retire a provisional Sent overlay row whose provider copy has arrived
