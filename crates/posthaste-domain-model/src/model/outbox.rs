@@ -144,6 +144,12 @@ impl OperationKind {
             Self::SetKeywords | Self::ReplaceMailboxes | Self::Destroy
         )
     }
+
+    /// Whether this op is a draft save (create or update) — the coalescing
+    /// unit for D174 (same-key saves replace a still-queued save).
+    pub fn is_draft_save(self) -> bool {
+        matches!(self, Self::DraftCreate | Self::DraftUpdate)
+    }
 }
 
 /// The kind of entity an operation targets.
@@ -173,9 +179,10 @@ pub struct OperationEntity {
 
 /// A single local-first command.
 ///
-/// `id` provides runtime/provider idempotency. `depends_on` preserves draft
-/// chains only; state assertions coalesce instead of depending on earlier
-/// assertions.
+/// `id` provides runtime/provider idempotency. There is no cross-operation
+/// dependency edge (D174): state assertions coalesce, same-key draft saves
+/// coalesce (last-writer-wins per compose session), and everything else
+/// relies on the flusher's insertion-order drain.
 ///
 /// @spec docs/L1-outbox#operation-model
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -197,8 +204,6 @@ pub struct Operation {
     pub state: OperationState,
     pub attempts: u32,
     pub last_error: Option<String>,
-    /// The operation that must settle before this one (draft-chain ordering).
-    pub depends_on: Option<OperationId>,
     /// Scheduled-send hold (send ops only): the earliest flush time, normalized
     /// UTC whole-second RFC 3339. A queued op with `send_at` in the future is
     /// excluded from the flushable set (it rests `pending`, visible and
@@ -284,7 +289,9 @@ pub enum MailIntent {
     /// A draft removal: the send-consume settlement effect (idempotent
     /// redelivery masks provider `notFound`, D133) or a user discard (which
     /// surfaces it).
-    DiscardDraft { idempotent_redelivery: bool },
+    DiscardDraft {
+        idempotent_redelivery: bool,
+    },
     Send(SendMessageRequest),
 }
 

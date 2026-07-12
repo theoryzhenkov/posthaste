@@ -1,16 +1,11 @@
 //! The flush drain: [`MailService::flush_account`] loops `flush_pass` over the
 //! flushable operations, routing each push outcome (settle / re-queue / park /
-//! fail) and honoring per-entity dependency ordering.
+//! fail). Ordering is the insertion-order drain — there are no cross-operation
+//! dependency edges (D174).
 
 use super::classify::{FlushDisposition, FlushError};
 use super::push::Pushed;
 use crate::service::*;
-
-enum DependencyStatus {
-    Satisfied,
-    Waiting,
-    Cancelled(String),
-}
 
 /// Outcome of one [`MailService::flush_pass`] over the flushable operations.
 struct FlushPass {
@@ -33,7 +28,7 @@ impl MailService {
     ///
     /// Stops draining on the first transient (offline) failure so later ops are
     /// retried together on the next connectivity window. Per-entity ordering is
-    /// preserved: an op whose dependency has not yet applied is skipped this pass.
+    /// the insertion-order drain (D174 — no dependency edges).
     ///
     /// A settlement effect can enqueue a follow-up operation mid-pass (a settled
     /// send consumes its draft — D126); the outer loop re-lists and drains those
@@ -111,31 +106,6 @@ impl MailService {
                 events.push(self.emit_dispatch_uncertain(account_id, &operation, reason)?);
                 continue;
             }
-            match self.dependency_status(&operation)? {
-                DependencyStatus::Satisfied => {}
-                DependencyStatus::Waiting => continue,
-                DependencyStatus::Cancelled(message) => {
-                    self.outbox.update_operation_state(
-                        &operation.id,
-                        OperationState::Failed,
-                        operation.attempts,
-                        Some(&message),
-                    )?;
-                    let settlement = OperationSettlement {
-                        id: operation.id.clone(),
-                        outcome: OperationOutcome::Failed,
-                        assigned_entity_id: None,
-                        error: Some(message),
-                    };
-                    events.push(self.emit_settlement(account_id, &operation, &settlement)?);
-                    if let Some(correction) =
-                        self.emit_failure_base_correction(account_id, &operation)?
-                    {
-                        events.push(correction);
-                    }
-                    continue;
-                }
-            }
             // The atomic flush gate (cancel-vs-flush, exactly one winner): claim
             // the op `inflight` with a single guarded conditional write. A user
             // cancel that already won removed the row, so the claim matches
@@ -151,6 +121,16 @@ impl MailService {
                     assigned_entity_id,
                     destroyed_entity_id,
                 }) => {
+                    // The live id the draft's visible row is keyed under going
+                    // INTO this settlement (pre-repoint) — the overlay entry a
+                    // rotation must clean up.
+                    let old_live = if operation.entity.kind == OperationEntityKind::Draft {
+                        self.draft_registry
+                            .resolve_draft_entity(account_id, &operation.entity.id)?
+                            .unwrap_or_else(|| operation.entity.id.clone())
+                    } else {
+                        operation.entity.id.clone()
+                    };
                     if let Some(new_id) = assigned_entity_id.as_deref() {
                         if new_id != operation.entity.id {
                             // M70 (D136): a draft op's entity id IS the stable
@@ -165,8 +145,12 @@ impl MailService {
                             )?;
                         }
                     }
-                    // Entity ops (drafts/sends) are not folded into message
-                    // reads, so they settle and prune on flush.
+                    // The live id the draft's visible row is keyed under
+                    // AFTER this settlement (post-repoint).
+                    let new_live = assigned_entity_id
+                        .as_deref()
+                        .unwrap_or(old_live.as_str())
+                        .to_string();
                     let settlement = OperationSettlement {
                         id: operation.id.clone(),
                         outcome: OperationOutcome::Applied,
@@ -209,12 +193,21 @@ impl MailService {
                         )?);
                     }
                     self.outbox.remove_operation(&operation.id)?;
+                    // NS2 Slice 3: a settled draft save carries its visible
+                    // row across the provider id rotation until sync confirms
+                    // it into base (old row hidden/dropped, new id pinned).
+                    if operation.kind.is_draft_save() {
+                        self.settle_draft_save_overlay(
+                            account_id, &operation, &old_live, &new_live, events,
+                        )
+                        .await?;
+                    }
                     // D126: a settled send consumes its originating draft — the
                     // destroy is enqueued as a follow-up op so it is retried
                     // with the outbox discipline, never silently dropped.
                     if self
-                        .consume_draft_after_send(account_id, &operation)?
-                        .is_some()
+                        .consume_draft_after_send(account_id, &operation, events)
+                        .await?
                     {
                         follow_up_enqueued = true;
                     }
@@ -328,22 +321,5 @@ impl MailService {
             stopped: false,
             follow_up_enqueued,
         })
-    }
-
-    /// Whether the operation this one depends on has applied, is still waiting,
-    /// or failed and should cancel this dependent.
-    fn dependency_status(&self, operation: &Operation) -> Result<DependencyStatus, ServiceError> {
-        let Some(dependency) = &operation.depends_on else {
-            return Ok(DependencyStatus::Satisfied);
-        };
-        match self.outbox.get_operation(dependency)? {
-            // Applied operations are pruned, so a missing dependency is satisfied.
-            None => Ok(DependencyStatus::Satisfied),
-            Some(dep) if dep.state == OperationState::Applied => Ok(DependencyStatus::Satisfied),
-            Some(dep) if dep.state == OperationState::Failed => Ok(DependencyStatus::Cancelled(
-                format!("dependency {} failed", dep.id.as_str()),
-            )),
-            Some(_) => Ok(DependencyStatus::Waiting),
-        }
     }
 }

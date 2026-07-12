@@ -146,7 +146,6 @@ export interface Operation {
   state: OperationState
   attempts: number
   lastError: string | null
-  dependsOn: string | null
   /**
    * Scheduled-send hold (send ops only): the earliest flush time (normalized
    * UTC RFC 3339). A pending op with `sendAt` in the future rests queued —

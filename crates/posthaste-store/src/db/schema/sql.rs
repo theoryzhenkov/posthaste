@@ -170,7 +170,6 @@ pub(super) const SCHEMA_SQL: &str = "
                 state TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT,
-                depends_on TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );

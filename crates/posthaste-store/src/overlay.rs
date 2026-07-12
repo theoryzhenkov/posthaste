@@ -93,15 +93,20 @@ impl MessageOverlayStore for DatabaseStore {
                 ],
             )
             .map_err(sql_to_store_error)?;
-            replace_overlay_sets_tx(tx, account_id, &message.id, |insert_mailbox, insert_keyword| {
-                for mailbox_id in &message.mailbox_ids {
-                    insert_mailbox(mailbox_id.as_str())?;
-                }
-                for keyword in &message.keywords {
-                    insert_keyword(keyword)?;
-                }
-                Ok(())
-            })
+            replace_overlay_sets_tx(
+                tx,
+                account_id,
+                &message.id,
+                |insert_mailbox, insert_keyword| {
+                    for mailbox_id in &message.mailbox_ids {
+                        insert_mailbox(mailbox_id.as_str())?;
+                    }
+                    for keyword in &message.keywords {
+                        insert_keyword(keyword)?;
+                    }
+                    Ok(())
+                },
+            )
         })
     }
 
@@ -383,4 +388,3 @@ fn replace_overlay_sets_tx(
     };
     rebuild(&mut insert_mailbox, &mut insert_keyword)
 }
-

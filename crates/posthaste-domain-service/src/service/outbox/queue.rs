@@ -27,8 +27,7 @@ impl MailService {
     /// Remove a queued or failed outbox operation, giving the user an escape
     /// hatch for a dead op — and the CANCEL path for a scheduled (undo-send /
     /// send-later) send. An in-flight op is never yanked (its provider call
-    /// may be mid-send). Discarding a failed op also unblocks its dependents: a
-    /// missing dependency reads as satisfied, so a dependent no longer cancels.
+    /// may be mid-send).
     ///
     /// Cancel-vs-flush has exactly one winner: the removal is a single guarded
     /// statement (`remove_operation_unless_inflight`) racing the flusher's
@@ -85,11 +84,13 @@ impl MailService {
         Ok(true)
     }
 
-    /// Construct and enqueue an operation, capturing creation timestamps and
-    /// ordering draft chains after the latest still-pending op for the same entity.
+    /// Construct and enqueue an operation, capturing creation timestamps.
+    /// There is no cross-operation dependency edge (D174): state assertions
+    /// coalesce here, draft saves coalesce in
+    /// [`Self::save_draft`](crate::service::MailService::save_draft), and
+    /// everything else relies on the flusher's insertion-order drain.
     ///
     /// @spec docs/L1-outbox#operation-model
-    #[allow(clippy::too_many_arguments)]
     pub fn queue_operation(
         &self,
         account_id: &AccountId,
@@ -99,19 +100,12 @@ impl MailService {
         send_at: Option<String>,
         hold_until_mono: Option<i64>,
     ) -> Result<Operation, ServiceError> {
-        let depends_on = if kind.is_state_assertion() {
+        if kind.is_state_assertion() {
             // State assertions coalesce instead of chaining: a new assertion
             // supersedes (or merges with) the pending assertion it replaces, so
             // the outbox holds the latest desired state per (entity, kind).
             self.coalesce_pending_assertions(account_id, &entity, kind, &mut payload)?;
-            None
-        } else {
-            self.outbox
-                .list_pending_operations(account_id)?
-                .into_iter()
-                .rfind(|existing| existing.entity == entity)
-                .map(|existing| existing.id)
-        };
+        }
         let now =
             now_iso8601().map_err(|error| ServiceError::from(GatewayError::Rejected(error)))?;
         let operation = Operation {
@@ -124,7 +118,6 @@ impl MailService {
             state: OperationState::Pending,
             attempts: 0,
             last_error: None,
-            depends_on,
             send_at,
             hold_until_mono,
             created_at: now.clone(),

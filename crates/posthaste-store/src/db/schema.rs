@@ -161,7 +161,7 @@ fn migrate_legacy_message_fts(connection: &Connection) -> Result<(), StoreError>
 /// or TRANSFORMATIVE changes (drops, renames, data rewrites, trigger
 /// replacements) are numbered migrations below — run exactly once per
 /// database, each in its own transaction, in order.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 /// The full open-time schema flow (replaces bare `init_schema` at the open
 /// call site):
@@ -215,6 +215,7 @@ fn apply_migration(tx: &Connection, version: i64) -> Result<(), StoreError> {
     match version {
         1 => v1_retire_mailbox_counters(tx),
         2 => v2_recover_conflicted_outbox_rows(tx),
+        3 => v3_drop_outbox_depends_on(tx),
         other => Err(StoreError::Failure(format!(
             "unknown schema migration {other}"
         ))),
@@ -248,6 +249,28 @@ fn v1_retire_mailbox_counters(tx: &Connection) -> Result<(), StoreError> {
             tx.execute_batch(&format!("ALTER TABLE mailbox DROP COLUMN {column}"))
                 .map_err(sql_to_store_error)?;
         }
+    }
+    Ok(())
+}
+
+/// v3 (D174 / NS2 Slice 3): cross-operation dependency chains are deleted —
+/// state assertions and draft saves both coalesce, and everything else relies
+/// on the flusher's insertion-order drain — so the `depends_on` column goes.
+/// In-queue chain data needs no rewrite: a pending dependent simply flushes in
+/// insertion order (after what used to be its dependency).
+fn v3_drop_outbox_depends_on(tx: &Connection) -> Result<(), StoreError> {
+    let has_column: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM pragma_table_info('outbox_operation') WHERE name = 'depends_on'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_to_store_error)?;
+    if has_column {
+        tx.execute_batch("ALTER TABLE outbox_operation DROP COLUMN depends_on")
+            .map_err(sql_to_store_error)?;
     }
     Ok(())
 }

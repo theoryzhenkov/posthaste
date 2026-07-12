@@ -23,7 +23,6 @@ fn operation(id: &str, entity_id: &str, kind: OperationKind, state: OperationSta
         state,
         attempts: 0,
         last_error: None,
-        depends_on: None,
         send_at: None,
         hold_until_mono: None,
         created_at: NOW.to_string(),
