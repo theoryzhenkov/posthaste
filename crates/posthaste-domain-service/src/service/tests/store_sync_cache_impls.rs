@@ -253,6 +253,25 @@ impl MessageOverlayStore for TestStore {
             .cloned())
     }
 
+    fn find_base_message_id_by_rfc_prefix(
+        &self,
+        _account_id: &AccountId,
+        prefix: &str,
+    ) -> Result<Option<MessageId>, StoreError> {
+        Ok(self
+            .applied_messages
+            .lock()
+            .expect("applied messages lock poisoned")
+            .iter()
+            .find(|record| {
+                record
+                    .rfc_message_id
+                    .as_deref()
+                    .is_some_and(|rfc| rfc.starts_with(prefix))
+            })
+            .map(|record| record.id.clone()))
+    }
+
     fn read_base_message_record(
         &self,
         _account_id: &AccountId,

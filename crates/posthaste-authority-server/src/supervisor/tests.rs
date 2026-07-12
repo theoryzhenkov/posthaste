@@ -1893,7 +1893,9 @@ async fn scheduled_send_tick_holds_until_due_then_flushes_exactly_one_send() {
     let held = shared
         .service
         .enqueue_send(&account.id, request.clone())
-        .expect("scheduled send should enqueue");
+        .await
+        .expect("scheduled send should enqueue")
+        .0;
 
     // Not due: the tick probes, finds nothing due, and must NOT flush it.
     handle_scheduled_send_tick(&sync_state, &shared, &account, generation, &mut connection).await;
@@ -1912,12 +1914,15 @@ async fn scheduled_send_tick_holds_until_due_then_flushes_exactly_one_send() {
     assert!(shared
         .service
         .discard_operation(&held.id)
-        .expect("cancel should succeed"));
+        .await
+        .expect("cancel should succeed")
+        .is_some());
     let mut due_request = request;
     due_request.send_at = Some("2020-01-01T00:00:00Z".to_string());
     shared
         .service
         .enqueue_send(&account.id, due_request)
+        .await
         .expect("due send should enqueue");
 
     handle_scheduled_send_tick(&sync_state, &shared, &account, generation, &mut connection).await;

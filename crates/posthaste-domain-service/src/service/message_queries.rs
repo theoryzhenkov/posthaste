@@ -416,6 +416,17 @@ pub(crate) enum FoldEffect {
     UpsertDraft(posthaste_domain_model::SendMessageRequest),
     /// A queued draft removal: the overlay tombstones the draft's live row.
     TombstoneDraft,
+    /// A queued send (NS2 Slice 4, D172): multi-row — the consumed draft's
+    /// live row tombstones and a provisional Sent row upserts at the send's
+    /// own entity id. Phase-aware in the engine: a HELD send folds neither
+    /// (the draft stays visible and cancelable); a due/dispatched send folds
+    /// both.
+    SendEffects {
+        /// The materialized originating-draft key (D170), when this send
+        /// consumes one.
+        consumes_draft_key: Option<String>,
+        request: posthaste_domain_model::SendMessageRequest,
+    },
 }
 
 /// NS2 Slices 2+3: THE effect interpreter for the overlay fold — the one place
@@ -450,7 +461,18 @@ pub(crate) fn intent_fold_effect(
             Some(FoldEffect::UpsertDraft(request))
         }
         posthaste_domain_model::MailIntent::DiscardDraft { .. } => Some(FoldEffect::TombstoneDraft),
-        posthaste_domain_model::MailIntent::Send(_) => None,
+        posthaste_domain_model::MailIntent::Send(request) => {
+            let consumes_draft_key = request
+                .draft_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+                .map(str::to_string);
+            Some(FoldEffect::SendEffects {
+                consumes_draft_key,
+                request,
+            })
+        }
     })
 }
 

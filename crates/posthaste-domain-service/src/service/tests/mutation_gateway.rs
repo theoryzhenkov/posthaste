@@ -42,6 +42,9 @@ pub(super) struct MutationGateway {
     /// Subjects of each `send_message` call, in order (includes deduplicated
     /// re-forwards of an already-committed send).
     pub(super) send_calls: Mutex<Vec<String>>,
+    /// The `consume_draft` live id of each `send_message` call (NS2 Slice 4:
+    /// gateway-owned consumption).
+    pub(super) send_consume_calls: Mutex<Vec<Option<MessageId>>>,
     /// Idempotency keys that have committed a submission server-side. A second
     /// `send_message` under a key already present is a re-forward that does
     /// **not** create a second submission (models JMAP `ifInState` / the stable
@@ -96,6 +99,7 @@ impl MutationGateway {
             delete_draft_idempotent_calls: Mutex::new(Vec::new()),
             delete_draft_results: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
+            send_consume_calls: Mutex::new(Vec::new()),
             committed_send_keys: Mutex::new(Vec::new()),
             send_results: Mutex::new(Vec::new()),
             set_keywords_results: Mutex::new(Vec::new()),
@@ -325,8 +329,13 @@ impl MailGateway for MutationGateway {
         &self,
         _account_id: &AccountId,
         request: &SendMessageRequest,
+        consume_draft: Option<&MessageId>,
         idempotency_key: &str,
     ) -> Result<SendFiling, GatewayError> {
+        self.send_consume_calls
+            .lock()
+            .expect("send consume calls poisoned")
+            .push(consume_draft.cloned());
         self.send_calls
             .lock()
             .expect("send calls poisoned")

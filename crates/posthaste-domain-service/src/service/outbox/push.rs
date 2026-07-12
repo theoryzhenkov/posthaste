@@ -163,8 +163,29 @@ impl MailService {
                 // EmailSubmission create-id + `ifInState` and the SMTP/JMAP
                 // Message-ID from it (D84/D85), so a re-forward of a send that
                 // already committed is deduplicated, not duplicated.
+                // Gateway-owned consumption (NS2 Slice 4): the send's
+                // materialized originating-draft key (stamped at admission,
+                // D170) resolves to its LIVE provider id here at flush — a
+                // typed miss means the draft was confirmed destroyed since
+                // admission, so there is nothing to consume.
+                let consume = match request
+                    .draft_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                {
+                    Some(key) => self
+                        .resolve_draft_flush_target(account_id, key)?
+                        .map(|live| MessageId::from(live.as_str())),
+                    None => None,
+                };
                 let filing = gateway
-                    .send_message(account_id, &request, operation.id.as_str())
+                    .send_message(
+                        account_id,
+                        &request,
+                        consume.as_ref(),
+                        operation.id.as_str(),
+                    )
                     .await
                     .map_err(classify_gateway_error)?;
                 Ok(Pushed::Entity {

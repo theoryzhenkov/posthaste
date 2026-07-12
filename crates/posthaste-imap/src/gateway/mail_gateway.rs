@@ -214,12 +214,35 @@ impl MailGateway for LiveImapSmtpGateway {
 
     async fn send_message(
         &self,
-        _account_id: &AccountId,
+        account_id: &AccountId,
         request: &SendMessageRequest,
+        consume_draft: Option<&MessageId>,
         idempotency_key: &str,
     ) -> Result<posthaste_domain_model::SendFiling, GatewayError> {
         let smtp_config = self.resolve_smtp_config().await?;
-        send_message_via_smtp(self, &smtp_config, request, idempotency_key).await
+        let filing = send_message_via_smtp(self, &smtp_config, request, idempotency_key).await?;
+        // Gateway-owned consumption (NS2 Slice 4): expunge the originating
+        // draft AFTER the submission committed. Best-effort — a failure
+        // lingers until the D175 repair, never fails the committed send.
+        if let Some(consume) = consume_draft {
+            let deleted = match self.sessions.acquire("send_consume_draft").await {
+                Ok(mut lease) => {
+                    let result = delete_imap_draft(self, lease.client(), account_id, consume).await;
+                    lease.finish_gateway(result)
+                }
+                Err(error) => Err(imap_error_to_gateway(error)),
+            };
+            if let Err(error) = deleted {
+                ph_warn!(
+                    events::SEND_DRAFT_CONSUME_NOT_APPLIED,
+                    draft_id = %consume,
+                    error = %error,
+                    "SMTP send committed but the draft consume failed \
+                     (lingering until repair)"
+                );
+            }
+        }
+        Ok(filing)
     }
 
     async fn save_draft(

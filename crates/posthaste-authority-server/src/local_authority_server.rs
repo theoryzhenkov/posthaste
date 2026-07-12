@@ -189,7 +189,7 @@ impl AuthorityServerLink for LocalAuthorityServer {
     }
 
     async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
-        self.authority_server.discard_operation(operation_id)
+        self.authority_server.discard_operation(operation_id).await
     }
 
     async fn retry_operation(
