@@ -222,14 +222,61 @@ replica-core — `MessageRecord`/command types cannot cross into the wasm-pure
 kernel; the shared-kernel effect vocabulary extension ships with Slices 3/4's
 multi-row effects, which is when the client prediction needs it.
 
-**REMAINING (next session, in order): Slices 3–5.** Slice 3 (draft
-`MailIntent` + versioned envelope + `fold_effects()` in replica-core + the
-one interpreter in `refresh_message_overlay`) is the largest single unit —
-start it with fresh context; everything it needs is specified in §2–§4 and
-the substrate (NS1 + Slices 0/1) is complete and green beneath it. Then
-Slice 3 (draft intents; the last `BaseWrite::legacy` production grant dies),
-Slice 4 (send-as-one-intent; `moved_to_sent` dies), Slice 5 (verdict
-surfacing + SEND-grid tests).
+**Slice 3 LANDED (2026-07-12) — the draft plane folds; the base seal is
+total.** `intent_fold_effect` returns the typed `FoldEffect`
+(`Assert`/`UpsertDraft`/`TombstoneDraft`; `Send` still `None` until Slice 4)
+and `refresh_message_overlay` — now a `MailService` method (every caller had
+`&self`; the free-fn form was residue) — folds draft intents keyed by their
+registry-resolved LIVE id:
+
+- **Instant drafts (CL-H3/D132 dead):** a queued save IS a visible Drafts
+  row (synthesized from the request; `$draft`+`$seen`; sorts by the op's
+  `updated_at`), with a projection echo published from the effective read.
+  `get_draft_content` serves a still-queued save's content from the op
+  payload — offline compose resume can no longer lose the body.
+- **Discard = tombstone fold:** supersedes queued saves, skips the provider
+  entirely for never-flushed drafts, surfaces `NotFound` per D133 —
+  and never writes base. The last `BaseWrite::legacy` production grant AND
+  the whole `MessageCommandStore` port are deleted; sync's reconciler is the
+  only production base writer. Send-consume (D126) now also folds the
+  tombstone at enqueue, so the consumed draft leaves Drafts at settlement.
+- **Rotation carry:** at save settlement the old live row is
+  hidden/dropped (+ prune echo) and the settled fold is pinned at the
+  assigned id (+ projection echo); the post-sync sweep retires it once base
+  covers it. Draft entries confirm keywords modulo `$seen` (IMAP appends
+  `\Draft` only; exact-set compare would linger forever).
+- **D174 landed in full:** same-key saves coalesce via a guarded
+  pending-only payload swap (races the flush claim, one winner; op id — the
+  create idempotency identity — and kind never change); `depends_on` is
+  deleted end to end (model field, store column via migration v3, the flush
+  dependency gate, `Operation.dependsOn` on the wire).
+- **D153 typed misses:** save AND delete reserve the registry mapping at
+  admission, so a flush-time resolve miss can only mean confirmed
+  destruction — a `DraftUpdate` re-creates (cross-device last-writer-wins),
+  a `DiscardDraft` settles as already-done without a provider call.
+
+**Slice 3 deviations/notes for the next session:**
+- The `draft_message_exists` projection probe in `save_draft` SURVIVES (it
+  is admission-time materialization reading authority-private state — legal
+  under D171's boundary rule; needed for headerless drafts resumed by
+  provider id). The full D153 "four seams" cleanup rides Slice 4's
+  materialization step.
+- BE-H2 reorder corner: a discard enqueued behind a transient-failing
+  inflight save can flush first once the save is skipped past the
+  threshold; the discard then 404s retryably and converges after the save
+  settles (resolve-at-flush retargets it). Accepted; noted here so Slice 5's
+  L2 cells can pin it.
+- `drafts_mailbox_id` resolves via `list_mailboxes` (which derives live
+  counts) once per draft refresh — fine at autosave cadence, but a cheap
+  role-lookup store method is the obvious optimization if profiling ever
+  cares.
+
+**REMAINING (in order): Slices 4–5.** Slice 4 (send-as-one-intent:
+multi-row effects — which is when the shared-kernel `fold_effects()` moves
+into replica-core for the client prediction — materialization D170, two-step
+held plan D173, gateway-owned consumption, `SendOutcome`/D154 killing
+`moved_to_sent`, reconcile-by-intent-id, D175 repair), then Slice 5 (verdict
+surfacing + SEND-grid L2 tests).
 
 **Slice 0 LANDED (2026-07-11):** `PRAGMA user_version` + the ordered migration
 runner + the downgrade guard (`Conflict`, never `Corruption` — a newer database
