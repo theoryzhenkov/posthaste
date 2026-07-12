@@ -53,6 +53,11 @@ impl MailService {
         let wall_now = super::schedule::wall_now_rfc3339()
             .map_err(|error| ServiceError::from(GatewayError::Rejected(error)))?;
         let mono_now = super::schedule::monotonic_now_secs();
+        // D173 step 1: held sends' eager ensure-draft runs before the
+        // readiness-gated drain (a held row is not flushable, but its draft
+        // must reach the provider NOW for cross-device visibility).
+        self.ensure_drafts_for_held_sends(account_id, gateway, &wall_now, mono_now, events)
+            .await?;
         let queued = self
             .outbox
             .list_flushable_operations(account_id, &wall_now, mono_now)?;
