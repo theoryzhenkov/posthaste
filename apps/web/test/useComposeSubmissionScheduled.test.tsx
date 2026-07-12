@@ -114,12 +114,10 @@ function undoFromToast(toastSpy: ReturnType<typeof spyOn>): () => void {
 
 function renderSubmission({
   delaySeconds,
-  onPersistDraft,
   onRestoreDraft,
   onSent,
 }: {
   delaySeconds: number | null
-  onPersistDraft?: () => Promise<void>
   onRestoreDraft?: (sourceId: string, draftKey: string) => void
   onSent?: () => void
 }) {
@@ -139,7 +137,6 @@ function renderSubmission({
         intentKind: 'new',
         isPreparingMessage: false,
         onClose: () => {},
-        onPersistDraft,
         onRestoreDraft,
         onSent,
         replyContext: undefined,
@@ -170,9 +167,6 @@ describe('useComposeSubmission — undo-send / send-later', () => {
     const before = Date.now()
     const { result } = renderSubmission({
       delaySeconds: 10,
-      onPersistDraft: async () => {
-        persistCalls.push('persist')
-      },
     })
     await act(async () => {
       result.current.handleSubmit()
@@ -186,8 +180,9 @@ describe('useComposeSubmission — undo-send / send-later', () => {
     const sendAtMs = new Date(request?.input.sendAt ?? '').getTime()
     expect(sendAtMs).toBeGreaterThanOrEqual(before + 10_000)
     expect(sendAtMs).toBeLessThanOrEqual(Date.now() + 11_000)
-    // The draft is persisted BEFORE the schedule so undo restores fidelity.
-    expect(persistCalls).toEqual(['persist', 'schedule'])
+    // NS2 D173: NO persist-then-schedule two-step — the held send is one
+    // intent; the backend folds/ensures the draft and undo re-queues it.
+    expect(persistCalls).toEqual(['schedule'])
     // The countdown toast is up with an Undo action.
     await waitFor(() =>
       expect(

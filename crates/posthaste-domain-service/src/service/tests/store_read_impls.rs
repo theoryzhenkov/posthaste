@@ -21,6 +21,8 @@ impl MailboxReadStore for TestStore {
         };
         let (inbox_unread, inbox_total) = counts("inbox");
         let (archive_unread, archive_total) = counts("archive");
+        let (drafts_unread, drafts_total) = counts("drafts");
+        let (sent_unread, sent_total) = counts("sent");
         Ok(vec![
             MailboxSummary {
                 id: MailboxId::from("inbox"),
@@ -35,6 +37,23 @@ impl MailboxReadStore for TestStore {
                 role: Some("archive".to_string()),
                 unread_emails: archive_unread,
                 total_emails: archive_total,
+            },
+            // NS2 Slice 5: the draft/send folds resolve these by role (the
+            // synthesized rows' mailbox membership + the S-CONV-2 filing
+            // repair target).
+            MailboxSummary {
+                id: MailboxId::from("drafts"),
+                name: "Drafts".to_string(),
+                role: Some("drafts".to_string()),
+                unread_emails: drafts_unread,
+                total_emails: drafts_total,
+            },
+            MailboxSummary {
+                id: MailboxId::from("sent"),
+                name: "Sent".to_string(),
+                role: Some("sent".to_string()),
+                unread_emails: sent_unread,
+                total_emails: sent_total,
             },
         ])
     }

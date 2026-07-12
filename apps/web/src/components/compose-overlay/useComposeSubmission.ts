@@ -35,13 +35,12 @@ import { validateComposeSubmission } from './validation'
  *   pre-feature immediate-send path untouched.
  * - Send-later: an explicit schedule from the composer's "Send later" menu.
  *
- * UNDO RESTORES THE FULL COMPOSE: before scheduling, the compose is persisted
- * as a draft (body/recipients/attachments — `onPersistDraft`), and the
- * scheduled send carries `draftId` so the backend consumes that draft only
- * when the send actually fires (D126). Undo cancels the queued send and
- * reopens the composer on the intact draft (`onRestoreDraft`); if the cancel
- * loses the race with the flusher, the user is told the message already went
- * out.
+ * UNDO RESTORES THE FULL COMPOSE (NS2 D173): the held send is ONE intent —
+ * the backend folds a draft-form row for the hold, eagerly ensures a real
+ * provider draft (cross-device), and an undo re-queues the send's own content
+ * as a durable draft save. `onRestoreDraft` then reopens the composer on the
+ * kept draft by its compose key; if the cancel loses the race with the
+ * flusher, the user is told the message already went out.
  *
  * OFFLINE SEMANTICS (local-first, surfaced in the toast copy): a scheduled
  * send is NOT a server-side schedule — it fires when Posthaste is next
@@ -53,7 +52,6 @@ export function useComposeSubmission({
   intentKind,
   isPreparingMessage,
   onClose,
-  onPersistDraft,
   onRestoreDraft,
   onSent,
   replyContext,
@@ -67,8 +65,6 @@ export function useComposeSubmission({
   intentKind: ComposeIntent['kind']
   isPreparingMessage: boolean
   onClose: () => void
-  /** Persist the current compose as a draft (full fidelity, attachments included). */
-  onPersistDraft?: () => Promise<void>
   /** Reopen the composer on the kept draft after a successful undo. */
   onRestoreDraft?: (sourceId: string, draftKey: string) => void
   onSent?: () => void | Promise<void>
@@ -141,16 +137,17 @@ export function useComposeSubmission({
       /** Undo-send hold in seconds; null for an explicit send-later schedule. */
       undoWindowSeconds: number | null
     }) => {
-      // Persist the compose as a draft FIRST so undo restores full fidelity
-      // (attachments included). Best-effort: a failed save never blocks the
-      // send — undo then still cancels, it just cannot reopen the content.
-      await onPersistDraft?.()
+      // NS2 D173: no persist-then-schedule two-step. The held send is ONE
+      // intent — the backend folds it as a draft-form row immediately, the
+      // eager ensure step writes the provider draft during the hold, and an
+      // undo re-queues the content as a durable draft save. Undo restores
+      // full fidelity from the send's own payload (attachments included).
       const response = await runtimeMutations.messages.scheduleSend({
         sourceId: variables.sourceId,
         input: {
           ...variables.input,
-          // The originating draft: consumed by the backend only when the
-          // send actually fires (D126), so it stays restorable until then.
+          // The compose key: admission materializes what this send means
+          // (D170) and the kept/ensured draft stays restorable under it.
           draftId: draftKey,
           // For undo-send the DURATION is authoritative (server-stamped
           // deadline, D152); sendAt rides along as display metadata. For an

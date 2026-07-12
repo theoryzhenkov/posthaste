@@ -148,23 +148,23 @@ Legend: **P**rimary / **C**onfirming layer.
 | **S-AUTHZ-1** | Send without the `send` capability → refused before optimistic apply or enqueue; zero effect | success (authz gate) | L1(P) · L2(P) | `send_l2_refused_without_send_scope` | 🟡 per-op authz landed, no send-specific test |
 | **S-AUTHZ-2** | Capability expiring *after* enqueue doesn't strand an in-flight send (authorized at admission) | uncertain × P4 | L2(P) | `send_l2_expiry_midflight_completes` | 🔴 unspecified |
 | **S-CONV-1** | After settle+sync: U=C=R — in Sent, absent from Drafts, all three planes | success | L2(P) · L3(C) · L4(C) | `send_{l2,l3,l4}_converges_to_sent` | ✅ / 🔴 no L4 |
-| **S-CONV-2** | Delivered-but-unfiled (`moved_to_sent==false`) still converges Drafts→Sent on later reconcile | success × P4-nofile | L2(P fault) · L3(C) · L4(C) | `send_l2_nofile_reconciles` | 🔴 **live incident** |
+| **S-CONV-2** | Delivered-but-unfiled (`PendingFiling`) still converges Drafts→Sent on later reconcile | success × P4-nofile | L2(P fault) · L3(C) · L4(C) | `send_l2_nofile_reconciles` | ✅ L2 (NS2 Slice 5 — adoption files the Drafts ghost, add-Sent-drop-Drafts) / 🔴 no L3/L4 |
 | **S-CONV-3** | A parked send that *did* deliver converges to Sent with no duplicate on reconcile | uncertain × P4-lost | L2(P) · L3(C) | `send_l2_parked_but_delivered_reconciles` | 🟡 |
 | **S-ATOM-1** | `{draft consumed, Sent recorded}` write-through is crash-atomic — recovery is never {draft gone ∧ Sent absent} nor {both present} | any × P5-torn | L2(P crash-inject) | `send_l2_settle_is_crash_atomic` | 🔴 untested (non-atomic settlement MEDIUM item) |
 | **S-EO-1** | Redelivered/retried send → one delivery (deterministic `phsend-` create-id dedups) | uncertain × P4-lost | L1(P) · L2(P) · L3(C) | `send_{l2,l3}_uncertain_no_double_send` | ✅ |
-| **S-EO-2** | On providers that DON'T dedup on create-id (RFC-8620) / IMAP APPEND, adopt-by-header prevents a twin | uncertain × P4-lost, non-dedup provider | L2(P fault) · L3(P) | `send_l3_no_createid_dedup_no_twin` | 🔴 open (M72 adopt-by-header un-landed) |
+| **S-EO-2** | On providers that DON'T dedup on create-id (RFC-8620) / IMAP APPEND, adopt-by-header prevents a twin | uncertain × P4-lost, non-dedup provider | L2(P fault) · L3(P) | `provisional_sent_row_is_adopted_when_the_provider_copy_syncs` | ✅ L2 (NS2 Slice 4 — adoption by `send_identity_token` prefix) / 🔴 no L3 |
 | **S-EO-3** | After restart, durable apply-ledger re-observes the decision → no re-execute | uncertain × restart | L2(P restart-sim) | `send_l2_restart_no_reexecute` | ✅ (DS7) |
 | **S-EO-4** | Same client idempotency-key replay → original op, no double | retriable × client-retry | L1(P) · L2(C) | `send_l2_idem_key_collapses` | ✅ |
 | **S-NOLOSS-1** | Permanently-failed send must NOT have destroyed the draft (recovery artifact survives) | permanent | L2(P force-permanent) | `send_l2_permanent_keeps_draft` | 🟡 |
 | **S-REVERT-1** | Rejected/failed send → optimistic draft-destroy reverts; draft reappears | permanent/rejected | L2(P settle) · L4(C) | `send_l2_reject_returns_draft` | ✅ (DS8) |
 | **S-REVERT-2** | Parked (uncertain) send does NOT hard-revert *or* fake-Sent — shows pending, keeps draft for retry | uncertain | L2(P) · L4(C) | `send_l2_park_shows_pending` | 🟡 surfacing |
 | **S-VERD-1** | Success → user sees "Sent", no false-Sent flicker | success | L2(P `assert_confirmed`) · L4(P) | `send_l4_toast_sent` | ✅ / 🔴 no L4 |
-| **S-VERD-2** | Uncertain → distinct "needs attention / retry", never silent, never fake success | uncertain × P4-lost | L2(P event) · L4(C) | `send_l4_parked_affordance` | 🟡 |
-| **S-VERD-3** | `moved_to_sent==false` → truthful verdict, never a silent Drafts ghost + log line | success × P4-nofile | L2(P) · L4(C) | `send_l4_nofile_verdict` | 🔴 **live incident** |
-| **S-VERD-4** | Verdict survives process restart — no "sending… forever" | uncertain × restart | L2(P restart) | `send_l2_verdict_survives_restart` | 🔴 open (BE-H3 volatile send-bridge) |
+| **S-VERD-2** | Uncertain → distinct "needs attention / retry", never silent, never fake success | uncertain × P4-lost | L2(P event) · L4(C) | `interrupted_inflight_send_parks_dispatch_uncertain_not_resent` | ✅ L2 event + web needs-attention notification / 🔴 no L4 |
+| **S-VERD-3** | `PendingFiling` → truthful verdict, never a silent Drafts ghost + log line | success × P4-nofile | L2(P) · L4(C) | `send_settlement_carries_the_typed_filing_outcome` | ✅ L2 (D154 `sendFiling` on the settlement) + web "Sent — still filing" notification / 🔴 no L4 |
+| **S-VERD-4** | Verdict survives process restart — no "sending… forever" | uncertain × restart | L2(P restart) | `send_l2_verdict_survives_restart` | ✅ L2 (durable outbox verdict + retry) — BE-H3 client-bridge hang remains a client-link item |
 | **S-RECOV-1** | Dropped `message.updated` (Sent echo) → later level-triggered reconcile still files it in Sent | success × P6/E-gap | L2(P drop-echo) · L3(C) | `send_l2_missed_echo_reconciles` | 🟡 (CL-C3 partial) |
 | **S-RECOV-2** | Dropped settlement frame → op re-resolves, not stuck Inflight | uncertain × E-gap | L2(P) | `send_l2_missed_settlement_resolves` | 🟡 (BE-H6 partial) |
-| **S-ISO-1** | A permanently-poisoned send doesn't block the account's other ops (attempt cap/quarantine) | permanent × poison | L2(P poison+good) | `send_l2_poison_does_not_wedge_outbox` | 🔴 open (BE-H2) |
+| **S-ISO-1** | A permanently-poisoned send doesn't block the account's other ops (attempt cap/quarantine) | permanent × poison | L2(P poison+good) | `send_l2_poison_does_not_wedge_outbox` | ✅ L2 (permanent settles + drain continues; transient wedge = BE-H2 skip, Slice 2) |
 | **S-ORDER-1** | Edit-then-send on one draft: the send carries the latest saved content (no lost update) | concurrent | L2(P) | `send_l2_send_after_edit_latest` | 🟡 (DP-H10) |
 
 ### 5.1 Explicit N/A cells (the discipline — empty by decision)
