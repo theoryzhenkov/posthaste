@@ -170,12 +170,21 @@ export interface SaveDraftInput {
   message: SendMessageInput
 }
 
+/**
+ * How the provider filed the Sent copy of a delivered send (D154):
+ * `pendingFiling` means delivery committed but the Sent copy is not yet
+ * confirmed filed ("Sent — filing").
+ */
+export type SendFiling = 'filed' | 'pendingFiling'
+
 /** Settlement payload carried by the `operation.settled` event. @spec docs/L1-outbox#settlement */
 export interface OperationSettlement {
   id: string
   outcome: 'applied' | 'failed'
   assignedEntityId: string | null
   error: string | null
+  /** For an applied send: the Sent-copy filing outcome (D154). */
+  sendFiling?: SendFiling
 }
 
 /**

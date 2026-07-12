@@ -226,6 +226,27 @@ pub struct Operation {
     pub updated_at: String,
 }
 
+/// How the provider filed the Sent copy of a DELIVERED send (D154). The full
+/// send-outcome space is `Delivered { filed } | Uncertain(cause) | Failed`:
+/// `Uncertain` rides `operation.dispatch_uncertain` (the park, D86) and
+/// `Failed` rides the failed settlement — this enum types the piece that used
+/// to be a warn-and-forget boolean (`moved_to_sent`).
+///
+/// @spec docs/eph/RFC-L2-send-draft-state-machine#3-decisions
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum SendFiling {
+    /// The Sent copy is filed (server-side move applied, Sent append
+    /// succeeded, or the provider files sent mail itself).
+    Filed,
+    /// Delivery committed but the Sent copy is NOT confirmed filed (the
+    /// server ignored the Drafts→Sent move; the IMAP Sent append failed or no
+    /// Sent mailbox was discovered). The provisional Sent overlay row stays
+    /// confirmation-gated; reads "Sent — filing" (Slice 5 surfaces it).
+    PendingFiling,
+}
+
 /// Terminal outcome of an operation flush, propagated via
 /// `operation.settled` so optimistic state can be cleared or a failure surfaced.
 ///
@@ -239,6 +260,10 @@ pub struct OperationSettlement {
     /// Set when a temp entity id was reconciled to a provider id on this flush.
     pub assigned_entity_id: Option<String>,
     pub error: Option<String>,
+    /// For an APPLIED send: how the Sent copy was filed (D154). `None` on
+    /// every non-send settlement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_filing: Option<SendFiling>,
 }
 
 /// Outcome variants reported in [`OperationSettlement`].

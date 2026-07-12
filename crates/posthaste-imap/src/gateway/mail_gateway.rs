@@ -217,7 +217,7 @@ impl MailGateway for LiveImapSmtpGateway {
         _account_id: &AccountId,
         request: &SendMessageRequest,
         idempotency_key: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<posthaste_domain_model::SendFiling, GatewayError> {
         let smtp_config = self.resolve_smtp_config().await?;
         send_message_via_smtp(self, &smtp_config, request, idempotency_key).await
     }

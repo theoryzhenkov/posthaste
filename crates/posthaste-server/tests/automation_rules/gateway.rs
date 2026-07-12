@@ -256,7 +256,7 @@ impl MailGateway for ScriptedGateway {
         _account_id: &AccountId,
         _request: &SendMessageRequest,
         _idempotency_key: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<posthaste_domain_model::SendFiling, GatewayError> {
         Err(GatewayError::Rejected(
             "unused in automation tests".to_string(),
         ))
