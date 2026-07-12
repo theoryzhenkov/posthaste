@@ -590,8 +590,8 @@ impl MailGateway for MockJmapGateway {
         _account_id: &AccountId,
         _request: &SendMessageRequest,
         _idempotency_key: &str,
-    ) -> Result<(), GatewayError> {
-        Ok(())
+    ) -> Result<posthaste_domain_model::SendFiling, GatewayError> {
+        Ok(posthaste_domain_model::SendFiling::Filed)
     }
 
     /// Store a draft message and return a deterministic created id. When

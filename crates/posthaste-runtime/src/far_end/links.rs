@@ -1499,6 +1499,7 @@ mod race_tests {
             },
             assigned_entity_id: None,
             error: (!applied).then(|| "send permanently failed".to_string()),
+            send_filing: None,
         };
         DomainEvent {
             seq: 1,
