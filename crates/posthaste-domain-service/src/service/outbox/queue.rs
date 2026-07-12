@@ -346,6 +346,7 @@ impl MailService {
             .take()
             .map(|key| key.trim().to_string())
             .filter(|key| !key.is_empty());
+        let held = send_at.is_some() || hold_until_mono.is_some();
         let consumes_key = match compose_key {
             Some(key) => {
                 let registered = self
@@ -358,9 +359,26 @@ impl MailService {
                             .set_draft_alias(account_id, &key, &key)?;
                     }
                     Some(key)
+                } else if held {
+                    // D173: a HELD send is ALWAYS consuming — its two-step
+                    // plan's eager ensure-draft creates the provider copy
+                    // (cross-device visibility during the hold), so an
+                    // unknown key is reserved rather than dropped.
+                    self.draft_registry
+                        .set_draft_alias(account_id, &key, &key)?;
+                    Some(key)
                 } else {
                     None
                 }
+            }
+            None if held => {
+                // A key-less held send mints its compose key at admission —
+                // the ensure-draft step needs a draft identity to create,
+                // and the submit step consumes it.
+                let key = format!("draft-local-{}", Id::generate());
+                self.draft_registry
+                    .set_draft_alias(account_id, &key, &key)?;
+                Some(key)
             }
             None => None,
         };

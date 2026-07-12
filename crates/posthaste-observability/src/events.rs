@@ -84,6 +84,10 @@ pub const SEND_SENT_MOVE_NOT_APPLIED: LogEvent = LogEvent::new("send.sent_move_n
 /// gone, or lingering until the D175 repair) — never a send failure.
 pub const SEND_DRAFT_CONSUME_NOT_APPLIED: LogEvent =
     LogEvent::new("send.draft_consume_not_applied");
+/// A held send's eager ensure-draft step (D173) failed; retried next flush
+/// window — never fails the held send itself.
+pub const OUTBOX_HELD_SEND_ENSURE_FAILED: LogEvent =
+    LogEvent::new("outbox.held_send_ensure_failed");
 pub const OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("outbox.followup_sync_trigger_failed");
 

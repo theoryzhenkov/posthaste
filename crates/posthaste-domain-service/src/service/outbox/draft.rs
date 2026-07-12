@@ -433,6 +433,129 @@ impl MailService {
         Ok(())
     }
 
+    /// D173 step 1 — the eager ensure-draft for HELD sends: during the hold
+    /// the message is a REAL provider draft, visible and editable on every
+    /// device. Runs each flush pass, before the readiness-gated drain; the
+    /// registry is the step ledger — done = the compose key maps to a
+    /// provider id (a crash retry re-creates under the same deterministic
+    /// create-id, DS2, so the server dedups). A queued save op on the same
+    /// key IS the ensure step (it flushes eagerly on its own), and a failure
+    /// here only warns — cross-device visibility degrades, the submit step
+    /// is untouched.
+    pub(super) async fn ensure_drafts_for_held_sends(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+        wall_now: &str,
+        mono_now: i64,
+        events: &mut Vec<DomainEvent>,
+    ) -> Result<(), ServiceError> {
+        let pending = self.outbox.list_pending_operations(account_id)?;
+        for operation in &pending {
+            if operation.kind != OperationKind::Send || operation.state != OperationState::Pending {
+                continue;
+            }
+            let held = operation
+                .send_at
+                .as_deref()
+                .is_some_and(|send_at| send_at > wall_now)
+                || operation
+                    .hold_until_mono
+                    .is_some_and(|hold| hold > mono_now);
+            if !held {
+                continue;
+            }
+            let Ok(posthaste_domain_model::MailIntent::Send(request)) = operation.intent() else {
+                continue;
+            };
+            let Some(key) = request
+                .draft_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+            else {
+                continue;
+            };
+            match self
+                .draft_registry
+                .resolve_draft_entity(account_id, key)?
+                .as_deref()
+            {
+                // Confirmed destroyed since admission: nothing to ensure.
+                None => continue,
+                // Rotated to a provider id: the step is complete.
+                Some(live) if live != key => continue,
+                _ => {}
+            }
+            let save_queued = pending.iter().any(|other| {
+                other.entity.kind == OperationEntityKind::Draft
+                    && other.entity.id == key
+                    && other.kind.is_draft_save()
+                    && matches!(
+                        other.state,
+                        OperationState::Pending | OperationState::Inflight
+                    )
+            });
+            if save_queued {
+                continue;
+            }
+            match gateway
+                .save_draft(account_id, &request, None, false, operation.id.as_str())
+                .await
+            {
+                Ok(new_id) => {
+                    // The rotation write IS the durable step-complete marker.
+                    self.draft_registry
+                        .set_draft_alias(account_id, key, new_id.as_str())?;
+                    let live_id = MessageId::from(new_id.as_str());
+                    let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
+                    let record = crate::service::mutation::synthesize_draft_record(
+                        None,
+                        &request,
+                        operation,
+                        drafts_mailbox.as_ref(),
+                        &live_id,
+                        key,
+                    );
+                    {
+                        let overlay = self.overlay.clone();
+                        let owned_account = account_id.clone();
+                        offload(move || overlay.upsert_overlay_message(&owned_account, &record))
+                            .await?;
+                    }
+                    if let Some(summary) = self
+                        .message_detail_reader
+                        .get_message_summary(account_id, &live_id)?
+                    {
+                        let scope = summary.mailbox_ids.first().cloned();
+                        events.push(self.events.append_event(
+                            account_id,
+                            EVENT_TOPIC_MESSAGE_UPDATED,
+                            scope.as_ref(),
+                            Some(&live_id),
+                            serde_json::json!({
+                                "messageId": live_id.as_str(),
+                                "changes": { "mailboxes": true },
+                                "projection": &summary,
+                            }),
+                        )?);
+                    }
+                }
+                Err(error) => {
+                    ph_warn!(
+                        events::OUTBOX_HELD_SEND_ENSURE_FAILED,
+                        account_id = %account_id,
+                        operation_id = %operation.id,
+                        error = %error,
+                        "held send's eager ensure-draft failed; cross-device \
+                         visibility degraded until the next flush window"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// M70 (D136): resolve a draft op's stable key to the live entity id at
     /// flush time — immediately before the gateway call — so the push targets
     /// the freshest mapping the registry knows. This closes the in-flight-op
