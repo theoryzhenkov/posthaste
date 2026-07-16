@@ -51,7 +51,7 @@ function startTimeoutSeconds(): number {
 export const { test, expect } = createTauriTest({
   devUrl: "",
   mcpSocket: requiredPrivateSocket(),
-  tauriCommand: "bun run tauri dev --config apps/desktop/tauri.e2e.conf.json",
+  tauriCommand: "bun run tauri dev --config legacy/desktop/tauri.e2e.conf.json",
   tauriCwd: env.POSTHASTE_REPO_ROOT ?? cwd(),
   tauriFeatures: ["e2e-testing"],
   startTimeout: startTimeoutSeconds(),

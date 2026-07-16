@@ -207,7 +207,7 @@ jobs:
           # authorization code (Google rejects the exchange without it).
           VITE_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
-          bun --cwd=apps/web run build
+          bun --cwd=legacy/web run build
           bash tools/package/web.sh
 
       - uses: actions/upload-artifact@v4
@@ -369,7 +369,7 @@ jobs:
     needs: [resolve-channel, build-cli]
     runs-on: ${{ matrix.os }}
     env:
-      # Resolved by apps/desktop/build.rs into a compile-time constant the binary
+      # Resolved by legacy/desktop/build.rs into a compile-time constant the binary
       # self-reports via --print-release-channel (checked by the smoke step), and
       # passed to the web bundle so the two cannot disagree.
       POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
@@ -380,7 +380,7 @@ jobs:
       matrix:
         include:
           # cli_platform / target_triple: the posthastectl sidecar is staged as
-          # apps/desktop/binaries/posthastectl-<target_triple>[.exe] before the
+          # legacy/desktop/binaries/posthastectl-<target_triple>[.exe] before the
           # tauri build. cli_platform selects build-cli's raw artifact
           # (PosthasteCTL[Nightly]-<cli_platform>); target_triple is the Rust
           # host triple of this runner, which is the exact suffix Tauri's
@@ -452,7 +452,7 @@ jobs:
       # carries app + embedded server + CLI as one unit. Tauri's
       # `bundle.externalBin` (tauri.conf.json: "binaries/posthastectl") requires
       # the resolved binary to exist at
-      #   apps/desktop/binaries/posthastectl-<target_triple>[.exe]
+      #   legacy/desktop/binaries/posthastectl-<target_triple>[.exe]
       # BEFORE `tauri build` runs (externalBin is validated at bundle time). We
       # reuse build-cli's cross-compiled raw binaries instead of rebuilding.
       # Tauri strips the -<triple> suffix when it copies the binary into the
@@ -471,8 +471,8 @@ jobs:
           ext=""
           [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
           src="cli-raw/${POSTHASTE_CLI_NAME}-${{ matrix.cli_platform }}${ext}"
-          dest="apps/desktop/binaries/posthastectl-${{ matrix.target_triple }}${ext}"
-          mkdir -p apps/desktop/binaries
+          dest="legacy/desktop/binaries/posthastectl-${{ matrix.target_triple }}${ext}"
+          mkdir -p legacy/desktop/binaries
           if [ ! -f "$src" ]; then
             echo "sidecar source binary not found: $src" >&2
             ls -la cli-raw >&2 || true
@@ -508,7 +508,7 @@ jobs:
         shell: bash
         run: |
           echo "Desktop bundle version: $POSTHASTE_BUNDLE_VERSION"
-          node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\\n')" "$POSTHASTE_BUNDLE_VERSION"
+          node -e "const fs=require('fs');const f='legacy/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\\n')" "$POSTHASTE_BUNDLE_VERSION"
 
       - name: Import Apple Developer certificate
         if: runner.os == 'macOS'
@@ -562,7 +562,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VITE_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
-          bun --cwd=apps/web run build
+          bun --cwd=legacy/web run build
           devtools_flag=""
           if [ "${POSTHASTE_INCLUDE_DEVTOOLS:-false}" = "true" ]; then
             devtools_flag="--features devtools"
@@ -662,7 +662,7 @@ jobs:
             fi
           }
 
-          bun --cwd=apps/web run build
+          bun --cwd=legacy/web run build
           configure_notarization
           if [ "${POSTHASTE_ENFORCE_MACOS_SIGNING:-}" = "true" ] && [ "$notarization_enabled" != "true" ]; then
             echo "Stable macOS release builds require notarization credentials." >&2
@@ -699,7 +699,7 @@ jobs:
           # over the whole .app. Without this key Tauri would re-sign the sidecar
           # with hardened runtime and NO entitlements, stripping the JIT
           # capability and crashing the CLI on first launch. Path is relative to
-          # tauri.conf.json (apps/desktop), same resolution as the icon config.
+          # tauri.conf.json (legacy/desktop), same resolution as the icon config.
           # Applied on both signing branches (harmless under ad-hoc / hardened
           # runtime off). VERIFY on the next release run: `codesign -d
           # --entitlements - <app>/Contents/MacOS/posthastectl` must list allow-jit.
@@ -768,7 +768,7 @@ jobs:
           while IFS= read -r app; do
             found=1
             codesign --verify --deep --strict --verbose=2 "$app"
-          done < <(find target/release/bundle apps/desktop/target/release/bundle -type d -name '*.app' 2>/dev/null)
+          done < <(find target/release/bundle legacy/desktop/target/release/bundle -type d -name '*.app' 2>/dev/null)
           test "$found" -eq 1
 
       - name: Collect desktop bundles
@@ -779,7 +779,7 @@ jobs:
           while IFS= read -r file; do
             cp "$file" "$out/"
           done < <(
-            find target/release/bundle apps/desktop/target/release/bundle \
+            find target/release/bundle legacy/desktop/target/release/bundle \
               -type f \( \
                 -name '*.AppImage' -o \
                 -name '*.dmg' -o \

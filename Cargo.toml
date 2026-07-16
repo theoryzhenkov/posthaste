@@ -2,7 +2,7 @@
 # `apps/client/*` is the integrated app (backend + mirror frontend): members
 # for the shared lockfile/lints, deliberately NOT default-members — the default
 # build stays the split-model app until the cutover.
-members = ["crates/*", "apps/desktop", "apps/client/models", "apps/client/backend"]
+members = ["crates/*", "legacy/desktop", "apps/client/models", "apps/client/backend"]
 # `posthaste-bench` is a member (shared lockfile/target cache) but kept out of the
 # default build: it pulls profiling-only deps and a Valgrind-backed bench harness,
 # exercised by `profile.yml` rather than the main `ci.yml`.

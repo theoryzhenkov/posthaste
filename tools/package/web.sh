@@ -3,7 +3,7 @@
 # archive. Split from the daemon (the frontend is co-deployed but distributed
 # separately so the daemon artifact stays small + platform-scoped).
 #
-# Requires: bun --cwd=apps/web run build already run (apps/web/dist populated).
+# Requires: bun --cwd=legacy/web run build already run (legacy/web/dist populated).
 # Env:
 #   POSTHASTE_WEB_NAME - release artifact base name (from channel-policy.sh)
 set -euo pipefail
@@ -15,14 +15,14 @@ name="${POSTHASTE_WEB_NAME:-posthaste-web}"
 out_root="$root/target/distribute"
 out_dir="$out_root/$name"
 
-if [[ ! -f "$root/apps/web/dist/index.html" ]]; then
-  echo "missing apps/web/dist/index.html; run 'bun --cwd=apps/web run build' first" >&2
+if [[ ! -f "$root/legacy/web/dist/index.html" ]]; then
+  echo "missing legacy/web/dist/index.html; run 'bun --cwd=legacy/web run build' first" >&2
   exit 1
 fi
 
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
-cp -R "$root/apps/web/dist" "$out_dir/web"
+cp -R "$root/legacy/web/dist" "$out_dir/web"
 
 cat > "$out_dir/README.md" <<EOF
 # ${POSTHASTE_WEB_NAME:-Posthaste web frontend}
