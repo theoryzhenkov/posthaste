@@ -26,8 +26,13 @@ use posthaste_domain_model::{
     ProviderAuthKind, ProviderHint, SecretRef, SecretStoreError, SyncBatch, SyncCursor, SyncObject,
 };
 use posthaste_domain_service::{MailStore, SecretStore};
+use posthaste_replica_projector::{
+    EntityStore, SortDirection as StoreSortDirection, SortKey as StoreSortKey, StoreUpdate,
+    ViewPredicate, ViewRow as StoreViewRow,
+};
 use posthaste_runtime::RuntimeHandle;
 use posthaste_runtime_api::RuntimeAccountApi;
+use serde_json::Value;
 
 use crate::fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
 use crate::guard::TempDirGuard;
@@ -377,23 +382,176 @@ impl RuntimeHarness {
             .expect("runtime stream should subscribe");
         let frames = std::mem::take(&mut subscription.catch_up);
         let view_id = snapshot.view_id.clone();
+        let mirror = MailListMirror::try_new(&snapshot);
         ViewWatch {
             view_id,
             subscription,
             frames,
             last_snapshot: Some(snapshot),
+            mirror,
             _phantom: PhantomData,
         }
     }
 }
 
+/// The client half of the self-maintained mail-list contract, in miniature.
+///
+/// The runtime never re-serves a `client_self_maintained` mail-list per event
+/// (option iii, `view_registry::spawn_event_pump`): it broadcasts
+/// `message.updated` notifications — each carrying the full row `projection` —
+/// and the CLIENT folds them into its entity store. The web adapter
+/// (`apps/web/src/runtime/replica/entityStoreAdapter.ts`) does that over the
+/// WASM-wrapped [`EntityStore`]; this mirror embeds the same store natively so
+/// a [`ViewWatch`] observes what a real client renders, not just the frames
+/// the runtime pushes. Seeding mirrors the adapter's `seedOpenedView`; folding
+/// mirrors its `storeUpdatesFromEvent`; row synthesis mirrors `projectView`.
+struct MailListMirror {
+    store: EntityStore,
+    predicate: ViewPredicate,
+}
+
+/// The mirror registers the watched view under one fixed store key.
+const MIRROR_VIEW: &str = "watch";
+
+impl MailListMirror {
+    /// Build from the opened view's initial snapshot. `None` when the view is
+    /// not a self-maintained mail list over an `in:<account>/<mailbox>` scope —
+    /// the only shape [`ViewWatch`] needs to self-maintain (everything else is
+    /// runtime-re-served, so the plain snapshot wait suffices).
+    fn try_new(snapshot: &ViewSnapshot) -> Option<Self> {
+        let descriptor = &snapshot.descriptor;
+        if descriptor.family != "mailList" || !descriptor.client_self_maintained {
+            return None;
+        }
+        let query = descriptor.payload.get("query")?.as_str()?;
+        let (_account, mailbox) = query.strip_prefix("in:")?.split_once('/')?;
+        let mut mirror = Self {
+            store: EntityStore::new(),
+            predicate: ViewPredicate::InMailboxes(vec![mailbox.to_string()]),
+        };
+        mirror.seed(snapshot);
+        Some(mirror)
+    }
+
+    /// Adopt a served snapshot: register + seed the rows' message bases +
+    /// place the rows, against the snapshot's coverage watermark (the
+    /// adapter's `seedOpenedView` / re-serve adoption).
+    fn seed(&mut self, snapshot: &ViewSnapshot) {
+        let rows: Vec<&Value> = snapshot
+            .data
+            .get("rows")
+            .and_then(Value::as_array)
+            .map(|rows| rows.iter().collect())
+            .unwrap_or_default();
+        // The watermark W — the sort key of the last held row; `None` (the
+        // range reaches BOTTOM / complete) when coverage has no ranges.
+        let watermark = if snapshot.coverage.ranges.is_empty() {
+            None
+        } else {
+            rows.last()
+                .and_then(|row| sort_key_of(row.get("projection")?))
+        };
+        self.store.register_view(
+            MIRROR_VIEW,
+            self.predicate.clone(),
+            "date".to_string(),
+            StoreSortDirection::Desc,
+            watermark.clone(),
+        );
+        let bases: Vec<StoreUpdate> = rows
+            .iter()
+            .filter_map(|row| {
+                let projection = row.get("projection")?;
+                Some(StoreUpdate::Message {
+                    message_id: projection.get("id")?.as_str()?.to_string(),
+                    projection: projection.clone(),
+                    deleted: false,
+                })
+            })
+            .collect();
+        self.store.ingest_batch(bases);
+        let placed: Vec<StoreViewRow> = rows
+            .iter()
+            .filter_map(|row| {
+                let projection = row.get("projection")?;
+                let source_id = projection.get("sourceId")?.as_str()?;
+                let id = projection.get("id")?.as_str()?;
+                Some(StoreViewRow {
+                    row_key: format!("{source_id}:{id}"),
+                    message_id: id.to_string(),
+                    sort_key: sort_key_of(projection)?,
+                })
+            })
+            .collect();
+        self.store.set_view_rows(MIRROR_VIEW, placed, watermark);
+        let _ = self.store.drain_dirty();
+    }
+
+    /// Fold one `message.updated` notification (the adapter's
+    /// `storeUpdatesFromEvent`): the event's inner payload carries
+    /// `messageId` + the full `projection` (or `deleted`). Returns whether an
+    /// update was ingested (so the caller re-projects).
+    fn ingest(&mut self, event_payload: &Value) -> bool {
+        let inner = &event_payload["payload"];
+        let Some(message_id) = inner.get("messageId").and_then(Value::as_str) else {
+            return false;
+        };
+        let deleted = inner.get("deleted").and_then(Value::as_bool) == Some(true);
+        let projection = inner.get("projection").cloned().unwrap_or(Value::Null);
+        if projection.is_null() && !deleted {
+            return false;
+        }
+        self.store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: message_id.to_string(),
+            projection,
+            deleted,
+        }]);
+        let _ = self.store.drain_dirty();
+        true
+    }
+
+    /// The store's projected rows as `MailListRowState` values (the adapter's
+    /// `projectView` synthesis), for splicing into the held snapshot.
+    fn rows(&self) -> Vec<Value> {
+        self.store
+            .view_rows(MIRROR_VIEW)
+            .unwrap_or_default()
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "rowKey": row.row_key,
+                    "resourceRef": null,
+                    "projection": self.store.message(&row.message_id),
+                    "sortKey": row.sort_key,
+                    "orderKey": "",
+                })
+            })
+            .collect()
+    }
+}
+
+/// The store's composite sort key `[receivedAt, id]` from a row projection.
+fn sort_key_of(projection: &Value) -> Option<StoreSortKey> {
+    Some(StoreSortKey {
+        received_at: projection.get("receivedAt")?.as_str()?.to_string(),
+        message_id: projection.get("id")?.as_str()?.to_string(),
+    })
+}
+
 /// A live subscription to one view's frame stream, kept open across an external
 /// action (e.g. message injection) so a sync-driven recompute can be observed.
+///
+/// For a `client_self_maintained` mail list the watch additionally folds the
+/// `message.updated` firehose through a [`MailListMirror`] — the runtime never
+/// re-serves such a view per event, so without the client-side fold the watch
+/// would stale on arrivals forever (the exact contract the web client's entity
+/// store fulfils in production).
 pub struct ViewWatch<'a> {
     view_id: ViewId,
     subscription: RuntimeFrameSubscription,
     frames: Vec<RuntimeFrame>,
     last_snapshot: Option<ViewSnapshot>,
+    mirror: Option<MailListMirror>,
     _phantom: PhantomData<&'a ()>,
 }
 
@@ -425,9 +583,32 @@ impl<'a> ViewWatch<'a> {
                         | RuntimeFrame::ViewReplace {
                             view_id, snapshot, ..
                         } if view_id == &self.view_id => {
+                            // A served snapshot is authoritative: re-seed the
+                            // mirror against it (the adapter's re-serve
+                            // adoption), then adopt it as the held state.
+                            if let Some(mirror) = &mut self.mirror {
+                                mirror.seed(snapshot);
+                            }
                             self.last_snapshot = Some(snapshot.clone());
                             if predicate(snapshot) {
                                 satisfied = true;
+                            }
+                        }
+                        RuntimeFrame::Notification { kind, payload, .. }
+                            if kind == "message.updated" =>
+                        {
+                            // The self-maintenance fold: no re-serve is coming
+                            // for this event — project the store's rows into
+                            // the held snapshot, exactly as the client renders.
+                            if let (Some(mirror), Some(snapshot)) =
+                                (&mut self.mirror, &mut self.last_snapshot)
+                            {
+                                if mirror.ingest(payload) {
+                                    snapshot.data["rows"] = Value::Array(mirror.rows());
+                                    if predicate(snapshot) {
+                                        satisfied = true;
+                                    }
+                                }
                             }
                         }
                         _ => {}
