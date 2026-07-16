@@ -2289,9 +2289,10 @@ export interface components {
         /**
          * @description A single local-first command.
          *
-         *     `id` provides runtime/provider idempotency. `depends_on` preserves draft
-         *     chains only; state assertions coalesce instead of depending on earlier
-         *     assertions.
+         *     `id` provides runtime/provider idempotency. There is no cross-operation
+         *     dependency edge (D174): state assertions coalesce, same-key draft saves
+         *     coalesce (last-writer-wins per compose session), and everything else
+         *     relies on the flusher's insertion-order drain.
          *
          *     @spec docs/L1-outbox#operation-model
          */
@@ -2300,16 +2301,29 @@ export interface components {
             /** Format: int32 */
             attempts: number;
             createdAt: string;
-            dependsOn?: null | components["schemas"]["OperationId"];
             entity: components["schemas"]["OperationEntity"];
+            /**
+             * Format: int64
+             * @description Undo-send hold deadline in the DAEMON's monotonic-anchored epoch
+             *     seconds (D152): stamped and judged on one clock, meaningless across
+             *     machines (deliberately not display data — clients show their own local
+             *     countdown). `None` for immediate and wall-scheduled sends.
+             */
+            holdUntilMono?: number | null;
             id: components["schemas"]["OperationId"];
             kind: components["schemas"]["OperationKind"];
             lastError?: string | null;
             /**
              * @description Kind-specific payload (the wrapped command or draft body), as JSON so the
-             *     envelope stays uniform across kinds.
+             *     envelope stays uniform across kinds. Decode through
+             *     [`Operation::intent`], never ad hoc (NS2 Slice 2).
              */
             payload: Record<string, never>;
+            /**
+             * Format: int64
+             * @description D155 payload envelope version. v1 = the historical per-kind shapes.
+             */
+            payloadVersion?: number;
             /**
              * @description Scheduled-send hold (send ops only): the earliest flush time, normalized
              *     UTC whole-second RFC 3339. A queued op with `send_at` in the future is
@@ -2908,6 +2922,15 @@ export interface components {
             sendAt?: string | null;
             subject: string;
             to: components["schemas"]["Recipient"][];
+            /**
+             * Format: int32
+             * @description Undo-send hold as a DURATION (seconds), NOT a timestamp (D152): the
+             *     server stamps the deadline on ITS monotonic-anchored clock and judges
+             *     it on that same clock, so client/daemon wall skew (the nightly
+             *     nothing-sends P0) is unrepresentable. When present it takes precedence
+             *     over `send_at`, which degrades to display metadata for this request.
+             */
+            undoWindowSeconds?: number | null;
         };
         /**
          * @description Response body for `POST /v1/sources/{source_id}/commands/send`: the send
