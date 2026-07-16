@@ -6,9 +6,12 @@
   "workspaces": [
     "apps/web",
     "apps/site",
-    "apps/mcp"
+    "apps/mcp",
+    "apps/client/frontend"
   ],
   "scripts": {
+    "client:dev": "bun --cwd=apps/client/frontend run dev",
+    "client:check": "bun --cwd=apps/client/frontend run check",
     "web:dev": "bun --cwd=apps/web run dev",
     "web:build": "bun --cwd=apps/web run build",
     "web:check": "bun --cwd=apps/web run check",
