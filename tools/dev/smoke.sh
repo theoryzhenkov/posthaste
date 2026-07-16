@@ -15,8 +15,8 @@ reject_path() {
   [[ ! -e "$path" ]] || { echo "legacy path should not exist: $path" >&2; exit 1; }
 }
 
-require_path apps/web
-require_path apps/desktop
+require_path legacy/web
+require_path legacy/desktop
 require_path crates
 require_path tools/dev
 require_path tools/dev/stalwart/config.toml

@@ -4,7 +4,7 @@
 The endpoint inventory is the single highest-drift content in the API domain
 (hand-kept tables of every route). It is mechanically derivable from the OpenAPI
 contract, so it is generated here rather than maintained by hand, and is excluded
-from the <300-line spec rule as a generated artifact (cf. apps/web .../schema.gen.ts).
+from the <300-line spec rule as a generated artifact (cf. legacy/web .../schema.gen.ts).
 
 Committed, like schema.gen.ts: re-run `just docs gen-endpoints` after an API
 change and commit the result; the docs build re-runs it so the site is never stale.

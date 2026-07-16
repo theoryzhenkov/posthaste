@@ -155,7 +155,7 @@ jobs:
       # regardless. Compile the Rust graph directly (no bundling) to warm the
       # cache `tauri build` will restore.
       - name: Build frontend (required for compile-time asset embedding)
-        run: bun --cwd=apps/web run build
+        run: bun --cwd=legacy/web run build
 
       - name: Warm release desktop compilation
         run: cargo build --release -p posthaste-desktop --features devtools

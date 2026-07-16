@@ -72,7 +72,7 @@
         "typescript-eslint": "^8.57.0",
       },
     },
-    "apps/web": {
+    "legacy/web": {
       "name": "posthaste-web",
       "version": "0.0.0",
       "dependencies": {
@@ -1848,7 +1848,7 @@
 
     "posthaste-site": ["posthaste-site@workspace:apps/site"],
 
-    "posthaste-web": ["posthaste-web@workspace:apps/web"],
+    "posthaste-web": ["posthaste-web@workspace:legacy/web"],
 
     "powershell-utils": ["powershell-utils@0.1.0", "", {}, "sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A=="],
 
