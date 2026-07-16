@@ -19,10 +19,10 @@ result
 /vendor/*/Cargo.lock
 /vendor/*/target/
 /node_modules/
-/apps/desktop/target/
-/apps/web/dist/
-/apps/web/.vite/
-/apps/web/node_modules/
+/legacy/desktop/target/
+/legacy/web/dist/
+/legacy/web/.vite/
+/legacy/web/node_modules/
 /apps/site/dist/
 /apps/site/.astro/
 /apps/site/.vite/
@@ -38,7 +38,7 @@ result
 # local app/dev data
 /var/dev/
 /.overmind.*.sock
-apps/desktop/gen/schemas/
+legacy/desktop/gen/schemas/
 
 # editor
 .idea/
@@ -55,3 +55,5 @@ target-hygiene/
 
 # per-workspace cargo target dirs (worker overflow; see target-shared-note/, target-hygiene/ above)
 /target-*
+/apps/client/frontend/node_modules/
+/apps/client/frontend/dist/

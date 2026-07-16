@@ -36,10 +36,10 @@ profile = "profile.lab.empty.test"
 runners = ["runner.bun.test"]
 tags = ["ui", "readiness", "web", "fast", "lab-smoke"]
 paths = [
-  "apps/web/src/labReadiness.ts",
-  "apps/web/test/labReadiness.test.ts",
+  "legacy/web/src/labReadiness.ts",
+  "legacy/web/test/labReadiness.test.ts",
 ]
-command = "bun --cwd=apps/web test labReadiness"
+command = "bun --cwd=legacy/web test labReadiness"
 timeout_seconds = 60
 artifacts = ["artifact.bun.lab-readiness.web.test"]
 
@@ -50,15 +50,15 @@ profile = "profile.lab.empty.test"
 runners = ["runner.bun.test"]
 tags = ["ui", "surfaces", "web", "fast", "lab-smoke"]
 paths = [
-  "apps/web/src/App.tsx",
-  "apps/web/src/components/InvalidSurface.tsx",
-  "apps/web/src/hooks/useSurfaceRouting.ts",
-  "apps/web/src/surfaces.ts",
-  "apps/web/src/surfaceWindowPolicy.ts",
-  "apps/web/test/surfaces.test.ts",
-  "apps/web/test/desktop.test.ts",
+  "legacy/web/src/App.tsx",
+  "legacy/web/src/components/InvalidSurface.tsx",
+  "legacy/web/src/hooks/useSurfaceRouting.ts",
+  "legacy/web/src/surfaces.ts",
+  "legacy/web/src/surfaceWindowPolicy.ts",
+  "legacy/web/test/surfaces.test.ts",
+  "legacy/web/test/desktop.test.ts",
 ]
-command = "bun --cwd=apps/web test surfaces desktop"
+command = "bun --cwd=legacy/web test surfaces desktop"
 timeout_seconds = 60
 artifacts = ["artifact.bun.surfaces.web.test"]
 
@@ -121,13 +121,13 @@ profile = "profile.lab.empty.test"
 runners = ["runner.tauri-playwright.linux.test"]
 tags = ["desktop", "tauri", "linux", "smoke"]
 paths = [
-  "apps/desktop/Cargo.toml",
-  "apps/desktop/src/e2e.rs",
-  "apps/desktop/src/lib.rs",
-  "apps/desktop/tauri.e2e.conf.json",
-  "apps/web/src/components/FocusedSurface.tsx",
-  "apps/web/src/components/SurfaceHost.tsx",
-  "apps/web/src/labReadiness.ts",
+  "legacy/desktop/Cargo.toml",
+  "legacy/desktop/src/e2e.rs",
+  "legacy/desktop/src/lib.rs",
+  "legacy/desktop/tauri.e2e.conf.json",
+  "legacy/web/src/components/FocusedSurface.tsx",
+  "legacy/web/src/components/SurfaceHost.tsx",
+  "legacy/web/src/labReadiness.ts",
   "tools/lab/tauri-playwright/",
 ]
 command = "just lab tauri-smoke"

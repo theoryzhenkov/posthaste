@@ -21,8 +21,8 @@ smoke:
 
 # Typecheck and format-check the optional Tauri Playwright lab files.
 tauri-check:
-    bun --cwd=apps/web run tsc -p ../../tools/lab/tauri-playwright/tsconfig.json --noEmit
-    bun --cwd=apps/web run prettier ../../tools/lab/tauri-playwright --check
+    bun --cwd=legacy/web run tsc -p ../../tools/lab/tauri-playwright/tsconfig.json --noEmit
+    bun --cwd=legacy/web run prettier ../../tools/lab/tauri-playwright --check
 
 # Optional graphical Linux Tauri smoke through tauri-playwright.
 tauri-smoke *args:

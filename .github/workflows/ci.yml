@@ -136,9 +136,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
-      - run: bun --cwd=apps/web run check
-      - run: bun --cwd=apps/web run test
-      - run: bun --cwd=apps/web run build
+      - run: bun --cwd=legacy/web run check
+      - run: bun --cwd=legacy/web run test
+      - run: bun --cwd=legacy/web run build
 
   site:
     runs-on: ubuntu-latest
@@ -228,7 +228,7 @@ jobs:
       # makes the freshness diff below fail with a pure hash churn (this is the
       # long-standing "M4" red job). This version MUST match the rustc the nix
       # devshell provides (nix/devshell.d/posthaste.nix -> pkgs.rustc), which is
-      # what regenerates apps/web/src/runtime/wasm/*. When the nix rust pin is
+      # what regenerates legacy/web/src/runtime/wasm/*. When the nix rust pin is
       # bumped and the glue regenerated, bump this line in the same change.
       - uses: dtolnay/rust-toolchain@1.94.0
         with:
@@ -264,14 +264,14 @@ jobs:
         # build instead.
         run: |
           canon() { sed -e 's/__h[0-9a-f]\{16\}/__hHASH/g' -e 's/shim_idx: [0-9]*/shim_idx: N/g' "$1"; }
-          if ! diff <(canon <(git show HEAD:apps/web/src/runtime/wasm/posthaste_client_node_wasm.js)) \
-                    <(canon apps/web/src/runtime/wasm/posthaste_client_node_wasm.js); then
+          if ! diff <(canon <(git show HEAD:legacy/web/src/runtime/wasm/posthaste_client_node_wasm.js)) \
+                    <(canon legacy/web/src/runtime/wasm/posthaste_client_node_wasm.js); then
             echo "::error::wasm JS glue drifted from the committed binding (beyond symbol-hash churn) — regenerate with 'just build-client-node-wasm' and commit"
             exit 1
           fi
       - run: bun install --frozen-lockfile
       - name: Smoke-test the WASM boundary
-        run: bun --cwd=apps/web test test/replicaWasmSmoke.test.ts
+        run: bun --cwd=legacy/web test test/replicaWasmSmoke.test.ts
 
   docs:
     runs-on: ubuntu-latest
