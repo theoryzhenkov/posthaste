@@ -1,11 +1,14 @@
 # RFC-L2: View-membership negotiation — one predicate, two evaluators, runtime-owned assignment
 
-Status: **PROPOSED** (drafted 2026-07-16). Parent: RFC-L2-client-resilience
-(the M49/M50 reactive-store completion); supersedes the "negotiate the mode"
-step of docs/issues/L2-single-source-view-membership (option iii, step 4).
-Child of the same north star as RFC-L2-client-replication-model §6: SQL is the
-single predicate engine server-side; replica-core/-projector the single client
-fold.
+Status: **SUPERSEDED, pre-implementation** (2026-07-16, same day as drafted) —
+by [RFC-L2-mirror-client], which removes the second evaluator instead of
+negotiating with it, making the membership-assignment problem moot. Slice 0
+(the testkit `MailListMirror`) LANDED and remains the L3 convergence-test
+bridge until mirror-client Slice 3 deletes the machinery it mirrors. Slices
+1–5 will not be implemented. §1 (the problem statement) doubles as evidence
+for the mirror-client RFC. Original parent: RFC-L2-client-resilience;
+superseded the "negotiate the mode" step of
+docs/issues/L2-single-source-view-membership (option iii, step 4).
 
 ## 1. Problem
 
