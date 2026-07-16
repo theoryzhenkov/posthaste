@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/*", "apps/desktop"]
+# `apps/client/*` is the integrated app (backend + mirror frontend): members
+# for the shared lockfile/lints, deliberately NOT default-members — the default
+# build stays the split-model app until the cutover.
+members = ["crates/*", "apps/desktop", "apps/client/models", "apps/client/backend"]
 # `posthaste-bench` is a member (shared lockfile/target cache) but kept out of the
 # default build: it pulls profiling-only deps and a Valgrind-backed bench harness,
 # exercised by `profile.yml` rather than the main `ci.yml`.
@@ -80,6 +83,7 @@ tower-http = { version = "0.6", features = ["cors", "fs", "trace", "timeout"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+ts-rs = { version = "10", features = ["serde-compat", "serde-json-impl"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 uuid = { version = "1", features = ["v4"] }
