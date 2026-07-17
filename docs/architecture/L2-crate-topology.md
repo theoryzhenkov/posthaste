@@ -4,18 +4,17 @@ scope: L2
 summary: "Crate topology — the one place the workspace's crate set, ownership, dependency hierarchy, role binaries, and wasm-pure frontier are named. Realized per RFC-L2-architecture-cleanup M0–M9c plus RFC-L2-provider-reliability M30/M31 (the call-policy/provider-call split); no [::state] markers remain (§2.1b records the D38 projector-merge verdict: not a fit, not forced)."
 modified: 2026-07-04
 reviewed: 2026-07-04
-state: active
+state: stale
 depends:
-  - path: docs/replication/L1
-  - path: docs/runtime/internals/L1
-  - path: docs/authority-server/L2
 dependents:
-  - path: docs/authority-server/L2
-  - path: docs/replication/authority-server-link/L2
-  - path: docs/replication/client-link/L2
 ---
 
 # Crate topology
+
+> **Stale — pre-pivot.** This table describes the split-model workspace,
+> which still builds on this branch but is being retired
+> (`docs/eph/RFC-L2-mirror-client.md`). It is rewritten as the legacy crates
+> retire; until then it remains the accurate map of `crates/`.
 
 This spec names the workspace boundary once (XV): which crates exist, what each
 owns, the dependency direction, the role binaries, and the wasm-pure frontier.
