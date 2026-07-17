@@ -4072,7 +4072,12 @@ dependencies = [
 name = "posthaste-client-backend"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
+ "async-trait",
  "axum",
+ "dirs",
+ "futures-util",
+ "keyring",
  "posthaste-client-models",
  "posthaste-config",
  "posthaste-domain-model",
@@ -4081,12 +4086,19 @@ dependencies = [
  "posthaste-imap",
  "posthaste-observability",
  "posthaste-store",
+ "posthaste-testkit",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

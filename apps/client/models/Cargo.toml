@@ -3,19 +3,27 @@ name = "posthaste-client-models"
 version = "0.1.0"
 edition = "2021"
 
-# The client protocol's single source of truth: the state document, surfaces,
-# patches, and commands, exported to TypeScript via ts-rs into
+# The client protocol's single source of truth: queries, commands, the event
+# stream, and the error envelope, exported to TypeScript via ts-rs into
 # `../frontend/src/gen/`.
 #
-# DEPENDENCY ALLOWLIST: serde + ts-rs + the domain model, nothing else. In
-# particular nothing from posthaste-contract-core's frame vocabulary or the
-# link crates may enter this crate.
+# DEPENDENCY ALLOWLIST: serde/serde_json + ts-rs + the domain model, nothing
+# else. In particular nothing from posthaste-contract-core's frame vocabulary
+# or the link crates may enter this crate.
 
 [dependencies]
 posthaste-domain-model = { path = "../../../crates/posthaste-domain-model" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-ts-rs = { workspace = true }
+# `no-serde-warnings`: several fields use `skip_serializing_if`, which ts-rs
+# does not parse; the TS-side optionality is declared explicitly with
+# `#[ts(optional)]`, so the parse warning is pure noise.
+ts-rs = { workspace = true, features = ["no-serde-warnings"] }
+
+# Regenerates `../frontend/src/gen/` — run as `just gen-ts`.
+[[bin]]
+name = "export-ts"
+path = "src/bin/export_ts.rs"
 
 [lints]
 workspace = true

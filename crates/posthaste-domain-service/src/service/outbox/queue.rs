@@ -13,6 +13,15 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// One outbox operation by id, in any state the outbox still holds
+    /// (retired operations are gone).
+    pub fn get_operation(
+        &self,
+        operation_id: &OperationId,
+    ) -> Result<Option<Operation>, ServiceError> {
+        self.outbox.get_operation(operation_id).map_err(Into::into)
+    }
+
     /// All non-terminal operations for an account, oldest first. Used to hydrate
     /// optimistic state and surface pending/failed work.
     pub fn list_pending_operations(
@@ -233,6 +242,32 @@ impl MailService {
         account_id: &AccountId,
         entity: OperationEntity,
         kind: OperationKind,
+        payload: serde_json::Value,
+        send_at: Option<String>,
+        hold_until_mono: Option<i64>,
+    ) -> Result<Operation, ServiceError> {
+        self.queue_operation_with_id(
+            None,
+            account_id,
+            entity,
+            kind,
+            payload,
+            send_at,
+            hold_until_mono,
+        )
+    }
+
+    /// [`Self::queue_operation`] with a caller-supplied operation id, making
+    /// that id the durable idempotency key: enqueueing is idempotent on it,
+    /// so replaying the same id returns the already-stored operation instead
+    /// of inserting a second one. `None` mints a fresh id.
+    #[allow(clippy::too_many_arguments)]
+    pub fn queue_operation_with_id(
+        &self,
+        operation_id: Option<OperationId>,
+        account_id: &AccountId,
+        entity: OperationEntity,
+        kind: OperationKind,
         mut payload: serde_json::Value,
         send_at: Option<String>,
         hold_until_mono: Option<i64>,
@@ -246,7 +281,7 @@ impl MailService {
         let now =
             now_iso8601().map_err(|error| ServiceError::from(GatewayError::Rejected(error)))?;
         let operation = Operation {
-            id: OperationId::from(Id::generate().to_string()),
+            id: operation_id.unwrap_or_else(|| OperationId::from(Id::generate().to_string())),
             account_id: account_id.clone(),
             entity,
             kind,
@@ -337,7 +372,21 @@ impl MailService {
     pub async fn enqueue_send(
         &self,
         account_id: &AccountId,
+        request: SendMessageRequest,
+    ) -> Result<(Operation, Vec<DomainEvent>), ServiceError> {
+        self.enqueue_send_with_operation_id(account_id, request, None)
+            .await
+    }
+
+    /// [`Self::enqueue_send`] with a caller-supplied outbox operation id, so
+    /// an API-level intent id becomes the durable idempotency key for the
+    /// send: replaying the same id returns the already-queued operation
+    /// instead of enqueuing — and eventually dispatching — a second one.
+    pub async fn enqueue_send_with_operation_id(
+        &self,
+        account_id: &AccountId,
         mut request: SendMessageRequest,
+        operation_id: Option<OperationId>,
     ) -> Result<(Operation, Vec<DomainEvent>), ServiceError> {
         // D152: an undo hold is a DURATION stamped on the daemon's monotonic
         // clock (the same clock that later judges it); `send_at` then degrades
@@ -412,7 +461,8 @@ impl MailService {
         // send's payload — and the bytes the gateway sees — stay identical to
         // the pre-feature shape.
         let payload = encode_payload(request, "send request")?;
-        let operation = self.queue_operation(
+        let operation = self.queue_operation_with_id(
+            operation_id,
             account_id,
             OperationEntity {
                 kind: OperationEntityKind::Message,
