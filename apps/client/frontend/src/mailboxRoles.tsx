@@ -1,6 +1,5 @@
 /**
  * Mailbox role icons and name-to-role mapping for sidebar and list rendering.
- * @spec docs/L1-ui#component-hierarchy
  */
 import {
   Archive,

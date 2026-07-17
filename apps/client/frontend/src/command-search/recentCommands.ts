@@ -1,12 +1,10 @@
 /**
- * Persisted recency/frequency counter for palette commands (PLAN-L2 §4.5).
+ * Persisted recency/frequency counter for palette commands.
  *
- * The ranker already weights `recentCommands`/`frequentCommands`
- * (`ranker.ts` contextScore) but `createRankingContext` fed it empty counters,
- * so no command ever ranked up from use. This module persists a
- * {@link DecayedCounter} keyed by STABLE action id (`message.archive`,
- * `app.compose`, …) in localStorage and bumps it on every palette execution, so
- * recently and frequently used commands float toward the top.
+ * Persists a {@link DecayedCounter} keyed by stable action id
+ * (`message.archive`, `app.compose`, …) in localStorage and bumps it on every
+ * palette execution, so recently and frequently used commands float toward the
+ * top of the ranker.
  *
  * A single decayed counter captures both signals: repeated use accumulates
  * value (frequency); the half-life decay discounts stale entries (recency). It
@@ -14,8 +12,6 @@
  *
  * Pure/localStorage-only — no React, no cross-window sync (a per-tab bias is
  * fine; correctness never depends on it).
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
  */
 import type { DecayedCounter } from './types'
 

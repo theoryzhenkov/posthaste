@@ -12,7 +12,7 @@ use posthaste_domain_model::{
     EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
 
-use super::{now_rfc3339, ApiFailure};
+use super::{now_rfc3339, offload_read, ApiFailure};
 use crate::AppState;
 
 /// Account id stamped on smart-mailbox events: the configuration is
@@ -47,7 +47,7 @@ pub(crate) fn evaluate_smart_mailboxes(
     Ok(SmartMailboxesResult { rows })
 }
 
-pub(crate) fn create_smart_mailbox(
+pub(crate) async fn create_smart_mailbox(
     app: &AppState,
     intent: CreateSmartMailboxIntent,
 ) -> Result<u64, ApiFailure> {
@@ -70,64 +70,95 @@ pub(crate) fn create_smart_mailbox(
         created_at: now.clone(),
         updated_at: now,
     };
-    app.service.save_smart_mailbox(&smart_mailbox)?;
+    // The config save is a synchronous filesystem write; offload it off the
+    // async worker (matching the read-path discipline).
+    let saved_id = smart_mailbox.id.clone();
+    let service = app.service.clone();
+    offload_read(move || Ok(service.save_smart_mailbox(&smart_mailbox)?)).await?;
     Ok(publish_smart_mailbox_event(
         app,
         EVENT_TOPIC_SMART_MAILBOX_CREATED,
-        Some(&smart_mailbox.id),
+        Some(&saved_id),
     ))
 }
 
-pub(crate) fn update_smart_mailbox(
+pub(crate) async fn update_smart_mailbox(
     app: &AppState,
     intent: UpdateSmartMailboxIntent,
 ) -> Result<u64, ApiFailure> {
-    let mut smart_mailbox = app.service.get_smart_mailbox(&intent.smart_mailbox_id)?;
-    if let Some(name) = intent.name {
-        let name = name.trim().to_string();
-        if name.is_empty() {
+    // Validate the request shape before touching the config store.
+    if let Some(name) = &intent.name {
+        if name.trim().is_empty() {
             return Err(ApiFailure::malformed(
                 "smart mailbox name must not be empty",
             ));
         }
-        smart_mailbox.name = name;
     }
-    if let Some(role) = intent.role {
-        smart_mailbox.role = normalize_view_role(Some(role))?;
+    // `Some(None)` clears the role, `None` leaves it untouched.
+    let role_update = intent
+        .role
+        .map(|role| normalize_view_role(Some(role)))
+        .transpose()?;
+    if let Some(rule) = &intent.rule {
+        validate_rule(rule)?;
     }
-    if let Some(rule) = intent.rule {
-        validate_rule(&rule)?;
-        smart_mailbox.rule = rule;
-    }
-    smart_mailbox.updated_at = now_rfc3339();
-    app.service.save_smart_mailbox(&smart_mailbox)?;
+    // The config read-modify-write is a synchronous filesystem round-trip;
+    // offload it off the async worker (matching the read-path discipline).
+    let service = app.service.clone();
+    let updated_at = now_rfc3339();
+    let saved_id = offload_read(move || {
+        let mut smart_mailbox = service.get_smart_mailbox(&intent.smart_mailbox_id)?;
+        if let Some(name) = intent.name {
+            smart_mailbox.name = name.trim().to_string();
+        }
+        if let Some(role) = role_update {
+            smart_mailbox.role = role;
+        }
+        if let Some(rule) = intent.rule {
+            smart_mailbox.rule = rule;
+        }
+        smart_mailbox.updated_at = updated_at;
+        service.save_smart_mailbox(&smart_mailbox)?;
+        Ok(smart_mailbox.id)
+    })
+    .await?;
     Ok(publish_smart_mailbox_event(
         app,
         EVENT_TOPIC_SMART_MAILBOX_UPDATED,
-        Some(&smart_mailbox.id),
+        Some(&saved_id),
     ))
 }
 
-pub(crate) fn delete_smart_mailbox(
+pub(crate) async fn delete_smart_mailbox(
     app: &AppState,
     intent: DeleteSmartMailboxIntent,
 ) -> Result<u64, ApiFailure> {
-    // The config delete is silently idempotent; resolve the id first so an
-    // unknown target is an unknown-id failure, not a phantom success.
-    let smart_mailbox = app.service.get_smart_mailbox(&intent.smart_mailbox_id)?;
-    app.service.delete_smart_mailbox(&smart_mailbox.id)?;
+    // The config resolve + delete is a synchronous filesystem round-trip;
+    // offload it off the async worker. Resolve the id first so an unknown
+    // target is an unknown-id failure, not a phantom success (the delete is
+    // otherwise silently idempotent).
+    let service = app.service.clone();
+    let saved_id = offload_read(move || {
+        let smart_mailbox = service.get_smart_mailbox(&intent.smart_mailbox_id)?;
+        service.delete_smart_mailbox(&smart_mailbox.id)?;
+        Ok(smart_mailbox.id)
+    })
+    .await?;
     Ok(publish_smart_mailbox_event(
         app,
         EVENT_TOPIC_SMART_MAILBOX_DELETED,
-        Some(&smart_mailbox.id),
+        Some(&saved_id),
     ))
 }
 
-pub(crate) fn reset_smart_mailboxes(
+pub(crate) async fn reset_smart_mailboxes(
     app: &AppState,
     _intent: ResetSmartMailboxesIntent,
 ) -> Result<u64, ApiFailure> {
-    app.service.reset_default_smart_mailboxes()?;
+    // The config reset rewrites the document — a synchronous filesystem write;
+    // offload it off the async worker.
+    let service = app.service.clone();
+    offload_read(move || Ok(service.reset_default_smart_mailboxes().map(|_| ())?)).await?;
     Ok(publish_smart_mailbox_event(
         app,
         EVENT_TOPIC_SMART_MAILBOX_RESET,

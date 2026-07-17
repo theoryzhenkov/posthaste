@@ -11,8 +11,6 @@ import { cn } from '@/lib/utils'
  * (Inbox/Sent/Trash/…) carry a provider-structural `role` and must never be
  * deletable; only a plain user mailbox (`role === null`) is. The delete
  * context-menu item and its confirm dialog are both gated on this.
- *
- * @spec docs/eph/RFC-L2-mailbox-management
  */
 export function isMailboxDeletable(mailbox: Mailbox): boolean {
   return mailbox.role == null
@@ -67,8 +65,6 @@ export interface PartitionedSourceMailboxes {
  * source). Member order follows the source's own mailbox order — stable and
  * independent of the order ids were assigned. Purely presentational: a mailbox
  * in no group is unaffected.
- *
- * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
 export function partitionSourceMailboxes(
   mailboxes: Mailbox[],
@@ -117,8 +113,6 @@ export function partitionSourceMailboxes(
  * Group contributes nothing — its members are hidden from the walk exactly as a
  * collapsed source hides all of its rows. Shared by the sidebar render and the
  * keyboard walker so they never drift.
- *
- * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
 export function visibleSourceMailboxes(
   mailboxes: Mailbox[],
@@ -153,7 +147,7 @@ export interface PartitionedSmartMailboxes {
 
 /**
  * Partition the smart mailboxes into Groups + ungrouped remainder, driven by the
- * SAME synced `mailboxGroups` setting M3 uses for source mailboxes. A Group
+ * SAME synced `mailboxGroups` setting used for source mailboxes. A Group
  * surfaces in the Smart section only when it holds ≥1 smart mailbox, and each
  * group's members are FILTERED to the smart-mailbox id set — so a stray mixed
  * group (smart + source ids) shows only its smart members here, and a purely
@@ -164,8 +158,6 @@ export interface PartitionedSmartMailboxes {
  * Mirrors {@link partitionSourceMailboxes}: iterating over `smartMailboxes` and
  * grouping by id is itself the smart-set filter (a non-smart member id never
  * matches a smart mailbox, so it contributes nothing here).
- *
- * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
 export function partitionSmartMailboxes(
   smartMailboxes: SmartMailboxSummary[],
@@ -211,8 +203,6 @@ export function partitionSmartMailboxes(
  * ungrouped smart mailbox, then each expanded Group's members. A collapsed Group
  * contributes nothing. Mirrors {@link visibleSourceMailboxes} so the Smart
  * section render and the keyboard walker never drift.
- *
- * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
 export function visibleSmartMailboxes(
   smartMailboxes: SmartMailboxSummary[],
@@ -237,8 +227,6 @@ export function visibleSmartMailboxes(
  * holds implicitly: a smart-populated group never matches a source's own mailbox
  * ids, so it never surfaces there. Empty groups don't exist (they're pruned), so
  * every returned group is genuinely smart-homogeneous.
- *
- * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
 export function smartAssignableGroups(
   groups: readonly MailboxGroup[],

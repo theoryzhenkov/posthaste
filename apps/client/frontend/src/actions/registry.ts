@@ -1,15 +1,13 @@
 /**
- * Unified action registry (PLAN-L2, Slice 1).
+ * Unified action registry.
  *
  * A module-level collection populated once, at import time, from the static
  * definition files (`actions/defs/*`). Insertion order is preserved and used by
  * the resolver as the within-section tiebreak, so registration order is
- * meaningful (mirrors the push order of the old `contextualActions.ts` builder).
+ * meaningful.
  *
  * No React here — pure data in, pure data out — so it is unit-testable exactly
  * like `components/keyboard/dispatch.ts`.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
  */
 import type { ActionDefinition } from './types'
 

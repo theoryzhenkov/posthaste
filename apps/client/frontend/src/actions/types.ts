@@ -1,17 +1,11 @@
 /**
- * Unified action registry — core types (PLAN-L2, Slice 1).
+ * Unified action registry — core types.
  *
  * ONE definition per message/mail action, from which every surface (palette,
- * context menu, detail header, keyboard) will eventually resolve. Slice 1 lands
- * the machinery and ports the pure, role-gated context-menu actions from
- * `contextualActions.ts` WITHOUT changing any user-visible behavior — the old
- * builder becomes a shim over {@link resolveActions}.
- *
- * Definitions are pure data: titles/icons are values or `(ctx) => value`
- * functions, never JSX, so the whole registry is unit-testable without a DOM
- * (same philosophy as `components/keyboard/dispatch.ts`).
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
+ * context menu, detail header, keyboard) resolves. Definitions are pure data:
+ * titles/icons are values or `(ctx) => value` functions, never JSX, so the
+ * whole registry is unit-testable without a DOM (same philosophy as
+ * `components/keyboard/dispatch.ts`).
  */
 import type { LucideIcon } from 'lucide-react'
 import type { Mailbox, MessageSummary, SourceMessageRef } from '../api/types'
@@ -99,9 +93,7 @@ export interface ActionContext {
 }
 
 /** Injected once at registry-bind time (per provider render), NOT per action:
- *  the domain + app handler bundles that already exist. Slices add fields
- *  (navigation, overlays…) as surfaces migrate; Slice-1 definitions only touch
- *  `email`, so `app` is optional until Slice 2 threads it. */
+ *  the domain + app handler bundles that already exist. */
 export interface ActionServices {
   /** hooks/useEmailActions.ts — domain mutations (owns optimistic folds, toasts,
    *  undo). Actions delegate here; they never reimplement. */

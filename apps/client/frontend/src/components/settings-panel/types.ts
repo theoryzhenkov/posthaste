@@ -1,7 +1,5 @@
 /**
  * Shared types for the settings panel editor components.
- * @spec docs/L1-api#account-crud-lifecycle
- * @spec docs/L1-api#smart-mailbox-crud
  */
 import type { AccountDriver, MailQueryRule, TransportSecurity } from '@/gen'
 
@@ -13,7 +11,6 @@ export type SmartMailboxEditorTarget = 'new' | string
 /** Driver choices offered in the manual add-account form. */
 export type ManualAccountDriver = Extract<AccountDriver, 'jmap' | 'imapSmtp'>
 
-/** @spec docs/L1-api#account-crud-lifecycle */
 export interface AccountFormState {
   name: string
   fullName: string
@@ -37,7 +34,6 @@ export interface AccountFormState {
   smtpSecurity: TransportSecurity
 }
 
-/** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailboxFormState {
   name: string
   /** Optional view role; `null` for a plain saved query. */

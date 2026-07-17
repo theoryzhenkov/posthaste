@@ -5,7 +5,6 @@
  * Styled to match `TagChip`'s pill convention, with the mailbox's role icon
  * from the same lookup the sidebar uses (`renderMailboxRoleIcon`).
  *
- * @spec docs/L1-ui#messagelist
  */
 import { cn } from '@/lib/utils'
 import { renderMailboxRoleIcon } from '@/mailboxRoles'

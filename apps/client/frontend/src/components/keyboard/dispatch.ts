@@ -7,8 +7,6 @@
  * for accessibility), and finally the focused pane's own handler (`j`/`k`,
  * `h`/`l`). Keeping it pure makes the precedence order testable without a DOM.
  *
- * @spec docs/ui/L0#navigation-model
- * @spec docs/ui/L1#keyboard-shortcuts
  */
 import { stepGotoPrefix, type GotoPrefix, type GotoRole } from './goto'
 import { isEditableKeyboardTarget } from './inputTargets'
@@ -28,11 +26,11 @@ export const PANE_ORDER: readonly PaneId[] = ['sidebar', 'list']
 export type PaneKeyHandler = (event: KeyboardEvent) => boolean
 
 /**
- * The registry tier of the dispatcher (PLAN-L2, Slice 5).
+ * The registry tier of the dispatcher.
  *
  * The controller supplies a `match` built over the action registry: for a
- * pressed chord it resolves the `keyboard` surface in the CURRENT context and
- * returns a bound runner for the matching AVAILABLE action, or `null` to fall
+ * pressed chord it resolves the `keyboard` surface in the current context and
+ * returns a bound runner for the matching available action, or `null` to fall
  * through to native dispatch. The returned `run` already encapsulates the
  * destructive-confirm gate (it prompts before an irreversible delete), so the
  * dispatcher stays a thin, pure router.

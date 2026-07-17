@@ -60,7 +60,7 @@ function renderRow(
       const entry = row.candidate.entry
       const isDisabled = entry.disabled === true
       // Disabled rows stay visible and highlightable (discoverability) but are
-      // inert: onSelect no-ops so Enter/click skip them (PLAN-L2 §4.2).
+      // inert: onSelect no-ops so Enter/click skip them.
       return (
         <CommandItem
           key={row.id}

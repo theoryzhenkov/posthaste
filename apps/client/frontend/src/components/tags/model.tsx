@@ -4,7 +4,6 @@
  * override into concrete chip styles. Used by the settings pane (to pick) and
  * the chip (to render), so picker and render agree.
  *
- * @spec docs/eph/DESIGN-L2-appearance-toml
  */
 import {
   Bell,

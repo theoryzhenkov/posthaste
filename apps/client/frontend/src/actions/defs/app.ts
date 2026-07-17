@@ -1,19 +1,15 @@
 /**
- * App-level command definitions (PLAN-L2, Slice 3).
+ * App-level command definitions.
  *
- * The palette-only global commands that used to live as a hand-rolled
- * `CommandPaletteEntry[]` inside `command-search/providers/commands.tsx`
- * (compose, settings surfaces, keyboard reference, tag/mailbox/rule/account
- * management). Ported verbatim — same labels, icons, keywords, and target
- * handlers — as {@link ActionDefinition}s so the registry-backed palette
- * provider is their single source of truth. They delegate to the existing
- * `services.app` (the `useMailClientHandlers` bundle); no logic is duplicated.
+ * The palette-only global commands (compose, settings surfaces, keyboard
+ * reference, tag/mailbox/rule/account management) expressed as
+ * {@link ActionDefinition}s so the registry-backed palette provider is their
+ * single source of truth. They delegate to the existing `services.app` (the
+ * `useMailClientHandlers` bundle); no logic is duplicated.
  *
  * These are always available (no selection needed) and carry no `isAvailable`
- * gate, matching the old static entries. Message-scoped palette commands
- * (reply/archive/flag/tag/snooze/…) live in `defs/message.ts`.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
+ * gate. Message-scoped palette commands (reply/archive/flag/tag/snooze/…) live
+ * in `defs/message.ts`.
  */
 import {
   Keyboard,

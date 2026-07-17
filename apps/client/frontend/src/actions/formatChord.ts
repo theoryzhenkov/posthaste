@@ -1,13 +1,11 @@
 /**
- * Human-readable rendering of a {@link ShortcutChord} (PLAN-L2, Slice 3).
+ * Human-readable rendering of a {@link ShortcutChord}.
  *
- * One formatter feeds the palette row shortcut hints today and (Slice 5) the
- * generated `ShortcutReference` and button titles — so the chord a definition
- * declares is the single source of truth for what the user is told to press.
+ * One formatter feeds the palette row shortcut hints and the generated
+ * `ShortcutReference` and button titles — so the chord a definition declares is
+ * the single source of truth for what the user is told to press.
  *
  * Pure data → string; no DOM, unit-testable.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
  */
 import type { ShortcutChord } from './types'
 

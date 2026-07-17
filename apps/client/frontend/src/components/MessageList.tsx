@@ -5,8 +5,6 @@
  * concern: selecting a message still lets the reader load its surrounding
  * conversation, but the middle pane itself does not collapse rows by thread.
  *
- * @spec docs/L1-ui#messagelist
- * @spec docs/ui/L1#keyboard-shortcuts
  */
 import { useCallback, useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
@@ -44,7 +42,6 @@ import { buildThreadListLayout } from './thread-list/columns'
 import { ThreadListHeader } from './thread-list/ThreadListHeader'
 import { useColumnConfig } from './thread-list/useColumnConfig'
 
-/** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
   selectedView: SidebarSelection | null
   selection: MailSelection | null
@@ -65,9 +62,6 @@ interface MessageListProps {
  *
  * Handles individual-message loading, manual virtualization, live refresh on
  * domain events, per-view scroll restoration, and keyboard shortcuts.
- *
- * @spec docs/L1-ui#messagelist
- * @spec docs/ui/L1#keyboard-shortcuts
  */
 export function MessageList({
   selectedView,

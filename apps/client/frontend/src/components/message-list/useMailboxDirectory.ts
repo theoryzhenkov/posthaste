@@ -6,7 +6,6 @@
  * every account's mailboxes, deduped by the shared family key; critically no
  * per-row fetch.
  *
- * @spec docs/L1-ui#messagelist
  */
 import { useMemo } from 'react'
 

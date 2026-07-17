@@ -48,8 +48,6 @@ const DEFAULT_VIEW: SidebarSelection = {
  * Manages view selection, message selection, SSE event subscription,
  * and keyboard-accessible email actions.
  *
- * @spec docs/L1-ui#component-hierarchy
- * @spec docs/ui/L0#navigation-model
  */
 export function MailClient({
   invalidSurfaceRoute,

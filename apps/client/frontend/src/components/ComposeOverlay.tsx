@@ -1,8 +1,6 @@
 /**
  * Compose and reply overlay backed by the Rust JMAP send API.
  *
- * @spec docs/L1-ui#component-hierarchy
- * @spec docs/L1-compose#mime-structure
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 

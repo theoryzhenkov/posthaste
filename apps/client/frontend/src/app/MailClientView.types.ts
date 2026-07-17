@@ -18,8 +18,7 @@ export type LayoutHandler = NonNullable<PanelGroupProps['onLayoutChanged']>
 
 export interface MailClientViewProps {
   actions: EmailActions
-  /** The app/handler bundle, bound as the palette's `ActionServices.app`
-   *  (PLAN-L2 Slice 3). */
+  /** The app/handler bundle, bound as the palette's `ActionServices.app`. */
   handlers: ReturnType<typeof useMailClientHandlers>
   appReadinessState: string
   closeCompose: () => void

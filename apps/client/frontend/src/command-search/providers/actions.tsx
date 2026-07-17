@@ -12,13 +12,12 @@ import type { CommandPaletteEntry, SearchProvider } from '../types'
 import { candidateFromEntry } from './shared'
 
 /**
- * The single registry-backed palette provider (PLAN-L2, Slice 3).
+ * The single registry-backed palette provider.
  *
- * Replaces the two hand-rolled providers (`commands.tsx` + `tagActions.tsx`):
- * it resolves the palette surface from the unified registry
+ * Resolves the palette surface from the unified registry
  * (`resolveActions(ctx, services, { includeDisabled: true })`) and maps each
  * {@link import('@/actions').ResolvedAction} to a `CommandPaletteEntry`. The
- * enrichments the registry unlocks fall out for free:
+ * registry unlocks:
  *
  * - contextual availability — trash view surfaces "Delete permanently", drafts
  *   surface "Discard draft", etc., because the same `isAvailable` predicates
@@ -31,11 +30,6 @@ import { candidateFromEntry } from './shared'
  * refs) so the provider identity stays stable across renders — the search
  * pipeline re-runs on query/ranking-context change, not on every keystroke of
  * app state.
- *
- * Keeps the provider id `commands` + vertical `command` so the ranker's
- * "Commands" section, per-provider limit, and vertical prior are unchanged.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
  */
 export function createActionProvider(input: {
   getContext: () => ActionContext

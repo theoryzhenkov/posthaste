@@ -13,7 +13,7 @@ use posthaste_domain_model::{
 };
 use posthaste_domain_service::{validate_automation_drafts, validate_automation_rules};
 
-use super::{now_rfc3339, ApiFailure, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT};
+use super::{now_rfc3339, offload_read, ApiFailure, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT};
 use crate::AppState;
 
 /// The settings document is global, but every domain event names an account;
@@ -43,7 +43,7 @@ pub(crate) fn evaluate_rule_preview(
     })
 }
 
-pub(crate) fn create_rule(
+pub(crate) async fn create_rule(
     app: &AppState,
     intent: CreateAutomationRuleIntent,
 ) -> Result<u64, ApiFailure> {
@@ -52,67 +52,90 @@ pub(crate) fn create_rule(
             "automation rule id must not be empty",
         ));
     }
-    let mut settings = app.service.get_app_settings()?;
-    if settings
-        .automation_rules
-        .iter()
-        .any(|existing| existing.id == intent.rule.id)
-    {
-        return Err(ApiFailure::new(
-            StatusCode::CONFLICT,
-            ApiErrorKind::Conflict,
-            format!("automation rule {} already exists", intent.rule.id),
-            false,
-        ));
-    }
-    settings.automation_rules.push(intent.rule);
-    save_rules(app, settings)
+    mutate_rules(app, move |settings| {
+        if settings
+            .automation_rules
+            .iter()
+            .any(|existing| existing.id == intent.rule.id)
+        {
+            return Err(ApiFailure::new(
+                StatusCode::CONFLICT,
+                ApiErrorKind::Conflict,
+                format!("automation rule {} already exists", intent.rule.id),
+                false,
+            ));
+        }
+        settings.automation_rules.push(intent.rule);
+        Ok(true)
+    })
+    .await
 }
 
-pub(crate) fn update_rule(
+pub(crate) async fn update_rule(
     app: &AppState,
     intent: UpdateAutomationRuleIntent,
 ) -> Result<u64, ApiFailure> {
-    let mut settings = app.service.get_app_settings()?;
-    let slot = settings
-        .automation_rules
-        .iter_mut()
-        .find(|existing| existing.id == intent.rule.id)
-        .ok_or_else(|| ApiFailure::unknown_id(format!("automation rule {}", intent.rule.id)))?;
-    *slot = intent.rule;
-    save_rules(app, settings)
+    mutate_rules(app, move |settings| {
+        let slot = settings
+            .automation_rules
+            .iter_mut()
+            .find(|existing| existing.id == intent.rule.id)
+            .ok_or_else(|| ApiFailure::unknown_id(format!("automation rule {}", intent.rule.id)))?;
+        *slot = intent.rule;
+        Ok(true)
+    })
+    .await
 }
 
-pub(crate) fn delete_rule(
+pub(crate) async fn delete_rule(
     app: &AppState,
     intent: DeleteAutomationRuleIntent,
 ) -> Result<u64, ApiFailure> {
-    let mut settings = app.service.get_app_settings()?;
-    let before = settings.automation_rules.len();
-    settings
-        .automation_rules
-        .retain(|existing| existing.id != intent.rule_id);
-    if settings.automation_rules.len() == before {
-        // Idempotent: the rule is already gone, which is the requested state.
-        return Ok(app.events.generation());
-    }
-    save_rules(app, settings)
+    mutate_rules(app, move |settings| {
+        let before = settings.automation_rules.len();
+        settings
+            .automation_rules
+            .retain(|existing| existing.id != intent.rule_id);
+        // A no-op delete leaves the document untouched: the rule is already
+        // gone, which is the requested state.
+        Ok(settings.automation_rules.len() != before)
+    })
+    .await
 }
 
-/// Validate and persist the whole document, refresh the durable backfill
-/// jobs for the (possibly changed) ruleset, and announce the change on the
-/// stream. One shared finish path so every rule mutation behaves alike.
-fn save_rules(app: &AppState, settings: AppSettings) -> Result<u64, ApiFailure> {
-    validate_automation_rules(&settings.automation_rules)
-        .map_err(|error| ApiFailure::malformed(error.to_string()))?;
-    validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)
-        .map_err(|error| ApiFailure::malformed(error.to_string()))?;
-    app.service.put_app_settings(&settings)?;
-    // Backfill-eligible rules also apply to existing mail: make sure every
-    // enabled account holds a durable job for the current ruleset (cheap
-    // when the fingerprint is unchanged).
-    app.service
-        .ensure_automation_backfills_for_current_rules()?;
+/// Read the settings document, apply `transform`, then — when it reports a
+/// change — validate and persist the whole document and refresh the durable
+/// backfill jobs, all off the async worker (the config store is synchronous
+/// filesystem I/O). On change the settings-updated event is published on the
+/// async side. One shared finish path so every rule mutation behaves alike.
+///
+/// `transform` returns `Ok(true)` when it changed the document (persist +
+/// announce), `Ok(false)` for an idempotent no-op.
+async fn mutate_rules<F>(app: &AppState, transform: F) -> Result<u64, ApiFailure>
+where
+    F: FnOnce(&mut AppSettings) -> Result<bool, ApiFailure> + Send + 'static,
+{
+    let service = app.service.clone();
+    let changed = offload_read(move || {
+        let mut settings = service.get_app_settings()?;
+        if !transform(&mut settings)? {
+            return Ok(false);
+        }
+        validate_automation_rules(&settings.automation_rules)
+            .map_err(|error| ApiFailure::malformed(error.to_string()))?;
+        validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)
+            .map_err(|error| ApiFailure::malformed(error.to_string()))?;
+        service.put_app_settings(&settings)?;
+        // Backfill-eligible rules also apply to existing mail: make sure every
+        // enabled account holds a durable job for the current ruleset (cheap
+        // when the fingerprint is unchanged).
+        service.ensure_automation_backfills_for_current_rules()?;
+        Ok(true)
+    })
+    .await?;
+    if !changed {
+        return Ok(app.events.generation());
+    }
     app.events.publish(&[DomainEvent {
         seq: 0,
         account_id: AccountId::from(SETTINGS_EVENT_ACCOUNT_ID),

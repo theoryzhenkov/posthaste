@@ -5,7 +5,6 @@
  * Extracted from ComposeOverlay so the component holds UI/state wiring while
  * these (React-free, testable) helpers stand on their own.
  *
- * @spec docs/L1-compose#mime-structure
  */
 import type { Recipient, ReplyContext, SendMessageInput } from '@/api/types'
 import type { MessageDetailResult, SendMessageRequest } from '@/gen'
@@ -95,9 +94,7 @@ export function optionLabel(option: FromAddressOption): string {
 /** Append a signature to a compose body using the conventional `-- ` separator
  * (RFC 3676 §4.3). The signature lands at the bottom of the body — visible and
  * editable — so the user can adjust or remove it per message. Seeded into fresh
- * compositions only (not resumed drafts), so it is never double-inserted.
- *
- * @spec docs/L1-compose#sender-selection */
+ * compositions only (not resumed drafts), so it is never double-inserted. */
 export function appendSignature(body: string, signature: string): string {
   return `${body}\n\n-- \n${signature}`
 }

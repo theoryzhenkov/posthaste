@@ -346,7 +346,11 @@ fn oauth_request_error<E: std::fmt::Display>(error: E) -> GatewayError {
     if message.contains("invalid_grant") || message.contains("unauthorized_client") {
         GatewayError::Auth
     } else {
-        GatewayError::Network(message)
+        // The provider/transport error Display can carry the provider's
+        // response body and request URL; log it server-side and return a
+        // fixed message so unbounded third-party text never reaches the client.
+        tracing::warn!(%message, "OAuth token-endpoint request failed");
+        GatewayError::Network("the OAuth provider could not be reached".to_string())
     }
 }
 

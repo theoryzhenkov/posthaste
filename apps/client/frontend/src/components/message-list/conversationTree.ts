@@ -16,7 +16,6 @@
  * The builder is pure so it can be unit-tested and so the React layer only owns
  * fetching + collapse state.
  *
- * @spec docs/L1-ui#messagelist
  */
 import type { MessageSummary } from '@/api/types'
 
