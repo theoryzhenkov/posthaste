@@ -1,40 +1,52 @@
 ---
 title: Technical reference
-description: The durable, layered technical specs — architecture, state, runtime, replication, API, and more.
-modified: 2026-07-04
-reviewed: 2026-07-04
+description: The durable, layered technical specs — architecture, API, backend, client, mail state, testing, and UI.
+modified: 2026-07-17
+reviewed: 2026-07-17
 ---
 
-The durable, layered technical specs live in domain directories. Each domain is
-authored at the scope levels it needs (L0 orientation → L1 contract → L2
+The durable, layered technical specs live in domain directories. Each domain
+is authored at the scope levels it needs (L0 orientation → L1 contract → L2
 structure → L3 implementation reference):
 
-- [Mail state](state/mail/L1.md): canonical mail state, derived projections, query evaluation, and conversation freshness.
-- [Runtime](runtime/L1.md): UI-facing runtime contract for the bundled application, embedded authority server, and future deployment adapters. Sub-domains: the [runtime adapter](runtime/adapter/L1.md) (the client-facing Api/Link surfaces), [runtime internals](runtime/internals/L1.md) (assembly, links, lifecycle), and [mutations](runtime/mutations/L1.md).
-- [Replication](replication/L1.md): coherent links — the optimistic up-channel, authoritative down-channel, and confirmation-watermark convergence that move state between client, runtime, and authority server. Two seams have their own sub-domains: the [client↔runtime link](replication/client-link/L1.md) (the device replica) and the [runtime↔authority-server link](replication/authority-server-link/L1.md) (the AuthorityServerLink seam).
-- [Client](client/L1.md): the renderer's boundary over runtime state — the runtime adapter facade, view/mutation hooks, the main-thread reactive live-store, and the wasm replica hosted in a Web Worker.
-- [API](api/L1.md): external `/v1` HTTP and SSE contract over those projections. The route inventory is generated: [endpoints](api/endpoints.md).
-- [Authority server](authority-server/L1.md): the far node's service, store, provider, account-runtime, event, and API implementation boundaries.
-- [Crate topology](architecture/L2-crate-topology.md): the workspace crate set, ownership, dependency hierarchy, role binaries, and the wasm-pure frontier.
-- [UI](ui/L0.md): the mail shell's navigation model — view kinds, pane focus, and the keyboard contract. Partial: only the navigation model (L0) and keyboard shortcuts (L1) are authored; the remaining UI sections are a follow-up.
-- [Testing](testing/L0.md): behavior-contract coverage model, the shared `posthaste-testkit` harness (`StalwartFixture`, the `mock-gmail` label-model fixture, runtime-in-harness), the client testkit (`apps/web/test/harness`), and the verification ladder. The remaining forward contract (`posthastectl`) is in the [testkit roadmap](eph/PLAN-L2-testkit-roadmap.md).
+- [Architecture](architecture/L1-architecture.md): the integrated app — one
+  Rust backend as the only evaluator, a TypeScript frontend rendering live
+  query results, and the localhost protocol between them.
+- [API](api/L1-api.md): the one integration surface — queries, commands, the
+  event stream, and binary resources; the same contract for the frontend,
+  the CLI, the MCP server, and user scripts.
+- [Backend](backend/L1-backend.md): internal structure — the domain service
+  over the SQLite store, provider gateways, account runtimes, the outbox,
+  events and the store generation, query evaluation, command execution.
+- [Client](client/L1-client.md): the frontend contract — the facade, live
+  queries, commands as verbs, ephemeral state, and hackability.
+- [Mail state](state/mail/L1.md): canonical mail state, derived projections,
+  query evaluation, and conversation freshness.
+- [Crate topology](architecture/L2-crate-topology.md): the workspace crate
+  set and dependency hierarchy. Describes the pre-pivot workspace; it is
+  rewritten as the legacy crates retire.
+- [Testing](testing/L0.md): the behavior-contract coverage model, the shared
+  `posthaste-testkit` harness, and the verification ladder.
+- [UI](ui/L0.md): the mail shell's navigation model — view kinds, pane
+  focus, and the keyboard contract.
 
-Task-oriented, tool-facing guides (as opposed to the layered specs above) live
-alongside the specs:
+Task-oriented, tool-facing guides live alongside the specs:
 
-- [Scripting quickstart](https://posthaste.theor.net/docs/scripting-quickstart): automate Posthaste from a shell script with no protocol code — the `/v1/events` tap plus the one-vocabulary apply path, driven by `posthastectl`.
-- [Scripting security & threat model](https://posthaste.theor.net/docs/scripting-security): the trust relationships and mitigations for event-triggered code (`watch --exec`, `exec`/`webhook` rules).
-- [User guide](https://posthaste.theor.net/docs): the walkthrough-style user/operator guide.
+- [Scripting quickstart](https://posthaste.theor.net/docs/scripting-quickstart):
+  automate Posthaste from a shell script — the event stream plus commands,
+  driven by `posthastectl`.
+- [Scripting security & threat model](https://posthaste.theor.net/docs/scripting-security):
+  trust relationships and mitigations for event-triggered code.
+- [User guide](https://posthaste.theor.net/docs): the walkthrough-style
+  user/operator guide.
 
 ## Decision records and design history
 
-The durable specs above record *what is true now*. The reasoning, deviations,
-and forward plans behind them live as dated records in [`eph/`](eph/INDEX.md) — RFCs
-(the architecture-cleanup, scripting, drafts, provider-reliability, lifecycle,
-and client-resilience programs), audits, design notes, and the reality ledger
-([DEVIATION-L2-architecture-cleanup.md](eph/DEVIATION-L2-architecture-cleanup.md)).
-The architecture-cleanup refactor these specs describe has **landed** (M0–M9c);
-its RFC is [RFC-L2-architecture-cleanup.md](eph/RFC-L2-architecture-cleanup.md).
-[Release channels](eph/DESIGN-L2-release-channels.md) — nightly (dogfood/devtools)
-versus stable builds, updater manifests, and signing gates — is a design note in
-that corpus. Open technical debt tracked here: [issues/L2-runtime-lifecycle-debt.md](issues/L2-runtime-lifecycle-debt.md).
+The durable specs above record *what is true now* (drafts marked `state:
+draft` record what is being built). The reasoning, deviations, and forward
+plans live as dated records in [`eph/`](eph/INDEX.md) — RFCs, audits, design
+notes, and reality ledgers. The pivot from the split client/runtime model to
+the integrated app is recorded in
+[RFC-L2-mirror-client.md](eph/RFC-L2-mirror-client.md); the pre-pivot spec
+set survives on the `legacy/distributed-model` branch. Open technical debt
+is tracked in [`issues/`](issues/L2-index.md).

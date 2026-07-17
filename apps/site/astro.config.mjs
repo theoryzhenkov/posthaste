@@ -66,10 +66,28 @@ export default defineConfig({
               label: 'Architecture',
               items: [
                 {
+                  label: 'Architecture (L1)',
+                  slug: 'docs/architecture/L1-architecture',
+                },
+                {
                   label: 'Crate topology (L2)',
                   slug: 'docs/architecture/L2-crate-topology',
                 },
               ],
+            },
+            {
+              label: 'API',
+              items: [{ label: 'API (L1)', slug: 'docs/api/L1-api' }],
+            },
+            {
+              label: 'Backend',
+              items: [
+                { label: 'Backend (L1)', slug: 'docs/backend/L1-backend' },
+              ],
+            },
+            {
+              label: 'Client',
+              items: [{ label: 'Client (L1)', slug: 'docs/client/L1-client' }],
             },
             {
               label: 'State',
@@ -80,105 +98,6 @@ export default defineConfig({
                   label: 'Implementation patterns (L3)',
                   slug: 'docs/state/mail/L3',
                 },
-              ],
-            },
-            {
-              label: 'Runtime',
-              items: [
-                { label: 'Contract (L1)', slug: 'docs/runtime/L1' },
-                {
-                  label: 'Adapter — Surface (L1)',
-                  slug: 'docs/runtime/adapter/L1',
-                },
-                {
-                  label: 'Adapter — Sessions & views (L2)',
-                  slug: 'docs/runtime/adapter/L2',
-                },
-                {
-                  label: 'Adapter — Patterns (L3)',
-                  slug: 'docs/runtime/adapter/L3',
-                },
-                {
-                  label: 'Mutations — Catalog (L1)',
-                  slug: 'docs/runtime/mutations/L1',
-                },
-                {
-                  label: 'Mutations — Pipeline (L2)',
-                  slug: 'docs/runtime/mutations/L2',
-                },
-                {
-                  label: 'Internals — Contract (L1)',
-                  slug: 'docs/runtime/internals/L1',
-                },
-                {
-                  label: 'Internals — Assembly (L2)',
-                  slug: 'docs/runtime/internals/L2',
-                },
-                {
-                  label: 'Internals — Patterns (L3)',
-                  slug: 'docs/runtime/internals/L3',
-                },
-              ],
-            },
-            {
-              label: 'Replication',
-              items: [
-                { label: 'Coherent links (L1)', slug: 'docs/replication/L1' },
-                {
-                  label: 'Client link — Seam (L1)',
-                  slug: 'docs/replication/client-link/L1',
-                },
-                {
-                  label: 'Client link — Components (L2)',
-                  slug: 'docs/replication/client-link/L2',
-                },
-                {
-                  label: 'Client link — Integration (L3)',
-                  slug: 'docs/replication/client-link/L3',
-                },
-                {
-                  label: 'Authority-server link — Seam (L1)',
-                  slug: 'docs/replication/authority-server-link/L1',
-                },
-                {
-                  label: 'Authority-server link — Components (L2)',
-                  slug: 'docs/replication/authority-server-link/L2',
-                },
-                {
-                  label: 'Authority-server link — Implementation (L3)',
-                  slug: 'docs/replication/authority-server-link/L3',
-                },
-              ],
-            },
-            {
-              label: 'API',
-              items: [
-                { label: 'Contracts (L1)', slug: 'docs/api/L1' },
-                { label: 'Structure & flows (L2)', slug: 'docs/api/L2' },
-                { label: 'Implementation reference (L3)', slug: 'docs/api/L3' },
-                { label: 'Endpoint inventory', slug: 'docs/api/endpoints' },
-              ],
-            },
-            {
-              label: 'Authority server',
-              items: [
-                { label: 'Contracts (L1)', slug: 'docs/authority-server/L1' },
-                {
-                  label: 'Structure & flows (L2)',
-                  slug: 'docs/authority-server/L2',
-                },
-                {
-                  label: 'Adapter patterns (L3)',
-                  slug: 'docs/authority-server/L3',
-                },
-              ],
-            },
-            {
-              label: 'Client',
-              items: [
-                { label: 'State contract (L1)', slug: 'docs/client/L1' },
-                { label: 'Mail runtime (L2)', slug: 'docs/client/L2' },
-                { label: 'Adapter patterns (L3)', slug: 'docs/client/L3' },
               ],
             },
             {
