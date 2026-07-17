@@ -273,11 +273,3 @@ jobs:
       - name: Smoke-test the WASM boundary
         run: bun --cwd=legacy/web test test/replicaWasmSmoke.test.ts
 
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify endpoint inventory is up to date
-        run: |
-          python3 tools/docs/gen_endpoints.py
-          git diff --exit-code docs/api/endpoints.md

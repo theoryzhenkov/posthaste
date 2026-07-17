@@ -4,14 +4,10 @@
 
 set working-directory := '..'
 
-# Regenerate the API endpoint inventory from openapi.json (committed artifact)
-gen-endpoints:
-    python3 tools/docs/gen_endpoints.py
-
 # Serve the docs locally via the site's dev server (Starlight owns /docs)
-serve: gen-endpoints
+serve:
     bun --cwd=apps/site run dev
 
 # Build the site (includes the Starlight docs + Pagefind index)
-build: gen-endpoints
+build:
     bun --cwd=apps/site run build
