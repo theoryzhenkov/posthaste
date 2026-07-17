@@ -21,7 +21,6 @@
  * only change how the user enters that value, never its serialized shape, so
  * the compiler/evaluator and stored JSON are unchanged.
  *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 import { useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'

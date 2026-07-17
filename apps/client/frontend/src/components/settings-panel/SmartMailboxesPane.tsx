@@ -1,8 +1,6 @@
 /**
  * Unified mailbox settings view with drill-in editors for smart and source mailboxes.
  *
- * @spec docs/L1-api#smart-mailbox-crud
- * @spec docs/L1-api#mailbox-metadata
  */
 import type { AccountRow } from '@/gen'
 import { Plus } from 'lucide-react'

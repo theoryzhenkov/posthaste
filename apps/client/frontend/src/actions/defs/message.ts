@@ -1,31 +1,25 @@
 /**
- * Message action definitions (PLAN-L2, Slices 1-5 + parameterized actions).
+ * Message action definitions.
  *
- * A faithful port of the pure, role-gated context-menu actions that live in
- * `actions/contextualActions.ts` today — same labels, icons, destructive flags,
- * and `viewRole`/draft gating — expressed as {@link ActionDefinition}s that
- * delegate to `services.email` (never reimplementing the domain logic).
+ * Pure, role-gated context-menu, palette, header, and keyboard actions
+ * expressed as {@link ActionDefinition}s that delegate to `services.email`
+ * (never reimplementing the domain logic).
  *
- * Registration order below is meaningful: the resolver uses it as the
- * within-section tiebreak, so it mirrors the old builder's push order (the two
- * `open` entries, then `toggle-read`/`toggle-flag`, then `archive`,
- * `move-to-inbox`, and the mutually-exclusive trash/delete/discard trio) to
- * preserve menu ordering.
+ * Registration order is meaningful: the resolver uses it as the within-section
+ * tiebreak, so it mirrors the push order of the two `open` entries, then
+ * `toggle-read`/`toggle-flag`, then `archive`, `move-to-inbox`, and the
+ * mutually-exclusive trash/delete/discard trio.
  *
- * Slice 2 folds in the two row-scoped `open` / `view-conversation` entries the
- * old shim owned: they delegate to `services.row` (bound per row by
- * `MessageRow`) with an `services.app` fallback so the palette can surface them
- * too. Slice 4 lights the `detail-header` surface: the header entries delegate
- * to `services.detail` (bound by `MessageHeader`) or `services.app`, and the
- * old hand-rolled draft-vs-message branch is availability-driven (a draft's
- * header resolves to edit/discard only, via {@link notDraftOnHeader}).
+ * The two row-scoped `open` / `view-conversation` entries delegate to
+ * `services.row` (bound per row by `MessageRow`) with an `services.app`
+ * fallback so the palette can surface them too. The `detail-header` surface
+ * entries delegate to `services.detail` (bound by `MessageHeader`) or
+ * `services.app`, and the draft-vs-message branch is availability-driven (a
+ * draft's header resolves to edit/discard only, via {@link notDraftOnHeader}).
  *
  * PARAMETERIZED actions: `move-to-mailbox` (options = the account's mailboxes
  * from `services.mailboxes`, minus the message's current ones and non-movable
- * roles) and `snooze` (options = the header's snooze presets — now a REAL
- * palette command instead of the old placeholder toast).
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
+ * roles) and `snooze` (options = the header's snooze presets).
  */
 import {
   Archive,
@@ -64,8 +58,8 @@ function isRestorableRole(role: string | null): boolean {
   return role === 'trash' || role === 'archive' || role === 'junk'
 }
 
-/** The subject a single-target action operates on. Slice-1 surfaces bind exactly
- *  one target; `?? undefined` keeps the accessors total for the empty case. */
+/** The subject a single-target action operates on. `?? undefined` keeps the
+ *  accessors total for the empty case. */
 function primaryTarget(ctx: ActionContext): MessageTarget | undefined {
   return ctx.targets[0]
 }
@@ -98,9 +92,9 @@ function hasDraftTarget(ctx: ActionContext): boolean {
   return ctx.targets.some((t) => t.isDraft)
 }
 
-/** The detail header shows a DRAFT a draft-appropriate action set (D129: edit +
- *  discard, never reply/move/flag). Everywhere else the action keeps its own
- *  gating — the context menu / palette still offer e.g. flagging a draft. */
+/** The detail header shows a draft-appropriate action set (edit + discard,
+ *  never reply/move/flag). Everywhere else the action keeps its own gating —
+ *  the context menu / palette still offer e.g. flagging a draft. */
 function notDraftOnHeader(ctx: ActionContext): boolean {
   return !(ctx.surface === 'detail-header' && hasDraftTarget(ctx))
 }
@@ -218,7 +212,7 @@ export const messageActions: readonly ActionDefinition[] = [
     section: 'state',
     title: (ctx: ActionContext) =>
       primaryTarget(ctx)?.summary?.isFlagged ? 'Unflag' : 'Flag',
-    // Star (not the palette's old wrong `Tag` icon, PLAN §1.2) — one chosen icon.
+    // Star — the single canonical icon for flag/unflag.
     icon: Star,
     keywords: 'flag unflag star',
     surfaces: ['context-menu', 'palette', 'detail-header'],
@@ -268,8 +262,8 @@ export const messageActions: readonly ActionDefinition[] = [
     run: (_ctx, s) => (s.detail?.forward ?? s.app?.handleForward)?.(),
   },
   {
-    // D129: the draft header's "Edit draft" — availability-driven now (every
-    // target must be a draft), also reachable from the palette.
+    // "Edit draft" — availability-driven (every target must be a draft), also
+    // reachable from the palette.
     id: 'message.edit-draft',
     section: 'compose-reply',
     title: 'Edit draft',
@@ -347,8 +341,8 @@ export const messageActions: readonly ActionDefinition[] = [
     // (trash-view ⇒ delete-permanently, elsewhere ⇒ this). Stays instant —
     // move-to-trash is reversible via the undo toast.
     shortcut: [{ key: '#' }, { key: 'backspace' }],
-    // Not offered in Trash, and never on drafts (D127: a draft is discarded,
-    // never trashed).
+    // Not offered in Trash, and never on drafts (a draft is discarded, not
+    // trashed).
     isAvailable: (ctx) =>
       ctx.viewRole !== 'trash' && !ctx.targets.some((t) => t.isDraft),
     isEnabled: requireTarget,
@@ -388,7 +382,7 @@ export const messageActions: readonly ActionDefinition[] = [
     destructive: true,
     keywords: 'discard draft delete',
     surfaces: ['context-menu', 'palette', 'detail-header'],
-    // Every target must be a draft (D127: hard delete via the draft-delete op).
+    // Every target must be a draft (hard delete via the draft-delete op).
     isAvailable: (ctx) =>
       ctx.targets.length > 0 && ctx.targets.every((t) => t.isDraft),
     isEnabled: requireTarget,

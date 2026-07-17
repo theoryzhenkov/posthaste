@@ -11,7 +11,6 @@
  * Pure data → data (chord vs `KeyboardEvent`, resolved action out); no DOM, so
  * it is unit-testable exactly like `components/keyboard/dispatch.ts`.
  *
- * @spec docs/eph/PLAN-L2-action-registry.md
  */
 import type {
   ActionConfirmCopy,

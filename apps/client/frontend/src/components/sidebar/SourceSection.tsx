@@ -94,8 +94,8 @@ export function SourceSection({
     return map
   }, [partition.groups])
   // The account header's aggregate unread sums the react-query mailbox rows'
-  // counts (RFC-L2-count-unification): invalidation + the optimistic overlay
-  // keep `unreadEmails` live, so no separate live-count source exists.
+  // counts: invalidation + the optimistic overlay keep `unreadEmails` live,
+  // so no separate live-count source exists.
   const unreadTotal = useMemo(
     () =>
       source.mailboxes.reduce((sum, mailbox) => sum + mailbox.unreadEmails, 0),
@@ -255,7 +255,6 @@ export function SourceSection({
  * group's collapse; a context menu offers rename / delete. Delete only ungroups
  * the members — it never touches mailboxes or mail.
  *
- * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
 export function GroupHeader({
   group,

@@ -5,7 +5,6 @@
  * (links/buttons) clickable — the 5px activation constraint disambiguates a
  * click from a drag.
  *
- * @spec docs/L1-accounts#sidebar-ordering
  */
 import {
   DndContext,

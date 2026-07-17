@@ -8,7 +8,7 @@ use posthaste_domain_model::{
 };
 use posthaste_domain_service::{validate_automation_drafts, validate_automation_rules};
 
-use super::{now_rfc3339, ApiFailure};
+use super::{now_rfc3339, offload_read, ApiFailure};
 use crate::AppState;
 
 /// The synthetic account id global (non-account) events are published under.
@@ -28,7 +28,7 @@ pub(crate) fn evaluate_app_settings(
 /// transient `forceBackfill` flag re-runs the backfill-enabled automation
 /// rules against existing mail; otherwise a changed ruleset only ensures its
 /// durable backfill job exists.
-pub(crate) fn update_settings(
+pub(crate) async fn update_settings(
     app: &AppState,
     intent: UpdateSettingsIntent,
 ) -> Result<u64, ApiFailure> {
@@ -36,15 +36,26 @@ pub(crate) fn update_settings(
         settings,
         force_backfill,
     } = intent;
-    validate_settings_document(app, &settings)?;
-    let previous = app.service.get_app_settings()?;
-    app.service.put_app_settings(&settings)?;
-    if force_backfill {
-        app.service.reset_automation_backfills_for_current_rules()?;
-    } else if previous.automation_rules != settings.automation_rules {
-        app.service
-            .ensure_automation_backfills_for_current_rules()?;
-    }
+    // The config validate + read-modify-write is a synchronous filesystem
+    // round-trip; offload it so a slow/contended disk cannot stall the async
+    // worker (matching the read-path discipline).
+    let offloaded = app.clone();
+    offload_read(move || {
+        validate_settings_document(&offloaded, &settings)?;
+        let previous = offloaded.service.get_app_settings()?;
+        offloaded.service.put_app_settings(&settings)?;
+        if force_backfill {
+            offloaded
+                .service
+                .reset_automation_backfills_for_current_rules()?;
+        } else if previous.automation_rules != settings.automation_rules {
+            offloaded
+                .service
+                .ensure_automation_backfills_for_current_rules()?;
+        }
+        Ok(())
+    })
+    .await?;
     Ok(publish_settings_event(app))
 }
 

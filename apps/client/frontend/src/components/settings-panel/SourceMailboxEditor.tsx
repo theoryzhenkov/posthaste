@@ -1,8 +1,6 @@
 /**
  * Source mailbox detail editor for server metadata and mailbox-scoped actions.
  *
- * @spec docs/L1-api#mailbox-metadata
- * @spec docs/L1-ui#account-settings
  */
 import type { AccountRow } from '@/gen'
 import type {

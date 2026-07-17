@@ -1,7 +1,6 @@
 /**
  * Pure helpers for the sidebar's `j`/`k` roving cursor.
  *
- * @spec docs/ui/L0#navigation-model
  */
 import type { SidebarSelection } from '../Sidebar'
 

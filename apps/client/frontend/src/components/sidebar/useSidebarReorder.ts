@@ -5,7 +5,6 @@
  * backend re-resolves list order from. Acceptance invalidates every query,
  * so the reordered lists re-render from the backend's answer.
  *
- * @spec docs/L1-accounts#sidebar-ordering
  */
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'

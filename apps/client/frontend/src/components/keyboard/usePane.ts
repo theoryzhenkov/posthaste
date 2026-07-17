@@ -2,7 +2,6 @@
  * Consumer hooks for the mail keyboard controller: read/move pane focus and
  * register a pane's focused-key handler.
  *
- * @spec docs/ui/L0#navigation-model
  */
 import { useEffect, useRef } from 'react'
 

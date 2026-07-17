@@ -4,7 +4,6 @@
  * window. Wrap independent regions (surfaces, the mail shell) so one crash
  * cannot blank the entire app.
  *
- * @spec docs/L1-ui#component-hierarchy
  */
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 

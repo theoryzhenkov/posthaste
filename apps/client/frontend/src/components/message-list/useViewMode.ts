@@ -4,7 +4,6 @@
  * remembers its own mode. Mirrors the external-store pattern of
  * `useColumnConfig` so all list instances stay in sync.
  *
- * @spec docs/L1-ui#messagelist
  */
 import { useCallback, useSyncExternalStore } from 'react'
 

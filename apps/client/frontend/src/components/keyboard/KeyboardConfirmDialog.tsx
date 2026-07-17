@@ -1,13 +1,10 @@
 /**
- * Confirm host for keyboard-invoked destructive actions (PLAN-L2, Slice 5).
+ * Confirm host for keyboard-invoked destructive actions.
  *
- * A registry action carrying `confirm` metadata (today: delete-permanently)
- * must NOT run straight from a keystroke. The registry tier parks its runner and
- * this dialog gates it — reusing the app's shared `AlertDialog` pattern (cf.
- * `ComposeCloseConfirmDialog`, account `DangerSection`) so the keyboard path
- * gets the same affordance the context menu / palette would.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
+ * A registry action carrying `confirm` metadata (delete-permanently) must not
+ * run straight from a keystroke. The registry tier parks its runner and this
+ * dialog gates it — reusing the app's shared `AlertDialog` pattern so the
+ * keyboard path gets the same affordance the context menu / palette does.
  */
 import type { ActionConfirm } from '@/actions'
 import {

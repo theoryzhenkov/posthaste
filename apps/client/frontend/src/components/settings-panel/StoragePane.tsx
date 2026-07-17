@@ -3,7 +3,6 @@
  * it keeps. Edits `cachePolicy` via the settings PATCH (the same `app.toml`
  * `[cache]` that already existed but had no UI).
  *
- * @spec docs/L1-sync#local-cache-planning
  */
 import { useState } from 'react'
 

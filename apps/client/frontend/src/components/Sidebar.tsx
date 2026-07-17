@@ -6,8 +6,6 @@
  * when the sidebar pane has focus), and wires drag-to-reorder for smart
  * mailboxes and accounts.
  *
- * @spec docs/L1-ui#component-hierarchy
- * @spec docs/ui/L0#navigation-model
  */
 import { useCallback, useMemo, useState } from 'react'
 
@@ -34,10 +32,7 @@ import {
   SmartMailboxSection,
 } from './sidebar/SidebarContent'
 
-/**
- * Discriminated union representing the current sidebar selection.
- * @spec docs/ui/L0#navigation-model
- */
+/** Discriminated union representing the current sidebar selection. */
 export type SidebarSelection =
   | { kind: 'smart-mailbox'; id: string; name: string }
   | {
@@ -47,7 +42,6 @@ export type SidebarSelection =
       name: string
     }
 
-/** @spec docs/L1-ui#component-hierarchy */
 interface SidebarProps {
   selectedView: SidebarSelection | null
   onOpenAccountSettings: (sourceId: string) => void
@@ -63,9 +57,6 @@ interface SidebarProps {
 
 /**
  * Sidebar navigation with smart mailbox and source mailbox sections.
- *
- * @spec docs/L1-ui#component-hierarchy
- * @spec docs/ui/L0#navigation-model
  */
 export function Sidebar({
   selectedView,

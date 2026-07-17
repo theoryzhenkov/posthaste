@@ -53,8 +53,6 @@ export const QUERY_FIELD_SCHEMA: Record<MailQueryField, QueryFieldSchema> = {
  * editor renders. This is PRESENTATION and is *finer* than the coarse value
  * type — e.g. an id, a mailbox ref, a role, and an address all share the coarse
  * `text` value type but want different pickers here.
- *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 export type ConditionValueType =
   | 'text'
@@ -119,8 +117,6 @@ const WIDGET_OVERRIDE: Partial<Record<MailQueryField, ConditionValueType>> = {
  * The field -> { valueType (widget), operators } table. The DATA (field set +
  * operators + coarse value type) is generated from the Rust schema; only the
  * widget refinement above is hand-maintained here.
- *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 export const FIELD_REGISTRY: Record<MailQueryField, FieldDescriptor> =
   Object.fromEntries(

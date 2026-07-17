@@ -98,18 +98,26 @@ async fn apply_command(
         Command::DeleteAccount(intent) => accounts::delete_account(app, intent).await,
         Command::SetAccountLogo(intent) => accounts::set_account_logo(app, intent).await,
         Command::CompleteOauth(intent) => accounts::complete_oauth(app, intent).await,
-        Command::UpdateSettings(intent) => settings::update_settings(app, intent),
-        Command::CreateSmartMailbox(intent) => smart_mailboxes::create_smart_mailbox(app, intent),
-        Command::UpdateSmartMailbox(intent) => smart_mailboxes::update_smart_mailbox(app, intent),
-        Command::DeleteSmartMailbox(intent) => smart_mailboxes::delete_smart_mailbox(app, intent),
-        Command::ResetSmartMailboxes(intent) => smart_mailboxes::reset_smart_mailboxes(app, intent),
+        Command::UpdateSettings(intent) => settings::update_settings(app, intent).await,
+        Command::CreateSmartMailbox(intent) => {
+            smart_mailboxes::create_smart_mailbox(app, intent).await
+        }
+        Command::UpdateSmartMailbox(intent) => {
+            smart_mailboxes::update_smart_mailbox(app, intent).await
+        }
+        Command::DeleteSmartMailbox(intent) => {
+            smart_mailboxes::delete_smart_mailbox(app, intent).await
+        }
+        Command::ResetSmartMailboxes(intent) => {
+            smart_mailboxes::reset_smart_mailboxes(app, intent).await
+        }
         Command::CreateMailbox(intent) => mailboxes::create_mailbox(app, intent).await,
         Command::RenameMailbox(intent) => mailboxes::rename_mailbox(app, intent),
         Command::DeleteMailbox(intent) => mailboxes::delete_mailbox(app, intent).await,
         Command::SetMailboxRole(intent) => mailboxes::set_mailbox_role(app, intent).await,
-        Command::CreateAutomationRule(intent) => automation::create_rule(app, intent),
-        Command::UpdateAutomationRule(intent) => automation::update_rule(app, intent),
-        Command::DeleteAutomationRule(intent) => automation::delete_rule(app, intent),
+        Command::CreateAutomationRule(intent) => automation::create_rule(app, intent).await,
+        Command::UpdateAutomationRule(intent) => automation::update_rule(app, intent).await,
+        Command::DeleteAutomationRule(intent) => automation::delete_rule(app, intent).await,
         Command::Snooze(intent) => snooze::snooze(app, intent).await,
         Command::Unsnooze(intent) => snooze::unsnooze(app, intent).await,
         Command::Undo(intent) => rev_log::undo(app, intent).await,

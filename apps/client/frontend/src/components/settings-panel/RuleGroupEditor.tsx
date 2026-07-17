@@ -4,7 +4,6 @@
  * Groups support `all`/`any` operators, optional negation, and can
  * contain both condition nodes and nested groups.
  *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 import type { MailQueryGroup } from '../../api/types'
 import { cn } from '../../lib/utils'
@@ -28,8 +27,6 @@ import { ConditionEditor } from './rule-group/ConditionEditor'
 /**
  * Recursive editor for a `MailQueryGroup` node.
  * Renders its own conditions inline and delegates nested groups recursively.
- *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 export function RuleGroupEditor({
   group,

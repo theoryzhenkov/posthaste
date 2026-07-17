@@ -76,19 +76,19 @@ export interface CommandPaletteEntry {
   action: PaletteAction
   closeOnSelect?: boolean
   /** Registry-backed palette rows: shown greyed and non-runnable when the
-   *  action's `isEnabled` predicate fails (PLAN-L2 §4.2 disabled-with-reason). */
+   *  action's `isEnabled` predicate fails. */
   disabled?: boolean
   /** Hint rendered under a disabled row (e.g. "Select a message first"). */
   disabledReason?: string
   /** Pre-formatted shortcut hint (e.g. `⌘⇧L`) rendered right-aligned on the
-   *  row (PLAN-L2 §4.4). */
+   *  row. */
   shortcut?: string
 }
 
 export type PaletteAction =
   | { kind: 'command'; commandId: CommandActionId }
   /** Registry action: dispatched via `getAction(actionId).run(ctx, services)`
-   *  — the palette's single execution path (PLAN-L2 Slice 3). */
+   *  — the palette's single execution path. */
   | { kind: 'action'; actionId: string }
   /** PARAMETERIZED registry action: selecting it pushes the palette into its
    *  pick-step (a searchable list of the action's options) instead of running. */

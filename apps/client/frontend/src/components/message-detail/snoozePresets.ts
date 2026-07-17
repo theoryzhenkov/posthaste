@@ -1,6 +1,6 @@
 /** Snooze preset return times (unix seconds, local). The scheduler
  * (`MailService::auto_return_snoozed_messages`) moves a snoozed message back
- * to the Inbox when `until <= now`. @spec docs/eph/DESIGN-L2-snooze */
+ * to the Inbox when `until <= now`. */
 
 export type SnoozePreset = { label: string; until: number }
 

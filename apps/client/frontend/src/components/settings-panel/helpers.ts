@@ -1,8 +1,6 @@
 /**
  * Pure helper functions and constants for the settings panel editors.
  *
- * @spec docs/L1-api#account-crud-lifecycle
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 export {
   EMPTY_FORM,

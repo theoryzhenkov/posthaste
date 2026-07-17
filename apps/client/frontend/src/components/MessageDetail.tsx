@@ -5,7 +5,6 @@
  * metadata) and, from its provider thread id, the surrounding thread for the
  * switcher. Messages are deduped by `(sourceId, messageId)`.
  *
- * @spec docs/L1-ui#messagedetail-and-emailframe
  */
 import type {
   ConversationView,
@@ -25,12 +24,10 @@ import {
 } from './message-detail/MessageDetailStates'
 import { dedupeConversationMessages } from './message-detail/model'
 
-/** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageSelection extends SourceMessageRef {
   conversationId: string
 }
 
-/** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageDetailProps {
   selection: MessageSelection | null
   /** Domain mutations — the header resolves its action row from the registry
@@ -53,8 +50,6 @@ interface MessageDetailProps {
 
 /**
  * Message detail pane with sticky header, thread switcher, and email body.
- *
- * @spec docs/L1-ui#messagedetail-and-emailframe
  */
 export function MessageDetail({
   selection,

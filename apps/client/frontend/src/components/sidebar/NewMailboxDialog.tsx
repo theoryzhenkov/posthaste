@@ -20,7 +20,6 @@ import { useCreateMailboxMutation } from './useCreateMailboxMutation'
  * synchronous backend create + resync runs; errors are surfaced by the mutation
  * hook's toast (never a raw provider string).
  *
- * @spec docs/eph/RFC-L2-mailbox-management
  */
 export function NewMailboxDialog({
   sourceId,

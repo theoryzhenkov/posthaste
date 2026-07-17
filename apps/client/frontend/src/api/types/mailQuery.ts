@@ -2,13 +2,10 @@
  *
  *  The front-end-agnostic query language shared by every surface that filters
  *  mail — smart mailboxes (saved queries) and automation-rule WHEN-clauses. The
- *  `SmartMailbox` container itself lives in `./smartMailboxes`.
- *  @spec docs/L1-search#smart-mailbox-data-model */
+ *  `SmartMailbox` container itself lives in `./smartMailboxes`. */
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export type MailQueryGroupOperator = 'all' | 'any'
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export type MailQueryField =
   | 'sourceId'
   | 'sourceName'
@@ -31,12 +28,10 @@ export type MailQueryField =
   | 'receivedAt'
   | 'size'
 
-/** Neutral comparison operators (D6): the four ordered comparisons are
- *  `lt`/`gt`/`le`/`ge` (`< > <= >=`), labelled per field type in the editor
- *  ("before/after" for dates, "smaller/larger than" for size). The model no
- *  longer speaks "date". Stored rules using the old names still deserialize
- *  server-side via serde aliases.
- *  @spec docs/L1-search#smart-mailbox-data-model */
+/** The four ordered comparisons are `lt`/`gt`/`le`/`ge` (`< > <= >=`), labelled
+ *  per field type in the editor ("before/after" for dates, "smaller/larger than"
+ *  for size). Stored rules using old operator names still deserialize server-side
+ *  via serde aliases. */
 export type MailQueryOperator =
   | 'equals'
   | 'in'
@@ -49,30 +44,25 @@ export type MailQueryOperator =
   | 'le'
   | 'ge'
 
-/** Time unit for a relative date offset.
- *  @spec docs/L1-search#smart-mailbox-data-model */
+/** Time unit for a relative date offset. */
 export type DateUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
 
 /** A typed date condition value. `absolute` compares against a stored RFC3339
  *  instant; `relative` is a rolling "N units ago" offset resolved at query
  *  time (so it never freezes to a fixed date at edit time). Distinguished from
- *  the scalar `MailQueryValue` shapes by being an object with a `kind` tag.
- *  @spec docs/L1-search#smart-mailbox-data-model */
+ *  the scalar `MailQueryValue` shapes by being an object with a `kind` tag. */
 export type DateValue =
   | { kind: 'absolute'; value: string }
   | { kind: 'relative'; amount: number; unit: DateUnit }
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export type MailQueryValue = string | string[] | boolean | DateValue
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface MailQueryGroup {
   operator: MailQueryGroupOperator
   negated: boolean
   nodes: MailQueryRuleNode[]
 }
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface MailQueryCondition {
   type: 'condition'
   field: MailQueryField
@@ -81,7 +71,6 @@ export interface MailQueryCondition {
   value: MailQueryValue
 }
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface MailQueryRuleGroup {
   type: 'group'
   operator: MailQueryGroupOperator
@@ -89,10 +78,8 @@ export interface MailQueryRuleGroup {
   nodes: MailQueryRuleNode[]
 }
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export type MailQueryRuleNode = MailQueryRuleGroup | MailQueryCondition
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface MailQueryRule {
   root: MailQueryGroup
 }

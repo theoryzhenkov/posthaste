@@ -5,7 +5,6 @@
  * carrier through the ordinary `tag:<name>` search surface (see
  * {@link ./useTagMaintenance}).
  *
- * @spec docs/L1-ui#account-settings
  */
 import { Check, Loader2, Pencil, Tags, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'

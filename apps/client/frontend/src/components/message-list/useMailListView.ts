@@ -6,7 +6,6 @@
  * infinite scroll. Liveness is the stream's job: a generation advance
  * invalidates every query, so the loaded window refetches in place.
  *
- * @spec docs/L1-ui#messagelist
  */
 import { useCallback, useMemo } from 'react'
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'

@@ -3,8 +3,6 @@
  * `settings.tags` appearance overrides (color + icon) and falling back to
  * name-derived defaults.
  *
- * @spec docs/eph/DESIGN-L2-appearance-toml
- * @spec docs/ui/L0#navigation-model
  */
 import { X } from 'lucide-react'
 

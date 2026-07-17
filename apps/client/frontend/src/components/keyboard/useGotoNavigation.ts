@@ -3,7 +3,6 @@
  * view-selection handlers, returning a single `goto(role, options)` callback
  * for the keyboard controller.
  *
- * @spec docs/ui/L0#navigation-model
  */
 import { useCallback, useMemo } from 'react'
 

@@ -8,7 +8,6 @@
  * for `in`, a `boolean` for booleans — so the compiler/evaluator and stored
  * JSON are unchanged.
  *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 import type { DateUnit, DateValue, MailQueryValue } from '../../../api/types'
 

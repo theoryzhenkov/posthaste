@@ -226,7 +226,7 @@ export function CommandPalette({
   const executeAction = usePaletteActions({ actionContext, services, nav })
 
   function runEntry(entry: CommandPaletteEntry) {
-    // Disabled registry rows are inert — skip on Enter/click (PLAN-L2 §4.2).
+    // Disabled registry rows are inert — skip on Enter/click.
     if (entry.disabled) return
     executeAction(entry.action)
     if (entry.closeOnSelect !== false) {
