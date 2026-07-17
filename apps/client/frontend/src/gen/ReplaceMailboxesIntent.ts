@@ -4,6 +4,6 @@ import type { MessageId } from "./MessageId";
 import type { ReplaceMailboxesCommand } from "./ReplaceMailboxesCommand";
 
 /**
- * Target + mailbox replacement for [`Command::ReplaceMailboxes`].
+ * Target + mailbox replacement for [`crate::Command::ReplaceMailboxes`].
  */
 export type ReplaceMailboxesIntent = { accountId: AccountId, messageId: MessageId, change: ReplaceMailboxesCommand, };

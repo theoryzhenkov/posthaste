@@ -2,6 +2,7 @@
 import type { AccountId } from "./AccountId";
 import type { MailSort } from "./MailSort";
 import type { MailboxId } from "./MailboxId";
+import type { SmartMailboxId } from "./SmartMailboxId";
 
 /**
  * Scope, filters, and window for a mail list read. Every field is optional:
@@ -17,6 +18,12 @@ accountId?: AccountId | null,
  * provider-scoped mailbox ids).
  */
 mailboxId?: MailboxId | null, 
+/**
+ * Restrict to one smart mailbox: the saved rule scopes the list, and the
+ * remaining filters AND on top of it. Mutually exclusive with
+ * `mailboxId`.
+ */
+smartMailboxId?: SmartMailboxId | null, 
 /**
  * Free-text search over subject, sender, recipients, preview, and the
  * cached body index.

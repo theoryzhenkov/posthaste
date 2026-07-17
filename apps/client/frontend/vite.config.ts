@@ -1,4 +1,6 @@
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 
 // HTTP+SSE on localhost is THE transport: the client runs identically in a
@@ -16,7 +18,12 @@ export default defineConfig(() => {
   const token = process.env.POSTHASTE_DEV_TOKEN
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined
   return {
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
+    resolve: {
+      alias: {
+        '@': resolve(import.meta.dirname, 'src'),
+      },
+    },
     server: {
       proxy: {
         '/api': { target: backend, headers },

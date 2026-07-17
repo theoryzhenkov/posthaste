@@ -1,0 +1,515 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+@theme inline {
+  --font-sans: 'Geist Variable', sans-serif;
+  --font-mono: 'Geist Mono Variable', monospace;
+  --font-heading: var(--font-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-chrome: var(--chrome);
+  --color-chrome-foreground: var(--chrome-foreground);
+  --color-panel: var(--panel);
+  --color-panel-foreground: var(--panel-foreground);
+  --color-panel-muted: var(--panel-muted);
+  --color-bg-elev: var(--bg-elev);
+  --color-border-soft: var(--border-soft);
+  --color-border-strong: var(--border-strong);
+  --color-signal-unread: var(--signal-unread);
+  --color-signal-flag: var(--signal-flag);
+  --color-brand-coral: var(--brand-coral);
+  --color-brand-coral-foreground: var(--brand-coral-foreground);
+  --color-brand-coral-soft: var(--brand-coral-soft);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * PostHaste light theme.
+ * Mirrors the handoff light token set: warm neutral surfaces, slate selection,
+ * coral brand/flag, and blue unread signals.
+ */
+:root {
+  --ph-surface-hue: 70;
+  --ph-surface-chroma: 0.007;
+  --radius: 0.25rem;
+
+  color-scheme: light;
+
+  /* Layering scale — single source of truth is src/layering.ts. These MUST
+     mirror the `Z` values there (guarded by test/layering.test.ts). Class-based
+     surfaces reference them via Tailwind `z-(--z-popover)` etc. */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-surface: 100;
+  --z-popover: 1000;
+  --z-window: 2000;
+  --z-overlay: 3000;
+  --z-modal: 4000;
+  --z-toast: 5000;
+  --z-tooltip: 6000;
+
+  /* Surfaces */
+  --background: oklch(0.985 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --foreground: oklch(0.22 0.01 60);
+  --card: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --card-foreground: oklch(0.22 0.01 60);
+  --popover: oklch(0.99 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --popover-foreground: oklch(0.22 0.01 60);
+
+  /* Primary = brand coral */
+  --primary: oklch(0.68 0.17 45);
+  --primary-foreground: #fff;
+
+  /* Secondary = raised neutral */
+  --secondary: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --secondary-foreground: oklch(0.46 0.01 60);
+
+  /* Muted = subdued elements */
+  --muted: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --muted-foreground: oklch(0.46 0.01 60);
+
+  /* Accent = hover wash */
+  --accent: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --accent-foreground: oklch(0.22 0.01 60);
+
+  /* Destructive */
+  --destructive: oklch(0.58 0.22 25);
+
+  /* Borders & inputs */
+  --border: oklch(0.88 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --input: oklch(0.88 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --ring: oklch(0.62 0.15 250);
+
+  /* Sidebar */
+  --sidebar: oklch(0.955 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --sidebar-foreground: oklch(0.22 0.01 60);
+  --sidebar-primary: oklch(0.68 0.17 45);
+  --sidebar-primary-foreground: #fff;
+  --sidebar-accent: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --sidebar-accent-foreground: oklch(0.22 0.01 60);
+  --sidebar-border: oklch(0.88 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --sidebar-ring: oklch(0.62 0.15 250);
+
+  /*
+   * PostHaste application tokens.
+   * These sit above shadcn's generic tokens and give the mail client stable
+   * names for dense shell/chrome work without coupling components to a preset.
+   */
+  --chrome: oklch(0.945 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --chrome-foreground: oklch(0.22 0.01 60);
+  --panel: oklch(0.99 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --panel-foreground: oklch(0.22 0.01 60);
+  --panel-muted: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --bg-elev: oklch(0.97 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-soft: oklch(0.93 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-strong: oklch(0.78 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --signal-unread: oklch(0.65 0.13 245);
+  --signal-flag: oklch(0.68 0.17 45);
+  --brand-coral: oklch(0.68 0.17 45);
+  --brand-coral-foreground: #fff;
+  --brand-coral-soft: oklch(0.92 0.055 50);
+  --brand-coral-deep: oklch(0.52 0.18 38);
+  --sidebar-section-label: oklch(0.65 0.008 60);
+  --list-header: oklch(0.945 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra: oklch(0.98 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra-alt: oklch(0.965 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-hover: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-selection: oklch(0.88 0.02 250);
+  --list-selection-foreground: oklch(0.22 0.05 250);
+  /* Selection in a pane that does not have keyboard focus: same weight as the
+     active selection, but desaturated to grey (macOS-style). */
+  --list-selection-muted: oklch(0.88 0.004 250);
+  --list-selection-muted-foreground: oklch(0.34 0.012 250);
+  --list-divider: oklch(0.93 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --hover-bg: oklch(0.94 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --focus-soft: color-mix(in oklab, var(--ring) 24%, transparent);
+  --shadow-popover: 0 20px 48px rgb(40 30 20 / 0.14);
+  --shadow-pane:
+    0 1px 2px rgb(40 30 20 / 0.06), 0 4px 16px rgb(40 30 20 / 0.04);
+
+  --ph-font-size-meta: 0.6875rem;
+  --ph-font-size-ui: 0.75rem;
+  --ph-font-size-body: 0.8125rem;
+  --ph-font-size-emphasis: 0.875rem;
+  --ph-font-size-heading: 1.0625rem;
+  --ph-icon-xs: 0.75rem;
+  --ph-icon-sm: 0.875rem;
+  --ph-icon-md: 1rem;
+  --ph-icon-lg: 1.25rem;
+
+  --density-toolbar-height: 2.625rem;
+  --density-sidebar-row-height: 1.75rem;
+  --density-message-row-height: 1.875rem;
+  --density-pane-padding: 0.75rem;
+}
+
+.dark {
+  --ph-surface-hue: 58;
+  --ph-surface-chroma: 0.008;
+  color-scheme: dark;
+
+  --background: oklch(0.22 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --foreground: oklch(0.94 0.005 80);
+  --card: oklch(0.25 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --card-foreground: oklch(0.94 0.005 80);
+  --popover: oklch(0.25 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --popover-foreground: oklch(0.94 0.005 80);
+  --primary: oklch(0.65 0.13 245);
+  --primary-foreground: oklch(0.18 0.008 55);
+  --secondary: oklch(0.27 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --secondary-foreground: oklch(0.82 0.008 72);
+  --muted: oklch(0.27 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --muted-foreground: oklch(0.72 0.008 70);
+  --accent: oklch(0.29 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --accent-foreground: oklch(0.94 0.005 80);
+  --destructive: #f87171;
+  --border: oklch(0.32 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --input: oklch(0.32 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --ring: oklch(0.68 0.15 250);
+  --sidebar: oklch(0.195 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --sidebar-foreground: oklch(0.9 0.005 78);
+  --sidebar-primary: #6fade8;
+  --sidebar-primary-foreground: #0e1114;
+  --sidebar-accent: oklch(0.26 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --sidebar-accent-foreground: oklch(0.94 0.005 80);
+  --sidebar-border: oklch(0.28 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --sidebar-ring: #77b1ec;
+  --chrome: oklch(0.185 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --chrome-foreground: oklch(0.9 0.005 78);
+  --panel: oklch(0.27 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --panel-foreground: oklch(0.94 0.005 80);
+  --panel-muted: oklch(0.25 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --bg-elev: oklch(0.26 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-soft: oklch(0.28 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --border-strong: oklch(0.4 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --signal-unread: oklch(0.65 0.13 245);
+  --signal-flag: oklch(0.68 0.17 45);
+  --brand-coral: oklch(0.68 0.17 45);
+  --brand-coral-foreground: oklch(0.18 0.008 55);
+  --brand-coral-soft: oklch(0.92 0.055 50);
+  --brand-coral-deep: oklch(0.52 0.18 38);
+  --sidebar-section-label: oklch(0.55 0.008 65);
+  --list-header: oklch(0.205 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra: oklch(0.235 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-zebra-alt: oklch(0.255 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-hover: oklch(0.29 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --list-selection: oklch(0.34 0.06 250);
+  --list-selection-foreground: oklch(0.98 0.01 250);
+  --list-selection-muted: oklch(0.34 0.012 250);
+  --list-selection-muted-foreground: oklch(0.92 0.006 250);
+  --list-divider: oklch(0.28 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --hover-bg: oklch(0.29 var(--ph-surface-chroma) var(--ph-surface-hue));
+  --focus-soft: color-mix(in oklab, var(--ring) 34%, transparent);
+  --shadow-popover: 0 32px 96px rgb(0 0 0 / 0.58);
+  --shadow-pane: 0 2px 6px rgb(0 0 0 / 0.32), 0 18px 44px rgb(0 0 0 / 0.24);
+}
+
+[data-palette-preset='glass'] {
+  color-scheme: light;
+
+  --radius: 0.625rem;
+  --background: transparent;
+  --foreground: #1a1728;
+  --card: rgba(255, 255, 255, 0.55);
+  --card-foreground: #1a1728;
+  --popover: rgba(255, 255, 254, 0.85);
+  --popover-foreground: #1a1728;
+  --primary: #ff7aa2;
+  --primary-foreground: #fff;
+  --secondary: rgba(255, 255, 255, 0.55);
+  --secondary-foreground: #584f70;
+  --muted: rgba(255, 255, 255, 0.55);
+  --muted-foreground: #584f70;
+  --accent: rgba(0, 0, 0, 0.03);
+  --accent-foreground: #1a1728;
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(0, 0, 0, 0.08);
+  --ring: #b882ff;
+  --sidebar: rgba(255, 255, 255, 0.55);
+  --sidebar-foreground: #1a1728;
+  --sidebar-primary: #ff7aa2;
+  --sidebar-primary-foreground: #fff;
+  --sidebar-accent: rgba(0, 0, 0, 0.03);
+  --sidebar-accent-foreground: #1a1728;
+  --sidebar-border: rgba(0, 0, 0, 0.04);
+  --sidebar-ring: #b882ff;
+  --chrome: rgba(255, 255, 255, 0.6);
+  --chrome-foreground: #1a1728;
+  --panel: rgba(255, 255, 255, 0.7);
+  --panel-foreground: #1a1728;
+  --panel-muted: rgba(255, 255, 255, 0.55);
+  --bg-elev: rgba(255, 255, 255, 0.55);
+  --border-soft: rgba(0, 0, 0, 0.04);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --signal-unread: #8ab4ff;
+  --signal-flag: #ff7aa2;
+  --brand-coral: #ff7aa2;
+  --brand-coral-foreground: #fff;
+  --brand-coral-soft: rgba(255, 122, 162, 0.2);
+  --brand-coral-deep: #ff9fc0;
+  --sidebar-section-label: #9f96b8;
+  --list-header: rgba(255, 255, 255, 0.6);
+  --list-zebra: rgba(255, 255, 255, 0.5);
+  --list-zebra-alt: rgba(255, 255, 255, 0.3);
+  --list-hover: rgba(0, 0, 0, 0.03);
+  --list-selection: rgba(180, 130, 255, 0.35);
+  --list-selection-foreground: #2a1a50;
+  --list-divider: rgba(0, 0, 0, 0.04);
+  --hover-bg: rgba(0, 0, 0, 0.03);
+  --focus-soft: rgba(184, 130, 255, 0.24);
+  --shadow-popover:
+    0 32px 80px rgba(40, 30, 60, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+  --shadow-pane:
+    0 8px 32px rgba(100, 80, 200, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.dark[data-palette-preset='glass'] {
+  color-scheme: dark;
+
+  --background: transparent;
+  --foreground: #f0ecff;
+  --card: rgba(20, 18, 30, 0.4);
+  --card-foreground: #f0ecff;
+  --popover: rgba(22, 20, 28, 0.82);
+  --popover-foreground: #f0ecff;
+  --primary: #ff7aa2;
+  --primary-foreground: #150e1f;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: #b0a8c8;
+  --muted: rgba(255, 255, 255, 0.06);
+  --muted-foreground: #b0a8c8;
+  --accent: rgba(255, 255, 255, 0.05);
+  --accent-foreground: #f0ecff;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #b882ff;
+  --sidebar: rgba(20, 18, 30, 0.4);
+  --sidebar-foreground: #f0ecff;
+  --sidebar-primary: #ff7aa2;
+  --sidebar-primary-foreground: #150e1f;
+  --sidebar-accent: rgba(255, 255, 255, 0.05);
+  --sidebar-accent-foreground: #f5f0ff;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: #b882ff;
+  --chrome: rgba(15, 13, 22, 0.55);
+  --chrome-foreground: #f0ecff;
+  --panel: rgba(18, 16, 26, 0.45);
+  --panel-foreground: #f0ecff;
+  --panel-muted: rgba(255, 255, 255, 0.06);
+  --bg-elev: rgba(255, 255, 255, 0.06);
+  --border-soft: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --signal-unread: #8ab4ff;
+  --signal-flag: #ff7aa2;
+  --brand-coral: #ff7aa2;
+  --brand-coral-foreground: #150e1f;
+  --brand-coral-soft: rgba(255, 122, 162, 0.15);
+  --brand-coral-deep: #ff9fc0;
+  --sidebar-section-label: #666078;
+  --list-header: rgba(15, 13, 22, 0.55);
+  --list-zebra: rgba(24, 22, 34, 0.35);
+  --list-zebra-alt: rgba(255, 255, 255, 0.025);
+  --list-hover: rgba(255, 255, 255, 0.05);
+  --list-selection: rgba(180, 130, 255, 0.25);
+  --list-selection-foreground: #f5f0ff;
+  --list-divider: rgba(255, 255, 255, 0.06);
+  --hover-bg: rgba(255, 255, 255, 0.05);
+  --focus-soft: rgba(184, 130, 255, 0.34);
+  --shadow-popover:
+    0 32px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  --shadow-pane:
+    0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+[data-palette-preset='glass'] body {
+  background: var(
+    --glass-mesh-background,
+    linear-gradient(180deg, #f0e8ff 0%, #e8f0ff 100%)
+  );
+}
+
+.dark[data-palette-preset='glass'] body {
+  background: var(
+    --glass-mesh-background,
+    linear-gradient(180deg, #0a0812 0%, #050410 100%)
+  );
+}
+
+[data-palette-preset='glass'] .bg-chrome,
+[data-palette-preset='glass'] .bg-sidebar,
+[data-palette-preset='glass'] .bg-panel,
+[data-palette-preset='glass'] .bg-background,
+[data-palette-preset='glass'] .bg-card,
+[data-palette-preset='glass'] .bg-bg-elev {
+  background-clip: padding-box;
+  -webkit-backdrop-filter: blur(44px) saturate(180%);
+  backdrop-filter: blur(44px) saturate(180%);
+}
+
+[data-ui-density='compact'] {
+  --density-toolbar-height: 2.375rem;
+  --density-sidebar-row-height: 1.5rem;
+  --density-message-row-height: 1.5rem;
+  --density-pane-padding: 0.625rem;
+}
+
+[data-ui-density='cozy'] {
+  --density-toolbar-height: 2.625rem;
+  --density-sidebar-row-height: 1.75rem;
+  --density-message-row-height: 1.875rem;
+  --density-pane-padding: 0.75rem;
+}
+
+[data-ui-density='comfortable'] {
+  --density-toolbar-height: 2.875rem;
+  --density-sidebar-row-height: 2rem;
+  --density-message-row-height: 3rem;
+  --density-pane-padding: 1rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: var(--ph-font-size-body);
+    line-height: 1.45;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    overflow: hidden;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+@layer utilities {
+  .ph-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(
+        in oklab,
+        var(--muted-foreground) 32%,
+        transparent
+      )
+      transparent;
+  }
+
+  .ph-scroll::-webkit-scrollbar {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+
+  .ph-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .ph-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--muted-foreground) 28%, transparent);
+  }
+
+  .ph-scroll::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted-foreground) 44%, transparent);
+  }
+
+  .ph-focus-ring {
+    @apply outline-none ring-0 focus-visible:ring-2 focus-visible:ring-ring/50;
+  }
+
+  .ph-progress-indeterminate {
+    width: 38%;
+    animation: ph-progress-indeterminate 1.15s ease-in-out infinite;
+  }
+
+  .ph-hue-range::-webkit-slider-thumb {
+    width: 1.125rem;
+    height: 1.125rem;
+    appearance: none;
+    border: 2px solid var(--popover);
+    border-radius: 999px;
+    background: var(--brand-coral);
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      0 2px 8px rgb(0 0 0 / 0.24);
+  }
+
+  .ph-hue-range::-moz-range-thumb {
+    width: 1.125rem;
+    height: 1.125rem;
+    border: 2px solid var(--popover);
+    border-radius: 999px;
+    background: var(--brand-coral);
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      0 2px 8px rgb(0 0 0 / 0.24);
+  }
+}
+
+@keyframes ph-progress-indeterminate {
+  0% {
+    transform: translateX(-115%);
+  }
+
+  50% {
+    transform: translateX(80%);
+  }
+
+  100% {
+    transform: translateX(265%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ph-progress-indeterminate {
+    animation: none;
+    transform: translateX(0);
+  }
+}

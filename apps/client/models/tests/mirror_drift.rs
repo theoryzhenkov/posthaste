@@ -132,6 +132,216 @@ fn structs_decode_strictly_from_domain_serialization() {
     );
 }
 
+/// A mail-query rule exercising groups, conditions, and every value shape.
+fn mail_query_rule() -> domain::MailQueryRule {
+    domain::MailQueryRule {
+        root: domain::MailQueryGroup {
+            operator: domain::MailQueryGroupOperator::All,
+            negated: false,
+            nodes: vec![
+                domain::MailQueryRuleNode::Condition(domain::MailQueryCondition {
+                    field: domain::MailQueryField::Subject,
+                    operator: domain::MailQueryOperator::Contains,
+                    negated: false,
+                    value: domain::MailQueryValue::String("invoice".into()),
+                }),
+                domain::MailQueryRuleNode::Condition(domain::MailQueryCondition {
+                    field: domain::MailQueryField::Keyword,
+                    operator: domain::MailQueryOperator::In,
+                    negated: true,
+                    value: domain::MailQueryValue::Strings(vec!["work".into(), "urgent".into()]),
+                }),
+                domain::MailQueryRuleNode::Group(domain::MailQueryGroup {
+                    operator: domain::MailQueryGroupOperator::Any,
+                    negated: false,
+                    nodes: vec![
+                        domain::MailQueryRuleNode::Condition(domain::MailQueryCondition {
+                            field: domain::MailQueryField::IsRead,
+                            operator: domain::MailQueryOperator::Equals,
+                            negated: false,
+                            value: domain::MailQueryValue::Bool(false),
+                        }),
+                        domain::MailQueryRuleNode::Condition(domain::MailQueryCondition {
+                            field: domain::MailQueryField::ReceivedAt,
+                            operator: domain::MailQueryOperator::Ge,
+                            negated: false,
+                            value: domain::MailQueryValue::Date(domain::DateValue::Relative {
+                                amount: 7,
+                                unit: domain::DateUnit::Days,
+                            }),
+                        }),
+                        domain::MailQueryRuleNode::Condition(domain::MailQueryCondition {
+                            field: domain::MailQueryField::ReceivedAt,
+                            operator: domain::MailQueryOperator::Lt,
+                            negated: false,
+                            value: domain::MailQueryValue::Date(domain::DateValue::Absolute {
+                                value: "2026-01-01T00:00:00Z".into(),
+                            }),
+                        }),
+                    ],
+                }),
+            ],
+        },
+    }
+}
+
+fn automation_rule() -> domain::AutomationRule {
+    domain::AutomationRule {
+        id: "rule-1".into(),
+        name: "File invoices".into(),
+        enabled: true,
+        triggers: vec![
+            domain::AutomationTrigger::MessageArrived,
+            domain::AutomationTrigger::Manual,
+        ],
+        condition: mail_query_rule(),
+        actions: vec![
+            domain::AutomationAction::ApplyTag { tag: "work".into() },
+            domain::AutomationAction::MoveToMailbox {
+                mailbox_id: "archive".into(),
+            },
+        ],
+        backfill: true,
+    }
+}
+
+#[test]
+fn query_ast_and_settings_mirrors_decode_domain_values() {
+    assert_mirrors::<mirror::MailQueryRule>("MailQueryRule", &mail_query_rule());
+    assert_mirrors::<mirror::AutomationRule>("AutomationRule", &automation_rule());
+    assert_mirrors::<mirror::TagSummary>(
+        "TagSummary",
+        &domain::TagSummary {
+            name: "work".into(),
+            unread_messages: 2,
+            total_messages: 9,
+        },
+    );
+    assert_mirrors::<mirror::AppSettings>(
+        "AppSettings",
+        &domain::AppSettings {
+            default_account_id: Some("a1".into()),
+            cache_policy: domain::CachePolicy::default(),
+            automation_rules: vec![automation_rule()],
+            automation_drafts: vec![automation_rule()],
+            appearance: Some(domain::Appearance {
+                mode: Some(domain::ThemeMode::Dark),
+                theme: Some("glass".into()),
+                density: Some(domain::UiDensity::Cozy),
+                light: Some(domain::ThemeColors {
+                    accent_hue: Some(200),
+                    surface_hue: Some(220),
+                    tokens: [("--radius".to_string(), "4px".to_string())]
+                        .into_iter()
+                        .collect(),
+                }),
+                dark: Some(domain::ThemeColors::default()),
+                glass_theme: Some(domain::GlassTheme {
+                    blooms: vec![domain::GlassBloom {
+                        id: "b1".into(),
+                        hue: 12,
+                        x: 0.2,
+                        y: 0.4,
+                        opacity: 0.5,
+                        radius: 0.8,
+                    }],
+                }),
+            }),
+            notifications: Some(domain::Notifications {
+                new_mail: Some(true),
+                sound: Some(false),
+            }),
+            mailbox_colors: vec![domain::MailboxColor {
+                source_id: "a1".into(),
+                mailbox_id: "inbox".into(),
+                hue: 128,
+            }],
+            tags: vec![domain::TagAppearance {
+                name: "work".into(),
+                fg: Some("#1f2937".into()),
+                bg: Some("#dbeafe".into()),
+                icon: Some("briefcase".into()),
+            }],
+            smart_mailbox_order: vec!["sm-1".into()],
+            account_order: vec!["a1".into()],
+            mailbox_groups: vec![domain::MailboxGroup {
+                id: "g1".into(),
+                name: "Projects".into(),
+                mailbox_ids: vec!["mb1".into()],
+                order: 1,
+            }],
+            compose: Some(domain::ComposeSettings {
+                undo_send_delay_seconds: Some(10),
+            }),
+        },
+    );
+}
+
+#[test]
+fn account_config_mirrors_decode_domain_values() {
+    assert_mirrors::<mirror::ImapTransportSettings>(
+        "ImapTransportSettings",
+        &domain::ImapTransportSettings {
+            host: "imap.example.com".into(),
+            port: 993,
+            security: domain::TransportSecurity::Tls,
+        },
+    );
+    assert_mirrors::<mirror::SmtpTransportSettings>(
+        "SmtpTransportSettings",
+        &domain::SmtpTransportSettings {
+            host: "smtp.example.com".into(),
+            port: 465,
+            security: domain::TransportSecurity::StartTls,
+        },
+    );
+    assert_mirrors::<mirror::SecretStatus>(
+        "SecretStatus",
+        &domain::SecretStatus {
+            storage: domain::SecretKind::Os,
+            configured: true,
+            label: Some("IMAP password".into()),
+        },
+    );
+    assert_mirrors::<mirror::AccountAppearance>(
+        "AccountAppearance",
+        &domain::AccountAppearance::Initials {
+            initials: "AB".into(),
+            color_hue: 210,
+        },
+    );
+    assert_mirrors::<mirror::AccountAppearance>(
+        "AccountAppearance",
+        &domain::AccountAppearance::Image {
+            image_id: "img-1".into(),
+            initials: "AB".into(),
+            color_hue: 210,
+        },
+    );
+}
+
+#[test]
+fn rev_log_mirrors_decode_domain_values() {
+    assert_mirrors::<mirror::RevLogStep>(
+        "RevLogStep",
+        &domain::RevLogStep {
+            step_id: "01J".into(),
+            seq: 3,
+            message_id: "m1".into(),
+            source_id: "a1".into(),
+            diff: json!({ "keywords": { "added": ["$seen"], "removed": [] } }),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        },
+    );
+    assert_mirrors::<mirror::RevCursor>(
+        "RevCursor",
+        &domain::RevCursor {
+            cursor_step_id: Some("01J".into()),
+            redo_tail: vec!["01K".into()],
+        },
+    );
+}
+
 #[test]
 fn ids_decode_as_plain_strings() {
     assert_mirrors::<mirror::AccountId>("AccountId", &domain::AccountId::from("a1"));
@@ -141,6 +351,10 @@ fn ids_decode_as_plain_strings() {
     assert_mirrors::<mirror::ConversationId>("ConversationId", &domain::ConversationId::from("c1"));
     assert_mirrors::<mirror::BlobId>("BlobId", &domain::BlobId::from("b1"));
     assert_mirrors::<mirror::OperationId>("OperationId", &domain::OperationId::from("op1"));
+    assert_mirrors::<mirror::SmartMailboxId>(
+        "SmartMailboxId",
+        &domain::SmartMailboxId::from("sm1"),
+    );
 }
 
 #[test]
@@ -253,6 +467,180 @@ fn enums_decode_every_domain_variant() {
 }
 
 #[test]
+fn vocabulary_enums_decode_every_domain_variant() {
+    // Exhaustive matches: a new domain variant fails compilation here, which
+    // is the cue to extend both the mirror and these lists.
+    fn covered_field(value: domain::MailQueryField) {
+        use domain::MailQueryField as F;
+        match value {
+            F::SourceId
+            | F::SourceName
+            | F::MessageId
+            | F::ThreadId
+            | F::ConversationId
+            | F::MailboxId
+            | F::MailboxName
+            | F::MailboxRole
+            | F::IsRead
+            | F::IsFlagged
+            | F::HasAttachment
+            | F::Keyword
+            | F::FromName
+            | F::FromEmail
+            | F::To
+            | F::Subject
+            | F::Preview
+            | F::Body
+            | F::ReceivedAt
+            | F::Size => {}
+        }
+    }
+    fn covered_operator(value: domain::MailQueryOperator) {
+        use domain::MailQueryOperator as O;
+        match value {
+            O::Equals
+            | O::In
+            | O::Contains
+            | O::BeginsWith
+            | O::EndsWith
+            | O::Regex
+            | O::Lt
+            | O::Gt
+            | O::Le
+            | O::Ge => {}
+        }
+    }
+    fn covered_sync(value: domain::SyncMode) {
+        use domain::SyncMode as S;
+        match value {
+            S::Incremental | S::FullMetadata => {}
+        }
+    }
+    covered_field(domain::MailQueryField::Subject);
+    covered_operator(domain::MailQueryOperator::Equals);
+    covered_sync(domain::SyncMode::Incremental);
+
+    for field in [
+        domain::MailQueryField::SourceId,
+        domain::MailQueryField::SourceName,
+        domain::MailQueryField::MessageId,
+        domain::MailQueryField::ThreadId,
+        domain::MailQueryField::ConversationId,
+        domain::MailQueryField::MailboxId,
+        domain::MailQueryField::MailboxName,
+        domain::MailQueryField::MailboxRole,
+        domain::MailQueryField::IsRead,
+        domain::MailQueryField::IsFlagged,
+        domain::MailQueryField::HasAttachment,
+        domain::MailQueryField::Keyword,
+        domain::MailQueryField::FromName,
+        domain::MailQueryField::FromEmail,
+        domain::MailQueryField::To,
+        domain::MailQueryField::Subject,
+        domain::MailQueryField::Preview,
+        domain::MailQueryField::Body,
+        domain::MailQueryField::ReceivedAt,
+        domain::MailQueryField::Size,
+    ] {
+        assert_mirrors::<mirror::MailQueryField>("MailQueryField", &field);
+    }
+    for operator in [
+        domain::MailQueryOperator::Equals,
+        domain::MailQueryOperator::In,
+        domain::MailQueryOperator::Contains,
+        domain::MailQueryOperator::BeginsWith,
+        domain::MailQueryOperator::EndsWith,
+        domain::MailQueryOperator::Regex,
+        domain::MailQueryOperator::Lt,
+        domain::MailQueryOperator::Gt,
+        domain::MailQueryOperator::Le,
+        domain::MailQueryOperator::Ge,
+    ] {
+        assert_mirrors::<mirror::MailQueryOperator>("MailQueryOperator", &operator);
+    }
+    for group_operator in [
+        domain::MailQueryGroupOperator::All,
+        domain::MailQueryGroupOperator::Any,
+    ] {
+        assert_mirrors::<mirror::MailQueryGroupOperator>("MailQueryGroupOperator", &group_operator);
+    }
+    for unit in [
+        domain::DateUnit::Minutes,
+        domain::DateUnit::Hours,
+        domain::DateUnit::Days,
+        domain::DateUnit::Weeks,
+        domain::DateUnit::Months,
+    ] {
+        assert_mirrors::<mirror::DateUnit>("DateUnit", &unit);
+    }
+    for kind in [
+        domain::SmartMailboxKind::Default,
+        domain::SmartMailboxKind::User,
+    ] {
+        assert_mirrors::<mirror::SmartMailboxKind>("SmartMailboxKind", &kind);
+    }
+    for trigger in [
+        domain::AutomationTrigger::MessageArrived,
+        domain::AutomationTrigger::MessageChanged,
+        domain::AutomationTrigger::Manual,
+    ] {
+        assert_mirrors::<mirror::AutomationTrigger>("AutomationTrigger", &trigger);
+    }
+    for driver in [
+        domain::AccountDriver::Jmap,
+        domain::AccountDriver::ImapSmtp,
+        domain::AccountDriver::Mock,
+    ] {
+        assert_mirrors::<mirror::AccountDriver>("AccountDriver", &driver);
+    }
+    for provider in [
+        domain::ProviderHint::Generic,
+        domain::ProviderHint::Gmail,
+        domain::ProviderHint::Outlook,
+        domain::ProviderHint::Icloud,
+    ] {
+        assert_mirrors::<mirror::ProviderHint>("ProviderHint", &provider);
+    }
+    for auth in [
+        domain::ProviderAuthKind::Password,
+        domain::ProviderAuthKind::AppPassword,
+        domain::ProviderAuthKind::OAuth2,
+    ] {
+        assert_mirrors::<mirror::ProviderAuthKind>("ProviderAuthKind", &auth);
+    }
+    for security in [
+        domain::TransportSecurity::Tls,
+        domain::TransportSecurity::StartTls,
+        domain::TransportSecurity::Plain,
+    ] {
+        assert_mirrors::<mirror::TransportSecurity>("TransportSecurity", &security);
+    }
+    for secret_kind in [domain::SecretKind::Env, domain::SecretKind::Os] {
+        assert_mirrors::<mirror::SecretKind>("SecretKind", &secret_kind);
+    }
+    for mode in [
+        domain::ThemeMode::Light,
+        domain::ThemeMode::Dark,
+        domain::ThemeMode::System,
+    ] {
+        assert_mirrors::<mirror::ThemeMode>("ThemeMode", &mode);
+    }
+    for density in [
+        domain::UiDensity::Compact,
+        domain::UiDensity::Cozy,
+        domain::UiDensity::Comfortable,
+    ] {
+        assert_mirrors::<mirror::UiDensity>("UiDensity", &density);
+    }
+    for sync_mode in [
+        domain::SyncMode::Incremental,
+        domain::SyncMode::FullMetadata,
+    ] {
+        assert_mirrors::<mirror::SyncMode>("SyncMode", &sync_mode);
+    }
+}
+
+#[test]
 fn wire_envelopes_serialize_the_documented_shapes() {
     use posthaste_client_models as models;
 
@@ -266,6 +654,7 @@ fn wire_envelopes_serialize_the_documented_shapes() {
             "mailList": {
                 "accountId": null,
                 "mailboxId": "inbox",
+                "smartMailboxId": null,
                 "freeText": null,
                 "isRead": null,
                 "isFlagged": null,
@@ -317,5 +706,40 @@ fn wire_envelopes_serialize_the_documented_shapes() {
     assert_eq!(
         serde_json::to_value(&handshake).unwrap(),
         json!({ "generation": 4184, "runId": "run-1" })
+    );
+}
+
+#[test]
+fn secret_material_has_exactly_one_wire_shape() {
+    use posthaste_client_models as models;
+
+    // The dedicated secret-bearing command: material appears only under an
+    // explicit `replace`.
+    let command = models::Command::SetAccountSecret(models::SetAccountSecretIntent {
+        account_id: "a1".into(),
+        change: models::AccountSecretChange::Replace {
+            secret: "hunter2".into(),
+        },
+    });
+    assert_eq!(
+        serde_json::to_value(&command).unwrap(),
+        json!({
+            "setAccountSecret": {
+                "accountId": "a1",
+                "change": { "kind": "replace", "secret": "hunter2" }
+            }
+        })
+    );
+
+    // Keep/clear carry no material at all.
+    let command = models::Command::SetAccountSecret(models::SetAccountSecretIntent {
+        account_id: "a1".into(),
+        change: models::AccountSecretChange::Clear,
+    });
+    assert_eq!(
+        serde_json::to_value(&command).unwrap(),
+        json!({
+            "setAccountSecret": { "accountId": "a1", "change": { "kind": "clear" } }
+        })
     );
 }

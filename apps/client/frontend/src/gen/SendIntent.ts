@@ -3,7 +3,7 @@ import type { AccountId } from "./AccountId";
 import type { SendMessageRequest } from "./SendMessageRequest";
 
 /**
- * Content for [`Command::Send`]. Hold semantics (undo-send window,
+ * Content for [`crate::Command::Send`]. Hold semantics (undo-send window,
  * send-later time, originating draft) travel inside the request itself.
  */
 export type SendIntent = { accountId: AccountId, request: SendMessageRequest, };

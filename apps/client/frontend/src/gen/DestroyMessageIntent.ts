@@ -3,6 +3,6 @@ import type { AccountId } from "./AccountId";
 import type { MessageId } from "./MessageId";
 
 /**
- * Target for [`Command::Destroy`].
+ * Target for [`crate::Command::Destroy`].
  */
 export type DestroyMessageIntent = { accountId: AccountId, messageId: MessageId, };

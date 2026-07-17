@@ -4,6 +4,6 @@ import type { MessageId } from "./MessageId";
 import type { SetKeywordsCommand } from "./SetKeywordsCommand";
 
 /**
- * Target + keyword change for [`Command::SetKeywords`].
+ * Target + keyword change for [`crate::Command::SetKeywords`].
  */
 export type SetKeywordsIntent = { accountId: AccountId, messageId: MessageId, change: SetKeywordsCommand, };

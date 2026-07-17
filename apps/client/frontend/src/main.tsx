@@ -1,33 +1,43 @@
+/** Application entry point: constructs the MailClient facade and mounts the
+ * React root in StrictMode. Served behind the dev proxy the facade needs no
+ * token of its own (the proxy injects the Authorization header); the packaged
+ * app passes the connection-info credentials instead. */
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './app/App'
+import './index.css'
+import App from './App'
+import { applyBrandFavicon } from './brandFavicon'
 import { MailClient } from './client'
-import { MailClientProvider } from './hooks'
-import './app.css'
+import { MailClientProvider } from './data'
+import { ackDesktopWebviewBoot } from './desktop'
+import { markSurfaceBootstrap } from './surfaceBootstrapLog'
 
-// The backend's connection info (port + session secret from the app data
-// directory), injected onto the page by the packaged shell before this
-// bundle runs. In dev neither field is set: the Vite proxy forwards requests
-// to the backend and injects the Authorization header from
-// POSTHASTE_DEV_TOKEN, so the in-page token stays empty.
-interface InjectedConnectionInfo {
-  baseUrl?: string
-  port?: number
-  token?: string
+applyBrandFavicon()
+
+if ('__TAURI_INTERNALS__' in window) {
+  import('./consoleCapture').then(({ installConsoleCapture }) =>
+    installConsoleCapture(),
+  )
 }
 
-declare global {
-  interface Window {
-    __POSTHASTE_CONNECTION__?: InjectedConnectionInfo
-  }
-}
+markSurfaceBootstrap('main_entry', {
+  hash: window.location.hash,
+  tauri: '__TAURI_INTERNALS__' in window,
+})
 
-const info = window.__POSTHASTE_CONNECTION__
-const baseUrl =
-  info?.baseUrl ?? (info?.port !== undefined ? `http://127.0.0.1:${info.port}` : '')
-const client = new MailClient({ baseUrl, token: info?.token ?? '' })
+// Boot ACK: tells the desktop backend this window's JS is alive, keeping the
+// guarded (JS-aware) close flow; a window that never ACKs is force-destroyed
+// on close so a failed frontend load can never yield an unclosable window.
+void ackDesktopWebviewBoot()
+
+// Dev-proxy construction: same-origin requests, Authorization injected by
+// the proxy, so the facade needs no baseUrl or token of its own.
+const mailClient = new MailClient({ baseUrl: '', token: '' })
 
 createRoot(document.getElementById('root')!).render(
-  <MailClientProvider client={client}>
-    <App />
-  </MailClientProvider>,
+  <StrictMode>
+    <MailClientProvider client={mailClient}>
+      <App />
+    </MailClientProvider>
+  </StrictMode>,
 )
