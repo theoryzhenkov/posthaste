@@ -177,6 +177,7 @@ export class MailClient {
   private readonly entries = new Map<string, Entry>()
   private readonly eventListeners = new Map<string, Set<EventCallback>>()
   private readonly connectionListeners = new Set<() => void>()
+  private readonly generationListeners = new Set<(generation: number) => void>()
 
   private stream: EventSourceLike | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -291,10 +292,29 @@ export class MailClient {
       this.latestGeneration = generation
       this.markAllStale(true)
       this.refetchMounted(true)
+      this.dispatchGeneration(generation)
       return
     }
-    if (generation > this.latestGeneration) this.latestGeneration = generation
+    if (generation > this.latestGeneration) {
+      this.latestGeneration = generation
+      this.dispatchGeneration(generation)
+    }
     this.scheduleRefetch()
+  }
+
+  /** Subscribes to generation advances heard on the event stream (including
+   * run rotations, which void every baseline). The external mirror — the
+   * react-query cache — invalidates everything it holds on each advance;
+   * there is no per-key policy. */
+  subscribeGeneration(cb: (generation: number) => void): () => void {
+    this.generationListeners.add(cb)
+    return () => {
+      this.generationListeners.delete(cb)
+    }
+  }
+
+  private dispatchGeneration(generation: number): void {
+    for (const cb of this.generationListeners) cb(generation)
   }
 
   private scheduleRefetch(): void {
@@ -488,6 +508,12 @@ export class MailClient {
     return `${this.baseUrl}/api/blobs/${encodeURIComponent(blobId)}${token}`
   }
 
+  /** Authenticated URL for an account logo GET, same token rules as blobs. */
+  accountLogoUrl(imageId: string): string {
+    const token = this.token ? `?token=${encodeURIComponent(this.token)}` : ''
+    return `${this.baseUrl}/api/account-assets/logos/${encodeURIComponent(imageId)}${token}`
+  }
+
   // ------------------------------------------------------------------ verbs
 
   /** Posts one typed command with a fresh idempotency id (or the caller's),
@@ -552,7 +578,8 @@ export class MailClient {
     return this.move(accountId, messageId, [mailboxId])
   }
 
-  private async mailboxWithRole(accountId: AccountId, role: string): Promise<MailboxId> {
+  /** Resolves the account's mailbox carrying the given role (inbox, junk, …). */
+  async mailboxWithRole(accountId: AccountId, role: string): Promise<MailboxId> {
     const { data } = await this.query({ mailboxCounts: { accountId } })
     const row = data.rows.find((r) => r.accountId === accountId && r.mailbox.role === role)
     if (!row) {

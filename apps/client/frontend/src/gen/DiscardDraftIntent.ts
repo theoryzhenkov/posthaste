@@ -2,7 +2,7 @@
 import type { AccountId } from "./AccountId";
 
 /**
- * Target for [`Command::DiscardDraft`].
+ * Target for [`crate::Command::DiscardDraft`].
  */
 export type DiscardDraftIntent = { accountId: AccountId, 
 /**

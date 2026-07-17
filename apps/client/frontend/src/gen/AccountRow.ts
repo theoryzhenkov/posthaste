@@ -6,7 +6,8 @@ import type { PushStatus } from "./PushStatus";
 /**
  * One account as the client renders it: identity plus live health. The full
  * settings tree (transport, secrets, appearance) is deliberately not on this
- * row — it belongs to the settings surface, not the mail surface.
+ * row — it belongs to the [`AccountSettingsQuery`] surface, not the mail
+ * surface.
  */
 export type AccountRow = { id: AccountId, name: string, fullName: string | null, enabled: boolean, isDefault: boolean, 
 /**

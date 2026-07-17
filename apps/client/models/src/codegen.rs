@@ -18,8 +18,10 @@ use crate::{
     event::EventMessage,
     mirror,
     query::{
-        AccountsResult, MailListResult, MailboxCountsResult, MessageDetailResult,
-        PendingOperationsResult, Query, QueryEnvelope,
+        AccountSettingsResult, AccountsResult, AppSettingsResult, AutomationRulePreviewResult,
+        MailListResult, MailboxCountsResult, MessageDetailResult, MessageRawSourceResult,
+        OauthStartResult, PendingOperationsResult, Query, QueryEnvelope, RevLogResult,
+        SenderAddressesResult, SmartMailboxesResult, TagsResult, VerifyAccountResult,
     },
 };
 
@@ -43,9 +45,19 @@ pub fn export_into(dir: &Path) -> Result<(), Box<dyn Error>> {
     MailListResult::export_all_to(dir)?;
     mirror::ThreadView::export_all_to(dir)?;
     MessageDetailResult::export_all_to(dir)?;
+    MessageRawSourceResult::export_all_to(dir)?;
     MailboxCountsResult::export_all_to(dir)?;
     AccountsResult::export_all_to(dir)?;
+    AccountSettingsResult::export_all_to(dir)?;
+    VerifyAccountResult::export_all_to(dir)?;
+    OauthStartResult::export_all_to(dir)?;
     PendingOperationsResult::export_all_to(dir)?;
+    AppSettingsResult::export_all_to(dir)?;
+    SmartMailboxesResult::export_all_to(dir)?;
+    TagsResult::export_all_to(dir)?;
+    AutomationRulePreviewResult::export_all_to(dir)?;
+    RevLogResult::export_all_to(dir)?;
+    SenderAddressesResult::export_all_to(dir)?;
     CommandEnvelope::export_all_to(dir)?;
     CommandAccepted::export_all_to(dir)?;
     EventMessage::export_all_to(dir)?;
