@@ -3,15 +3,18 @@ name = "posthaste-client-backend"
 version = "0.1.0"
 edition = "2021"
 
-# The client's backend: the one evaluator. Owns sessions, the surface
-# materializer (reading the store's `_effective` views), the
-# dirty→coalesce→diff recomputer, the SSE state-document stream, and the
-# command endpoint feeding the outbox with typed mail intents.
+# The client's backend: the domain service over the SQLite store with
+# per-account provider runtimes, serving the loopback API — typed queries
+# evaluated fresh over the effective views, typed commands feeding the
+# outbox, the generation-stamped SSE event stream, and blob downloads.
 #
 # DEPENDENCY ALLOWLIST: the domain core + `models` + the HTTP stack. The
-# runtime/link/replica crates (posthaste-runtime, the link crates,
-# contract-core, replica-*) must never appear below — that machinery is what
-# this backend replaces.
+# runtime/link crates (posthaste-runtime, the link crates, contract-core,
+# the authority server, replica-projector) must never be declared below and
+# never appear in the normal dependency tree — that machinery is what this
+# backend replaces. One transitive exception: posthaste-domain-service
+# itself depends on posthaste-replica-core (its message-fold predictor), so
+# replica-core rides along with every domain-service consumer.
 
 [dependencies]
 posthaste-client-models = { path = "../models" }
@@ -23,13 +26,27 @@ posthaste-imap = { path = "../../../crates/posthaste-imap" }
 posthaste-observability = { path = "../../../crates/posthaste-observability" }
 posthaste-store = { path = "../../../crates/posthaste-store" }
 
+async-stream = "0.3"
+async-trait = { workspace = true }
 axum = { workspace = true }
+dirs = { workspace = true }
+futures-util = { workspace = true }
+keyring = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+posthaste-testkit = { path = "../../../crates/posthaste-testkit" }
+reqwest = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

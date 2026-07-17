@@ -33,12 +33,14 @@ generation it was computed at:
 { "generation": 4182, "data": { "rows": [...] } }
 ```
 
-Queries are windowed: list queries take a limit and an opaque cursor, and
-return a screenful, never the mailbox. Evaluation happens entirely in the
-backend, over the effective views, so every answer already includes the
-folded effect of pending local operations. Queries are side-effect-free and
-always answered fresh — the API has no read cache, and needs none on
-loopback.
+Mail-list queries (including free-text search, which is a mail-list filter)
+are windowed: they take a limit and an opaque cursor, and return a
+screenful, never the mailbox. The other families — counts, accounts, pending
+operations — are small, bounded enumerations answered whole, already in
+display order. Evaluation happens entirely in the backend, over the
+effective views, so every answer already includes the folded effect of
+pending local operations. Queries are side-effect-free and always answered
+fresh — the API has no read cache, and needs none on loopback.
 
 ## 3. The event stream
 
@@ -90,8 +92,9 @@ state, observed through the pending-operations query like any other data.
 
 Message bodies, attachments, and other blobs are fetched by id over plain
 authenticated GETs. Blobs are immutable, so responses carry long-lived
-caching headers. Compose uploads go the other way: `POST /blobs` stores an
-attachment and returns the blob id that the send command references.
+caching headers. Compose attachments travel the other way inside the send
+command itself, base64-encoded in the request body and bounded by its size
+cap — there is no separate upload endpoint.
 
 ## 6. Authentication
 
@@ -100,7 +103,10 @@ possession of which is the local trust boundary, equivalent to local user
 access. Agents and scripts get their own credentials: scoped, auto-expiring
 tokens minted through the UI or CLI, carrying an explicit capability set
 (which queries, which commands, which accounts). The MCP server holds such a
-token, never the session secret.
+token, never the session secret. The token surface is specified ahead of its
+implementation: today the session secret is the only credential, every
+consumer presents it, and capability minting and enforcement are staged
+work.
 
 ## 7. Errors
 

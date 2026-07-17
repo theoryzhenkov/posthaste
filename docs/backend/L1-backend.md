@@ -100,23 +100,28 @@ never toward trusting an old answer.
 
 The API's typed queries map one-to-one onto reads over the effective views:
 mail lists and search (the query grammar compiled to SQL, including FTS),
-threads, message details, mailbox counts (maintained counters, not scans),
-accounts and their health, and pending operations (the outbox with
-verdicts). List queries are windowed by limit and keyset cursor and return a
-screenful bounded by the window, never by mailbox size. There is no query
+threads, message details, mailbox counts (derived live over the effective
+views, indexed and bounded by the account's membership rows), accounts and
+their health, and pending operations (the outbox with verdicts). Mail-list
+queries are windowed by limit and keyset cursor and return a screenful
+bounded by the window, never by mailbox size; the remaining families are
+small, bounded enumerations answered whole. There is no query
 cache and no materialized per-client state: every answer is evaluated fresh
 from the store, stamped with the generation, and forgotten.
 
 ## 9. Command execution
 
 A command arrives as a typed envelope with a client-generated id. Execution
-is: decode to the intent vocabulary, check the caller's capability set,
-apply, reply with the resulting generation. Mail mutations apply through the
-outbox path (§6); configuration commands — accounts, settings, rules —
-apply directly in the service. Replaying an id returns the original
-outcome. The reply means "recorded and visible at this generation";
-provider-side results arrive later as verdict state, never as a late HTTP
-response.
+is: decode to the intent vocabulary, check the caller's capability set
+(staged with the scoped-token surface — today the session secret grants the
+full surface), apply, reply with the resulting generation. Mail mutations
+apply through the outbox path (§6); configuration commands — accounts,
+settings, rules — apply directly in the service. Replaying an id returns an
+acceptance without re-applying; for a send, the command id is also the
+outbox operation id, so the dedupe is durable across restarts for as long
+as the outbox holds the intent. The reply means "recorded and visible at
+this generation"; provider-side results arrive later as verdict state,
+never as a late HTTP response.
 
 ## 10. Config, secrets, lifecycle
 
