@@ -93,6 +93,12 @@ build-client-node-wasm:
             -o legacy/web/src/runtime/wasm/posthaste_client_node_wasm_bg.wasm; \
     fi
 
+# Regenerate the client's TypeScript protocol types (apps/client/frontend/src/gen/)
+# from the Rust models crate. Committed output; the models crate's freshness
+# test fails when this is stale.
+gen-ts:
+    cargo run -p posthaste-client-models --bin export-ts
+
 # Build the browser-localhost distributable assets and server binary.
 build-serve:
     just web build
