@@ -8,7 +8,6 @@
  * conversation-first intent. Fetches are `thread` family queries keyed by
  * the shared family key, so they dedupe with the detail pane.
  *
- * @spec docs/L1-ui#messagelist
  */
 import { useCallback, useMemo, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'

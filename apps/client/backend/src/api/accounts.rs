@@ -145,7 +145,7 @@ pub(crate) async fn create_account(
         created_at: now.clone(),
         updated_at: now,
     };
-    app.service.insert_source(&settings)?;
+    insert_source(app, &settings).await?;
     app.supervisor.start_account(&settings).await;
     Ok(publish_account_event(
         app,
@@ -158,7 +158,7 @@ pub(crate) async fn update_account(
     app: &AppState,
     intent: UpdateAccountIntent,
 ) -> Result<u64, ApiFailure> {
-    let mut settings = load_account(app, &intent.account_id)?;
+    let mut settings = load_account_offloaded(app, intent.account_id.clone()).await?;
     if let Some(name) = intent.name {
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -182,7 +182,7 @@ pub(crate) async fn update_account(
         settings.appearance = Some(appearance);
     }
     settings.updated_at = now_rfc3339();
-    app.service.save_source(&settings)?;
+    save_source(app, &settings).await?;
     // Restart (or park) the runtime under the new settings.
     app.supervisor.start_account(&settings).await;
     Ok(publish_account_event(
@@ -199,7 +199,7 @@ pub(crate) async fn update_account_transport(
     app: &AppState,
     intent: UpdateAccountTransportIntent,
 ) -> Result<u64, ApiFailure> {
-    let mut settings = load_account(app, &intent.account_id)?;
+    let mut settings = load_account_offloaded(app, intent.account_id.clone()).await?;
     if let Some(provider) = intent.provider {
         settings.transport.provider = provider;
     }
@@ -219,7 +219,7 @@ pub(crate) async fn update_account_transport(
         settings.transport.smtp = Some(smtp);
     }
     settings.updated_at = now_rfc3339();
-    app.service.save_source(&settings)?;
+    save_source(app, &settings).await?;
     // Reconnect under the new endpoints.
     app.supervisor.start_account(&settings).await;
     Ok(publish_account_event(
@@ -236,42 +236,57 @@ pub(crate) async fn set_account_secret(
     app: &AppState,
     intent: SetAccountSecretIntent,
 ) -> Result<u64, ApiFailure> {
-    let mut settings = load_account(app, &intent.account_id)?;
-    match intent.change {
-        // A form round-trip placeholder: nothing to store, nothing to
-        // restart.
-        AccountSecretChange::Keep => return Ok(app.events.generation()),
-        AccountSecretChange::Replace { secret } => {
-            let material = secret.trim();
-            if material.is_empty() {
-                return Err(ApiFailure::malformed("secret material must not be empty"));
-            }
-            // Reuse an existing OS-keyring reference; an env-var reference
-            // is read-only from here, so a replace moves the account onto
-            // its own keyring entry.
-            let secret_ref = settings
-                .transport
-                .secret_ref
-                .clone()
-                .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
-                .unwrap_or_else(|| os_secret_ref(&settings.id));
-            app.secret_store
-                .save(&secret_ref, material)
-                .map_err(ServiceError::from)?;
-            settings.transport.secret_ref = Some(secret_ref);
+    // A form round-trip placeholder: nothing to store, nothing to restart.
+    if matches!(intent.change, AccountSecretChange::Keep) {
+        return Ok(app.events.generation());
+    }
+    if let AccountSecretChange::Replace { secret } = &intent.change {
+        if secret.trim().is_empty() {
+            return Err(ApiFailure::malformed("secret material must not be empty"));
         }
-        AccountSecretChange::Clear => {
-            if let Some(existing) = settings.transport.secret_ref.take() {
-                if matches!(existing.kind, SecretKind::Os) {
-                    app.secret_store
-                        .delete(&existing)
-                        .map_err(ServiceError::from)?;
+    }
+    // The keyring write/delete and the config save are synchronous blocking
+    // IPC + filesystem I/O; run the whole load-modify-store off the async
+    // worker so a slow keyring daemon cannot stall it.
+    let app_cloned = app.clone();
+    let updated_at = now_rfc3339();
+    let settings = offload_read(move || {
+        let mut settings = load_account(&app_cloned, &intent.account_id)?;
+        match intent.change {
+            AccountSecretChange::Keep => unreachable!("handled above"),
+            AccountSecretChange::Replace { secret } => {
+                let material = secret.trim();
+                // Reuse an existing OS-keyring reference; an env-var reference
+                // is read-only from here, so a replace moves the account onto
+                // its own keyring entry.
+                let secret_ref = settings
+                    .transport
+                    .secret_ref
+                    .clone()
+                    .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
+                    .unwrap_or_else(|| os_secret_ref(&settings.id));
+                app_cloned
+                    .secret_store
+                    .save(&secret_ref, material)
+                    .map_err(ServiceError::from)?;
+                settings.transport.secret_ref = Some(secret_ref);
+            }
+            AccountSecretChange::Clear => {
+                if let Some(existing) = settings.transport.secret_ref.take() {
+                    if matches!(existing.kind, SecretKind::Os) {
+                        app_cloned
+                            .secret_store
+                            .delete(&existing)
+                            .map_err(ServiceError::from)?;
+                    }
                 }
             }
         }
-    }
-    settings.updated_at = now_rfc3339();
-    app.service.save_source(&settings)?;
+        settings.updated_at = updated_at;
+        app_cloned.service.save_source(&settings)?;
+        Ok(settings)
+    })
+    .await?;
     // Reconnect under the new credential.
     app.supervisor.start_account(&settings).await;
     Ok(publish_account_event(
@@ -289,22 +304,29 @@ pub(crate) async fn delete_account(
     app: &AppState,
     intent: DeleteAccountIntent,
 ) -> Result<u64, ApiFailure> {
-    let settings = load_account(app, &intent.account_id)?;
+    let settings = load_account_offloaded(app, intent.account_id.clone()).await?;
     app.supervisor.remove_account(&settings.id).await;
-    if let Some(secret_ref) = settings
-        .transport
-        .secret_ref
-        .as_ref()
-        .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
-    {
-        if let Err(error) = app.secret_store.delete(secret_ref) {
-            tracing::warn!(account_id = %settings.id, %error, "failed to delete account secret");
+    // The keyring delete, logo removal, and config delete are synchronous
+    // blocking IPC + filesystem I/O; run them off the async worker.
+    let app_cloned = app.clone();
+    let settings = offload_read(move || {
+        if let Some(secret_ref) = settings
+            .transport
+            .secret_ref
+            .as_ref()
+            .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
+        {
+            if let Err(error) = app_cloned.secret_store.delete(secret_ref) {
+                tracing::warn!(account_id = %settings.id, %error, "failed to delete account secret");
+            }
         }
-    }
-    if let Some(image_id) = appearance_image_id(&settings) {
-        remove_logo_files(app, &image_id);
-    }
-    app.service.delete_source(&settings.id)?;
+        if let Some(image_id) = appearance_image_id(&settings) {
+            remove_logo_files(&app_cloned, &image_id);
+        }
+        app_cloned.service.delete_source(&settings.id)?;
+        Ok(settings)
+    })
+    .await?;
     Ok(publish_account_event(
         app,
         &settings.id,
@@ -319,7 +341,7 @@ pub(crate) async fn set_account_logo(
     app: &AppState,
     intent: SetAccountLogoIntent,
 ) -> Result<u64, ApiFailure> {
-    let mut settings = load_account(app, &intent.account_id)?;
+    let mut settings = load_account_offloaded(app, intent.account_id.clone()).await?;
     let extension = logo_extension(&intent.mime_type)?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(intent.content_base64.as_bytes())
@@ -350,10 +372,16 @@ pub(crate) async fn set_account_logo(
         color_hue,
     });
     settings.updated_at = now_rfc3339();
-    if let Err(error) = app.service.save_source(&settings) {
-        let _ = std::fs::remove_file(&path);
-        return Err(error.into());
-    }
+    let service = app.service.clone();
+    let save_settings = settings.clone();
+    offload_read(move || {
+        if let Err(error) = service.save_source(&save_settings) {
+            let _ = std::fs::remove_file(&path);
+            return Err(error.into());
+        }
+        Ok(())
+    })
+    .await?;
     if let Some(previous_image_id) = previous_image_id {
         if previous_image_id != image_id {
             remove_logo_files(app, &previous_image_id);
@@ -378,9 +406,20 @@ pub(crate) async fn complete_oauth(
     let secret_ref = os_secret_ref(&account_id);
     // The credential lands in the keyring BEFORE the account exists in
     // config, so an enabled account is never observable without its secret.
-    app.secret_store
-        .save(&secret_ref, &seed.token_set_json)
-        .map_err(ServiceError::from)?;
+    // The keyring save is synchronous blocking IPC — run it off the async
+    // worker.
+    {
+        let secret_store = app.secret_store.clone();
+        let secret_ref = secret_ref.clone();
+        let token_set_json = seed.token_set_json.clone();
+        offload_read(move || {
+            secret_store
+                .save(&secret_ref, &token_set_json)
+                .map_err(ServiceError::from)?;
+            Ok(())
+        })
+        .await?;
+    }
     let now = now_rfc3339();
     let settings = AccountSettings {
         id: account_id,
@@ -403,7 +442,7 @@ pub(crate) async fn complete_oauth(
         created_at: now.clone(),
         updated_at: now,
     };
-    app.service.insert_source(&settings)?;
+    insert_source(app, &settings).await?;
     app.supervisor.start_account(&settings).await;
     Ok(publish_account_event(
         app,
@@ -449,10 +488,38 @@ pub(crate) async fn handle_logo_download(
 }
 
 /// Load one account's configuration or fail with the unknown-id envelope.
+/// Synchronous config-store read — call from an already-offloaded context;
+/// the async handlers use [`load_account_offloaded`].
 fn load_account(app: &AppState, account_id: &AccountId) -> Result<AccountSettings, ApiFailure> {
     app.service
         .get_source(account_id)?
         .ok_or_else(|| ApiFailure::unknown_id(format!("account {}", account_id.as_str())))
+}
+
+/// [`load_account`] off the async worker: the config store is synchronous
+/// filesystem I/O and must not block a Tokio worker thread.
+async fn load_account_offloaded(
+    app: &AppState,
+    account_id: AccountId,
+) -> Result<AccountSettings, ApiFailure> {
+    let app = app.clone();
+    offload_read(move || load_account(&app, &account_id)).await
+}
+
+/// Persist a new account document off the async worker (synchronous config
+/// filesystem write).
+async fn insert_source(app: &AppState, settings: &AccountSettings) -> Result<(), ApiFailure> {
+    let service = app.service.clone();
+    let settings = settings.clone();
+    offload_read(move || Ok(service.insert_source(&settings)?)).await
+}
+
+/// Persist an existing account document off the async worker (synchronous
+/// config filesystem write).
+async fn save_source(app: &AppState, settings: &AccountSettings) -> Result<(), ApiFailure> {
+    let service = app.service.clone();
+    let settings = settings.clone();
+    offload_read(move || Ok(service.save_source(&settings)?)).await
 }
 
 /// The secrets-safe transport projection: the stored credential surfaces

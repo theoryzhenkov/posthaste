@@ -364,8 +364,6 @@ export function useComposeFormState({
     // quote/forward block. When the quote has not streamed in yet the signature
     // is appended at the end and the later quote lands below it — the same
     // final order either way.
-    //
-    // @spec docs/L1-compose#sender-selection
     if (!signature || intentKind === 'draft') {
       return
     }

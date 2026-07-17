@@ -25,7 +25,6 @@ import { useDeleteMailboxMutation } from './useDeleteMailboxMutation'
  * dialog re-prompts with the fresh count. Errors surface via toast (never a raw
  * provider string).
  *
- * @spec docs/eph/RFC-L2-mailbox-management
  */
 export function DeleteMailboxDialog({
   sourceId,

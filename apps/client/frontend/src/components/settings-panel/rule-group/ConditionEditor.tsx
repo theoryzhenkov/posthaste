@@ -25,8 +25,6 @@ import { ConditionValueEditor } from './conditionValueWidgets'
  * The VALUE input is type-directed — its widget is inferred from the field's
  * `valueType` (see `conditionValueWidgets.tsx`), while the emitted value keeps
  * the same wire shape (string | string[] | boolean) as the old text box.
- *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 export function ConditionEditor({
   condition,

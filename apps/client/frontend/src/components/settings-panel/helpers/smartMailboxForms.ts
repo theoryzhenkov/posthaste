@@ -46,10 +46,7 @@ export function formFromSmartMailbox(
   }
 }
 
-/**
- * Available smart mailbox filter fields for the rule builder UI.
- * @spec docs/L1-search#smart-mailbox-data-model
- */
+/** Available smart mailbox filter fields for the rule builder UI. */
 export const FIELD_OPTIONS: Array<{ value: MailQueryField; label: string }> = [
   { value: 'sourceId', label: 'Source ID' },
   { value: 'sourceName', label: 'Source Name' },
@@ -72,7 +69,6 @@ export const FIELD_OPTIONS: Array<{ value: MailQueryField; label: string }> = [
   { value: 'size', label: 'Size' },
 ]
 
-/** @spec docs/L1-search#smart-mailbox-data-model */
 export const GROUP_OPERATOR_OPTIONS: Array<{
   value: MailQueryGroupOperator
   label: string

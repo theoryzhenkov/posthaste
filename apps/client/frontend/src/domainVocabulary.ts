@@ -1,9 +1,6 @@
 /**
  * Typed frontend mirror of serialized domain vocabulary strings.
  *
- * @spec docs/L1-api#mailbox-metadata
- * @spec docs/L1-api#navigation
- * @spec docs/L1-api#sse-event-stream
  */
 import type { KnownMailboxRole } from './api/types'
 
@@ -66,7 +63,7 @@ export const KNOWN_SYSTEM_KEYWORDS = [
   SYSTEM_KEYWORDS.Forwarded,
 ] as const satisfies readonly SystemKeyword[]
 
-// Event topics moved to the generated `src/api/events.gen.ts` (M47 / D118): the
-// topic union, named accessors (`EVENT_TOPICS`), and `isEventTopic` guard are now
-// codegen'd from `asyncapi.json` and drift-checked, so an unhandled server-side
-// topic is a client compile error rather than a hand-mirror omission.
+// Event topics come from the generated `src/api/events.gen.ts`: the topic union,
+// named accessors (`EVENT_TOPICS`), and `isEventTopic` guard are codegen'd from
+// `asyncapi.json` and drift-checked, so an unhandled server-side topic is a
+// client compile error.

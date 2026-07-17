@@ -4,7 +4,6 @@
  * Renders sender, subject, preview, relative timestamp, unread dot,
  * flag star, attachment state, and source tag.
  *
- * @spec docs/L1-ui#messagelist
  */
 import { Fragment, memo, useCallback } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
@@ -37,7 +36,6 @@ import {
   getColumnDef,
 } from './thread-list/columns'
 
-/** @spec docs/L1-ui#messagelist */
 interface MessageRowProps {
   message: MessageSummary
   isSelected: boolean
@@ -70,8 +68,6 @@ const TREE_INDENT_PX = 22
 /**
  * Fixed-height message row displaying sender, subject,
  * preview, date, unread state, flag, and source.
- *
- * @spec docs/L1-ui#messagelist
  */
 export const MessageRow = memo(function MessageRow({
   message,

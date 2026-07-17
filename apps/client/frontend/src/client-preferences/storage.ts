@@ -157,8 +157,6 @@ export function isThemeStorageEvent(event: StorageEvent): boolean {
  * One-time import guard for migrating the renderer's localStorage appearance
  * cache into TOML (`[appearance]` in app.toml). Set after the cache is first
  * written to TOML so the import is not repeated.
- *
- * @spec docs/eph/DESIGN-L2-appearance-toml
  */
 const APPEARANCE_IMPORTED_FLAG = 'posthaste.appearance.imported'
 

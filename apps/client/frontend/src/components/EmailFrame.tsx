@@ -14,27 +14,18 @@
  *
  * Long messages scroll inside the iframe rather than expanding the detail pane.
  *
- * @spec docs/L1-ui#messagedetail-and-emailframe
- * @spec docs/L0-ui#html-email-rendering
  */
 import { useMemo } from 'react'
 
 import { isTauriRuntime } from '../desktop'
 import { cn } from '../lib/utils'
 
-/** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface EmailFrameProps {
   html: string
   className?: string
   title?: string
 }
 
-/**
- * Renders email HTML inside a sandboxed `srcdoc` iframe.
- *
- * @spec docs/L1-ui#messagedetail-and-emailframe
- * @spec docs/L0-branding#color-palette-light-mode-primary
- */
 type EmailLinkTarget = '_blank' | '_top'
 
 function normalizeEmailLinkTargets(

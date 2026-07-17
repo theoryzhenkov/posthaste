@@ -1,12 +1,10 @@
 /**
  * Keyboard shortcut reference overlay, toggled with `?`.
  *
- * The action rows are GENERATED from the action registry (their chords are the
+ * The action rows are generated from the action registry (their chords are the
  * exact data the keyboard tier dispatches), so the list can no longer drift from
- * behavior the way the old hand-maintained array did (PLAN-L2 §1.1, Slice 5).
- * Native, non-action keys stay a small static list. See ./shortcutReferenceRows.
- *
- * @spec docs/ui/L1#keyboard-shortcuts
+ * behavior. Native, non-action keys stay a small static list. See
+ * ./shortcutReferenceRows.
  */
 import { Keyboard } from 'lucide-react'
 

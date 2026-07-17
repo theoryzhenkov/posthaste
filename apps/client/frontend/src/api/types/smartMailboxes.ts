@@ -16,7 +16,6 @@ export interface CreateSmartMailboxInput {
   rule: MailQueryRule
 }
 
-/** @spec docs/L1-api#smart-mailbox-crud */
 export interface UpdateSmartMailboxInput {
   name?: string
   /** Set a role, or pass an empty string to clear it. Omit to leave unchanged. */

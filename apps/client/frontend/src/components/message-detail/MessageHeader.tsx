@@ -1,20 +1,15 @@
 /**
- * Message detail header (PLAN-L2, Slice 4 — registry-driven action row).
+ * Message detail header with registry-driven action row.
  *
- * The action row is no longer hand-rolled JSX per action: it renders from
- * `resolveActions(ctx, { surface: 'detail-header' })`, the SAME resolver the
- * context menu / palette / keyboard use. That makes the row ROLE-AWARE (the old
- * header offered Archive inside Archive and Trash inside Trash; now Trash shows
- * Delete permanently + Move to Inbox instead — the latent bug the plan flagged)
- * and makes the draft-vs-message branch availability-driven (a draft resolves
- * to edit/discard only, D129).
+ * The action row renders from `resolveActions(ctx, { surface: 'detail-header' })`,
+ * the same resolver the context menu / palette / keyboard use. This makes the
+ * row role-aware and the draft-vs-message branch availability-driven (a draft
+ * resolves to edit/discard only).
  *
- * Presentation stays here: icon buttons in a fixed header order, a popover for
- * PARAMETERIZED actions (Snooze presets), a confirm dialog for destructive
+ * Presentation: icon buttons in a fixed header order, a popover for
+ * parameterized actions (Snooze presets), a confirm dialog for destructive
  * `confirm`-bearing actions (delete-permanently), the flag tint, and the tag
  * editor's outside-click anchor attribute.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
  */
 import { useState, type MouseEvent } from 'react'
 import { Paperclip } from 'lucide-react'

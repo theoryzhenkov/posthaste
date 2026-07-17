@@ -4,7 +4,6 @@
  * `localStorage` mirror only for fast boot (no FOUC). These types model the
  * daemon wire schema exactly.
  *
- * @spec docs/eph/DESIGN-L2-appearance-toml
  */
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type UiDensity = 'compact' | 'cozy' | 'comfortable'

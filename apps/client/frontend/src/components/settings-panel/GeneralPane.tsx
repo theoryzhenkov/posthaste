@@ -1,7 +1,6 @@
 /**
  * General preferences: default account selector and at-a-glance overview.
  *
- * @spec docs/L1-api#account-crud-lifecycle
  */
 import type { AccountRow } from '@/gen'
 import { isTauriRuntime } from '../../desktop'

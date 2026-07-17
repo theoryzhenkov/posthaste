@@ -1,17 +1,14 @@
 /**
- * Rows for the keyboard `ShortcutReference` (PLAN-L2, Slice 5).
+ * Rows for the keyboard `ShortcutReference`.
  *
- * The action rows are DERIVED from the registry — every definition that declares
- * a `shortcut` becomes a row, formatted from the very chord the keyboard tier
- * dispatches — so the reference can no longer drift from what the keys actually
- * do (the hand-maintained list did: PLAN §1.1). The native, non-action keys
- * (pane navigation, the goto machine, command search) that live in
- * `dispatch.ts` rather than the registry are listed as a small static set.
+ * Action rows are derived from the registry — every definition that declares a
+ * `shortcut` becomes a row, formatted from the very chord the keyboard tier
+ * dispatches — so the reference cannot drift from what the keys actually do. The
+ * native, non-action keys (pane navigation, the goto machine, command search)
+ * that live in `dispatch.ts` rather than the registry are listed as a small
+ * static set.
  *
  * Pure data → data; no DOM, so it is unit-testable.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
- * @spec docs/ui/L1#keyboard-shortcuts
  */
 import { allActions, formatChords } from '@/actions'
 import type { ActionContext } from '@/actions'

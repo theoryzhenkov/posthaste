@@ -19,7 +19,6 @@ import { Input } from '@/components/ui/input'
  * mutation and close immediately. Reuses the alert-dialog + input primitives
  * (mirrors NewMailboxDialog).
  *
- * @spec docs/eph/RFC-L2-mailbox-management#a4
  */
 export function GroupNameDialog({
   mode,

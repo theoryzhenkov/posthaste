@@ -1,14 +1,10 @@
 /**
- * Contextual resolver (PLAN-L2, Slice 1).
+ * Contextual resolver.
  *
  * Given an {@link ActionContext} and the injected {@link ActionServices}, filter
  * the registry by requesting surface → availability → enablement, apply the
  * context-derived title/icon, and order by section (then registration order).
- * Pure given `(ctx, services)`; the shape mirrors the old builder so section
- * separators fall out of adjacent-section changes exactly as the context menu
- * renders them today.
- *
- * @spec docs/eph/PLAN-L2-action-registry.md
+ * Pure given `(ctx, services)`.
  */
 import type { LucideIcon } from 'lucide-react'
 import { allActions } from './registry'
@@ -81,8 +77,6 @@ function bind(
     disabledReason,
     confirm,
     params,
-    // Slice 1 ports carry no `confirm`, so this matches the old direct `run`.
-    // The confirm-dialog host is wired in a later slice.
     execute: () => def.run(ctx, services),
     executeWith: params
       ? (param: ActionParamOption) => def.run(ctx, services, param)

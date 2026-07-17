@@ -4,7 +4,6 @@
  * the condition builder reuses the exact picker the move action uses rather
  * than forking a second one.
  *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 import type React from 'react'
 import type { Mailbox } from '../../api/types'

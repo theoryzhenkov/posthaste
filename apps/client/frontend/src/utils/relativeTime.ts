@@ -26,8 +26,6 @@ function pad2(n: number): string {
  *
  * Uses 24-hour time. A double-space separates the date and time parts
  * for visual breathing room.
- *
- * @spec docs/L1-ui#messagelist
  */
 export function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate)

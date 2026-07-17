@@ -57,8 +57,8 @@ export function currentSearchableServerQuery(query: string): string {
 
 export function createRankingContext(input: {
   hasSelectedMessage: boolean
-  /** Persisted per-command recency/frequency (PLAN-L2 §4.5). Defaults to an
-   *  empty counter so callers/tests that don't wire persistence are unaffected. */
+  /** Persisted per-command recency/frequency counter. Defaults to an empty
+   *  counter so callers/tests that don't wire persistence are unaffected. */
   recentCommands?: DecayedCounter
 }): RankingContext {
   return {

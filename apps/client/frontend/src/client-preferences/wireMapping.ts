@@ -38,8 +38,6 @@ function wireColorsToDesign(
  * fall back to the renderer defaults. Lossless for the curated knobs (per-mode
  * accent + surface, free-form theme id, density, glass blooms); the open
  * `tokens` escape hatch is carried by the wire but not yet consumed here.
- *
- * @spec docs/eph/DESIGN-L2-appearance-toml
  */
 export function wireAppearanceToDesign(
   appearance: Appearance | null | undefined,
@@ -85,8 +83,6 @@ function designColorsToWire(colors: ThemeColors): WireThemeColors {
 /**
  * Map the renderer's `DesignThemePreferences` to a wire `Appearance` (all
  * curated fields set, non-null) for PATCHing to TOML.
- *
- * @spec docs/eph/DESIGN-L2-appearance-toml
  */
 export function designToWireAppearance(
   prefs: DesignThemePreferences,

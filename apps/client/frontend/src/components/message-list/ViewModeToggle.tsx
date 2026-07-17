@@ -4,7 +4,6 @@
  * command search; mode is per-view and persisted via the shared `useViewMode`
  * store, so it stays in sync with the list it controls.
  *
- * @spec docs/L1-ui#messagelist
  */
 import { List, ListTree } from 'lucide-react'
 

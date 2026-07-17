@@ -6,15 +6,13 @@ import { recordCommandUse } from '@/command-search/recentCommands'
 import type { MailSelection } from '@/data/selection'
 
 /**
- * The palette's SINGLE execution path (PLAN-L2, Slice 3).
+ * The palette's single execution path.
  *
- * The old parallel execution switch (a `PaletteAction`-kind switch plus a second
- * `CommandActionId` switch that re-implemented every command handler) is gone.
- * Registry rows (`kind: 'action'`) now dispatch through the resolved action's
- * `run(ctx, services)` — the very same code path the context menu uses — and
- * bump the recency counter. Everything else here is pure search-result
- * navigation emitted by the other providers (mailboxes/messages/tags/query),
- * which are not registry actions.
+ * Registry rows (`kind: 'action'`) dispatch through the resolved action's
+ * `run(ctx, services)` — the same code path the context menu uses — and bump
+ * the recency counter. Everything else here is pure search-result navigation
+ * emitted by the other providers (mailboxes/messages/tags/query), which are not
+ * registry actions.
  */
 export interface PaletteNavHandlers {
   onApplySearch: (query: string) => void

@@ -9,7 +9,6 @@
  * renders and still emits the same wire value — pickers simply fall back to
  * showing the raw stored value, exactly like the previous text box.
  *
- * @spec docs/L1-search#smart-mailbox-data-model
  */
 import { createContext, useContext } from 'react'
 import type { Mailbox } from '../../../api/types'
