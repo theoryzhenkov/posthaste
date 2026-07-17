@@ -3,7 +3,7 @@ import type { AccountId } from "./AccountId";
 import type { SendMessageRequest } from "./SendMessageRequest";
 
 /**
- * Content for [`Command::CreateDraft`]. The draft's stable id travels in
- * `draft.draftId`.
+ * Content for [`crate::Command::CreateDraft`]. The draft's stable id
+ * travels in `draft.draftId`.
  */
 export type CreateDraftIntent = { accountId: AccountId, draft: SendMessageRequest, };

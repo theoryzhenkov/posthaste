@@ -1,0 +1,238 @@
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { EditorState, type Extension } from '@codemirror/state'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import {
+  EditorView,
+  keymap,
+  placeholder as editorPlaceholder,
+  type ViewUpdate,
+} from '@codemirror/view'
+
+import { cn } from '@/lib/utils'
+
+import { filesFromDataTransfer } from './compose-overlay/attachments'
+import { FormatMenuButton } from './markdown-composer/FormatMenuButton'
+import {
+  FORMAT_COMMANDS,
+  formatSelection,
+} from './markdown-composer/formattingCommands'
+import {
+  composerTheme,
+  markdownSyntaxHighlighting,
+} from './markdown-composer/theme'
+
+export interface MarkdownComposerEditorHandle {
+  focus: () => void
+  /** Focus with the caret pinned to the start of the document (top-posting). */
+  focusAtStart: () => void
+}
+
+interface MarkdownComposerEditorProps {
+  className?: string
+  onChange: (value: string) => void
+  /**
+   * Receives the `File`s of a paste (Cmd+V) or drop targeting the editor.
+   * When files are present the event is consumed here (CodeMirror's own
+   * text handling is skipped); text-only pastes/drops are untouched.
+   */
+  onFiles?: (files: File[]) => void
+  placeholder?: string
+  value: string
+}
+
+interface ContextMenuPosition {
+  x: number
+  y: number
+}
+
+export const MarkdownComposerEditor = forwardRef<
+  MarkdownComposerEditorHandle,
+  MarkdownComposerEditorProps
+>(function MarkdownComposerEditor(
+  { className, onChange, onFiles, placeholder, value },
+  ref,
+) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<EditorView | null>(null)
+  const initialValueRef = useRef(value)
+  const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(
+    null,
+  )
+  // Read through a ref so the (identity-sensitive) extensions array does not
+  // rebuild — and the editor does not remount — when the callback changes.
+  const onFilesRef = useRef(onFiles)
+  useEffect(() => {
+    onFilesRef.current = onFiles
+  })
+
+  const handleEditorUpdate = useCallback(
+    (update: ViewUpdate) => {
+      if (update.docChanged) {
+        onChange(update.state.doc.toString())
+      }
+    },
+    [onChange],
+  )
+
+  const extensions = useMemo<Extension[]>(
+    () => [
+      // Registered ahead of CodeMirror's built-in handlers: returning true
+      // consumes the event, so a paste/drop CARRYING FILES becomes an
+      // attachment instead of text insertion, while plain text pastes/drops
+      // fall through to the default behavior untouched.
+      EditorView.domEventHandlers({
+        paste: (event) => {
+          const files = filesFromDataTransfer(event.clipboardData)
+          if (files.length === 0 || !onFilesRef.current) {
+            return false
+          }
+          event.preventDefault()
+          onFilesRef.current(files)
+          return true
+        },
+        drop: (event) => {
+          const files = filesFromDataTransfer(event.dataTransfer)
+          if (files.length === 0 || !onFilesRef.current) {
+            return false
+          }
+          event.preventDefault()
+          onFilesRef.current(files)
+          return true
+        },
+      }),
+      history(),
+      markdown({
+        addKeymap: true,
+        base: markdownLanguage,
+        completeHTMLTags: false,
+      }),
+      markdownSyntaxHighlighting,
+      composerTheme,
+      EditorView.lineWrapping,
+      EditorView.updateListener.of(handleEditorUpdate),
+      keymap.of([
+        ...FORMAT_COMMANDS.map((command) => ({
+          key: command.shortcut,
+          preventDefault: true,
+          run: formatSelection(command.marker),
+        })),
+        ...historyKeymap,
+        ...defaultKeymap,
+      ]),
+      placeholder ? editorPlaceholder(placeholder) : [],
+    ],
+    [handleEditorUpdate, placeholder],
+  )
+
+  useEffect(() => {
+    if (!containerRef.current) {
+      return
+    }
+
+    const view = new EditorView({
+      parent: containerRef.current,
+      state: EditorState.create({ doc: initialValueRef.current, extensions }),
+    })
+    editorRef.current = view
+
+    return () => {
+      view.destroy()
+      editorRef.current = null
+    }
+  }, [extensions])
+
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view) {
+      return
+    }
+    const currentValue = view.state.doc.toString()
+    if (currentValue === value) {
+      return
+    }
+    view.dispatch({
+      changes: { from: 0, to: currentValue.length, insert: value },
+    })
+  }, [value])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => editorRef.current?.focus(),
+      focusAtStart: () => {
+        const view = editorRef.current
+        if (!view) {
+          return
+        }
+        view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true })
+        view.focus()
+      },
+    }),
+    [],
+  )
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+
+    function closeMenu() {
+      setContextMenu(null)
+    }
+
+    window.addEventListener('mousedown', closeMenu)
+    window.addEventListener('keydown', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      window.removeEventListener('mousedown', closeMenu)
+      window.removeEventListener('keydown', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [contextMenu])
+
+  function runFormat(marker: string) {
+    const view = editorRef.current
+    if (!view) {
+      return
+    }
+    formatSelection(marker)(view)
+    view.focus()
+    setContextMenu(null)
+  }
+
+  return (
+    <div
+      className={cn('relative h-full min-h-[220px]', className)}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        editorRef.current?.focus()
+        setContextMenu({ x: event.clientX, y: event.clientY })
+      }}
+    >
+      <div ref={containerRef} className="h-full min-h-[220px]" />
+      {contextMenu && (
+        <div
+          className="fixed z-(--z-popover) flex overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          {FORMAT_COMMANDS.map((command) => (
+            <FormatMenuButton
+              key={command.key}
+              command={command}
+              onClick={() => runFormat(command.marker)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+})

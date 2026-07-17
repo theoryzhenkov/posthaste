@@ -3,7 +3,7 @@ import type { AccountId } from "./AccountId";
 import type { SendMessageRequest } from "./SendMessageRequest";
 
 /**
- * Target + content for [`Command::UpdateDraft`].
+ * Target + content for [`crate::Command::UpdateDraft`].
  */
 export type UpdateDraftIntent = { accountId: AccountId, 
 /**

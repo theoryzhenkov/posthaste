@@ -3,6 +3,7 @@ import type { AccountId } from "./AccountId";
 import type { ThreadId } from "./ThreadId";
 
 /**
- * Read all messages of one provider thread.
+ * Read all messages of one provider thread — answered with the thread view
+ * (`ThreadView`).
  */
 export type ThreadQuery = { accountId: AccountId, threadId: ThreadId, };
