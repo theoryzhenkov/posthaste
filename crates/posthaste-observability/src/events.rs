@@ -55,6 +55,7 @@ pub const CONFIG_BOOTSTRAP_IMPORTED: LogEvent = LogEvent::new("config.bootstrap_
 pub const DATABASE_OPENED: LogEvent = LogEvent::new("database.opened");
 pub const DATABASE_CORRUPT_REPAIRED: LogEvent = LogEvent::new("database.corrupt.repaired");
 pub const DESKTOP_BACKEND_STARTED: LogEvent = LogEvent::new("desktop.backend.started");
+pub const DESKTOP_BACKEND_START_FAILED: LogEvent = LogEvent::new("desktop.backend.start_failed");
 pub const DESKTOP_RELEASE_CHANNEL: LogEvent = LogEvent::new("desktop.release_channel");
 pub const DESKTOP_FACTORY_RESET: LogEvent = LogEvent::new("desktop.factory_reset");
 pub const HTTP_REQUEST_COMPLETED: LogEvent = LogEvent::new("http.request.completed");

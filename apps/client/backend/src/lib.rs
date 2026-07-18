@@ -23,9 +23,13 @@ mod push;
 mod secret;
 mod supervisor;
 
+/// Marker file name (inside the state root) that requests a quarantine-and-
+/// rebuild of the database on the next open; embedding shells write it.
+pub use posthaste_store::REPAIR_MARKER_FILE;
+
 pub use event_bus::{EventBus, DEFAULT_EVENT_CAPACITY};
-pub use paths::{AppPaths, ConnectionInfo};
-pub use secret::SystemSecretStore;
+pub use paths::{AppPaths, ConnectionInfo, StoreLock};
+pub use secret::{keyring_entry_location, SystemSecretStore};
 pub use supervisor::{AccountSupervisor, DEFAULT_POLL_INTERVAL};
 
 /// Deadline for stopping all account runtimes during shutdown.
@@ -53,6 +57,10 @@ pub struct AppState {
     pub supervisor: Arc<AccountSupervisor>,
     /// Resolved filesystem roots.
     pub paths: AppPaths,
+    /// Exclusive advisory lock on the state root, held while the state is
+    /// live so no second backend can open the same store. Released by
+    /// [`AppState::shutdown`] (or when the last state handle drops).
+    pub store_lock: Arc<StoreLock>,
     /// Repair report when the database was quarantined and rebuilt on open,
     /// so the API can surface it and trigger a re-sync.
     pub repair: Option<Arc<RepairReport>>,
@@ -106,6 +114,8 @@ pub enum BuildError {
         path: std::path::PathBuf,
         source: std::io::Error,
     },
+    #[error("the mail store at {path} is in use by another running Posthaste instance")]
+    StoreLocked { path: std::path::PathBuf },
 }
 
 impl AppState {
@@ -128,6 +138,21 @@ impl AppState {
             path: paths.state_root.clone(),
             source,
         })?;
+
+        // One live backend per store: take the exclusive state-root lock
+        // before anything opens the database. SQLite WAL mode permits a
+        // concurrent multi-process open, so this lock is the only thing
+        // stopping two sync engines from racing over one store.
+        let lock_path = paths.lock_path();
+        let store_lock = StoreLock::acquire(&lock_path)
+            .map_err(|source| BuildError::Io {
+                path: lock_path,
+                source,
+            })?
+            .ok_or_else(|| BuildError::StoreLocked {
+                path: paths.state_root.clone(),
+            })?;
+        let store_lock = Arc::new(store_lock);
 
         let config_repo = TomlConfigRepository::open(&paths.config_root)?;
         if config_repo.is_empty() {
@@ -180,15 +205,18 @@ impl AppState {
             events,
             supervisor,
             paths,
+            store_lock,
             repair: repair.map(Arc::new),
         })
     }
 
-    /// Ordered teardown: stop account runtimes (cooperative, bounded), then
-    /// close the store (checkpoint + release file handles). Idempotent.
+    /// Ordered teardown: stop account runtimes (cooperative, bounded), close
+    /// the store (checkpoint + release file handles), then release the
+    /// state-root lock so a successor can open the store. Idempotent.
     pub async fn shutdown(&self) {
         self.supervisor.stop_all(SUPERVISOR_STOP_DEADLINE).await;
         self.database_store.close();
+        self.store_lock.release();
     }
 }
 
