@@ -15,7 +15,7 @@ import {
 } from '../../../data/models/accountDirectory'
 import type { MessageSummary } from '../../../data/transport/api/index'
 import { MailApiError } from '@/data/transport/client'
-import type { EmailActions } from '../../../data/hooks/useEmailActions'
+
 import type { MailSelection } from '@/data/models/selection'
 import { useActivePane } from '../../keyboard/usePane'
 import type { PreparedServerSearchQuery } from '../../../domain/searchQuery'
@@ -40,6 +40,7 @@ import { useViewMode } from './model/useViewMode'
 import type { SidebarSelection } from '../../sidebar/Sidebar'
 import { buildThreadListLayout } from '../thread/columns'
 import { ThreadListHeader } from '../thread/ThreadListHeader'
+import type { RowContextMenuFor } from './MessageRow'
 import { useColumnConfig } from '../thread/useColumnConfig'
 
 interface MessageListProps {
@@ -48,9 +49,9 @@ interface MessageListProps {
   onSelectMessage: (message: MailSelection) => void
   onClearSelection: () => void
   onClearSearchQuery: () => void
-  actions: EmailActions
-  /** Mailbox role of the current view (null when ambiguous); drives row actions. */
-  viewRole: string | null
+  /** Registry-resolved row context menu (commands/bind, built by the app
+   *  shell); rows supply their own callbacks + mailbox read model. */
+  contextMenuFor: RowContextMenuFor
   /** Filter the view to a message's conversation (contextual action). */
   onViewConversation: (message: MessageSummary) => void
   searchQuery?: string
@@ -69,8 +70,7 @@ export function MessageList({
   onSelectMessage,
   onClearSelection,
   onClearSearchQuery,
-  actions,
-  viewRole,
+  contextMenuFor,
   onViewConversation,
   searchQuery,
   preparedSearchQuery,
@@ -271,7 +271,7 @@ export function MessageList({
             onScroll={handleScroll}
           >
             <MessageListRows
-              actions={actions}
+              contextMenuFor={contextMenuFor}
               columns={columns}
               errorState={errorState}
               isFetchingNextPage={mailListView.isLoadingMore}
@@ -289,7 +289,6 @@ export function MessageList({
               scrollTop={scrollTop}
               selectedKey={selectedKey}
               isPaneActive={isListActive}
-              viewRole={viewRole}
               viewportHeight={viewportHeight}
               mailboxDirectory={mailboxDirectory}
               excludeMailboxId={excludeMailboxId}

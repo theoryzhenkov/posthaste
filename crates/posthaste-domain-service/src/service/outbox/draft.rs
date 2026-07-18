@@ -507,6 +507,15 @@ impl MailService {
                     // The rotation write IS the durable step-complete marker.
                     self.draft_registry
                         .set_draft_alias(account_id, key, new_id.as_str())?;
+                    if new_id.as_str() != key {
+                        // The admission-time row was pinned under the compose
+                        // KEY; the visible row now lives under the provider id.
+                        // Without this retire the key row leaks — a phantom
+                        // draft that survives both the send's settlement and an
+                        // undo (which each clean up only the RESOLVED live id).
+                        self.retire_rotated_draft_row(account_id, key, events)
+                            .await?;
+                    }
                     let live_id = MessageId::from(new_id.as_str());
                     let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
                     let record = crate::service::mutation::synthesize_draft_record(
@@ -582,6 +591,53 @@ impl MailService {
             })
     }
 
+    /// Retire the visible row a draft was keyed under BEFORE a provider id
+    /// rotation (`old_live` → a new live id): tombstone it while base still
+    /// shows the destroyed predecessor (sync prunes it later), drop the
+    /// overlay entry otherwise, and echo the deletion so clients prune the
+    /// stale row. Shared by the draft-save settlement and the held-send
+    /// eager ensure-draft — the two places a rotation retires a row.
+    async fn retire_rotated_draft_row(
+        &self,
+        account_id: &AccountId,
+        old_live: &str,
+        events: &mut Vec<DomainEvent>,
+    ) -> Result<(), ServiceError> {
+        let old_id = MessageId::from(old_live);
+        let base_has_old = {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_message = old_id.clone();
+            offload(move || overlay.read_base_message_record(&owned_account, &owned_message))
+                .await?
+                .is_some()
+        };
+        {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_message = old_id.clone();
+            offload(move || {
+                if base_has_old {
+                    // Base still shows the destroyed rotation predecessor:
+                    // hide it until sync prunes it.
+                    overlay.tombstone_overlay_message(&owned_account, &owned_message)
+                } else {
+                    overlay.remove_overlay_message(&owned_account, &owned_message)
+                }
+            })
+            .await?;
+        }
+        // Prune the stale row client-side.
+        events.push(self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            None,
+            Some(&old_id),
+            serde_json::json!({ "messageId": old_live, "deleted": true }),
+        )?);
+        Ok(())
+    }
+
     /// Post-settlement overlay maintenance for a draft save (NS2 Slice 3):
     /// carry the settled draft's visible row across the provider id rotation
     /// until sync confirms it into base.
@@ -603,38 +659,8 @@ impl MailService {
     ) -> Result<(), ServiceError> {
         let new_id = MessageId::from(new_live);
         if old_live != new_live {
-            let old_id = MessageId::from(old_live);
-            let base_has_old = {
-                let overlay = self.overlay.clone();
-                let owned_account = account_id.clone();
-                let owned_message = old_id.clone();
-                offload(move || overlay.read_base_message_record(&owned_account, &owned_message))
-                    .await?
-                    .is_some()
-            };
-            {
-                let overlay = self.overlay.clone();
-                let owned_account = account_id.clone();
-                let owned_message = old_id.clone();
-                offload(move || {
-                    if base_has_old {
-                        // Base still shows the destroyed rotation predecessor:
-                        // hide it until sync prunes it.
-                        overlay.tombstone_overlay_message(&owned_account, &owned_message)
-                    } else {
-                        overlay.remove_overlay_message(&owned_account, &owned_message)
-                    }
-                })
+            self.retire_rotated_draft_row(account_id, old_live, events)
                 .await?;
-            }
-            // Prune the stale row client-side.
-            events.push(self.events.append_event(
-                account_id,
-                EVENT_TOPIC_MESSAGE_UPDATED,
-                None,
-                Some(&old_id),
-                serde_json::json!({ "messageId": old_live, "deleted": true }),
-            )?);
         }
         // A remaining queued draft op on the same key (a newer save, or a
         // discard racing this settlement) owns the row now — refold it at the

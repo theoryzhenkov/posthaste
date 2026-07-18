@@ -1,6 +1,6 @@
 import type { AccountAppearance } from '../../../data/transport/api/index'
 import { useAccountLogoUrl } from '@/data/transport/blobs'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 
 interface AccountMarkProps {
   appearance: AccountAppearance

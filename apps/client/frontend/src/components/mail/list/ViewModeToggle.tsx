@@ -7,7 +7,7 @@
  */
 import { List, ListTree } from 'lucide-react'
 
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 import type { MessageListViewMode } from '@/domain/vocabulary'
 

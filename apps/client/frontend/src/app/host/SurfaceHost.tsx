@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useMemo } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { openSurfaceInSeparateWindow } from '@/desktop/runtime'
+import { useCommandScope, type CommandScope } from '@/lib/command'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { surfaceWindowPolicy } from '@/surfaces/windowPolicy'
 import { Button } from '../../components/ui/form/button'
@@ -21,21 +22,17 @@ export function SurfaceHost({
   onClose,
   onSearch,
 }: SurfaceHostProps) {
-  useEffect(() => {
-    if (!surface) {
-      return
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !event.repeat && canClose) {
-        event.preventDefault()
-        onClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [canClose, onClose, surface])
+  // Escape routes through the command dispatcher (`surface.close`): the scope
+  // binds `surfaceHost.close` only while a closeable surface is shown, so the
+  // chord falls through everywhere else.
+  const closeScope = useMemo<CommandScope | null>(
+    () =>
+      surface && canClose
+        ? { owner: 'surface', services: { surfaceHost: { close: onClose } } }
+        : null,
+    [canClose, onClose, surface],
+  )
+  useCommandScope(closeScope)
 
   if (!surface) {
     return null

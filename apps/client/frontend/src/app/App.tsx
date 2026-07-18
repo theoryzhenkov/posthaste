@@ -6,9 +6,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { Toaster } from 'sonner'
 
-// Bootstrap: side-effect import populates the action registry at app init, so
-// it is filled before any surface (context menu, etc.) resolves from it.
-import '../commands/index'
+import { CommandDispatcher } from '../commands/index'
 import { ConnectionBanner } from './shell/ConnectionBanner'
 import { MailClient } from './mail/MailClient'
 import { Z } from './shell/layering'
@@ -19,6 +17,7 @@ import { InvalidSurfaceDocument } from './host/InvalidSurface'
 import { DesignThemeProvider } from './shell/ThemeProvider'
 import { isMainDesktopWindow, isTauriRuntime, toggleDevtools } from '../desktop/runtime'
 import { isDeveloperToolsEnabled } from '../desktop/devtools'
+import type { CommandScope } from '../lib/command'
 import { useNewMailNotifications } from '../data/notifications/newMailArrivals'
 import { DockBadge } from '../desktop/dock/DockBadge'
 import { useDesktopUpdates } from '../desktop/updates/useDesktopUpdates'
@@ -79,11 +78,11 @@ export default function App() {
     markSurfaceBootstrap('app_mounted', { isStandaloneSurface })
   }, [isStandaloneSurface])
 
-  useDeveloperToolsShortcut()
   useDesktopUpdates()
 
   return (
     <QueryClientProvider client={queryClient}>
+      <CommandDispatcher scope={APP_COMMAND_SCOPE}>
       <DesignThemeProvider writeThrough>
         <AppearanceSettingsSync />
         {/* Liveness rides the facade's event stream in the MAIN window; a
@@ -116,24 +115,20 @@ export default function App() {
           toastOptions={{ className: 'font-sans text-sm' }}
         />
       </DesignThemeProvider>
+      </CommandDispatcher>
     </QueryClientProvider>
   )
 }
 
-function useDeveloperToolsShortcut() {
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.altKey &&
-        event.code === 'KeyI' &&
-        isDeveloperToolsEnabled()
-      ) {
-        event.preventDefault()
-        void toggleDevtools()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+/** The root command scope: binds the desktop devtools capability, so
+ *  `app.toggle-devtools` (⌘⌥I) resolves in every window — formerly App's own
+ *  window listener (the charter's first R4 migration). */
+const APP_COMMAND_SCOPE: CommandScope = {
+  owner: 'mail',
+  services: {
+    desktop: {
+      isDeveloperToolsEnabled,
+      toggleDevtools,
+    },
+  },
 }

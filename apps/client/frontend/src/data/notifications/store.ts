@@ -1,16 +1,16 @@
 /**
  * App-wide notification center.
  *
- * A module-level store (not React state) so any code path — React components,
- * the react-query error handler, the event stream — can surface a notification
- * without prop drilling. The bell button and panel read it via
- * `useSyncExternalStore`.
+ * A module-level `createStore` (R5), not React state, so any code path —
+ * React components, the react-query error handler, the event stream — can
+ * surface a notification without prop drilling. The bell button and panel
+ * read it via `useStore`.
  */
-import { useSyncExternalStore } from 'react'
+import { createStore, useStore } from '@/lib/store'
 
 import type { NotificationSeverity } from '@/domain/vocabulary'
 
-export interface NotificationAction {
+interface NotificationAction {
   label: string
   run: () => void | Promise<void>
 }
@@ -34,34 +34,14 @@ export type NotificationInput = Omit<
 
 const MAX_NOTIFICATIONS = 100
 
-let notifications: AppNotification[] = []
-const listeners = new Set<() => void>()
-
-function emit() {
-  for (const listener of listeners) {
-    listener()
-  }
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-function getSnapshot(): AppNotification[] {
-  return notifications
-}
-
-/** Current notifications, newest-first. For non-React readers and tests. */
-export function getNotificationsSnapshot(): readonly AppNotification[] {
-  return notifications
-}
+const notificationStore = createStore<AppNotification[]>([])
 
 /**
  * Add a notification (or refresh an existing one with the same `dedupeKey`,
  * bumping it to the top and marking it unread). Returns the notification id.
  */
 export function pushNotification(input: NotificationInput): string {
+  const notifications = notificationStore.get()
   if (input.dedupeKey) {
     const existing = notifications.find((n) => n.dedupeKey === input.dedupeKey)
     if (existing) {
@@ -72,11 +52,10 @@ export function pushNotification(input: NotificationInput): string {
         createdAt: Date.now(),
         read: false,
       }
-      notifications = [
+      notificationStore.set([
         refreshed,
         ...notifications.filter((n) => n.id !== existing.id),
-      ]
-      emit()
+      ])
       return existing.id
     }
   }
@@ -84,42 +63,42 @@ export function pushNotification(input: NotificationInput): string {
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
       : `n-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  notifications = [
-    { ...input, id, createdAt: Date.now(), read: false },
-    ...notifications,
-  ].slice(0, MAX_NOTIFICATIONS)
-  emit()
+  notificationStore.set(
+    [
+      { ...input, id, createdAt: Date.now(), read: false },
+      ...notifications,
+    ].slice(0, MAX_NOTIFICATIONS),
+  )
   return id
 }
 
 export function dismissNotification(id: string): void {
-  notifications = notifications.filter((n) => n.id !== id)
-  emit()
+  notificationStore.set(notificationStore.get().filter((n) => n.id !== id))
 }
 
 export function clearNotifications(): void {
-  if (notifications.length === 0) {
+  if (notificationStore.get().length === 0) {
     return
   }
-  notifications = []
-  emit()
+  notificationStore.set([])
 }
 
 export function markAllNotificationsRead(): void {
+  const notifications = notificationStore.get()
   if (notifications.every((n) => n.read)) {
     return
   }
-  notifications = notifications.map((n) => ({ ...n, read: true }))
-  emit()
+  notificationStore.set(notifications.map((n) => ({ ...n, read: true })))
 }
 
 /** Subscribe to the full, newest-first notification list. */
 export function useNotifications(): AppNotification[] {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return useStore(notificationStore)
 }
 
 /** Subscribe to the unread count (for the toolbar badge). */
 export function useUnreadNotificationCount(): number {
-  const items = useNotifications()
-  return items.reduce((count, n) => (n.read ? count : count + 1), 0)
+  return useStore(notificationStore, (items) =>
+    items.reduce((count, n) => (n.read ? count : count + 1), 0),
+  )
 }

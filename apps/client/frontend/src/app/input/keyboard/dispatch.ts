@@ -2,38 +2,46 @@
  * Pure keyboard dispatch for the mail surface.
  *
  * One window listener (owned by {@link ./KeyboardController}) routes every key
- * through this function: modifier chords first, then mail-surface single keys,
- * pane rotation (`Shift+H`/`Shift+L` — `Tab` is left to native focus traversal
- * for accessibility), and finally the focused pane's own handler (`j`/`k`,
- * `h`/`l`). Keeping it pure makes the precedence order testable without a DOM.
- *
+ * through this function. The action registry is the single dispatch table: the
+ * controller supplies a `match` resolved over it, and the matched chord's tier
+ * flags decide WHERE in the precedence order it fires (see
+ * {@link dispatchMailKey}). The only native keys are the ones with no registry
+ * definition at all: the palette openers (⌘K, `/` — the opener clears the
+ * palette's seeded pick-step, a shell concern), undo/redo (⌘Z/⌘⇧Z), Escape
+ * clears, the goto prefix machine, and pane movement (`Shift+H`/`Shift+L` —
+ * `Tab` is left to native focus traversal for accessibility). Keeping the
+ * function pure makes the precedence order testable without a DOM.
  */
 import { PANE_ID, type PaneId } from '@/domain/vocabulary'
-import { stepGotoPrefix, type GotoPrefix, type GotoRole } from './goto/goto'
-import { isEditableKeyboardTarget } from './inputTargets'
+import type { PaneKeyHandler } from '@/components/keyboard/context'
+import { stepGotoPrefix, type GotoPrefix, type GotoRole } from '../goto/goto'
+import { isEditableKeyboardTarget } from '@/lib/dom'
 
 /** Left-to-right pane order; drives `Shift+H`/`Shift+L` pane rotation. */
 export const PANE_ORDER: readonly PaneId[] = [PANE_ID.Sidebar, PANE_ID.List]
 
-/**
- * A pane's focused-key handler. Returns `true` when it consumed the event so
- * the dispatcher stops; `false` lets the key fall through to global actions.
- */
-export type PaneKeyHandler = (event: KeyboardEvent) => boolean
+export type { PaneKeyHandler }
 
 /**
  * The registry tier of the dispatcher.
  *
  * The controller supplies a `match` built over the action registry: for a
  * pressed chord it resolves the `keyboard` surface in the current context and
- * returns a bound runner for the matching available action, or `null` to fall
- * through to native dispatch. The returned `run` already encapsulates the
- * destructive-confirm gate (it prompts before an irreversible delete), so the
- * dispatcher stays a thin, pure router.
+ * returns a bound runner for the matching action, or `null` when no definition
+ * claims the chord here. The returned `run` already encapsulates the
+ * destructive-confirm gate (it prompts before an irreversible delete) and the
+ * disabled-swallow (a claimed chord with nothing to act on runs as a no-op —
+ * so ⌘R with no selection still never reaches the browser), keeping the
+ * dispatcher a thin, pure router.
  */
 export interface RegistryKeyMatch {
   /** Resolved action id (for debugging / the ambiguity guard). */
   id: string
+  /** The matched chord fires above lightweight overlays (the modifier-chord
+   *  tier) instead of only on the bare mail surface. */
+  aboveOverlay: boolean
+  /** The matched chord fires even while an editable element is focused. */
+  inEditable: boolean
   /** Execute the action — instant, or after a confirm prompt for destructive
    *  actions. Owned by the controller so the dialog state lives in React-land. */
   run: () => void
@@ -63,25 +71,16 @@ export interface KeyboardDispatchContext {
   /** `gc` — filter the list to the selected message's conversation. */
   onGotoConversation: () => void
   onOpenCommandPalette: () => void
-  onOpenSettings: () => void
-  onCompose: () => void
-  onReply: () => void
-  onReplyAll: () => void
-  onToggleFlag: () => void
   onUndo: () => void
   onRedo: () => void
-  onArchive: () => void
-  onTrash: () => void
-  onOpenTagEditor: () => void
-  onOpenFocusedMessage: () => void
   onClearSelectedMessage: () => void
   onClearSearchQuery: () => void
-  onToggleShortcuts: () => void
-  /** Registry tier: contextual mail-action shortcuts (archive/trash/delete/tag).
-   *  Consulted before the native selection-scoped handlers so the SAME chord
-   *  (`#`/Backspace) resolves to move-to-trash outside Trash and
-   *  delete-permanently inside it. Optional so `dispatchMailKey` stays usable in
-   *  unit tests that only exercise native behaviors. */
+  /** Registry tier: every action chord — modifier chords (⌘R/⌘⇧R/⌘N/⌘,/⌘⇧L/`?`)
+   *  and the contextual mail actions (archive/trash/delete/tag/open). The
+   *  matched chord's flags place it in the precedence order; availability is
+   *  the table's alone (no native fallback re-deciding it). Optional so
+   *  `dispatchMailKey` stays usable in unit tests that only exercise native
+   *  behaviors. */
   registryHook?: RegistryKeyHook
 }
 
@@ -96,11 +95,14 @@ function moveFocus(ctx: KeyboardDispatchContext, direction: 1 | -1): void {
 
 /**
  * Route a keydown through the mail-surface keyboard map. Precedence:
- *  1. modifier chords (fire even inside text inputs, matching the legacy map);
+ *  1. the native palette chord (⌘K) and the registry's `aboveOverlay` chords
+ *     (fire above overlays; inside text inputs only when `inEditable`);
  *  2. nothing else fires while typing;
- *  3. undo/redo, Escape clears, `?`/`/` (work regardless of overlay focus);
+ *  3. undo/redo, Escape clears, `/` (work regardless of overlay focus);
  *  4. pane-focus movement and the focused pane's handler;
- *  5. selection-scoped actions (`e`/`#`/`t`/`o`).
+ *  5. the registry's plain mail-action chords (`e`/`#`/`u`/`m`/`t`/`o`), whose
+ *     availability the action table alone decides — a chord no definition
+ *     claims in this context does nothing (e.g. `e` in the Archive view).
  */
 export function dispatchMailKey(
   event: KeyboardEvent,
@@ -112,40 +114,28 @@ export function dispatchMailKey(
   const mod = event.metaKey || event.ctrlKey
   const key = event.key
   const lower = key.toLowerCase()
+  const editable = isEditableKeyboardTarget(event.target)
 
-  // ---- Modifier chords: intentionally fire even while a text input is focused. ----
+  // ⌘K: native palette opener (no registry definition — see module header).
+  // Intentionally fires even while a text input is focused.
   if (mod && lower === 'k') {
     event.preventDefault()
     ctx.onOpenCommandPalette()
     return
   }
-  if (mod && key === ',') {
+
+  // ONE registry resolution per keydown; the matched chord's flags pick the tier.
+  const match = ctx.registryHook?.match(event) ?? null
+
+  // ---- Registry chord tier: fires above overlays; inside a text input only
+  // when the chord declares `inEditable` (the modifier chords do; `?` doesn't).
+  if (match?.aboveOverlay && (match.inEditable || !editable)) {
     event.preventDefault()
-    ctx.onOpenSettings()
-    return
-  }
-  if (mod && lower === 'n') {
-    event.preventDefault()
-    ctx.onCompose()
-    return
-  }
-  if (mod && event.shiftKey && lower === 'r') {
-    event.preventDefault()
-    ctx.onReplyAll()
-    return
-  }
-  if (mod && lower === 'r') {
-    event.preventDefault()
-    ctx.onReply()
-    return
-  }
-  if (mod && event.shiftKey && lower === 'l') {
-    event.preventDefault()
-    if (ctx.hasSelectedMessage) ctx.onToggleFlag()
+    match.run()
     return
   }
 
-  if (isEditableKeyboardTarget(event.target)) return
+  if (editable) return
 
   // ---- Undo/redo: only on the bare mail surface (native undo wins in overlays). ----
   if (mod && lower === 'z') {
@@ -172,21 +162,10 @@ export function dispatchMailKey(
     }
   }
 
-  if (key === '?') {
-    event.preventDefault()
-    ctx.onToggleShortcuts()
-    return
-  }
   if (key === '/') {
     event.preventDefault()
     ctx.onOpenCommandPalette()
     return
-  }
-
-  // A pending goto prefix is cancelled the moment a text input takes focus
-  // (e.g. the command palette opened via a chord above).
-  if (ctx.pendingPrefix && isEditableKeyboardTarget(event.target)) {
-    ctx.setPendingPrefix(null)
   }
 
   // ---- Plain keys below act on the bare mail surface only. ----
@@ -242,36 +221,14 @@ export function dispatchMailKey(
   const paneHandler = ctx.resolvePaneHandler(ctx.activePane)
   if (paneHandler && paneHandler(event)) return
 
-  // ---- Registry tier: contextual mail actions (archive/trash/delete/tag). ----
-  // The resolver picks the AVAILABLE action for this chord IN THIS CONTEXT, so
-  // `#`/Backspace lands on delete-permanently in Trash (with a confirm) and
-  // move-to-trash elsewhere. A `null` match (no available action — e.g. a draft,
-  // or no selection) falls through to the native handlers below, so every legacy
-  // behavior is preserved.
-  const registryMatch = ctx.registryHook?.match(event)
-  if (registryMatch) {
+  // ---- Registry mail-action tier: contextual chords (archive/trash/delete/
+  // tag/open). The resolver picks the action for this chord IN THIS CONTEXT, so
+  // `#`/Backspace lands on delete-permanently in Trash (with a confirm),
+  // discard-draft on a draft, and move-to-trash elsewhere. The table's verdict
+  // is final: a `null` match means the chord does nothing here — there is no
+  // native fallback second-guessing availability.
+  if (match) {
     event.preventDefault()
-    registryMatch.run()
-    return
-  }
-
-  // Selection-scoped actions, available from any pane while a message is open.
-  if (!ctx.hasSelectedMessage) return
-  if (lower === 'e') {
-    ctx.onArchive()
-    return
-  }
-  if (key === '#' || key === 'Backspace') {
-    ctx.onTrash()
-    return
-  }
-  if (lower === 't') {
-    event.preventDefault()
-    ctx.onOpenTagEditor()
-    return
-  }
-  if (lower === 'o') {
-    event.preventDefault()
-    ctx.onOpenFocusedMessage()
+    match.run()
   }
 }

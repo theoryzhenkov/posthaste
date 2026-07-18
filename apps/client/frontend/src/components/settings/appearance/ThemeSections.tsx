@@ -12,7 +12,7 @@ import {
   uiDensities,
   type ResolvedThemeMode,
 } from '@/lib/design'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import type { useDesignTheme } from '@/lib/design/useDesignTheme'
 
 import { SettingsSection } from '../panel/shared'

@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 
+import { buildDetailHeaderActions, buildRowContextMenu } from '@/commands'
+import { openExternalUrl } from '@/desktop/runtime'
 import { useActivePane } from '@/components/keyboard/usePane'
 import type { PaneId } from '@/domain/vocabulary'
 import { MessageDetail as MessageDetailPane } from '@/components/mail/detail/MessageDetail'
@@ -82,6 +84,43 @@ export function MailPanels(props: MailClientViewProps) {
 }
 
 function MessagePanels(props: MailClientViewProps) {
+  // Row context menus resolve from the registry with the shell's mutations +
+  // view role; each row supplies its own open/view callbacks and mailbox read
+  // model at menu time (commands/bind).
+  const contextMenuFor = useMemo(
+    () =>
+      buildRowContextMenu({ email: props.actions, viewRole: props.viewRole }),
+    [props.actions, props.viewRole],
+  )
+  // The detail header's action row, with this shell's callbacks pre-bound.
+  const headerActionsFor = useMemo(
+    () =>
+      buildDetailHeaderActions({
+        email: props.actions,
+        viewRole: props.viewRole,
+        detail: {
+          reply: props.onReply,
+          replyAll: props.onReplyAll,
+          forward: props.onForward,
+          editDraft: props.onEditDraft,
+          openTagEditor: () => props.onSetTagEditorOpen(true),
+          openFocusedMessage: props.onOpenFocusedMessage,
+        },
+        unsubscribeMailto: props.onUnsubscribeMailto,
+        openExternalUrl,
+      }),
+    [
+      props.actions,
+      props.viewRole,
+      props.onReply,
+      props.onReplyAll,
+      props.onForward,
+      props.onEditDraft,
+      props.onSetTagEditorOpen,
+      props.onOpenFocusedMessage,
+      props.onUnsubscribeMailto,
+    ],
+  )
   return (
     <ResizablePanelGroup
       orientation="horizontal"
@@ -102,8 +141,7 @@ function MessagePanels(props: MailClientViewProps) {
             onSelectMessage={props.onSelectMessageRef}
             onClearSelection={props.onClearSelectedMessage}
             onClearSearchQuery={props.onRejectSearchPreview}
-            actions={props.actions}
-            viewRole={props.viewRole}
+            contextMenuFor={contextMenuFor}
             onViewConversation={(message) =>
               props.onSearch(conversationViewQuery(message.conversationId))
             }
@@ -121,17 +159,9 @@ function MessagePanels(props: MailClientViewProps) {
             <div className="h-full min-h-0">
               <MessageDetailPane
                 selection={props.selectedMessage}
-                actions={props.actions}
-                viewRole={props.viewRole}
-                onEditDraft={props.onEditDraft}
-                onForward={props.onForward}
-                onOpenFocusedMessage={props.onOpenFocusedMessage}
-                onReply={props.onReply}
-                onReplyAll={props.onReplyAll}
+                headerActionsFor={headerActionsFor}
                 onSelectMessage={props.onSelectMessage}
                 onSearch={props.onSearch}
-                onTag={() => props.onSetTagEditorOpen(true)}
-                onUnsubscribeMailto={props.onUnsubscribeMailto}
               />
             </div>
           </ResizablePanel>

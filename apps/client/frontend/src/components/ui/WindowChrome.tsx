@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { isMacDesktop } from '@/desktop/runtime'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 // Shared macOS window chrome. On macOS every app window uses the inset/overlay
 // title bar (the traffic-light "semaphore" is drawn inside the webview), so each

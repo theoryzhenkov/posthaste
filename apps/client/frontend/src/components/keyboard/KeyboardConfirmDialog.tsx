@@ -6,7 +6,7 @@
  * dialog gates it — reusing the app's shared `AlertDialog` pattern so the
  * keyboard path gets the same affordance the context menu / palette does.
  */
-import type { ActionConfirm } from '@/commands'
+import type { ActionConfirmCopy as ActionConfirm } from '@/lib/command'
 import {
   AlertDialog,
   AlertDialogAction,

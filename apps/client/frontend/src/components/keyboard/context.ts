@@ -7,7 +7,11 @@ import { createContext, useContext } from 'react'
 
 import type { PaneId } from '@/domain/vocabulary'
 
-import type { PaneKeyHandler } from './dispatch'
+/**
+ * A pane's focused-key handler. Returns `true` when it consumed the event so
+ * the dispatcher stops; `false` lets the key fall through to global actions.
+ */
+export type PaneKeyHandler = (event: KeyboardEvent) => boolean
 
 export interface KeyboardContextValue {
   activePane: PaneId

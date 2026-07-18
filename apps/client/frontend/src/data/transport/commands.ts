@@ -45,7 +45,21 @@ function makeCommands(client: MailClient, queryClient: QueryClient) {
     messageId: MessageId,
     add: string[],
     remove: string[],
-  ) => run({ setKeywords: { accountId, messageId, change: { add, remove } } })
+    opts?: {
+      /** `false` keeps an IMPLICIT gesture (the auto-mark-read on opening a
+       *  message) out of the account's undo history, so a deliberate action's
+       *  toast/shell Undo is never hijacked by its read-state side effect. */
+      recordUndo?: boolean
+    },
+  ) =>
+    run({
+      setKeywords: {
+        accountId,
+        messageId,
+        change: { add, remove },
+        ...(opts?.recordUndo === false ? { recordUndo: false } : {}),
+      },
+    })
 
   return {
     /** Escape hatch for intents without a dedicated verb yet. */

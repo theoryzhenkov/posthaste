@@ -6,9 +6,10 @@
  *
  * Baseline mechanism: ESLint has no native baseline, so current offender
  * files are listed in the override blocks below. Never add per-file disable
- * comments. The "burn-down" blocks are slices 4-5 debt (the R3 block burned
- * to zero in the primitives slice): entries only leave this file (as the
- * sites migrate); new files/sites fail immediately.
+ * comments. Every burn-down block has burned to zero (R3 in the primitives
+ * slice, R4 in the commands slice, R5 in the store slice); what remains are
+ * permanent allowlists for the named infrastructure. New files/sites fail
+ * immediately.
  *
  * Selector approximations (documented per the charter's spirit over letter):
  * - R3 matches exported `function is*` / `has*` whose FIRST param is annotated
@@ -71,51 +72,35 @@ export default [
     },
   },
 
-  // R4 permanent allowlist: the command dispatcher and named low-level
-  // primitives (focus/dismissal/placement, routing, storage sync, crash
-  // capture). These are the infrastructure the rule routes everything into.
+  // R4 permanent allowlist: the registry's two dispatchers (the mail shell's
+  // KeyboardController and the scope-based CommandDispatcher every other
+  // window keydown routes through) and named low-level primitives — the DOM
+  // primitive module (dismissal/measure/unload guards, lib/dom.ts),
+  // panel dismissal/placement, routing, storage sync (the preferences store's
+  // multi-key sync and lib/store's stored-store sync), crash capture. These
+  // are the infrastructure the rule routes everything into; the slice-4
+  // burn-down block (App/SurfaceHost/FocusedSurface/OnboardingTour/
+  // ComposeOverlay/MarkdownComposerEditor) burned to zero.
   {
     files: [
-      'src/components/keyboard/KeyboardController.tsx',
+      'src/app/input/keyboard/KeyboardController.tsx',
+      'src/commands/dispatcher.tsx',
+      'src/lib/dom.ts',
       'src/components/floating/hooks/usePanelDismissal.ts',
       'src/components/floating/hooks/usePanelPlacement.ts',
       'src/surfaces/useSurfaceRouting.ts',
       'src/data/preferences/store.ts',
-      'src/desktop/devtools.ts',
+      'src/lib/store.ts',
       'src/desktop/diagnostics/consoleCapture.ts',
     ],
     rules: { 'no-restricted-properties': 'off' },
   },
 
-  // R4 baseline (slice 4 burn-down): component/app listener sites that must
-  // migrate onto the command registry. Remove each entry as it lands.
+  // R5 exemption: lib/store.ts is the one blessed implementation (the slice-4
+  // burn-down list emptied when the seven hand-rolled copies migrated onto
+  // it). R3 stays live here.
   {
-    files: [
-      'src/app/App.tsx',
-      'src/app/host/SurfaceHost.tsx',
-      'src/app/host/FocusedSurface.tsx',
-      'src/app/shell/onboarding/OnboardingTour.tsx',
-      'src/components/compose/ComposeOverlay.tsx',
-      'src/components/compose/editor/MarkdownComposerEditor.tsx',
-    ],
-    rules: { 'no-restricted-properties': 'off' },
-  },
-
-  // R5 exemption: lib/store* is where the one blessed implementation lives.
-  // R5 baseline (slice 4 burn-down): the hand-rolled copies that migrate to
-  // it. R3 stays live in all of these files.
-  {
-    files: [
-      'src/lib/store.ts',
-      'src/lib/store/**',
-      'src/components/mail/list/model/useViewMode.ts',
-      'src/components/mail/thread/useColumnConfig.ts',
-      'src/app/shell/onboarding/store.ts',
-      'src/data/preferences/store.ts',
-      'src/data/notifications/store.ts',
-      'src/data/transport/client.ts',
-      'src/desktop/devtools.ts',
-    ],
+    files: ['src/lib/store.ts'],
     rules: { 'no-restricted-syntax': restrictedSyntax([R3_RULE]) },
   },
 ]

@@ -6,17 +6,12 @@
  * Mounted by `MailClient` once the mail UI is ready; persistence lives in
  * `./store`.
  */
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { openExternalUrl } from '@/desktop/runtime'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
+import { useEscapeToDismiss, useViewportRemeasure } from '@/lib/dom'
 import { Button } from '@/components/ui/form/button'
 
 import { DONATION_LINK, SOCIAL_LINKS, type OnboardingLink } from './links'
@@ -63,30 +58,16 @@ export function OnboardingTour() {
   }, [step.anchor])
 
   useLayoutEffect(() => {
-    // Measure from observer/listener callbacks (not synchronously in the effect
-    // body): observing the card fires an initial callback that positions it,
-    // and resize/scroll keep the spotlight + card aligned to the anchor.
+    // Measure from the observer callback (not synchronously in the effect
+    // body): observing the card fires an initial callback that positions it.
     const observer = new ResizeObserver(() => measure())
     if (cardRef.current) observer.observe(cardRef.current)
-    window.addEventListener('resize', measure)
-    window.addEventListener('scroll', measure, true)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', measure)
-      window.removeEventListener('scroll', measure, true)
-    }
+    return () => observer.disconnect()
   }, [measure])
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        finish()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [finish])
+  // Resize/scroll keep the spotlight + card aligned to the anchor; Escape
+  // skips the tour (overlay dismissal primitive — the tour owns input).
+  useViewportRemeasure(measure)
+  useEscapeToDismiss(finish)
 
   if (typeof document === 'undefined') {
     return null

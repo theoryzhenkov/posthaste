@@ -3,7 +3,7 @@ import type {
   PaletteRow,
   RankingContext,
   SearchCandidate,
-} from '@/components/palette/search/types'
+} from '@/app/input/palette/search/types'
 import { validateSearchQuery } from '@/domain/search'
 import { normalizeAppliedSearchQuery } from '@/domain/searchQuery'
 

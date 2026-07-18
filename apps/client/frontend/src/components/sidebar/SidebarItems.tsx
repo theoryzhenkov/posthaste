@@ -13,7 +13,7 @@ import {
 
 import type { Mailbox, MailboxGroup } from '@/data/transport/api'
 import { accentColor } from '@/lib/design'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import {
   mailboxRoleAccent,
   renderMailboxRoleIcon,

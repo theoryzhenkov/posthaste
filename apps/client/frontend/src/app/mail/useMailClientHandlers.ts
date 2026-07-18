@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 
 import type { AccountRow, MessageSummary } from '@/gen'
 import type { SidebarSelection } from '@/components/sidebar/Sidebar'
-import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
 import { useComposeIntent } from '@/data/hooks/useComposeIntent'
 import type { useEmailActions } from '@/data/hooks/useEmailActions'
 import { openFocusedSurface } from '@/surfaces/useSurfaceRouting'
@@ -105,22 +104,6 @@ export function useMailClientHandlers(input: {
     [applyTagChange],
   )
 
-  const handleToggleFlag = useCallback(() => {
-    if (!selectedMessage) return
-    actions.toggleFlag({
-      conversationId: selectedMessage.conversationId,
-      sourceId: selectedMessage.sourceId,
-      messageId: selectedMessage.messageId,
-      isFlagged: selectedMessageData?.isFlagged ?? false,
-      isRead: selectedMessageData?.isRead,
-      keywords: selectedMessageData?.keywords,
-    })
-  }, [actions, selectedMessage, selectedMessageData])
-  const handleArchive = useCallback(() => {
-    if (selectedMessage) {
-      actions.archive(selectedMessage)
-    }
-  }, [actions, selectedMessage])
   const handleDiscardDraft = useCallback(() => {
     if (selectedMessage) {
       actions.discardDraft({
@@ -128,19 +111,6 @@ export function useMailClientHandlers(input: {
         draftId: selectedMessageData?.draftId,
       })
     }
-  }, [actions, selectedMessage, selectedMessageData])
-  const handleTrash = useCallback(() => {
-    if (!selectedMessage) return
-    // Deleting a draft is a discard (hard delete via the draft-delete op),
-    // never a trash move — keeps the keyboard/`#` path coherent with the row.
-    if (selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft)) {
-      actions.discardDraft({
-        ...selectedMessage,
-        draftId: selectedMessageData?.draftId,
-      })
-      return
-    }
-    actions.trash(selectedMessage)
   }, [actions, selectedMessage, selectedMessageData])
   const handleSnooze = useCallback(
     (until: number) => {
@@ -160,7 +130,6 @@ export function useMailClientHandlers(input: {
     handleAddTag,
     handleRemoveTag,
     handleApplySearch: (query: string) => applySearchQuery(query),
-    handleArchive,
     handleClearSelectedMessage: () => setSelectedMessage(null),
     handleCloseCommandPalette: () => setIsCommandPaletteOpen(false),
     handleCompose: compose.openCompose,
@@ -187,7 +156,6 @@ export function useMailClientHandlers(input: {
       openFocusedSurface(surface)
       setIsCommandPaletteOpen(false)
     },
-    handleOpenSettingsShortcut: () => openFocusedSurface(settingsSurface()),
     handleOpenTagEditor: () => {
       if (selectedMessage) setIsTagEditorOpen(true)
     },
@@ -226,10 +194,8 @@ export function useMailClientHandlers(input: {
       setSelectedMessage(null)
     },
     handleShowShortcuts: () => setShowShortcuts(true),
-    handleToggleFlag,
     handleToggleSettings: () => toggleSettingsSurface({ effectiveSurface }),
     handleToggleShortcuts: () => setShowShortcuts((prev) => !prev),
-    handleTrash,
     handleSnooze,
   }
 }

@@ -7,15 +7,9 @@
  */
 import { Fragment, memo, useCallback } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import {
-  resolveActions,
-  type ActionContext,
-  type ActionServices,
-} from '../../../commands/index'
-import type { MessageSummary } from '../../../data/transport/api/index'
-import { SYSTEM_KEYWORDS } from '../../../domain/vocabulary'
-import type { EmailActions } from '../../../data/hooks/useEmailActions'
-import { cn } from '../../../lib/cn'
+import type { Mailbox, MessageSummary } from '../../../data/transport/api/index'
+import type { ResolvedActionView } from '../../../lib/command'
+import { cn } from '../../../lib/design/cn'
 import type { ConversationTreeRow } from './model/conversationTree'
 import { messageKey } from './model/model'
 import type { MailboxDirectory } from './model/useMailboxDirectory'
@@ -36,6 +30,16 @@ import {
   getColumnDef,
 } from '../thread/columns'
 
+/** Registry-resolved context menu for one row (built by the app shell via
+ *  `commands/bind.buildRowContextMenu`); the row supplies its own callbacks
+ *  and the account's mailbox read model at menu time. */
+export type RowContextMenuFor = (input: {
+  message: MessageSummary
+  open: (message: MessageSummary) => void
+  viewConversation: (message: MessageSummary) => void
+  mailboxes: { list: (sourceId: string) => Mailbox[] }
+}) => ResolvedActionView[]
+
 interface MessageRowProps {
   message: MessageSummary
   isSelected: boolean
@@ -44,9 +48,7 @@ interface MessageRowProps {
   onSelectMessage: (message: MessageSummary) => void
   columns: ColumnId[]
   layout: ThreadListLayout
-  actions: EmailActions
-  /** Role of the current view, used to derive contextual actions; null = ambiguous. */
-  viewRole: string | null
+  contextMenuFor: RowContextMenuFor
   /** Filter the view to this message's conversation (contextual action). */
   onViewConversation: (message: MessageSummary) => void
   /** Tree placement in conversation view; undefined in the flat list. */
@@ -77,15 +79,13 @@ export const MessageRow = memo(function MessageRow({
   onSelectMessage,
   columns,
   layout,
-  actions,
-  viewRole,
+  contextMenuFor,
   onViewConversation,
   treeRow,
   onToggleCollapse,
   mailboxDirectory,
   excludeMailboxId,
 }: MessageRowProps) {
-  const messageRef = { messageId: message.id, sourceId: message.sourceId }
   const renderContext: ColumnRenderContext = {
     mailboxDirectory,
     excludeMailboxId,
@@ -93,35 +93,16 @@ export const MessageRow = memo(function MessageRow({
   const handleSelect = useCallback(() => {
     onSelectMessage(message)
   }, [message, onSelectMessage])
-  // The context menu resolves directly from the registry for this row's target.
-  // `services.row` binds the two `open` entries to the row callbacks (the same
-  // wiring the deleted shim owned); `email` carries the domain mutations. Built
-  // per render — cheap plain objects, no hooks inside.
-  const services: ActionServices = {
-    email: actions,
-    row: { open: onSelectMessage, viewConversation: onViewConversation },
-    // The account's mailbox read model (already subscribed once per account by
-    // useMailboxDirectory) — options source for the parameterized "Move to ▸".
+  // The host-built resolver runs against this row's target: the row binds its
+  // own open/view callbacks and the account's mailbox read model (already
+  // subscribed once per account by useMailboxDirectory — options source for
+  // the parameterized "Move to ▸"). Built per render — cheap plain objects.
+  const contextActions = contextMenuFor({
+    message,
+    open: onSelectMessage,
+    viewConversation: onViewConversation,
     mailboxes: { list: mailboxDirectory.list },
-  }
-  const actionContext: ActionContext = {
-    targets: [
-      {
-        ref: messageRef,
-        summary: message,
-        isDraft: message.keywords.includes(SYSTEM_KEYWORDS.Draft),
-        draftId: message.draftId,
-        conversationId: message.conversationId,
-      },
-    ],
-    viewRole,
-    activePane: 'list',
-    surface: 'context-menu',
-    inputOwner: 'mail',
-    hasPendingMutation: actions.isPending,
-    connection: 'unknown',
-  }
-  const contextActions = resolveActions(actionContext, services)
+  })
   const row = (
     <button
       className={cn(
@@ -178,8 +159,8 @@ export const MessageRow = memo(function MessageRow({
           const previous = contextActions[index - 1]
           const Icon = action.icon
           return (
-            <Fragment key={action.def.id}>
-              {previous && previous.def.section !== action.def.section && (
+            <Fragment key={action.id}>
+              {previous && previous.section !== action.section && (
                 <ContextMenuSeparator />
               )}
               {action.params ? (
@@ -204,7 +185,7 @@ export const MessageRow = memo(function MessageRow({
                 </ContextMenuSub>
               ) : (
                 <ContextMenuItem
-                  variant={action.def.destructive ? 'destructive' : 'default'}
+                  variant={action.destructive ? 'destructive' : 'default'}
                   onSelect={action.execute}
                 >
                   <Icon size={14} />

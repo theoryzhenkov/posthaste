@@ -8,7 +8,7 @@
  */
 import { Keyboard } from 'lucide-react'
 
-import { FloatingPanel } from '../../floating/FloatingPanel'
+import { FloatingPanel } from '@/components/floating/FloatingPanel'
 import { shortcutReferenceRows } from './shortcutReferenceRows'
 
 interface ShortcutReferenceProps {
