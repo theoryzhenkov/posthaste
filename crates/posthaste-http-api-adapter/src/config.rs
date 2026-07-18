@@ -9,9 +9,6 @@ use posthaste_domain_model::{
 use posthaste_domain_service::ConfigRepository;
 use serde::Deserialize;
 
-/// Application directory name used under XDG paths.
-const APP_DIR_NAME: &str = "posthaste";
-
 /// Resolved filesystem paths for config, state, and optional bootstrap template.
 ///
 /// @spec docs/L1-accounts#config-directory-layout
@@ -23,17 +20,14 @@ pub struct ResolvedRoots {
 }
 
 /// Resolve config, state, and bootstrap paths from environment variables
-/// or XDG defaults.
+/// or XDG defaults. Config and state roots come from the canonical shared
+/// resolver in [`posthaste_config::paths`], so every embedding opens the
+/// same directories.
 ///
 /// @spec docs/L1-accounts#config-directory-layout
 pub fn resolve_roots() -> ResolvedRoots {
-    let config_root = std::env::var("POSTHASTE_CONFIG_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| default_config_root());
-
-    let state_root = std::env::var("POSTHASTE_STATE_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| default_state_root());
+    let config_root = posthaste_config::paths::config_root();
+    let state_root = posthaste_config::paths::state_root();
 
     let bootstrap_path = std::env::var("POSTHASTE_BOOTSTRAP_PATH")
         .map(PathBuf::from)
@@ -59,30 +53,8 @@ pub use bootstrap::import_bootstrap;
 
 // -- Helpers --
 
-/// Default config root: `$XDG_CONFIG_HOME/mail` or `~/.config/mail`.
-fn default_config_root() -> PathBuf {
-    xdg_dir("XDG_CONFIG_HOME", ".config").join(APP_DIR_NAME)
-}
-
-/// Default state root: `$XDG_DATA_HOME/mail` or `~/.local/share/mail`.
-fn default_state_root() -> PathBuf {
-    xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR_NAME)
-}
-
-/// Resolve an XDG directory from an env var or fall back to `$HOME/{suffix}`.
-fn xdg_dir(env_var: &str, fallback_suffix: &str) -> PathBuf {
-    std::env::var(env_var)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(fallback_suffix)
-        })
-}
-
-/// Default bootstrap file location: `$XDG_CONFIG_HOME/mail/bootstrap.toml`.
+/// Default bootstrap file location: `bootstrap.toml` under the default
+/// config root (deliberately not the env-overridden root).
 fn default_bootstrap_path() -> PathBuf {
-    xdg_dir("XDG_CONFIG_HOME", ".config")
-        .join(APP_DIR_NAME)
-        .join("bootstrap.toml")
+    posthaste_config::paths::default_config_root().join("bootstrap.toml")
 }

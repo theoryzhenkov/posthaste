@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use posthaste_client_backend::{serve, AppPaths, AppState, BuildOptions, ServerHandle};
+use posthaste_client_backend::{serve, AppPaths, AppState, BuildError, BuildOptions, ServerHandle};
 use posthaste_domain_model::{
     now_iso8601, AccountDriver, AccountId, AccountSettings, AccountStatus,
     AccountTransportSettings, ProviderAuthKind, ProviderHint, SecretKind, SecretRef,
@@ -2630,4 +2630,43 @@ async fn unsubscribe_requires_a_valid_one_click_target() {
     assert_eq!(response.status(), 404);
 
     server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn state_root_lock_refuses_a_second_backend() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let paths = AppPaths::with_roots(dir.path().join("config"), dir.path().join("state"));
+
+    let mut options = BuildOptions::at(paths.clone());
+    options.secret_store = Some(Arc::new(TestSecretStore));
+    let first = AppState::assemble(options)
+        .await
+        .expect("assemble first backend");
+
+    // A second backend over the same state root — a second desktop launch,
+    // another channel's build, or the standalone binary — must be refused
+    // before it opens the store.
+    let mut options = BuildOptions::at(paths.clone());
+    options.secret_store = Some(Arc::new(TestSecretStore));
+    let error = match AppState::assemble(options).await {
+        Ok(state) => {
+            state.shutdown().await;
+            panic!("second backend over a live store must be refused");
+        }
+        Err(error) => error,
+    };
+    assert!(
+        matches!(error, BuildError::StoreLocked { .. }),
+        "unexpected error: {error}"
+    );
+
+    // A shut-down backend frees the store even while its state handles are
+    // still alive.
+    first.shutdown().await;
+    let mut options = BuildOptions::at(paths);
+    options.secret_store = Some(Arc::new(TestSecretStore));
+    let reopened = AppState::assemble(options)
+        .await
+        .expect("store reopens after the first backend is gone");
+    reopened.shutdown().await;
 }

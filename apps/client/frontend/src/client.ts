@@ -97,6 +97,31 @@ export interface MailClientOptions {
   eventSourceFactory?: (url: string) => EventSourceLike
 }
 
+/** Connection options for the boot-time MailClient. The desktop shell
+ * injects the embedded backend's port and per-launch session token as window
+ * globals via an initialization script, before any bundle code runs; when
+ * they are present the client talks to the loopback API directly. Absent
+ * (browser tab behind the vite dev proxy), requests stay same-origin with no
+ * token — the proxy injects the Authorization header. */
+export function bootstrapClientOptions(): Pick<MailClientOptions, 'baseUrl' | 'token'> {
+  if (typeof window !== 'undefined') {
+    const globals = window as unknown as {
+      __POSTHASTE_PORT__?: unknown
+      __POSTHASTE_TOKEN__?: unknown
+    }
+    if (
+      typeof globals.__POSTHASTE_PORT__ === 'number' &&
+      typeof globals.__POSTHASTE_TOKEN__ === 'string'
+    ) {
+      return {
+        baseUrl: `http://127.0.0.1:${globals.__POSTHASTE_PORT__}`,
+        token: globals.__POSTHASTE_TOKEN__,
+      }
+    }
+  }
+  return { baseUrl: '', token: '' }
+}
+
 const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 
 /** A ULID-shaped id: 48-bit millisecond timestamp + 80 random bits, Crockford

@@ -11,7 +11,10 @@
   ],
   "scripts": {
     "client:dev": "bun --cwd=apps/client/frontend run dev",
+    "client:build": "bun --cwd=apps/client/frontend run build",
     "client:check": "bun --cwd=apps/client/frontend run check",
+    "client:desktop:dev": "cd apps/client/desktop && bunx tauri dev",
+    "client:desktop:build": "cd apps/client/desktop && bunx tauri build",
     "web:dev": "bun --cwd=legacy/web run dev",
     "web:build": "bun --cwd=legacy/web run build",
     "web:check": "bun --cwd=legacy/web run check",
@@ -20,8 +23,8 @@
     "site:build": "bun --cwd=apps/site run build",
     "site:check": "bun --cwd=apps/site run check",
     "tauri": "tauri",
-    "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build",
+    "desktop:dev": "cd legacy/desktop && bunx tauri dev",
+    "desktop:build": "cd legacy/desktop && bunx tauri build",
     "lab:tauri-playwright": "playwright test --config tools/lab/tauri-playwright/playwright.config.ts --project=tauri-main"
   },
   "devDependencies": {

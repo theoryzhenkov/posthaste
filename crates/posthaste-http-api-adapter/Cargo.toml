@@ -19,7 +19,6 @@ ammonia = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
-dirs = { workspace = true }
 keyring = { workspace = true }
 macaroon = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }

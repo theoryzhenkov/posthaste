@@ -7,7 +7,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
 import { applyBrandFavicon } from './brandFavicon'
-import { MailClient } from './client'
+import { bootstrapClientOptions, MailClient } from './client'
 import { MailClientProvider } from './data'
 import { ackDesktopWebviewBoot } from './desktop'
 import { markSurfaceBootstrap } from './surfaceBootstrapLog'
@@ -30,9 +30,10 @@ markSurfaceBootstrap('main_entry', {
 // on close so a failed frontend load can never yield an unclosable window.
 void ackDesktopWebviewBoot()
 
-// Dev-proxy construction: same-origin requests, Authorization injected by
+// Desktop shell: the injected window globals carry the embedded backend's
+// port + token. Dev proxy: same-origin requests, Authorization injected by
 // the proxy, so the facade needs no baseUrl or token of its own.
-const mailClient = new MailClient({ baseUrl: '', token: '' })
+const mailClient = new MailClient(bootstrapClientOptions())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

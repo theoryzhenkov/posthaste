@@ -32,7 +32,6 @@ axum = { workspace = true }
 base64 = { workspace = true }
 jsonwebtoken = { workspace = true }
 oauth2 = { workspace = true }
-dirs = { workspace = true }
 futures-util = { workspace = true }
 keyring = { workspace = true }
 reqwest = { workspace = true }
@@ -50,6 +49,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 posthaste-testkit = { path = "../../../crates/posthaste-testkit" }
 reqwest = { workspace = true }
+rusqlite = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]
