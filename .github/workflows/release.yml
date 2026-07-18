@@ -173,7 +173,7 @@ jobs:
   build-web:
     if: ${{ !inputs.only_desktop_linux }}
     name: Build web frontend
-    needs: resolve-channel
+    needs: [resolve-channel, build-client-frontend]
     runs-on: ubuntu-latest
 
     steps:
@@ -200,15 +200,14 @@ jobs:
           POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
         run: bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
 
-      - name: Build + package web frontend
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-frontend-dist
+          path: apps/client/frontend/dist
+
+      - name: Package web frontend
         shell: bash
-        env:
-          # Baked into the web bundle so OAuth account setup can exchange the
-          # authorization code (Google rejects the exchange without it).
-          VITE_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_OAUTH_CLIENT_SECRET }}
-        run: |
-          bun --cwd=apps/client/frontend run build
-          bash tools/package/web.sh
+        run: bash tools/package/web.sh
 
       - uses: actions/upload-artifact@v4
         with:
@@ -361,9 +360,42 @@ jobs:
           if-no-files-found: error
           path: target/distribute/PosthasteCTL*.tar.gz
 
+  # The integrated frontend is platform-independent: build it ONCE on Linux and
+  # feed the identical dist to the web tarball and every desktop bundle. This
+  # also keeps vite off the Windows runners (bun-on-Windows junctioned
+  # node_modules can EPERM during vite resolution).
+  build-client-frontend:
+    name: Build client frontend
+    needs: resolve-channel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - name: Build frontend dist
+        env:
+          # Baked into the bundle at vite build time so OAuth account setup
+          # can exchange the authorization code.
+          VITE_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_OAUTH_CLIENT_SECRET }}
+        run: bun --cwd=apps/client/frontend run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-frontend-dist
+          path: apps/client/frontend/dist
+          if-no-files-found: error
+
   build-desktop:
     name: Build desktop ${{ matrix.platform }}
-    needs: resolve-channel
+    needs: [resolve-channel, build-client-frontend]
     runs-on: ${{ matrix.os }}
     env:
       # Resolved by apps/client/desktop/build.rs into a compile-time constant the
@@ -503,6 +535,11 @@ jobs:
       # one channel. The checked-in tauri.conf.json keeps the legacy-compatible
       # `releases/latest/download/latest.json` endpoint for unsupervised local
       # builds.
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-frontend-dist
+          path: apps/client/frontend/dist
+
       - name: Build desktop bundles
         if: runner.os != 'macOS'
         shell: bash
@@ -511,7 +548,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VITE_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
-          bun --cwd=apps/client/frontend run build
           devtools_flag=""
           if [ "${POSTHASTE_INCLUDE_DEVTOOLS:-false}" = "true" ]; then
             devtools_flag="--features devtools"
@@ -593,7 +629,6 @@ jobs:
             fi
           }
 
-          bun --cwd=apps/client/frontend run build
           configure_notarization
           if [ "${POSTHASTE_ENFORCE_MACOS_SIGNING:-}" = "true" ] && [ "$notarization_enabled" != "true" ]; then
             echo "Stable macOS release builds require notarization credentials." >&2
