@@ -8,14 +8,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Application directory name used under the XDG base directories.
-const APP_DIR_NAME: &str = "posthaste";
-
 /// File name of the connection-info document inside the state root.
 const CONNECTION_INFO_FILE: &str = "connection-info.json";
 
 /// Database file name inside the state root.
 const DATABASE_FILE: &str = "mail.sqlite";
+
+/// File name of the instance-lock file inside the state root.
+const LOCK_FILE: &str = "backend.lock";
 
 /// Resolved filesystem roots for one backend instance.
 #[derive(Clone, Debug)]
@@ -28,19 +28,16 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
-    /// Resolve roots from `POSTHASTE_CONFIG_ROOT` / `POSTHASTE_STATE_ROOT`,
-    /// falling back to the XDG defaults (`$XDG_CONFIG_HOME/posthaste`,
-    /// `$XDG_DATA_HOME/posthaste`).
+    /// Resolve roots through the canonical shared resolver in
+    /// [`posthaste_config::paths`]: `POSTHASTE_CONFIG_ROOT` /
+    /// `POSTHASTE_STATE_ROOT`, falling back to the XDG defaults
+    /// (`$XDG_CONFIG_HOME/posthaste`, `$XDG_DATA_HOME/posthaste`) — the same
+    /// directories every earlier release opened, so an existing install's
+    /// data is found in place.
     pub fn resolve() -> Self {
-        let config_root = std::env::var("POSTHASTE_CONFIG_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| xdg_dir("XDG_CONFIG_HOME", ".config").join(APP_DIR_NAME));
-        let state_root = std::env::var("POSTHASTE_STATE_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR_NAME));
         Self {
-            config_root,
-            state_root,
+            config_root: posthaste_config::paths::config_root(),
+            state_root: posthaste_config::paths::state_root(),
         }
     }
 
@@ -57,21 +54,62 @@ impl AppPaths {
         self.state_root.join(DATABASE_FILE)
     }
 
+    /// Path of the instance-lock file.
+    pub fn lock_path(&self) -> PathBuf {
+        self.state_root.join(LOCK_FILE)
+    }
+
     /// Path of the connection-info file.
     pub fn connection_info_path(&self) -> PathBuf {
         self.state_root.join(CONNECTION_INFO_FILE)
     }
 }
 
-/// Resolve an XDG base directory from its env var or `$HOME/{suffix}`.
-fn xdg_dir(env_var: &str, fallback_suffix: &str) -> PathBuf {
-    std::env::var(env_var)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(fallback_suffix)
-        })
+/// Exclusive advisory lock on the state root: one live backend per store.
+///
+/// SQLite in WAL mode happily lets a second process open the same database,
+/// so nothing below this layer stops two backends (a second desktop launch,
+/// another channel's build over the shared XDG roots, or the standalone
+/// backend binary) from racing sync engines and outbox processors over one
+/// store and clobbering each other's connection-info file. The lock is taken
+/// before the database opens and released by [`AppState::shutdown`] (or when
+/// the last state handle drops); the OS releases it when the holding process
+/// exits, so a crash never leaves the store stuck. The lock file itself is
+/// never deleted — removing it would race a concurrent acquire.
+///
+/// [`AppState`]: crate::AppState
+/// [`AppState::shutdown`]: crate::AppState::shutdown
+#[derive(Debug)]
+pub struct StoreLock {
+    /// The locked file, held open while the lock is live; closing it (via
+    /// [`StoreLock::release`] or drop) releases the OS lock.
+    file: std::sync::Mutex<Option<fs::File>>,
+}
+
+impl StoreLock {
+    /// Try to take the exclusive lock, creating the lock file if needed.
+    /// `Ok(None)` means another live backend holds it.
+    pub fn acquire(path: &Path) -> io::Result<Option<Self>> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Self {
+                file: std::sync::Mutex::new(Some(file)),
+            })),
+            Err(fs::TryLockError::WouldBlock) => Ok(None),
+            Err(fs::TryLockError::Error(error)) => Err(error),
+        }
+    }
+
+    /// Release the lock while handles to it may still be alive, so an
+    /// ordered shutdown frees the store for a successor process without
+    /// waiting for every state clone to drop. Idempotent.
+    pub fn release(&self) {
+        self.file.lock().expect("store lock poisoned").take();
+    }
 }
 
 /// The connection-info document: where the API listens and the session
@@ -157,5 +195,31 @@ mod tests {
 
         ConnectionInfo::remove(&path).unwrap();
         ConnectionInfo::remove(&path).expect("second remove is a no-op");
+    }
+
+    #[test]
+    fn store_lock_is_exclusive_and_releases_on_release_or_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backend.lock");
+
+        let lock = StoreLock::acquire(&path)
+            .unwrap()
+            .expect("first acquire succeeds");
+        assert!(
+            StoreLock::acquire(&path).unwrap().is_none(),
+            "second acquire must be refused while the lock is held"
+        );
+
+        lock.release();
+        lock.release();
+        let relocked = StoreLock::acquire(&path)
+            .unwrap()
+            .expect("the lock is free again after release");
+
+        drop(relocked);
+        assert!(
+            StoreLock::acquire(&path).unwrap().is_some(),
+            "the lock is free again after drop"
+        );
     }
 }

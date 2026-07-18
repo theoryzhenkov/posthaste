@@ -5,6 +5,7 @@
 mod atomic;
 pub mod daemon;
 mod defaults;
+pub mod paths;
 mod repository;
 mod schema;
 #[cfg(test)]

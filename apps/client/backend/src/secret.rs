@@ -9,7 +9,19 @@ use posthaste_domain_model::{SecretKind, SecretRef, SecretStoreError};
 use posthaste_domain_service::{SecretCasOutcome, SecretStore};
 
 /// Keyring service name used for all OS-managed provider secrets.
+///
+/// FROZEN: every existing install's keychain entries live under this service
+/// name (with the secret-ref key as the account name — see
+/// [`keyring_entry_location`]), so changing either strands stored credentials.
 const KEYRING_SERVICE_NAME: &str = "posthaste";
+
+/// The `(service, account)` pair under which an OS secret ref lives in the
+/// OS keyring. This naming is the credential-continuity contract: the
+/// secret-ref keys persisted in `sources/*.toml` must keep resolving to the
+/// entries earlier releases wrote.
+pub fn keyring_entry_location(secret_ref: &SecretRef) -> (&'static str, &str) {
+    (KEYRING_SERVICE_NAME, secret_ref.key.as_str())
+}
 
 /// Process-wide guard serializing [`SystemSecretStore::update_if_unchanged`]
 /// read-compare-write sequences. The keyring and env backings expose no
@@ -27,8 +39,8 @@ pub struct SystemSecretStore;
 
 impl SystemSecretStore {
     fn entry(secret_ref: &SecretRef) -> Result<Entry, SecretStoreError> {
-        Entry::new(KEYRING_SERVICE_NAME, &secret_ref.key)
-            .map_err(|err| SecretStoreError::Unavailable(err.to_string()))
+        let (service, account) = keyring_entry_location(secret_ref);
+        Entry::new(service, account).map_err(|err| SecretStoreError::Unavailable(err.to_string()))
     }
 }
 
