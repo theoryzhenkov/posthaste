@@ -2,13 +2,14 @@
 //! (and generic) IMAP+SMTP fixture: sending a saved draft must destroy the
 //! draft on the provider as a settlement effect of the send — the draft leaves
 //! Drafts, exactly ONE copy lands in Sent — while a send without a `draft_id`
-//! touches nothing.
+//! touches nothing. Drives `MailService` + the real `LiveImapSmtpGateway`
+//! directly (enqueue → flush → sync).
 //!
 //! The provider-correctness bug these pin (owner field report): the send
 //! request always carried `draft_id`, but nothing consumed it — sending a
-//! draft left it sitting in Drafts forever. The fix enqueues the draft's
-//! delete when the send settles success (idempotent, retried with the outbox),
-//! and the Gmail Sent-copy rider is asserted both ways: Gmail SMTP auto-places
+//! draft left it sitting in Drafts forever. The fix consumes the draft when
+//! the send settles success (idempotent, retried with the outbox), and the
+//! Gmail Sent-copy rider is asserted both ways: Gmail SMTP auto-places
 //! the Sent copy (a client APPEND would be the classic duplicate — none may
 //! appear on the wire), while a generic provider gets its single Sent copy
 //! only from the client's APPEND.
@@ -19,17 +20,14 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_client_link::RuntimeLink;
-use posthaste_contract_core::{
-    AccountScopeRequest, ClientMutationId, MailListViewState, RuntimeCaller, RuntimeErrorCode,
-    ViewSnapshot,
-};
 use posthaste_domain_model::{AccountId, MessageId, OperationKind, Recipient, SendMessageRequest};
-use posthaste_runtime_api::{RuntimeMailReadApi, RuntimeMailWriteApi};
-use posthaste_testkit::{GmailImapFixture, Harness, RuntimeHarness, MAILBOX_DRAFTS, MAILBOX_SENT};
+use posthaste_imap::LiveImapSmtpGateway;
+use posthaste_testkit::{GmailImapFixture, Harness, MAILBOX_DRAFTS, MAILBOX_SENT};
+
+use common::{connect_account, flush_settled, mailbox_id_by_name, messages_in, sync};
 
 /// A compose-shaped request: `draft_id` names the originating draft on a send
-/// (None while saving the draft itself — the runtime stamps the stable key).
+/// (None while saving the draft itself — the service stamps the stable key).
 fn compose_request(subject: &str, draft_id: Option<&str>) -> SendMessageRequest {
     SendMessageRequest {
         from: Some(Recipient {
@@ -47,70 +45,27 @@ fn compose_request(subject: &str, draft_id: Option<&str>) -> SendMessageRequest 
     }
 }
 
-/// Resolve the fixture-served mailbox's runtime `MailboxId` by its IMAP name.
-async fn mailbox_id_by_name(harness: &RuntimeHarness, account: &AccountId, name: &str) -> String {
-    let mailboxes = harness
-        .core()
-        .list_mailboxes(
-            RuntimeCaller::test(),
-            AccountScopeRequest::Explicit {
-                account_ids: vec![account.clone()],
-            },
-        )
-        .await
-        .expect("mailboxes should list");
-    mailboxes
-        .get(account)
-        .and_then(|ms| ms.iter().find(|m| m.name.eq_ignore_ascii_case(name)))
-        .unwrap_or_else(|| panic!("mailbox {name} should be discovered"))
-        .id
-        .to_string()
-}
-
-/// Open a `mailList` view over one mailbox and return its state.
-async fn open_mailbox_view(
-    harness: &RuntimeHarness,
-    account: &AccountId,
-    mailbox_id: &str,
-) -> MailListViewState {
-    let caller = RuntimeCaller::test();
-    let view = common::mail_list_view(&format!("in:{account}/{mailbox_id}"));
-    let link = harness
-        .core()
-        .open_link(caller.clone())
-        .await
-        .expect("link should open")
-        .link_id;
-    let snapshot: ViewSnapshot = harness
-        .core()
-        .open_link_view(caller, link, view)
-        .await
-        .expect("mailbox view should open");
-    serde_json::from_value::<MailListViewState>(snapshot.data)
-        .expect("snapshot data should be mail list state")
-}
-
-/// Save a draft through the runtime and flush it to the provider's Drafts
+/// Save a draft through the service and flush it to the provider's Drafts
 /// mailbox, returning the stable draft key used.
 async fn save_and_flush_draft(
-    harness: &RuntimeHarness,
+    harness: &Harness,
     account: &AccountId,
+    gateway: &LiveImapSmtpGateway,
     fixture: &GmailImapFixture,
     subject: &str,
 ) -> MessageId {
     let draft_key = MessageId::from("compose-session-1");
     harness
-        .core()
+        .service
         .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
+            account,
             Some(draft_key.clone()),
-            None,
             compose_request(subject, None),
         )
         .await
         .expect("draft should save");
-    harness.sync_account(account).await;
+    flush_settled(harness, account, gateway).await;
+    sync(harness, account, gateway).await;
     assert_eq!(
         fixture.mailbox_message_count(MAILBOX_DRAFTS),
         1,
@@ -135,24 +90,23 @@ fn append_commands_into(commands: &[String], mailbox: &str) -> Vec<String> {
 #[tokio::test]
 async fn gmail_send_consumes_the_draft_with_exactly_one_sent_copy() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness
-        .create_gmail_account("gmail-send-draft", &gmail)
-        .await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-send-draft");
+    let gateway = connect_account(&harness, &gmail, "gmail-send-draft").await;
 
-    let draft_key = save_and_flush_draft(&harness, &account, &gmail, "Quarterly reply").await;
+    let draft_key =
+        save_and_flush_draft(&harness, &account, &gateway, &gmail, "Quarterly reply").await;
 
     harness
-        .core()
-        .send_message(
-            RuntimeCaller::test(),
-            account.clone(),
+        .service
+        .enqueue_send(
+            &account,
             compose_request("Quarterly reply", Some(draft_key.as_str())),
-            None,
         )
         .await
         .expect("send should queue");
-    harness.sync_account(&account).await;
+    flush_settled(&harness, &account, &gateway).await;
+    sync(&harness, &account, &gateway).await;
 
     // The submission happened exactly once, and the settled send consumed the
     // draft on the server.
@@ -193,14 +147,13 @@ async fn gmail_send_consumes_the_draft_with_exactly_one_sent_copy() {
         "the consumed draft is UID EXPUNGEd from Drafts exactly once, wire: {commands:#?}"
     );
 
-    // Local store coherence: the sync that settled the send already pulled the
-    // deletion — the Drafts view no longer shows the consumed draft.
-    let drafts_mailbox = mailbox_id_by_name(&harness, &account, MAILBOX_DRAFTS).await;
-    let drafts_view = open_mailbox_view(&harness, &account, &drafts_mailbox).await;
+    // Local store coherence: the sync that followed the send already pulled the
+    // deletion — the Drafts projection no longer shows the consumed draft.
+    let drafts_mailbox = mailbox_id_by_name(&harness, &account, MAILBOX_DRAFTS);
     assert_eq!(
-        drafts_view.rows.len(),
+        messages_in(&harness, &account, &drafts_mailbox).len(),
         0,
-        "the consumed draft must disappear from the local Drafts view"
+        "the consumed draft must disappear from the local Drafts projection"
     );
 }
 
@@ -211,24 +164,23 @@ async fn gmail_send_consumes_the_draft_with_exactly_one_sent_copy() {
 #[tokio::test]
 async fn generic_send_consumes_the_draft_and_appends_the_single_sent_copy() {
     let imap = GmailImapFixture::start_generic_uidplus().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness
-        .create_gmail_account("generic-send-draft", &imap)
-        .await;
+    let harness = Harness::new();
+    let account = AccountId::from("generic-send-draft");
+    let gateway = connect_account(&harness, &imap, "generic-send-draft").await;
 
-    let draft_key = save_and_flush_draft(&harness, &account, &imap, "Weekly update").await;
+    let draft_key =
+        save_and_flush_draft(&harness, &account, &gateway, &imap, "Weekly update").await;
 
     harness
-        .core()
-        .send_message(
-            RuntimeCaller::test(),
-            account.clone(),
+        .service
+        .enqueue_send(
+            &account,
             compose_request("Weekly update", Some(draft_key.as_str())),
-            None,
         )
         .await
         .expect("send should queue");
-    harness.sync_account(&account).await;
+    flush_settled(&harness, &account, &gateway).await;
+    sync(&harness, &account, &gateway).await;
 
     assert_eq!(
         imap.smtp_submission_count(),
@@ -265,12 +217,11 @@ async fn generic_send_consumes_the_draft_and_appends_the_single_sent_copy() {
     );
 
     // Local store coherence on the generic shape too.
-    let drafts_mailbox = mailbox_id_by_name(&harness, &account, MAILBOX_DRAFTS).await;
-    let drafts_view = open_mailbox_view(&harness, &account, &drafts_mailbox).await;
+    let drafts_mailbox = mailbox_id_by_name(&harness, &account, MAILBOX_DRAFTS);
     assert_eq!(
-        drafts_view.rows.len(),
+        messages_in(&harness, &account, &drafts_mailbox).len(),
         0,
-        "the consumed draft must disappear from the local Drafts view"
+        "the consumed draft must disappear from the local Drafts projection"
     );
 }
 
@@ -279,24 +230,19 @@ async fn generic_send_consumes_the_draft_and_appends_the_single_sent_copy() {
 #[tokio::test]
 async fn send_without_draft_id_leaves_saved_drafts_untouched() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness
-        .create_gmail_account("gmail-send-plain", &gmail)
-        .await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-send-plain");
+    let gateway = connect_account(&harness, &gmail, "gmail-send-plain").await;
 
-    save_and_flush_draft(&harness, &account, &gmail, "Unrelated draft").await;
+    save_and_flush_draft(&harness, &account, &gateway, &gmail, "Unrelated draft").await;
 
     harness
-        .core()
-        .send_message(
-            RuntimeCaller::test(),
-            account.clone(),
-            compose_request("Standalone send", None),
-            None,
-        )
+        .service
+        .enqueue_send(&account, compose_request("Standalone send", None))
         .await
         .expect("send should queue");
-    harness.sync_account(&account).await;
+    flush_settled(&harness, &account, &gateway).await;
+    sync(&harness, &account, &gateway).await;
 
     assert_eq!(gmail.smtp_submission_count(), 1, "the send still submits");
     assert_eq!(
@@ -319,35 +265,29 @@ async fn send_without_draft_id_leaves_saved_drafts_untouched() {
 ///
 /// This pins both halves: after save + sync there is exactly ONE Drafts row,
 /// under the Gmail canonical id, and a resumed edit's pending `DraftUpdate`
-/// targets that SAME id — proving the compose session was reconciled to the
-/// materialized draft, not stranded beside it.
+/// carries the stable compose key (resolved to that SAME live id at flush) —
+/// proving the compose session was reconciled to the materialized draft, not
+/// stranded beside it.
 #[tokio::test]
 async fn gmail_draft_save_reconciles_to_the_synced_canonical_id_with_no_twin() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness
-        .create_gmail_account("gmail-draft-twin", &gmail)
-        .await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-draft-twin");
+    let gateway = connect_account(&harness, &gmail, "gmail-draft-twin").await;
 
     // Save + flush + sync (asserts one provider Drafts message internally).
-    let draft_key = save_and_flush_draft(&harness, &account, &gmail, "Draft v1").await;
+    let draft_key = save_and_flush_draft(&harness, &account, &gateway, &gmail, "Draft v1").await;
 
     // Exactly one local Drafts row — no transient twin — under the Gmail
     // canonical id the sync materialized.
-    let drafts_mailbox = mailbox_id_by_name(&harness, &account, MAILBOX_DRAFTS).await;
-    let drafts_view = open_mailbox_view(&harness, &account, &drafts_mailbox).await;
+    let drafts_mailbox = mailbox_id_by_name(&harness, &account, MAILBOX_DRAFTS);
+    let drafts_rows = messages_in(&harness, &account, &drafts_mailbox);
     assert_eq!(
-        drafts_view.rows.len(),
+        drafts_rows.len(),
         1,
-        "exactly one Drafts row after save + sync (no canonical-id twin): {:#?}",
-        drafts_view.rows
+        "exactly one Drafts row after save + sync (no canonical-id twin): {drafts_rows:#?}"
     );
-    let row_id = drafts_view.rows[0]
-        .projection
-        .get("id")
-        .and_then(|id| id.as_str())
-        .expect("the row projection carries the message id")
-        .to_string();
+    let row_id = drafts_rows[0].id.to_string();
     assert!(
         row_id.starts_with("imap:gmail:msgid:"),
         "the synced draft row is under the Gmail canonical id, got {row_id}"
@@ -359,20 +299,17 @@ async fn gmail_draft_save_reconciles_to_the_synced_canonical_id_with_no_twin() {
     // must replace the materialized draft in place, not strand the compose
     // session beside an orphaned UID-based twin.
     harness
-        .core()
+        .service
         .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
+            &account,
             Some(draft_key.clone()),
-            None,
             compose_request("Draft v2", None),
         )
         .await
         .expect("resumed edit should save");
     let pending = harness
-        .core()
-        .list_pending_operations(RuntimeCaller::test(), account.clone())
-        .await
+        .service
+        .list_pending_operations(&account)
         .expect("pending operations should list");
     let edit = pending
         .iter()
@@ -387,216 +324,17 @@ async fn gmail_draft_save_reconciles_to_the_synced_canonical_id_with_no_twin() {
     // Flush the edit: the registry resolves the key to the synced canonical id,
     // so the provider replace lands in place — still exactly ONE provider draft
     // and ONE local Drafts row (no twin).
-    harness.sync_account(&account).await;
+    flush_settled(&harness, &account, &gateway).await;
+    sync(&harness, &account, &gateway).await;
     assert_eq!(
         gmail.mailbox_message_count(MAILBOX_DRAFTS),
         1,
         "the flushed edit replaced the synced draft in place — no provider twin"
     );
-    let drafts_after_edit = open_mailbox_view(&harness, &account, &drafts_mailbox).await;
+    let drafts_after_edit = messages_in(&harness, &account, &drafts_mailbox);
     assert_eq!(
-        drafts_after_edit.rows.len(),
+        drafts_after_edit.len(),
         1,
-        "exactly one local Drafts row after the resumed edit flushed: {:#?}",
-        drafts_after_edit.rows
-    );
-}
-
-/// Count the pending draft save/update operations for an account.
-async fn pending_draft_save_count(harness: &RuntimeHarness, account: &AccountId) -> usize {
-    harness
-        .core()
-        .list_pending_operations(RuntimeCaller::test(), account.clone())
-        .await
-        .expect("pending operations should list")
-        .iter()
-        .filter(|op| {
-            matches!(
-                op.kind,
-                OperationKind::DraftCreate | OperationKind::DraftUpdate
-            )
-        })
-        .count()
-}
-
-/// The apply-ledger on the draft routes (D128, closing the ruling-24 flag): a
-/// redelivered save under the SAME `Idempotency-Key` re-observes the ORIGINAL
-/// operation — same id, byte-identical response — and enqueues no second draft.
-#[tokio::test]
-async fn replayed_save_returns_the_same_operation_and_enqueues_one_draft() {
-    let imap = GmailImapFixture::start_generic_uidplus().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("replay-save", &imap).await;
-
-    let key = ClientMutationId::new("save-key-1");
-    let draft = MessageId::from("compose-session-1");
-    let first = harness
-        .core()
-        .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(draft.clone()),
-            Some(key.clone()),
-            compose_request("Replayed subject", None),
-        )
-        .await
-        .expect("first save should enqueue");
-    let replay = harness
-        .core()
-        .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(draft.clone()),
-            Some(key.clone()),
-            compose_request("Replayed subject", None),
-        )
-        .await
-        .expect("replayed save should return the stored outcome");
-
-    assert_eq!(
-        first.id, replay.id,
-        "a replay under the same key returns the SAME operation id"
-    );
-    assert_eq!(
-        serde_json::to_value(&first).unwrap(),
-        serde_json::to_value(&replay).unwrap(),
-        "a replay returns a byte-identical response"
-    );
-    assert_eq!(
-        pending_draft_save_count(&harness, &account).await,
-        1,
-        "the replay enqueues no second draft version"
-    );
-
-    harness.sync_account(&account).await;
-    assert_eq!(
-        imap.mailbox_message_count(MAILBOX_DRAFTS),
-        1,
-        "exactly one draft reaches the provider Drafts mailbox"
-    );
-}
-
-/// Two saves under DISTINCT keys are two operations — the versioned replace
-/// still applies (a genuine second autosave is not deduped away).
-#[tokio::test]
-async fn distinct_keys_enqueue_two_saves() {
-    let imap = GmailImapFixture::start_generic_uidplus().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("distinct-save", &imap).await;
-
-    let draft = MessageId::from("compose-session-1");
-    let first = harness
-        .core()
-        .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(draft.clone()),
-            Some(ClientMutationId::new("k1")),
-            compose_request("First", None),
-        )
-        .await
-        .expect("first save");
-    let second = harness
-        .core()
-        .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(draft.clone()),
-            Some(ClientMutationId::new("k2")),
-            compose_request("Second", None),
-        )
-        .await
-        .expect("second save");
-
-    assert_ne!(
-        first.id, second.id,
-        "distinct keys produce distinct operations"
-    );
-    assert_eq!(
-        pending_draft_save_count(&harness, &account).await,
-        2,
-        "both saves are enqueued (versioned replace applies)"
-    );
-}
-
-/// Reusing a save key for a delete is a cross-op key reuse → Conflict (distinct
-/// `draft.save` / `draft.delete` op-names guard the ledger).
-#[tokio::test]
-async fn reusing_a_save_key_for_a_delete_conflicts() {
-    let imap = GmailImapFixture::start_generic_uidplus().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("cross-op", &imap).await;
-
-    let key = ClientMutationId::new("shared-key");
-    let draft = MessageId::from("compose-session-1");
-    harness
-        .core()
-        .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(draft.clone()),
-            Some(key.clone()),
-            compose_request("Draft", None),
-        )
-        .await
-        .expect("save under the key");
-    let error = harness
-        .core()
-        .delete_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(key.clone()),
-            draft.clone(),
-        )
-        .await
-        .expect_err("reusing the save key for a delete must conflict");
-    assert_eq!(error.envelope().code, RuntimeErrorCode::Conflict);
-}
-
-/// A replayed delete under the same key is idempotent — it re-observes the
-/// original operation instead of enqueuing a second delete.
-#[tokio::test]
-async fn replayed_delete_is_idempotent() {
-    let imap = GmailImapFixture::start_generic_uidplus().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("replay-delete", &imap).await;
-
-    let draft = MessageId::from("compose-session-1");
-    harness
-        .core()
-        .save_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(draft.clone()),
-            None,
-            compose_request("Draft to delete", None),
-        )
-        .await
-        .expect("seed a draft to delete");
-
-    let key = ClientMutationId::new("delete-key-1");
-    let first = harness
-        .core()
-        .delete_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(key.clone()),
-            draft.clone(),
-        )
-        .await
-        .expect("first delete");
-    let replay = harness
-        .core()
-        .delete_draft(
-            RuntimeCaller::test(),
-            account.clone(),
-            Some(key.clone()),
-            draft.clone(),
-        )
-        .await
-        .expect("replayed delete re-observes the original");
-    assert_eq!(
-        first.id, replay.id,
-        "a replayed delete returns the same operation id"
+        "exactly one local Drafts row after the resumed edit flushed: {drafts_after_edit:#?}"
     );
 }

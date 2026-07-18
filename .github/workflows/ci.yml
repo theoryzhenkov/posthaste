@@ -31,16 +31,9 @@ jobs:
             mold \
             patchelf
       - run: cargo fmt --all -- --check
-      # posthastectl (apps/mcp/src/cli.ts) is driven by the watch/exec e2e
-      # milestone test (watch_exec_e2e: the REAL CLI mints a token via bun) —
-      # the test binary runs in the plain workspace test set, so bun + the mcp
-      # deps must exist here. It was silently red from the S4 mint change until
-      # the other job failures cleared.
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile --cwd apps/mcp
       # posthaste-bench (profiling harness) is built/run by profile.yml, not here.
-      - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-client-node-wasm -- -D warnings
-      - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-client-node-wasm
+      - run: cargo clippy --workspace --all-targets --exclude posthaste-bench -- -D warnings
+      - run: cargo test --workspace --exclude posthaste-bench
 
   # HARD send-path gate (RFC send-path-gate): a live-Stalwart end-to-end proof
   # that a send FILES INTO SENT and NOT DRAFTS — the beta-blocking regression
@@ -48,15 +41,16 @@ jobs:
   # self-sends undelivered) that previously shipped because the only assertion
   # was `sent || inbox` (masks exactly this bug) AND its CI job was soft-failed.
   # This job is REQUIRED — no continue-on-error. It runs the dedicated
-  # regression test plus the parity test whose send assertions are now the exact
+  # regression test plus the parity test whose send assertions are the exact
   # filing invariants (in Sent, not in Drafts, inbox delivery asserted for the
-  # self-send). Stalwart is provisioned DETERMINISTICALLY (pinned version +
-  # SHA-256, no `latest`, no private nix flake) by the same script the dev stack
-  # documents; it fetches BOTH the server and stalwart-cli (seed.sh needs the CLI
-  # to import the fixture maildir — the old soft job fetched only the server and
-  # so silently failed at seed time). The StalwartFixture spawns the server on
-  # dynamic loopback ports (no service container), and delivery is local
-  # Stalwart→Stalwart, so no network is touched after provisioning.
+  # self-send), both living in apps/client/backend (posthaste-client-backend)
+  # and mirrored locally by `just backend send-gate`. Stalwart is provisioned
+  # DETERMINISTICALLY (pinned version + SHA-256, no `latest`, no private nix
+  # flake) by the same script the dev stack documents; it fetches BOTH the
+  # server and stalwart-cli (seed.sh needs the CLI to import the fixture
+  # maildir). The StalwartFixture spawns the server on dynamic loopback ports
+  # (no service container), and delivery is local Stalwart→Stalwart, so no
+  # network is touched after provisioning.
   send-path-gate:
     runs-on: ubuntu-latest
     steps:
@@ -73,72 +67,9 @@ jobs:
         env:
           POSTHASTE_STALWART_INTEGRATION: "1"
         run: |
-          cargo test -p posthaste-server \
+          cargo test -p posthaste-client-backend \
             --test stalwart_send_regression \
             --test stalwart_provider_parity
-
-  # Broader live Stalwart integration suite (mail-loss convergence +
-  # draft/discard). These targets early-`return` unless
-  # POSTHASTE_STALWART_INTEGRATION=1 and a real `stalwart` binary is available,
-  # so without this job they are dead coverage. Provisioned by the SAME pinned
-  # script as send-path-gate so CI and the dev stack never drift. The
-  # StalwartFixture spawns the process itself on dynamic loopback ports (no
-  # service container needed) and seeds via tools/dev/stalwart/{config.toml,seed.sh}.
-  stalwart-integration:
-    runs-on: ubuntu-latest
-    # SOFT (continue-on-error): the send path is now hard-gated above; this
-    # broader suite stays best-effort until its remaining flakes are triaged.
-    # Graduate individual tests to send-path-gate (or a new hard job) as they
-    # are proven reliable. See tools/dev/stalwart/provision-ci.sh.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-rust
-          cache-on-failure: true
-      - name: Provision pinned Stalwart (server + CLI)
-        run: bash tools/dev/stalwart/provision-ci.sh
-      # watch_exec_e2e drives the real posthastectl (bun + apps/mcp deps).
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile --cwd apps/mcp
-      - name: Run live Stalwart integration tests
-        env:
-          POSTHASTE_STALWART_INTEGRATION: "1"
-        run: cargo test -p posthaste-testkit -p posthaste-server
-
-  # The frontier set grows as wasm-pure policy is extracted (RFC-L2-architecture-cleanup D15/M8;
-  # RFC-L2-provider-reliability M30 adds posthaste-call-policy — seven crates).
-  wasm-frontier:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-wasm-frontier
-          cache-on-failure: true
-      - run: cargo check --target wasm32-unknown-unknown -p posthaste-replica-core -p posthaste-replica-projector -p posthaste-contract-core -p posthaste-domain-model -p posthaste-call-policy -p posthaste-link-near-end -p posthaste-client-node-wasm
-
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - name: Cache Bun download cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-      - run: bun install --frozen-lockfile
-      - run: bun --cwd=legacy/web run check
-      - run: bun --cwd=legacy/web run test
-      - run: bun --cwd=legacy/web run build
 
   # The integrated app's frontend (apps/client/frontend): typecheck + tests +
   # production build. Its backend/model crates are covered by the `rust` job
@@ -198,50 +129,22 @@ jobs:
       - run: bun --cwd=apps/site run test
       - run: bun --cwd=apps/site run build
 
-  mcp:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - name: Cache Bun download cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-      - run: bun install --frozen-lockfile
-      - name: Check generated API schema is up to date
-        run: |
-          bun --cwd=apps/mcp run api:generate
-          git diff --exit-code apps/mcp/src/schema.gen.ts
-      - run: bun --cwd=apps/mcp run typecheck
-      - run: bun --cwd=apps/mcp run build
-
+  # Lab control plane (posthaste-lab): registry loading + the lab-smoke suites
+  # (posthaste-lab's own tests and the no-telemetry policy check).
   lab:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: oven-sh/setup-bun@v2
       - uses: extractions/setup-just@v3
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-lab-rust
           cache-on-failure: true
-      - name: Cache Bun download cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
       - name: Install Linux linker
         run: |
           sudo apt-get update
           sudo apt-get install -y mold
-      - run: bun install --frozen-lockfile
-      - run: just lab tauri-check
       - name: Lab smoke
         id: lab_smoke
         run: just lab smoke
@@ -256,61 +159,4 @@ jobs:
             target/lab/smoke/*/artifacts/**
           if-no-files-found: warn
           retention-days: 14
-
-  client-node-wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Pinned rustc — NOT `stable`. The committed wasm-bindgen JS glue embeds
-      # rustc-generated legacy-mangling symbol hashes (the
-      # `wasm_bindgen__convert__closures_____invoke__h<hash>` shims). Those hashes
-      # are a function of the *compiler version*, so a `stable` runner that is
-      # even one release ahead of the toolchain that generated the committed glue
-      # makes the freshness diff below fail with a pure hash churn (this is the
-      # long-standing "M4" red job). This version MUST match the rustc the nix
-      # devshell provides (nix/devshell.d/posthaste.nix -> pkgs.rustc), which is
-      # what regenerates legacy/web/src/runtime/wasm/*. When the nix rust pin is
-      # bumped and the glue regenerated, bump this line in the same change.
-      - uses: dtolnay/rust-toolchain@1.94.0
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: oven-sh/setup-bun@v2
-      - uses: extractions/setup-just@v3
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-client-node-wasm
-          cache-on-failure: true
-      - uses: jetli/wasm-bindgen-action@v0.2.0
-        with:
-          version: "0.2.117"
-      - name: Install binaryen (wasm-opt)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y binaryen
-      - name: Build the client node WASM bundle
-        env:
-          SKIP_WASM_OPT: 1
-        run: just build-client-node-wasm
-      - name: Verify committed JS binding is fresh
-        # The .wasm binary is not byte-diffed (binaryen output can vary across
-        # toolchain builds). The JS glue comparison is CANONICALIZED: rustc's
-        # closure-shim symbol hashes (`__h<16hex>`) are seeded by the compiler
-        # BUILD, not just its version — a nixpkgs-built and a dist-built rustc
-        # 1.94.0 emit different hashes (proven: run 28883568842) — so byte
-        # equality across provenances is unattainable. Normalizing the hashes
-        # (and shim_idx comments) still catches everything the check exists
-        # for: added/removed exports, changed signatures, structural drift.
-        # The rustc VERSION stays pinned (above) so the shim structure is
-        # like-for-like. The .d.ts companions are validated by the TypeScript
-        # build instead.
-        run: |
-          canon() { sed -e 's/__h[0-9a-f]\{16\}/__hHASH/g' -e 's/shim_idx: [0-9]*/shim_idx: N/g' "$1"; }
-          if ! diff <(canon <(git show HEAD:legacy/web/src/runtime/wasm/posthaste_client_node_wasm.js)) \
-                    <(canon legacy/web/src/runtime/wasm/posthaste_client_node_wasm.js); then
-            echo "::error::wasm JS glue drifted from the committed binding (beyond symbol-hash churn) — regenerate with 'just build-client-node-wasm' and commit"
-            exit 1
-          fi
-      - run: bun install --frozen-lockfile
-      - name: Smoke-test the WASM boundary
-        run: bun --cwd=legacy/web test test/replicaWasmSmoke.test.ts
 

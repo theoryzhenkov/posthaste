@@ -8,8 +8,7 @@ edition = "2021"
 # `../frontend/src/gen/`.
 #
 # DEPENDENCY ALLOWLIST: serde/serde_json + ts-rs + the domain model, nothing
-# else. In particular nothing from posthaste-contract-core's frame vocabulary
-# or the link crates may enter this crate.
+# else.
 
 [dependencies]
 posthaste-domain-model = { path = "../../../crates/posthaste-domain-model" }

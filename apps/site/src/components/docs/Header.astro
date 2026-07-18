@@ -2,7 +2,7 @@
 // On-brand docs header. Mirrors Starlight's default three-zone layout (site
 // title | search | right group) so search, theme toggle, social icons and the
 // mobile menu keep working, but adds the site's top-level nav (Home / Releases
-// / Wizard / Docs) so the docs read as part of posthaste.theor.net.
+// / Docs) so the docs read as part of posthaste.theor.net.
 import Search from '@astrojs/starlight/components/Search.astro'
 import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro'
 import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro'
@@ -11,7 +11,6 @@ import SiteTitle from './SiteTitle.astro'
 const navLinks = [
   { href: '/', label: 'Home' },
   { href: '/releases', label: 'Releases' },
-  { href: '/wizard', label: 'Wizard' },
   { href: '/docs/', label: 'Docs', current: true },
 ]
 ---

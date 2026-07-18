@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Launch the PostHaste dev stack with Overmind.
+# Launch the PostHaste dev services (Stalwart + seed + optional mock Gmail)
+# with Overmind. The client backend/frontend run separately (`just backend run`,
+# `bun run client:dev`).
 #
-# Usage: launch.sh <web|desktop|services>
+# Usage: launch.sh services
 #
-# Defaults point the server at an isolated dev-only config/state root
-# (var/dev/posthaste/) so the real ~/.config/posthaste is never touched.
-# Override any POSTHASTE_* env var before invoking to change behavior.
+# Defaults point at an isolated dev-only config/state root (var/dev/posthaste/)
+# so the real ~/.config/posthaste is never touched. Override any POSTHASTE_*
+# env var before invoking to change behavior.
 set -euo pipefail
 
-layout="${1:?usage: launch.sh <web|desktop|services>}"
+layout="${1:?usage: launch.sh services}"
 case "$layout" in
-  web|desktop|services) ;;
-  *) echo "unknown layout: $layout (expected web|desktop|services)" >&2; exit 2 ;;
+  services) ;;
+  *) echo "unknown layout: $layout (expected services)" >&2; exit 2 ;;
 esac
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -89,29 +91,9 @@ else
   POSTHASTE_STALWART_SMTP_PORT="$(port_from_bind "$POSTHASTE_STALWART_SMTP_BIND")"
 fi
 
-if [[ -z "${POSTHASTE_BIND:-}" ]]; then
-  POSTHASTE_SERVER_PORT="$(find_available_port 3001)"
-  export POSTHASTE_BIND="127.0.0.1:$POSTHASTE_SERVER_PORT"
-else
-  POSTHASTE_SERVER_PORT="$(port_from_bind "$POSTHASTE_BIND")"
-fi
-
-export POSTHASTE_VITE_HOST="${POSTHASTE_VITE_HOST:-127.0.0.1}"
-if [[ "$layout" == "desktop" ]]; then
-  if [[ -n "${POSTHASTE_VITE_PORT:-}" && "$POSTHASTE_VITE_PORT" != "5173" ]]; then
-    echo "desktop dev uses Tauri devUrl http://127.0.0.1:5173; unset POSTHASTE_VITE_PORT or set it to 5173" >&2
-    exit 2
-  fi
-  export POSTHASTE_VITE_PORT="5173"
-elif [[ -z "${POSTHASTE_VITE_PORT:-}" ]]; then
-  export POSTHASTE_VITE_PORT="$(find_available_port 5173)"
-fi
-export VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://127.0.0.1:$POSTHASTE_SERVER_PORT/v1}"
-export POSTHASTE_CORS_ORIGIN="${POSTHASTE_CORS_ORIGIN:-http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT}"
-
-instance_id="mail${POSTHASTE_STALWART_PORT}-api${POSTHASTE_SERVER_PORT}-web${POSTHASTE_VITE_PORT}"
+instance_id="mail${POSTHASTE_STALWART_PORT}"
 use_instance_roots=false
-if [[ "$POSTHASTE_STALWART_PORT" != "8080" || "$POSTHASTE_SERVER_PORT" != "3001" || "$POSTHASTE_VITE_PORT" != "5173" ]]; then
+if [[ "$POSTHASTE_STALWART_PORT" != "8080" ]]; then
   use_instance_roots=true
 fi
 
@@ -201,7 +183,7 @@ rm -f "$POSTHASTE_STATE_ROOT/.stalwart-seed-ready"
 
 log_path="$("$root/tools/dev/overmind/server-log-path.sh")"
 echo "Persisted server log: $log_path (tail with 'just dev log tail')"
-echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, IMAP 127.0.0.1:$POSTHASTE_STALWART_IMAP_PORT, SMTP 127.0.0.1:$POSTHASTE_STALWART_SMTP_PORT, API http://127.0.0.1:$POSTHASTE_SERVER_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
+echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, IMAP 127.0.0.1:$POSTHASTE_STALWART_IMAP_PORT, SMTP 127.0.0.1:$POSTHASTE_STALWART_SMTP_PORT"
 if [[ "${POSTHASTE_DEV_GMAIL:-}" == "1" ]]; then
   echo "Mock Gmail: IMAP 127.0.0.1:$POSTHASTE_MOCK_GMAIL_IMAP_PORT, control http://127.0.0.1:$POSTHASTE_MOCK_GMAIL_CONTROL_PORT (account 'local-gmail'; POST /deliver?subject= , /vanish?subject=)"
 fi

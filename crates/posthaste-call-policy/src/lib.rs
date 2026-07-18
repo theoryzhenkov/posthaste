@@ -1,11 +1,11 @@
 //! The shared outbound-call **policy core** (RFC-L2-provider-reliability D80).
 //!
 //! One place for the wasm-pure *policy* — the arithmetic and types that decide
-//! how an outbound provider or link call retries, backs off, deadlines, and
-//! classifies — so the link engine (`posthaste-link-near-end`) and the (M31)
-//! native provider executor (`posthaste-provider-call`) consume one shared fact
-//! rather than forking it three times (tenet XIV; R80: share the *policy*, not
-//! the whole link *engine*).
+//! how an outbound provider call retries, backs off, deadlines, and
+//! classifies — so the (M31) native provider executor
+//! (`posthaste-provider-call`) consumes one shared fact rather than
+//! re-deriving it per call site (tenet XIV; R80: share the *policy*, not the
+//! *engine*).
 //!
 //! Four pieces, each a pure function/table:
 //!

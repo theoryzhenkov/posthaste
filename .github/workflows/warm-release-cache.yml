@@ -36,58 +36,6 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
-  warm-serve:
-    name: Warm serve ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux-x86_64
-          - os: macos-latest
-            platform: macos
-          - os: windows-latest
-            platform: windows-x86_64
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: mozilla-actions/sccache-action@v0.0.9
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: release-daemon-${{ matrix.platform }}
-          cache-on-failure: true
-          # Only the default branch should write the canonical cache that tag
-          # runs restore. This workflow only runs on main, but be explicit.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install Linux daemon dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libssl-dev \
-            mold \
-            pkg-config
-
-      # The daemon binary does not embed the frontend (it serves it at runtime),
-      # so a frontend build is unnecessary here. Compile the daemon plus the
-      # distributed-topology role binaries and the install wizard to populate
-      # the cache `release.yml`'s single `cargo build --release --bin ...` pass
-      # will restore. Keep this bin list in sync with release.yml's build-daemon
-      # job.
-      - name: Warm release binary compilation
-        run: cargo build --release --bin posthaste-authority-runtime-server --bin posthaste-authority-server --bin posthaste-runtime --bin posthaste-wizard
-
-      - name: Print sccache stats
-        if: always()
-        run: sccache --show-stats || true
-
   warm-desktop:
     name: Warm desktop ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
@@ -149,16 +97,16 @@ jobs:
             patchelf \
             wget
 
-      # `tauri::generate_context!` embeds `frontendDist` (../web/dist) at compile
-      # time, so the dist must exist for the desktop crate to compile. Its exact
-      # content only affects the final crate; the heavy dependency tree caches
-      # regardless. Compile the Rust graph directly (no bundling) to warm the
-      # cache `tauri build` will restore.
+      # `tauri::generate_context!` embeds `frontendDist` (../frontend/dist) at
+      # compile time, so the dist must exist for the desktop crate to compile.
+      # Its exact content only affects the final crate; the heavy dependency
+      # tree caches regardless. Compile the Rust graph directly (no bundling)
+      # to warm the cache `tauri build` will restore.
       - name: Build frontend (required for compile-time asset embedding)
-        run: bun --cwd=legacy/web run build
+        run: bun --cwd=apps/client/frontend run build
 
       - name: Warm release desktop compilation
-        run: cargo build --release -p posthaste-desktop --features devtools
+        run: cargo build --release -p posthaste-client-desktop --features devtools
 
       - name: Print sccache stats
         if: always()

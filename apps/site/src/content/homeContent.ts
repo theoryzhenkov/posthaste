@@ -3,7 +3,6 @@ import { marked } from 'marked'
 import type { HomeContent, SiteMessage, TitledHtmlPiece } from './types'
 import welcomeRaw from './home/messages/welcome.md?raw'
 import performanceRaw from './home/messages/performance.md?raw'
-import wizardRaw from './home/messages/magick.md?raw'
 import visualsRaw from './home/messages/visuals.md?raw'
 import communityRaw from './home/messages/community.md?raw'
 import supportRaw from './home/messages/support.md?raw'
@@ -75,7 +74,6 @@ export async function getHomeContent(): Promise<HomeContent> {
   const [
     welcome,
     performance,
-    wizard,
     visuals,
     community,
     support,
@@ -84,7 +82,6 @@ export async function getHomeContent(): Promise<HomeContent> {
   ] = await Promise.all([
     parseMessage(welcomeRaw, 'home/messages/welcome.md'),
     parseMessage(performanceRaw, 'home/messages/performance.md'),
-    parseMessage(wizardRaw, 'home/messages/magick.md'),
     parseMessage(visualsRaw, 'home/messages/visuals.md'),
     parseMessage(communityRaw, 'home/messages/community.md'),
     parseMessage(supportRaw, 'home/messages/support.md'),
@@ -93,7 +90,7 @@ export async function getHomeContent(): Promise<HomeContent> {
   ])
 
   return {
-    messages: [welcome, performance, wizard, visuals, community, support],
+    messages: [welcome, performance, visuals, community, support],
     openSource,
     footer: {
       brand: requireString(footerDocument.data, 'brand', 'home/footer.md'),

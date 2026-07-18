@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use posthaste_bench::{runtime_workload, workloads};
+use posthaste_bench::workloads;
 
 // dhat hooks the global allocator. With no active `dhat::Profiler` the overhead
 // is negligible, so leaving it installed for the CPU phase is acceptable.
@@ -62,35 +62,6 @@ fn main() -> Result<()> {
     let session = workloads::open_seeded(count);
     profile("session_loop", &out, &mut || {
         workloads::session_loop(&session, workloads::DEFAULT_SESSION_ROUNDS);
-    })?;
-
-    // Runtime-tier workloads through the authority runtime (not just the store),
-    // driven on a CURRENT-THREAD tokio runtime so pprof samples one thread and
-    // the flamegraph is coherent. The two ops bracket the option-iii win:
-    //   runtime_mutation_notify  = the per-event cost AFTER option iii
-    //                              (store write + message.updated notification,
-    //                               NO per-event view recompute)
-    //   runtime_view_recompute   = the cost option iii REMOVED per event
-    //                              (one build_snapshot + frame)
-    // The ratio of their iterations/3s is the per-event-per-view recompute the
-    // runtime no longer pays on every affecting message.updated.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build current-thread tokio runtime")?;
-    let mut inbox = rt
-        .block_on(runtime_workload::open_runtime_inbox(count))
-        .context("open runtime inbox fixture")?;
-    let counter = std::cell::Cell::new(0usize);
-    profile("runtime_mutation_notify", &out, &mut || {
-        let i = counter.get();
-        counter.set(i + 1);
-        rt.block_on(runtime_workload::mutate_and_await_view(&mut inbox, i))
-            .expect("runtime mutation notify workload");
-    })?;
-    profile("runtime_view_recompute", &out, &mut || {
-        rt.block_on(runtime_workload::recompute_and_await_view(&mut inbox, 0))
-            .expect("runtime view recompute workload");
     })?;
 
     Ok(())

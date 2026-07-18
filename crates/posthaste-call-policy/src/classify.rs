@@ -3,8 +3,7 @@
 //! O2 ruling: the retryability taxonomy is [`posthaste_domain_model::Terminality`]
 //! — this crate **consumes** it, never forks it. Two pure functions live here:
 //! the HTTP status-band fallback, and the envelope-over-status **precedence
-//! rule** that `posthaste-link-near-end`'s engine hand-rolled inline. Both the
-//! link engine and the (M31) native provider executor call these instead of
+//! rule**. The (M31) native provider executor calls these instead of
 //! re-deriving the rule per site.
 
 pub use posthaste_domain_model::Terminality;

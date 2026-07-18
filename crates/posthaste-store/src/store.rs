@@ -4,7 +4,6 @@ use std::ops::Deref;
 use std::path::Path;
 use std::sync::{Arc, Condvar};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::warn;
 
 const MAX_IDLE_READ_CONNECTIONS: usize = 4;
 
@@ -159,7 +158,11 @@ fn lock_read_pool(
     match pool.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            warn!("read connection pool mutex was poisoned; recovering");
+            ph_warn!(
+                events::STORE_MUTEX_POISONED,
+                mutex = "read_pool",
+                "read connection pool mutex was poisoned; recovering"
+            );
             poisoned.into_inner()
         }
     }
@@ -171,7 +174,11 @@ fn lock_write_connection(
     match connection.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            warn!("write connection mutex was poisoned; recovering");
+            ph_warn!(
+                events::STORE_MUTEX_POISONED,
+                mutex = "write_connection",
+                "write connection mutex was poisoned; recovering"
+            );
             poisoned.into_inner()
         }
     }
@@ -224,9 +231,11 @@ impl Drop for StagedBodyFiles {
             match fs::remove_file(path) {
                 Ok(()) => {}
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => warn!(
-                    "store: failed to remove orphaned staged body {}: {err}",
-                    path.display()
+                Err(err) => ph_warn!(
+                    events::STORE_CACHE_STAGED_BODY_REMOVE_FAILED,
+                    path = %path.display(),
+                    error = %err,
+                    "failed to remove orphaned staged body"
                 ),
             }
         }
@@ -348,7 +357,11 @@ impl DatabaseStore {
             // Flush the WAL back into the main db file and truncate it to zero,
             // so a clean shutdown leaves no WAL to replay on next open (N3).
             if let Err(err) = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
-                warn!("store close: wal_checkpoint(TRUNCATE) failed: {err}");
+                ph_warn!(
+                    events::STORE_CLOSE_WAL_CHECKPOINT_FAILED,
+                    error = %err,
+                    "store close: wal_checkpoint(TRUNCATE) failed"
+                );
             }
         }
         // Drop the write connection: releases its file handle now and makes any

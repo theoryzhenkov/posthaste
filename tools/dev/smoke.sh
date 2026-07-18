@@ -15,9 +15,9 @@ reject_path() {
   [[ ! -e "$path" ]] || { echo "legacy path should not exist: $path" >&2; exit 1; }
 }
 
-require_path legacy/web
-require_path legacy/desktop
 require_path crates
+require_path apps/client/frontend
+require_path apps/client/backend
 require_path tools/dev
 require_path tools/dev/stalwart/config.toml
 require_path tools/dev/stalwart/seed.sh
@@ -27,6 +27,8 @@ reject_path web
 reject_path src-tauri
 reject_path dev
 reject_path crates/data
+reject_path legacy
+reject_path apps/mcp
 
 smoke_root="$root/var/dev/smoke-$$"
 trap 'rm -rf "$smoke_root"' EXIT
@@ -35,19 +37,10 @@ run_layout_smoke() {
   local layout="${1:?layout required}"
   local offset="${2:?offset required}"
   local layout_root="$smoke_root/$layout"
-  local vite_port="$((15173 + offset))"
-  if [[ "$layout" == "desktop" ]]; then
-    vite_port="5173"
-  fi
 
   POSTHASTE_DEV_STACK_SMOKE=1 \
   POSTHASTE_STALWART_BIND="127.0.0.1:$((18080 + offset))" \
   POSTHASTE_STALWART_URL= \
-  POSTHASTE_BIND="127.0.0.1:$((13001 + offset))" \
-  POSTHASTE_VITE_HOST="127.0.0.1" \
-  POSTHASTE_VITE_PORT="$vite_port" \
-  VITE_API_BASE_URL= \
-  POSTHASTE_CORS_ORIGIN= \
   POSTHASTE_BOOTSTRAP_PATH= \
   POSTHASTE_STALWART_DATA="$layout_root/stalwart/data" \
   POSTHASTE_STALWART_LOGS="$layout_root/stalwart/logs" \
@@ -61,9 +54,7 @@ run_layout_smoke() {
   require_path "$layout_root/posthaste/state/generated/bootstrap.stalwart.toml"
 }
 
-run_layout_smoke web 0
-run_layout_smoke desktop 1
-run_layout_smoke services 2
+run_layout_smoke services 0
 
 require_recipe() {
   just --dry-run "$@" >/dev/null 2>&1
@@ -76,18 +67,19 @@ reject_recipe() {
   fi
 }
 
-require_recipe dev web
-require_recipe dev desktop
 require_recipe dev services
 require_recipe dev smoke
 require_recipe dev log path
 require_recipe dev log tail
 require_recipe dev log query --event http.request.completed
-require_recipe web dev
-require_recipe desktop dev
 require_recipe lab suite list
-require_recipe lab verify suite.api.settings.dev
+require_recipe lab verify suite.lab.core.rust.test
 
+reject_recipe dev web
+reject_recipe dev desktop
+reject_recipe web dev
+reject_recipe desktop dev
+reject_recipe mcp check
 reject_recipe dev-web
 reject_recipe dev-desktop
 reject_recipe dev-services

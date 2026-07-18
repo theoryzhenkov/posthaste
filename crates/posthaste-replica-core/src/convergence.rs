@@ -400,9 +400,7 @@ impl<C: Convergence> Replica<C> {
 /// authority-confirmed AND the confirmed base carries its effect — version-
 /// gated where the consumer tracks authority versions).
 ///
-/// Both near nodes compose this one kernel (`one-replica-both-seams`, RFC D34):
-/// the client's `EntityStore` (posthaste-replica-projector) and the runtime's
-/// `AuthorityServerPendingSet` (posthaste-runtime). The trait is a *view*
+/// The trait is a *view*
 /// over the single-owner [`Replica`] — one store (base + pending), never a
 /// second copy (a split store was considered and rejected, RFC R2). The
 /// version-gated race-free retire lives behind this seam ([`accept_at`]

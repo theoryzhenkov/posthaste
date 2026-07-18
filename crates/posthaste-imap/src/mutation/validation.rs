@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use imap_client::client::tokio::Client as ImapClient;
+use imap_client::client::tokio::{Client as ImapClient, ClientError};
 use imap_client::imap_types::{
     command::CommandBody,
     fetch::MessageDataItem,
@@ -46,10 +46,24 @@ pub(crate) async fn verify_uid_fetch_response(
     client: &mut ImapClient,
     location: &ImapMessageLocation,
 ) -> Result<(), ImapAdapterError> {
-    let items = with_deadline(
-        "uid_fetch_first",
-        client.uid_fetch_first(uid(location)?, uid_fetch_item_names()),
-    )
+    let probe_uid = uid(location)?;
+    let items = with_deadline("uid_fetch_first", async {
+        match client
+            .uid_fetch_first(probe_uid, uid_fetch_item_names())
+            .await
+        {
+            Ok(items) => Ok(items.into_iter().collect::<Vec<_>>()),
+            // An EMPTY probe response (zero untagged FETCH lines + OK) is how
+            // a server answers `UID FETCH` of a UID no longer in the mailbox
+            // (e.g. Gmail stripped the label when the message was copied into
+            // Trash/Spam). `uid_fetch_first` surfaces that as a resolve-level
+            // `MissingData`; normalize it to the same absent-UID shape as a
+            // response carrying only other UIDs, so callers' idempotent-removal
+            // tolerance (`MissingFetchData`) covers both.
+            Err(ClientError::ResolveTask(TaskError::MissingData(_))) => Ok(Vec::new()),
+            Err(error) => Err(ImapAdapterError::from(error)),
+        }
+    })
     .await?;
     verify_message_data_contains_uid(location, items, "matching UID FETCH response")
 }

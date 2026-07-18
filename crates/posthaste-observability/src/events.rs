@@ -202,6 +202,17 @@ pub const IMAP_SYNC_FETCH_COMPLETED: LogEvent = LogEvent::new("imap.sync.fetch_c
 pub const IMAP_SYNC_FETCH_STARTED: LogEvent = LogEvent::new("imap.sync.fetch_started");
 
 pub const STORE_CACHE_ORPHANS_PRUNED: LogEvent = LogEvent::new("store.cache.orphans_pruned");
+/// Removing a staged (uncommitted) content-addressed body file failed during
+/// rollback. Non-fatal — the orphan pruner reclaims it later.
+pub const STORE_CACHE_STAGED_BODY_REMOVE_FAILED: LogEvent =
+    LogEvent::new("store.cache.staged_body_remove_failed");
+/// The shutdown `wal_checkpoint(TRUNCATE)` failed; the WAL replays on the
+/// next open instead of the file closing clean.
+pub const STORE_CLOSE_WAL_CHECKPOINT_FAILED: LogEvent =
+    LogEvent::new("store.close.wal_checkpoint_failed");
+/// A store connection mutex was poisoned by a panicking holder; the store
+/// recovers the guard and continues.
+pub const STORE_MUTEX_POISONED: LogEvent = LogEvent::new("store.mutex.poisoned");
 pub const STORE_CACHE_STRUCTURAL_BODY_REPAIRED: LogEvent =
     LogEvent::new("store.cache.structural_body_repaired");
 /// The full-snapshot prune-by-absence floor guard tripped: the remote id set

@@ -19,10 +19,6 @@ result
 /vendor/*/Cargo.lock
 /vendor/*/target/
 /node_modules/
-/legacy/desktop/target/
-/legacy/web/dist/
-/legacy/web/.vite/
-/legacy/web/node_modules/
 /apps/site/dist/
 /apps/site/.astro/
 /apps/site/.vite/
@@ -38,7 +34,6 @@ result
 # local app/dev data
 /var/dev/
 /.overmind.*.sock
-legacy/desktop/gen/schemas/
 
 # editor
 .idea/
