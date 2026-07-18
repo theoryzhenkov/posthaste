@@ -1,4 +1,3 @@
 stalwart: stalwart -c tools/dev/stalwart/config.toml
 seed: bash tools/dev/stalwart/seed.sh
-server: bash tools/dev/overmind/run-server.sh
 mock-gmail: bash tools/dev/overmind/run-mock-gmail.sh

@@ -53,317 +53,10 @@ jobs:
           cat "$GITHUB_OUTPUT"
 
 
-  build-daemon:
-    if: ${{ !inputs.only_desktop_linux }}
-    name: Build daemon ${{ matrix.platform }}
-    needs: resolve-channel
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux-x86_64
-          - os: macos-latest
-            platform: macos
-          - os: windows-latest
-            platform: windows-x86_64
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: mozilla-actions/sccache-action@v0.0.9
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: release-daemon-${{ matrix.platform }}
-          cache-on-failure: true
-
-      - name: Resolve channel policy
-        shell: bash
-        env:
-          POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
-        run: bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
-
-      - name: Install Linux daemon dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libssl-dev \
-            mold \
-            pkg-config
-
-      - name: Build server-side binaries
-        shell: bash
-        # Build the daemon plus the distributed-topology role binaries and the
-        # one-shot install wizard in a single cargo pass: they share the
-        # workspace dependency graph, so one build is far cheaper than separate
-        # jobs. The wizard's posthaste-config dep is dev-only, so a --bin build
-        # never pulls the config graph into the release artifact.
-        run: cargo build --release --bin posthaste-authority-runtime-server --bin posthaste-authority-server --bin posthaste-runtime --bin posthaste-wizard
-
-      - name: Package daemon
-        shell: bash
-        env:
-          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
-        run: bash tools/package/daemon.sh
-
-      - name: Package authority server node binary
-        shell: bash
-        env:
-          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
-          POSTHASTE_BIN: posthaste-authority-server
-          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_AUTHORITY_SERVER_NAME }}
-          POSTHASTE_BIN_LABEL: Posthaste authority server node
-        run: bash tools/package/bin.sh
-
-      - name: Package runtime node binary
-        shell: bash
-        env:
-          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
-          POSTHASTE_BIN: posthaste-runtime
-          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_RUNTIME_NAME }}
-          POSTHASTE_BIN_LABEL: Posthaste runtime node
-        run: bash tools/package/bin.sh
-
-      - name: Package install wizard
-        shell: bash
-        env:
-          POSTHASTE_PACKAGE_PLATFORM: ${{ matrix.platform }}
-          POSTHASTE_BIN: posthaste-wizard
-          POSTHASTE_ARTIFACT_NAME: ${{ env.POSTHASTE_WIZARD_NAME }}
-          POSTHASTE_BIN_LABEL: Posthaste install wizard
-        run: bash tools/package/bin.sh
-
-      - name: Print sccache stats
-        if: always()
-        shell: bash
-        run: sccache --show-stats || true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: posthaste-authority-runtime-server-${{ matrix.platform }}
-          if-no-files-found: error
-          path: target/distribute/PosthasteAuthorityRuntimeServer*.tar.gz
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: posthaste-authority-server-${{ matrix.platform }}
-          if-no-files-found: error
-          path: target/distribute/PosthasteAuthorityServer*.tar.gz
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: posthaste-runtime-${{ matrix.platform }}
-          if-no-files-found: error
-          path: target/distribute/PosthasteRuntime*.tar.gz
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: posthaste-wizard-${{ matrix.platform }}
-          if-no-files-found: error
-          path: target/distribute/PosthasteWizard*.tar.gz
-
-  build-web:
-    if: ${{ !inputs.only_desktop_linux }}
-    name: Build web frontend
-    needs: [resolve-channel, build-client-frontend]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Cache Bun download cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Resolve channel policy
-        shell: bash
-        env:
-          POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
-        run: bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: client-frontend-dist
-          path: apps/client/frontend/dist
-
-      - name: Package web frontend
-        shell: bash
-        run: bash tools/package/web.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: posthaste-web
-          if-no-files-found: error
-          path: target/distribute/PosthasteWeb*.tar.gz
-
-  build-cli:
-    name: Build posthastectl CLI
-    needs: resolve-channel
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Cache Bun download cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Resolve channel policy
-        shell: bash
-        env:
-          POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
-        run: bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
-
-      - name: Cross-compile posthastectl per target
-        shell: bash
-        run: |
-          mkdir -p target/distribute
-          # Bun target -> release artifact platform suffix.
-          targets=(
-            "bun-linux-x64:linux-x64"
-            "bun-linux-arm64:linux-arm64"
-            "bun-darwin-x64:darwin-x64"
-            "bun-darwin-arm64:darwin-arm64"
-            "bun-windows-x64:windows-x64"
-          )
-          for entry in "${targets[@]}"; do
-            bun_target="${entry%%:*}"
-            platform="${entry##*:}"
-            # build-cli.ts prints the final artifact path (incl. .exe for
-            # windows) as its last stdout line; capture + verify it exists.
-            artifact="$(bun run apps/mcp/scripts/build-cli.ts -- "$bun_target" "target/distribute/${POSTHASTE_CLI_NAME}-${platform}" | tail -1)"
-            test -n "$artifact" && test -f "$artifact" || { echo "build failed for $bun_target" >&2; exit 1; }
-            echo "built $bun_target -> $artifact"
-          done
-
-      - uses: actions/upload-artifact@v4
-        with:
-          # Intermediate: bare, unsigned cross-compiled binaries (build-cli
-          # runs on ubuntu-latest, cross-compiling all five targets — no
-          # macOS runner here, so codesign/notarization cannot happen in this
-          # job). The package-cli job below codesigns + notarizes the darwin
-          # binaries and repackages every platform as a .tar.gz; publish
-          # consumes its `posthaste-cli` artifact, not this one.
-          name: posthaste-cli-raw
-          if-no-files-found: error
-          path: target/distribute/PosthasteCTL*
-
-  package-cli:
-    if: ${{ !inputs.only_desktop_linux }}
-    name: Sign + notarize + package posthastectl CLI
-    needs: [resolve-channel, build-cli]
-    # macOS Gatekeeper hard-rejects an unsigned CLI binary as "damaged" on
-    # Apple Silicon (arm64 requires *some* valid signature to execute at
-    # all). codesign/notarytool are Darwin-only, so this needs a real macOS
-    # runner even though build-cli itself cross-compiles from Linux. See
-    # docs/eph/RFC-L2-scripting.md §7.10(a).
-    runs-on: macos-latest
-    env:
-      POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Resolve channel policy
-        shell: bash
-        run: |
-          bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
-          cat "$GITHUB_ENV"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: posthaste-cli-raw
-          path: target/distribute/cli-raw
-
-      # Same identity resolution as the build-desktop job: Developer ID
-      # Application when the release signing secrets are configured, ad-hoc
-      # fallback otherwise. Applied on BOTH channels — enforce_macos_signing
-      # only controls whether ad-hoc is an acceptable fallback (see next
-      # step), not which identity a configured cert resolves to.
-      - name: Import Apple Developer certificate
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: tools/release/import-macos-certificate.sh
-
-      - name: Require Apple Developer ID for stable CLI signing
-        shell: bash
-        run: |
-          if [ "${POSTHASTE_ENFORCE_MACOS_SIGNING:-}" = "true" ] && [ "${POSTHASTE_MACOS_SIGNING:-}" != "developer-id" ]; then
-            echo "Stable macOS CLI binaries must use Apple Developer ID signing." >&2
-            echo "Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets." >&2
-            exit 1
-          fi
-
-      - name: Configure App Store Connect API key
-        shell: bash
-        env:
-          POSTHASTE_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          POSTHASTE_APPLE_API_KEY_PRIVATE_KEY: ${{ secrets.APPLE_API_KEY_PRIVATE_KEY }}
-        run: |
-          if [ -z "${POSTHASTE_APPLE_API_KEY:-}" ] || [ -z "${POSTHASTE_APPLE_API_KEY_PRIVATE_KEY:-}" ]; then
-            echo "App Store Connect API key is not configured; notarization can still use APPLE_ID credentials if present."
-            exit 0
-          fi
-          key_path="$RUNNER_TEMP/AuthKey_${POSTHASTE_APPLE_API_KEY}.p8"
-          printf '%s\n' "$POSTHASTE_APPLE_API_KEY_PRIVATE_KEY" > "$key_path"
-          chmod 600 "$key_path"
-          echo "POSTHASTE_APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
-
-      - name: Codesign, notarize, and package the CLI binaries
-        shell: bash
-        env:
-          POSTHASTE_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          POSTHASTE_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          POSTHASTE_APPLE_ID: ${{ secrets.APPLE_ID }}
-          POSTHASTE_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          POSTHASTE_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash tools/release/sign-and-package-cli.sh target/distribute/cli-raw target/distribute
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: posthaste-cli
-          if-no-files-found: error
-          path: target/distribute/PosthasteCTL*.tar.gz
-
   # The integrated frontend is platform-independent: build it ONCE on Linux and
-  # feed the identical dist to the web tarball and every desktop bundle. This
-  # also keeps vite off the Windows runners (bun-on-Windows junctioned
-  # node_modules can EPERM during vite resolution).
+  # feed the identical dist to every desktop bundle. This also keeps vite off
+  # the Windows runners (bun-on-Windows junctioned node_modules can EPERM
+  # during vite resolution).
   build-client-frontend:
     name: Build client frontend
     needs: resolve-channel
@@ -570,9 +263,8 @@ jobs:
             d="$POSTHASTE_ICON_DIR"
             icon_config=(--config "{\"bundle\":{\"icon\":[\"$d/32x32.png\",\"$d/128x128.png\",\"$d/128x128@2x.png\",\"$d/icon.icns\",\"$d/icon.ico\"]}}")
           fi
-          # Run from the tauri dir so CLI app-dir discovery is unambiguous while
-          # legacy/desktop/tauri.conf.json is still in the tree. The frontend is
-          # prebuilt above, so beforeBuildCommand is nulled out.
+          # Run from the tauri dir so CLI app-dir discovery is unambiguous.
+          # The frontend is prebuilt above, so beforeBuildCommand is nulled out.
           cd apps/client/desktop
           # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
           # have no code-signing certs configured, so code signing is a no-op
@@ -682,9 +374,8 @@ jobs:
             fi
           }
 
-          # Run from the tauri dir so CLI app-dir discovery is unambiguous while
-          # legacy/desktop/tauri.conf.json is still in the tree. The frontend is
-          # prebuilt above, so beforeBuildCommand is nulled out.
+          # Run from the tauri dir so CLI app-dir discovery is unambiguous.
+          # The frontend is prebuilt above, so beforeBuildCommand is nulled out.
           cd apps/client/desktop
           attempts="${POSTHASTE_MACOS_BUILD_ATTEMPTS:-3}"
           attempt=1
@@ -757,9 +448,6 @@ jobs:
     if: ${{ !inputs.only_desktop_linux }}
     name: Publish GitHub Release
     needs:
-      - build-daemon
-      - build-web
-      - package-cli
       - build-desktop
       - resolve-channel
     runs-on: ubuntu-latest
@@ -789,18 +477,11 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          # Only the desktop bundles ship; client-frontend-dist is a build
+          # intermediate consumed by build-desktop, not a release asset.
+          pattern: posthaste-desktop-*
           path: release-assets
           merge-multiple: true
-
-      - name: Drop raw unsigned CLI intermediates
-        shell: bash
-        run: |
-          # merge-multiple flattens the posthaste-cli-raw intermediate next to
-          # package-cli's signed tarballs; publishing the bare unsigned
-          # binaries would re-create the Gatekeeper trap. Only *.tar.gz CLI
-          # assets ship.
-          find release-assets -maxdepth 1 -type f -name 'PosthasteCTL*' \
-            ! -name '*.tar.gz' -print -delete
 
       - name: Promote nested desktop bundles
         shell: bash
@@ -821,22 +502,12 @@ jobs:
         shell: bash
         run: cp keys/release-gpg-public.asc release-assets/
 
-      - name: Add wizard bootstrap script
-        shell: bash
-        # Ship install.sh as a release asset so it is checksummed + signed
-        # alongside the binaries. It is also published to the rolling channel
-        # release below for a stable `curl | sh` URL.
-        run: cp tools/install/install.sh release-assets/
-
       - name: Add macOS launch note
         shell: bash
         run: |
           cat > release-assets/MACOS-INSTALL.txt <<'RELEASE_EOF'
           macOS nightly builds are Apple Developer signed when the release signing secrets are configured. If notarization credentials are not configured, macOS may still require the first launch to be approved manually.
           Drag Posthaste.app to Applications. If macOS blocks the first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
-
-          CLI (posthastectl): download PosthasteCTL[Nightly]-darwin-<arch>.tar.gz and extract it from Terminal with `tar -xzf` (not Finder/Archive Utility, which can re-apply the quarantine flag to the extracted binary). The binary is Apple Developer ID signed and notarized when the release signing secrets are configured (ad-hoc signed otherwise), so Apple Silicon Macs will run it without the "is damaged and can't be opened" error. A notarized command-line tool cannot carry a stapled ticket, so the very first run needs network access for Gatekeeper to check it online. If Gatekeeper still blocks the first run, either Control-click the binary and choose Open, or run:
-              xattr -d com.apple.quarantine ./PosthasteCTL*-darwin-*
           RELEASE_EOF
 
       - name: Generate updater manifest
@@ -962,33 +633,6 @@ jobs:
           make_latest: false
           fail_on_unmatched_files: true
           files: release-assets/${{ env.POSTHASTE_UPDATER_MANIFEST }}
-
-      # Publish the wizard bootstrap to the rolling channel release so
-      # `releases/download/<channel>/install.sh` is a stable `curl | sh` URL
-      # that always resolves the latest build. Runs unconditionally (unlike the
-      # manifest step, which needs updater signing), creating the rolling
-      # release if it does not yet exist. Listed after the manifest step so its
-      # release name/body wins; existing assets (the manifest) are preserved.
-      - name: Publish wizard bootstrap to rolling channel release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ env.POSTHASTE_RELEASE_CHANNEL }}
-          name: ${{ env.POSTHASTE_PRODUCT_NAME }}
-          body: |
-            Rolling release for the `${{ env.POSTHASTE_RELEASE_CHANNEL }}` channel.
-
-            Holds the wizard bootstrap (`install.sh`) and, when updater signing
-            is configured, the Tauri updater manifest. Both point at the latest
-            versioned build; download installers from the versioned release tags,
-            not from here.
-
-            Bootstrap the install wizard:
-
-                curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ env.POSTHASTE_RELEASE_CHANNEL }}/install.sh | sh
-          prerelease: ${{ env.POSTHASTE_PRERELEASE == 'true' }}
-          make_latest: false
-          fail_on_unmatched_files: true
-          files: release-assets/install.sh
 
   publish-site:
     # Fan-in: fires only after `publish` — the job whose action-gh-release step

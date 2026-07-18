@@ -4,5 +4,4 @@
 //! operations exercised by the `posthaste-profile` binary, the Criterion timing
 //! benches, and the iai-callgrind regression gate.
 
-pub mod runtime_workload;
 pub mod workloads;

@@ -16,13 +16,13 @@ while IFS= read -r match; do
 done < <(
   rg -n \
     '(^|[^[:alnum:]_])(tracing::)?(trace|debug|info|warn|error)!\(' \
-    "$root/crates" "$root/legacy/desktop/src" \
+    "$root/crates" \
     --glob '*.rs' \
     --glob '!crates/posthaste-observability/src/lib.rs'
 )
 
-if rg -n 'ph_forwarded_(trace|debug|info|warn|error)!' "$root/crates" "$root/legacy/desktop/src" --glob '*.rs' \
-  | rg -v '/legacy/desktop/src/(lib|frontend_logging)\.rs:' >/tmp/posthaste-forwarded-log-contract.$$; then
+if rg -n 'ph_forwarded_(trace|debug|info|warn|error)!' "$root/crates" --glob '*.rs' \
+  >/tmp/posthaste-forwarded-log-contract.$$; then
   cat /tmp/posthaste-forwarded-log-contract.$$ | while IFS= read -r match; do
     echo "forwarded dynamic log macro is only allowed in the desktop frontend bridge: $match" >&2
   done

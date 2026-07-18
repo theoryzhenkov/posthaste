@@ -83,18 +83,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ammonia"
-version = "4.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68b9d3370580a12f4b7a10fdcc18b28942c083ba570e3d954fe59d10951b85a2"
-dependencies = [
- "cssparser 0.37.0",
- "html5ever 0.39.0",
- "maplit",
- "url",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -967,17 +955,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cssparser"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c9cdaae01d5ed7882b04d795e7f752f46ff52d2fa3b50a20d28c464510bba98"
-dependencies = [
- "dtoa-short",
- "itoa",
- "smallvec",
-]
-
-[[package]]
 name = "cssparser-macros"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1246,19 +1223,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521e380c0c8afb8d9a1e83a1822ee03556fc3e3e7dbc1fd30be14e37f9cb3f89"
 dependencies = [
  "bit-set",
- "cssparser 0.36.0",
+ "cssparser",
  "foldhash 0.2.0",
- "html5ever 0.38.0",
+ "html5ever",
  "precomputed-hash",
  "selectors",
  "tendril",
 ]
-
-[[package]]
-name = "dotenvy"
-version = "0.15.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dpi"
@@ -1321,17 +1292,8 @@ dependencies = [
  "digest",
  "elliptic-curve",
  "rfc6979",
- "signature 2.2.0",
+ "signature",
  "spki",
-]
-
-[[package]]
-name = "ed25519"
-version = "1.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91cff35c70bba8a626e3185d8cd48cc11b5437e1a5bcd15b9b5fa3c64b6dfee7"
-dependencies = [
- "signature 1.6.4",
 ]
 
 [[package]]
@@ -1341,7 +1303,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
- "signature 2.2.0",
+ "signature",
 ]
 
 [[package]]
@@ -1351,7 +1313,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
  "curve25519-dalek",
- "ed25519 2.2.3",
+ "ed25519",
  "serde",
  "sha2",
  "subtle",
@@ -1605,7 +1567,6 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
- "zlib-rs",
 ]
 
 [[package]]
@@ -1995,18 +1956,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
-name = "gloo-timers"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
-dependencies = [
- "futures-channel",
- "futures-core",
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "gobject-sys"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2191,17 +2140,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1054432bae2f14e0061e33d23402fbaa67a921d319d56adc6bcf887ddad1cbc2"
 dependencies = [
  "log",
- "markup5ever 0.38.0",
-]
-
-[[package]]
-name = "html5ever"
-version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46a1761807faccc9a19e86944bbf40610014066306f96edcdedc2fb714bcb7b8"
-dependencies = [
- "log",
- "markup5ever 0.39.0",
+ "markup5ever",
 ]
 
 [[package]]
@@ -2822,7 +2761,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "signature 2.2.0",
+ "signature",
  "simple_asn1",
  "zeroize",
 ]
@@ -2954,18 +2893,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libsodium-sys"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b779387cd56adfbc02ea4a668e704f729be8d6a6abd2c27ca5ee537849a92fd"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
- "walkdir",
-]
-
-[[package]]
 name = "libsqlite3-sys"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3040,19 +2967,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "macaroon"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b15778101dd1d3a58a95fd2af33821b38bc44a408bcf03e0e5e194f42c08050"
-dependencies = [
- "base64 0.13.1",
- "log",
- "serde",
- "serde_json",
- "sodiumoxide",
-]
-
-[[package]]
 name = "mail-parser"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3062,27 +2976,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "maplit"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
-
-[[package]]
 name = "markup5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8983d30f2915feeaaab2d6babdd6bc7e9ed1a00b66b5e6d74df19aa9c0e91862"
-dependencies = [
- "log",
- "tendril",
- "web_atoms",
-]
-
-[[package]]
-name = "markup5ever"
-version = "0.39.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7122d987ec5f704ee56f6e5b41a7d93722e9aae27ae07cafa4036c4d3f9757de"
 dependencies = [
  "log",
  "tendril",
@@ -3980,85 +3877,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-authority-server"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "futures-util",
- "jsonwebtoken",
- "oauth2",
- "posthaste-authority-server-link",
- "posthaste-call-policy",
- "posthaste-client-link",
- "posthaste-config",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "posthaste-domain-service",
- "posthaste-engine",
- "posthaste-imap",
- "posthaste-link-far-end",
- "posthaste-observability",
- "posthaste-provider-call",
- "posthaste-query-grammar",
- "posthaste-replica-core",
- "posthaste-runtime",
- "posthaste-runtime-api",
- "posthaste-store",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml 0.8.23",
- "tower",
- "tower-http",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "posthaste-authority-server-link"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "posthaste-link-far-end",
- "posthaste-replica-core",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "posthaste-bench"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "criterion",
  "dhat",
- "futures-util",
  "iai-callgrind",
- "posthaste-authority-server",
- "posthaste-client-link",
- "posthaste-contract-core",
  "posthaste-domain-model",
  "posthaste-domain-service",
  "posthaste-query-grammar",
- "posthaste-runtime",
- "posthaste-runtime-api",
  "posthaste-store",
  "pprof",
- "serde_json",
  "tempfile",
- "tokio",
 ]
 
 [[package]]
@@ -4131,17 +3962,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-client-link"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "posthaste-replica-core",
-]
-
-[[package]]
 name = "posthaste-client-models"
 version = "0.1.0"
 dependencies = [
@@ -4149,25 +3969,6 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
-]
-
-[[package]]
-name = "posthaste-client-node-wasm"
-version = "0.1.0"
-dependencies = [
- "futures-channel",
- "futures-util",
- "gloo-timers",
- "js-sys",
- "posthaste-contract-core",
- "posthaste-link-near-end",
- "posthaste-replica-core",
- "posthaste-replica-projector",
- "serde",
- "serde_json",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -4181,41 +3982,6 @@ dependencies = [
  "tempfile",
  "toml 0.8.23",
  "toml_edit 0.22.27",
-]
-
-[[package]]
-name = "posthaste-contract-core"
-version = "0.1.0"
-dependencies = [
- "posthaste-domain-model",
- "posthaste-replica-core",
- "serde",
- "serde_json",
- "utoipa",
-]
-
-[[package]]
-name = "posthaste-desktop"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "keyring",
- "posthaste-http-api-adapter",
- "posthaste-observability",
- "posthaste-server",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-playwright",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "tauri-utils",
- "tempfile",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -4276,50 +4042,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-http-api-adapter"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "http-body-util",
- "keyring",
- "macaroon",
- "posthaste-client-link",
- "posthaste-config",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "posthaste-domain-service",
- "posthaste-observability",
- "posthaste-query-grammar",
- "posthaste-runtime",
- "posthaste-runtime-api",
- "posthaste-store",
- "reqwest 0.12.28",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "tokio-rustls",
- "tokio-stream",
- "tokio-util",
- "toml 0.8.23",
- "tower",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "url",
- "utoipa",
- "utoipa-swagger-ui",
- "uuid",
-]
-
-[[package]]
 name = "posthaste-imap"
 version = "0.1.0"
 dependencies = [
@@ -4352,28 +4074,6 @@ dependencies = [
  "time",
  "toml 0.8.23",
  "uuid",
-]
-
-[[package]]
-name = "posthaste-link-far-end"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "posthaste-contract-core",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "posthaste-link-near-end"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "posthaste-call-policy",
- "posthaste-contract-core",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4414,116 +4114,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "posthaste-replica-projector"
-version = "0.1.0"
-dependencies = [
- "posthaste-replica-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "posthaste-runtime"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "axum",
- "futures-util",
- "keyring",
- "posthaste-authority-server-link",
- "posthaste-client-link",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "posthaste-domain-service",
- "posthaste-link-far-end",
- "posthaste-link-near-end",
- "posthaste-replica-core",
- "posthaste-replica-projector",
- "posthaste-runtime-api",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "posthaste-runtime-api"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "serde",
-]
-
-[[package]]
-name = "posthaste-runtimed"
-version = "0.1.0"
-dependencies = [
- "posthaste-config",
- "posthaste-http-api-adapter",
- "posthaste-runtime",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "posthaste-server"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "async-stream",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "dirs",
- "dotenvy",
- "futures-util",
- "http-body-util",
- "jsonwebtoken",
- "keyring",
- "macaroon",
- "oauth2",
- "posthaste-authority-server",
- "posthaste-authority-server-link",
- "posthaste-client-link",
- "posthaste-config",
- "posthaste-contract-core",
- "posthaste-domain-model",
- "posthaste-domain-service",
- "posthaste-engine",
- "posthaste-http-api-adapter",
- "posthaste-imap",
- "posthaste-observability",
- "posthaste-replica-core",
- "posthaste-runtime",
- "posthaste-runtime-api",
- "posthaste-store",
- "posthaste-testkit",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml 0.8.23",
- "tower",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "url",
- "utoipa",
- "utoipa-swagger-ui",
- "uuid",
-]
-
-[[package]]
 name = "posthaste-store"
 version = "0.1.0"
 dependencies = [
@@ -4546,20 +4136,11 @@ dependencies = [
 name = "posthaste-testkit"
 version = "0.1.0"
 dependencies = [
- "futures-util",
  "imap-codec",
- "jmap-client",
- "posthaste-authority-server",
- "posthaste-client-link",
  "posthaste-config",
- "posthaste-contract-core",
  "posthaste-domain-model",
  "posthaste-domain-service",
  "posthaste-imap",
- "posthaste-replica-core",
- "posthaste-replica-projector",
- "posthaste-runtime",
- "posthaste-runtime-api",
  "posthaste-store",
  "serde",
  "serde_json",
@@ -4567,23 +4148,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
-]
-
-[[package]]
-name = "posthaste-wizard"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "posthaste-config",
- "rcgen",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "time",
- "toml 0.8.23",
- "ureq",
 ]
 
 [[package]]
@@ -5022,19 +4586,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rcgen"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
-dependencies = [
- "pem",
- "ring",
- "rustls-pki-types",
- "time",
- "yasna",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5264,7 +4815,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core 0.6.4",
- "signature 2.2.0",
+ "signature",
  "spki",
  "subtle",
  "zeroize",
@@ -5282,40 +4833,6 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "smallvec",
-]
-
-[[package]]
-name = "rust-embed"
-version = "8.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04113cb9355a377d83f06ef1f0a45b8ab8cd7d8b1288160717d66df5c7988d27"
-dependencies = [
- "rust-embed-impl",
- "rust-embed-utils",
- "walkdir",
-]
-
-[[package]]
-name = "rust-embed-impl"
-version = "8.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da0902e4c7c8e997159ab384e6d0fc91c221375f6894346ae107f47dd0f3ccaa"
-dependencies = [
- "proc-macro2",
- "quote",
- "rust-embed-utils",
- "syn 2.0.118",
- "walkdir",
-]
-
-[[package]]
-name = "rust-embed-utils"
-version = "8.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bcdef0be6fe7f6fa333b1073c949729274b05f123a0ad7efcb8efd878e5c3b1"
-dependencies = [
- "sha2",
- "walkdir",
 ]
 
 [[package]]
@@ -5396,15 +4913,6 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework 3.7.0",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]
@@ -5632,7 +5140,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5d9c0c92a92d33f08817311cf3f2c29a3538a8240e94a6a3c622ce652d7e00c"
 dependencies = [
  "bitflags 2.13.0",
- "cssparser 0.36.0",
+ "cssparser",
  "derive_more",
  "log",
  "new_debug_unreachable",
@@ -5883,12 +5391,6 @@ dependencies = [
 
 [[package]]
 name = "signature"
-version = "1.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c"
-
-[[package]]
-name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
@@ -5957,18 +5459,6 @@ checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "sodiumoxide"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e26be3acb6c2d9a7aac28482586a7856436af4cfe7100031d219de2d2ecb0028"
-dependencies = [
- "ed25519 1.5.3",
- "libc",
- "libsodium-sys",
- "serde",
 ]
 
 [[package]]
@@ -6467,20 +5957,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-playwright"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2de803dd4ac54e9457e45f5e3f1f654eab2581d8cd60a14defc18d66725fcea5"
-dependencies = [
- "log",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
- "tokio",
-]
-
-[[package]]
 name = "tauri-plugin-process"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6536,7 +6012,7 @@ dependencies = [
  "tokio",
  "url",
  "windows-sys 0.60.2",
- "zip 4.6.1",
+ "zip",
 ]
 
 [[package]]
@@ -7335,21 +6811,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "ureq"
-version = "2.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
-dependencies = [
- "base64 0.22.1",
- "log",
- "once_cell",
- "rustls",
- "rustls-pki-types",
- "url",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7408,24 +6869,6 @@ dependencies = [
  "quote",
  "regex",
  "syn 2.0.118",
-]
-
-[[package]]
-name = "utoipa-swagger-ui"
-version = "9.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d047458f1b5b65237c2f6dc6db136945667f40a7668627b3490b9513a3d43a55"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "mime_guess",
- "regex",
- "rust-embed",
- "serde",
- "serde_json",
- "url",
- "utoipa",
- "zip 3.0.0",
 ]
 
 [[package]]
@@ -8287,15 +7730,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "yasna"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
-dependencies = [
- "time",
-]
-
-[[package]]
 name = "yoke"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8475,20 +7909,6 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12598812502ed0105f607f941c386f43d441e00148fce9dec3ca5ffb0bde9308"
-dependencies = [
- "arbitrary",
- "crc32fast",
- "flate2",
- "indexmap 2.14.0",
- "memchr",
- "zopfli",
-]
-
-[[package]]
-name = "zip"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
@@ -8500,28 +7920,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "zlib-rs"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5431d5661c32445236631278f27946e444ddafe4684cac70b185272d4f9c52d5"
-
-[[package]]
 name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[package]]
-name = "zopfli"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
-dependencies = [
- "bumpalo",
- "crc32fast",
- "log",
- "simd-adler32",
-]
 
 [[package]]
 name = "zvariant"

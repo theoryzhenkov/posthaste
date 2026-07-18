@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Default permissions for Posthaste","local":true,"windows":["main","settings","message-*","attachment-*","compose-*"],"permissions":["core:default","core:window:allow-set-badge-count","notification:default","opener:allow-open-url","updater:default","process:allow-restart"]}}

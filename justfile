@@ -1,11 +1,8 @@
-# Root justfile - orchestrates backend, frontend, desktop, docs, and dev stacks
+# Root justfile - orchestrates backend, frontend, docs, and dev stacks
 
 mod template
 mod backend 'crates/justfile'
-mod web 'legacy/web/justfile'
-mod mcp 'apps/mcp/justfile'
 mod site 'apps/site/justfile'
-mod desktop 'legacy/desktop/justfile'
 mod dev 'tools/dev/justfile'
 mod lab 'tools/lab/justfile'
 mod docs 'docs/justfile'
@@ -24,15 +21,11 @@ install:
 # Format all code
 fmt:
     just backend fmt
-    just web fmt
-    just mcp fmt
     just site fmt
 
 # Check formatting without modifying files
 fmt-check:
     just backend fmt-check
-    just web fmt-check
-    just mcp fmt-check
     just site fmt-check
 
 # Validate a Posthaste config directory. No production config is committed, so
@@ -45,8 +38,6 @@ check:
     just dev smoke
     just fmt-check
     just backend check
-    just web check
-    just mcp check
     just site check
     just docs build
 
@@ -54,16 +45,11 @@ check:
 test *args:
     bash tools/disk-guard.sh
     just backend test {{ args }}
-    just desktop test
-    just web test
-    just mcp test
 
 # Build everything
 build:
     bash tools/disk-guard.sh
     just backend build
-    just web build
-    just desktop build
     just site build
 
 # Report quota usage + every target/ dir under the checkout (the recurring hog).
@@ -74,49 +60,11 @@ disk:
 reclaim:
     bash tools/disk-guard.sh clean
 
-# Build the client node WASM bundle (posthaste-client-node-wasm: kernel +
-# projector + near-end, RFC-L2-architecture-cleanup D41/D43) and emit the JS
-# loader + .d.ts into legacy/web/src/runtime/wasm/. The replicaAdapter loads
-# these only when VITE_RUNTIME_REPLICA is enabled. The artifacts are generated
-# but committed (like legacy/web/src/api/schema.gen.ts) so web builds need no Rust
-# toolchain; re-run this and commit the result after changing the boundary, and
-# CI re-runs it to verify the bindings are fresh.
-build-client-node-wasm:
-    cargo build -p posthaste-client-node-wasm --release --target wasm32-unknown-unknown
-    wasm-bindgen target/wasm32-unknown-unknown/release/posthaste_client_node_wasm.wasm \
-        --out-dir legacy/web/src/runtime/wasm --target web
-    # Skip wasm-opt when SKIP_WASM_OPT is set (e.g. CI smoke tests where the
-    # available binaryen version produces a table-max that is incompatible with
-    # the committed wasm-bindgen JS glue). Release builds still optimize.
-    if [ -z "${SKIP_WASM_OPT:-}" ]; then \
-        wasm-opt -Oz legacy/web/src/runtime/wasm/posthaste_client_node_wasm_bg.wasm \
-            -o legacy/web/src/runtime/wasm/posthaste_client_node_wasm_bg.wasm; \
-    fi
-
 # Regenerate the client's TypeScript protocol types (apps/client/frontend/src/gen/)
 # from the Rust models crate. Committed output; the models crate's freshness
 # test fails when this is stale.
 gen-ts:
     cargo run -p posthaste-client-models --bin export-ts
-
-# Build the browser-localhost distributable assets and server binary.
-build-serve:
-    just web build
-    just backend build-release
-
-# Package the standalone daemon binary (posthasted) under target/distribute/.
-package-daemon:
-    just backend build-release
-    bash tools/package/daemon.sh
-
-# Package the browser-localhost web frontend under target/distribute/.
-package-web:
-    just web build
-    bash tools/package/web.sh
-
-# Run browser-localhost mode from the built frontend.
-serve *args:
-    cargo run --bin posthaste-authority-runtime-server -- serve --frontend-dist legacy/web/dist {{ args }}
 
 # Print the browser automation environment exposed by the dev shell.
 browser-env:
@@ -134,11 +82,9 @@ browser-screenshot url file *args:
 
 # --- Local Stalwart dev server (end-to-end testing) ---
 # See tools/dev/stalwart/ for config and seed script.
-# Canonical full-stack browser dev: just dev web
-# Canonical full-stack desktop dev: just dev desktop
-# Canonical services only: just dev services
-# Canonical Vite only: just web dev
-# Canonical Tauri only: just desktop dev
+# Canonical services stack (Stalwart + seed + mock Gmail): just dev services
+# Canonical client frontend dev: bun run client:dev
+# Canonical client desktop dev: bun run client:desktop:dev
 
 # Admin password for Stalwart's fallback-admin + dev mailbox password.
 # Override with `just stalwart-up admin=... user=...` or set env vars directly.

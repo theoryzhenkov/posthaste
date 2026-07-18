@@ -1,10 +1,10 @@
 //! Declarative TOML fixtures.
 //!
 //! A [`Fixture`] declares accounts and their messages (with optional field
-//! overrides) in TOML. [`RuntimeHarness::load_fixture_toml`](crate::RuntimeHarness::load_fixture_toml)
-//! parses it and drives the programmatic `create_mock_account` /
-//! `seed_messages_typed` helpers, so a scenario is one declarative block
-//! instead of imperative setup.
+//! overrides) in TOML. [`Harness::load_fixture_toml`](crate::Harness::load_fixture_toml)
+//! parses it and drives the programmatic account-save / `seed_messages_typed`
+//! helpers, so a scenario is one declarative block instead of imperative
+//! setup.
 //!
 //! Only `driver = "mock"` is supported today; JMAP / provider-state fixtures
 //! land with the live read-path (see `docs/eph/PLAN-L2-testkit-roadmap`).

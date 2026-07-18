@@ -24,20 +24,10 @@ posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-query-grammar = { path = "../posthaste-query-grammar" }
 posthaste-store = { path = "../posthaste-store" }
-# Runtime-tier workload: drive the full mutation -> view-recompute -> frame path
-# (not just the store), so the harness can profile the link-bus hot path.
-posthaste-authority-server = { path = "../posthaste-authority-server" }
-posthaste-client-link = { path = "../posthaste-client-link" }
-posthaste-contract-core = { path = "../posthaste-contract-core" }
-posthaste-runtime = { path = "../posthaste-runtime" }
-posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 anyhow = "1"
 pprof = { version = "0.15", features = ["flamegraph", "protobuf-codec"] }
 dhat = "0.3"
 tempfile = "3"
-tokio = { workspace = true }
-futures-util = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

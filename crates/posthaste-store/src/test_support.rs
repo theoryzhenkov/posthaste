@@ -4,9 +4,8 @@
 //! `std::env::temp_dir()` + nanos/counter unique-naming helper and never
 //! clean up the directory. Both now share [`temp_root`] from here instead.
 //!
-//! Backed by [`tempfile::TempDir`] (already in the dependency tree via
-//! `posthaste-wizard`/`posthaste-bench`) rather than reinventing unique-name
-//! generation and recursive removal. [`TempDirGuard`] adds a
+//! Backed by [`tempfile::TempDir`] (already in the workspace dependency tree)
+//! rather than reinventing unique-name generation and recursive removal. [`TempDirGuard`] adds a
 //! `Deref<Target = Path>` so the existing `let root = temp_root(); ...
 //! root.join(...)` call sites need no further changes beyond the binding's
 //! type going from `PathBuf` to this guard — the directory is removed when

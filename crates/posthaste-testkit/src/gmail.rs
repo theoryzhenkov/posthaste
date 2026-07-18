@@ -6,8 +6,8 @@
 //! `posthaste-imap`'s discovery tests (which asserts capability negotiation and
 //! FETCH parsing in isolation), this fixture answers the full discovery + sync +
 //! mutation command set the real gateway drives across several connections,
-//! so a `create_gmail_account` -> sync -> store -> mailList view test exercises
-//! the Gmail IMAP path end to end (mirroring the JMAP live test).
+//! so an account-against-the-fixture -> sync -> store -> projection test
+//! exercises the Gmail IMAP path end to end (mirroring the JMAP live test).
 //!
 //! The server holds a shared [`MailModel`] (behind a mutex) modeling Gmail's
 //! **label** semantics: one message store where each message carries a label
@@ -50,20 +50,13 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use posthaste_contract_core::{
-    AccountTransportMutation, CreateAccountMutation, RuntimeCaller, SecretWriteMode,
-    SecretWriteMutation,
-};
 use posthaste_domain_model::{
-    AccountDriver, AccountId, ImapTransportSettings, SmtpTransportSettings,
+    AccountTransportSettings, ImapTransportSettings, ProviderAuthKind, ProviderHint, SecretKind,
+    SecretRef, SmtpTransportSettings, TransportSecurity,
 };
-use posthaste_domain_model::{ProviderAuthKind, ProviderHint, TransportSecurity};
-use posthaste_runtime_api::RuntimeAccountApi;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
-
-use crate::RuntimeHarness;
 
 /// Capabilities the QRESYNC-capable Gmail mock advertises. Deliberately omits
 /// `IDLE` (see module docs): with no IDLE the gateway skips the background push
@@ -498,10 +491,8 @@ impl MailModel {
 
 /// A disposable mock Gmail IMAP server bound to a loopback port.
 ///
-/// The server task is aborted on drop. Use [`create_gmail_account`] to wire an
-/// `ImapSmtp` account against it.
-///
-/// [`create_gmail_account`]: RuntimeHarness::create_gmail_account
+/// The server task is aborted on drop. Use [`GmailImapFixture::imap_transport`]
+/// to wire an `ImapSmtp` account against it.
 pub struct GmailImapFixture {
     port: u16,
     smtp_port: u16,
@@ -722,39 +713,47 @@ impl GmailImapFixture {
             .any(|message| message.uid == uid && message.deleted_in.contains(mailbox))
     }
 
+    /// The provider personality this fixture models (`Gmail` for the Gmail
+    /// flavors, `Generic` for the plain-IMAP flavors) — the hint a gateway
+    /// config built against this fixture should carry.
+    pub fn provider(&self) -> ProviderHint {
+        self.provider.clone()
+    }
+
+    /// The account username the mock authenticates (any password accepted;
+    /// tests conventionally use [`GmailImapFixture::password`]).
+    pub fn username(&self) -> String {
+        "dev@gmail.example".to_string()
+    }
+
+    /// The password tests use against this mock (it accepts any).
+    pub fn password(&self) -> String {
+        "app-password".to_string()
+    }
+
     /// The `ImapSmtp` account transport pointed at this mock. SMTP settings are
     /// required to build the gateway config, but the sync path never connects
     /// SMTP (only sends do).
-    fn account_mutation(&self, id: &str) -> CreateAccountMutation {
-        CreateAccountMutation {
-            id: Some(id.to_string()),
-            name: id.to_string(),
-            driver: Some(AccountDriver::ImapSmtp),
-            enabled: Some(true),
-            full_name: Some("Gmail Dev".to_string()),
-            signature: None,
-            email_patterns: vec!["dev@gmail.example".to_string()],
-            appearance: None,
-            transport: AccountTransportMutation {
-                provider: Some(self.provider.clone()),
-                auth: Some(ProviderAuthKind::Password),
-                base_url: None,
-                username: Some("dev@gmail.example".to_string()),
-                imap: Some(ImapTransportSettings {
-                    host: "127.0.0.1".to_string(),
-                    port: self.port,
-                    security: TransportSecurity::Plain,
-                }),
-                smtp: Some(SmtpTransportSettings {
-                    host: "127.0.0.1".to_string(),
-                    port: self.smtp_port,
-                    security: TransportSecurity::Plain,
-                }),
-            },
-            secret: SecretWriteMutation {
-                mode: SecretWriteMode::Replace,
-                password: Some("app-password".to_string()),
-            },
+    pub fn imap_transport(&self) -> AccountTransportSettings {
+        AccountTransportSettings {
+            provider: self.provider.clone(),
+            auth: ProviderAuthKind::Password,
+            base_url: None,
+            username: Some(self.username()),
+            secret_ref: Some(SecretRef {
+                kind: SecretKind::Env,
+                key: "POSTHASTE_UNUSED".to_string(),
+            }),
+            imap: Some(ImapTransportSettings {
+                host: "127.0.0.1".to_string(),
+                port: self.port,
+                security: TransportSecurity::Plain,
+            }),
+            smtp: Some(SmtpTransportSettings {
+                host: "127.0.0.1".to_string(),
+                port: self.smtp_port,
+                security: TransportSecurity::Plain,
+            }),
         }
     }
 }
@@ -763,23 +762,6 @@ impl Drop for GmailImapFixture {
     fn drop(&mut self) {
         self.server.abort();
         self.smtp_server.abort();
-    }
-}
-
-impl RuntimeHarness {
-    /// Create an `ImapSmtp` account against a [`GmailImapFixture`] (any
-    /// flavor), enable it (which runs discovery), and run an initial sync
-    /// (full-snapshot fetch that lands the baseline message in the store).
-    /// Returns the account id; re-sync after mutating the fixture with
-    /// [`RuntimeHarness::sync_account`].
-    pub async fn create_gmail_account(&self, id: &str, gmail: &GmailImapFixture) -> AccountId {
-        let account = self
-            .core()
-            .create_account(RuntimeCaller::test(), gmail.account_mutation(id))
-            .await
-            .expect("gmail account should create");
-        self.sync_account(&account.id).await;
-        account.id
     }
 }
 

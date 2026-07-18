@@ -12,14 +12,12 @@ use super::*;
 ///   tracked on the account/connection status, not folded into this enum.
 /// * **The reason** a failure earned its terminality (auth vs corruption vs an
 ///   internal decode bug) is carried by the *paired* typed code at each site —
-///   the [`RuntimeErrorCode`](../../posthaste_contract_core) on a
-///   `RuntimeAdapterError`, or the [`GatewayError`] variant behind an outbox
-///   flush. `Terminality` is the shared verdict; the code alongside it is the
-///   shared reason. This keeps the axis small enough to be the single thing
-///   three consumers (outbox flush, near-end engine, D47 settlement) agree on.
+///   the [`GatewayError`] variant behind an outbox flush. `Terminality` is the
+///   shared verdict; the code alongside it is the shared reason. This keeps
+///   the axis small enough to be the single thing every consumer (outbox
+///   flush, D47 settlement) agrees on.
 ///
-/// Serde-only, no I/O deps: it rides the wasm frontier embedded in
-/// `RuntimeAdapterError`.
+/// Serde-only, no I/O deps.
 ///
 /// @spec docs/eph/RFC-L2-lifecycle-and-errors#3b-errors
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

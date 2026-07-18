@@ -1,67 +1,6 @@
 # PostHaste Lab suite registry.
 # Suite IDs use docs-compatible nested TOML tables that flatten to canonical IDs.
 
-[suite.api.health.dev]
-level = "integration"
-targets = ["daemon"]
-profile = "profile.lab.empty.dev"
-runners = ["runner.cargo.test.dev"]
-tags = ["api", "health", "fast", "lab-smoke"]
-paths = [
-  "crates/posthaste-server/src/lib.rs",
-  "crates/posthaste-server/tests/api_boundary_contracts.rs",
-]
-command = "cargo test -p posthaste-server health"
-timeout_seconds = 300
-artifacts = ["log.authority-server.health.dev"]
-
-[suite.api.settings.dev]
-level = "integration"
-targets = ["daemon"]
-profile = "profile.lab.empty.dev"
-runners = ["runner.cargo.test.dev"]
-tags = ["api", "settings", "fast"]
-paths = [
-  "crates/posthaste-server/src/lib.rs",
-  "crates/posthaste-server/tests/settings_patch.rs",
-]
-command = "cargo test -p posthaste-server --test settings_patch"
-timeout_seconds = 300
-artifacts = ["log.authority-server.jsonl.dev"]
-
-[suite.ui.readiness.web.test]
-level = "unit"
-targets = ["web"]
-profile = "profile.lab.empty.test"
-runners = ["runner.bun.test"]
-tags = ["ui", "readiness", "web", "fast", "lab-smoke"]
-paths = [
-  "legacy/web/src/labReadiness.ts",
-  "legacy/web/test/labReadiness.test.ts",
-]
-command = "bun --cwd=legacy/web test labReadiness"
-timeout_seconds = 60
-artifacts = ["artifact.bun.lab-readiness.web.test"]
-
-[suite.ui.surfaces.web.test]
-level = "unit"
-targets = ["web"]
-profile = "profile.lab.empty.test"
-runners = ["runner.bun.test"]
-tags = ["ui", "surfaces", "web", "fast", "lab-smoke"]
-paths = [
-  "legacy/web/src/App.tsx",
-  "legacy/web/src/components/InvalidSurface.tsx",
-  "legacy/web/src/hooks/useSurfaceRouting.ts",
-  "legacy/web/src/surfaces.ts",
-  "legacy/web/src/surfaceWindowPolicy.ts",
-  "legacy/web/test/surfaces.test.ts",
-  "legacy/web/test/desktop.test.ts",
-]
-command = "bun --cwd=legacy/web test surfaces desktop"
-timeout_seconds = 60
-artifacts = ["artifact.bun.surfaces.web.test"]
-
 [suite.lab.core.rust.test]
 level = "unit"
 targets = ["lab"]
@@ -113,26 +52,6 @@ paths = [
 command = "just dev smoke"
 timeout_seconds = 300
 artifacts = ["artifact.summary.dev.local"]
-
-[suite.desktop.main.linux.test]
-level = "smoke"
-targets = ["desktop", "linux"]
-profile = "profile.lab.empty.test"
-runners = ["runner.tauri-playwright.linux.test"]
-tags = ["desktop", "tauri", "linux", "smoke"]
-paths = [
-  "legacy/desktop/Cargo.toml",
-  "legacy/desktop/src/e2e.rs",
-  "legacy/desktop/src/lib.rs",
-  "legacy/desktop/tauri.e2e.conf.json",
-  "legacy/web/src/components/FocusedSurface.tsx",
-  "legacy/web/src/components/SurfaceHost.tsx",
-  "legacy/web/src/labReadiness.ts",
-  "tools/lab/tauri-playwright/",
-]
-command = "just lab tauri-smoke"
-timeout_seconds = 600
-artifacts = ["artifact.playwright.desktop-main.linux.test"]
 
 # --- Profiling (offline store hot paths) -------------------------------------
 # Slow + build-heavy; intentionally not tagged `lab-smoke`. Run explicitly with
