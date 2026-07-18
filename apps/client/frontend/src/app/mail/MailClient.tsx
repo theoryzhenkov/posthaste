@@ -13,8 +13,8 @@ import {
 import { useAutoMarkRead } from '@/data/hooks/useAutoMarkRead'
 import { useDesignTheme } from '@/lib/design/useDesignTheme'
 import { useEmailActions } from '@/data/hooks/useEmailActions'
-import { KeyboardController } from '@/components/keyboard/KeyboardController'
-import { useGotoNavigation } from '@/components/keyboard/goto/useGotoNavigation'
+import { KeyboardController } from '@/app/input/keyboard/KeyboardController'
+import { useGotoNavigation } from '@/app/input/goto/useGotoNavigation'
 import { useMailboxRole, useSmartMailboxRole } from '@/data/hooks/useMailboxRole'
 import { useMailLayoutPersistence } from '@/app/mail/useMailLayoutPersistence'
 import { closeWebSurface, useEffectiveSurface } from '@/surfaces/useSurfaceRouting'
@@ -99,7 +99,10 @@ export function MailClient({
     enabledAccounts[0]?.id ??
     null
   const undoRedo = useUndoRedo(undoAccountId)
-  const actions = useEmailActions({ undo: undoRedo.undo })
+  // The shell's undo/redo (Cmd+Z, palette) drives the default account's
+  // rev-log; the action toasts' Undo routes per acted-on account inside
+  // useEmailActions.
+  const actions = useEmailActions()
   const effectiveView = hasEnabledSources
     ? (selectedView ?? DEFAULT_VIEW)
     : null
@@ -252,20 +255,10 @@ export function MailClient({
         hasSelectedMessage={selectedMessage !== null}
         hasSearchQuery={searchQuery.trim().length > 0}
         onOpenCommandPalette={handleOpenCommandPalette}
-        onOpenSettings={handlers.handleOpenSettingsShortcut}
-        onCompose={handlers.handleCompose}
-        onReply={handlers.handleReply}
-        onReplyAll={handlers.handleReplyAll}
-        onToggleFlag={handlers.handleToggleFlag}
         onUndo={undoRedo.undo}
         onRedo={undoRedo.redo}
-        onArchive={handlers.handleArchive}
-        onTrash={handlers.handleTrash}
-        onOpenTagEditor={handlers.handleOpenTagEditor}
-        onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
         onClearSelectedMessage={handlers.handleClearSelectedMessage}
         onClearSearchQuery={handlers.handleRejectSearchPreview}
-        onToggleShortcuts={handlers.handleToggleShortcuts}
         onOpenActionPicker={handleOpenActionPicker}
         onGoto={gotoNavigation.goto}
         onGotoConversation={() => {

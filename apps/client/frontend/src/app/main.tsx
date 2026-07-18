@@ -4,7 +4,7 @@
  * app passes the connection-info credentials instead. */
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import './index.css'
+import './assets/index.css'
 import App from './App'
 import { applyBrandFavicon } from './shell/brandFavicon'
 import { bootstrapClientOptions, MailClient } from '../data/transport/client'

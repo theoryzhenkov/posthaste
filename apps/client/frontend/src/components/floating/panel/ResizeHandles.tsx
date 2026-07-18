@@ -1,7 +1,7 @@
 import type { PointerEvent, PointerEventHandler } from 'react'
 
 import type { ResizeHandle } from '@/components/floating/geometry'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 import { RESIZE_HANDLES } from './constants'
 

@@ -4,8 +4,12 @@ import type { MessageDetailResult, MessageSummary } from '@/gen'
 import { parseEmailPattern, type EmailPattern } from '@/domain/address'
 import {
   accountFromOptions,
+  deriveReplySeed,
+  initialComposeForm,
+  replyAllRecipients,
   replyContextFromDetail,
   toSendMessageRequest,
+  EMPTY_FORM,
   type ComposeAccount,
 } from './model'
 
@@ -158,5 +162,121 @@ describe('accountFromOptions', () => {
     const emails = options.map((option) => option.email)
     expect(emails).toContain('alias@corp.example.com')
     expect(emails).not.toContain('stranger@elsewhere.com')
+  })
+})
+
+describe('replyAllRecipients', () => {
+  test('spans From + To in `to`, keeps Cc, excluding self and duplicates', () => {
+    const { to, cc } = replyAllRecipients(
+      [{ name: 'Ada', email: 'ada@example.com' }],
+      [
+        { name: 'Theo', email: 'THEO@example.com' },
+        { name: 'Grace', email: 'grace@example.com' },
+        { name: 'Ada twice', email: 'Ada@Example.com' },
+      ],
+      [
+        { name: 'Cc self', email: 'theo@example.com' },
+        { name: 'Cc other', email: 'cc@example.com' },
+      ],
+      'theo@example.com',
+    )
+    expect(to.map((r) => r.email)).toEqual([
+      'ada@example.com',
+      'grace@example.com',
+    ])
+    expect(cc.map((r) => r.email)).toEqual(['cc@example.com'])
+  })
+
+  test('without a known self keeps every distinct recipient', () => {
+    const { to } = replyAllRecipients(
+      [{ name: null, email: 'ada@example.com' }],
+      [{ name: null, email: 'theo@example.com' }],
+      [],
+      undefined,
+    )
+    expect(to.map((r) => r.email)).toEqual([
+      'ada@example.com',
+      'theo@example.com',
+    ])
+  })
+})
+
+describe('deriveReplySeed', () => {
+  test('reply addresses the sender and heads the quote with the attribution', () => {
+    const seed = deriveReplySeed('reply', replyContextFromDetail(detail()), 'theo@example.com')
+    expect(seed.to).toEqual([{ name: 'Ada Lovelace', email: 'ada@example.com' }])
+    expect(seed.cc).toEqual([])
+    expect(seed.subject).toBe('Re: Quarterly report')
+    expect(seed.quoteBlock).toContain('Ada Lovelace <ada@example.com> wrote:')
+    expect(seed.quoteBlock).toContain('> first line\n> second line')
+  })
+
+  test('reply-all spans From + To minus self', () => {
+    const seed = deriveReplySeed(
+      'replyAll',
+      replyContextFromDetail(detail()),
+      'theo@example.com',
+    )
+    expect(seed.to.map((r) => r.email)).toEqual(['ada@example.com'])
+  })
+
+  test('forward starts unaddressed with the forwarded block', () => {
+    const seed = deriveReplySeed('forward', replyContextFromDetail(detail()), undefined)
+    expect(seed.to).toEqual([])
+    expect(seed.subject).toBe('Fwd: Quarterly report')
+    expect(seed.quoteBlock).toContain('---------- Forwarded message ----------')
+  })
+
+  test('a missing body yields no quote block for a reply', () => {
+    const seed = deriveReplySeed(
+      'reply',
+      replyContextFromDetail(detail({ bodyText: null })),
+      undefined,
+    )
+    expect(seed.quoteBlock).toBeNull()
+  })
+})
+
+describe('initialComposeForm', () => {
+  test('a resumed draft replaces the empty form once loaded', () => {
+    const draftSeed = {
+      from: 'me@example.com',
+      to: 'you@example.com',
+      cc: '',
+      bcc: '',
+      subject: 'Kept',
+      body: 'draft text',
+    }
+    expect(
+      initialComposeForm({ draftSeed, intentKind: 'draft', mailtoSeed: undefined }),
+    ).toEqual({ ...draftSeed, attachments: [] })
+    expect(
+      initialComposeForm({
+        draftSeed: undefined,
+        intentKind: 'draft',
+        mailtoSeed: undefined,
+      }),
+    ).toEqual(EMPTY_FORM)
+  })
+
+  test('a mailto seeds its known fields synchronously', () => {
+    const form = initialComposeForm({
+      draftSeed: undefined,
+      intentKind: 'mailto',
+      mailtoSeed: { to: 'a@b.c', subject: 'Hi', body: 'text' },
+    })
+    expect(form.to).toBe('a@b.c')
+    expect(form.subject).toBe('Hi')
+    expect(form.body).toBe('text')
+  })
+
+  test('a reply starts empty — its seed streams in later', () => {
+    expect(
+      initialComposeForm({
+        draftSeed: undefined,
+        intentKind: 'reply',
+        mailtoSeed: undefined,
+      }),
+    ).toEqual(EMPTY_FORM)
   })
 })

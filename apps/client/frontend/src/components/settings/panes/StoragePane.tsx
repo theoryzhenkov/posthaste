@@ -7,7 +7,7 @@
 import { useState } from 'react'
 
 import type { CachePolicy } from '../../../data/transport/api/index'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import { SettingsPage, SettingsPageHeader, SettingsSection } from '../panel/shared'
 
 const MB = 1024 * 1024

@@ -1,8 +1,8 @@
 import { useCallback } from 'react'
 
 import { getAction, type ActionContext, type ActionServices } from '@/commands'
-import type { PaletteAction } from '@/components/palette/search/types'
-import { recordCommandUse } from '@/components/palette/search/recent/recentCommands'
+import type { PaletteAction } from '@/app/input/palette/search/types'
+import { recordCommandUse } from '@/app/input/palette/search/recent/recentCommands'
 import type { MailSelection } from '@/data/models/selection'
 
 /**

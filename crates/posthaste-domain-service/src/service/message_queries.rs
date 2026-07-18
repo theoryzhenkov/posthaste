@@ -119,6 +119,34 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// The id a message read should target when the caller may hold a STABLE
+    /// draft key instead of the live row id (NS2 Slice 5 / D173): when no row
+    /// lives at the given id but the draft registry maps it to a different
+    /// live id, read there instead. Any id with a visible row — or unknown to
+    /// the registry — passes through unchanged. The undo-restore path depends
+    /// on this: it reopens the kept draft by compose key, while the visible
+    /// row is keyed by the provider id the eager ensure-draft rotated to.
+    pub fn resolve_live_message_id(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<MessageId, ServiceError> {
+        if self
+            .message_detail_reader
+            .get_message_summary(account_id, message_id)?
+            .is_some()
+        {
+            return Ok(message_id.clone());
+        }
+        match self
+            .draft_registry
+            .resolve_draft_entity(account_id, message_id.as_str())?
+        {
+            Some(live) if live != message_id.as_str() => Ok(MessageId::from(live.as_str())),
+            _ => Ok(message_id.clone()),
+        }
+    }
+
     /// Fetch message detail, lazily fetching body from the gateway if needed.
     ///
     /// @spec docs/L1-sync#sync-loop
@@ -193,21 +221,7 @@ impl MailService {
         // the undo-restore path reopens the kept/ensured draft by compose key
         // (D173). When no row lives at the given id but the registry maps it,
         // read the LIVE row instead.
-        let message_id = if self
-            .message_detail_reader
-            .get_message_summary(account_id, message_id)?
-            .is_none()
-        {
-            match self
-                .draft_registry
-                .resolve_draft_entity(account_id, message_id.as_str())?
-            {
-                Some(live) if live != message_id.as_str() => MessageId::from(live.as_str()),
-                _ => message_id.clone(),
-            }
-        } else {
-            message_id.clone()
-        };
+        let message_id = self.resolve_live_message_id(account_id, message_id)?;
         let message_id = &message_id;
         let result = self
             .get_message_detail(account_id, message_id, gateway)

@@ -11,12 +11,17 @@ pub(crate) async fn evaluate_message_detail(
     app: &AppState,
     query: MessageDetailQuery,
 ) -> Result<MessageDetailResult, ApiFailure> {
+    // The id may be a stable draft key (the undo-restore reopen, D173):
+    // resolve it to the live row the registry maps it to before reading.
+    let message_id = app
+        .service
+        .resolve_live_message_id(&query.account_id, &query.message_id)?;
     // The gateway is optional: connected accounts fetch a missing body
     // lazily; offline the cached projection serves.
     let gateway = app.supervisor.gateway(&query.account_id).await.ok();
     let result = app
         .service
-        .get_message_detail(&query.account_id, &query.message_id, gateway.as_deref())
+        .get_message_detail(&query.account_id, &message_id, gateway.as_deref())
         .await?;
     // A lazy body fetch is a committed write: publish its events so other
     // clients observe the cache fill.

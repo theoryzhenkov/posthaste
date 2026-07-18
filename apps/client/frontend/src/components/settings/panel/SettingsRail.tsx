@@ -14,7 +14,7 @@ import {
 
 import { brandAccents } from '../../../lib/design/tokens/tokens'
 import { isTauriRuntime } from '../../../desktop/runtime'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import { isNightly, releaseChannel } from '@/desktop/releaseChannel'
 import type { SettingsSurfaceCategory } from '../../../surfaces/index'
 import { Button } from '../../ui/form/button'

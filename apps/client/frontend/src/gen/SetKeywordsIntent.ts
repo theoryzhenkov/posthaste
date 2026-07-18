@@ -6,4 +6,11 @@ import type { SetKeywordsCommand } from "./SetKeywordsCommand";
 /**
  * Target + keyword change for [`crate::Command::SetKeywords`].
  */
-export type SetKeywordsIntent = { accountId: AccountId, messageId: MessageId, change: SetKeywordsCommand, };
+export type SetKeywordsIntent = { accountId: AccountId, messageId: MessageId, change: SetKeywordsCommand, 
+/**
+ * Whether the change joins the account's undo history (absent = true).
+ * The client sends `false` for IMPLICIT gestures — the auto-mark-read on
+ * opening a message — so a deliberate action's toast/shell Undo is never
+ * hijacked by the read-state side effect that follows it.
+ */
+recordUndo?: boolean | null, };

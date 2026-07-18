@@ -7,9 +7,9 @@
  * Pure given `(ctx, services)`.
  */
 import type { LucideIcon } from 'lucide-react'
+import type { ResolvedActionView } from '../lib/command'
 import { allActions } from './registry'
 import type {
-  ActionConfirmCopy,
   ActionContext,
   ActionDefinition,
   ActionParamOption,
@@ -17,23 +17,12 @@ import type {
   ActionServices,
 } from './types'
 
-export interface ResolvedAction {
+/** A resolved action: the flattened, domain-free view every surface renders
+ *  (`lib/command.ResolvedActionView` — components receive exactly that) plus
+ *  the full definition for registry-side consumers (palette search keywords,
+ *  shortcut hints, the keyboard matcher). */
+export interface ResolvedAction extends ResolvedActionView {
   def: ActionDefinition
-  /** Context-applied. */
-  title: string
-  icon: LucideIcon
-  enabled: boolean
-  disabledReason?: string
-  /** Context-resolved confirmation copy; `undefined` = run without a dialog. */
-  confirm?: ActionConfirmCopy
-  /** Context-resolved options of a PARAMETERIZED action (`def.resolveParams`);
-   *  `undefined` for plain actions. Surfaces render these as their picker. */
-  params?: ActionParamOption[]
-  /** Bound runner: applies confirm gating (later slices), then `def.run`. */
-  execute: () => void | Promise<void>
-  /** Parameterized runner — present iff {@link params} is. Runs `def.run` with
-   *  the chosen option. */
-  executeWith?: (param: ActionParamOption) => void | Promise<void>
 }
 
 /** Menu / palette section order. */
@@ -71,6 +60,9 @@ function bind(
     typeof def.confirm === 'function' ? def.confirm(ctx) : def.confirm
   return {
     def,
+    id: def.id,
+    section: def.section,
+    destructive: def.destructive ?? false,
     title,
     icon,
     enabled,

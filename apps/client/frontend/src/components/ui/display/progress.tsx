@@ -1,4 +1,4 @@
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import { normalizeProgressValue } from '@/components/ui/display/progressValue'
 
 interface ProgressBarProps {

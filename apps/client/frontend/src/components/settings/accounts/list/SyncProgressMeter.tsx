@@ -1,5 +1,5 @@
 import type { AccountRow } from '@/gen'
-import { cn } from '../../../../lib/cn'
+import { cn } from '../../../../lib/design/cn'
 import { ProgressBar } from '../../../ui/display/progress'
 
 /**

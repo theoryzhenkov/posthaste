@@ -45,7 +45,6 @@ const NATIVE_SHORTCUTS: readonly ShortcutRow[] = [
   { keys: ['g t'], action: 'Go to trash' },
   { keys: ['g c'], action: 'Go to conversation' },
   { keys: ['g q', '…'], action: 'Go to smart mailbox by role' },
-  { keys: ['o'], action: 'Open message' },
   { keys: ['/'], action: 'Open command search' },
 ]
 

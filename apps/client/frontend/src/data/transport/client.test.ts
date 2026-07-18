@@ -398,6 +398,30 @@ describe('verbs', () => {
     client.close()
   })
 
+  test('send returns the command id as the operation id — the undo cancel handle', async () => {
+    // Regression anchor for docs/issues/integrated-send-undo-broken.md: the
+    // undo countdown toast cancels via `cancelOperation` keyed by this id, and
+    // the backend adopts the send command's envelope id as the outbox
+    // operation id (verified end to end by the backend's
+    // `frontend_send_envelope_holds_flushes_and_cancels_by_command_id`).
+    const { client, calls } = makeClient(commandHandler({ generation: 5 }))
+    const { operationId } = await client.send('a1', {
+      from: null,
+      to: [],
+      cc: [],
+      bcc: [],
+      subject: 's',
+      body: 'b',
+      inReplyTo: null,
+      references: null,
+      attachments: [],
+      draftId: 'd1',
+    })
+    const envelope = commandCalls(calls)[0]!.body as { id: string }
+    expect(operationId).toBe(envelope.id)
+    client.close()
+  })
+
   test('saveDraft creates with a minted id on first save, updates after', async () => {
     const { client, calls } = makeClient(commandHandler({ generation: 6 }))
     const draft = {

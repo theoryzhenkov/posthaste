@@ -7,7 +7,7 @@
 import { X } from 'lucide-react'
 
 import type { TagAppearance } from '@/data/transport/api'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import { useTagAppearanceLookup } from '@/data/hooks/useTagAppearance'
 
 import { resolveTagStyle } from './model'

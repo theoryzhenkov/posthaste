@@ -1014,3 +1014,116 @@ async fn live_backend_backfills_an_automation_rule_over_seeded_mail() {
     server.shutdown().await;
     drop(stalwart);
 }
+
+/// Regression (docs/issues/integrated-send-undo-broken.md): the PORTED frontend's
+/// exact send shape — `/api/command {"send": ...}` with a client-minted
+/// `draftId` (no draft exists) and an `undoWindowSeconds` hold, the command
+/// id doubling as the outbox operation id — must deliver after the hold on a
+/// REAL Stalwart account, and a second send must cancel inside the window via
+/// `cancelOperation` keyed by the command id.
+#[tokio::test(flavor = "multi_thread")]
+async fn live_frontend_shaped_held_send_delivers_and_cancels() {
+    if !integration_enabled() {
+        eprintln!("skipping Stalwart integration; set POSTHASTE_STALWART_INTEGRATION=1");
+        return;
+    }
+    let stalwart = tokio::task::spawn_blocking(StalwartFixture::start)
+        .await
+        .expect("fixture task");
+    let server = LiveServer::spawn().await;
+    let account = create_jmap_account(&server, &stalwart).await;
+    let account_id = account.id.as_str().to_string();
+
+    let (_, _, sent_before) = server.mailbox_by_role(&account_id, "sent").await;
+
+    let send_command = |command_id: &str, subject: &str, draft_key: &str, hold: u32| {
+        serde_json::json!({
+            "id": command_id,
+            "command": { "send": { "accountId": account_id, "request": {
+                "from": { "name": Some("Dev Account"), "email": stalwart.email() },
+                "to": [{ "name": Some("Dev Account"), "email": stalwart.email() }],
+                "cc": [], "bcc": [],
+                "subject": subject,
+                "body": "held send probe (frontend shape)",
+                "inReplyTo": null, "references": null,
+                "attachments": [],
+                "draftId": draft_key,
+                "undoWindowSeconds": hold,
+                "sendAt": "2099-01-01T00:00:00Z"
+            } } }
+        })
+    };
+
+    // --- Held send: must flush after the hold and land in Sent. -----------
+    server
+        .command(&send_command(
+            "01PROBELIVESENDFLUSH000001",
+            "Held send delivers",
+            "01PROBEDRAFTKEYFLUSH000001",
+            1,
+        ))
+        .await;
+    let deadline = Instant::now() + CONVERGENCE_DEADLINE;
+    loop {
+        let rows = server.pending_rows(&account_id).await;
+        let send_row = rows
+            .iter()
+            .find(|row| row["id"] == "01PROBELIVESENDFLUSH000001");
+        match send_row {
+            None => break,
+            Some(row) => {
+                assert_ne!(
+                    row["state"], "failed",
+                    "held send parked failed: {rows:?}"
+                );
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "held send never left the outbox: {rows:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    // The Sent copy is part of the submission; allow a sync round for counts.
+    let deadline = Instant::now() + CONVERGENCE_DEADLINE;
+    loop {
+        let (_, _, sent_total) = server.mailbox_by_role(&account_id, "sent").await;
+        if sent_total > sent_before {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "sent copy never appeared (before={sent_before}, now={sent_total})"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // --- Undo: a long-held send cancels via the command id. ----------------
+    server
+        .command(&send_command(
+            "01PROBELIVESENDCANCEL00001",
+            "Held send canceled",
+            "01PROBEDRAFTKEYCANCEL00001",
+            3600,
+        ))
+        .await;
+    server
+        .command(&serde_json::json!({
+            "id": "01PROBELIVECANCELVERB00001",
+            "command": { "cancelOperation": {
+                "accountId": account_id,
+                "operationId": "01PROBELIVESENDCANCEL00001"
+            } }
+        }))
+        .await;
+    let rows = server.pending_rows(&account_id).await;
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row["id"] == "01PROBELIVESENDCANCEL00001"),
+        "canceled send must leave the outbox: {rows:?}"
+    );
+
+    server.shutdown().await;
+    drop(stalwart);
+}

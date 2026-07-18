@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import type { MessageSummary } from '@/data/transport/api'
 import type { SurfaceDescriptor } from '@/surfaces'
@@ -7,10 +7,12 @@ import {
   closeCurrentSurfaceWindow,
   isTauriRuntime,
   listenForDesktopCloseRequest,
+  openExternalUrl,
 } from '@/desktop/runtime'
 import { useComposeIntent } from '@/data/hooks/useComposeIntent'
 import { useEmailActions } from '@/data/hooks/useEmailActions'
-import { useUndoRedo } from '@/data/hooks/useUndoRedo'
+import { buildDetailHeaderActions } from '@/commands'
+import { useCommandScope, type CommandScope } from '@/lib/command'
 import { replaceFocusedSurface } from '@/surfaces/useSurfaceRouting'
 import {
   markSurfaceBootstrap,
@@ -40,8 +42,7 @@ export function FocusedSurface({
   markSurfaceBootstrapOnce('focused_surface_render', { kind: surface.kind })
   const selectedMessage = surface.kind === 'message' ? surface.params : null
   const accountsQuery = useAccounts({ enabled: surface.kind === 'settings' })
-  const undoRedo = useUndoRedo()
-  const actions = useEmailActions({ undo: undoRedo.undo })
+  const actions = useEmailActions()
   const {
     closeCompose,
     composeIntent,
@@ -57,22 +58,22 @@ export function FocusedSurface({
     selectedView: null,
   })
 
-  useEffect(() => {
-    if (onClose) {
-      return
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || event.repeat || !canClose) {
-        return
-      }
-      event.preventDefault()
-      void closeCurrentSurfaceWindow()
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [canClose, onClose])
+  // Standalone surface WINDOW (no host-provided onClose): Escape closes the
+  // window via the dispatcher's `surface.close`, same command the in-app
+  // surface host binds.
+  const windowCloseScope = useMemo<CommandScope | null>(
+    () =>
+      !onClose && canClose
+        ? {
+            owner: 'surface',
+            services: {
+              surfaceHost: { close: () => void closeCurrentSurfaceWindow() },
+            },
+          }
+        : null,
+    [canClose, onClose],
+  )
+  useCommandScope(windowCloseScope)
 
   if (surface.kind === 'settings') {
     return (
@@ -107,25 +108,36 @@ export function FocusedSurface({
     )
   }
 
+  const messageParams = surface.kind === 'message' ? surface.params : null
   return (
     <>
       <MessageDetail
         selection={surface.params}
-        actions={actions}
         // A focused window has no view context — role-gated header actions
-        // resolve as they do for an ambiguous view.
-        viewRole={null}
-        onEditDraft={() =>
-          editDraft(surface.params.sourceId, surface.params.messageId)
-        }
-        onForward={forwardSelectedMessage}
-        onReply={replyToSelectedMessage}
-        onReplyAll={replyAllToSelectedMessage}
+        // resolve as they do for an ambiguous view. No tag editor / focused
+        // opener here: leaving them unbound hides those actions.
+        headerActionsFor={buildDetailHeaderActions({
+          email: actions,
+          viewRole: null,
+          detail: {
+            reply: replyToSelectedMessage,
+            replyAll: replyAllToSelectedMessage,
+            forward: forwardSelectedMessage,
+            editDraft: () => {
+              if (messageParams) {
+                editDraft(messageParams.sourceId, messageParams.messageId)
+              }
+            },
+          },
+          unsubscribeMailto: (mailtoUri) => {
+            if (messageParams) {
+              composeMailto(messageParams.sourceId, mailtoUri)
+            }
+          },
+          openExternalUrl,
+        })}
         onSearch={onSearch}
         onSelectMessage={onSelectMessage ?? (() => {})}
-        onUnsubscribeMailto={(mailtoUri) =>
-          composeMailto(surface.params.sourceId, mailtoUri)
-        }
       />
       {composeIntent && (
         <ComposeOverlay intent={composeIntent} onClose={closeCompose} />

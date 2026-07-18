@@ -2290,6 +2290,144 @@ async fn undo_reverts_the_cursor_step_and_redo_reapplies_it() {
     server.shutdown().await;
 }
 
+/// Regression (charter slice 4 end-to-end proof): the FORWARD mutations must
+/// record themselves in the rev-log — before this, only the read/undo/redo
+/// half existed (recording died with the split-model stack's retirement), so
+/// every toast/shell undo hit an empty log: "nothing to undo".
+#[tokio::test(flavor = "multi_thread")]
+async fn forward_mutations_record_rev_log_steps_and_undo_reverts_them() {
+    let server = TestServer::spawn().await;
+    let account = create_plain_account(&server, "cmd-revrec-account", "Recorder").await;
+    let mut seeded = message_record("m-rec", "sender@example.com", "2026-07-01T00:00:00Z", "inbox");
+    seeded.keywords = vec!["$seen".to_string()];
+    seed_mail(
+        &server,
+        &account,
+        vec![
+            mailbox_record("inbox", "Inbox", Some("inbox")),
+            mailbox_record("archive", "Archive", Some("archive")),
+        ],
+        vec![seeded],
+    );
+
+    // Archive (the UI verb resolves to replaceMailboxes): records the
+    // membership delta.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-rec-move-1",
+                "command": { "replaceMailboxes": {
+                    "accountId": account.as_str(),
+                    "messageId": "m-rec",
+                    "change": { "mailboxIds": ["archive"] }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    // Keyword change: the recorded delta is EFFECTIVE — re-adding `$seen`
+    // must not be recorded (an undo would otherwise wrongly strip it).
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-rec-flag-1",
+                "command": { "setKeywords": {
+                    "accountId": account.as_str(),
+                    "messageId": "m-rec",
+                    "change": { "add": ["$seen", "$flagged"], "remove": [] }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    let log = json_body(
+        server
+            .post_json(
+                "/query",
+                serde_json::json!({ "revLog": { "accountId": account.as_str() } }),
+            )
+            .await,
+    )
+    .await;
+    let steps = log["data"]["steps"].as_array().expect("steps").clone();
+    assert_eq!(steps.len(), 2, "both mutations recorded: {steps:?}");
+    assert_eq!(
+        steps[0]["diff"]["mailboxes"],
+        serde_json::json!({ "added": ["archive"], "removed": ["inbox"] })
+    );
+    assert_eq!(
+        steps[1]["diff"]["keywords"],
+        serde_json::json!({ "added": ["$flagged"], "removed": [] }),
+        "only the effective keyword delta is recorded"
+    );
+    assert_eq!(
+        log["data"]["cursor"]["cursorStepId"], steps[1]["stepId"],
+        "the cursor auto-advanced to the newest forward step"
+    );
+
+    // Two undos walk both steps back to the seeded state.
+    for id in ["cmd-rec-undo-1", "cmd-rec-undo-2"] {
+        let response = server
+            .post_json(
+                "/command",
+                serde_json::json!({
+                    "id": id,
+                    "command": { "undo": { "accountId": account.as_str() } }
+                }),
+            )
+            .await;
+        assert_eq!(response.status(), 200);
+    }
+    let summary = message_summary(&server, &account, "m-rec").await;
+    assert_eq!(summary["mailboxIds"], serde_json::json!(["inbox"]));
+    assert_eq!(summary["keywords"], serde_json::json!(["$seen"]));
+
+    // An implicit gesture (`recordUndo: false` — the auto-mark-read) records
+    // nothing: the log, the cursor, and the redo tail all stay untouched.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-rec-implicit-1",
+                "command": { "setKeywords": {
+                    "accountId": account.as_str(),
+                    "messageId": "m-rec",
+                    "change": { "add": ["$flagged"], "remove": [] },
+                    "recordUndo": false
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let log = json_body(
+        server
+            .post_json(
+                "/query",
+                serde_json::json!({ "revLog": { "accountId": account.as_str() } }),
+            )
+            .await,
+    )
+    .await;
+    assert_eq!(log["data"]["steps"].as_array().expect("steps").len(), 2);
+    assert_eq!(
+        log["data"]["cursor"]["cursorStepId"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        log["data"]["cursor"]["redoTail"]
+            .as_array()
+            .expect("redo tail")
+            .len(),
+        2,
+        "an implicit gesture must not truncate the redo tail"
+    );
+
+    server.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn outbox_operations_cancel_and_retry_through_commands() {
     let server = TestServer::spawn().await;
@@ -2669,4 +2807,300 @@ async fn state_root_lock_refuses_a_second_backend() {
         .await
         .expect("store reopens after the first backend is gone");
     reopened.shutdown().await;
+}
+
+/// Regression (docs/issues/integrated-send-undo-broken.md bisect): the
+/// FRONTEND's exact `/api/command` send envelope — hold fields inside the
+/// request, a client-minted `draftId` naming no existing draft, the command
+/// id doubling as the outbox operation id — must enqueue a held send, flush
+/// it once the hold expires (the scheduled-send tick), and (for a second
+/// send) cancel inside the window via `cancelOperation` keyed by the command
+/// id. Before this test, no HTTP-level coverage exercised the held/consuming
+/// send shape the client actually posts.
+#[tokio::test(flavor = "multi_thread")]
+async fn frontend_send_envelope_holds_flushes_and_cancels_by_command_id() {
+    let server = TestServer::spawn().await;
+    spawn_mock_account(&server, "m-send").await;
+
+    let request = |subject: &str, draft_id: &str| {
+        serde_json::json!({
+            "from": { "name": null, "email": "me@example.com" },
+            "to": [{ "name": null, "email": "to@example.com" }],
+            "cc": [], "bcc": [],
+            "subject": subject,
+            "body": "held send probe",
+            "inReplyTo": null, "references": null,
+            "attachments": [],
+            "draftId": draft_id,
+            "undoWindowSeconds": 1,
+            "sendAt": "2099-01-01T00:00:00Z"
+        })
+    };
+
+    // Send #1: held one second, then the scheduled-send tick must flush it.
+    let response = server
+        .post_json(
+            "/api/command",
+            serde_json::json!({
+                "id": "01PROBECMDSENDFLUSH0000001",
+                "command": { "send": { "accountId": "m-send", "request": request("Flushes", "draft-key-flush") } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200, "{}", response.text().await.unwrap_or_default());
+
+    let pending = json_body(
+        server
+            .post_json(
+                "/api/query",
+                serde_json::json!({ "pendingOperations": { "accountId": "m-send" } }),
+            )
+            .await,
+    )
+    .await;
+    let rows = pending["data"]["rows"].as_array().expect("rows").clone();
+    assert_eq!(rows.len(), 1, "one held send row: {rows:?}");
+    assert_eq!(rows[0]["id"], "01PROBECMDSENDFLUSH0000001", "outbox op id IS the command id");
+
+    // Wait out the hold + the 5s scheduled-send tick.
+    let mut flushed = false;
+    let mut last_rows = serde_json::Value::Null;
+    for _ in 0..120 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let pending = json_body(
+            server
+                .post_json(
+                    "/api/query",
+                    serde_json::json!({ "pendingOperations": { "accountId": "m-send" } }),
+                )
+                .await,
+        )
+        .await;
+        let rows = pending["data"]["rows"].as_array().expect("rows").clone();
+        let send_row = rows
+            .iter()
+            .find(|row| row["id"] == "01PROBECMDSENDFLUSH0000001");
+        if send_row.is_none() {
+            flushed = true;
+            break;
+        }
+        last_rows = serde_json::Value::Array(rows.clone());
+        if send_row.is_some_and(|row| row["state"] == "failed") {
+            panic!("held send failed instead of flushing: {rows:?}");
+        }
+    }
+    assert!(
+        flushed,
+        "the held send flushed after the hold expired; final rows: {last_rows}"
+    );
+
+    // Send #2: canceled inside the window via the command id.
+    let response = server
+        .post_json(
+            "/api/command",
+            serde_json::json!({
+                "id": "01PROBECMDSENDCANCEL000001",
+                "command": { "send": { "accountId": "m-send", "request": {
+                    "from": { "name": null, "email": "me@example.com" },
+                    "to": [{ "name": null, "email": "to@example.com" }],
+                    "cc": [], "bcc": [],
+                    "subject": "Canceled",
+                    "body": "held send probe",
+                    "inReplyTo": null, "references": null,
+                    "attachments": [],
+                    "draftId": "draft-key-cancel",
+                    "undoWindowSeconds": 3600
+                } } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let response = server
+        .post_json(
+            "/api/command",
+            serde_json::json!({
+                "id": "01PROBECMDCANCELVERB000001",
+                "command": { "cancelOperation": {
+                    "accountId": "m-send",
+                    "operationId": "01PROBECMDSENDCANCEL000001"
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200, "cancel by command id: {}", response.text().await.unwrap_or_default());
+
+    server.shutdown().await;
+}
+
+/// Regression (charter slice 4 end-to-end proof): the held-send eager
+/// ensure-draft rotates the compose key to a provider id; the admission-time
+/// row pinned under the KEY must be retired at that rotation. Before the fix
+/// it leaked — a phantom Drafts row that survived both the send's settlement
+/// (message sent, "draft" still listed forever) and an undo (the restored
+/// draft listed TWICE: provider row + key row).
+#[tokio::test(flavor = "multi_thread")]
+async fn held_send_rotation_retires_the_compose_key_row() {
+    let server = TestServer::spawn().await;
+    spawn_mock_account(&server, "m-phantom").await;
+
+    let list_rows = || async {
+        let body = json_body(
+            server
+                .post_json(
+                    "/api/query",
+                    serde_json::json!({ "mailList": { "accountId": "m-phantom" } }),
+                )
+                .await,
+        )
+        .await;
+        body["data"]["rows"].as_array().expect("rows").clone()
+    };
+    let send = |id: &str, subject: &str, draft_id: &str, hold: u32| {
+        serde_json::json!({
+            "id": id,
+            "command": { "send": { "accountId": "m-phantom", "request": {
+                "from": { "name": null, "email": "me@example.com" },
+                "to": [{ "name": null, "email": "to@example.com" }],
+                "cc": [], "bcc": [],
+                "subject": subject,
+                "body": "phantom probe",
+                "inReplyTo": null, "references": null,
+                "attachments": [],
+                "draftId": draft_id,
+                "undoWindowSeconds": hold
+            } } }
+        })
+    };
+
+    // Leg 1 — flushed send: hold 2s; the command's own sync nudge runs the
+    // ensure step (rotation) while held, the scheduled tick flushes it after.
+    let response = server
+        .post_json(
+            "/api/command",
+            send("01PROBEPHANTOMFLUSH0000001", "Phantom flushed", "draft-key-phantom-1", 2),
+        )
+        .await;
+    assert_eq!(response.status(), 200, "{}", response.text().await.unwrap_or_default());
+    // Wait for the SEND op to settle (its slower chore ops may outlive it
+    // until a later sync window; the list assertions below are what matter).
+    let mut settled = false;
+    for _ in 0..120 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let pending = json_body(
+            server
+                .post_json(
+                    "/api/query",
+                    serde_json::json!({ "pendingOperations": { "accountId": "m-phantom" } }),
+                )
+                .await,
+        )
+        .await;
+        let rows = pending["data"]["rows"].as_array().expect("rows").clone();
+        if !rows.iter().any(|row| row["id"] == "01PROBEPHANTOMFLUSH0000001") {
+            settled = true;
+            break;
+        }
+    }
+    assert!(settled, "the held send settled");
+    let mut clean: Option<Vec<serde_json::Value>> = None;
+    for _ in 0..120 {
+        let rows = list_rows().await;
+        let leaked = rows.iter().any(|row| {
+            row["id"] == "draft-key-phantom-1"
+                || (row["subject"] == "Phantom flushed"
+                    && row["keywords"]
+                        .as_array()
+                        .is_some_and(|keywords| keywords.iter().any(|k| k == "$draft")))
+        });
+        if !leaked {
+            clean = Some(rows);
+            break;
+        }
+        clean = None;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(
+        clean.is_some(),
+        "a settled send leaves no compose-key or draft row behind: {:?}",
+        list_rows().await
+    );
+
+    // Leg 2 — undone send: long hold, wait for the ensure rotation (a $draft
+    // row under a provider id), cancel, then the restored draft must be
+    // listed exactly once and never under the compose key.
+    let response = server
+        .post_json(
+            "/api/command",
+            send("01PROBEPHANTOMUNDO00000001", "Phantom undone", "draft-key-phantom-2", 3600),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let mut ensured = false;
+    for _ in 0..120 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let rows = list_rows().await;
+        if rows.iter().any(|row| {
+            row["subject"] == "Phantom undone" && row["id"] != "draft-key-phantom-2"
+        }) {
+            ensured = true;
+            break;
+        }
+    }
+    assert!(ensured, "the eager ensure-draft rotated the key to a provider id");
+    let response = server
+        .post_json(
+            "/api/command",
+            serde_json::json!({
+                "id": "01PROBEPHANTOMCANCEL000001",
+                "command": { "cancelOperation": {
+                    "accountId": "m-phantom",
+                    "operationId": "01PROBEPHANTOMUNDO00000001"
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200, "{}", response.text().await.unwrap_or_default());
+    let mut converged: Option<Vec<serde_json::Value>> = None;
+    for _ in 0..120 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let rows = list_rows().await;
+        let restored: Vec<_> = rows
+            .iter()
+            .filter(|row| row["subject"] == "Phantom undone")
+            .cloned()
+            .collect();
+        if restored.len() == 1 && restored[0]["id"] != "draft-key-phantom-2" {
+            converged = Some(restored);
+            break;
+        }
+    }
+    let restored = converged.expect("the undone send converges to ONE restored draft row");
+    assert!(
+        restored[0]["keywords"]
+            .as_array()
+            .is_some_and(|keywords| keywords.iter().any(|k| k == "$draft")),
+        "the restored row is a draft: {restored:?}"
+    );
+
+    // The undo toast's reopen addresses the restored draft by its COMPOSE KEY
+    // (the only identity the client holds); `messageDetail` must resolve it
+    // to the live provider-id row instead of failing unknown-id.
+    let detail = json_body(
+        server
+            .post_json(
+                "/api/query",
+                serde_json::json!({ "messageDetail": {
+                    "accountId": "m-phantom",
+                    "messageId": "draft-key-phantom-2"
+                } }),
+            )
+            .await,
+    )
+    .await;
+    assert_eq!(
+        detail["data"]["summary"]["subject"], "Phantom undone",
+        "messageDetail resolves the compose key to the restored draft: {detail}"
+    );
+
+    server.shutdown().await;
 }

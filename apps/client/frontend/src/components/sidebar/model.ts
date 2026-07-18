@@ -4,7 +4,7 @@ import type {
   MailboxGroup,
   SmartMailboxSummary,
 } from '@/data/transport/api'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 /**
  * Whether a mailbox may be deleted from the sidebar. Protected/role mailboxes

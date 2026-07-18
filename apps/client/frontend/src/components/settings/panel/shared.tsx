@@ -2,7 +2,7 @@
 
 import type { AccountStatus } from '@/gen'
 import { statusLabel } from '../accounts/accountStatus'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '../../ui/form/button'
 import { Input } from '../../ui/form/input'

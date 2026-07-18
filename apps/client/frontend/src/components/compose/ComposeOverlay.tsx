@@ -2,9 +2,11 @@
  * Compose and reply overlay backed by the Rust JMAP send API.
  *
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { parseMailtoUri, type ComposeIntent } from '@/domain/composeIntent'
+import { useCommandScope, type CommandScope } from '@/lib/command'
+import { useBeforeUnloadGuard } from '@/lib/dom'
 
 import { FloatingPanel } from '../floating/FloatingPanel'
 import { ComposeAttachmentList } from './attachments/ComposeAttachmentList'
@@ -191,22 +193,13 @@ export function ComposeOverlay({
   // Safety net: warn on a full tab/app close while a dirty compose is open. The
   // traditional model has no continuous autosave, so this is the only guard
   // against losing content to a hard navigation.
-  useEffect(() => {
-    const isDirty = shouldPromptBeforeClose({
+  useBeforeUnloadGuard(
+    shouldPromptBeforeClose({
       form: formState.form,
       hasUserEdited: formState.hasUserEdited,
       isSending: false,
-    })
-    if (!isDirty) {
-      return
-    }
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [formState.form, formState.hasUserEdited])
+    }),
+  )
 
   const { isOpeningWindow, openInitialComposeInWindow } =
     useComposeWindowElevation({
@@ -216,17 +209,16 @@ export function ComposeOverlay({
       onClose,
     })
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-        event.preventDefault()
-        handleSubmit()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleSubmit])
+  // ⌘Enter sends via the command dispatcher (`compose.send`): the scope binds
+  // the active submission for exactly as long as this composer is mounted.
+  const sendScope = useMemo<CommandScope>(
+    () => ({
+      owner: 'overlay',
+      services: { compose: { send: () => handleSubmit() } },
+    }),
+    [handleSubmit],
+  )
+  useCommandScope(sendScope)
 
   // Paste (Cmd+V) and drag-and-drop attach files through the same ingestion
   // path as the picker; disabled while the composer is not ready or sending.

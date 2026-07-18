@@ -9,7 +9,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import type { AppSettings, CachePolicy, Notifications } from '@/gen'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import { useMailClient } from '@/data/context'
 import { useAccountSettings, useAppSettings, useSmartMailboxes, ensureAppSettings } from '@/data/queries/queries'
 import { runCommand, useCommands } from '@/data/transport/commands'

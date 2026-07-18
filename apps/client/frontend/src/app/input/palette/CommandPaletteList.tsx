@@ -1,8 +1,8 @@
 import type { UIEvent as ReactUIEvent } from 'react'
 
-import type { PaletteRow, SearchCandidate } from '@/components/palette/search/types'
+import type { PaletteRow, SearchCandidate } from '@/app/input/palette/search/types'
 
-import { CommandItem, CommandList } from '../ui/overlay/command'
+import { CommandItem, CommandList } from '@/components/ui/overlay/command'
 import { commandPaletteEntryValue, NO_COMMAND_PALETTE_SELECTION } from './model'
 
 export function CommandPaletteList({

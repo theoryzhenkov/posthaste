@@ -2,7 +2,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import {
   ColumnResizeHandle,
   type ColumnResizeHandlePlacement,

@@ -6,7 +6,7 @@
  *
  */
 import type { MailQueryGroup } from '../../../data/transport/api/index'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import { Button } from '../../ui/form/button'
 import { Checkbox } from '../../ui/form/checkbox'
 import {

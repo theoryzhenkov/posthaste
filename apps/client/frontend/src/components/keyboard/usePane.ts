@@ -5,10 +5,8 @@
  */
 import { useEffect, useRef } from 'react'
 
-import { useKeyboardContext } from './context'
+import { useKeyboardContext, type PaneKeyHandler } from './context'
 import type { PaneId } from '@/domain/vocabulary'
-
-import type { PaneKeyHandler } from './dispatch'
 
 /** Which pane currently owns within-pane keys, plus a setter for click-to-focus. */
 export function useActivePane(): {

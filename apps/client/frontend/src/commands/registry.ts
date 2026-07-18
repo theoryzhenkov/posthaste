@@ -2,12 +2,12 @@
  * Unified action registry.
  *
  * A module-level collection populated once, at import time, from the static
- * definition files (`actions/defs/*`). Insertion order is preserved and used by
+ * definition files (`defs/*`). Insertion order is preserved and used by
  * the resolver as the within-section tiebreak, so registration order is
  * meaningful.
  *
  * No React here — pure data in, pure data out — so it is unit-testable exactly
- * like `components/keyboard/dispatch.ts`.
+ * like the mail-key dispatcher (`app/input/keyboard/dispatch.ts`).
  */
 import type { ActionDefinition } from './types'
 
