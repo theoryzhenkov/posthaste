@@ -11,14 +11,14 @@ import {
   Trash2,
 } from 'lucide-react'
 
-import type { Mailbox, MailboxGroup } from '@/api/types'
-import { accentColor } from '@/design'
-import { cn } from '@/lib/utils'
+import type { Mailbox, MailboxGroup } from '@/data/transport/api'
+import { accentColor } from '@/lib/design'
+import { cn } from '@/lib/cn'
 import {
   mailboxRoleAccent,
   renderMailboxRoleIcon,
   renderSmartMailboxIcon,
-} from '@/mailboxRoles'
+} from '@/domain/mailboxRoles'
 
 import {
   ContextMenu,
@@ -29,10 +29,10 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from '../ui/context-menu'
-import { DeleteMailboxDialog } from './DeleteMailboxDialog'
-import { GroupNameDialog } from './GroupNameDialog'
-import { RenameMailboxDialog } from './RenameMailboxDialog'
+} from '../ui/overlay/context-menu'
+import { DeleteMailboxDialog } from './dialogs/DeleteMailboxDialog'
+import { GroupNameDialog } from './dialogs/GroupNameDialog'
+import { RenameMailboxDialog } from './dialogs/RenameMailboxDialog'
 import { isMailboxDeletable, isMailboxRenamable, itemButtonClass } from './model'
 
 function roleIcon(role: Mailbox['role'], size = 14): ReactNode {

@@ -8,7 +8,7 @@
  * `h`/`l`). Keeping it pure makes the precedence order testable without a DOM.
  *
  */
-import { stepGotoPrefix, type GotoPrefix, type GotoRole } from './goto'
+import { stepGotoPrefix, type GotoPrefix, type GotoRole } from './goto/goto'
 import { isEditableKeyboardTarget } from './inputTargets'
 
 /** The keyboard-navigable regions of the mail shell. The detail pane is NOT

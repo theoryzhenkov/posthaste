@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "check": "tsc --noEmit",
+    "check:tree": "node scripts/check-tree-shape.mjs",
     "test": "bun test"
   },
   "dependencies": {

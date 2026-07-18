@@ -3,8 +3,8 @@ import type {
   Mailbox,
   MailboxGroup,
   SmartMailboxSummary,
-} from '@/api/types'
-import { cn } from '@/lib/utils'
+} from '@/data/transport/api'
+import { cn } from '@/lib/cn'
 
 /**
  * Whether a mailbox may be deleted from the sidebar. Protected/role mailboxes

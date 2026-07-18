@@ -1,0 +1,408 @@
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+
+import type { ActionServices, MessageTarget } from '@/commands'
+import type { SidebarSelection } from '@/components/sidebar/Sidebar'
+import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
+import {
+  closeCurrentSurfaceWindow,
+  listenForDesktopCloseRequest,
+} from '@/desktop/runtime'
+import { useAutoMarkRead } from '@/data/hooks/useAutoMarkRead'
+import { useDesignTheme } from '@/lib/design/useDesignTheme'
+import { useEmailActions } from '@/data/hooks/useEmailActions'
+import { KeyboardController } from '@/components/keyboard/KeyboardController'
+import { useGotoNavigation } from '@/components/keyboard/goto/useGotoNavigation'
+import { useMailboxRole, useSmartMailboxRole } from '@/data/hooks/useMailboxRole'
+import { useMailLayoutPersistence } from '@/app/mail/useMailLayoutPersistence'
+import { closeWebSurface, useEffectiveSurface } from '@/surfaces/useSurfaceRouting'
+import {
+  appReadinessStateFromAccountsQuery,
+  LAB_READINESS_STATES,
+} from '@/lib/labReadiness'
+import { useMailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
+import { type MailSelection } from '@/data/models/selection'
+import { OnboardingTour } from '@/app/shell/onboarding/OnboardingTour'
+import { useOnboardingNeeded } from '@/app/shell/onboarding/store'
+import { useUndoRedo } from '@/data/hooks/useUndoRedo'
+import { fetchQuery, useAccounts, useCommands, useMailClient } from '@/data'
+import { queryKeys } from '@/data/queries/queryKeys'
+import type { MessageDetailResult } from '@/gen'
+import { consumeRepairCompletion } from '@/desktop/repair/feedback'
+import { conversationViewQuery, prepareServerSearchQuery } from '@/domain/searchQuery'
+import { type SurfaceDescriptor } from '@/surfaces'
+import { MailClientView } from './MailClientView'
+import { useMailClientHandlers } from './useMailClientHandlers'
+
+const DEFAULT_VIEW: SidebarSelection = {
+  kind: 'smart-mailbox',
+  id: 'default-inbox',
+  name: 'Inbox',
+}
+
+/**
+ * Main mail client shell: toolbar, three-column layout, and surface host.
+ *
+ * Manages view selection, message selection, SSE event subscription,
+ * and keyboard-accessible email actions.
+ *
+ */
+export function MailClient({
+  invalidSurfaceRoute,
+  routeSurface,
+}: {
+  invalidSurfaceRoute: string | null
+  routeSurface: SurfaceDescriptor | null
+}) {
+  const [selectedView, setSelectedView] = useState<SidebarSelection | null>(
+    DEFAULT_VIEW,
+  )
+  const [selectedMessage, setSelectedMessage] = useState<MailSelection | null>(
+    null,
+  )
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  // Non-null while the palette should OPEN INTO a parameterized action's
+  // pick-step (a keyboard chord like `m` requested a target picker).
+  const [paletteSeedActionId, setPaletteSeedActionId] = useState<string | null>(
+    null,
+  )
+  const [isTagEditorOpen, setIsTagEditorOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const preparedSearchQuery = useMemo(
+    () => prepareServerSearchQuery(searchQuery),
+    [searchQuery],
+  )
+  const theme = useDesignTheme()
+  const onboardingNeeded = useOnboardingNeeded()
+  useRepairCompletionToast()
+
+  // Live via the `accounts` query family: the stream's generation-advance
+  // invalidation keeps it fresh (status changes, sync completion).
+  const accountsQuery = useAccounts()
+  const accounts = useMemo(
+    () => accountsQuery.data?.rows ?? [],
+    [accountsQuery.data],
+  )
+  const enabledAccounts = useMemo(
+    () => accounts.filter((account) => account.enabled),
+    [accounts],
+  )
+  const hasEnabledSources = enabledAccounts.length > 0
+
+  // The shell's Ctrl+Z drives the default account's rev-log (or the only
+  // enabled account's, when no default is marked).
+  const undoAccountId =
+    enabledAccounts.find((account) => account.isDefault)?.id ??
+    enabledAccounts[0]?.id ??
+    null
+  const undoRedo = useUndoRedo(undoAccountId)
+  const actions = useEmailActions({ undo: undoRedo.undo })
+  const effectiveView = hasEnabledSources
+    ? (selectedView ?? DEFAULT_VIEW)
+    : null
+  const sourceRole = useMailboxRole(
+    effectiveView?.kind === 'source-mailbox' ? effectiveView.sourceId : null,
+    effectiveView?.kind === 'source-mailbox' ? effectiveView.mailboxId : null,
+  )
+  const smartRole = useSmartMailboxRole(
+    effectiveView?.kind === 'smart-mailbox' ? effectiveView.id : null,
+  )
+  const viewRole =
+    effectiveView?.kind === 'smart-mailbox' ? smartRole : sourceRole
+  const hasAccountsError = accountsQuery.isError
+  const isLoading = accountsQuery.isLoading
+  const hasLoadedAccounts = accountsQuery.isSuccess
+  const { effectiveSurface, isSettingsSurfaceOpen } = useEffectiveSurface({
+    routeSurface,
+  })
+
+  useDesktopCloseRequest(effectiveSurface)
+
+  const mailClient = useMailClient()
+  // The reader pane's source of truth: the `messageDetail` family, widened to
+  // its summary row (bodies render inside MessageDetail from its own query).
+  const selectedMessageQuery = useQuery({
+    queryKey: selectedMessage
+      ? queryKeys.messageDetail({
+          accountId: selectedMessage.sourceId,
+          messageId: selectedMessage.messageId,
+        })
+      : ['messageDetail', 'none'],
+    queryFn: () =>
+      fetchQuery<MessageDetailResult>(mailClient, {
+        messageDetail: {
+          accountId: selectedMessage!.sourceId,
+          messageId: selectedMessage!.messageId,
+        },
+      }),
+    select: (detail: MessageDetailResult) => detail.summary,
+    enabled: selectedMessage !== null,
+  })
+  const isMessageDetailOpen = selectedMessage !== null
+  const layout = useMailLayoutPersistence(isMessageDetailOpen)
+  const syncSourceMutation = useSyncSourceMutation()
+
+  useAutoMarkRead(selectedMessage, selectedMessageQuery.data, actions)
+
+  const handleToggleTheme = useCallback(() => {
+    theme.setMode(theme.resolvedMode === 'dark' ? 'light' : 'dark')
+  }, [theme])
+
+  const handlers = useMailClientHandlers({
+    actions,
+    effectiveSurface,
+    effectiveView,
+    enabledAccounts,
+    selectedMessage,
+    selectedMessageData: selectedMessageQuery.data,
+    setIsCommandPaletteOpen,
+    setIsTagEditorOpen,
+    setSearchQuery,
+    setSelectedMessage,
+    setSelectedView,
+    setShowShortcuts,
+  })
+
+  const gotoNavigation = useGotoNavigation({
+    effectiveView,
+    onSelectSmartMailbox: handlers.handleSelectSmartMailbox,
+    onSelectSourceMailbox: handlers.handleSelectSourceMailbox,
+  })
+
+  // The focused message as a resolver target for the keyboard tier — the same
+  // shape the palette builds (MessageDetail widens to the summary the toggles
+  // read). Rebuilt per render; consumed through the controller's ref snapshot.
+  const selectedMessageData = selectedMessageQuery.data
+  const keyboardTarget = useMemo<MessageTarget | null>(
+    () =>
+      selectedMessage
+        ? {
+            ref: {
+              sourceId: selectedMessage.sourceId,
+              messageId: selectedMessage.messageId,
+            },
+            summary: selectedMessageData,
+            isDraft:
+              selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft) ??
+              false,
+            draftId: selectedMessageData?.draftId ?? null,
+            conversationId: selectedMessage.conversationId,
+          }
+        : null,
+    [selectedMessage, selectedMessageData],
+  )
+  // The shared mailbox read model, bound as `ActionServices.mailboxes` so the
+  // keyboard tier can resolve parameterized mailbox actions (the `m` chord).
+  const navigationReadModels = useMailboxNavigationReadModels()
+  const keyboardServices = useMemo<ActionServices>(
+    () => ({
+      email: actions,
+      app: handlers,
+      mailboxes: {
+        list: (sourceId: string) =>
+          navigationReadModels.sources.find((source) => source.id === sourceId)
+            ?.mailboxes ?? [],
+      },
+    }),
+    [actions, handlers, navigationReadModels.sources],
+  )
+
+  // Keyboard chord → palette pick-step (e.g. `m` opens the mailbox picker).
+  const handleOpenActionPicker = useCallback((actionId: string) => {
+    setPaletteSeedActionId(actionId)
+    setIsCommandPaletteOpen(true)
+  }, [])
+  // A PLAIN open (⌘K, `/`, the toolbar button) always starts at the root list:
+  // clearing the seed on open (rather than on close) covers every close path
+  // without an effect. The palette reads the seed only at mount.
+  const handleOpenCommandPalette = useCallback(() => {
+    setPaletteSeedActionId(null)
+    handlers.handleOpenCommandPalette()
+    // handlers is rebuilt per render; the underlying setter is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handlers.handleOpenCommandPalette])
+
+  const appReadinessState = appReadinessStateFromAccountsQuery({
+    isLoading,
+    isSuccess: hasLoadedAccounts,
+    isError: hasAccountsError,
+  })
+
+  if (isLoading) {
+    return <MailClientLoading />
+  }
+
+  const showOnboarding =
+    onboardingNeeded && hasLoadedAccounts && !hasAccountsError
+
+  return (
+    <>
+      {showOnboarding && <OnboardingTour />}
+      <KeyboardController
+        effectiveSurfaceOpen={effectiveSurface !== null}
+        overlayOwnsInput={
+          isCommandPaletteOpen ||
+          handlers.composeIntent !== null ||
+          showShortcuts ||
+          isTagEditorOpen
+        }
+        hasSelectedMessage={selectedMessage !== null}
+        hasSearchQuery={searchQuery.trim().length > 0}
+        onOpenCommandPalette={handleOpenCommandPalette}
+        onOpenSettings={handlers.handleOpenSettingsShortcut}
+        onCompose={handlers.handleCompose}
+        onReply={handlers.handleReply}
+        onReplyAll={handlers.handleReplyAll}
+        onToggleFlag={handlers.handleToggleFlag}
+        onUndo={undoRedo.undo}
+        onRedo={undoRedo.redo}
+        onArchive={handlers.handleArchive}
+        onTrash={handlers.handleTrash}
+        onOpenTagEditor={handlers.handleOpenTagEditor}
+        onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
+        onClearSelectedMessage={handlers.handleClearSelectedMessage}
+        onClearSearchQuery={handlers.handleRejectSearchPreview}
+        onToggleShortcuts={handlers.handleToggleShortcuts}
+        onOpenActionPicker={handleOpenActionPicker}
+        onGoto={gotoNavigation.goto}
+        onGotoConversation={() => {
+          if (selectedMessage) {
+            handlers.handleSearch(
+              conversationViewQuery(selectedMessage.conversationId),
+            )
+          }
+        }}
+        viewRole={viewRole}
+        keyboardTarget={keyboardTarget}
+        actionServices={keyboardServices}
+      >
+        <MailClientView
+          actions={actions}
+          handlers={handlers}
+          appReadinessState={appReadinessState}
+          closeCompose={handlers.closeCompose}
+          composeIntent={handlers.composeIntent}
+          effectiveSurface={effectiveSurface}
+          effectiveView={effectiveView}
+          invalidSurfaceRoute={invalidSurfaceRoute}
+          commandPaletteSeedActionId={paletteSeedActionId}
+          isCommandPaletteOpen={isCommandPaletteOpen}
+          isDarkMode={theme.resolvedMode === 'dark'}
+          isMessageDetailOpen={isMessageDetailOpen}
+          isSettingsSurfaceOpen={isSettingsSurfaceOpen}
+          isTagEditorOpen={isTagEditorOpen}
+          messageDefaultLayout={layout.messageDefaultLayout}
+          preparedSearchQuery={preparedSearchQuery}
+          searchQuery={searchQuery}
+          selectedMessage={selectedMessage}
+          selectedMessageData={selectedMessageQuery.data}
+          shellDefaultLayout={layout.shellDefaultLayout}
+          showShortcuts={showShortcuts}
+          tags={navigationReadModels.tags}
+          viewRole={viewRole}
+          onAddTag={handlers.handleAddTag}
+          onApplySearch={handlers.handleApplySearch}
+          onEditDraft={handlers.handleEditDraft}
+          onClearSearch={handlers.handleRejectSearchPreview}
+          onClearSelectedMessage={handlers.handleClearSelectedMessage}
+          onCloseCommandPalette={handlers.handleCloseCommandPalette}
+          onCompose={handlers.handleCompose}
+          onForward={handlers.handleForward}
+          onReplyAll={handlers.handleReplyAll}
+          onMessageLayoutChanged={layout.onMessageLayoutChanged}
+          onOpenCommandPalette={handleOpenCommandPalette}
+          onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
+          onOpenSettings={handlers.handleOpenSettings}
+          onOpenTagEditor={handlers.handleOpenTagEditor}
+          onPlaceholderAction={handlers.handlePlaceholderAction}
+          onRejectSearchPreview={handlers.handleRejectSearchPreview}
+          onRemoveTag={handlers.handleRemoveTag}
+          onReply={handlers.handleReply}
+          onUnsubscribeMailto={handlers.handleUnsubscribeMailto}
+          onSearch={handlers.handleSearch}
+          onSelectMessage={handlers.handleSelectMessage}
+          onSelectMessageRef={handlers.handleSelectMessageRef}
+          onSelectSmartMailbox={handlers.handleSelectSmartMailbox}
+          onSelectSourceMailbox={handlers.handleSelectSourceMailbox}
+          onSetTagEditorOpen={setIsTagEditorOpen}
+          onShellLayoutChanged={layout.onShellLayoutChanged}
+          onShowShortcuts={handlers.handleShowShortcuts}
+          onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
+          onToggleShortcuts={handlers.handleToggleShortcuts}
+          onToggleSettings={handlers.handleToggleSettings}
+          onToggleTheme={handleToggleTheme}
+        />
+      </KeyboardController>
+    </>
+  )
+}
+
+function MailClientLoading() {
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center gap-3"
+      data-posthaste-state={LAB_READINESS_STATES.appLoading}
+    >
+      <Loader2 size={24} className="animate-spin text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">Setting up...</p>
+    </div>
+  )
+}
+
+/** Confirm a completed local repair / factory reset once, after the relaunch. */
+function useRepairCompletionToast() {
+  useEffect(() => {
+    const kind = consumeRepairCompletion()
+    if (kind === 'factory-reset') {
+      toast(
+        'Posthaste was reset to a clean state. Add an account to get started.',
+      )
+    } else if (kind === 'repair') {
+      toast('Posthaste repaired your local data and is re-syncing your mail.')
+    }
+  }, [])
+}
+
+function useDesktopCloseRequest(effectiveSurface: SurfaceDescriptor | null) {
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    let disposed = false
+
+    void listenForDesktopCloseRequest(() => {
+      if (effectiveSurface) {
+        closeWebSurface()
+        return
+      }
+      void closeCurrentSurfaceWindow()
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten()
+        return
+      }
+      unlisten = nextUnlisten
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [effectiveSurface])
+}
+
+function useSyncSourceMutation() {
+  const commands = useCommands()
+  return useMutation({
+    // The command's acceptance already invalidates every mounted query; the
+    // stream's generation advances carry the rest of the sync's progress.
+    mutationFn: (sourceId: string) => commands.run({ syncNow: { accountId: sourceId } }),
+    onSuccess: () => {
+      toast('Sync started')
+    },
+    onError: (error) => {
+      toast.error(error.message)
+    },
+  })
+}

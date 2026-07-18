@@ -2,7 +2,7 @@
  * Pure helpers for the sidebar's `j`/`k` roving cursor.
  *
  */
-import type { SidebarSelection } from '../Sidebar'
+import type { SidebarSelection } from './Sidebar'
 
 /** Stable key for a navigable sidebar row (smart mailbox, tag, or folder). */
 export type SidebarNavKey = string

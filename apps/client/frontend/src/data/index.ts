@@ -4,8 +4,8 @@
 // here; they never see HTTP, SSE, or generations.
 
 export { MailClientProvider, useMailClient, useOptionalMailClient } from './context'
-export { queryClient } from './queryClient'
-export { familyKey, queryKeys } from '@/data/queryKeys'
+export { queryClient } from './queries/queryClient'
+export { familyKey, queryKeys } from '@/data/queries/queryKeys'
 export {
   ensureAppSettings,
   fetchQuery,
@@ -22,9 +22,9 @@ export {
   useSmartMailboxes,
   useTags,
   useThread,
-} from './queries'
-export { runCommand, useCommands, type MailCommands } from './commands'
-export { useDomainEvent, useStreamInvalidation } from './stream'
-export { useAccountLogoUrl, useBlobUrl } from './blobs'
-export { useConnectionStatus } from './connection'
-export type { MailSelection, MailViewSelection } from './selection'
+} from './queries/queries'
+export { runCommand, useCommands, type MailCommands } from './transport/commands'
+export { useDomainEvent, useStreamInvalidation } from './transport/stream'
+export { useAccountLogoUrl, useBlobUrl } from './transport/blobs'
+export { useConnectionStatus } from './transport/connection'
+export type { MailSelection, MailViewSelection } from './models/selection'

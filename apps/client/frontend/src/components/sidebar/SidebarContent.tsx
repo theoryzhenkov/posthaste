@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
 import { AlertCircle } from 'lucide-react'
 
-import type { SmartMailboxSummary } from '@/api/types'
-import { smartMailboxAccent } from '@/mailboxRoles'
-import type { useMailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
+import type { SmartMailboxSummary } from '@/data/transport/api'
+import { smartMailboxAccent } from '@/domain/mailboxRoles'
+import type { useMailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
 
-import type { SidebarSelection } from '../Sidebar'
-import { SortableList, SortableRow } from '../ui/SortableList'
+import type { SidebarSelection } from './Sidebar'
+import { SortableList, SortableRow } from '../ui/display/SortableList'
 import {
   fallbackAccountAppearance,
   partitionSmartMailboxes,
@@ -14,7 +14,7 @@ import {
 } from './model'
 import { GroupHeader, SectionHeader, SourceSection } from './SourceSection'
 import { SmartMailboxItem } from './SidebarItems'
-import { useMailboxGroups, useMailboxGroupMutations } from './useMailboxGroups'
+import { useMailboxGroups, useMailboxGroupMutations } from './hooks/useMailboxGroups'
 
 type NavigationReadModels = ReturnType<typeof useMailboxNavigationReadModels>
 
