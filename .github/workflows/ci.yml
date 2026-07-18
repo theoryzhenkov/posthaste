@@ -89,6 +89,9 @@ jobs:
             ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: bun --cwd=apps/client/frontend run check
+      # Charter ratchet (docs/client/L2-charter.md §The ratchet): fails on
+      # NEW violations only; committed baselines carry the slice 3-5 debt.
+      - run: bun --cwd=apps/client/frontend run check:charter
       - run: bun --cwd=apps/client/frontend test
       - run: bun --cwd=apps/client/frontend run build
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["scripts/*.{mjs,ts}"],
+  "project": ["src/**/*.{ts,tsx}", "!src/gen/**"],
+  "ignoreDependencies": [
+    "tailwindcss",
+    "tw-animate-css",
+    "shadcn",
+    "@fontsource-variable/geist",
+    "@fontsource-variable/geist-mono"
+  ]
+}

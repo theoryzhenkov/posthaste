@@ -18,6 +18,12 @@ setup:
 install:
     bun install
 
+# The client frontend's charter ratchet (docs/client/L2-charter.md §The
+# ratchet): tree shape, import boundaries, structural lint, dead code,
+# duplication — all fail on NEW violations only, against committed baselines.
+client-charter:
+    bun --cwd=apps/client/frontend run check:charter
+
 # Format all code
 fmt:
     just backend fmt
