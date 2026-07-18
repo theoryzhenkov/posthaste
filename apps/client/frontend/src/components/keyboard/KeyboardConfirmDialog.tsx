@@ -6,7 +6,7 @@
  * dialog gates it — reusing the app's shared `AlertDialog` pattern so the
  * keyboard path gets the same affordance the context menu / palette does.
  */
-import type { ActionConfirm } from '@/actions'
+import type { ActionConfirm } from '@/commands'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +16,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+} from '@/components/ui/overlay/alert-dialog'
 
 export function KeyboardConfirmDialog({
   confirm,

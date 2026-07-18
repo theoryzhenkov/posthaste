@@ -24,7 +24,7 @@ import {
   type ActionContext,
   type ActionServices,
   type MessageTarget,
-} from '@/actions'
+} from '@/commands'
 
 import { KeyboardContext, type KeyboardContextValue } from './context'
 import {
@@ -35,7 +35,7 @@ import {
   type PaneKeyHandler,
 } from './dispatch'
 import { KeyboardConfirmDialog } from './KeyboardConfirmDialog'
-import type { GotoPrefix, GotoRole } from './goto'
+import type { GotoPrefix, GotoRole } from './goto/goto'
 
 /** How long a half-typed goto prefix (`g`, `gq`) waits for its next key. */
 const PREFIX_TIMEOUT_MS = 1500

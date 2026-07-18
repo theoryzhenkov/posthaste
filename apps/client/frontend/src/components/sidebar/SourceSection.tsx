@@ -11,24 +11,24 @@ import {
   Trash2,
 } from 'lucide-react'
 
-import type { AccountHealth } from '@/accountHealth'
-import type { AccountAppearance, Mailbox, MailboxGroup } from '@/api/types'
-import { useMailboxColorLookup } from '@/hooks/useMailboxColors'
+import type { AccountHealth } from '@/data/models/accountHealth'
+import type { AccountAppearance, Mailbox, MailboxGroup } from '@/data/transport/api'
+import { useMailboxColorLookup } from '@/data/hooks/useMailboxColors'
 
-import { AccountMark } from '../AccountMark'
-import type { SidebarSelection } from '../Sidebar'
+import { AccountMark } from '../ui/display/AccountMark'
+import type { SidebarSelection } from './Sidebar'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '../ui/context-menu'
-import { GroupNameDialog } from './GroupNameDialog'
+} from '../ui/overlay/context-menu'
+import { GroupNameDialog } from './dialogs/GroupNameDialog'
 import { partitionSourceMailboxes } from './model'
 import { MailboxItem } from './SidebarItems'
-import { useMailboxGroups, useMailboxGroupMutations } from './useMailboxGroups'
-import { NewMailboxDialog } from './NewMailboxDialog'
+import { useMailboxGroups, useMailboxGroupMutations } from './hooks/useMailboxGroups'
+import { NewMailboxDialog } from './dialogs/NewMailboxDialog'
 
 export function SourceSection({
   source,
