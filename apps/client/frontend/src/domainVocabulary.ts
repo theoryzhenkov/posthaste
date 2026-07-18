@@ -63,7 +63,5 @@ export const KNOWN_SYSTEM_KEYWORDS = [
   SYSTEM_KEYWORDS.Forwarded,
 ] as const satisfies readonly SystemKeyword[]
 
-// Event topics come from the generated `src/api/events.gen.ts`: the topic union,
-// named accessors (`EVENT_TOPICS`), and `isEventTopic` guard are codegen'd from
-// `asyncapi.json` and drift-checked, so an unhandled server-side topic is a
-// client compile error.
+// Event topics come from the generated protocol types in `src/gen/` (ts-rs
+// output of the models crate, e.g. `DomainEventPayload`), not from this file.

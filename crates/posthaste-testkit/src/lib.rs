@@ -2,11 +2,10 @@
 //!
 //! Dev-only library consumed by integration tests via `[dev-dependencies]`.
 //! Provides the disposable integration [`Harness`] (config + store +
-//! `MailService` on a temp root), its [`Harness::with_runtime`] extension that
-//! stands up an in-process authority runtime, a [`ViewSettlement`] recorder that
-//! captures the ordered view-diff stream a mutation settles through, a managed
-//! real-Stalwart [`StalwartFixture`] for live-provider parity, and small
-//! path/port helpers.
+//! `MailService` on a temp root) with declarative TOML fixture loading, a
+//! managed real-Stalwart [`StalwartFixture`] for live-provider parity, a mock
+//! Gmail/generic IMAP+SMTP [`GmailImapFixture`] for provider-wire tests, an
+//! in-memory [`TestSecretStore`], and small path/port helpers.
 //!
 //! See `docs/testing/L1.md` for the contract this crate is the reference
 //! implementation of.
@@ -15,9 +14,8 @@ mod fixture;
 mod gmail;
 mod guard;
 mod harness;
-mod migration;
 mod paths;
-mod runtime;
+mod secret;
 mod stalwart;
 
 pub use fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
@@ -28,7 +26,6 @@ pub use gmail::{
 };
 pub use guard::TempDirGuard;
 pub use harness::Harness;
-pub use migration::runtime_handle_with_account_runtime_provider_for_migration;
 pub use paths::{free_loopback_port, stalwart_bin, temp_root, workspace_root};
-pub use runtime::{RuntimeHarness, TestSecretStore, ViewSettlement, ViewWatch};
+pub use secret::TestSecretStore;
 pub use stalwart::StalwartFixture;

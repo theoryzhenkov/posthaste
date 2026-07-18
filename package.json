@@ -4,9 +4,7 @@
   "type": "module",
   "packageManager": "bun@1.3.11",
   "workspaces": [
-    "legacy/web",
     "apps/site",
-    "apps/mcp",
     "apps/client/frontend"
   ],
   "scripts": {
@@ -15,21 +13,12 @@
     "client:check": "bun --cwd=apps/client/frontend run check",
     "client:desktop:dev": "cd apps/client/desktop && bunx tauri dev",
     "client:desktop:build": "cd apps/client/desktop && bunx tauri build",
-    "web:dev": "bun --cwd=legacy/web run dev",
-    "web:build": "bun --cwd=legacy/web run build",
-    "web:check": "bun --cwd=legacy/web run check",
-    "web:test": "bun --cwd=legacy/web run test",
     "site:dev": "bun --cwd=apps/site run dev",
     "site:build": "bun --cwd=apps/site run build",
     "site:check": "bun --cwd=apps/site run check",
-    "tauri": "tauri",
-    "desktop:dev": "cd legacy/desktop && bunx tauri dev",
-    "desktop:build": "cd legacy/desktop && bunx tauri build",
-    "lab:tauri-playwright": "playwright test --config tools/lab/tauri-playwright/playwright.config.ts --project=tauri-main"
+    "tauri": "tauri"
   },
   "devDependencies": {
-    "@playwright/test": "1.58.2",
-    "@srsholmes/tauri-playwright": "0.2.2",
     "@tauri-apps/cli": "2.10.1"
   }
 }

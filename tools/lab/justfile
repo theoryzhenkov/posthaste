@@ -19,15 +19,6 @@ smoke:
     cargo run -p posthaste-lab -- suite list
     cargo run -p posthaste-lab -- verify --tag lab-smoke --run-root target/lab/smoke
 
-# Typecheck and format-check the optional Tauri Playwright lab files.
-tauri-check:
-    bun --cwd=legacy/web run tsc -p ../../tools/lab/tauri-playwright/tsconfig.json --noEmit
-    bun --cwd=legacy/web run prettier ../../tools/lab/tauri-playwright --check
-
-# Optional graphical Linux Tauri smoke through tauri-playwright.
-tauri-smoke *args:
-    bash tools/lab/tauri-playwright/smoke.sh {{ args }}
-
 # --- Profiling (offline store hot paths) -------------------------------------
 
 # CPU flamegraphs (pprof SVG + protobuf) and dhat heap profiles for each

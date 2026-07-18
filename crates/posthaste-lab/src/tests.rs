@@ -9,10 +9,10 @@ profile = "profile.lab.empty.dev"
 fixture = "fixture.mail.basic.test"
 runners = ["runner.cargo.test.dev"]
 tags = ["api", "settings", "fast"]
-paths = ["crates/posthaste-server/tests/settings_patch.rs"]
+paths = ["apps/client/backend/tests/settings_patch.rs"]
 command = "printf 'settings stdout\\n'; printf 'settings stderr\\n' >&2"
 timeout_seconds = 5
-artifacts = ["log.authority-server.jsonl.dev"]
+artifacts = ["log.client-backend.jsonl.dev"]
 
 [suite.dev.smoke.local]
 level = "smoke"

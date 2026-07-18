@@ -9,7 +9,7 @@ on:
   pull_request:
     paths:
       - "crates/posthaste-store/**"
-      - "crates/posthaste-domain/**"
+      - "crates/posthaste-domain-model/**"
       - "crates/posthaste-bench/**"
       - ".github/workflows/profile.yml"
   push:

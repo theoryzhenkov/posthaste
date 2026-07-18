@@ -4,9 +4,7 @@
 # per-launch session token, and injects {port, token} into every webview.
 #
 # DEPENDENCY ALLOWLIST: posthaste-client-backend, posthaste-config,
-# posthaste-observability, and the tauri crates. The split-model machinery
-# (posthaste-server, runtime/link crates, contract-core, the authority
-# server, the http-api adapter) must never be declared here.
+# posthaste-observability, and the tauri crates, nothing else.
 
 [package]
 name = "posthaste-client-desktop"

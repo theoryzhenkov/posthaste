@@ -1,11 +1,12 @@
 //! End-to-end IMAP move/archive wire-correctness scenarios against the mock
-//! Gmail (and generic) IMAP server: a `message.replaceMailboxes` mutation must
+//! Gmail (and generic) IMAP server: a `replace_mailboxes` mutation must
 //! actually remove the message from every removed mailbox *on the server*, not
-//! just locally.
+//! just locally. Drives `MailService` + the real `LiveImapSmtpGateway`
+//! directly (enqueue → flush → sync).
 //!
 //! The provider-correctness bug these pin (owner field report, Gmail): the
 //! wire delta used to be computed against the local canonical mailbox junction,
-//! which the runtime's optimistic write-through had already replaced with the
+//! which the optimistic write-through had already replaced with the
 //! target set by the time the outbox pushed — so an archive produced an empty
 //! delta and **zero wire commands** — and even a nonempty remove delta only
 //! parked `UID STORE +FLAGS (\Deleted)` without ever expunging, which no other
@@ -21,117 +22,39 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_client_link::RuntimeLink;
-use posthaste_contract_core::{
-    AccountScopeRequest, MailListViewState, MutationRequest, RuntimeCaller, ViewSnapshot,
-};
-use posthaste_domain_model::AccountId;
-use posthaste_runtime_api::RuntimeMailReadApi;
+use posthaste_domain_model::{AccountId, MailboxId, MessageId, ReplaceMailboxesCommand};
+use posthaste_imap::LiveImapSmtpGateway;
 use posthaste_testkit::{
-    GmailImapFixture, Harness, RuntimeHarness, MAILBOX_ALL_MAIL, MAILBOX_INBOX, MAILBOX_STARRED,
-    MAILBOX_TRASH,
+    GmailImapFixture, Harness, MAILBOX_ALL_MAIL, MAILBOX_INBOX, MAILBOX_STARRED, MAILBOX_TRASH,
 };
+
+use common::{connect_account, flush_settled, mailbox_id_by_name, messages_in, sync};
 
 /// The seeded message's UID on the mock server.
 const SEEDED_UID: u32 = 1;
 
-fn mail_list_rows(snapshot: &ViewSnapshot) -> MailListViewState {
-    serde_json::from_value::<MailListViewState>(snapshot.data.clone())
-        .expect("snapshot data should be mail list state")
-}
-
-/// Resolve the fixture-served mailbox's runtime `MailboxId` by its IMAP name.
-async fn mailbox_id_by_name(harness: &RuntimeHarness, account: &AccountId, name: &str) -> String {
-    let mailboxes = harness
-        .core()
-        .list_mailboxes(
-            RuntimeCaller::test(),
-            AccountScopeRequest::Explicit {
-                account_ids: vec![account.clone()],
+/// Apply a `replace_mailboxes` locally, push it through the real gateway, and
+/// assert it settled applied (nothing pending, failed, or parked) — the
+/// mutation-Confirmed invariant of the retired runtime drive.
+async fn settle_replace(
+    harness: &Harness,
+    account: &AccountId,
+    gateway: &LiveImapSmtpGateway,
+    message_id: &MessageId,
+    target_mailbox_ids: Vec<MailboxId>,
+) {
+    harness
+        .service
+        .replace_mailboxes(
+            account,
+            message_id,
+            &ReplaceMailboxesCommand {
+                mailbox_ids: target_mailbox_ids,
             },
         )
         .await
-        .expect("mailboxes should list");
-    mailboxes
-        .get(account)
-        .and_then(|ms| ms.iter().find(|m| m.name.eq_ignore_ascii_case(name)))
-        .unwrap_or_else(|| panic!("mailbox {name} should be discovered"))
-        .id
-        .to_string()
-}
-
-/// Open a `mailList` view over one mailbox and return its state.
-async fn open_mailbox_view(
-    harness: &RuntimeHarness,
-    account: &AccountId,
-    mailbox_id: &str,
-) -> MailListViewState {
-    let caller = RuntimeCaller::test();
-    let view = common::mail_list_view(&format!("in:{account}/{mailbox_id}"));
-    let link = harness
-        .core()
-        .open_link(caller.clone())
-        .await
-        .expect("link should open")
-        .link_id;
-    let snapshot = harness
-        .core()
-        .open_link_view(caller, link, view)
-        .await
-        .expect("mailbox view should open");
-    mail_list_rows(&snapshot)
-}
-
-/// The synced message's id, read from the INBOX view's single row projection.
-async fn seeded_message_id(
-    harness: &RuntimeHarness,
-    account: &AccountId,
-    inbox_id: &str,
-) -> String {
-    let state = open_mailbox_view(harness, account, inbox_id).await;
-    assert_eq!(state.rows.len(), 1, "the seeded message should be in INBOX");
-    state.rows[0]
-        .projection
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .expect("row projection should carry the message id")
-        .to_string()
-}
-
-fn replace_mailboxes_mutation(
-    account_id: &str,
-    message_id: &str,
-    mailbox_ids: &[&str],
-    cmid: &str,
-) -> MutationRequest {
-    serde_json::from_value(serde_json::json!({
-        "name": "message.replaceMailboxes",
-        "args": {
-            "sourceId": account_id,
-            "messageId": message_id,
-            "mailboxIds": mailbox_ids,
-        },
-        "clientMutationId": cmid,
-    }))
-    .expect("request builds from the flat wire shape")
-}
-
-/// Run a `replaceMailboxes` mutation through the full runtime (link + outbox +
-/// gateway push) and wait for its settlement.
-async fn settle_replace(
-    harness: &RuntimeHarness,
-    account: &AccountId,
-    message_id: &str,
-    target_mailbox_ids: &[&str],
-    view_mailbox_id: &str,
-) {
-    let settlement = harness
-        .settle(
-            replace_mailboxes_mutation(account.as_str(), message_id, target_mailbox_ids, "c-1"),
-            common::mail_list_view(&format!("in:{account}/{view_mailbox_id}")),
-        )
-        .await;
-    settlement.assert_confirmed();
+        .expect("mailbox move should apply locally");
+    flush_settled(harness, account, gateway).await;
 }
 
 /// Commands the server saw while `mailbox` was selected, matching `needle`.
@@ -170,20 +93,21 @@ fn assert_no_mailbox_wide_expunge(commands: &[String]) {
 #[tokio::test]
 async fn gmail_archive_expunges_the_removed_inbox_location() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("gmail-archive", &gmail).await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-archive");
+    let gateway = connect_account(&harness, &gmail, "gmail-archive").await;
 
-    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX).await;
-    let all_mail = mailbox_id_by_name(&harness, &account, MAILBOX_ALL_MAIL).await;
-    let starred = mailbox_id_by_name(&harness, &account, MAILBOX_STARRED).await;
-    let message_id = seeded_message_id(&harness, &account, &inbox).await;
+    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX);
+    let all_mail = mailbox_id_by_name(&harness, &account, MAILBOX_ALL_MAIL);
+    let starred = mailbox_id_by_name(&harness, &account, MAILBOX_STARRED);
+    let message_id = common::seeded_message_id(&harness, &account, &inbox);
 
     settle_replace(
         &harness,
         &account,
+        &gateway,
         &message_id,
-        &[&all_mail, &starred],
-        &inbox,
+        vec![all_mail.clone(), starred],
     )
     .await;
 
@@ -226,19 +150,17 @@ async fn gmail_archive_expunges_the_removed_inbox_location() {
 
     // Sync coherence: the next syncs observe the provider state and must not
     // resurrect the INBOX membership.
-    harness.sync_account(&account).await;
-    harness.sync_account(&account).await;
-    let inbox_view = open_mailbox_view(&harness, &account, &inbox).await;
+    sync(&harness, &account, &gateway).await;
+    sync(&harness, &account, &gateway).await;
     assert_eq!(
-        inbox_view.rows.len(),
+        messages_in(&harness, &account, &inbox).len(),
         0,
-        "the archived message must not resurrect in the INBOX view after re-syncs"
+        "the archived message must not resurrect in the INBOX projection after re-syncs"
     );
-    let all_mail_view = open_mailbox_view(&harness, &account, &all_mail).await;
     assert_eq!(
-        all_mail_view.rows.len(),
+        messages_in(&harness, &account, &all_mail).len(),
         1,
-        "the archived message should remain in the All Mail view"
+        "the archived message should remain in the All Mail projection"
     );
 }
 
@@ -250,21 +172,22 @@ async fn gmail_archive_expunges_the_removed_inbox_location() {
 #[tokio::test]
 async fn gmail_simple_move_to_trash_uses_uid_move() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("gmail-move", &gmail).await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-move");
+    let gateway = connect_account(&harness, &gmail, "gmail-move").await;
 
-    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX).await;
-    let all_mail = mailbox_id_by_name(&harness, &account, MAILBOX_ALL_MAIL).await;
-    let starred = mailbox_id_by_name(&harness, &account, MAILBOX_STARRED).await;
-    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH).await;
-    let message_id = seeded_message_id(&harness, &account, &inbox).await;
+    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX);
+    let all_mail = mailbox_id_by_name(&harness, &account, MAILBOX_ALL_MAIL);
+    let starred = mailbox_id_by_name(&harness, &account, MAILBOX_STARRED);
+    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH);
+    let message_id = common::seeded_message_id(&harness, &account, &inbox);
 
     settle_replace(
         &harness,
         &account,
+        &gateway,
         &message_id,
-        &[&all_mail, &starred, &trash],
-        &inbox,
+        vec![all_mail, starred, trash.clone()],
     )
     .await;
 
@@ -285,14 +208,16 @@ async fn gmail_simple_move_to_trash_uses_uid_move() {
         "the moved message must be in Trash on the server"
     );
 
-    harness.sync_account(&account).await;
-    let inbox_view = open_mailbox_view(&harness, &account, &inbox).await;
-    assert_eq!(inbox_view.rows.len(), 0, "INBOX view should be empty");
-    let trash_view = open_mailbox_view(&harness, &account, &trash).await;
+    sync(&harness, &account, &gateway).await;
     assert_eq!(
-        trash_view.rows.len(),
+        messages_in(&harness, &account, &inbox).len(),
+        0,
+        "INBOX projection should be empty"
+    );
+    assert_eq!(
+        messages_in(&harness, &account, &trash).len(),
         1,
-        "Trash view should hold the message"
+        "Trash projection should hold the message"
     );
 }
 
@@ -300,22 +225,30 @@ async fn gmail_simple_move_to_trash_uses_uid_move() {
 /// `ReplaceMailboxes([trash])`): the delta adds Trash and removes *every*
 /// current location. Gmail strips the other labels itself when the message is
 /// copied into Trash, so the follow-up removals find the UID already gone —
-/// removal is idempotent and the mutation must still settle Confirmed with the
+/// removal is idempotent and the mutation must still settle applied with the
 /// message ending up in Trash only.
 #[tokio::test]
 async fn gmail_trash_flow_tolerates_gmail_stripping_labels_on_copy() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("gmail-trash", &gmail).await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-trash");
+    let gateway = connect_account(&harness, &gmail, "gmail-trash").await;
 
-    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX).await;
-    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH).await;
-    let message_id = seeded_message_id(&harness, &account, &inbox).await;
+    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX);
+    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH);
+    let message_id = common::seeded_message_id(&harness, &account, &inbox);
 
     // Target = [Trash] only: add=[Trash], remove=[INBOX, All Mail, Starred] —
-    // a non-simple delta (settle_replace asserts Confirmed: the already-gone
-    // removals must not fail the mutation).
-    settle_replace(&harness, &account, &message_id, &[&trash], &inbox).await;
+    // a non-simple delta (settle_replace asserts settled-applied: the
+    // already-gone removals must not fail the mutation).
+    settle_replace(
+        &harness,
+        &account,
+        &gateway,
+        &message_id,
+        vec![trash.clone()],
+    )
+    .await;
 
     let commands = gmail.commands();
     assert_eq!(
@@ -338,14 +271,16 @@ async fn gmail_trash_flow_tolerates_gmail_stripping_labels_on_copy() {
         "a trashed message is not in All Mail on Gmail"
     );
 
-    harness.sync_account(&account).await;
-    let inbox_view = open_mailbox_view(&harness, &account, &inbox).await;
-    assert_eq!(inbox_view.rows.len(), 0, "INBOX view should be empty");
-    let trash_view = open_mailbox_view(&harness, &account, &trash).await;
+    sync(&harness, &account, &gateway).await;
     assert_eq!(
-        trash_view.rows.len(),
+        messages_in(&harness, &account, &inbox).len(),
+        0,
+        "INBOX projection should be empty"
+    );
+    assert_eq!(
+        messages_in(&harness, &account, &trash).len(),
         1,
-        "Trash view should hold the message"
+        "Trash projection should hold the message"
     );
 }
 
@@ -356,14 +291,15 @@ async fn gmail_trash_flow_tolerates_gmail_stripping_labels_on_copy() {
 #[tokio::test]
 async fn generic_non_simple_move_expunges_the_removed_location() {
     let imap = GmailImapFixture::start_generic_uidplus().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("generic-move", &imap).await;
+    let harness = Harness::new();
+    let account = AccountId::from("generic-move");
+    let gateway = connect_account(&harness, &imap, "generic-move").await;
 
-    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX).await;
-    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH).await;
-    let message_id = seeded_message_id(&harness, &account, &inbox).await;
+    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX);
+    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH);
+    let message_id = common::seeded_message_id(&harness, &account, &inbox);
 
-    settle_replace(&harness, &account, &message_id, &[&trash], &inbox).await;
+    settle_replace(&harness, &account, &gateway, &message_id, vec![trash]).await;
 
     let commands = imap.commands();
     assert_eq!(
@@ -403,14 +339,15 @@ async fn generic_non_simple_move_expunges_the_removed_location() {
 #[tokio::test]
 async fn non_uidplus_removal_falls_back_to_mark_deleted_without_expunge() {
     let imap = GmailImapFixture::start_generic_without_uidplus().await;
-    let harness = Harness::new().with_runtime().await;
-    let account = harness.create_gmail_account("generic-basic", &imap).await;
+    let harness = Harness::new();
+    let account = AccountId::from("generic-basic");
+    let gateway = connect_account(&harness, &imap, "generic-basic").await;
 
-    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX).await;
-    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH).await;
-    let message_id = seeded_message_id(&harness, &account, &inbox).await;
+    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX);
+    let trash = mailbox_id_by_name(&harness, &account, MAILBOX_TRASH);
+    let message_id = common::seeded_message_id(&harness, &account, &inbox);
 
-    settle_replace(&harness, &account, &message_id, &[&trash], &inbox).await;
+    settle_replace(&harness, &account, &gateway, &message_id, vec![trash]).await;
 
     let commands = imap.commands();
     let stores = commands_in(&commands, MAILBOX_INBOX, "UID STORE");

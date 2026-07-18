@@ -1,15 +1,10 @@
 //! Declarative TOML fixture loader: a fixture declares accounts + messages
 //! (with field overrides); loading it creates the accounts and seeds the
-//! messages so a view reflects the declared state.
+//! messages so the projection reflects the declared state.
 //!
 // spec: docs/testing/L1#declarative-fixtures
 
-#[path = "common/mod.rs"]
-mod common;
-
-use posthaste_client_link::RuntimeLink;
-use posthaste_contract_core::{AccountScopeRequest, MailListViewState, RuntimeCaller};
-use posthaste_runtime_api::RuntimeMailReadApi;
+use posthaste_domain_model::AccountId;
 use posthaste_testkit::Harness;
 
 const FIXTURE_TOML: &str = r#"
@@ -28,44 +23,24 @@ id = "a"
 "#;
 
 #[tokio::test]
-async fn declarative_fixture_loads_accounts_and_messages_into_the_view() {
-    let harness = Harness::new().with_runtime().await;
+async fn declarative_fixture_loads_accounts_and_messages_into_the_projection() {
+    let harness = Harness::new();
     let accounts = harness
         .load_fixture_toml(FIXTURE_TOML)
-        .await
         .expect("fixture should load");
 
     assert_eq!(accounts.len(), 1);
     assert_eq!(accounts[0].as_str(), "a");
 
-    let caller = RuntimeCaller::test();
-    let link = harness
-        .core()
-        .open_link(caller.clone())
-        .await
-        .expect("link should open")
-        .link_id;
-    let snapshot = harness
-        .core()
-        .open_link_view(caller, link, common::mail_list_view("in:a/inbox"))
-        .await
-        .expect("mail list view should open");
-    let state: MailListViewState =
-        serde_json::from_value(snapshot.data).expect("snapshot should be mail list state");
+    let messages = harness
+        .service
+        .list_messages(&AccountId::from("a"), None)
+        .expect("messages should list");
 
     // Both declared messages are present.
-    assert_eq!(state.rows.len(), 2);
+    assert_eq!(messages.len(), 2);
     // Subject overrides landed: the declared subject for m-1, the default for m-2.
-    let subjects: Vec<String> = state
-        .rows
-        .iter()
-        .filter_map(|row| {
-            row.projection
-                .get("subject")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-        })
-        .collect();
+    let subjects: Vec<String> = messages.iter().filter_map(|m| m.subject.clone()).collect();
     assert!(
         subjects.contains(&"Welcome to Posthaste".to_string()),
         "declared subject override should be present; got {subjects:?}"
@@ -74,6 +49,12 @@ async fn declarative_fixture_loads_accounts_and_messages_into_the_view() {
         subjects.contains(&"Subject m-2".to_string()),
         "default subject should still apply when unset; got {subjects:?}"
     );
+    // Keyword overrides landed: m-1 is flagged (declared), m-2 is not (default).
+    let flagged = messages
+        .iter()
+        .find(|m| m.subject.as_deref() == Some("Welcome to Posthaste"))
+        .expect("m-1 should be present");
+    assert!(flagged.is_flagged, "declared $flagged keyword should apply");
 }
 
 const UNREAD_FIXTURE_TOML: &str = r#"
@@ -95,27 +76,17 @@ id = "a"
 async fn fixture_unread_message_is_counted_in_mailbox_summary() {
     // A message without `$seen` is unread; the mailbox summary's unread count
     // must reflect it (the store derives unread from message keywords on read).
-    let harness = Harness::new().with_runtime().await;
+    let harness = Harness::new();
     let accounts = harness
         .load_fixture_toml(UNREAD_FIXTURE_TOML)
-        .await
         .expect("fixture should load");
 
     let mailboxes = harness
-        .core()
-        .list_mailboxes(
-            RuntimeCaller::test(),
-            AccountScopeRequest::Explicit {
-                account_ids: accounts.clone(),
-            },
-        )
-        .await
+        .service
+        .list_mailboxes(&accounts[0])
         .expect("mailboxes should list");
-    // The seeded inbox is the only mailbox with 2 messages; any system
-    // mailboxes created by the mock-account sync are empty.
+    // The seeded inbox is the only mailbox with 2 messages.
     let inbox = mailboxes
-        .get(&accounts[0])
-        .expect("account should have mailboxes")
         .iter()
         .find(|m| m.total_emails == 2)
         .expect("seeded inbox with 2 messages should be present");

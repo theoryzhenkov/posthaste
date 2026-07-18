@@ -2,28 +2,19 @@
 name = "posthaste-testkit"
 version = "0.1.0"
 edition = "2021"
-description = "Shared test support: disposable integration harness, runtime-in-harness, a managed real-Stalwart fixture, and a view-settlement recorder. Dev-only; consumed via [dev-dependencies]."
+description = "Shared test support: disposable integration harness, a managed real-Stalwart fixture, and a mock Gmail/generic IMAP fixture. Dev-only; consumed via [dev-dependencies]."
 
 [lib]
 name = "posthaste_testkit"
 path = "src/lib.rs"
 
 [dependencies]
-futures-util = { workspace = true }
-posthaste-authority-server = { path = "../posthaste-authority-server" }
-posthaste-client-link = { path = "../posthaste-client-link" }
 posthaste-config = { path = "../posthaste-config" }
-posthaste-contract-core = { path = "../posthaste-contract-core" }
 posthaste-domain-model = { path = "../posthaste-domain-model" }
 posthaste-domain-service = { path = "../posthaste-domain-service" }
 posthaste-imap = { path = "../posthaste-imap" }
-posthaste-replica-core = { path = "../posthaste-replica-core" }
-posthaste-replica-projector = { path = "../posthaste-replica-projector" }
-posthaste-runtime = { path = "../posthaste-runtime" }
-posthaste-runtime-api = { path = "../posthaste-runtime-api" }
 posthaste-store = { path = "../posthaste-store" }
 imap-codec = "2.0.0-alpha.7"
-jmap-client = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

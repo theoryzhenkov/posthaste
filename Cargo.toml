@@ -1,44 +1,30 @@
 [workspace]
-# `apps/client/*` is the integrated app (backend + mirror frontend): members
-# for the shared lockfile/lints, deliberately NOT default-members — the default
-# build stays the split-model app until the cutover.
 members = [
   "crates/*",
-  "legacy/desktop",
   "apps/client/models",
   "apps/client/backend",
   "apps/client/desktop",
 ]
 # `posthaste-bench` is a member (shared lockfile/target cache) but kept out of the
 # default build: it pulls profiling-only deps and a Valgrind-backed bench harness,
-# exercised by `profile.yml` rather than the main `ci.yml`.
+# exercised by `profile.yml` rather than the main `ci.yml`. `apps/client/desktop`
+# is the Tauri shell; it needs system webkit deps, so it stays opt-in too.
 default-members = [
-  "crates/posthaste-authority-server",
+  "crates/posthaste-call-policy",
   "crates/posthaste-config",
-  "crates/posthaste-contract-core",
   "crates/posthaste-domain-model",
   "crates/posthaste-domain-service",
   "crates/posthaste-engine",
   "crates/posthaste-imap",
   "crates/posthaste-lab",
-  "crates/posthaste-authority-server-link",
-  "crates/posthaste-call-policy",
-  "crates/posthaste-provider-call",
-  "crates/posthaste-link-far-end",
-  "crates/posthaste-replica-core",
-  "crates/posthaste-link-near-end",
-  "crates/posthaste-replica-projector",
   "crates/posthaste-observability",
-  "crates/posthaste-http-api-adapter",
+  "crates/posthaste-provider-call",
   "crates/posthaste-query-grammar",
-  "crates/posthaste-runtime",
-  "crates/posthaste-client-link",
-  "crates/posthaste-runtime-api",
-  "crates/posthaste-runtimed",
-  "crates/posthaste-server",
+  "crates/posthaste-replica-core",
   "crates/posthaste-store",
   "crates/posthaste-testkit",
-  "crates/posthaste-wizard",
+  "apps/client/models",
+  "apps/client/backend",
 ]
 exclude = ["crates/target", "vendor/imap-codec", "vendor/imap-types"]
 resolver = "2"

@@ -3,7 +3,7 @@ import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
 import rehypeDocLinks from './rehype-doc-links.mjs'
 
-// Posthaste site. The bespoke marketing landing (`/`, `/releases`, `/wizard`)
+// Posthaste site. The bespoke marketing landing (`/`, `/releases`)
 // is served by `src/pages/*.astro`; Starlight owns everything under `/docs`.
 // The two coexist because every Starlight entry id is prefixed with `docs/`
 // (see `src/content.config.ts`), so Starlight's routes never collide with the

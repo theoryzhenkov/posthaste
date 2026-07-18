@@ -1,135 +1,86 @@
 //! End-to-end Gmail IMAP scenarios against the mock Gmail IMAP server: an
 //! initial full-snapshot sync lands the baseline INBOX message in the store and
-//! view, and a second sync after a fixture mutation exercises the real
+//! projection, and a second sync after a fixture mutation exercises the real
 //! CONDSTORE/QRESYNC delta path (`CHANGEDSINCE` + `VANISHED`). The IMAP
-//! counterpart to the JMAP live-convergence test, but self-contained (no real
-//! server, so it runs unconditionally).
+//! counterpart to the JMAP live-convergence coverage, but self-contained (no
+//! real server, so it runs unconditionally). Drives `MailService` + the real
+//! `LiveImapSmtpGateway` directly.
 //!
-//! Views are queried by the inbox's actual `MailboxId` (resolved via
+//! Messages are read by the inbox's actual `MailboxId` (resolved via
 //! `list_mailboxes`), matching the app: a live-synced Gmail mailbox's id is
 //! namespaced (`imap:mailbox:<hex>`), never the bare "inbox" the mock seed path
-//! uses, so querying by name returns 0.
+//! uses.
 //!
 // spec: docs/testing/L1#provider-observation-matrix
 
 #[path = "common/mod.rs"]
 mod common;
 
-use posthaste_client_link::RuntimeLink;
-use posthaste_contract_core::{
-    AccountScopeRequest, MailListViewState, RuntimeCaller, ViewSnapshot,
-};
 use posthaste_domain_model::AccountId;
-use posthaste_runtime_api::RuntimeMailReadApi;
-use posthaste_testkit::{GmailImapFixture, Harness, RuntimeHarness, SEEDED_SUBJECT};
+use posthaste_testkit::{GmailImapFixture, Harness, MAILBOX_INBOX, SEEDED_SUBJECT};
 
-fn mail_list_rows(snapshot: &ViewSnapshot) -> MailListViewState {
-    serde_json::from_value::<MailListViewState>(snapshot.data.clone())
-        .expect("snapshot data should be mail list state")
-}
+use common::{connect_account, mailbox_id_by_name, messages_in, sync};
 
-/// Open the account's inbox `mailList` view by its real (namespaced) MailboxId,
-/// returning the current snapshot's mail-list state.
-async fn open_inbox_view(harness: &RuntimeHarness, account: &AccountId) -> MailListViewState {
-    let caller = RuntimeCaller::test();
-    let mailboxes = harness
-        .core()
-        .list_mailboxes(
-            caller.clone(),
-            AccountScopeRequest::Explicit {
-                account_ids: vec![account.clone()],
-            },
-        )
-        .await
-        .expect("mailboxes should list");
-    let inbox = mailboxes
-        .get(account)
-        .and_then(|ms| {
-            ms.iter().find(|m| {
-                m.role
-                    .as_deref()
-                    .is_some_and(|r| r.eq_ignore_ascii_case("inbox"))
-                    || m.name.eq_ignore_ascii_case("inbox")
-            })
-        })
-        .expect("inbox mailbox should be present after the initial sync");
-    let view = common::mail_list_view(&format!("in:{account}/{}", inbox.id.as_str()));
-    let link = harness
-        .core()
-        .open_link(caller.clone())
-        .await
-        .expect("link should open")
-        .link_id;
-    let snapshot = harness
-        .core()
-        .open_link_view(caller, link, view)
-        .await
-        .expect("inbox view should open");
-    mail_list_rows(&snapshot)
-}
-
-/// All row projections joined, for substring assertions over the view contents.
-fn row_projections(state: &MailListViewState) -> String {
-    state
-        .rows
-        .iter()
-        .map(|r| r.projection.to_string())
-        .collect::<Vec<_>>()
-        .join(" | ")
+/// The subjects currently projected into the inbox, joined for assertions.
+fn inbox_subjects(harness: &Harness, account: &AccountId) -> Vec<String> {
+    let inbox = mailbox_id_by_name(harness, account, MAILBOX_INBOX);
+    messages_in(harness, account, &inbox)
+        .into_iter()
+        .map(|m| m.subject.unwrap_or_default())
+        .collect()
 }
 
 #[tokio::test]
-async fn gmail_imap_sync_lands_inbox_message_in_the_mail_list_view() {
+async fn gmail_imap_sync_lands_inbox_message_in_the_projection() {
     let gmail = GmailImapFixture::start().await;
-    let harness = Harness::new().with_runtime().await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-imap");
 
-    // Create + enable (runs discovery) + initial sync (full-snapshot fetch).
-    let account = harness.create_gmail_account("gmail-imap", &gmail).await;
+    // Save + connect + initial sync (full-snapshot fetch).
+    let _gateway = connect_account(&harness, &gmail, "gmail-imap").await;
 
-    let state = open_inbox_view(&harness, &account).await;
+    let inbox = mailbox_id_by_name(&harness, &account, MAILBOX_INBOX);
+    let rows = messages_in(&harness, &account, &inbox);
     assert_eq!(
-        state.rows.len(),
+        rows.len(),
         1,
-        "exactly the one seeded Gmail INBOX message should surface in the view"
+        "exactly the one seeded Gmail INBOX message should surface in the projection"
     );
     // Prove it is the seeded Gmail message that round-tripped through the IMAP
     // FETCH parse, not an artifact: its projection carries the subject.
-    let projection = state.rows[0].projection.to_string();
-    assert!(
-        projection.contains(SEEDED_SUBJECT),
-        "the row projection should carry the seeded subject {SEEDED_SUBJECT:?}, got: {projection}"
+    assert_eq!(
+        rows[0].subject.as_deref(),
+        Some(SEEDED_SUBJECT),
+        "the projection should carry the seeded subject"
     );
     // The per-message authority version (flicker Bug-1b guard input) is stamped
     // from the real IMAP per-message modseq end-to-end: sync -> store ->
-    // projection -> view frame. The mock serves the baseline message at
-    // modseq 100, so the projection's `version` is 100 — exactly the value the
-    // client replica's strict-`<` staleness guard compares.
+    // projection. The mock serves the baseline message at modseq 100, so the
+    // summary's `version` is 100 — exactly the value the client replica's
+    // strict-`<` staleness guard compares.
     assert_eq!(
-        state.rows[0]
-            .projection
-            .get("version")
-            .and_then(serde_json::Value::as_u64),
+        rows[0].version,
         Some(100),
-        "the row projection should carry version=max(modseq); got: {projection}"
+        "the projection should carry version=max(modseq); got: {:?}",
+        rows[0]
     );
 }
 
 #[tokio::test]
-async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
+async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_projection() {
     const NEW_SUBJECT: &str = "Board deck (final)";
 
     let gmail = GmailImapFixture::start().await;
-    let harness = Harness::new().with_runtime().await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-imap-delta");
 
     // Baseline: the seeded message is synced and visible.
-    let account = harness
-        .create_gmail_account("gmail-imap-delta", &gmail)
-        .await;
-    let baseline = open_inbox_view(&harness, &account).await;
-    assert_eq!(baseline.rows.len(), 1, "baseline should hold one message");
-    assert!(
-        row_projections(&baseline).contains(SEEDED_SUBJECT),
-        "baseline view should show the seeded subject"
+    let gateway = connect_account(&harness, &gmail, "gmail-imap-delta").await;
+    let baseline = inbox_subjects(&harness, &account);
+    assert_eq!(baseline.len(), 1, "baseline should hold one message");
+    assert_eq!(
+        baseline[0], SEEDED_SUBJECT,
+        "baseline projection should show the seeded subject"
     );
 
     let baseline_headers = gmail.header_fetch_count();
@@ -139,7 +90,7 @@ async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
     // (the gateway's STATUS preflight sees a changed MODSEQ, then issues
     // `ENABLE QRESYNC` + `UID FETCH ... (CHANGEDSINCE <modseq> VANISHED)`).
     gmail.vanish_inbox_and_deliver(NEW_SUBJECT);
-    harness.sync_account(&account).await;
+    sync(&harness, &account, &gateway).await;
 
     // The re-sync must have taken the QRESYNC delta path, not a full snapshot:
     // the mock counts the `CHANGEDSINCE` fetches it answered.
@@ -157,20 +108,19 @@ async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
         "the QRESYNC delta should fetch exactly the replacement message's header (INBOX + All Mail)"
     );
 
-    let after = open_inbox_view(&harness, &account).await;
-    let projections = row_projections(&after);
+    let after = inbox_subjects(&harness, &account);
     assert_eq!(
-        after.rows.len(),
+        after.len(),
         1,
-        "after the delta the view should hold exactly the replacement message, got: {projections}"
+        "after the delta the projection should hold exactly the replacement message, got: {after:?}"
     );
     assert!(
-        projections.contains(NEW_SUBJECT),
-        "the delivered replacement {NEW_SUBJECT:?} should appear after the delta, got: {projections}"
+        after.contains(&NEW_SUBJECT.to_string()),
+        "the delivered replacement {NEW_SUBJECT:?} should appear after the delta, got: {after:?}"
     );
     assert!(
-        !projections.contains(SEEDED_SUBJECT),
-        "the vanished seeded message should be gone after the delta, got: {projections}"
+        !after.contains(&SEEDED_SUBJECT.to_string()),
+        "the vanished seeded message should be gone after the delta, got: {after:?}"
     );
 }
 
@@ -182,29 +132,28 @@ async fn gmail_imap_qresync_delta_replaces_vanished_message_in_the_view() {
 #[tokio::test]
 async fn condstore_only_second_sync_with_no_changes_fetches_zero_headers() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-condstore-nochange");
 
-    let account = harness
-        .create_gmail_account("gmail-condstore-nochange", &gmail)
-        .await;
+    let gateway = connect_account(&harness, &gmail, "gmail-condstore-nochange").await;
     let baseline_headers = gmail.header_fetch_count();
     assert!(
         baseline_headers >= 1,
         "the initial full-snapshot sync should have fetched the seeded header"
     );
 
-    harness.sync_account(&account).await;
+    sync(&harness, &account, &gateway).await;
 
     assert_eq!(
         gmail.header_fetch_count(),
         baseline_headers,
         "a no-change CONDSTORE-only re-sync must fetch zero headers"
     );
-    let state = open_inbox_view(&harness, &account).await;
+    let after = inbox_subjects(&harness, &account);
     assert_eq!(
-        state.rows.len(),
+        after.len(),
         1,
-        "the seeded message should still be in the view after the no-op re-sync"
+        "the seeded message should still be projected after the no-op re-sync"
     );
 }
 
@@ -220,11 +169,10 @@ async fn condstore_only_delta_fetches_only_the_changed_messages() {
     // Two messages in INBOX before the account exists, so the initial snapshot
     // lands both and the later delta has unchanged messages to NOT re-fetch.
     gmail.deliver_additional(SECOND_SUBJECT);
-    let harness = Harness::new().with_runtime().await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-condstore-delta");
 
-    let account = harness
-        .create_gmail_account("gmail-condstore-delta", &gmail)
-        .await;
+    let gateway = connect_account(&harness, &gmail, "gmail-condstore-delta").await;
     let baseline_headers = gmail.header_fetch_count();
     // The label-model mock serves each message once per mailbox view it
     // appears in: the seeded message (labels \Inbox + \Starred) from INBOX,
@@ -236,7 +184,7 @@ async fn condstore_only_delta_fetches_only_the_changed_messages() {
     );
 
     gmail.deliver_additional(NEW_SUBJECT);
-    harness.sync_account(&account).await;
+    sync(&harness, &account, &gateway).await;
 
     assert!(
         gmail.changedsince_fetch_count() >= 1,
@@ -248,52 +196,49 @@ async fn condstore_only_delta_fetches_only_the_changed_messages() {
         "the CONDSTORE delta should fetch exactly the one delivered message's header (INBOX + All Mail)"
     );
 
-    let state = open_inbox_view(&harness, &account).await;
-    let projections = row_projections(&state);
+    let after = inbox_subjects(&harness, &account);
     assert_eq!(
-        state.rows.len(),
+        after.len(),
         3,
-        "all three messages should be in the view after the delta, got: {projections}"
+        "all three messages should be projected after the delta, got: {after:?}"
     );
     assert!(
-        projections.contains(NEW_SUBJECT),
-        "the delivered {NEW_SUBJECT:?} should appear after the delta, got: {projections}"
+        after.contains(&NEW_SUBJECT.to_string()),
+        "the delivered {NEW_SUBJECT:?} should appear after the delta, got: {after:?}"
     );
     assert!(
-        projections.contains(SEEDED_SUBJECT) && projections.contains(SECOND_SUBJECT),
-        "the unchanged messages should survive the partial-delta batch, got: {projections}"
+        after.contains(&SEEDED_SUBJECT.to_string()) && after.contains(&SECOND_SUBJECT.to_string()),
+        "the unchanged messages should survive the partial-delta batch, got: {after:?}"
     );
 }
 
 /// CONDSTORE-only deletion detection: CHANGEDSINCE cannot report expunges
 /// without QRESYNC, so the delta reconciles a header-free `UID SEARCH
 /// UNDELETED` against known local locations — the expunged message leaves the
-/// view while zero headers are fetched.
+/// projection while zero headers are fetched.
 #[tokio::test]
 async fn condstore_only_delta_detects_an_expunged_message_as_deleted() {
     let gmail = GmailImapFixture::start_condstore_only().await;
-    let harness = Harness::new().with_runtime().await;
+    let harness = Harness::new();
+    let account = AccountId::from("gmail-condstore-expunge");
 
-    let account = harness
-        .create_gmail_account("gmail-condstore-expunge", &gmail)
-        .await;
-    let baseline = open_inbox_view(&harness, &account).await;
-    assert_eq!(baseline.rows.len(), 1, "baseline should hold one message");
+    let gateway = connect_account(&harness, &gmail, "gmail-condstore-expunge").await;
+    let baseline = inbox_subjects(&harness, &account);
+    assert_eq!(baseline.len(), 1, "baseline should hold one message");
     let baseline_headers = gmail.header_fetch_count();
 
     gmail.expunge_inbox();
-    harness.sync_account(&account).await;
+    sync(&harness, &account, &gateway).await;
 
     assert_eq!(
         gmail.header_fetch_count(),
         baseline_headers,
         "a pure-expunge CONDSTORE-only re-sync must fetch zero headers"
     );
-    let after = open_inbox_view(&harness, &account).await;
-    let projections = row_projections(&after);
+    let after = inbox_subjects(&harness, &account);
     assert_eq!(
-        after.rows.len(),
+        after.len(),
         0,
-        "the expunged message should be removed from the view, got: {projections}"
+        "the expunged message should be removed from the projection, got: {after:?}"
     );
 }

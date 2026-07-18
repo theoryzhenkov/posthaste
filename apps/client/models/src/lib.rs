@@ -11,8 +11,7 @@
 //! reused types; wire fields point at them with `#[ts(as = ...)]`, and a
 //! drift test keeps mirror and domain serde-identical.
 //!
-//! Dependency allowlist: `serde` + `ts-rs` + the domain model. The link/frame
-//! vocabulary (contract-core) must never enter this crate.
+//! Dependency allowlist: `serde` + `ts-rs` + the domain model, nothing else.
 
 pub mod codegen;
 pub mod command;

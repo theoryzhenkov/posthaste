@@ -2,9 +2,9 @@
 
 set working-directory := '..'
 
-# Run the local server
+# Run the local client backend (HTTP+SSE on 127.0.0.1:7365)
 run *args:
-    cargo run --bin posthaste-authority-runtime-server -- serve {{args}}
+    cargo run -p posthaste-client-backend {{args}}
 
 # Build all crates
 build:
@@ -18,7 +18,7 @@ build-release:
 
 # Run tests
 test *args:
-    cargo test --workspace --exclude posthaste-desktop {{args}}
+    cargo test --workspace {{args}}
 
 # Runs against the dev-stack Stalwart — the nix devshell puts `stalwart` +
 # `stalwart-cli` on PATH, which the StalwartFixture spawns on loopback ports.
@@ -27,14 +27,14 @@ test *args:
 # HARD send-path gate: the exact tests CI's `send-path-gate` job runs (a live
 # send must file into Sent and NOT Drafts; parity's self-send filing invariants).
 send-gate:
-    POSTHASTE_STALWART_INTEGRATION=1 cargo test -p posthaste-server \
+    POSTHASTE_STALWART_INTEGRATION=1 cargo test -p posthaste-client-backend \
         --test stalwart_send_regression \
         --test stalwart_provider_parity
 
 # Run clippy + check
 check:
     bash tools/dev/logs/check-rust-contract.sh
-    cargo clippy --workspace --exclude posthaste-desktop --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Format code
 fmt:

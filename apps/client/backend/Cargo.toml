@@ -8,13 +8,10 @@ edition = "2021"
 # evaluated fresh over the effective views, typed commands feeding the
 # outbox, the generation-stamped SSE event stream, and blob downloads.
 #
-# DEPENDENCY ALLOWLIST: the domain core + `models` + the HTTP stack. The
-# runtime/link crates (posthaste-runtime, the link crates, contract-core,
-# the authority server, replica-projector) must never be declared below and
-# never appear in the normal dependency tree — that machinery is what this
-# backend replaces. One transitive exception: posthaste-domain-service
-# itself depends on posthaste-replica-core (its message-fold predictor), so
-# replica-core rides along with every domain-service consumer.
+# DEPENDENCY ALLOWLIST: the domain core + `models` + the HTTP stack, nothing
+# else. Note: posthaste-domain-service itself depends on posthaste-replica-core
+# (its message-fold predictor), so replica-core rides along with every
+# domain-service consumer.
 
 [dependencies]
 posthaste-client-models = { path = "../models" }

@@ -30,13 +30,7 @@ fn real_suite_registry_paths_exist_and_smoke_stays_non_graphical() {
 
     assert_eq!(
         smoke_suite_ids,
-        vec![
-            "suite.api.health.dev",
-            "suite.lab.core.rust.test",
-            "suite.policy.no_telemetry.main",
-            "suite.ui.readiness.web.test",
-            "suite.ui.surfaces.web.test",
-        ]
+        vec!["suite.lab.core.rust.test", "suite.policy.no_telemetry.main",]
     );
 
     for (id, entry) in registry.suites() {
@@ -121,7 +115,7 @@ fn selects_suites_by_changed_paths() {
     let selected = registry
         .select(&SelectionCriteria {
             changed: true,
-            changed_paths: vec!["crates/posthaste-server/tests/settings_patch.rs".to_string()],
+            changed_paths: vec!["apps/client/backend/tests/settings_patch.rs".to_string()],
             ..SelectionCriteria::default()
         })
         .unwrap();

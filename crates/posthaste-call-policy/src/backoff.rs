@@ -1,10 +1,9 @@
 //! Jittered, capped exponential backoff + the `Retry-After`/429 arithmetic.
 //!
 //! This is the arithmetic half of the outbound-call retry policy (D80/D81/F1),
-//! extracted verbatim from `posthaste-link-near-end`'s scheduler so the link
-//! engine and the (M31) native provider executor share one schedule instead of
-//! forking it. It is pure: no timer, no RNG, no clock. The caller supplies both
-//! the `attempt` counter and the jitter `rand_unit` — see [`BackoffSchedule::delay_for`].
+//! the one schedule the (M31) native provider executor consumes. It is pure:
+//! no timer, no RNG, no clock. The caller supplies both the `attempt` counter
+//! and the jitter `rand_unit` — see [`BackoffSchedule::delay_for`].
 
 use std::time::Duration;
 

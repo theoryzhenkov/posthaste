@@ -119,19 +119,6 @@ fn env_root_overrides_resolve_through_the_canonical_resolver() {
 
 // -- 2. Keyring continuity ---------------------------------------------------
 
-/// Extract the keyring service-name constant from the split-model secret
-/// store's source, while it is still in the tree. Returns `None` once that
-/// crate is gone — the literal assertion below then remains the contract.
-fn split_model_keyring_service_name() -> Option<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../crates/posthaste-runtime/src/secret.rs");
-    let source = std::fs::read_to_string(path).ok()?;
-    let marker = "KEYRING_SERVICE_NAME: &str = \"";
-    let start = source.find(marker)? + marker.len();
-    let rest = &source[start..];
-    Some(rest[..rest.find('"')?].to_string())
-}
-
 #[test]
 fn keyring_naming_resolves_the_entries_existing_installs_wrote() {
     let secret_ref = SecretRef {
@@ -145,13 +132,6 @@ fn keyring_naming_resolves_the_entries_existing_installs_wrote() {
     // key (as persisted in `sources/*.toml`) as the account name.
     assert_eq!(service, "posthaste");
     assert_eq!(account, "account:primary");
-
-    if let Some(split_model_service) = split_model_keyring_service_name() {
-        assert_eq!(
-            service, split_model_service,
-            "keyring service name must match the split-model secret store"
-        );
-    }
 }
 
 #[test]
