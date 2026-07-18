@@ -32,7 +32,8 @@ import {
 } from '../ui/context-menu'
 import { DeleteMailboxDialog } from './DeleteMailboxDialog'
 import { GroupNameDialog } from './GroupNameDialog'
-import { isMailboxDeletable, itemButtonClass } from './model'
+import { RenameMailboxDialog } from './RenameMailboxDialog'
+import { isMailboxDeletable, isMailboxRenamable, itemButtonClass } from './model'
 
 function roleIcon(role: Mailbox['role'], size = 14): ReactNode {
   return renderMailboxRoleIcon(role, size)
@@ -249,7 +250,9 @@ export function MailboxItem({
   // answered row, kept live by the generation-advance invalidation.
   const unread = mailbox.unreadEmails
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [isRenameOpen, setIsRenameOpen] = useState(false)
   const isDeletable = isMailboxDeletable(mailbox)
+  const isRenamable = isMailboxRenamable(mailbox)
   const button = (
     <button
       className={itemButtonClass(isSelected, depth, isPaneActive)}
@@ -293,20 +296,32 @@ export function MailboxItem({
             <Settings size={14} />
             Account settings
           </ContextMenuItem>
+          {(isRenamable || isDeletable) && <ContextMenuSeparator />}
+          {isRenamable && (
+            <ContextMenuItem onSelect={() => setIsRenameOpen(true)}>
+              <Edit3 size={14} />
+              Rename mailbox
+            </ContextMenuItem>
+          )}
           {isDeletable && (
-            <>
-              <ContextMenuSeparator />
-              <ContextMenuItem
-                variant="destructive"
-                onSelect={() => setIsDeleteOpen(true)}
-              >
-                <Trash2 size={14} />
-                Delete mailbox
-              </ContextMenuItem>
-            </>
+            <ContextMenuItem
+              variant="destructive"
+              onSelect={() => setIsDeleteOpen(true)}
+            >
+              <Trash2 size={14} />
+              Delete mailbox
+            </ContextMenuItem>
           )}
         </ContextMenuContent>
       </ContextMenu>
+      {isRenamable && (
+        <RenameMailboxDialog
+          sourceId={sourceId}
+          mailbox={mailbox}
+          open={isRenameOpen}
+          onOpenChange={setIsRenameOpen}
+        />
+      )}
       {isDeletable && (
         <DeleteMailboxDialog
           sourceId={sourceId}

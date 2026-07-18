@@ -17,7 +17,7 @@ use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use oauth2::{
     AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, ExtraTokenFields,
-    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use posthaste_client_models::{OauthStartQuery, OauthStartResult};
 use posthaste_domain_model::{
@@ -29,6 +29,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
 use super::ApiFailure;
+use crate::oauth_refresh::{oauth_secret_type, OauthTokenSet};
 
 /// Total wall-clock deadline for a single identity-provider HTTP request, so
 /// a hung provider can never wedge a command handler.
@@ -282,30 +283,25 @@ pub(crate) async fn complete_flow(state: &str, code: &str) -> Result<OauthAccoun
             ApiFailure::malformed("provider does not support built-in OAuth account creation")
         })?;
 
-    let token_set = OauthTokenSet {
-        r#type: "oauth2".to_string(),
-        provider: flow.provider.clone(),
-        client_id: flow.client_id,
-        client_secret: flow.client_secret,
-        access_token: token_response.access_token().secret().clone(),
-        refresh_token: token_response
-            .refresh_token()
-            .map(|token| token.secret().clone()),
-        expires_at: expires_at_from_duration(now, token_response.expires_in())
-            .map_err(service_failure)?,
-        scopes: token_response
-            .scopes()
-            .map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect())
-            .unwrap_or_else(|| {
-                endpoints
-                    .scopes
-                    .iter()
-                    .map(|scope| (*scope).to_string())
-                    .collect()
-            }),
-    };
-    let token_set_json = serde_json::to_string(&token_set)
-        .map_err(|_| ApiFailure::internal("failed to encode the OAuth token set"))?;
+    let token_set = token_set_from_response(
+        flow.provider.clone(),
+        flow.client_id,
+        flow.client_secret,
+        &token_response,
+        now,
+        // The exchange is the grant's origin: there is no prior refresh
+        // token to carry over.
+        None,
+        || {
+            endpoints
+                .scopes
+                .iter()
+                .map(|scope| (*scope).to_string())
+                .collect()
+        },
+    )
+    .map_err(service_failure)?;
+    let token_set_json = token_set.encode().map_err(service_failure)?;
 
     Ok(OauthAccountSeed {
         provider: flow.provider,
@@ -341,6 +337,120 @@ fn oauth_client(
     Ok(client)
 }
 
+/// A client for the refresh-token grant alone: only the token endpoint is
+/// set — no authorization URL, no redirect — because a refresh is a pure
+/// backend exchange.
+type OauthRefreshClient = oauth2::Client<
+    oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>,
+    OauthTokenResponse,
+    oauth2::StandardTokenIntrospectionResponse<
+        OpenIdExtraTokenFields,
+        oauth2::basic::BasicTokenType,
+    >,
+    oauth2::StandardRevocableToken,
+    oauth2::StandardErrorResponse<oauth2::RevocationErrorResponseType>,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointSet,
+>;
+
+fn refresh_client(
+    client_id: &str,
+    client_secret: Option<&str>,
+    token_url: &str,
+) -> Result<OauthRefreshClient, GatewayError> {
+    let token_url = TokenUrl::new(token_url.to_string())
+        .map_err(|error| GatewayError::Rejected(format!("invalid OAuth URL: {error}")))?;
+    let mut client =
+        oauth2::Client::new(ClientId::new(client_id.to_string())).set_token_uri(token_url);
+    if let Some(client_secret) = client_secret {
+        client = client
+            .set_client_secret(ClientSecret::new(client_secret.to_string()))
+            .set_auth_type(AuthType::RequestBody);
+    }
+    Ok(client)
+}
+
+/// Exchange a token set's refresh token at the bundled provider
+/// registration's token endpoint, producing the rotated set. A provider that
+/// rotates the refresh token replaces it; one that omits it keeps the
+/// current grant.
+pub(crate) async fn refresh_token_set(
+    token_set: &OauthTokenSet,
+    now: OffsetDateTime,
+) -> Result<OauthTokenSet, GatewayError> {
+    let endpoints = provider_endpoints(&token_set.provider).ok_or_else(|| {
+        GatewayError::Rejected(format!(
+            "OAuth refresh is not supported for provider {:?}",
+            token_set.provider
+        ))
+    })?;
+    refresh_token_set_at(token_set, endpoints.token_url, now).await
+}
+
+async fn refresh_token_set_at(
+    token_set: &OauthTokenSet,
+    token_url: &str,
+    now: OffsetDateTime,
+) -> Result<OauthTokenSet, GatewayError> {
+    // No refresh token means the grant cannot be renewed without the user
+    // re-authorizing: a credential problem, typed as one.
+    let refresh_token = token_set.refresh_token.as_ref().ok_or(GatewayError::Auth)?;
+    let client = refresh_client(
+        &token_set.client_id,
+        token_set.client_secret.as_deref(),
+        token_url,
+    )?;
+    let token_response = client
+        .exchange_refresh_token(&RefreshToken::new(refresh_token.clone()))
+        .request_async(&*OAUTH_HTTP_CLIENT)
+        .await
+        .map_err(oauth_request_error)?;
+    token_set_from_response(
+        token_set.provider.clone(),
+        token_set.client_id.clone(),
+        token_set.client_secret.clone(),
+        &token_response,
+        now,
+        // A provider that omits the refresh token keeps the current grant.
+        token_set.refresh_token.clone(),
+        || token_set.scopes.clone(),
+    )
+}
+
+/// Map a token-endpoint response into the stored token-set shape. Fields the
+/// response omits fall back to the caller's carry-over values: the prior
+/// refresh token (refresh grant) or none (authorization-code exchange), and
+/// the scope list that was requested or already held.
+fn token_set_from_response(
+    provider: ProviderHint,
+    client_id: String,
+    client_secret: Option<String>,
+    token_response: &OauthTokenResponse,
+    now: OffsetDateTime,
+    fallback_refresh_token: Option<String>,
+    fallback_scopes: impl FnOnce() -> Vec<String>,
+) -> Result<OauthTokenSet, GatewayError> {
+    Ok(OauthTokenSet {
+        r#type: oauth_secret_type(),
+        provider,
+        client_id,
+        client_secret,
+        access_token: token_response.access_token().secret().clone(),
+        refresh_token: token_response
+            .refresh_token()
+            .map(|token| token.secret().clone())
+            .or(fallback_refresh_token),
+        expires_at: expires_at_from_duration(now, token_response.expires_in())?,
+        scopes: token_response
+            .scopes()
+            .map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect())
+            .unwrap_or_else(fallback_scopes),
+    })
+}
+
 fn oauth_request_error<E: std::fmt::Display>(error: E) -> GatewayError {
     let message = error.to_string();
     if message.contains("invalid_grant") || message.contains("unauthorized_client") {
@@ -372,23 +482,6 @@ fn expires_at_from_duration(
             })
         })
         .transpose()
-}
-
-/// The stored account secret for an OAuth account: the whole token bundle,
-/// JSON-encoded, so a refresh can mint new access tokens without
-/// re-authorizing. Never returned by any API answer.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OauthTokenSet {
-    r#type: String,
-    provider: ProviderHint,
-    client_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    client_secret: Option<String>,
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_at: Option<String>,
-    scopes: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -661,4 +754,124 @@ fn jwks_cache_duration(headers: &oauth2::http::HeaderMap) -> Duration {
         .unwrap_or(JWKS_DEFAULT_CACHE_SECONDS)
         .clamp(1, JWKS_MAX_CACHE_SECONDS);
     Duration::seconds(seconds)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use axum::routing::post;
+    use axum::{Json, Router};
+    use posthaste_domain_model::ProviderHint;
+
+    use super::*;
+
+    /// Serve one canned token-endpoint response on a loopback port and
+    /// return the endpoint URL.
+    async fn fake_token_endpoint(status: StatusCode, body: serde_json::Value) -> String {
+        let router =
+            Router::new().route("/token", post(move || async move { (status, Json(body)) }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let address = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.expect("serve");
+        });
+        format!("http://{address}/token")
+    }
+
+    fn now() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp")
+    }
+
+    fn stale_token_set() -> OauthTokenSet {
+        OauthTokenSet {
+            r#type: oauth_secret_type(),
+            provider: ProviderHint::Gmail,
+            client_id: "client-id".to_string(),
+            client_secret: None,
+            access_token: "stale-token".to_string(),
+            refresh_token: Some("current-refresh".to_string()),
+            expires_at: Some("2023-11-14T00:00:00Z".to_string()),
+            scopes: vec!["https://mail.google.com/".to_string()],
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_rotates_the_token_set_through_the_token_endpoint() {
+        let token_url = fake_token_endpoint(
+            StatusCode::OK,
+            serde_json::json!({
+                "access_token": "new-token",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "refresh_token": "new-refresh",
+            }),
+        )
+        .await;
+
+        let rotated = refresh_token_set_at(&stale_token_set(), &token_url, now())
+            .await
+            .expect("refresh succeeds");
+
+        assert_eq!(rotated.access_token, "new-token");
+        assert_eq!(rotated.refresh_token.as_deref(), Some("new-refresh"));
+        assert_eq!(
+            rotated.expires_at.as_deref(),
+            Some(
+                (now() + Duration::seconds(3600))
+                    .format(&Rfc3339)
+                    .expect("formats")
+                    .as_str()
+            )
+        );
+        // Scopes absent from the response carry over from the current set.
+        assert_eq!(rotated.scopes, stale_token_set().scopes);
+    }
+
+    #[tokio::test]
+    async fn refresh_keeps_the_current_grant_when_the_endpoint_omits_the_refresh_token() {
+        let token_url = fake_token_endpoint(
+            StatusCode::OK,
+            serde_json::json!({
+                "access_token": "new-token",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            }),
+        )
+        .await;
+
+        let rotated = refresh_token_set_at(&stale_token_set(), &token_url, now())
+            .await
+            .expect("refresh succeeds");
+
+        assert_eq!(rotated.refresh_token.as_deref(), Some("current-refresh"));
+    }
+
+    #[tokio::test]
+    async fn invalid_grant_surfaces_the_typed_auth_error() {
+        let token_url = fake_token_endpoint(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": "invalid_grant" }),
+        )
+        .await;
+
+        let error = refresh_token_set_at(&stale_token_set(), &token_url, now())
+            .await
+            .expect_err("revoked grant fails");
+
+        assert!(matches!(error, GatewayError::Auth));
+    }
+
+    #[tokio::test]
+    async fn missing_refresh_token_surfaces_the_typed_auth_error() {
+        let mut token_set = stale_token_set();
+        token_set.refresh_token = None;
+
+        let error = refresh_token_set_at(&token_set, "http://127.0.0.1:1/token", now())
+            .await
+            .expect_err("unrenewable grant fails");
+
+        assert!(matches!(error, GatewayError::Auth));
+    }
 }

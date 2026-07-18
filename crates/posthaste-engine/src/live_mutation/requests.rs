@@ -88,6 +88,46 @@ pub(crate) fn set_mailbox_role_request_body(
     })
 }
 
+/// Build a `Mailbox/set` update request that renames a single mailbox.
+///
+/// The patch carries only `name`, so the mailbox's id, role, and contents are
+/// untouched by the rename.
+pub(crate) fn rename_mailbox_request_body(
+    account_id: &str,
+    expected_state: Option<&str>,
+    mailbox_id: &MailboxId,
+    name: &str,
+) -> Value {
+    let mut patch = Map::new();
+    patch.insert("name".to_string(), Value::String(name.to_string()));
+
+    let mut arguments = Map::new();
+    arguments.insert(
+        "accountId".to_string(),
+        Value::String(account_id.to_string()),
+    );
+    if let Some(expected_state) = expected_state {
+        arguments.insert(
+            "ifInState".to_string(),
+            Value::String(expected_state.to_string()),
+        );
+    }
+    arguments.insert(
+        "update".to_string(),
+        json!({ mailbox_id.as_str(): Value::Object(patch) }),
+    );
+
+    json!({
+        "using": [
+            "urn:ietf:params:jmap:core",
+            "urn:ietf:params:jmap:mail"
+        ],
+        "methodCalls": [
+            ["Mailbox/set", Value::Object(arguments), "s0"]
+        ]
+    })
+}
+
 /// The client-side create id used in the hand-rolled `Mailbox/set` create
 /// request. The server echoes it under `created`, keying the created mailbox's
 /// server id (see [`crate::live_mutation::outcome::created_mailbox_id`]).

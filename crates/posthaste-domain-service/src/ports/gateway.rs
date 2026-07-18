@@ -152,6 +152,28 @@ pub trait MailGateway: Send + Sync {
         name: &str,
     ) -> Result<MailboxId, GatewayError>;
 
+    /// Rename a mailbox via a `Mailbox/set` name update (JMAP), leaving its
+    /// id, role, and contents untouched.
+    ///
+    /// Default transport behaviour rejects mailbox renames; JMAP overrides.
+    /// IMAP keeps an explicit rejecting implementation — its ids encode the
+    /// mailbox name, so a server-side `RENAME` would re-key the mailbox and
+    /// every message in it (see the adapter's implementation for the id-model
+    /// details).
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    async fn rename_mailbox(
+        &self,
+        _account_id: &AccountId,
+        _mailbox_id: &MailboxId,
+        _expected_state: Option<&str>,
+        _name: &str,
+    ) -> Result<MutationOutcome, GatewayError> {
+        Err(GatewayError::Rejected(
+            "mailbox rename is not supported by this transport".to_string(),
+        ))
+    }
+
     /// Destroy a mailbox via `Mailbox/set` destroy (JMAP) or `DELETE` (IMAP).
     ///
     /// `remove_emails` is JMAP's `onDestroyRemoveEmails`: when `false` a JMAP

@@ -156,6 +156,26 @@ impl MailGateway for LiveImapSmtpGateway {
             .map(|()| crate::imap_mailbox_id(name))
     }
 
+    /// Mailbox rename is not supported on IMAP accounts: the adapter's
+    /// mailbox ids encode the mailbox NAME (`imap:mailbox:hex(name)`), and its
+    /// message ids embed that mailbox id (`imap:{uidvalidity}:{uid}:{hex}`),
+    /// so a server-side `RENAME` would rotate the mailbox id and re-key every
+    /// contained message — tearing down and re-adding the whole mailbox and
+    /// stranding any local state keyed by the old ids. The typed rejection
+    /// keeps the refusal at the gateway seam instead of half-applying that id
+    /// rotation.
+    async fn rename_mailbox(
+        &self,
+        _account_id: &AccountId,
+        _mailbox_id: &MailboxId,
+        _expected_state: Option<&str>,
+        _name: &str,
+    ) -> Result<MutationOutcome, GatewayError> {
+        Err(GatewayError::Rejected(
+            "renaming mailboxes is not supported on IMAP accounts".to_string(),
+        ))
+    }
+
     /// Destroy a mailbox with IMAP `DELETE`.
     ///
     /// IMAP has **no** `onDestroyRemoveEmails` — `DELETE` destroys any contained

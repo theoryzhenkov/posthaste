@@ -166,12 +166,8 @@ pub(crate) async fn update_account(
         }
         settings.name = name;
     }
-    if let Some(full_name) = intent.full_name {
-        settings.full_name = Some(full_name);
-    }
-    if let Some(signature) = intent.signature {
-        settings.signature = Some(signature);
-    }
+    intent.full_name.apply(&mut settings.full_name);
+    intent.signature.apply(&mut settings.signature);
     if let Some(email_patterns) = intent.email_patterns {
         settings.email_patterns = email_patterns;
     }
@@ -206,12 +202,8 @@ pub(crate) async fn update_account_transport(
     if let Some(auth) = intent.auth {
         settings.transport.auth = auth;
     }
-    if let Some(base_url) = intent.base_url {
-        settings.transport.base_url = Some(base_url);
-    }
-    if let Some(username) = intent.username {
-        settings.transport.username = Some(username);
-    }
+    intent.base_url.apply(&mut settings.transport.base_url);
+    intent.username.apply(&mut settings.transport.username);
     if let Some(imap) = intent.imap {
         settings.transport.imap = Some(imap);
     }

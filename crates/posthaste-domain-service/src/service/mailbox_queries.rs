@@ -130,6 +130,55 @@ impl MailService {
         Ok(events)
     }
 
+    /// Rename a server-side mailbox and refresh the local mailbox projection.
+    ///
+    /// Synchronous, not optimistic (mirroring
+    /// [`create_mailbox`](Self::create_mailbox)): a blocking provider
+    /// round-trip applies the new name, then a resync reads it back. The
+    /// gateway call carries only the name — the mailbox's id, role, and
+    /// contents are untouched.
+    pub async fn rename_mailbox(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        name: &str,
+        gateway: &dyn MailGateway,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        // Resolve the target locally first, so an unknown mailbox is a
+        // not-found refusal before the provider is touched.
+        self.mailbox_reader
+            .list_mailboxes(account_id)?
+            .into_iter()
+            .find(|mailbox| mailbox.id == *mailbox_id)
+            .ok_or_else(|| {
+                StoreError::NotFound(format!("mailbox {} not found", mailbox_id.as_str()))
+            })?;
+        let expected_state = self
+            .sync_state
+            .get_cursor(account_id, SyncObject::Mailbox)?;
+        gateway
+            .rename_mailbox(
+                account_id,
+                mailbox_id,
+                expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                name,
+            )
+            .await?;
+        let renamed_event = self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MAILBOX_UPDATED,
+            Some(mailbox_id),
+            None,
+            json!({ "mailboxId": mailbox_id.as_str() }),
+        )?;
+        let mut events = vec![renamed_event];
+        events.extend(
+            self.sync_account(account_id, SyncTrigger::Manual, gateway, None)
+                .await?,
+        );
+        Ok(events)
+    }
+
     /// Destroy a server-side mailbox, then resync so its disappearance tears down
     /// the local rows (the resync-observed-deletion path reuses the store's
     /// `mailbox_cleanup` teardown — `message_mailbox` + `imap_message_location` +

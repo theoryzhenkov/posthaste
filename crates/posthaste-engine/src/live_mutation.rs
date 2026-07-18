@@ -12,8 +12,9 @@ use crate::live_mutation::outcome::{
     set_keywords_mutation_outcome,
 };
 use crate::live_mutation::requests::{
-    create_mailbox_request_body, destroy_mailbox_request_body, send_json_request,
-    set_keywords_request_body, set_mailbox_role_request_body, CREATE_MAILBOX_CREATE_ID,
+    create_mailbox_request_body, destroy_mailbox_request_body, rename_mailbox_request_body,
+    send_json_request, set_keywords_request_body, set_mailbox_role_request_body,
+    CREATE_MAILBOX_CREATE_ID,
 };
 
 /// Add or remove keywords (flags) on a message via `Email/set`.
@@ -137,6 +138,31 @@ pub(crate) async fn create_mailbox(
         .unwrap_set_mailbox()
         .map_err(map_gateway_error)?;
     created_mailbox_id(response, CREATE_MAILBOX_CREATE_ID)
+}
+
+/// Rename a mailbox via a hand-rolled `Mailbox/set` update.
+///
+/// A name-only patch: the mailbox's id, role, and contents are untouched.
+///
+/// @spec docs/L1-jmap#methods-used
+/// @spec docs/L1-sync#conflict-model
+pub(crate) async fn rename_mailbox(
+    gateway: &LiveJmapGateway,
+    mailbox_id: &MailboxId,
+    expected_state: Option<&str>,
+    name: &str,
+) -> Result<MutationOutcome, GatewayError> {
+    let request = rename_mailbox_request_body(
+        gateway.server_account_id(),
+        expected_state,
+        mailbox_id,
+        name,
+    );
+    let mut response = send_json_request(gateway, request).await?;
+    let response = required_method_response(response.pop_method_response(), "Mailbox/set")?
+        .unwrap_set_mailbox()
+        .map_err(map_gateway_error)?;
+    mailbox_mutation_outcome(response, mailbox_id)
 }
 
 /// Destroy a mailbox via a hand-rolled `Mailbox/set` destroy.

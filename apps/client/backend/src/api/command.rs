@@ -112,7 +112,7 @@ async fn apply_command(
             smart_mailboxes::reset_smart_mailboxes(app, intent).await
         }
         Command::CreateMailbox(intent) => mailboxes::create_mailbox(app, intent).await,
-        Command::RenameMailbox(intent) => mailboxes::rename_mailbox(app, intent),
+        Command::RenameMailbox(intent) => mailboxes::rename_mailbox(app, intent).await,
         Command::DeleteMailbox(intent) => mailboxes::delete_mailbox(app, intent).await,
         Command::SetMailboxRole(intent) => mailboxes::set_mailbox_role(app, intent).await,
         Command::CreateAutomationRule(intent) => automation::create_rule(app, intent).await,

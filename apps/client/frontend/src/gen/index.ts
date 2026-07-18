@@ -45,6 +45,7 @@ export * from "./DestroyMessageIntent";
 export * from "./DiscardDraftIntent";
 export * from "./DomainEventPayload";
 export * from "./EventMessage";
+export * from "./FieldPatch";
 export * from "./GlassBloom";
 export * from "./GlassTheme";
 export * from "./ImapTransportSettings";

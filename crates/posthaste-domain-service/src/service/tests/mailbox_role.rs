@@ -78,6 +78,135 @@ async fn create_mailbox_creates_then_resyncs() {
 }
 
 #[tokio::test]
+async fn rename_mailbox_calls_the_gateway_then_resyncs() {
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    // `rename_mailbox` runs a blocking gateway update then a resync readback;
+    // an (empty) sync batch lets that readback complete.
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    let account = AccountId::from("primary");
+    let mailbox = MailboxId::from("archive");
+
+    let events = service
+        .rename_mailbox(&account, &mailbox, "Stash", &gateway)
+        .await
+        .expect("rename should succeed");
+
+    assert_eq!(
+        &*gateway.rename_mailbox_calls.lock().expect("calls poisoned"),
+        &[(mailbox.clone(), "Stash".to_string())],
+        "the gateway rename runs exactly once, carrying only the new name",
+    );
+    let renamed = events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_MAILBOX_UPDATED)
+        .expect("a mailbox-updated event marks the rename");
+    assert_eq!(renamed.payload["mailboxId"], "archive");
+    assert_eq!(
+        renamed.mailbox_id.as_ref().map(MailboxId::as_str),
+        Some("archive"),
+    );
+}
+
+#[tokio::test]
+async fn rename_mailbox_preserves_role_and_counts() {
+    let store = Arc::new(TestStore::default());
+    store.rule_page.lock().expect("rule page poisoned").push({
+        let mut summary = sample_message_summary("m-archive", Vec::new());
+        summary.mailbox_ids = vec![MailboxId::from("archive")];
+        summary
+    });
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    // This gateway's `set_mailbox_role` always rejects, so the rename
+    // succeeding also proves the role round-trip is never taken.
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    let account = AccountId::from("primary");
+    let mailbox = MailboxId::from("archive");
+    let before = service
+        .list_mailboxes(&account)
+        .expect("list before")
+        .into_iter()
+        .find(|summary| summary.id == mailbox)
+        .expect("archive listed before the rename");
+
+    service
+        .rename_mailbox(&account, &mailbox, "Stash", &gateway)
+        .await
+        .expect("a rename must not route through set_mailbox_role");
+
+    let after = service
+        .list_mailboxes(&account)
+        .expect("list after")
+        .into_iter()
+        .find(|summary| summary.id == mailbox)
+        .expect("the mailbox keeps its id across the rename");
+    assert_eq!(after.role, before.role, "the role survives the rename");
+    assert_eq!(after.total_emails, before.total_emails);
+    assert_eq!(after.unread_emails, before.unread_emails);
+}
+
+#[tokio::test]
+async fn rename_mailbox_provider_failure_surfaces_as_the_typed_rejection() {
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    gateway
+        .rename_mailbox_results
+        .lock()
+        .expect("results poisoned")
+        .push(Err(GatewayError::Rejected(
+            "mailbox rename is not supported by this transport".to_string(),
+        )));
+    let account = AccountId::from("primary");
+    let mailbox = MailboxId::from("archive");
+
+    let error = service
+        .rename_mailbox(&account, &mailbox, "Stash", &gateway)
+        .await
+        .expect_err("the provider refusal must surface");
+
+    assert!(
+        matches!(
+            error,
+            posthaste_domain_model::ServiceError::Gateway(GatewayError::Rejected(_))
+        ),
+        "the refusal keeps its typed gateway-rejection class, got {error:?}",
+    );
+}
+
+#[tokio::test]
+async fn rename_unknown_mailbox_refuses_before_the_gateway() {
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    let account = AccountId::from("primary");
+    let mailbox = MailboxId::from("ghost");
+
+    let error = service
+        .rename_mailbox(&account, &mailbox, "Stash", &gateway)
+        .await
+        .expect_err("an unknown mailbox is refused locally");
+
+    assert!(
+        matches!(
+            error,
+            posthaste_domain_model::ServiceError::Store(
+                posthaste_domain_model::StoreError::NotFound(_)
+            )
+        ),
+        "the refusal is a local not-found, got {error:?}",
+    );
+    assert!(
+        gateway
+            .rename_mailbox_calls
+            .lock()
+            .expect("calls poisoned")
+            .is_empty(),
+        "the gateway must NOT be called for an unknown mailbox",
+    );
+}
+
+#[tokio::test]
 async fn destroy_empty_mailbox_calls_the_gateway_then_resyncs() {
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store, Arc::new(TestConfig::default()));

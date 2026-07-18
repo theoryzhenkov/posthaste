@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 
 use posthaste_client_backend::{serve, AppPaths, AppState, ServerHandle};
 use posthaste_domain_model::{
-    AccountDriver, AccountId, AccountSettings, OperationId, OperationState,
+    AccountDriver, AccountId, AccountSettings, AutomationBackfillJobStatus, OperationId,
+    OperationState,
 };
 use posthaste_testkit::{StalwartFixture, TestSecretStore};
 
@@ -613,6 +614,45 @@ async fn live_backend_serves_the_new_surfaces_against_stalwart() {
     let (_, _, reports_total) = server.mailbox_by_name(account_id, "Live Reports").await;
     assert_eq!(reports_total, 1, "the count holds through settlement");
 
+    // --- Rename: the provider applies the name-only update synchronously;
+    // the id, the counts, and the message list all hold. --------------------
+    let accepted = server
+        .command(&serde_json::json!({
+            "id": "cmd-live-rename-1",
+            "command": { "renameMailbox": {
+                "accountId": account_id,
+                "mailboxId": reports_id,
+                "name": "Live Reports Renamed",
+            } }
+        }))
+        .await;
+    assert!(
+        accepted["generation"].as_u64().expect("generation") > seen_generation,
+        "the rename must advance the generation"
+    );
+    let (renamed_id, _, renamed_total) = server
+        .mailbox_by_name(account_id, "Live Reports Renamed")
+        .await;
+    assert_eq!(renamed_id, reports_id, "a rename keeps the mailbox id");
+    assert_eq!(renamed_total, 1, "the count survives the rename");
+    let counts = server
+        .query(serde_json::json!({ "mailboxCounts": { "accountId": account_id } }))
+        .await;
+    assert!(
+        counts["data"]["rows"]
+            .as_array()
+            .expect("mailbox rows")
+            .iter()
+            .all(|row| row["mailbox"]["name"].as_str() != Some("Live Reports")),
+        "the old name must leave the mailbox list"
+    );
+    let (_, renamed_rows) = server.mail_list(account_id, &reports_id).await;
+    assert_eq!(
+        row_ids(&renamed_rows),
+        vec![moved.as_str()],
+        "the renamed mailbox's messages stay queryable"
+    );
+
     // --- Snooze: a snooze-role mailbox hides the message from the inbox;
     // unsnooze restores it. -------------------------------------------------
     server
@@ -838,6 +878,138 @@ async fn live_backend_serves_the_new_surfaces_against_stalwart() {
         flagged["isFlagged"], true,
         "the retried keyword change must land"
     );
+
+    server.shutdown().await;
+    drop(stalwart);
+}
+
+/// A backfill-enabled automation rule applies to mail that was already
+/// synced: the rule write creates a durable job, the supervisor's backfill
+/// ticks drain it in bounded batches against the real provider, every
+/// applied action echoes on /events (advancing the generation the
+/// level-triggered way), and the job records completion. The rule triggers
+/// only manually, so every tag the account gains is the backfill's work —
+/// never the arrival path's.
+#[tokio::test(flavor = "multi_thread")]
+async fn live_backend_backfills_an_automation_rule_over_seeded_mail() {
+    if !integration_enabled() {
+        eprintln!("skipping Stalwart integration; set POSTHASTE_STALWART_INTEGRATION=1");
+        return;
+    }
+
+    let stalwart = tokio::task::spawn_blocking(StalwartFixture::start)
+        .await
+        .expect("fixture task");
+    let server = LiveServer::spawn().await;
+    let account = create_jmap_account(&server, &stalwart).await;
+    let account_id = account.id.as_str();
+
+    let mut stream = SseReader::connect(&server).await;
+    let handshake = stream.next_data(SSE_FRAME_DEADLINE).await;
+    let mut seen_generation = handshake["generation"].as_u64().expect("generation");
+
+    // Every seeded message matches: a from address always carries an '@'.
+    // The rule's own preview pins the expected count before the rule exists.
+    let condition = serde_json::json!({ "root": {
+        "operator": "all",
+        "negated": false,
+        "nodes": [{
+            "type": "condition",
+            "field": "fromEmail",
+            "operator": "contains",
+            "negated": false,
+            "value": "@",
+        }],
+    } });
+    let preview = server
+        .query(serde_json::json!({ "automationRulePreview": {
+            "condition": condition,
+            "limit": 1,
+        } }))
+        .await;
+    let expected = preview["data"]["total"].as_i64().expect("preview total");
+    assert!(
+        expected > 0,
+        "the seeded account must hold matching messages before the rule exists"
+    );
+
+    server
+        .command(&serde_json::json!({
+            "id": "cmd-live-backfill-rule-1",
+            "command": { "createAutomationRule": { "rule": {
+                "id": "rule-live-backfill",
+                "name": "Tag the archive",
+                "enabled": true,
+                "triggers": ["manual"],
+                "condition": condition,
+                "actions": [{ "kind": "applyTag", "tag": "backfilled-live" }],
+                "backfill": true,
+            } } }
+        }))
+        .await;
+
+    // Level-triggered convergence: refetch the tag counts only when the
+    // stream reports a generation past the last refetch — the backfill's
+    // published echo events are what advance it.
+    let deadline = Instant::now() + CONVERGENCE_DEADLINE;
+    let mut tagged_total = 0;
+    let mut update_events = 0;
+    while tagged_total < expected {
+        assert!(
+            Instant::now() < deadline,
+            "the backfill never tagged all {expected} messages (at {tagged_total} when the deadline passed)"
+        );
+        let frame = stream.next_data(SSE_FRAME_DEADLINE).await;
+        let event = &frame["event"];
+        if event["kind"].as_str() == Some("message.updated")
+            && event["accountId"].as_str() == Some(account_id)
+        {
+            update_events += 1;
+        }
+        let generation = frame["generation"].as_u64().expect("generation");
+        if generation <= seen_generation {
+            continue;
+        }
+        seen_generation = generation;
+        let tags = server
+            .query(serde_json::json!({ "tags": { "accountId": account_id } }))
+            .await;
+        tagged_total = tags["data"]["rows"]
+            .as_array()
+            .expect("tag rows")
+            .iter()
+            .find(|row| row["name"] == "backfilled-live")
+            .and_then(|row| row["totalMessages"].as_i64())
+            .unwrap_or(0);
+    }
+    assert_eq!(tagged_total, expected, "every matching message is tagged");
+    assert!(
+        update_events > 0,
+        "applied backfill actions must surface as message.updated events"
+    );
+
+    // The durable job records completion. The status write of a trailing
+    // empty batch emits no event, so this wait polls the job directly
+    // instead of the stream.
+    let deadline = Instant::now() + CONVERGENCE_DEADLINE;
+    loop {
+        let job = server
+            .state
+            .service
+            .automation_backfill_job_for_current_rules(&account.id)
+            .expect("job readable")
+            .expect("the rule write created a durable job");
+        if job.status == AutomationBackfillJobStatus::Completed {
+            assert!(job.last_error.is_none(), "a clean drain records no error");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the backfill job never recorded completion (status {:?})",
+            job.status
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 
     server.shutdown().await;
     drop(stalwart);

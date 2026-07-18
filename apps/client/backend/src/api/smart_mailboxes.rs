@@ -2,8 +2,8 @@
 //! create/update/delete/reset commands over the config-backed saved queries.
 
 use posthaste_client_models::{
-    CreateSmartMailboxIntent, DeleteSmartMailboxIntent, ResetSmartMailboxesIntent, SmartMailboxRow,
-    SmartMailboxesQuery, SmartMailboxesResult, UpdateSmartMailboxIntent,
+    CreateSmartMailboxIntent, DeleteSmartMailboxIntent, FieldPatch, ResetSmartMailboxesIntent,
+    SmartMailboxRow, SmartMailboxesQuery, SmartMailboxesResult, UpdateSmartMailboxIntent,
 };
 use posthaste_domain_model::{
     validate_query, AccountId, DomainEvent, Id, MailQueryRule, MailboxRole, SmartMailbox,
@@ -95,10 +95,11 @@ pub(crate) async fn update_smart_mailbox(
         }
     }
     // `Some(None)` clears the role, `None` leaves it untouched.
-    let role_update = intent
-        .role
-        .map(|role| normalize_view_role(Some(role)))
-        .transpose()?;
+    let role_update = match intent.role {
+        FieldPatch::Keep => None,
+        FieldPatch::Set { value } => Some(normalize_view_role(Some(value))?),
+        FieldPatch::Clear => Some(None),
+    };
     if let Some(rule) = &intent.rule {
         validate_rule(rule)?;
     }

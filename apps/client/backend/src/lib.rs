@@ -14,8 +14,10 @@ use posthaste_observability::{events, ph_info, ph_warn};
 use posthaste_store::{DatabaseStore, RepairReport};
 
 mod api;
+mod backfill;
 mod event_bus;
 mod gateway;
+mod oauth_refresh;
 mod paths;
 mod push;
 mod secret;

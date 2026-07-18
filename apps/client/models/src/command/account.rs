@@ -7,6 +7,8 @@ use posthaste_domain_model as domain;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::patch::FieldPatch;
+
 /// Minimal account creation for [`crate::Command::CreateAccount`].
 #[derive(Clone, Debug, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +32,9 @@ pub struct CreateAccountIntent {
 }
 
 /// Identity/appearance patch for [`crate::Command::UpdateAccount`]; absent
-/// fields are preserved. Enable/disable is the `enabled` field.
+/// fields are preserved. Enable/disable is the `enabled` field. The
+/// clearable fields (`fullName`, `signature`) are [`FieldPatch`]es, so a
+/// caller can also empty them explicitly.
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAccountIntent {
@@ -40,11 +44,11 @@ pub struct UpdateAccountIntent {
     #[ts(optional = nullable)]
     pub name: Option<String>,
     #[serde(default)]
-    #[ts(optional = nullable)]
-    pub full_name: Option<String>,
+    #[ts(optional, as = "Option<FieldPatch<String>>")]
+    pub full_name: FieldPatch<String>,
     #[serde(default)]
-    #[ts(optional = nullable)]
-    pub signature: Option<String>,
+    #[ts(optional, as = "Option<FieldPatch<String>>")]
+    pub signature: FieldPatch<String>,
     #[serde(default)]
     #[ts(optional = nullable)]
     pub email_patterns: Option<Vec<String>>,
@@ -58,8 +62,10 @@ pub struct UpdateAccountIntent {
 }
 
 /// Transport-endpoint patch for [`crate::Command::UpdateAccountTransport`];
-/// absent fields are preserved. Deliberately has no field a credential could
-/// ride in: the secret travels only in `setAccountSecret`.
+/// absent fields are preserved. The clearable fields (`baseUrl`,
+/// `username`) are [`FieldPatch`]es, so a caller can also empty them
+/// explicitly. Deliberately has no field a credential could ride in: the
+/// secret travels only in `setAccountSecret`.
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAccountTransportIntent {
@@ -72,11 +78,11 @@ pub struct UpdateAccountTransportIntent {
     #[ts(optional = nullable, as = "Option<crate::mirror::ProviderAuthKind>")]
     pub auth: Option<domain::ProviderAuthKind>,
     #[serde(default)]
-    #[ts(optional = nullable)]
-    pub base_url: Option<String>,
+    #[ts(optional, as = "Option<FieldPatch<String>>")]
+    pub base_url: FieldPatch<String>,
     #[serde(default)]
-    #[ts(optional = nullable)]
-    pub username: Option<String>,
+    #[ts(optional, as = "Option<FieldPatch<String>>")]
+    pub username: FieldPatch<String>,
     #[serde(default)]
     #[ts(optional = nullable, as = "Option<crate::mirror::ImapTransportSettings>")]
     pub imap: Option<domain::ImapTransportSettings>,
