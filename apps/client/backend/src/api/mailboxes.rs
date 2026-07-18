@@ -1,8 +1,7 @@
-//! The mailbox family: counts, provider-mailbox create/delete, and role
-//! assignment. Mailbox mutations are synchronous, not optimistic: a blocking
-//! provider round-trip applies the change and a resync reads it back, so the
-//! reply's generation already reflects the provider's answer. Rename has no
-//! provider capability yet (wire contract laid; handler pending).
+//! The mailbox family: counts, provider-mailbox create/rename/delete, and
+//! role assignment. Mailbox mutations are synchronous, not optimistic: a
+//! blocking provider round-trip applies the change and a resync reads it
+//! back, so the reply's generation already reflects the provider's answer.
 
 use posthaste_client_models::{
     CreateMailboxIntent, DeleteMailboxIntent, MailboxCountsQuery, MailboxCountsResult,
@@ -11,7 +10,7 @@ use posthaste_client_models::{
 use posthaste_domain_model::{AccountId, DomainEvent, MailboxRole};
 use posthaste_domain_service::SharedGateway;
 
-use super::{scoped_accounts, unimplemented_surface, ApiFailure};
+use super::{scoped_accounts, ApiFailure};
 use crate::AppState;
 
 pub(crate) fn evaluate_mailbox_counts(
@@ -67,11 +66,27 @@ pub(crate) async fn create_mailbox(
     Ok(publish_events(app, events))
 }
 
-pub(crate) fn rename_mailbox(
-    _app: &AppState,
-    _intent: RenameMailboxIntent,
+pub(crate) async fn rename_mailbox(
+    app: &AppState,
+    intent: RenameMailboxIntent,
 ) -> Result<u64, ApiFailure> {
-    Err(unimplemented_surface("the renameMailbox command"))
+    let name = intent.name.trim();
+    if name.is_empty() {
+        return Err(ApiFailure::malformed("mailbox name must not be empty"));
+    }
+    let gateway = connected_gateway(app, &intent.account_id).await?;
+    // IMAP accounts refuse the rename with a typed rejection (their ids
+    // encode the mailbox name); JMAP applies a name-only update.
+    let events = app
+        .service
+        .rename_mailbox(
+            &intent.account_id,
+            &intent.mailbox_id,
+            name,
+            gateway.as_ref(),
+        )
+        .await?;
+    Ok(publish_events(app, events))
 }
 
 pub(crate) async fn delete_mailbox(

@@ -68,6 +68,13 @@ pub(super) struct MutationGateway {
     /// lets the M2 gate tests assert the gateway is NOT reached when the service
     /// refuses a non-empty destroy, and that the confirmed flag threads through.
     pub(super) destroy_mailbox_calls: Mutex<Vec<(MailboxId, bool)>>,
+    /// Every `rename_mailbox` call's `(mailbox_id, name)`, in order — lets the
+    /// rename tests assert the call carries only the new name and that an
+    /// unknown-mailbox refusal never reaches the gateway.
+    pub(super) rename_mailbox_calls: Mutex<Vec<(MailboxId, String)>>,
+    /// Results returned by `rename_mailbox`, popped front-first; empty falls
+    /// back to a plain success.
+    pub(super) rename_mailbox_results: Mutex<Vec<Result<MutationOutcome, GatewayError>>>,
 }
 
 impl MutationGateway {
@@ -106,6 +113,8 @@ impl MutationGateway {
             readbacks: Mutex::new(Vec::new()),
             reject_next: Mutex::new(None),
             destroy_mailbox_calls: Mutex::new(Vec::new()),
+            rename_mailbox_calls: Mutex::new(Vec::new()),
+            rename_mailbox_results: Mutex::new(Vec::new()),
         }
     }
 
@@ -294,6 +303,31 @@ impl MailGateway for MutationGateway {
         // Return a deterministic id derived from the name so the service's
         // create-then-resync path can be asserted end to end.
         Ok(MailboxId::from(format!("mb-{name}").as_str()))
+    }
+
+    async fn rename_mailbox(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        _expected_state: Option<&str>,
+        name: &str,
+    ) -> Result<MutationOutcome, GatewayError> {
+        self.rename_mailbox_calls
+            .lock()
+            .expect("rename mailbox calls poisoned")
+            .push((mailbox_id.clone(), name.to_string()));
+        let mut results = self
+            .rename_mailbox_results
+            .lock()
+            .expect("rename mailbox results poisoned");
+        if results.is_empty() {
+            Ok(MutationOutcome {
+                cursor: None,
+                message: None,
+            })
+        } else {
+            results.remove(0)
+        }
     }
 
     async fn destroy_mailbox(

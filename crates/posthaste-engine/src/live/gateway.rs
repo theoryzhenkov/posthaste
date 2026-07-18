@@ -145,6 +145,19 @@ impl MailGateway for LiveJmapGateway {
         crate::live_mutation::create_mailbox(self, name).await
     }
 
+    /// Rename a mailbox via a `Mailbox/set` name update.
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    async fn rename_mailbox(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        expected_state: Option<&str>,
+        name: &str,
+    ) -> Result<MutationOutcome, GatewayError> {
+        crate::live_mutation::rename_mailbox(self, mailbox_id, expected_state, name).await
+    }
+
     /// Destroy a mailbox via `Mailbox/set` destroy.
     ///
     /// @spec docs/L1-jmap#methods-used

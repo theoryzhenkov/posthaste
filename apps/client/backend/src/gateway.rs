@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use posthaste_domain_model::{
     AccountDriver, AccountSettings, GatewayError, RemoteIdleScope, RemoteObservationPolicy,
-    SecretRef, ServiceError,
+    ServiceError,
 };
 use posthaste_domain_service::{
     MailStore, PushEventStream, ResilientPushConfig, SecretResolver, SecretStore, SharedGateway,
@@ -17,6 +17,7 @@ use posthaste_imap::{
 };
 use posthaste_observability::{events, ph_info, ph_warn};
 
+use crate::oauth_refresh::RefreshingSecretResolver;
 use crate::push::resilient_push_stream;
 
 /// A live gateway connection paired with its optional push event stream.
@@ -75,30 +76,10 @@ impl ConnectionState {
 
 /// Secret resolver for provider accounts: reads the referenced secret from
 /// the secret store on every resolve, so a credential rotated in the
-/// keychain is picked up at the next (re)connect. OAuth access-token
-/// refresh is not performed here; the stored secret is returned as-is.
-struct StoreSecretResolver {
-    secret_store: Arc<dyn SecretStore>,
-    secret_ref: SecretRef,
-}
-
-impl std::fmt::Debug for StoreSecretResolver {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StoreSecretResolver")
-            .field("key", &self.secret_ref.key)
-            .finish_non_exhaustive()
-    }
-}
-
-#[async_trait::async_trait]
-impl SecretResolver for StoreSecretResolver {
-    async fn resolve_secret(&self) -> Result<String, GatewayError> {
-        self.secret_store
-            .resolve(&self.secret_ref)
-            .map_err(|error| GatewayError::Unavailable(error.to_string()))
-    }
-}
-
+/// keychain is picked up at the next (re)connect. For OAuth accounts the
+/// resolver returns the token set's access token, refreshing an expired one
+/// through the provider's token endpoint first (see
+/// [`RefreshingSecretResolver`]).
 fn secret_resolver_for(
     account: &AccountSettings,
     secret_store: &Arc<dyn SecretStore>,
@@ -108,10 +89,11 @@ fn secret_resolver_for(
             "missing account secret reference".to_string(),
         ))
     })?;
-    Ok(Arc::new(StoreSecretResolver {
-        secret_store: Arc::clone(secret_store),
+    Ok(Arc::new(RefreshingSecretResolver::for_account(
+        account.transport.auth.clone(),
         secret_ref,
-    }))
+        Arc::clone(secret_store),
+    )))
 }
 
 /// Build a gateway connection for an account, resolving its secret and

@@ -3,6 +3,7 @@ import type {
   AccountSecretChange,
   AccountSettingsResult,
   CreateAccountIntent,
+  FieldPatch,
   ProviderAuthKind,
   ProviderHint,
   TransportSecurity,
@@ -86,6 +87,13 @@ export function buildSecretChange(form: AccountFormState): AccountSecretChange {
   return { kind: 'keep' }
 }
 
+/** The patch for a clearable text field: an emptied input clears the stored
+ * value; anything else sets the trimmed text. */
+export function textFieldPatch(value: string): FieldPatch<string> {
+  const trimmed = value.trim()
+  return trimmed === '' ? { kind: 'clear' } : { kind: 'set', value: trimmed }
+}
+
 /** Parse newline/comma-separated addresses and catch-all patterns. */
 export function parseEmailPatterns(value: string): string[] {
   return value
@@ -123,8 +131,8 @@ export function buildTransportIntent(
       accountId,
       provider: 'generic',
       auth: 'password',
-      baseUrl: form.baseUrl,
-      username: form.username,
+      baseUrl: textFieldPatch(form.baseUrl),
+      username: textFieldPatch(form.username),
     }
   }
   const email = primaryEmailFor(form)
@@ -133,8 +141,9 @@ export function buildTransportIntent(
     accountId,
     provider: defaults?.provider ?? 'generic',
     auth: defaults?.auth ?? 'password',
-    baseUrl: '',
-    username: form.username,
+    // The base URL belongs to the JMAP driver; an IMAP/SMTP save clears it.
+    baseUrl: { kind: 'clear' },
+    username: textFieldPatch(form.username),
     imap: {
       host: form.imapHost.trim(),
       port: parsePort(form.imapPort, 993),
@@ -291,8 +300,8 @@ export function buildIdentityPatch(
   return {
     accountId,
     name: form.name.trim(),
-    fullName: form.fullName.trim() || null,
-    signature: form.signature.trim() || null,
+    fullName: textFieldPatch(form.fullName),
+    signature: textFieldPatch(form.signature),
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
     appearance: buildAccountAppearanceInput(form),
   }

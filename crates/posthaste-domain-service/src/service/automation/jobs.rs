@@ -113,9 +113,17 @@ impl MailService {
             });
         };
 
-        let job = self
-            .automation_backfills
-            .ensure_automation_backfill_job(account_id, &rule_fingerprint)?;
+        // Job bookkeeping is synchronous store work; run it on the blocking
+        // pool so the caller's async loop is never stalled by SQLite.
+        let job = {
+            let automation_backfills = self.automation_backfills.clone();
+            let account_id = account_id.clone();
+            let rule_fingerprint = rule_fingerprint.clone();
+            offload(move || {
+                automation_backfills.ensure_automation_backfill_job(&account_id, &rule_fingerprint)
+            })
+            .await?
+        };
         if job.status != AutomationBackfillJobStatus::Pending {
             return Ok(AutomationBackfillBatchOutcome {
                 ran: false,
@@ -132,8 +140,14 @@ impl MailService {
         {
             Ok((events, has_more)) => {
                 if !has_more {
-                    self.automation_backfills
-                        .complete_automation_backfill_job(account_id, &rule_fingerprint)?;
+                    let automation_backfills = self.automation_backfills.clone();
+                    let account_id = account_id.clone();
+                    let rule_fingerprint = rule_fingerprint.clone();
+                    offload(move || {
+                        automation_backfills
+                            .complete_automation_backfill_job(&account_id, &rule_fingerprint)
+                    })
+                    .await?;
                 }
                 Ok(AutomationBackfillBatchOutcome {
                     ran: true,
@@ -142,12 +156,18 @@ impl MailService {
                 })
             }
             Err(error) => {
-                self.automation_backfills
-                    .record_automation_backfill_failure(
-                        account_id,
+                let automation_backfills = self.automation_backfills.clone();
+                let account_id = account_id.clone();
+                let rule_fingerprint = rule_fingerprint.clone();
+                let message = error.to_string();
+                offload(move || {
+                    automation_backfills.record_automation_backfill_failure(
+                        &account_id,
                         &rule_fingerprint,
-                        &error.to_string(),
-                    )?;
+                        &message,
+                    )
+                })
+                .await?;
                 Err(error)
             }
         }

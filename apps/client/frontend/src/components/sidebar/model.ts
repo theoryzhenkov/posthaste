@@ -16,6 +16,15 @@ export function isMailboxDeletable(mailbox: Mailbox): boolean {
   return mailbox.role == null
 }
 
+/**
+ * Whether a mailbox may be renamed from the sidebar. Same protection rule as
+ * delete: role mailboxes are provider-structural and keep their names; only a
+ * plain user mailbox (`role === null`) offers the rename affordance.
+ */
+export function isMailboxRenamable(mailbox: Mailbox): boolean {
+  return mailbox.role == null
+}
+
 export function fallbackAccountAppearance(
   sourceId: string,
   sourceName: string,

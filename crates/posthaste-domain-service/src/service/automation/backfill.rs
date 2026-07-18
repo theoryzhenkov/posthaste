@@ -55,13 +55,22 @@ impl MailService {
                     break;
                 }
                 let query_rule = automation_query_rule(account_id, rule, action, &[]);
-                let page = self.smart_mailboxes.query_message_page_by_rule(
-                    &query_rule,
-                    remaining,
-                    None,
-                    MessageSortField::Date,
-                    SortDirection::Asc,
-                )?;
+                // The candidate scan is a synchronous store read; run it on
+                // the blocking pool like the sync path's store writes.
+                let page = {
+                    let smart_mailboxes = self.smart_mailboxes.clone();
+                    let limit = remaining;
+                    offload(move || {
+                        smart_mailboxes.query_message_page_by_rule(
+                            &query_rule,
+                            limit,
+                            None,
+                            MessageSortField::Date,
+                            SortDirection::Asc,
+                        )
+                    })
+                    .await?
+                };
                 if page.items.len() == remaining {
                     has_more = true;
                 }

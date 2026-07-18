@@ -743,3 +743,63 @@ fn secret_material_has_exactly_one_wire_shape() {
         })
     );
 }
+
+#[test]
+fn field_patches_serialize_keep_set_and_clear() {
+    use posthaste_client_models as models;
+    use posthaste_client_models::FieldPatch;
+
+    // The three patch states have the documented tagged shapes.
+    let intent = models::UpdateAccountIntent {
+        account_id: "a1".into(),
+        name: None,
+        full_name: FieldPatch::Set {
+            value: "Ada Lovelace".into(),
+        },
+        signature: FieldPatch::Clear,
+        email_patterns: None,
+        enabled: None,
+        appearance: None,
+    };
+    let json = serde_json::to_value(&intent).unwrap();
+    assert_eq!(
+        json["fullName"],
+        json!({ "kind": "set", "value": "Ada Lovelace" })
+    );
+    assert_eq!(json["signature"], json!({ "kind": "clear" }));
+
+    // An absent field decodes as keep — a TS caller may omit it entirely.
+    let decoded: models::UpdateAccountIntent =
+        serde_json::from_value(json!({ "accountId": "a1" })).unwrap();
+    assert_eq!(decoded.full_name, FieldPatch::Keep);
+    assert_eq!(decoded.signature, FieldPatch::Keep);
+
+    let decoded: models::UpdateAccountTransportIntent = serde_json::from_value(json!({
+        "accountId": "a1",
+        "baseUrl": { "kind": "clear" },
+        "username": { "kind": "set", "value": "probe@example.com" },
+    }))
+    .unwrap();
+    assert_eq!(decoded.base_url, FieldPatch::Clear);
+    assert_eq!(
+        decoded.username,
+        FieldPatch::Set {
+            value: "probe@example.com".into()
+        }
+    );
+    assert_eq!(decoded.provider, None);
+
+    // A bare null is not a patch: clearing must be said explicitly.
+    assert!(serde_json::from_value::<models::UpdateAccountIntent>(
+        json!({ "accountId": "a1", "fullName": null })
+    )
+    .is_err());
+
+    let decoded: models::UpdateSmartMailboxIntent = serde_json::from_value(json!({
+        "smartMailboxId": "sm1",
+        "role": { "kind": "clear" },
+    }))
+    .unwrap();
+    assert_eq!(decoded.role, FieldPatch::Clear);
+    assert_eq!(decoded.name, None);
+}

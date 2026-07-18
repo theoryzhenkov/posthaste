@@ -482,6 +482,31 @@ impl MailGateway for MockJmapGateway {
         Ok(mutation_outcome(&state, SyncObject::Mailbox))
     }
 
+    /// Rename a mock mailbox in place — id, role, and contents untouched. The
+    /// new name surfaces on the next `sync`, mirroring the readback the
+    /// service performs after a rename.
+    async fn rename_mailbox(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        expected_state: Option<&str>,
+        name: &str,
+    ) -> Result<MutationOutcome, GatewayError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
+        ensure_expected_state(&state, expected_state, SyncObject::Mailbox)?;
+        let mailbox = state
+            .mailboxes
+            .iter_mut()
+            .find(|mailbox| &mailbox.id == mailbox_id)
+            .ok_or_else(|| GatewayError::Rejected("unknown mailbox".to_string()))?;
+        mailbox.name = name.to_string();
+        bump_revision(&mut state);
+        Ok(mutation_outcome(&state, SyncObject::Mailbox))
+    }
+
     /// Create a mock mailbox and return its id. The new record surfaces on the
     /// next `sync`, mirroring the readback the service performs after a create.
     async fn create_mailbox(

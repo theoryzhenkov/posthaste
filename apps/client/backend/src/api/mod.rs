@@ -25,7 +25,7 @@ mod mail_list;
 mod mail_mutations;
 mod mailboxes;
 mod message_detail;
-mod oauth;
+pub(crate) mod oauth;
 mod operations;
 mod query;
 mod rev_log;
@@ -118,14 +118,6 @@ pub fn build_router(app: AppState, token: String) -> Router {
         .merge(routes.clone())
         .nest("/api", routes)
         .with_state(state)
-}
-
-/// The stub failure for a surface whose wire contract is laid but whose
-/// handler is not implemented yet.
-fn unimplemented_surface(surface: &str) -> ApiFailure {
-    ApiFailure::unavailable(format!(
-        "{surface} is not implemented yet: the wire contract is final, the handler is pending"
-    ))
 }
 
 fn decode_json<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, ApiFailure> {
