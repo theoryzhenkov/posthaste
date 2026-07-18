@@ -1,0 +1,8 @@
+{
+  "threshold": 0.71,
+  "pattern": "src/**/*.{ts,tsx}",
+  "ignore": ["**/src/gen/**", "**/node_modules/**", "**/dist/**"],
+  "reporters": ["console"],
+  "silent": true,
+  "gitignore": true
+}
