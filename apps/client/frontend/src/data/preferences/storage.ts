@@ -1,9 +1,9 @@
 import {
   designStorageKeys,
-  isThemeMode,
-  isUiDensity,
   normalizeAccentHue,
   normalizeGlassThemeParameters,
+  parseThemeMode,
+  parseUiDensity,
 } from '@/lib/design'
 import {
   defaultThemeColors,
@@ -42,7 +42,7 @@ function normalizeThemeColors(value: unknown): ThemeColors {
 
 function storedThemeMode(): DesignThemePreferences['mode'] {
   const value = window.localStorage.getItem(designStorageKeys.themeMode)
-  return value && isThemeMode(value) ? value : defaultThemePreferences().mode
+  return (value && parseThemeMode(value)) || defaultThemePreferences().mode
 }
 
 function storedTheme(): string {
@@ -52,7 +52,7 @@ function storedTheme(): string {
 
 function storedDensity(): DesignThemePreferences['density'] {
   const value = window.localStorage.getItem(designStorageKeys.uiDensity)
-  return value && isUiDensity(value) ? value : defaultThemePreferences().density
+  return (value && parseUiDensity(value)) || defaultThemePreferences().density
 }
 
 function storedColors(): Pick<DesignThemePreferences, 'light' | 'dark'> {

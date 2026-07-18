@@ -1,5 +1,5 @@
 import type { MailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
-import { renderMailboxRoleIcon, renderSmartMailboxIcon } from '@/domain/mailboxRoles'
+import { renderMailboxRoleIcon, renderSmartMailboxIcon } from '@/domain/role'
 
 import { matchesQuery } from '../match'
 import type { CommandPaletteEntry, SearchProvider } from '../types'

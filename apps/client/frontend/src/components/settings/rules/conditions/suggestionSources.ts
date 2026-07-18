@@ -14,7 +14,7 @@ import { useMemo } from 'react'
 import {
   buildAddressBookSuggestionOptions,
   type AddressSuggestionOption,
-} from '@/domain/addressSuggestions'
+} from '@/domain/address'
 import { useSenderAddresses, useTags } from '@/data'
 
 /**

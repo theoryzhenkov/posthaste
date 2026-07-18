@@ -732,3 +732,122 @@ pub struct RevCursor {
     pub cursor_step_id: Option<String>,
     pub redo_tail: Vec<String>,
 }
+
+// ------------------------------------------------------ event-payload twins
+
+/// Twin of [`posthaste_domain_model::MessageChangeFlags`].
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageChangeFlags {
+    pub keywords: bool,
+    pub mailboxes: bool,
+    /// The message gained membership in at least one mailbox it was not in
+    /// before; with [`MessageUpdatedPayload::created`] it distinguishes a NEW
+    /// arrival from a move of an existing message.
+    pub arrived: bool,
+}
+
+/// Twin of [`posthaste_domain_model::MessageUpdatedPayload`] — the payload of
+/// the sync-projection `message.updated` diff event, the only
+/// `message.updated` shape that states `created`. Other emitters of the same
+/// topic (command echoes, settle reverts, deletions) carry narrower shapes;
+/// consumers parse for `created` before trusting this contract.
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageUpdatedPayload {
+    pub message_id: MessageId,
+    pub source_thread_id: ThreadId,
+    pub conversation_id: ConversationId,
+    /// The message did not exist in the store before this apply.
+    pub created: bool,
+    pub changes: MessageChangeFlags,
+    pub keywords: Vec<String>,
+    pub mailbox_ids: Vec<MailboxId>,
+    /// The mailboxes the message just gained membership in.
+    pub arrived_mailbox_ids: Vec<MailboxId>,
+    /// The full list-row projection, when the apply produced one.
+    #[serde(default)]
+    #[ts(optional)]
+    pub projection: Option<MessageSummary>,
+}
+
+/// Twin of [`posthaste_domain_model::OperationOutcome`].
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationOutcome {
+    Applied,
+    Failed,
+}
+
+/// Twin of [`posthaste_domain_model::SendFiling`].
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SendFiling {
+    Filed,
+    PendingFiling,
+}
+
+/// Twin of [`posthaste_domain_model::OperationSettlement`] — the payload of
+/// the `operation.settled` event.
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OperationSettlement {
+    pub id: OperationId,
+    pub outcome: OperationOutcome,
+    /// Set when a temp entity id was reconciled to a provider id on this flush.
+    pub assigned_entity_id: Option<String>,
+    pub error: Option<String>,
+    /// For an APPLIED send: how the Sent copy was filed. Absent on every
+    /// non-send settlement.
+    #[serde(default)]
+    #[ts(optional)]
+    pub send_filing: Option<SendFiling>,
+}
+
+/// Twin of [`posthaste_domain_model::SyncTrigger`].
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncTrigger {
+    Startup,
+    Poll,
+    Push,
+    Manual,
+}
+
+/// Twin of [`posthaste_domain_model::SyncResourceRef`].
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SyncResourceRef {
+    /// Resource family, e.g. `sync`, `mailbox`, `message`.
+    pub kind: String,
+    /// What happened to it, e.g. `completed`, `refreshed`.
+    pub operation: String,
+    pub account_id: AccountId,
+    #[serde(default)]
+    #[ts(optional)]
+    pub mode: Option<SyncMode>,
+}
+
+/// Twin of [`posthaste_domain_model::SyncCompletedPayload`] — the payload of
+/// the `sync.completed` event.
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SyncCompletedPayload {
+    #[ts(type = "number")]
+    pub mailbox_count: u64,
+    #[ts(type = "number")]
+    pub message_count: u64,
+    #[ts(type = "number")]
+    pub deleted_imap_location_count: u64,
+    #[ts(type = "number")]
+    pub deleted_message_count: u64,
+    /// Automation events recorded while applying this cycle's batches.
+    #[ts(type = "number")]
+    pub automation_event_count: u64,
+    pub trigger: SyncTrigger,
+    pub mode: SyncMode,
+    pub resources: Vec<SyncResourceRef>,
+    /// Error codes from post-commit work that failed after the sync batch
+    /// itself committed.
+    pub post_commit_errors: Vec<String>,
+}

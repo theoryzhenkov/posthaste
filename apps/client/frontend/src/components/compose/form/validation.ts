@@ -1,10 +1,7 @@
 import type { SendMessageInput } from '@/data/transport/api'
+import { parseEmailAddress } from '@/domain/address'
 
-import {
-  isConcreteEmailPattern,
-  parseRecipients,
-  type ComposeForm,
-} from './model'
+import { parseRecipients, type ComposeForm } from './model'
 
 export function validateComposeSubmission(
   formData: ComposeForm,
@@ -22,7 +19,7 @@ export function validateComposeSubmission(
   if (input.to.length === 0) {
     return 'Add at least one recipient.'
   }
-  if (!isConcreteEmailPattern(input.from.email)) {
+  if (!parseEmailAddress(input.from.email)) {
     return 'From address must be a single email address.'
   }
   if (input.to.some((recipient) => recipient.email.trim().length === 0)) {

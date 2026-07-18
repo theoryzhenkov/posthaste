@@ -1,3 +1,60 @@
+/**
+ * Email address/pattern parsing (the R3 boundary) plus the shared
+ * address-autocomplete engine built on it.
+ */
+
+/** A concrete, deliverable address (`local@domain`, trimmed, no wildcard). */
+export type EmailAddress = string & { readonly __brand: 'EmailAddress' }
+
+/** A sending-identity pattern from account settings: a concrete
+ *  {@link EmailAddress} or a `*@domain` catch-all (trimmed). */
+export type EmailPattern = string & { readonly __brand: 'EmailPattern' }
+
+const CONCRETE_ADDRESS = /^[^@\s]+@[^@\s]+$/
+const WILDCARD_PATTERN = /^\*@[^@\s*]+$/
+
+/** Parse raw text into a concrete address, or `null` (empty, wildcard, or
+ *  malformed input). The ONE home of the concrete-address rule. */
+export function parseEmailAddress(raw: string): EmailAddress | null {
+  const trimmed = raw.trim()
+  return trimmed.length > 0 &&
+    !trimmed.includes('*') &&
+    CONCRETE_ADDRESS.test(trimmed)
+    ? (trimmed as EmailAddress)
+    : null
+}
+
+/** Parse raw text into a sending pattern: a concrete address or a `*@domain`
+ *  catch-all. Anything else (empty, other wildcard shapes) is `null`. */
+export function parseEmailPattern(raw: string): EmailPattern | null {
+  const trimmed = raw.trim()
+  if (parseEmailAddress(trimmed) || WILDCARD_PATTERN.test(trimmed)) {
+    return trimmed as EmailPattern
+  }
+  return null
+}
+
+/** The concrete address a pattern names, or `null` for a catch-all. */
+export function patternEmailAddress(
+  pattern: EmailPattern,
+): EmailAddress | null {
+  return parseEmailAddress(pattern)
+}
+
+/** Does an address fall inside a pattern? Concrete patterns compare
+ *  case-insensitively; catch-alls match on the domain suffix. */
+export function patternMatchesEmail(
+  pattern: EmailPattern,
+  email: string,
+): boolean {
+  const normalizedEmail = email.trim().toLowerCase()
+  const concrete = patternEmailAddress(pattern)
+  if (concrete) {
+    return concrete.toLowerCase() === normalizedEmail
+  }
+  return normalizedEmail.endsWith(pattern.toLowerCase().slice(1))
+}
+
 export interface AddressSuggestionOption {
   name: string | null
   email: string
@@ -9,15 +66,6 @@ export interface AddressSuggestionOption {
 export interface AddressBookEntry {
   name: string | null
   email: string
-}
-
-export function isConcreteEmailAddress(pattern: string): boolean {
-  const trimmed = pattern.trim()
-  return (
-    trimmed.length > 0 &&
-    !trimmed.includes('*') &&
-    /^[^@\s]+@[^@\s]+$/.test(trimmed)
-  )
 }
 
 export function formatAddressSuggestion(
@@ -38,8 +86,8 @@ export function buildAddressBookSuggestionOptions(
   const seen = new Set<string>()
   const options: AddressSuggestionOption[] = []
   for (const address of addresses) {
-    const email = address.email.trim()
-    if (!isConcreteEmailAddress(email)) {
+    const email = parseEmailAddress(address.email)
+    if (!email) {
       continue
     }
     const key = email.toLowerCase()

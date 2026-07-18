@@ -1,6 +1,7 @@
 import { Circle, Paperclip, Star } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { MessageSummary } from '../../../data/transport/api/index'
+import type { SortDirection } from '../../../domain/vocabulary'
 import { cn } from '../../../lib/cn'
 import { formatRelativeTime } from '../../../lib/time'
 import { userTags } from '../detail/model'
@@ -321,8 +322,6 @@ export function buildThreadListLayout(
 // ---------------------------------------------------------------------------
 // Sorting
 // ---------------------------------------------------------------------------
-
-export type SortDirection = 'asc' | 'desc'
 
 export interface SortConfig {
   columnId: ColumnId

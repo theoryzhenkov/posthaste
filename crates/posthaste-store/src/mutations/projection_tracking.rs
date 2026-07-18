@@ -65,39 +65,38 @@ impl<'a> MessageEventDiff<'a> {
         self.message.mailbox_ids.first()
     }
 
+    // The typed contract lives in `posthaste_domain_model::MessageUpdatedPayload`
+    // (mirrored into the client protocol). The full `MessageSummary` projection
+    // rides along — enough for the reactive store to materialize a never-held
+    // message (sort key, row key, membership, render) without a promotion
+    // round-trip (`firehose-carries-rows`). Byte-identical to a served row (one
+    // derivation). The flat keyword/mailboxIds fields are retained for the
+    // legacy invalidation path until 2e retires it. No counts on the event
+    // (RFC-L2-count-unification): clients invalidate their mailbox-count
+    // queries on `message.updated` and re-read the trigger-maintained
+    // canonical counts instead of applying deltas.
     fn message_updated_payload(&self) -> Value {
-        let arrived_mailbox_ids = self
+        let arrived_mailbox_ids: Vec<MailboxId> = self
             .current_mailboxes
             .difference(&self.previous_mailboxes)
-            .map(MailboxId::as_str)
-            .collect::<Vec<_>>();
-        let mut payload = json!({
-            "messageId": self.message.id.as_str(),
-            "sourceThreadId": self.message.source_thread_id.as_str(),
-            "conversationId": self.conversation_id.as_str(),
-            "created": !self.before.existed,
-            "changes": {
-                "keywords": self.keywords_changed(),
-                "mailboxes": self.mailboxes_changed(),
-                "arrived": !arrived_mailbox_ids.is_empty(),
+            .cloned()
+            .collect();
+        let payload = posthaste_domain_model::MessageUpdatedPayload {
+            message_id: self.message.id.clone(),
+            source_thread_id: self.message.source_thread_id.clone(),
+            conversation_id: self.conversation_id.clone(),
+            created: !self.before.existed,
+            changes: posthaste_domain_model::MessageChangeFlags {
+                keywords: self.keywords_changed(),
+                mailboxes: self.mailboxes_changed(),
+                arrived: !arrived_mailbox_ids.is_empty(),
             },
-            "keywords": self.message.keywords,
-            "mailboxIds": self.message.mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
-            "arrivedMailboxIds": arrived_mailbox_ids,
-        });
-        // The full `MessageSummary` projection — enough for the reactive store
-        // to materialize a never-held message (sort key, row key, membership,
-        // render) without a promotion round-trip (`firehose-carries-rows`).
-        // Byte-identical to a served row (one derivation). The flat
-        // keyword/mailboxIds fields above are retained for the legacy
-        // invalidation path until 2e retires it.
-        if let Some(summary) = self.projection {
-            payload["projection"] = serde_json::to_value(summary).unwrap_or(Value::Null);
-        }
-        // No counts on the event (RFC-L2-count-unification): clients invalidate
-        // their mailbox-count queries on `message.updated` and re-read the
-        // trigger-maintained canonical counts instead of applying deltas.
-        payload
+            keywords: self.message.keywords.clone(),
+            mailbox_ids: self.message.mailbox_ids.clone(),
+            arrived_mailbox_ids,
+            projection: self.projection.cloned(),
+        };
+        serde_json::to_value(&payload).unwrap_or(Value::Null)
     }
 
     fn keywords_changed(&self) -> bool {

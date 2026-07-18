@@ -20,6 +20,7 @@ import type {
   Command,
   CommandAccepted,
   CommandEnvelope,
+  DomainEventKind,
   DomainEventPayload,
   EventMessage,
   MailboxCountsQuery,
@@ -38,9 +39,7 @@ import type {
   ThreadQuery,
   ThreadView,
 } from '@/gen'
-
-/** Lifecycle of one mirror entry, as rendered by the hooks. */
-export type QueryStatus = 'loading' | 'ready' | 'stale' | 'error'
+import type { ConnectionStatus, QueryStatus } from '@/domain/vocabulary'
 
 /** What a live query hook returns: the latest answer with its generation. */
 export interface LiveResult<T> {
@@ -49,9 +48,6 @@ export interface LiveResult<T> {
   status: QueryStatus
   error: Error | null
 }
-
-/** Stream/connection state the facade exposes to the UI. */
-export type ConnectionStatus = 'connected' | 'reconnecting' | 'stale'
 
 /** A failed HTTP call, carrying the typed error envelope fields. */
 export class MailApiError extends Error {
@@ -377,8 +373,8 @@ export class MailClient {
   /** Subscribes to domain events for UI reactions (notifications, the undo
    * toast). Payloads are prompts: they trigger the callback and nothing else —
    * they are never folded into the mirror. `kind` is an exact topic like
-   * `message.arrived`, or `*` for every event. */
-  onEvent(kind: string, cb: EventCallback): () => void {
+   * `message.updated`, or `*` for every event. */
+  onEvent(kind: DomainEventKind | '*', cb: EventCallback): () => void {
     let set = this.eventListeners.get(kind)
     if (!set) {
       set = new Set()

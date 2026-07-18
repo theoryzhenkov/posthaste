@@ -5,8 +5,8 @@
  * daemon wire schema exactly.
  *
  */
-export type ThemeMode = 'light' | 'dark' | 'system'
-export type UiDensity = 'compact' | 'cozy' | 'comfortable'
+export type { ThemeMode, UiDensity } from '@/gen'
+import type { ThemeMode, UiDensity } from '@/gen'
 
 /**
  * Per-mode color overrides. The named knobs are the curated UX; `tokens` is the

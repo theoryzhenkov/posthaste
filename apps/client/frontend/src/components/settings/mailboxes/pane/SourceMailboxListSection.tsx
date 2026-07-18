@@ -1,6 +1,6 @@
 import type { AccountRow } from '@/gen'
 
-import { mailboxRoleAccent, renderMailboxRoleIcon } from '../../../../domain/mailboxRoles'
+import { mailboxRoleAccent, renderMailboxRoleIcon } from '../../../../domain/role'
 import { useMailboxCounts } from '@/data'
 import { SettingsList } from '../../panel/shared'
 import { MailboxListRow } from './MailboxListRow'

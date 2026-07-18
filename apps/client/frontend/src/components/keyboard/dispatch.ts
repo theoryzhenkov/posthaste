@@ -8,16 +8,12 @@
  * `h`/`l`). Keeping it pure makes the precedence order testable without a DOM.
  *
  */
+import { PANE_ID, type PaneId } from '@/domain/vocabulary'
 import { stepGotoPrefix, type GotoPrefix, type GotoRole } from './goto/goto'
 import { isEditableKeyboardTarget } from './inputTargets'
 
-/** The keyboard-navigable regions of the mail shell. The detail pane is NOT
- *  focusable — it only displays the list's selected message, and `j`/`k` in the
- *  list drive it. */
-export type PaneId = 'sidebar' | 'list'
-
 /** Left-to-right pane order; drives `Shift+H`/`Shift+L` pane rotation. */
-export const PANE_ORDER: readonly PaneId[] = ['sidebar', 'list']
+export const PANE_ORDER: readonly PaneId[] = [PANE_ID.Sidebar, PANE_ID.List]
 
 /**
  * A pane's focused-key handler. Returns `true` when it consumed the event so

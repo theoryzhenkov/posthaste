@@ -1,15 +1,8 @@
+import { parseIsoDate } from '../time'
 import { IS_VALUES } from './definitions'
 import { normalize, prefixDefinition } from './scan'
 import { parseQueryTokens } from './parser'
 import type { QueryValidation } from './types'
-
-function isValidIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false
-  }
-  const date = new Date(`${value}T00:00:00.000Z`)
-  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value)
-}
 
 function validatePrefixedValue(prefix: string, value: string): QueryValidation {
   if (!value.trim()) {
@@ -29,7 +22,7 @@ function validatePrefixedValue(prefix: string, value: string): QueryValidation {
         ? { state: 'valid' }
         : { state: 'invalid', message: `unknown has: value: ${value}` }
     case 'date':
-      return isValidIsoDate(normalizedValue)
+      return parseIsoDate(normalizedValue)
         ? { state: 'valid' }
         : { state: 'invalid', message: `invalid date '${value}'` }
     case 'newer':

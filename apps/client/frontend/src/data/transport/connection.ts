@@ -3,7 +3,7 @@
 // stale); when it comes back, stream.ts invalidates everything mounted.
 
 import { useCallback, useSyncExternalStore } from 'react'
-import type { ConnectionStatus } from '@/data/transport/client'
+import type { ConnectionStatus } from '@/domain/vocabulary'
 import { useMailClient } from '../context'
 
 export function useConnectionStatus(): ConnectionStatus {

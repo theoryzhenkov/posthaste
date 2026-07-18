@@ -8,7 +8,7 @@ import { useComposeIntent } from '@/data/hooks/useComposeIntent'
 import type { useEmailActions } from '@/data/hooks/useEmailActions'
 import { openFocusedSurface } from '@/surfaces/useSurfaceRouting'
 import type { MailSelection } from '@/data/models/selection'
-import { normalizeValidAppliedSearchQuery } from '@/domain/searchQuery'
+import { parseSearchQuery } from '@/domain/searchQuery'
 import {
   accountSettingsSurface,
   messageSurfaceFromSelection,
@@ -54,7 +54,7 @@ export function useMailClientHandlers(input: {
       setSearchQuery((previousQuery) => {
         const candidate =
           append && previousQuery ? `${previousQuery} ${query}` : query
-        const normalized = normalizeValidAppliedSearchQuery(candidate)
+        const normalized = parseSearchQuery(candidate)
         return normalized === null ? previousQuery : normalized
       })
     },

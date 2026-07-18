@@ -9,7 +9,7 @@ import type {
   SmartMailbox,
   SmartMailboxSummary,
 } from '../../../data/transport/api/index'
-import { renderSmartMailboxIcon, smartMailboxAccent } from '../../../domain/mailboxRoles'
+import { renderSmartMailboxIcon, smartMailboxAccent } from '../../../domain/role'
 import { Button } from '../../ui/form/button'
 import { SortableList, SortableRow } from '../../ui/display/SortableList'
 import { useSidebarReorder } from '../../sidebar/hooks/useSidebarReorder'

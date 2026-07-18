@@ -3,9 +3,13 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 
 import type { Identity, Recipient } from '@/data/transport/api'
 import {
-  isConcreteEmailAddress,
+  parseEmailAddress,
+  parseEmailPattern,
+  patternEmailAddress,
+  patternMatchesEmail,
+  type EmailAddress,
   type AddressSuggestionOption,
-} from '@/domain/addressSuggestions'
+} from '@/domain/address'
 import type { ComposeIntent } from '@/domain/composeIntent'
 import {
   fetchQuery,
@@ -19,9 +23,7 @@ import type { AccountSettingsResult, MessageDetailResult } from '@/gen'
 
 import {
   accountFromOptions,
-  isConcreteEmailPattern,
   replyContextFromDetail,
-  wildcardMatchesEmail,
   type ComposeAccount,
   type ComposeSenderAddress,
 } from '../form/model'
@@ -60,7 +62,13 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
         id: row.id,
         name: row.name,
         fullName: row.fullName,
-        emailPatterns: settingsByAccount.get(row.id)?.emailPatterns ?? [],
+        // The parse boundary for account sending patterns: raw wire strings
+        // become EmailPattern here; junk patterns drop out once.
+        emailPatterns: (settingsByAccount.get(row.id)?.emailPatterns ?? [])
+          .map(parseEmailPattern)
+          .filter((pattern): pattern is NonNullable<typeof pattern> =>
+            pattern !== null,
+          ),
       })),
     [accountRows, settingsByAccount],
   )
@@ -73,14 +81,18 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
     if (!settings) {
       return undefined
     }
-    const email = settings.emailPatterns.find(isConcreteEmailPattern)
+    const email =
+      settings.emailPatterns
+        .map(parseEmailAddress)
+        .find((candidate): candidate is EmailAddress => candidate !== null) ??
+      null
     if (!email) {
       return undefined
     }
     return {
       id: settings.id,
       name: settings.fullName ?? settings.name,
-      email: email.trim(),
+      email,
     }
   }, [identityQuery.data])
   const signature = identityQuery.data?.signature ?? null
@@ -208,8 +220,8 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   const recipientSuggestions = useMemo<AddressSuggestionOption[]>(() => {
     const options: AddressSuggestionOption[] = []
     for (const account of composeAccounts) {
-      for (const email of account.emailPatterns.filter(
-        isConcreteEmailAddress,
+      for (const email of account.emailPatterns.flatMap(
+        (pattern) => patternEmailAddress(pattern) ?? [],
       )) {
         options.push({
           name: account.fullName,
@@ -223,8 +235,8 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
       composeAccounts.map((account) => [account.id, account.name]),
     )
     for (const sender of cachedSenders) {
-      const email = sender.email.trim()
-      if (!isConcreteEmailAddress(email)) {
+      const email = parseEmailAddress(sender.email)
+      if (!email) {
         continue
       }
       options.push({
@@ -262,7 +274,7 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
       )
       if (
         currentAccount?.emailPatterns.some((pattern) =>
-          wildcardMatchesEmail(pattern, email),
+          patternMatchesEmail(pattern, email),
         )
       ) {
         return currentAccount.id
@@ -270,7 +282,7 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
       return (
         composeAccounts.find((account) =>
           account.emailPatterns.some((pattern) =>
-            wildcardMatchesEmail(pattern, email),
+            patternMatchesEmail(pattern, email),
           ),
         )?.id ?? intent.sourceId
       )

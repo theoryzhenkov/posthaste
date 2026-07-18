@@ -17,7 +17,7 @@ export {
 } from './tokens/attributes'
 export {
   defaultUiDensity,
-  isUiDensity,
+  parseUiDensity,
   messageRowHeight,
   uiDensities,
   uiDensitySettings,
@@ -54,8 +54,7 @@ export {
   builtInThemeIds,
   defaultThemeId,
   defaultThemeMode,
-  isBuiltInThemeId,
-  isThemeMode,
+  parseThemeMode,
   resolvedThemeModes,
   themeModes,
   themeStyle,

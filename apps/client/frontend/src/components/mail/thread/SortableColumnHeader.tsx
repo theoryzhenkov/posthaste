@@ -7,7 +7,7 @@ import {
   ColumnResizeHandle,
   type ColumnResizeHandlePlacement,
 } from './ColumnResizeHandle'
-import type { SortDirection } from './columns'
+import type { SortDirection } from '@/domain/vocabulary'
 
 interface SortableColumnHeaderProps {
   id: string

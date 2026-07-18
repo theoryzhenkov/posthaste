@@ -52,7 +52,7 @@ import {
 } from 'lucide-react'
 
 import type { TagAppearance } from '@/data/transport/api'
-import { smartMailboxAccent } from '@/domain/mailboxRoles'
+import { smartMailboxAccent } from '@/domain/role'
 
 /** A curated foreground/background pair. Backgrounds use alpha so the chip
  *  tints over either light or dark surfaces; foregrounds read on both. */

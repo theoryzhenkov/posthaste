@@ -1,5 +1,5 @@
 import { SPACED_VALUE_PREFIXES } from './definitions'
-import { isWhitespace, prefixDefinition } from './scan'
+import { WHITESPACE, prefixDefinition } from './scan'
 import type { QueryValidation } from './types'
 
 export function parseQueryTokens(input: string):
@@ -16,7 +16,7 @@ export function parseQueryTokens(input: string):
   let index = 0
 
   while (index < chars.length) {
-    while (index < chars.length && isWhitespace(chars[index] ?? '')) {
+    while (index < chars.length && WHITESPACE.test(chars[index] ?? '')) {
       index += 1
     }
     if (index >= chars.length) {
@@ -26,14 +26,14 @@ export function parseQueryTokens(input: string):
     if (
       chars[index] === '-' &&
       index + 1 < chars.length &&
-      !isWhitespace(chars[index + 1] ?? '')
+      !WHITESPACE.test(chars[index + 1] ?? '')
     ) {
       index += 1
     }
 
     const start = index
     let colonIndex: number | null = null
-    while (index < chars.length && !isWhitespace(chars[index] ?? '')) {
+    while (index < chars.length && !WHITESPACE.test(chars[index] ?? '')) {
       if (chars[index] === ':') {
         colonIndex = index
         break
@@ -61,7 +61,7 @@ export function parseQueryTokens(input: string):
     }
 
     index = colonIndex + 1
-    while (index < chars.length && isWhitespace(chars[index] ?? '')) {
+    while (index < chars.length && WHITESPACE.test(chars[index] ?? '')) {
       index += 1
     }
 
@@ -109,7 +109,7 @@ function scanTokenValue(
   }
 
   let end = start
-  while (end < chars.length && !isWhitespace(chars[end] ?? '')) {
+  while (end < chars.length && !WHITESPACE.test(chars[end] ?? '')) {
     end += 1
   }
   return { value: chars.slice(start, end).join(''), end }
@@ -126,7 +126,7 @@ function startsKnownPrefixTokenAt(chars: string[], position: number): boolean {
   }
 
   const start = index
-  while (index < chars.length && !isWhitespace(chars[index] ?? '')) {
+  while (index < chars.length && !WHITESPACE.test(chars[index] ?? '')) {
     if (chars[index] === ':') {
       return prefixDefinition(chars.slice(start, index).join('')) !== undefined
     }
@@ -136,12 +136,12 @@ function startsKnownPrefixTokenAt(chars: string[], position: number): boolean {
 }
 
 function startsKnownPrefixAt(chars: string[], position: number): boolean {
-  if (position >= chars.length || !isWhitespace(chars[position] ?? '')) {
+  if (position >= chars.length || !WHITESPACE.test(chars[position] ?? '')) {
     return false
   }
 
   let index = position
-  while (index < chars.length && isWhitespace(chars[index] ?? '')) {
+  while (index < chars.length && WHITESPACE.test(chars[index] ?? '')) {
     index += 1
   }
   if (chars[index] === '-') {
@@ -149,7 +149,7 @@ function startsKnownPrefixAt(chars: string[], position: number): boolean {
   }
 
   const start = index
-  while (index < chars.length && !isWhitespace(chars[index] ?? '')) {
+  while (index < chars.length && !WHITESPACE.test(chars[index] ?? '')) {
     if (chars[index] === ':') {
       return prefixDefinition(chars.slice(start, index).join('')) !== undefined
     }
