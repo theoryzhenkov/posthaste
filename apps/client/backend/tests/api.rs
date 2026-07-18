@@ -8,7 +8,8 @@ use std::time::Duration;
 use posthaste_client_backend::{serve, AppPaths, AppState, BuildOptions, ServerHandle};
 use posthaste_domain_model::{
     now_iso8601, AccountDriver, AccountId, AccountSettings, AccountStatus,
-    AccountTransportSettings, SecretRef, SecretStoreError,
+    AccountTransportSettings, ProviderAuthKind, ProviderHint, SecretKind, SecretRef,
+    SecretStoreError,
 };
 use posthaste_domain_service::SecretStore;
 
@@ -44,10 +45,14 @@ struct TestServer {
 
 impl TestServer {
     async fn spawn() -> Self {
+        Self::spawn_with_secret_store(Arc::new(TestSecretStore)).await
+    }
+
+    async fn spawn_with_secret_store(secret_store: Arc<dyn SecretStore>) -> Self {
         let dir = tempfile::tempdir().expect("create temp dir");
         let paths = AppPaths::with_roots(dir.path().join("config"), dir.path().join("state"));
         let mut options = BuildOptions::at(paths);
-        options.secret_store = Some(Arc::new(TestSecretStore));
+        options.secret_store = Some(secret_store);
         let state = AppState::assemble(options).await.expect("assemble backend");
         let token = "test-session-token".to_string();
         let server = serve(state.clone(), 0, token.clone())
@@ -735,7 +740,7 @@ async fn smart_mailbox_crud_drives_the_list_and_scopes_the_mail_list() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mailbox_create_role_and_delete_round_trip_through_the_provider() {
+async fn mailbox_create_rename_role_and_delete_round_trip_through_the_provider() {
     let server = TestServer::spawn().await;
     spawn_mock_account(&server, "m1").await;
 
@@ -816,6 +821,54 @@ async fn mailbox_create_role_and_delete_round_trip_through_the_provider() {
         .expect("mailbox still listed");
     assert_eq!(projects["mailbox"]["role"], "junk");
 
+    // Rename the mailbox; the resynced projection carries the new name under
+    // the SAME id, with the assigned role untouched and the counts intact.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-mb-rename",
+                "command": { "renameMailbox": {
+                    "accountId": "m1", "mailboxId": projects_id, "name": "Receipts"
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let counts = json_body(
+        server
+            .post_json(
+                "/query",
+                serde_json::json!({ "mailboxCounts": { "accountId": "m1" } }),
+            )
+            .await,
+    )
+    .await;
+    let renamed = counts["data"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["mailbox"]["id"] == projects_id.as_str())
+        .cloned()
+        .expect("the renamed mailbox keeps its id");
+    assert_eq!(renamed["mailbox"]["name"], "Receipts");
+    assert_eq!(renamed["mailbox"]["role"], "junk");
+    assert_eq!(renamed["mailbox"]["totalEmails"], 0);
+
+    // A blank rename never reaches the provider.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-mb-rename-blank",
+                "command": { "renameMailbox": {
+                    "accountId": "m1", "mailboxId": projects_id, "name": "   "
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 400);
+
     // An unknown role never reaches the provider.
     let response = server
         .post_json(
@@ -878,21 +931,22 @@ async fn mailbox_create_role_and_delete_round_trip_through_the_provider() {
         .iter()
         .all(|row| row["mailbox"]["id"] != projects_id.as_str()));
 
-    // Rename is a laid wire contract whose handler is pending.
+    // Renaming a mailbox that no longer exists is an unknown id, refused
+    // before the provider is touched.
     let response = server
         .post_json(
             "/command",
             serde_json::json!({
-                "id": "cmd-mb-rename",
+                "id": "cmd-mb-rename-gone",
                 "command": { "renameMailbox": {
-                    "accountId": "m1", "mailboxId": inbox_id, "name": "Postbox"
+                    "accountId": "m1", "mailboxId": projects_id, "name": "Postbox"
                 } }
             }),
         )
         .await;
-    assert_eq!(response.status(), 503);
+    assert_eq!(response.status(), 404);
     let body = json_body(response).await;
-    assert_eq!(body["kind"], "unavailable");
+    assert_eq!(body["kind"], "unknownId");
 
     // An unknown account is an unknown id, not a connection failure.
     let response = server
@@ -1101,7 +1155,7 @@ async fn account_lifecycle_covers_transport_secret_sync_and_delete() {
                     "accountId": account_id,
                     "provider": "gmail",
                     "auth": "appPassword",
-                    "username": "probe@example.com",
+                    "username": { "kind": "set", "value": "probe@example.com" },
                     "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
                     "smtp": { "host": "smtp.example.com", "port": 587, "security": "startTls" },
                 } }
@@ -1235,6 +1289,234 @@ async fn account_lifecycle_covers_transport_secret_sync_and_delete() {
         )
         .await;
     assert_eq!(response.status(), 404);
+
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_patches_set_keep_and_clear_optional_fields() {
+    async fn account_settings(server: &TestServer, account_id: &str) -> serde_json::Value {
+        json_body(
+            server
+                .post_json(
+                    "/query",
+                    serde_json::json!({ "accountSettings": { "accountId": account_id } }),
+                )
+                .await,
+        )
+        .await
+    }
+
+    let server = TestServer::spawn().await;
+
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-create",
+                "command": { "createAccount": {
+                    "name": "Patch Probe",
+                    "fullName": "Ada Lovelace",
+                    "signature": "-- Ada"
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let accounts = json_body(
+        server
+            .post_json("/query", serde_json::json!({ "accounts": {} }))
+            .await,
+    )
+    .await;
+    let account_id = accounts["data"]["rows"][0]["id"]
+        .as_str()
+        .expect("account id")
+        .to_string();
+    // Set replaces both identity fields.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-set",
+                "command": { "updateAccount": {
+                    "accountId": account_id,
+                    "fullName": { "kind": "set", "value": "Ada K. Lovelace" },
+                    "signature": { "kind": "set", "value": "-- Ada K." }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = account_settings(&server, &account_id).await;
+    assert_eq!(body["data"]["fullName"], "Ada K. Lovelace");
+    assert_eq!(body["data"]["signature"], "-- Ada K.");
+
+    // Absent and explicit keep both preserve the stored values.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-keep",
+                "command": { "updateAccount": {
+                    "accountId": account_id,
+                    "name": "Patch Probe Renamed",
+                    "signature": { "kind": "keep" }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = account_settings(&server, &account_id).await;
+    assert_eq!(body["data"]["name"], "Patch Probe Renamed");
+    assert_eq!(body["data"]["fullName"], "Ada K. Lovelace");
+    assert_eq!(body["data"]["signature"], "-- Ada K.");
+
+    // Clear nulls exactly the cleared field.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-clear",
+                "command": { "updateAccount": {
+                    "accountId": account_id,
+                    "fullName": { "kind": "clear" }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = account_settings(&server, &account_id).await;
+    assert_eq!(body["data"]["fullName"], serde_json::Value::Null);
+    assert_eq!(body["data"]["signature"], "-- Ada K.");
+
+    // A bare null cannot clear: the request is malformed, nothing changes.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-null",
+                "command": { "updateAccount": {
+                    "accountId": account_id,
+                    "signature": null
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 400);
+
+    // The same tristate drives the transport endpoints.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-transport-set",
+                "command": { "updateAccountTransport": {
+                    "accountId": account_id,
+                    "baseUrl": { "kind": "set", "value": "https://jmap.example.com" },
+                    "username": { "kind": "set", "value": "probe@example.com" }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = account_settings(&server, &account_id).await;
+    assert_eq!(
+        body["data"]["transport"]["baseUrl"],
+        "https://jmap.example.com"
+    );
+    assert_eq!(body["data"]["transport"]["username"], "probe@example.com");
+
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-transport-clear",
+                "command": { "updateAccountTransport": {
+                    "accountId": account_id,
+                    "baseUrl": { "kind": "clear" }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = account_settings(&server, &account_id).await;
+    assert_eq!(
+        body["data"]["transport"]["baseUrl"],
+        serde_json::Value::Null
+    );
+    assert_eq!(body["data"]["transport"]["username"], "probe@example.com");
+
+    // The smart-mailbox role rides the same patch shape.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-smb-create",
+                "command": { "createSmartMailbox": {
+                    "name": "Patched", "role": "archive",
+                    "rule": subject_contains_rule("x")
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let rows = json_body(
+        server
+            .post_json("/query", serde_json::json!({ "smartMailboxes": {} }))
+            .await,
+    )
+    .await;
+    let smart_mailbox = rows["data"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["name"] == "Patched")
+        .cloned()
+        .expect("created smart mailbox");
+    assert_eq!(smart_mailbox["role"], "archive");
+    let smart_mailbox_id = smart_mailbox["id"].as_str().expect("id").to_string();
+
+    // Absent keeps the role; an explicit clear removes it.
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-smb-keep",
+                "command": { "updateSmartMailbox": {
+                    "smartMailboxId": smart_mailbox_id, "name": "Patched Kept"
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-patch-smb-clear",
+                "command": { "updateSmartMailbox": {
+                    "smartMailboxId": smart_mailbox_id,
+                    "role": { "kind": "clear" }
+                } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let rows = json_body(
+        server
+            .post_json("/query", serde_json::json!({ "smartMailboxes": {} }))
+            .await,
+    )
+    .await;
+    let smart_mailbox = rows["data"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["name"] == "Patched Kept")
+        .cloned()
+        .expect("updated smart mailbox");
+    assert_eq!(smart_mailbox["role"], serde_json::Value::Null);
 
     server.shutdown().await;
 }
@@ -1385,6 +1667,98 @@ async fn oauth_start_mints_a_pkce_descriptor_without_touching_the_network() {
         )
         .await;
     assert_eq!(response.status(), 400);
+
+    server.shutdown().await;
+}
+
+/// An OAuth account whose token refresh cannot succeed surfaces a typed auth
+/// failure through the accounts query — health as state, never a hang. The
+/// stored token set is expired and holds no refresh token, so the resolve
+/// fails as a credential problem before any network is touched, and the
+/// query keeps answering while the runtime records the failure.
+#[tokio::test(flavor = "multi_thread")]
+async fn oauth_refresh_failure_surfaces_as_auth_error_through_the_accounts_query() {
+    let secret_store = Arc::new(posthaste_testkit::TestSecretStore::default());
+    let server = TestServer::spawn_with_secret_store(secret_store.clone()).await;
+
+    let secret_ref = SecretRef {
+        kind: SecretKind::Os,
+        key: "account:oauth-stale".to_string(),
+    };
+    let token_set = serde_json::json!({
+        "type": "oauth2",
+        "provider": "gmail",
+        "clientId": "bundled-client-id",
+        "accessToken": "expired-access-token",
+        "refreshToken": null,
+        "expiresAt": "2020-01-01T00:00:00Z",
+        "scopes": ["https://mail.google.com/"],
+    });
+    secret_store
+        .save(&secret_ref, &token_set.to_string())
+        .expect("seed the stale token set");
+
+    let now = now_iso8601().expect("clock");
+    let account = AccountSettings {
+        id: "oauth-stale".into(),
+        name: "OAuth Stale".to_string(),
+        full_name: None,
+        signature: None,
+        email_patterns: Vec::new(),
+        driver: AccountDriver::ImapSmtp,
+        enabled: true,
+        appearance: None,
+        transport: AccountTransportSettings {
+            provider: ProviderHint::Gmail,
+            auth: ProviderAuthKind::OAuth2,
+            secret_ref: Some(secret_ref),
+            ..AccountTransportSettings::default()
+        },
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    server
+        .state
+        .config
+        .save_source(&account)
+        .expect("save account");
+    server
+        .state
+        .service
+        .sync_source_projections()
+        .expect("project sources");
+    server.state.supervisor.start_account(&account).await;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let body = json_body(
+            server
+                .post_json("/query", serde_json::json!({ "accounts": {} }))
+                .await,
+        )
+        .await;
+        let row = body["data"]["rows"]
+            .as_array()
+            .expect("account rows")
+            .iter()
+            .find(|row| row["id"] == "oauth-stale")
+            .expect("the OAuth account row")
+            .clone();
+        if row["status"] == "authError" {
+            assert!(
+                row["lastSyncError"]
+                    .as_str()
+                    .is_some_and(|message| !message.is_empty()),
+                "the auth failure carries a user-facing message: {row}"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the account never surfaced the typed auth error; last row: {row}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     server.shutdown().await;
 }

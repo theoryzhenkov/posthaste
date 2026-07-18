@@ -4,6 +4,8 @@ use posthaste_domain_model as domain;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::patch::FieldPatch;
+
 /// Content for [`crate::Command::CreateSmartMailbox`]. The backend mints the
 /// id; the created mailbox appears in the next `smartMailboxes` answer.
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -29,11 +31,10 @@ pub struct UpdateSmartMailboxIntent {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub name: Option<String>,
-    /// Set a role, or pass an empty string to clear it. Absent leaves the
-    /// role unchanged.
+    /// Set or clear the view role; absent (`keep`) leaves it unchanged.
     #[serde(default)]
-    #[ts(optional = nullable)]
-    pub role: Option<String>,
+    #[ts(optional, as = "Option<FieldPatch<String>>")]
+    pub role: FieldPatch<String>,
     #[serde(default)]
     #[ts(optional = nullable, as = "Option<crate::mirror::MailQueryRule>")]
     pub rule: Option<domain::MailQueryRule>,

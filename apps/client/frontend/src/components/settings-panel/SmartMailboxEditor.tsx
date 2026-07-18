@@ -107,8 +107,9 @@ export function SmartMailboxEditor({
           updateSmartMailbox: {
             smartMailboxId: editorTarget,
             name,
-            // Empty string clears the role; a value sets it.
-            role: currentForm.role ?? '',
+            role: currentForm.role
+              ? { kind: 'set', value: currentForm.role }
+              : { kind: 'clear' },
             rule: currentForm.rule,
           },
         })

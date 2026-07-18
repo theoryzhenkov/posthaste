@@ -90,6 +90,26 @@ fn create_mailbox_request_builds_flat_create_with_name_and_no_parent() {
 }
 
 #[test]
+fn rename_mailbox_request_patches_only_the_name() {
+    let request = rename_mailbox_request_body(
+        "account-1",
+        Some("mailbox-state-1"),
+        &MailboxId::from("mailbox-1"),
+        "Receipts",
+    );
+
+    let patch = &request["methodCalls"][0][1]["update"]["mailbox-1"];
+    assert_eq!(request["methodCalls"][0][0], "Mailbox/set");
+    assert_eq!(patch["name"], Value::String("Receipts".to_string()));
+    // A name-only patch: the role (and everything else) is untouched.
+    assert!(
+        patch.get("role").is_none(),
+        "a rename must not patch the role"
+    );
+    assert_eq!(request["methodCalls"][0][1]["ifInState"], "mailbox-state-1");
+}
+
+#[test]
 fn destroy_mailbox_request_carries_id_and_on_destroy_remove_emails_true() {
     let request = destroy_mailbox_request_body("account-1", &MailboxId::from("MB123"), true);
 

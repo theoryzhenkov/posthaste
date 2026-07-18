@@ -8,7 +8,7 @@ use posthaste_domain_model::{
     ServiceError, SetKeywordsCommand, SortDirection, StoreError,
 };
 
-use super::MailService;
+use super::{offload, MailService};
 
 mod apply;
 mod backfill;

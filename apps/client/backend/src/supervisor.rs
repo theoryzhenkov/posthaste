@@ -28,6 +28,10 @@ use tokio::task::{AbortHandle, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{info_span, Instrument};
 
+use crate::backfill::{
+    process_backfill_batch, AUTOMATION_BACKFILL_BATCH_SIZE, AUTOMATION_BACKFILL_DRAIN_DELAY,
+    AUTOMATION_BACKFILL_INITIAL_DELAY, AUTOMATION_BACKFILL_INTERVAL,
+};
 use crate::event_bus::EventBus;
 use crate::gateway::{build_connection, ConnectionState};
 
@@ -54,6 +58,10 @@ const ARM_BUDGET_SYNC: Duration = Duration::from_secs(300);
 
 /// Backstop budget for one snooze/scheduled-send probe (local store work).
 const ARM_BUDGET_TICK: Duration = Duration::from_secs(30);
+
+/// Backstop budget for one automation-backfill batch
+/// (`AUTOMATION_BACKFILL_BATCH_SIZE` provider round trips per tick).
+const ARM_BUDGET_BACKFILL: Duration = Duration::from_secs(120);
 
 /// A faulting account runtime is restarted at most this many times under
 /// bounded backoff; the failure that would require one more restart halts it
@@ -1112,6 +1120,10 @@ async fn run_account_runtime(
     let mut snooze_interval = tick_interval(SNOOZE_INITIAL_DELAY, SNOOZE_INTERVAL);
     let mut scheduled_send_interval =
         tick_interval(SCHEDULED_SEND_INITIAL_DELAY, SCHEDULED_SEND_INTERVAL);
+    let mut backfill_interval = tick_interval(
+        AUTOMATION_BACKFILL_INITIAL_DELAY,
+        AUTOMATION_BACKFILL_INTERVAL,
+    );
 
     shared
         .set_runtime_overview_for_generation(
@@ -1147,6 +1159,7 @@ async fn run_account_runtime(
             &account_id,
             generation,
             "startup_sync",
+            ARM_BUDGET_SYNC,
         )
         .await;
     }
@@ -1184,7 +1197,7 @@ async fn run_account_runtime(
                         &mut connection,
                     ),
                 ).await.is_err() {
-                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "poll_sync").await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "poll_sync", ARM_BUDGET_SYNC).await;
                 }
                 interval = sync_poll_interval(shared.poll_interval);
             }
@@ -1193,7 +1206,7 @@ async fn run_account_runtime(
                     ARM_BUDGET_TICK,
                     handle_snooze_tick(&shared, &account_id),
                 ).await.is_err() {
-                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "snooze").await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "snooze", ARM_BUDGET_TICK).await;
                 }
             }
             _ = scheduled_send_interval.tick() => {
@@ -1203,7 +1216,21 @@ async fn run_account_runtime(
                     ARM_BUDGET_SYNC,
                     handle_scheduled_send_tick(&sync_state, &shared, &account, generation, &mut connection),
                 ).await.is_err() {
-                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "scheduled_send").await;
+                    record_arm_timeout(&sync_state, &shared, &account_id, generation, "scheduled_send", ARM_BUDGET_SYNC).await;
+                }
+            }
+            _ = backfill_interval.tick() => {
+                match tokio::time::timeout(
+                    ARM_BUDGET_BACKFILL,
+                    handle_backfill_tick(&shared, &account_id, connection.gateway()),
+                ).await {
+                    // More work queued: come back after the short drain
+                    // delay instead of a full interval — one bounded batch
+                    // per pass keeps a big backfill interleaved with sync,
+                    // push, and commands instead of starving them.
+                    Ok(true) => backfill_interval.reset_after(AUTOMATION_BACKFILL_DRAIN_DELAY),
+                    Ok(false) => {}
+                    Err(_) => record_arm_timeout(&sync_state, &shared, &account_id, generation, "backfill", ARM_BUDGET_BACKFILL).await,
                 }
             }
             Some(command) = command_rx.recv() => {
@@ -1219,7 +1246,7 @@ async fn run_account_runtime(
                     ),
                 ).await {
                     Ok(()) => interval = sync_poll_interval(shared.poll_interval),
-                    Err(_) => record_arm_timeout(&sync_state, &shared, &account_id, generation, "command").await,
+                    Err(_) => record_arm_timeout(&sync_state, &shared, &account_id, generation, "command", ARM_BUDGET_SYNC).await,
                 }
             }
             Some(event) = next_push => {
@@ -1229,7 +1256,7 @@ async fn run_account_runtime(
                 ).await {
                     Ok(true) => interval = sync_poll_interval(shared.poll_interval),
                     Ok(false) => {}
-                    Err(_) => record_arm_timeout(&sync_state, &shared, &account_id, generation, "push_event").await,
+                    Err(_) => record_arm_timeout(&sync_state, &shared, &account_id, generation, "push_event", ARM_BUDGET_SYNC).await,
                 }
             }
         }
@@ -1246,6 +1273,7 @@ async fn record_arm_timeout(
     account_id: &AccountId,
     generation: u64,
     arm: &'static str,
+    budget: Duration,
 ) {
     sync_state.reset().await;
     ph_warn!(
@@ -1255,7 +1283,7 @@ async fn record_arm_timeout(
         "supervisor select-loop arm exceeded its bounded budget; account degraded, loop continues"
     );
     shared
-        .mark_arm_timeout(account_id, generation, arm, ARM_BUDGET_SYNC)
+        .mark_arm_timeout(account_id, generation, arm, budget)
         .await;
 }
 
@@ -1474,6 +1502,31 @@ async fn handle_runtime_command(
             .await;
         }
     }
+}
+
+/// Automation-backfill tick: process one bounded batch of the account's
+/// durable backfill job (if one is pending) and publish its events on the
+/// bus, bumping the generation so connected clients refetch. Returns whether
+/// the job still has work queued, so the loop shortens its next delay.
+/// Without a connected gateway the batch cannot flush to the provider; the
+/// store-backed job just waits for a tick after the next reconnect.
+async fn handle_backfill_tick(
+    shared: &Arc<SupervisorShared>,
+    account_id: &AccountId,
+    gateway: Option<posthaste_domain_service::SharedGateway>,
+) -> bool {
+    let Some(gateway) = gateway else {
+        return false;
+    };
+    let mut publish = |batch: &[DomainEvent]| shared.publish_events(batch);
+    process_backfill_batch(
+        &shared.service,
+        account_id,
+        gateway.as_ref(),
+        AUTOMATION_BACKFILL_BATCH_SIZE,
+        &mut publish,
+    )
+    .await
 }
 
 /// Snooze scheduler tick: return every due snoozed message to the Inbox.
