@@ -4,7 +4,7 @@
 // `queries.ts` and writes through the verbs in `commands.ts`.
 
 import { createContext, useContext, type ReactNode } from 'react'
-import { MailClient } from '@/client'
+import { MailClient } from '@/data/transport/client'
 
 const MailClientContext = createContext<MailClient | null>(null)
 
