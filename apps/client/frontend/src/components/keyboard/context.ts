@@ -5,7 +5,9 @@
  */
 import { createContext, useContext } from 'react'
 
-import type { PaneId, PaneKeyHandler } from './dispatch'
+import type { PaneId } from '@/domain/vocabulary'
+
+import type { PaneKeyHandler } from './dispatch'
 
 export interface KeyboardContextValue {
   activePane: PaneId

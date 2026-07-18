@@ -5,7 +5,7 @@ import {
   formatAddressSuggestion,
   insertAddressSuggestion,
   type AddressSuggestionOption,
-} from '@/domain/addressSuggestions'
+} from '@/domain/address'
 
 import { Input } from '../../ui/form/input'
 

@@ -75,6 +75,17 @@ describe('new-mail arrival gate', () => {
       kind: 'message.updated',
       accountId: 'acct-1',
     })
+    // A settle-revert echo: same topic, narrower shape, no `created` — the
+    // typed parse boundary rejects it before the gate ever reads flags.
+    coordinator.onMessageUpdated({
+      kind: 'message.updated',
+      accountId: 'acct-1',
+      payload: {
+        messageId: 'm1',
+        changes: { keywords: true, mailboxes: true },
+        reverted: true,
+      },
+    })
     await settle()
     expect(posted).toHaveLength(0)
     coordinator.dispose()

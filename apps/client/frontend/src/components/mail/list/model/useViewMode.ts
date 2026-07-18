@@ -7,7 +7,7 @@
  */
 import { useCallback, useSyncExternalStore } from 'react'
 
-export type MessageListViewMode = 'messages' | 'conversations'
+import type { MessageListViewMode } from '@/domain/vocabulary'
 
 const STORAGE_KEY = 'posthaste-message-view-mode-v1'
 

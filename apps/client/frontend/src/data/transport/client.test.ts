@@ -443,22 +443,22 @@ describe('prompts', () => {
     const snapBefore = client.getSnapshot(key)
 
     const seen: string[] = []
-    const unsub = client.onEvent('message.arrived', (p) => seen.push(p.accountId))
+    const unsub = client.onEvent('message.updated', (p) => seen.push(p.accountId))
     client.onEvent('*', (p) => seen.push(`*:${p.kind}`))
     sources[0]!.open()
     sources[0]!.emit({
       generation: 2,
-      event: { kind: 'message.arrived', accountId: 'a1', messageId: 'm9' },
+      event: { kind: 'message.updated', accountId: 'a1', messageId: 'm9' },
     })
-    expect(seen).toEqual(['a1', '*:message.arrived'])
+    expect(seen).toEqual(['a1', '*:message.updated'])
     expect(client.getSnapshot(key)).toBe(snapBefore) // payload folded nowhere
 
     unsub()
     sources[0]!.emit({
       generation: 2,
-      event: { kind: 'message.arrived', accountId: 'a2' },
+      event: { kind: 'message.updated', accountId: 'a2' },
     })
-    expect(seen).toEqual(['a1', '*:message.arrived', '*:message.arrived'])
+    expect(seen).toEqual(['a1', '*:message.updated', '*:message.updated'])
     client.close()
   })
 })

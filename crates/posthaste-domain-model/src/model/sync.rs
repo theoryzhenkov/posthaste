@@ -109,3 +109,42 @@ impl SyncMode {
         matches!(self, Self::FullMetadata)
     }
 }
+
+/// One resource touched by a sync cycle, listed on the `sync.completed`
+/// payload for scripting/tap consumers.
+///
+/// @spec docs/L1-sync#event-propagation
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SyncResourceRef {
+    /// Resource family, e.g. `sync`, `mailbox`, `message`.
+    pub kind: String,
+    /// What happened to it, e.g. `completed`, `refreshed`.
+    pub operation: String,
+    pub account_id: AccountId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<SyncMode>,
+}
+
+/// Payload of the `sync.completed` event: the cycle's counters plus the
+/// resources it touched.
+///
+/// @spec docs/L1-sync#event-propagation
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SyncCompletedPayload {
+    pub mailbox_count: usize,
+    pub message_count: usize,
+    pub deleted_imap_location_count: usize,
+    pub deleted_message_count: usize,
+    /// Automation events recorded while applying this cycle's batches.
+    pub automation_event_count: usize,
+    pub trigger: SyncTrigger,
+    pub mode: SyncMode,
+    pub resources: Vec<SyncResourceRef>,
+    /// Error codes from post-commit work (e.g. the automation outbox flush)
+    /// that failed after the sync batch itself committed.
+    pub post_commit_errors: Vec<String>,
+}

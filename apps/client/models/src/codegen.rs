@@ -61,6 +61,13 @@ pub fn export_into(dir: &Path) -> Result<(), Box<dyn Error>> {
     CommandEnvelope::export_all_to(dir)?;
     CommandAccepted::export_all_to(dir)?;
     EventMessage::export_all_to(dir)?;
+    crate::event::DomainEventKind::export_all_to(dir)?;
+    // Event payloads ride `DomainEventPayload.payload` as `unknown` on the
+    // wire envelope; the typed shapes are exported as their own roots and the
+    // client narrows by `kind`.
+    mirror::MessageUpdatedPayload::export_all_to(dir)?;
+    mirror::OperationSettlement::export_all_to(dir)?;
+    mirror::SyncCompletedPayload::export_all_to(dir)?;
     ApiError::export_all_to(dir)?;
 
     write_barrel(dir)?;

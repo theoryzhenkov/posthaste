@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { useActivePane } from '@/components/keyboard/usePane'
-import type { PaneId } from '@/components/keyboard/dispatch'
+import type { PaneId } from '@/domain/vocabulary'
 import { MessageDetail as MessageDetailPane } from '@/components/mail/detail/MessageDetail'
 import { MessageList } from '@/components/mail/list/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'

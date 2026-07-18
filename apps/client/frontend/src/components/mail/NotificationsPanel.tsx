@@ -6,12 +6,12 @@ import { useState } from 'react'
 import { AlertCircle, AlertTriangle, Info, Loader2, X } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
+import type { NotificationSeverity } from '@/domain/vocabulary'
 import {
   clearNotifications,
   dismissNotification,
   useNotifications,
   type AppNotification,
-  type NotificationSeverity,
 } from '@/data/notifications/store'
 
 import { FloatingPanel } from '../floating/FloatingPanel'

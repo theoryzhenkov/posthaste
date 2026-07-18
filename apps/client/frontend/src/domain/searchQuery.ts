@@ -1,7 +1,11 @@
 import { validateSearchQuery, type QueryValidation } from './search/index'
 
+/** A normalized query the SERVER search accepts: whitespace-collapsed and
+ *  validated against the prefix grammar. Empty means "no filter". */
+export type SearchQuery = string & { readonly __brand: 'SearchQuery' }
+
 export interface PreparedServerSearchQuery {
-  query: string | undefined
+  query: SearchQuery | undefined
   validation: QueryValidation
   isBlocked: boolean
 }
@@ -14,18 +18,20 @@ export function normalizeAppliedSearchQuery(value: string): string {
  * Build the query that filters a view to a single message's conversation. The
  * backend search supports the `conversation:` prefix (matching
  * `MailQueryField::ConversationId`); conversation ids are whitespace-free
- * tokens, so no quoting is needed.
+ * tokens, so no quoting is needed — the result is valid by construction.
  */
-export function conversationViewQuery(conversationId: string): string {
-  return `conversation:${conversationId}`
+export function conversationViewQuery(conversationId: string): SearchQuery {
+  return `conversation:${conversationId}` as SearchQuery
 }
 
-export function normalizeValidAppliedSearchQuery(value: string): string | null {
+/** Parse raw search text into an applicable query, or `null` when the grammar
+ *  rejects it. Empty/whitespace input parses to the empty query (clear). */
+export function parseSearchQuery(value: string): SearchQuery | null {
   const prepared = prepareServerSearchQuery(value)
   if (prepared.isBlocked) {
     return null
   }
-  return prepared.query ?? ''
+  return prepared.query ?? ('' as SearchQuery)
 }
 
 export function prepareServerSearchQuery(
@@ -50,7 +56,7 @@ export function prepareServerSearchQuery(
   }
 
   return {
-    query: normalized,
+    query: normalized as SearchQuery,
     validation,
     isBlocked: false,
   }

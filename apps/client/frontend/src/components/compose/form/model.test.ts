@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { MessageDetailResult, MessageSummary } from '@/gen'
+import { parseEmailPattern, type EmailPattern } from '@/domain/address'
 import {
   accountFromOptions,
   replyContextFromDetail,
@@ -122,7 +123,13 @@ describe('accountFromOptions', () => {
       id: 'acct-1',
       name: 'Work',
       fullName: 'Theo R',
-      emailPatterns: ['theo@example.com', '*@corp.example.com'],
+      emailPatterns: ['theo@example.com', '*@corp.example.com'].map(
+        (raw): EmailPattern => {
+          const pattern = parseEmailPattern(raw)
+          if (!pattern) throw new Error(`fixture pattern rejected: ${raw}`)
+          return pattern
+        },
+      ),
     },
   ]
 

@@ -2,13 +2,10 @@ import { SYSTEM_KEYWORD_PREFIX } from '../vocabulary'
 import { PREFIX_BY_NAME, type QueryPrefixDefinition } from './definitions'
 import type { ValueCandidate } from './types'
 
-export function isWhitespace(value: string): boolean {
-  return /\s/.test(value)
-}
-
-export function isPrefixChar(value: string): boolean {
-  return /[a-zA-Z]/.test(value)
-}
+/** Character classes the query scanner steps over. Exported as data (regexes),
+ *  not `is*` validators (R3): a character class is vocabulary, not a parse. */
+export const WHITESPACE = /\s/
+export const PREFIX_CHAR = /[a-zA-Z]/
 
 export function normalize(value: string): string {
   return value.trim().toLowerCase()
@@ -18,10 +15,6 @@ export function prefixDefinition(
   prefix: string,
 ): QueryPrefixDefinition | undefined {
   return PREFIX_BY_NAME.get(prefix.toLowerCase())
-}
-
-export function todayIsoDate(now: Date): string {
-  return now.toISOString().slice(0, 10)
 }
 
 export function uniqueCandidates(
@@ -91,7 +84,7 @@ export function activeBareToken(input: string): {
   value: string
 } {
   let start = input.length
-  while (start > 0 && !isWhitespace(input[start - 1] ?? '')) {
+  while (start > 0 && !WHITESPACE.test(input[start - 1] ?? '')) {
     start -= 1
   }
   return { start, value: input.slice(start) }

@@ -6,13 +6,13 @@ import {
   RELATIVE_DATE_VALUES,
   SPACED_VALUE_PREFIXES,
 } from './definitions'
+import { todayIsoDate } from '../time'
 import {
+  PREFIX_CHAR,
+  WHITESPACE,
   activeBareToken,
   filterCandidates,
-  isPrefixChar,
-  isWhitespace,
   normalize,
-  todayIsoDate,
   uniqueCandidates,
   userTagCandidate,
 } from './scan'
@@ -34,7 +34,7 @@ export function findActivePrefix(input: string): {
   } | null = null
 
   for (let index = 0; index < input.length; index += 1) {
-    if (index > 0 && !isWhitespace(input[index - 1] ?? '')) {
+    if (index > 0 && !WHITESPACE.test(input[index - 1] ?? '')) {
       continue
     }
 
@@ -44,7 +44,7 @@ export function findActivePrefix(input: string): {
     }
 
     let nameEnd = nameStart
-    while (nameEnd < input.length && isPrefixChar(input[nameEnd] ?? '')) {
+    while (nameEnd < input.length && PREFIX_CHAR.test(input[nameEnd] ?? '')) {
       nameEnd += 1
     }
 
@@ -59,13 +59,13 @@ export function findActivePrefix(input: string): {
 
     const acceptsSpacedValue = SPACED_VALUE_PREFIXES.has(name)
     let valueStart = nameEnd + 1
-    while (valueStart < input.length && isWhitespace(input[valueStart] ?? '')) {
+    while (valueStart < input.length && WHITESPACE.test(input[valueStart] ?? '')) {
       valueStart += 1
     }
 
     if (!acceptsSpacedValue) {
       let valueEnd = valueStart
-      while (valueEnd < input.length && !isWhitespace(input[valueEnd] ?? '')) {
+      while (valueEnd < input.length && !WHITESPACE.test(input[valueEnd] ?? '')) {
         valueEnd += 1
       }
       if (valueEnd < input.length) {

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { AlertCircle } from 'lucide-react'
 
 import type { SmartMailboxSummary } from '@/data/transport/api'
-import { smartMailboxAccent } from '@/domain/mailboxRoles'
+import { smartMailboxAccent } from '@/domain/role'
 import type { useMailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
 
 import type { SidebarSelection } from './Sidebar'

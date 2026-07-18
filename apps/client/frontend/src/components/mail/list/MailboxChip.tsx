@@ -7,7 +7,7 @@
  *
  */
 import { cn } from '@/lib/cn'
-import { renderMailboxRoleIcon } from '@/domain/mailboxRoles'
+import { renderMailboxRoleIcon } from '@/domain/role'
 
 export function MailboxChip({
   name,

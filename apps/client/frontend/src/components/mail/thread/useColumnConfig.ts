@@ -1,9 +1,10 @@
 import { useCallback, useSyncExternalStore } from 'react'
+import type { SortDirection } from '@/domain/vocabulary'
+
 import {
   type ColumnId,
   type ColumnWidths,
   type SortConfig,
-  type SortDirection,
   ALL_COLUMNS,
   DEFAULT_COLUMNS,
   DEFAULT_SORT,

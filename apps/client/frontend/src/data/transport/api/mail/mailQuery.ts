@@ -4,49 +4,24 @@
  *  mail — smart mailboxes (saved queries) and automation-rule WHEN-clauses. The
  *  `SmartMailbox` container itself lives in `./smartMailboxes`. */
 
-export type MailQueryGroupOperator = 'all' | 'any'
-
-export type MailQueryField =
-  | 'sourceId'
-  | 'sourceName'
-  | 'messageId'
-  | 'threadId'
-  | 'conversationId'
-  | 'mailboxId'
-  | 'mailboxName'
-  | 'mailboxRole'
-  | 'isRead'
-  | 'isFlagged'
-  | 'hasAttachment'
-  | 'keyword'
-  | 'fromName'
-  | 'fromEmail'
-  | 'to'
-  | 'subject'
-  | 'preview'
-  | 'body'
-  | 'receivedAt'
-  | 'size'
+// The closed query vocabularies are wire-borne: re-served from `gen/`.
+export type {
+  DateUnit,
+  MailQueryField,
+  MailQueryGroupOperator,
+  MailQueryOperator,
+} from '@/gen'
+import type {
+  DateUnit,
+  MailQueryField,
+  MailQueryGroupOperator,
+  MailQueryOperator,
+} from '@/gen'
 
 /** The four ordered comparisons are `lt`/`gt`/`le`/`ge` (`< > <= >=`), labelled
  *  per field type in the editor ("before/after" for dates, "smaller/larger than"
  *  for size). Stored rules using old operator names still deserialize server-side
  *  via serde aliases. */
-export type MailQueryOperator =
-  | 'equals'
-  | 'in'
-  | 'contains'
-  | 'beginsWith'
-  | 'endsWith'
-  | 'regex'
-  | 'lt'
-  | 'gt'
-  | 'le'
-  | 'ge'
-
-/** Time unit for a relative date offset. */
-export type DateUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
-
 /** A typed date condition value. `absolute` compares against a stored RFC3339
  *  instant; `relative` is a rolling "N units ago" offset resolved at query
  *  time (so it never freezes to a fixed date at edit time). Distinguished from

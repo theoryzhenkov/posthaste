@@ -9,7 +9,9 @@ import { List, ListTree } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
 
-import { useViewMode, type MessageListViewMode } from './model/useViewMode'
+import type { MessageListViewMode } from '@/domain/vocabulary'
+
+import { useViewMode } from './model/useViewMode'
 
 const OPTIONS: {
   mode: MessageListViewMode

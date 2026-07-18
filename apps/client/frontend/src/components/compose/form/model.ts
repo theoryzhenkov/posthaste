@@ -8,6 +8,11 @@
  */
 import type { Recipient, ReplyContext, SendMessageInput } from '@/data/transport/api'
 import type { MessageDetailResult, SendMessageRequest } from '@/gen'
+import {
+  patternEmailAddress,
+  patternMatchesEmail,
+  type EmailPattern,
+} from '@/domain/address'
 import { formatRecipient } from '@/components/compose/form/composeMessage'
 
 export type { ComposeAttachment, ComposeForm } from '@/components/compose/form/composeMessage'
@@ -34,13 +39,13 @@ export interface FromAddressOption {
 }
 
 /** The slice of an account the compose surfaces need: identity naming plus
- * the sending patterns, merged from the `accounts` row and the account's
- * `accountSettings` answer. */
+ * the sending patterns (parsed ONCE at the query boundary), merged from the
+ * `accounts` row and the account's `accountSettings` answer. */
 export interface ComposeAccount {
   id: string
   name: string
   fullName: string | null
-  emailPatterns: string[]
+  emailPatterns: readonly EmailPattern[]
 }
 
 /** One address-book row for From/recipient derivation (the `senderAddresses`
@@ -70,21 +75,6 @@ export function toSendMessageRequest(
     attachments: input.attachments,
     draftId,
   }
-}
-
-export function isConcreteEmailPattern(pattern: string): boolean {
-  const trimmed = pattern.trim()
-  return (
-    trimmed.length > 0 &&
-    !trimmed.includes('*') &&
-    /^[^@\s]+@[^@\s]+$/.test(trimmed)
-  )
-}
-
-export function wildcardMatchesEmail(pattern: string, email: string): boolean {
-  const trimmed = pattern.trim().toLowerCase()
-  const normalizedEmail = email.trim().toLowerCase()
-  return trimmed.startsWith('*@') && normalizedEmail.endsWith(trimmed.slice(1))
 }
 
 export function optionLabel(option: FromAddressOption): string {
@@ -261,7 +251,11 @@ export function accountFromOptions(
   const options: FromAddressOption[] = []
 
   for (const account of accounts) {
-    for (const email of account.emailPatterns.filter(isConcreteEmailPattern)) {
+    for (const pattern of account.emailPatterns) {
+      const email = patternEmailAddress(pattern)
+      if (!email) {
+        continue
+      }
       options.push({
         sourceId: account.id,
         sourceName: account.name,
@@ -294,9 +288,7 @@ export function accountFromOptions(
     // account's own email patterns (a concrete identity or a `*@domain`
     // catch-all) — external correspondents are excluded.
     const isOwnIdentity = account.emailPatterns.some((pattern) =>
-      isConcreteEmailPattern(pattern)
-        ? pattern.trim().toLowerCase() === cached.email.trim().toLowerCase()
-        : wildcardMatchesEmail(pattern, cached.email),
+      patternMatchesEmail(pattern, cached.email),
     )
     if (!isOwnIdentity) {
       continue

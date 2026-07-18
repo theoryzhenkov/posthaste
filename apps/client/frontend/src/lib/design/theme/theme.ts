@@ -46,11 +46,13 @@ export const builtInThemeIds = ['neutral', 'glass'] as const
 
 export const defaultThemeId = 'neutral' as const satisfies BuiltInThemeId
 
-export function isThemeMode(value: string): value is ThemeMode {
-  return themeModes.includes(value as ThemeMode)
+/** Parse a stored/broadcast value into a theme mode, or `null` (R3). */
+export function parseThemeMode(value: string): ThemeMode | null {
+  return themeModes.includes(value as ThemeMode) ? (value as ThemeMode) : null
 }
 
-export function isBuiltInThemeId(value: string): value is BuiltInThemeId {
+/** Internal guard behind {@link themeStyle}; not exported (R3). */
+function isBuiltInThemeId(value: string): value is BuiltInThemeId {
   return (builtInThemeIds as readonly string[]).includes(value)
 }
 

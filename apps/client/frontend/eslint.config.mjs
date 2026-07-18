@@ -6,14 +6,15 @@
  *
  * Baseline mechanism: ESLint has no native baseline, so current offender
  * files are listed in the override blocks below. Never add per-file disable
- * comments. The "burn-down" blocks are slices 3-5 debt: entries only leave
- * this file (as the sites migrate); new files/sites fail immediately.
+ * comments. The "burn-down" blocks are slices 4-5 debt (the R3 block burned
+ * to zero in the primitives slice): entries only leave this file (as the
+ * sites migrate); new files/sites fail immediately.
  *
  * Selector approximations (documented per the charter's spirit over letter):
  * - R3 matches exported `function is*` / `has*` whose FIRST param is annotated
  *   exactly `string`. Union params (`string | null`), arrow-function
- *   exports, and unannotated params escape it; tightening happens in the
- *   primitives slice, not by selector golf.
+ *   exports, and unannotated params escape it; the domain/ parse kit is the
+ *   real enforcement, this selector just catches regressions.
  * - R5 matches `new Set(...)` bound to a name ending in `listeners`
  *   (variable or class field). A hand-rolled store that names its set
  *   differently escapes; the paired subscribe/getSnapshot shape is not
@@ -98,19 +99,6 @@ export default [
       'src/components/compose/editor/MarkdownComposerEditor.tsx',
     ],
     rules: { 'no-restricted-properties': 'off' },
-  },
-
-  // R3 baseline (slice 3 burn-down): the exported raw-string validators that
-  // collapse into domain/ parsers. R5 stays live in these files.
-  {
-    files: [
-      'src/lib/design/tokens/density.ts',
-      'src/lib/design/theme/theme.ts',
-      'src/components/compose/form/model.ts',
-      'src/domain/addressSuggestions.ts',
-      'src/domain/search/scan.ts',
-    ],
-    rules: { 'no-restricted-syntax': restrictedSyntax(R5_RULES) },
   },
 
   // R5 exemption: lib/store* is where the one blessed implementation lives.
