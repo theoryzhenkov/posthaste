@@ -8,7 +8,8 @@ import type {
   KnownMailboxRole,
   Mailbox,
 } from '../../../data/transport/api/index'
-import { isKnownMailboxRole, renderMailboxRoleIcon } from '../../../domain/mailboxRoles'
+import { parseMailboxRole, renderMailboxRoleIcon } from '../../../domain/role'
+import { MAILBOX_ROLES } from '../../../domain/vocabulary'
 import { accentColor } from '@/lib/design'
 import { hueGradient } from '../appearance/constants'
 import { SourceMailboxAutomationFields } from '../rules/AutomationActionsEditor'
@@ -28,13 +29,13 @@ const mailboxRoleOptions: Array<{
   label: string
 }> = [
   { value: '__none__', label: 'None' },
-  { value: 'inbox', label: 'Inbox' },
-  { value: 'archive', label: 'Archive' },
-  { value: 'drafts', label: 'Drafts' },
-  { value: 'sent', label: 'Sent' },
-  { value: 'junk', label: 'Junk' },
-  { value: 'trash', label: 'Trash' },
-  { value: 'snooze', label: 'Snoozed' },
+  { value: MAILBOX_ROLES.Inbox, label: 'Inbox' },
+  { value: MAILBOX_ROLES.Archive, label: 'Archive' },
+  { value: MAILBOX_ROLES.Drafts, label: 'Drafts' },
+  { value: MAILBOX_ROLES.Sent, label: 'Sent' },
+  { value: MAILBOX_ROLES.Junk, label: 'Junk' },
+  { value: MAILBOX_ROLES.Trash, label: 'Trash' },
+  { value: MAILBOX_ROLES.Snooze, label: 'Snoozed' },
 ]
 
 export function SourceMailboxEditor({
@@ -68,12 +69,9 @@ export function SourceMailboxEditor({
     )
   }
   const hasUnknownRole = Boolean(
-    mailbox.role && !isKnownMailboxRole(mailbox.role),
+    mailbox.role && !parseMailboxRole(mailbox.role),
   )
-  const selectValue =
-    mailbox.role && (isKnownMailboxRole(mailbox.role) || hasUnknownRole)
-      ? mailbox.role
-      : '__none__'
+  const selectValue = mailbox.role || '__none__'
 
   return (
     <div className="pb-8">

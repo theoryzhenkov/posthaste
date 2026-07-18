@@ -43,6 +43,7 @@ import {
 import type { ListUnsubscribe, MessageDetail } from '../../data/transport/api/index'
 import { snoozePresets } from '../../components/mail/detail/snoozePresets'
 import { conversationViewQuery } from '../../domain/searchQuery'
+import { MAILBOX_ROLES } from '../../domain/vocabulary'
 import { registerActions } from '../registry'
 import type {
   ActionContext,
@@ -55,7 +56,11 @@ import type {
 /** Roles from which a message is "removed" and can be restored to the inbox
  *  (mirrors `contextualActions.isRestorableRole`). */
 function isRestorableRole(role: string | null): boolean {
-  return role === 'trash' || role === 'archive' || role === 'junk'
+  return (
+    role === MAILBOX_ROLES.Trash ||
+    role === MAILBOX_ROLES.Archive ||
+    role === MAILBOX_ROLES.Junk
+  )
 }
 
 /** The subject a single-target action operates on. `?? undefined` keeps the
@@ -102,7 +107,12 @@ function notDraftOnHeader(ctx: ActionContext): boolean {
 /** Mailbox roles a message can NEVER be moved into via "Move to…": drafts/sent
  *  are provider-managed, snooze is scheduler-owned, and trashing has its own
  *  destructive action (with confirm + draft-discard semantics). */
-const NON_MOVE_TARGET_ROLES = new Set(['drafts', 'sent', 'snooze', 'trash'])
+const NON_MOVE_TARGET_ROLES = new Set<string>([
+  MAILBOX_ROLES.Drafts,
+  MAILBOX_ROLES.Sent,
+  MAILBOX_ROLES.Snooze,
+  MAILBOX_ROLES.Trash,
+])
 
 /** Options for `move-to-mailbox`: the target account's mailboxes (the sidebar's
  *  read model, via `services.mailboxes`), minus the message's current
@@ -286,8 +296,8 @@ export const messageActions: readonly ActionDefinition[] = [
     surfaces: ['context-menu', 'palette', 'keyboard', 'detail-header'],
     shortcut: { key: 'e' },
     isAvailable: (ctx) =>
-      ctx.viewRole !== 'archive' &&
-      ctx.viewRole !== 'trash' &&
+      ctx.viewRole !== MAILBOX_ROLES.Archive &&
+      ctx.viewRole !== MAILBOX_ROLES.Trash &&
       notDraftOnHeader(ctx),
     isEnabled: requireTarget,
     run: (ctx, s) => ctx.targets.forEach((t) => s.email.archive(t.ref)),
@@ -344,7 +354,7 @@ export const messageActions: readonly ActionDefinition[] = [
     // Not offered in Trash, and never on drafts (a draft is discarded, not
     // trashed).
     isAvailable: (ctx) =>
-      ctx.viewRole !== 'trash' && !ctx.targets.some((t) => t.isDraft),
+      ctx.viewRole !== MAILBOX_ROLES.Trash && !ctx.targets.some((t) => t.isDraft),
     isEnabled: requireTarget,
     run: (ctx, s) => ctx.targets.forEach((t) => s.email.trash(t.ref)),
   },
@@ -369,7 +379,7 @@ export const messageActions: readonly ActionDefinition[] = [
     shortcut: [{ key: '#' }, { key: 'backspace' }],
     // Trash view only, and never on drafts.
     isAvailable: (ctx) =>
-      ctx.viewRole === 'trash' && !ctx.targets.some((t) => t.isDraft),
+      ctx.viewRole === MAILBOX_ROLES.Trash && !ctx.targets.some((t) => t.isDraft),
     isEnabled: requireTarget,
     run: (ctx, s) =>
       ctx.targets.forEach((t) => s.email.deletePermanently(t.ref)),

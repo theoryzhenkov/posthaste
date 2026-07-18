@@ -35,11 +35,13 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 
 import { useDomainEvent } from '@/data'
 import { queryKeys } from '@/data/queries/queryKeys'
+import { parseMessageUpdated } from '@/data/transport/stream'
+import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
 import type {
   AccountsResult,
   AppSettingsResult,
   DomainEventPayload,
-  MessageSummary,
+  MessageUpdatedPayload,
   Notifications,
 } from '@/gen'
 
@@ -93,40 +95,22 @@ interface PendingArrival {
   subject: string | null
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : null
-}
-
-function changeFlag(payload: Record<string, unknown>, key: string): boolean {
-  const changes = asRecord(payload.changes)
-  return changes !== null && changes[key] === true
-}
-
-/** Extract a notifiable arrival, or `null` when the event must not notify. */
-function arrivalFromEvent(event: DomainEventPayload): PendingArrival | null {
-  const payload = asRecord(event.payload)
-  if (!payload) {
-    return null
-  }
+/** Extract a notifiable arrival from the typed diff payload, or `null` when
+ * the event must not notify. */
+function arrivalFromPayload(payload: MessageUpdatedPayload): PendingArrival | null {
   // Only a genuinely NEW message that just gained mailbox membership. Echoes
   // of the user's own mutations either lack `arrived` (keyword flips) or lack
   // `created` (moves of an existing message).
-  if (payload.created !== true || !changeFlag(payload, 'arrived')) {
+  if (!payload.created || !payload.changes.arrived) {
     return null
   }
-  const keywords = Array.isArray(payload.keywords) ? payload.keywords : []
-  if (keywords.includes('$seen') || keywords.includes('$draft')) {
+  if (
+    payload.keywords.includes(SYSTEM_KEYWORDS.Seen) ||
+    payload.keywords.includes(SYSTEM_KEYWORDS.Draft)
+  ) {
     return null
   }
-  const projection = asRecord(payload.projection) as
-    | Partial<MessageSummary>
-    | null
-  // Belt and braces for payloads carrying a projection but no flat keywords.
-  if (projection?.isRead === true) {
-    return null
-  }
+  const projection = payload.projection
   return {
     sender: projection?.fromName ?? projection?.fromEmail ?? null,
     subject: projection?.subject ?? null,
@@ -218,7 +202,10 @@ export function createNewMailArrivalCoordinator(
       if ((deps.getPreferences()?.newMail ?? true) === false) {
         return
       }
-      const arrival = arrivalFromEvent(event)
+      // Parse boundary: only the sync-projection diff shape (the one shape
+      // stating `created`) can claim an arrival.
+      const payload = parseMessageUpdated(event)
+      const arrival = payload === null ? null : arrivalFromPayload(payload)
       if (arrival === null) {
         return
       }

@@ -10,7 +10,11 @@
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
-import type { DomainEventPayload } from '@/gen'
+import type {
+  DomainEventKind,
+  DomainEventPayload,
+  MessageUpdatedPayload,
+} from '@/gen'
 import { useMailClient } from '../context'
 
 const DEBOUNCE_MS = 100
@@ -49,11 +53,11 @@ export function useStreamInvalidation(): void {
   }, [client, queryClient])
 }
 
-/** Subscribes to domain-event prompts (`message.arrived`, `operation.settled`,
+/** Subscribes to domain-event prompts (`message.updated`, `operation.settled`,
  * `*`). Reactions may notify, toast, or focus a refetch — the payload itself
  * is never written into anything the UI renders from. */
 export function useDomainEvent(
-  kind: string,
+  kind: DomainEventKind | '*',
   onEvent: (payload: DomainEventPayload, generation: number) => void,
 ): void {
   const client = useMailClient()
@@ -65,4 +69,25 @@ export function useDomainEvent(
     () => client.onEvent(kind, (payload, generation) => ref.current(payload, generation)),
     [client, kind],
   )
+}
+
+/**
+ * Parse the sync-projection diff payload out of a `message.updated` event
+ * (the generated `MessageUpdatedPayload` contract). The topic is shared by
+ * narrower shapes — command echoes, settle reverts, deletions — and only the
+ * diff shape states `created`, so that key is the discriminant. Returns
+ * `null` for any other kind or shape; past this boundary consumers hold the
+ * typed contract and never re-check.
+ */
+export function parseMessageUpdated(
+  event: DomainEventPayload,
+): MessageUpdatedPayload | null {
+  if (event.kind !== 'message.updated') {
+    return null
+  }
+  const payload = event.payload
+  if (typeof payload !== 'object' || payload === null || !('created' in payload)) {
+    return null
+  }
+  return payload as MessageUpdatedPayload
 }

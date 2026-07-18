@@ -27,11 +27,12 @@ import {
 } from '@/commands'
 
 import { KeyboardContext, type KeyboardContextValue } from './context'
+import type { PaneId } from '@/domain/vocabulary'
+
 import {
   dispatchMailKey,
   PANE_ORDER,
   type KeyboardDispatchContext,
-  type PaneId,
   type PaneKeyHandler,
 } from './dispatch'
 import { KeyboardConfirmDialog } from './KeyboardConfirmDialog'

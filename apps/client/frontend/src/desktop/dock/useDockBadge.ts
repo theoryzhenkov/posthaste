@@ -22,9 +22,10 @@ import { useEffect, useRef } from 'react'
 
 import type { MailboxCountsRow } from '@/gen'
 import { isTauriRuntime } from '@/desktop/runtime'
+import { MAILBOX_ROLES } from '@/domain/vocabulary'
 import { LOG_EVENTS, uiLogger } from '@/lib/log/logger'
 
-const INBOX_ROLE = 'inbox'
+const INBOX_ROLE = MAILBOX_ROLES.Inbox
 
 /**
  * Sum inbox-role unread across the given accounts from `mailboxCounts` rows.

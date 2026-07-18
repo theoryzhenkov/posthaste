@@ -1,7 +1,7 @@
 import { ChevronDown } from 'lucide-react'
 import type { Dispatch, SetStateAction } from 'react'
 
-import type { AddressSuggestionOption } from '@/domain/addressSuggestions'
+import type { AddressSuggestionOption } from '@/domain/address'
 import type { ComposeIntent } from '@/domain/composeIntent'
 
 import {

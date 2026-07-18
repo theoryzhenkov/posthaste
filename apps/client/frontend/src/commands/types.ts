@@ -9,7 +9,7 @@
  */
 import type { LucideIcon } from 'lucide-react'
 import type { Mailbox, MessageSummary, SourceMessageRef } from '../data/transport/api/index'
-import type { PaneId } from '../components/keyboard/dispatch'
+import type { PaneId } from '../domain/vocabulary'
 import type { useMailClientHandlers } from '../app/mail/useMailClientHandlers'
 import type { EmailActions } from '../data/hooks/useEmailActions'
 

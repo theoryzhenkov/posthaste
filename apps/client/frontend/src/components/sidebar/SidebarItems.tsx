@@ -18,7 +18,7 @@ import {
   mailboxRoleAccent,
   renderMailboxRoleIcon,
   renderSmartMailboxIcon,
-} from '@/domain/mailboxRoles'
+} from '@/domain/role'
 
 import {
   ContextMenu,

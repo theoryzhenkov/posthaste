@@ -64,4 +64,76 @@ export const KNOWN_SYSTEM_KEYWORDS = [
 ] as const satisfies readonly SystemKeyword[]
 
 // Event topics come from the generated protocol types in `src/gen/` (ts-rs
-// output of the models crate, e.g. `DomainEventPayload`), not from this file.
+// output of the models crate: `DomainEventKind`, the payload shapes), not
+// from this file. Below are the CLIENT-ONLY vocabularies: closed string sets
+// minted on this side of the wire, each owned here once.
+
+/** Lifecycle of one mirror entry, as rendered by the data hooks. */
+const QUERY_STATUS = {
+  Loading: 'loading',
+  Ready: 'ready',
+  Stale: 'stale',
+  Error: 'error',
+} as const
+
+export type QueryStatus = (typeof QUERY_STATUS)[keyof typeof QUERY_STATUS]
+
+/** Stream/connection state the data facade exposes to the UI. */
+const CONNECTION_STATUS = {
+  Connected: 'connected',
+  Reconnecting: 'reconnecting',
+  Stale: 'stale',
+} as const
+
+export type ConnectionStatus =
+  (typeof CONNECTION_STATUS)[keyof typeof CONNECTION_STATUS]
+
+/** Severity of an entry in the app-wide notification center. */
+const NOTIFICATION_SEVERITY = {
+  Error: 'error',
+  Warning: 'warning',
+  Info: 'info',
+} as const
+
+export type NotificationSeverity =
+  (typeof NOTIFICATION_SEVERITY)[keyof typeof NOTIFICATION_SEVERITY]
+
+/** Severity of an account's derived health notice (`ok` = no notice). */
+const ACCOUNT_HEALTH_SEVERITY = {
+  Ok: 'ok',
+  Info: 'info',
+  Warn: 'warn',
+  Error: 'error',
+} as const
+
+export type AccountHealthSeverity =
+  (typeof ACCOUNT_HEALTH_SEVERITY)[keyof typeof ACCOUNT_HEALTH_SEVERITY]
+
+/** How the message list groups rows. */
+const MESSAGE_LIST_VIEW_MODE = {
+  Messages: 'messages',
+  Conversations: 'conversations',
+} as const
+
+export type MessageListViewMode =
+  (typeof MESSAGE_LIST_VIEW_MODE)[keyof typeof MESSAGE_LIST_VIEW_MODE]
+
+/** The keyboard-navigable regions of the mail shell. The detail pane is NOT
+ *  focusable — it only displays the list's selected message, and `j`/`k` in
+ *  the list drive it. */
+export const PANE_ID = {
+  Sidebar: 'sidebar',
+  List: 'list',
+} as const
+
+export type PaneId = (typeof PANE_ID)[keyof typeof PANE_ID]
+
+/** Client-side sort direction for the message-list columns (the wire carries
+ *  a `descending` boolean; this is the UI's two-way vocabulary). */
+const SORT_DIRECTION = {
+  Asc: 'asc',
+  Desc: 'desc',
+} as const
+
+export type SortDirection =
+  (typeof SORT_DIRECTION)[keyof typeof SORT_DIRECTION]

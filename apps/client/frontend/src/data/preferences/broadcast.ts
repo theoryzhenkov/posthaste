@@ -1,7 +1,7 @@
 import {
-  isThemeMode,
-  isUiDensity,
   normalizeGlassThemeParameters,
+  parseThemeMode,
+  parseUiDensity,
 } from '@/lib/design'
 import type { DesignThemePreferences } from '@/lib/design/theme/themeSettings'
 
@@ -23,11 +23,12 @@ function parseAppearancePreferences(
     return null
   }
   const { density, glassTheme, light, dark, mode, theme } = value
+  const parsedDensity =
+    typeof density === 'string' ? parseUiDensity(density) : null
+  const parsedMode = typeof mode === 'string' ? parseThemeMode(mode) : null
   if (
-    typeof density !== 'string' ||
-    !isUiDensity(density) ||
-    typeof mode !== 'string' ||
-    !isThemeMode(mode) ||
+    !parsedDensity ||
+    !parsedMode ||
     typeof theme !== 'string' ||
     !isRecord(light) ||
     !isRecord(dark)
@@ -35,11 +36,11 @@ function parseAppearancePreferences(
     return null
   }
   return normalizeAppearancePreferences({
-    density,
+    density: parsedDensity,
     glassTheme: normalizeGlassThemeParameters(glassTheme),
     light: light as unknown as DesignThemePreferences['light'],
     dark: dark as unknown as DesignThemePreferences['dark'],
-    mode,
+    mode: parsedMode,
     theme,
   })
 }

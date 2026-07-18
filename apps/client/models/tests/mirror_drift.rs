@@ -130,6 +130,53 @@ fn structs_decode_strictly_from_domain_serialization() {
             undo_window_seconds: Some(30),
         },
     );
+    assert_mirrors::<mirror::MessageUpdatedPayload>(
+        "MessageUpdatedPayload",
+        &domain::MessageUpdatedPayload {
+            message_id: "m1".into(),
+            source_thread_id: "t1".into(),
+            conversation_id: "c1".into(),
+            created: true,
+            changes: domain::MessageChangeFlags {
+                keywords: true,
+                mailboxes: true,
+                arrived: true,
+            },
+            keywords: vec!["$seen".into()],
+            mailbox_ids: vec!["inbox".into()],
+            arrived_mailbox_ids: vec!["inbox".into()],
+            projection: Some(message_summary()),
+        },
+    );
+    assert_mirrors::<mirror::OperationSettlement>(
+        "OperationSettlement",
+        &domain::OperationSettlement {
+            id: "op1".into(),
+            outcome: domain::OperationOutcome::Applied,
+            assigned_entity_id: Some("m2".into()),
+            error: Some("boom".into()),
+            send_filing: Some(domain::SendFiling::PendingFiling),
+        },
+    );
+    assert_mirrors::<mirror::SyncCompletedPayload>(
+        "SyncCompletedPayload",
+        &domain::SyncCompletedPayload {
+            mailbox_count: 2,
+            message_count: 10,
+            deleted_imap_location_count: 1,
+            deleted_message_count: 1,
+            automation_event_count: 3,
+            trigger: domain::SyncTrigger::Poll,
+            mode: domain::SyncMode::Incremental,
+            resources: vec![domain::SyncResourceRef {
+                kind: "sync".into(),
+                operation: "completed".into(),
+                account_id: "a1".into(),
+                mode: Some(domain::SyncMode::Incremental),
+            }],
+            post_commit_errors: vec!["automation_flush_failed".into()],
+        },
+    );
 }
 
 /// A mail-query rule exercising groups, conditions, and every value shape.

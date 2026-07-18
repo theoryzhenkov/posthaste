@@ -217,3 +217,46 @@ pub struct ThreadView {
     pub id: ThreadId,
     pub messages: Vec<MessageSummary>,
 }
+
+/// Which dimensions of a message a `message.updated` diff event touched.
+///
+/// @spec docs/L1-sync#event-propagation
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageChangeFlags {
+    pub keywords: bool,
+    pub mailboxes: bool,
+    /// The message gained membership in at least one mailbox it was not in
+    /// before. With [`MessageUpdatedPayload::created`] it distinguishes a NEW
+    /// arrival from a move of an existing message.
+    pub arrived: bool,
+}
+
+/// Payload of the sync-projection `message.updated` diff event — the shape
+/// the store emits when applying provider state (the only `message.updated`
+/// emitter that states `created`). Other `message.updated` emitters (command
+/// echoes, settle reverts, deletions) carry their own narrower shapes and
+/// never claim an arrival.
+///
+/// @spec docs/L1-sync#event-propagation
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageUpdatedPayload {
+    pub message_id: MessageId,
+    pub source_thread_id: ThreadId,
+    pub conversation_id: ConversationId,
+    /// The message did not exist in the store before this apply.
+    pub created: bool,
+    pub changes: MessageChangeFlags,
+    pub keywords: Vec<String>,
+    pub mailbox_ids: Vec<MailboxId>,
+    /// The mailboxes the message just gained membership in.
+    pub arrived_mailbox_ids: Vec<MailboxId>,
+    /// The full list-row projection — enough for a reactive store to
+    /// materialize a never-held message without a promotion round-trip
+    /// (`firehose-carries-rows`). Byte-identical to a served row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<MessageSummary>,
+}

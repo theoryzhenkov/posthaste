@@ -12,4 +12,4 @@ export interface OkResponse {
   ok: boolean
 }
 
-export type SyncMode = 'incremental' | 'fullMetadata'
+export type { SyncMode } from '@/gen'

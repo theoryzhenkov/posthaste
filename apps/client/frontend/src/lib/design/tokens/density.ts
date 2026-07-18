@@ -47,6 +47,7 @@ export function messageRowHeight(density: UiDensity): number {
   return uiDensitySettings[density].messageRowHeight
 }
 
-export function isUiDensity(value: string): value is UiDensity {
-  return uiDensities.includes(value as UiDensity)
+/** Parse a stored/broadcast value into a UI density, or `null` (R3). */
+export function parseUiDensity(value: string): UiDensity | null {
+  return uiDensities.includes(value as UiDensity) ? (value as UiDensity) : null
 }

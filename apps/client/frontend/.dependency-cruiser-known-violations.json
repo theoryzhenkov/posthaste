@@ -227,21 +227,6 @@
   },
   {
     "type": "dependency",
-    "from": "src/commands/types.ts",
-    "to": "src/components/keyboard/dispatch.ts",
-    "unresolvedTo": "../components/keyboard/dispatch",
-    "dependencyTypes": [
-      "local",
-      "type-only",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "r11-commands-boundary"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "src/components/compose/hooks/useComposeWindowElevation.ts",
     "to": "src/desktop/runtime.ts",
     "unresolvedTo": "@/desktop/runtime",

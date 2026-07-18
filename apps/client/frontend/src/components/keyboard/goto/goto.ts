@@ -10,34 +10,33 @@
  *
  */
 import type { MailViewSelection } from '@/data/models/selection'
+import {
+  ASSIGNABLE_MAILBOX_ROLES,
+  MAILBOX_ROLES,
+} from '@/domain/vocabulary'
 
-/** Mailbox roles reachable via a goto command. */
-export type GotoRole =
-  | 'inbox'
-  | 'archive'
-  | 'trash'
-  | 'drafts'
-  | 'sent'
-  | 'junk'
+/** Mailbox roles reachable via a goto command: the user-assignable provider
+ *  roles (everything but the system-managed snooze). */
+export type GotoRole = (typeof ASSIGNABLE_MAILBOX_ROLES)[number]
 
 /** Pending state of the goto prefix machine. */
 export type GotoPrefix = 'g' | 'gq' | null
 
 /** Roles addressable by the top-level `g` prefix (context-aware). */
 const G_ROLE: Record<string, GotoRole> = {
-  i: 'inbox',
-  a: 'archive',
-  t: 'trash',
+  i: MAILBOX_ROLES.Inbox,
+  a: MAILBOX_ROLES.Archive,
+  t: MAILBOX_ROLES.Trash,
 }
 
 /** Roles addressable by the `gq` prefix (always a smart mailbox). */
 const GQ_ROLE: Record<string, GotoRole> = {
-  i: 'inbox',
-  a: 'archive',
-  t: 'trash',
-  d: 'drafts',
-  s: 'sent',
-  j: 'junk',
+  i: MAILBOX_ROLES.Inbox,
+  a: MAILBOX_ROLES.Archive,
+  t: MAILBOX_ROLES.Trash,
+  d: MAILBOX_ROLES.Drafts,
+  s: MAILBOX_ROLES.Sent,
+  j: MAILBOX_ROLES.Junk,
 }
 
 export type GotoPrefixStep =

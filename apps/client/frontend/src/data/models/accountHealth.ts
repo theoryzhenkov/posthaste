@@ -12,6 +12,7 @@
  */
 import { MailApiError } from '@/data/transport/client'
 import type { AccountRow, AccountStatus } from '@/gen'
+import type { AccountHealthSeverity } from '@/domain/vocabulary'
 
 export type AccountErrorCategory =
   | 'network'
@@ -20,9 +21,6 @@ export type AccountErrorCategory =
   | 'config'
   | 'storage'
   | 'internal'
-
-/** Severity tone used to pick colors/icons for the health indicator. */
-export type AccountHealthSeverity = 'ok' | 'info' | 'warn' | 'error'
 
 /** The recovery affordance to render for an unhealthy account. */
 export type AccountRecoveryAction = 'retry' | 'reconnect' | 'edit' | null

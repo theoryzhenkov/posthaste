@@ -1,5 +1,6 @@
 /**
- * Mailbox role icons and name-to-role mapping for sidebar and list rendering.
+ * Mailbox-role parsing (the R3 boundary for server-provided role strings)
+ * plus role icons and accents for sidebar and list rendering.
  */
 import {
   Archive,
@@ -47,8 +48,16 @@ const SMART_MAILBOX_ACCENTS = {
   muted: 'oklch(0.60 0.008 70)',
 } as const
 
-/** Type guard for server-provided role strings. */
-export function isKnownMailboxRole(
+/** Parse a server-provided role string into the known-role vocabulary, or
+ *  `null` for absent/unknown roles (rendered with generic fallbacks). */
+export function parseMailboxRole(
+  role: string | null | undefined,
+): KnownMailboxRole | null {
+  return isKnownMailboxRole(role) ? role : null
+}
+
+/** Internal guard behind {@link parseMailboxRole}; not exported (R3). */
+function isKnownMailboxRole(
   role: string | null | undefined,
 ): role is KnownMailboxRole {
   return Boolean(role && role in ROLE_ICON_MAP)
@@ -124,7 +133,7 @@ export function renderMailboxRoleIcon(
 
 /** Choose a fallback icon for smart mailboxes: All Mail gets the Mail icon,
  *  keyed off the stable `defaultKey` (rename-safe), not the display name. */
-export function smartMailboxFallbackIcon(
+function smartMailboxFallbackIcon(
   defaultKey: string | null,
 ): LucideIcon {
   return defaultKey === ALL_MAIL_DEFAULT_KEY ? Mail : Folder

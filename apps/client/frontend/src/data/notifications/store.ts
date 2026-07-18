@@ -8,7 +8,7 @@
  */
 import { useSyncExternalStore } from 'react'
 
-export type NotificationSeverity = 'error' | 'warning' | 'info'
+import type { NotificationSeverity } from '@/domain/vocabulary'
 
 export interface NotificationAction {
   label: string
