@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, integrated-model]
 
 permissions:
   contents: read
@@ -139,6 +139,47 @@ jobs:
       - run: bun --cwd=legacy/web run check
       - run: bun --cwd=legacy/web run test
       - run: bun --cwd=legacy/web run build
+
+  # The integrated app's frontend (apps/client/frontend): typecheck + tests +
+  # production build. Its backend/model crates are covered by the `rust` job
+  # (workspace tests include the generated-TS freshness test); the live
+  # end-to-end proof is `integrated-live-gate`.
+  integrated-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - run: bun --cwd=apps/client/frontend run check
+      - run: bun --cwd=apps/client/frontend test
+      - run: bun --cwd=apps/client/frontend run build
+
+  # HARD live gate for the integrated backend: the full loop (account -> sync
+  # -> inject -> converge -> command -> counts) plus the new-surfaces scenario
+  # against a real pinned Stalwart — same deterministic provisioning as
+  # send-path-gate. Required, no continue-on-error.
+  integrated-live-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-rust
+          cache-on-failure: true
+      - name: Provision pinned Stalwart (server + CLI)
+        run: bash tools/dev/stalwart/provision-ci.sh
+      - name: Integrated-app live gate
+        env:
+          POSTHASTE_STALWART_INTEGRATION: "1"
+        run: cargo test -p posthaste-client-backend --test live_stalwart
 
   site:
     runs-on: ubuntu-latest
