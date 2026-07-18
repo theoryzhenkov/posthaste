@@ -13,7 +13,7 @@ import type { MessageSummary } from '@/gen'
 import type {
   CommandPaletteEntry,
   SearchCandidate,
-} from '@/components/palette/search/types'
+} from '@/app/input/palette/search/types'
 import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
 import type { useMailClientHandlers } from '@/app/mail/useMailClientHandlers'
 import type { EmailActions } from '@/data/hooks/useEmailActions'
@@ -31,8 +31,8 @@ import {
 } from './model'
 import { useCommandPaletteSearch } from './useCommandPaletteSearch'
 import { usePaletteActions } from './usePaletteActions'
-import { FloatingPanel } from '../floating/FloatingPanel'
-import { Command, CommandInput } from '../ui/overlay/command'
+import { FloatingPanel } from '@/components/floating/FloatingPanel'
+import { Command, CommandInput } from '@/components/ui/overlay/command'
 
 interface CommandPaletteProps {
   /** Domain mutations — the `email` half of the palette's {@link ActionServices}. */

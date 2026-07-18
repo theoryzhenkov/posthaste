@@ -10,7 +10,7 @@ import {
   type GlassBloomId,
 } from '@/lib/design'
 import { useDesignTheme } from '@/lib/design/useDesignTheme'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 import { SettingsSection } from '../panel/shared'
 import { SliderRow } from './SliderRow'

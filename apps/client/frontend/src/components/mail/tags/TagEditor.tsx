@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import type { TagSummary } from '@/data/transport/api'
 import type { MessageSummary } from '@/gen'
 import type { EmailActions } from '@/data/hooks/useEmailActions'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 import { FloatingPanel } from '../../floating/FloatingPanel'
 import { TagChip } from './TagChip'

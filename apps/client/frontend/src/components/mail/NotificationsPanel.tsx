@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { AlertCircle, AlertTriangle, Info, Loader2, X } from 'lucide-react'
 
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import type { NotificationSeverity } from '@/domain/vocabulary'
 import {
   clearNotifications,

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, Clock3, Loader2, Paperclip, Send } from 'lucide-react'
 import type { RefObject } from 'react'
 
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 import { Button } from '../../ui/form/button'
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/overlay/popover'

@@ -1,25 +1,17 @@
 /**
- * Message action definitions.
+ * Mail-state command definitions: read/flag toggles, archive/move/trash/delete,
+ * tagging, snoozing, unsubscribe. Every entry delegates to `services.email`
+ * (the domain mutations owning optimistic folds, toasts, and undo) — never
+ * reimplementing.
  *
- * Pure, role-gated context-menu, palette, header, and keyboard actions
- * expressed as {@link ActionDefinition}s that delegate to `services.email`
- * (never reimplementing the domain logic).
- *
- * Registration order is meaningful: the resolver uses it as the within-section
- * tiebreak, so it mirrors the push order of the two `open` entries, then
- * `toggle-read`/`toggle-flag`, then `archive`, `move-to-inbox`, and the
+ * Registration order is the resolver's within-section tiebreak: it mirrors the
+ * historical order — `toggle-read`/`toggle-flag`, then `archive`,
+ * `move-to-inbox`, the parameterized `move-to-mailbox`, and the
  * mutually-exclusive trash/delete/discard trio.
- *
- * The two row-scoped `open` / `view-conversation` entries delegate to
- * `services.row` (bound per row by `MessageRow`) with an `services.app`
- * fallback so the palette can surface them too. The `detail-header` surface
- * entries delegate to `services.detail` (bound by `MessageHeader`) or
- * `services.app`, and the draft-vs-message branch is availability-driven (a
- * draft's header resolves to edit/discard only, via {@link notDraftOnHeader}).
  *
  * PARAMETERIZED actions: `move-to-mailbox` (options = the account's mailboxes
  * from `services.mailboxes`, minus the message's current ones and non-movable
- * roles) and `snooze` (options = the header's snooze presets).
+ * roles) and `snooze` (options = the snooze presets, `domain/time`).
  */
 import {
   Archive,
@@ -27,22 +19,13 @@ import {
   Eye,
   EyeOff,
   FolderInput,
-  Forward,
   Inbox,
-  MailOpen,
   MailX,
-  Maximize2,
-  MessagesSquare,
-  Pencil,
-  Reply,
-  ReplyAll,
   Star,
   Tag,
   Trash2,
 } from 'lucide-react'
-import type { ListUnsubscribe, MessageDetail } from '../../data/transport/api/index'
-import { snoozePresets } from '../../components/mail/detail/snoozePresets'
-import { conversationViewQuery } from '../../domain/searchQuery'
+import { snoozePresets } from '../../domain/time'
 import { MAILBOX_ROLES } from '../../domain/vocabulary'
 import { registerActions } from '../registry'
 import type {
@@ -50,59 +33,16 @@ import type {
   ActionDefinition,
   ActionParamOption,
   ActionServices,
-  MessageTarget,
 } from '../types'
-
-/** Roles from which a message is "removed" and can be restored to the inbox
- *  (mirrors `contextualActions.isRestorableRole`). */
-function isRestorableRole(role: string | null): boolean {
-  return (
-    role === MAILBOX_ROLES.Trash ||
-    role === MAILBOX_ROLES.Archive ||
-    role === MAILBOX_ROLES.Junk
-  )
-}
-
-/** The subject a single-target action operates on. `?? undefined` keeps the
- *  accessors total for the empty case. */
-function primaryTarget(ctx: ActionContext): MessageTarget | undefined {
-  return ctx.targets[0]
-}
-
-/** The target's parsed List-Unsubscribe data. Only the DETAIL DTO carries it
- *  (`listUnsubscribe`), so a plain list-row summary yields `undefined` — which
- *  is the availability gate working as designed. */
-function unsubscribeTargets(ctx: ActionContext): ListUnsubscribe | undefined {
-  const summary = primaryTarget(ctx)?.summary as
-    | Partial<Pick<MessageDetail, 'listUnsubscribe'>>
-    | undefined
-  return summary?.listUnsubscribe ?? undefined
-}
-
-/** The subject passed to keyword-toggle handlers. Prefer the summary (carries
- *  the keyword state the handler derives from); fall back to a `MailSelection`
- *  built from the ref so the handler's cache path resolves state. */
-function toggleSubject(t: MessageTarget) {
-  return t.summary ?? { ...t.ref, conversationId: t.conversationId ?? '' }
-}
-
-/** Base enablement shared by every message action: at least one target. In the
- *  context menu a target always exists, so these stay enabled — matching today.
- *  It exists so the palette (later slice) can render "select a message first". */
-function requireTarget(ctx: ActionContext) {
-  return ctx.targets.length > 0 || { reason: 'Select a message first' }
-}
-
-function hasDraftTarget(ctx: ActionContext): boolean {
-  return ctx.targets.some((t) => t.isDraft)
-}
-
-/** The detail header shows a draft-appropriate action set (edit + discard,
- *  never reply/move/flag). Everywhere else the action keeps its own gating —
- *  the context menu / palette still offer e.g. flagging a draft. */
-function notDraftOnHeader(ctx: ActionContext): boolean {
-  return !(ctx.surface === 'detail-header' && hasDraftTarget(ctx))
-}
+import {
+  hasDraftTarget,
+  isRestorableRole,
+  notDraftOnHeader,
+  primaryTarget,
+  requireTarget,
+  toggleSubject,
+  unsubscribeTargets,
+} from './shared'
 
 /** Mailbox roles a message can NEVER be moved into via "Move to…": drafts/sent
  *  are provider-managed, snooze is scheduler-owned, and trashing has its own
@@ -138,71 +78,7 @@ function moveTargetMailboxes(
     }))
 }
 
-export const messageActions: readonly ActionDefinition[] = [
-  {
-    id: 'message.open',
-    section: 'open',
-    title: 'Open',
-    icon: MailOpen,
-    keywords: 'open message',
-    surfaces: ['context-menu', 'palette'],
-    // Row-scoped in the menu (`services.row`, bound by MessageRow); the palette
-    // falls back to the app selection handler so "Open" works on the focused
-    // message too. Absent both bindings (e.g. the email-only parity harness)
-    // the entry stays hidden.
-    isAvailable: (_ctx, s) => Boolean(s.row ?? s.app),
-    isEnabled: requireTarget,
-    run: (ctx, s) => {
-      const summary = primaryTarget(ctx)?.summary
-      if (!summary) return
-      if (s.row) {
-        s.row.open(summary)
-        return
-      }
-      s.app?.handleSelectMessage(summary)
-    },
-  },
-  {
-    id: 'message.view-conversation',
-    section: 'open',
-    title: 'View conversation',
-    icon: MessagesSquare,
-    keywords: 'conversation thread view show',
-    // Palette too (owner gap): falls back to the app search handler with the
-    // same conversation query the `gc` keyboard goto applies.
-    surfaces: ['context-menu', 'palette'],
-    isAvailable: (_ctx, s) => Boolean(s.row ?? s.app),
-    isEnabled: requireTarget,
-    run: (ctx, s) => {
-      const target = primaryTarget(ctx)
-      if (!target) return
-      if (s.row && target.summary) {
-        s.row.viewConversation(target.summary)
-        return
-      }
-      if (target.conversationId) {
-        s.app?.handleSearch(conversationViewQuery(target.conversationId))
-      }
-    },
-  },
-  {
-    // "Open message" in its own window — the header's Maximize affordance,
-    // also reachable from the palette. The keyboard `o` stays native.
-    id: 'message.open-focused',
-    section: 'open',
-    title: 'Open message',
-    icon: Maximize2,
-    keywords: 'open message window focus maximize',
-    surfaces: ['palette', 'detail-header'],
-    isAvailable: (ctx, s) =>
-      notDraftOnHeader(ctx) &&
-      (ctx.surface === 'detail-header'
-        ? Boolean(s.detail?.openFocusedMessage)
-        : Boolean(s.app)),
-    isEnabled: requireTarget,
-    run: (_ctx, s) =>
-      (s.detail?.openFocusedMessage ?? s.app?.handleOpenFocusedMessage)?.(),
-  },
+const mailActions: readonly ActionDefinition[] = [
   {
     id: 'message.toggle-read',
     section: 'state',
@@ -215,7 +91,7 @@ export const messageActions: readonly ActionDefinition[] = [
     shortcut: { key: 'u' },
     isEnabled: requireTarget,
     run: (ctx, s) =>
-      ctx.targets.forEach((t) => s.email.toggleRead(toggleSubject(t))),
+      ctx.targets.forEach((t) => s.email?.toggleRead(toggleSubject(t))),
   },
   {
     id: 'message.toggle-flag',
@@ -225,67 +101,19 @@ export const messageActions: readonly ActionDefinition[] = [
     // Star — the single canonical icon for flag/unflag.
     icon: Star,
     keywords: 'flag unflag star',
-    surfaces: ['context-menu', 'palette', 'detail-header'],
-    shortcut: { key: 'l', mod: true, shift: true },
+    surfaces: ['context-menu', 'palette', 'detail-header', 'keyboard'],
+    // Modifier-chord tier: ⌘⇧L fires even while typing or above an overlay.
+    shortcut: {
+      key: 'l',
+      mod: true,
+      shift: true,
+      inEditable: true,
+      aboveOverlay: true,
+    },
     isAvailable: notDraftOnHeader,
     isEnabled: requireTarget,
     run: (ctx, s) =>
-      ctx.targets.forEach((t) => s.email.toggleFlag(toggleSubject(t))),
-  },
-  {
-    // Reply: delegates to the header binding when present (works in the focused
-    // message window too), else the app handler (palette). The ⌘R chord stays
-    // native in dispatch.ts.
-    id: 'message.reply',
-    section: 'compose-reply',
-    title: 'Reply',
-    icon: Reply,
-    keywords: 'reply respond answer',
-    surfaces: ['palette', 'detail-header'],
-    shortcut: { key: 'r', mod: true },
-    // Never on a draft (you edit a draft, not reply to it).
-    isAvailable: (ctx) => !hasDraftTarget(ctx),
-    isEnabled: requireTarget,
-    run: (_ctx, s) => (s.detail?.reply ?? s.app?.handleReply)?.(),
-  },
-  {
-    id: 'message.reply-all',
-    section: 'compose-reply',
-    title: 'Reply All',
-    icon: ReplyAll,
-    keywords: 'reply all respond everyone',
-    surfaces: ['palette', 'detail-header'],
-    shortcut: { key: 'r', mod: true, shift: true },
-    isAvailable: (ctx) => !hasDraftTarget(ctx),
-    isEnabled: requireTarget,
-    run: (_ctx, s) => (s.detail?.replyAll ?? s.app?.handleReplyAll)?.(),
-  },
-  {
-    id: 'message.forward',
-    section: 'compose-reply',
-    title: 'Forward',
-    icon: Forward,
-    keywords: 'forward send along',
-    surfaces: ['palette', 'detail-header'],
-    isAvailable: (ctx) => !hasDraftTarget(ctx),
-    isEnabled: requireTarget,
-    run: (_ctx, s) => (s.detail?.forward ?? s.app?.handleForward)?.(),
-  },
-  {
-    // "Edit draft" — availability-driven (every target must be a draft), also
-    // reachable from the palette.
-    id: 'message.edit-draft',
-    section: 'compose-reply',
-    title: 'Edit draft',
-    icon: Pencil,
-    keywords: 'edit draft compose continue',
-    surfaces: ['palette', 'detail-header'],
-    isAvailable: (ctx, s) =>
-      ctx.targets.length > 0 &&
-      ctx.targets.every((t) => t.isDraft) &&
-      Boolean(s.detail?.editDraft ?? s.app),
-    isEnabled: requireTarget,
-    run: (_ctx, s) => (s.detail?.editDraft ?? s.app?.handleEditDraft)?.(),
+      ctx.targets.forEach((t) => s.email?.toggleFlag(toggleSubject(t))),
   },
   {
     id: 'message.archive',
@@ -300,7 +128,7 @@ export const messageActions: readonly ActionDefinition[] = [
       ctx.viewRole !== MAILBOX_ROLES.Trash &&
       notDraftOnHeader(ctx),
     isEnabled: requireTarget,
-    run: (ctx, s) => ctx.targets.forEach((t) => s.email.archive(t.ref)),
+    run: (ctx, s) => ctx.targets.forEach((t) => s.email?.archive(t.ref)),
   },
   {
     id: 'message.move-to-inbox',
@@ -312,7 +140,7 @@ export const messageActions: readonly ActionDefinition[] = [
     isAvailable: (ctx) =>
       isRestorableRole(ctx.viewRole) && notDraftOnHeader(ctx),
     isEnabled: requireTarget,
-    run: (ctx, s) => ctx.targets.forEach((t) => s.email.moveToInbox(t.ref)),
+    run: (ctx, s) => ctx.targets.forEach((t) => s.email?.moveToInbox(t.ref)),
   },
   {
     // PARAMETERIZED: "Move to ▸ / Move to…" — the user picks ANY target mailbox
@@ -335,7 +163,7 @@ export const messageActions: readonly ActionDefinition[] = [
     run: (ctx, s, param) => {
       if (!param) return
       ctx.targets.forEach((t) =>
-        s.email.moveToMailbox(t.ref, param.id, param.label),
+        s.email?.moveToMailbox(t.ref, param.id, param.label),
       )
     },
   },
@@ -356,7 +184,7 @@ export const messageActions: readonly ActionDefinition[] = [
     isAvailable: (ctx) =>
       ctx.viewRole !== MAILBOX_ROLES.Trash && !ctx.targets.some((t) => t.isDraft),
     isEnabled: requireTarget,
-    run: (ctx, s) => ctx.targets.forEach((t) => s.email.trash(t.ref)),
+    run: (ctx, s) => ctx.targets.forEach((t) => s.email?.trash(t.ref)),
   },
   {
     id: 'message.delete-permanently',
@@ -382,7 +210,7 @@ export const messageActions: readonly ActionDefinition[] = [
       ctx.viewRole === MAILBOX_ROLES.Trash && !ctx.targets.some((t) => t.isDraft),
     isEnabled: requireTarget,
     run: (ctx, s) =>
-      ctx.targets.forEach((t) => s.email.deletePermanently(t.ref)),
+      ctx.targets.forEach((t) => s.email?.deletePermanently(t.ref)),
   },
   {
     id: 'message.discard-draft',
@@ -391,20 +219,23 @@ export const messageActions: readonly ActionDefinition[] = [
     icon: Trash2,
     destructive: true,
     keywords: 'discard draft delete',
-    surfaces: ['context-menu', 'palette', 'detail-header'],
+    surfaces: ['context-menu', 'palette', 'detail-header', 'keyboard'],
+    // Third claimant of the `#`/Backspace chord: on a DRAFT the key discards
+    // (hard delete via the draft-delete op) — availability keeps the trio
+    // (trash / delete-permanently / discard) mutually exclusive.
+    shortcut: [{ key: '#' }, { key: 'backspace' }],
     // Every target must be a draft (hard delete via the draft-delete op).
     isAvailable: (ctx) =>
       ctx.targets.length > 0 && ctx.targets.every((t) => t.isDraft),
     isEnabled: requireTarget,
     run: (ctx, s) =>
       ctx.targets.forEach((t) =>
-        s.email.discardDraft({ ...t.ref, draftId: t.draftId }),
+        s.email?.discardDraft({ ...t.ref, draftId: t.draftId }),
       ),
   },
   {
-    // "Tag" command (folds the old dedicated tagActions provider into the
-    // registry): opens the tag editor for the focused message. The app handler
-    // already no-ops without a selection; `requireTarget` renders it
+    // "Tag" command: opens the tag editor for the focused message. The app
+    // handler already no-ops without a selection; `requireTarget` renders it
     // disabled-with-reason in the palette instead of silently vanishing.
     id: 'message.tag',
     section: 'organize',
@@ -421,9 +252,8 @@ export const messageActions: readonly ActionDefinition[] = [
       (s.detail?.openTagEditor ?? s.app?.handleOpenTagEditor)?.(),
   },
   {
-    // PARAMETERIZED: Snooze with the header's preset options — a REAL command
-    // now (it delegates to `email.snooze`, the same mutation the old header
-    // popover used) instead of the old palette placeholder toast.
+    // PARAMETERIZED: Snooze with the preset options (`domain/time`), delegating
+    // to `email.snooze` — the same mutation the header popover used.
     id: 'message.snooze',
     section: 'organize',
     title: 'Snooze…',
@@ -441,7 +271,7 @@ export const messageActions: readonly ActionDefinition[] = [
       if (!param) return
       const until = Number(param.id)
       if (!Number.isFinite(until)) return
-      ctx.targets.forEach((t) => s.email.snooze(t.ref, until))
+      ctx.targets.forEach((t) => s.email?.snooze(t.ref, until))
     },
   },
   {
@@ -500,4 +330,4 @@ export const messageActions: readonly ActionDefinition[] = [
   },
 ]
 
-registerActions(messageActions)
+registerActions(mailActions)

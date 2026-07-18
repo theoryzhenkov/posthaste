@@ -1,58 +1,40 @@
+/**
+ * Wiring between the compose form machine (`form/machine.ts` — the reducer
+ * that owns form truth) and the composer's queries/effects. This hook derives
+ * named events and dispatches them; the only state it keeps itself is UI
+ * ephemera (From menu/focus, the in-flight attachment read) per the charter.
+ */
 import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
-  type SetStateAction,
 } from 'react'
 
-import type { Identity, Recipient, ReplyContext } from '@/data/transport/api'
+import type { Identity, ReplyContext } from '@/data/transport/api'
 import type { ComposeIntent, MailtoSeed } from '@/domain/composeIntent'
 
 import type { MarkdownComposerEditorHandle } from '../editor/MarkdownComposerEditor'
 import {
-  EMPTY_FORM,
-  appendSignature,
   composeAttachmentFromFile,
+  deriveReplySeed,
   formatRecipient,
   formatRecipients,
-  formatReplyAttribution,
-  insertSignatureAboveQuote,
-  type ComposeAttachment,
+  initialComposeForm,
   type ComposeForm,
+  type ComposeAttachment,
+  type DraftSeed,
 } from '../form/model'
-import { validateAttachmentLimits, withPastedFileName } from '../attachments/attachments'
-
-/**
- * Derive the reply-all recipient set: original From + To (minus self) go to
- * `to`, original Cc (minus self) goes to `cc`. Recipients are de-duplicated by
- * email (case-insensitive). Only the primary identity address is excluded;
- * alias exclusion is a follow-up.
- */
-function replyAllRecipients(
-  replyTo: Recipient[],
-  originalTo: Recipient[],
-  cc: Recipient[],
-  selfEmail: string | undefined,
-): { to: Recipient[]; cc: Recipient[] } {
-  const self = selfEmail?.toLowerCase()
-  const dedupedExcludingSelf = (recipients: Recipient[]): Recipient[] => {
-    const seen = new Set<string>()
-    const out: Recipient[] = []
-    for (const r of recipients) {
-      const key = r.email.toLowerCase()
-      if (seen.has(key) || (self && key === self)) continue
-      seen.add(key)
-      out.push(r)
-    }
-    return out
-  }
-  return {
-    to: dedupedExcludingSelf([...replyTo, ...originalTo]),
-    cc: dedupedExcludingSelf(cc),
-  }
-}
+import {
+  composeView,
+  initialComposeMachineState,
+  reduceCompose,
+  type ComposeEvent,
+  type ComposeSession,
+} from '../form/machine'
+import { withPastedFileName } from '../attachments/attachments'
 
 export function useComposeFormState({
   composeKey,
@@ -66,16 +48,7 @@ export function useComposeFormState({
   signature,
 }: {
   composeKey: string
-  draftSeed:
-    | {
-        from: string
-        to: string
-        cc: string
-        bcc: string
-        subject: string
-        body: string
-      }
-    | undefined
+  draftSeed: DraftSeed | undefined
   forwardAttachments: ComposeAttachment[]
   identity: Identity | undefined
   intentKind: ComposeIntent['kind']
@@ -87,36 +60,10 @@ export function useComposeFormState({
 }) {
   const bodyRef = useRef<MarkdownComposerEditorHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const initialForm = useMemo<ComposeForm>(() => {
-    if (intentKind === 'draft') {
-      return draftSeed
-        ? {
-            from: draftSeed.from,
-            to: draftSeed.to,
-            cc: draftSeed.cc,
-            bcc: draftSeed.bcc,
-            subject: draftSeed.subject,
-            body: draftSeed.body,
-            attachments: [],
-          }
-        : EMPTY_FORM
-    }
-    // A mailto compose is a `new` message whose fields are already known —
-    // seed them synchronously (nothing streams in later).
-    if (intentKind === 'mailto' && mailtoSeed) {
-      return {
-        ...EMPTY_FORM,
-        to: mailtoSeed.to,
-        subject: mailtoSeed.subject,
-        body: mailtoSeed.body,
-      }
-    }
-    // FIX2 — a reply/forward starts EMPTY and streams its quoted body +
-    // recipients + subject in via the seed effect below (keyed to a STABLE
-    // reset key), so the editor is usable the instant it opens and a late
-    // `replyContext` never resets the form out from under early typing.
-    return EMPTY_FORM
-  }, [draftSeed, intentKind, mailtoSeed])
+  const initialForm = useMemo<ComposeForm>(
+    () => initialComposeForm({ draftSeed, intentKind, mailtoSeed }),
+    [draftSeed, intentKind, mailtoSeed],
+  )
   // Only a DRAFT resume flips loading→ready (its loaded content REPLACES the
   // empty form). A reply/forward keeps a stable reset key: its quote streams in
   // via an effect, so the form must not reset (which would clobber early edits).
@@ -124,56 +71,49 @@ export function useComposeFormState({
     intentKind === 'draft'
       ? `${composeKey}:${draftSeed ? 'ready' : 'loading'}`
       : composeKey
-  const [composeState, setComposeState] = useState(() => ({
-    errorMessage: null as string | null,
-    form: initialForm,
-    resetKey: formResetKey,
-  }))
-  const [fromMenuOpen, setFromMenuOpen] = useState(false)
-  const [fromInputFocused, setFromInputFocused] = useState(false)
-  const [editedResetKey, setEditedResetKey] = useState<string | null>(null)
-  const [isReadingAttachments, setIsReadingAttachments] = useState(false)
-  const editedResetKeyRef = useRef<string | null>(null)
-  const seededAttachmentsKeyRef = useRef<string | null>(null)
-  const seededSignatureKeyRef = useRef<string | null>(null)
-
-  const needsFormReset = composeState.resetKey !== formResetKey
-  const form = needsFormReset ? initialForm : composeState.form
-  const errorMessage = needsFormReset ? null : composeState.errorMessage
-  const setForm = useCallback(
-    (nextForm: SetStateAction<ComposeForm>) => {
-      setComposeState((current) => {
-        const isCurrentForm = current.resetKey === formResetKey
-        const baseForm = isCurrentForm ? current.form : initialForm
-        return {
-          errorMessage: isCurrentForm ? current.errorMessage : null,
-          form: typeof nextForm === 'function' ? nextForm(baseForm) : nextForm,
-          resetKey: formResetKey,
-        }
-      })
-    },
+  const session = useMemo<ComposeSession>(
+    () => ({ resetKey: formResetKey, initialForm }),
     [formResetKey, initialForm],
   )
+  const [machineState, dispatch] = useReducer(
+    (
+      state: ReturnType<typeof initialComposeMachineState>,
+      action: { session: ComposeSession; event: ComposeEvent },
+    ) => reduceCompose(state, action.session, action.event),
+    session,
+    initialComposeMachineState,
+  )
+  const send = useCallback(
+    (event: ComposeEvent) => dispatch({ session, event }),
+    [session],
+  )
+  // UI ephemera — deliberately outside the machine.
+  const [fromMenuOpen, setFromMenuOpen] = useState(false)
+  const [fromInputFocused, setFromInputFocused] = useState(false)
+  const [isReadingAttachments, setIsReadingAttachments] = useState(false)
+
+  const view = composeView(machineState, session)
+  const { form, errorMessage, hasUserEdited } = view
+
+  // The last reset key that saw a user edit, read outside React's render
+  // cycle (caret pinning below, the window-elevation close decision).
+  const editedResetKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (hasUserEdited) {
+      editedResetKeyRef.current = formResetKey
+    }
+  }, [hasUserEdited, formResetKey])
+
   const setErrorMessage = useCallback(
-    (message: string | null) => {
-      setComposeState((current) => {
-        const isCurrentForm = current.resetKey === formResetKey
-        return {
-          errorMessage: message,
-          form: isCurrentForm ? current.form : initialForm,
-          resetKey: formResetKey,
-        }
-      })
-    },
-    [formResetKey, initialForm],
+    (message: string | null) => send({ type: 'errorReported', message }),
+    [send],
   )
   const setField = useCallback(
     <K extends keyof ComposeForm>(field: K, value: ComposeForm[K]) => {
       editedResetKeyRef.current = formResetKey
-      setEditedResetKey(formResetKey)
-      setForm((current) => ({ ...current, [field]: value }))
+      send({ type: 'fieldChanged', field, value } as ComposeEvent)
     },
-    [formResetKey, setForm],
+    [formResetKey, send],
   )
   const handleBodyChange = useCallback(
     (value: string) => setField('body', value),
@@ -181,12 +121,10 @@ export function useComposeFormState({
   )
   const removeAttachment = useCallback(
     (attachmentId: string) => {
-      setField(
-        'attachments',
-        form.attachments.filter((attachment) => attachment.id !== attachmentId),
-      )
+      editedResetKeyRef.current = formResetKey
+      send({ type: 'attachmentRemoved', attachmentId })
     },
-    [form.attachments, setField],
+    [formResetKey, send],
   )
   // Monotonic per-session ordinal for naming unnamed pasted files
   // (`pasted-image-<n>.png`), so two screenshots never collide.
@@ -194,8 +132,8 @@ export function useComposeFormState({
   /**
    * Shared attachment ingestion for every entry path — the picker, paste
    * (Cmd+V) into the body editor or the fields, and drag-and-drop onto the
-   * composer. Unnamed clipboard images get a generated name; the send-path
-   * size caps are enforced here, surfacing the over-limit message in the
+   * composer. Unnamed clipboard images get a generated name; the machine
+   * enforces the send-path size caps, surfacing the over-limit message in the
    * footer instead of failing silently at send.
    */
   const ingestFiles = useCallback(
@@ -203,22 +141,17 @@ export function useComposeFormState({
       if (files.length === 0) {
         return
       }
-      const named = files.map((file) =>
-        withPastedFileName(file, ++pastedFileOrdinalRef.current),
-      )
-      const nextAttachments = [
-        ...form.attachments,
-        ...named.map(composeAttachmentFromFile),
-      ]
-      const error = validateAttachmentLimits(nextAttachments)
-      if (error) {
-        setErrorMessage(error)
-      } else {
-        setErrorMessage(null)
-        setField('attachments', nextAttachments)
-      }
+      editedResetKeyRef.current = formResetKey
+      send({
+        type: 'attachmentsAdded',
+        attachments: files.map((file) =>
+          composeAttachmentFromFile(
+            withPastedFileName(file, ++pastedFileOrdinalRef.current),
+          ),
+        ),
+      })
     },
-    [form.attachments, setErrorMessage, setField],
+    [formResetKey, send],
   )
   const handleAttachFiles = useCallback(
     (files: FileList | null) => {
@@ -251,15 +184,11 @@ export function useComposeFormState({
       return
     }
     const frame = requestAnimationFrame(() => {
-      setForm((current) =>
-        current.from.trim().length > 0
-          ? current
-          : { ...current, from: formatRecipient(identity) },
-      )
+      send({ type: 'identityDefaulted', from: formatRecipient(identity) })
     })
 
     return () => cancelAnimationFrame(frame)
-  }, [form.from, identity, setForm])
+  }, [form.from, identity, send])
 
   useEffect(() => {
     // A forward re-sends the original files; a resumed draft restores the files
@@ -271,29 +200,21 @@ export function useComposeFormState({
     ) {
       return
     }
-    if (seededAttachmentsKeyRef.current === formResetKey) {
-      return
-    }
-    seededAttachmentsKeyRef.current = formResetKey
-    setForm((current) =>
-      current.attachments.length > 0
-        ? current
-        : { ...current, attachments: forwardAttachments },
-    )
-  }, [intentKind, forwardAttachments, formResetKey, setForm])
+    send({ type: 'forwardAttachmentsSeeded', attachments: forwardAttachments })
+  }, [intentKind, forwardAttachments, send])
 
-  const seededReplyContextKeyRef = useRef<string | null>(null)
-  // The exact quote block this session seeded (attribution + `>`-quote, or the
-  // forwarded-message block). The signature effect inserts ABOVE it when the
-  // quote arrived first, keeping signature-above-quote in either effect order.
-  const seededQuoteBlockRef = useRef<string | null>(null)
   useEffect(() => {
     // FIX2 — stream the reply/forward quote + recipients + subject into the form
     // once `replyContext` is available (from the cache placeholder or the served
     // fetch), WITHOUT resetting the form: the editor was interactive from the
     // start, so this only FILLS fields the user hasn't touched and APPENDS the
-    // quote below any early-typed text. Ref-guarded to seed once per session.
-    if (intentKind === 'new' || intentKind === 'draft' || !replyContext) {
+    // quote below any early-typed text. The machine seeds once per session.
+    if (
+      intentKind === 'new' ||
+      intentKind === 'draft' ||
+      intentKind === 'mailto' ||
+      !replyContext
+    ) {
       return
     }
     // Reply-all excludes self from the recipient set — wait for the identity so
@@ -301,63 +222,22 @@ export function useComposeFormState({
     if (intentKind === 'replyAll' && !identity) {
       return
     }
-    if (seededReplyContextKeyRef.current === formResetKey) {
-      return
-    }
-    seededReplyContextKeyRef.current = formResetKey
-    // A reply's quote is headed by the localized attribution line ("On <date>
-    // <sender> wrote:"); a forward's block carries its own header, built
-    // server-side ("---------- Forwarded message ----------\nFrom: ...").
-    const attribution =
-      intentKind === 'forward'
-        ? null
-        : formatReplyAttribution(
-            replyContext.originalFrom[0] ?? replyContext.to[0] ?? null,
-            replyContext.originalDate,
-          )
-    const quotedWithAttribution = replyContext.quotedBody
-      ? attribution
-        ? `${attribution}\n${replyContext.quotedBody}`
-        : replyContext.quotedBody
-      : null
-    const seed =
-      intentKind === 'forward'
-        ? replyContext.forwardedBody
-        : quotedWithAttribution
-    seededQuoteBlockRef.current = seed ?? null
-    // Reply-all derives the full recipient set (original From + To, plus the
-    // original Cc) with the user's own address excluded. A plain reply uses the
-    // original From only; forward starts empty.
-    const { to, cc } =
-      intentKind === 'forward'
-        ? { to: [], cc: [] }
-        : intentKind === 'replyAll'
-          ? replyAllRecipients(
-              replyContext.to,
-              replyContext.originalTo,
-              replyContext.cc,
-              identity?.email,
-            )
-          : { to: replyContext.to, cc: [] }
-    const subject =
-      intentKind === 'forward'
-        ? replyContext.forwardSubject
-        : replyContext.replySubject
-    setForm((current) => ({
-      ...current,
-      to: current.to.trim() ? current.to : formatRecipients(to),
-      cc: current.cc.trim() ? current.cc : formatRecipients(cc),
-      subject: current.subject.trim() ? current.subject : subject,
-      body: seed ? `${current.body}\n\n${seed}` : current.body,
-    }))
-  }, [intentKind, replyContext, identity, formResetKey, setForm])
+    const seed = deriveReplySeed(intentKind, replyContext, identity?.email)
+    send({
+      type: 'replyContextSeeded',
+      to: formatRecipients(seed.to),
+      cc: formatRecipients(seed.cc),
+      subject: seed.subject,
+      quoteBlock: seed.quoteBlock,
+    })
+  }, [intentKind, replyContext, identity, send])
 
   useEffect(() => {
     // Seed the account's signature into the body once per fresh composition
     // (new/reply/forward) so it is visible and editable. Skipped for a resumed
     // draft, which carries its own body (and may already include a signature);
-    // the ref guard prevents re-inserting it across re-renders or account-list
-    // reloads, so a user edit is never clobbered.
+    // the machine's seed-once guard prevents re-inserting it across re-renders
+    // or account-list reloads, so a user edit is never clobbered.
     //
     // A new message appends at the end (which IS the top — there is no quote).
     // A reply/reply-all/forward top-posts: the signature goes ABOVE the seeded
@@ -367,23 +247,14 @@ export function useComposeFormState({
     if (!signature || intentKind === 'draft') {
       return
     }
-    if (seededSignatureKeyRef.current === formResetKey) {
-      return
-    }
-    seededSignatureKeyRef.current = formResetKey
-    setForm((current) => ({
-      ...current,
-      body:
-        // A mailto compose has no quote — the signature appends like `new`.
-        intentKind === 'new' || intentKind === 'mailto'
-          ? appendSignature(current.body, signature)
-          : insertSignatureAboveQuote(
-              current.body,
-              signature,
-              seededQuoteBlockRef.current,
-            ),
-    }))
-  }, [signature, intentKind, formResetKey, setForm])
+    send({
+      type: 'signatureSeeded',
+      signature,
+      // A mailto compose has no quote — the signature appends like `new`.
+      placement:
+        intentKind === 'new' || intentKind === 'mailto' ? 'append' : 'aboveQuote',
+    })
+  }, [signature, intentKind, send])
 
   return {
     bodyRef,
@@ -396,7 +267,7 @@ export function useComposeFormState({
     fromMenuOpen,
     handleAttachFiles,
     handleBodyChange,
-    hasUserEdited: editedResetKey === formResetKey,
+    hasUserEdited,
     ingestFiles,
     isReadingAttachments,
     removeAttachment,

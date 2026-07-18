@@ -12,7 +12,7 @@ import type {
   SourceMessageRef,
 } from '../../../data/transport/api/index'
 import type { MessageSummary } from '@/gen'
-import type { EmailActions } from '../../../data/hooks/useEmailActions'
+import type { ResolvedActionView } from '@/lib/command'
 import { useMessageDetail, useThread } from '@/data/queries/queries'
 import { MessageAttachments } from './MessageAttachments'
 import { MessageBody } from './MessageBody'
@@ -30,22 +30,12 @@ interface MessageSelection extends SourceMessageRef {
 
 interface MessageDetailProps {
   selection: MessageSelection | null
-  /** Domain mutations — the header resolves its action row from the registry
-   *  and delegates email operations (archive/trash/flag/snooze/…) here. */
-  actions: EmailActions
-  /** Role of the current view (null when ambiguous, e.g. the focused message
-   *  window) — makes the header's action row role-aware. */
-  viewRole: string | null
-  onEditDraft?: () => void
-  onForward: () => void
-  onOpenFocusedMessage?: () => void
-  onReply: () => void
-  onReplyAll: () => void
+  /** Host-resolved `detail-header` action row for the loaded message
+   *  (`commands/bind.buildDetailHeaderActions`): role-aware and with the
+   *  host's callbacks pre-bound, so this pane stays pure UI (R11). */
+  headerActionsFor: (message: MessageDetailPayload) => ResolvedActionView[]
   onSelectMessage: (message: MessageSummary) => void
   onSearch?: (query: string, append?: boolean) => void
-  onTag?: () => void
-  /** Open the composer prefilled from a `mailto:` unsubscribe URI. */
-  onUnsubscribeMailto?: (mailtoUri: string) => void
 }
 
 /**
@@ -53,17 +43,9 @@ interface MessageDetailProps {
  */
 export function MessageDetail({
   selection,
-  actions,
-  viewRole,
-  onEditDraft,
-  onForward,
-  onOpenFocusedMessage,
-  onReply,
-  onReplyAll,
+  headerActionsFor,
   onSelectMessage,
   onSearch,
-  onTag,
-  onUnsubscribeMailto,
 }: MessageDetailProps) {
   const detailQuery = useMessageDetail(
     {
@@ -127,16 +109,8 @@ export function MessageDetail({
       <MessageHeader
         conversationSubject={conversation.subject}
         message={message}
-        actions={actions}
-        viewRole={viewRole}
-        onEditDraft={onEditDraft}
-        onForward={onForward}
-        onOpenFocusedMessage={onOpenFocusedMessage}
-        onReply={onReply}
-        onReplyAll={onReplyAll}
-        onUnsubscribeMailto={onUnsubscribeMailto}
+        headerActionsFor={headerActionsFor}
         onSearch={onSearch}
-        onTag={onTag}
         threadMessages={threadMessages}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

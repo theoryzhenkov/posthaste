@@ -1,4 +1,5 @@
 import type { DesignThemePreferences } from '@/lib/design/theme/themeSettings'
+import { createStore } from '@/lib/store'
 
 import { createBroadcastChannel, parseBroadcastMessage } from './broadcast'
 import {
@@ -18,46 +19,20 @@ import {
   type ClientPreferencesUpdater,
 } from './types'
 
-class LocalClientPreferencesStore implements ClientPreferencesStore {
-  private broadcastChannel: BroadcastChannel | null = null
-  private readonly listeners = new Set<ClientPreferencesListener>()
-  private snapshot = normalizeSnapshot(readStoredClientPreferences())
-  private signature = snapshotSignature(this.snapshot)
+/**
+ * The client-preferences store: a `createStore` (R5) over the normalized
+ * snapshot, plus the cross-window machinery the appearance settings need —
+ * storage events and a BroadcastChannel keep every window in agreement, and
+ * both only live while someone subscribes (tenet VIII). Appearance spans
+ * several legacy localStorage keys, so persistence stays in ./storage rather
+ * than a single-key stored store.
+ */
+export function createClientPreferencesStore(): ClientPreferencesStore {
+  const initial = normalizeSnapshot(readStoredClientPreferences())
+  let signature = snapshotSignature(initial)
+  let broadcastChannel: BroadcastChannel | null = null
 
-  readonly getSnapshot = () => this.snapshot
-
-  readonly getServerSnapshot = () => defaultSnapshot()
-
-  readonly subscribe = (listener: ClientPreferencesListener) => {
-    this.listeners.add(listener)
-    if (this.listeners.size === 1) {
-      this.startCrossWindowSync()
-    }
-    this.applySnapshot(readStoredClientPreferences(), {
-      broadcast: false,
-      persist: false,
-    })
-
-    return () => {
-      this.listeners.delete(listener)
-      if (this.listeners.size === 0) {
-        this.stopCrossWindowSync()
-      }
-    }
-  }
-
-  readonly setAppearance = (nextAppearance: DesignThemePreferences) => {
-    this.applySnapshot(
-      { appearance: nextAppearance },
-      { broadcast: true, persist: true },
-    )
-  }
-
-  readonly updateAppearance = (updater: ClientPreferencesUpdater) => {
-    this.setAppearance(updater(this.snapshot.appearance))
-  }
-
-  private readonly handleStorage = (event: StorageEvent) => {
+  const handleStorage = (event: StorageEvent) => {
     if (
       typeof window === 'undefined' ||
       (event.storageArea !== null &&
@@ -66,76 +41,90 @@ class LocalClientPreferencesStore implements ClientPreferencesStore {
     ) {
       return
     }
-    this.applySnapshot(readStoredClientPreferences(), {
+    applySnapshot(readStoredClientPreferences(), {
       broadcast: false,
       persist: false,
     })
   }
 
-  private readonly handleBroadcast = (event: MessageEvent<unknown>) => {
+  const handleBroadcast = (event: MessageEvent<unknown>) => {
     const message = parseBroadcastMessage(event.data)
     if (!message) {
       return
     }
-    this.applySnapshot(message.snapshot, { broadcast: false, persist: false })
+    applySnapshot(message.snapshot, { broadcast: false, persist: false })
   }
 
-  private startCrossWindowSync() {
-    if (typeof window === 'undefined') {
-      return
+  const store = createStore<ClientPreferencesSnapshot>(initial, {
+    onActive: () => {
+      if (typeof window === 'undefined') {
+        return undefined
+      }
+      window.addEventListener('storage', handleStorage)
+      broadcastChannel = createBroadcastChannel()
+      broadcastChannel?.addEventListener('message', handleBroadcast)
+      return () => {
+        window.removeEventListener('storage', handleStorage)
+        broadcastChannel?.removeEventListener('message', handleBroadcast)
+        broadcastChannel?.close()
+        broadcastChannel = null
+      }
+    },
+  })
+
+  const broadcastSnapshot = (snapshot: ClientPreferencesSnapshot) => {
+    const channel = broadcastChannel ?? createBroadcastChannel()
+    channel?.postMessage({
+      type: CLIENT_PREFERENCES_UPDATED,
+      snapshot,
+    } satisfies ClientPreferencesBroadcastMessage)
+    if (channel && channel !== broadcastChannel) {
+      channel.close()
     }
-    window.addEventListener('storage', this.handleStorage)
-    this.broadcastChannel = createBroadcastChannel()
-    this.broadcastChannel?.addEventListener('message', this.handleBroadcast)
   }
 
-  private stopCrossWindowSync() {
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('storage', this.handleStorage)
-    }
-    this.broadcastChannel?.removeEventListener('message', this.handleBroadcast)
-    this.broadcastChannel?.close()
-    this.broadcastChannel = null
-  }
-
-  private applySnapshot(
+  const applySnapshot = (
     nextSnapshot: ClientPreferencesSnapshot,
     options: { broadcast: boolean; persist: boolean },
-  ) {
+  ) => {
     const normalized = normalizeSnapshot(nextSnapshot)
     const nextSignature = snapshotSignature(normalized)
-    if (nextSignature === this.signature) {
+    if (nextSignature === signature) {
       return
     }
     if (options.persist) {
       persistAppearancePreferences(normalized.appearance)
     }
-    this.snapshot = normalized
-    this.signature = nextSignature
-    this.emit()
+    signature = nextSignature
+    store.set(normalized)
     if (options.broadcast) {
-      this.broadcastSnapshot(normalized)
+      broadcastSnapshot(normalized)
     }
   }
 
-  private broadcastSnapshot(snapshot: ClientPreferencesSnapshot) {
-    const channel = this.broadcastChannel ?? createBroadcastChannel()
-    channel?.postMessage({
-      type: CLIENT_PREFERENCES_UPDATED,
-      snapshot,
-    } satisfies ClientPreferencesBroadcastMessage)
-    if (channel && channel !== this.broadcastChannel) {
-      channel.close()
-    }
+  const setAppearance = (nextAppearance: DesignThemePreferences) => {
+    applySnapshot(
+      { appearance: nextAppearance },
+      { broadcast: true, persist: true },
+    )
   }
 
-  private emit() {
-    for (const listener of this.listeners) {
-      listener()
-    }
+  return {
+    getSnapshot: store.get,
+    getServerSnapshot: () => defaultSnapshot(),
+    subscribe: (listener: ClientPreferencesListener) => {
+      const unsubscribe = store.subscribe(listener)
+      // Storage may have moved while no window sync was attached; catch up so
+      // the first subscriber never renders a stale snapshot.
+      applySnapshot(readStoredClientPreferences(), {
+        broadcast: false,
+        persist: false,
+      })
+      return unsubscribe
+    },
+    setAppearance,
+    updateAppearance: (updater: ClientPreferencesUpdater) => {
+      setAppearance(updater(store.get().appearance))
+    },
   }
-}
-
-export function createClientPreferencesStore(): ClientPreferencesStore {
-  return new LocalClientPreferencesStore()
 }

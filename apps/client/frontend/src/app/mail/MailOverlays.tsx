@@ -1,10 +1,10 @@
 import { lazy, Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 
-import { CommandPalette } from '@/components/palette/CommandPalette'
+import { CommandPalette } from '@/app/input/palette/CommandPalette'
 import { ErrorBoundary } from '@/app/shell/ErrorBoundary'
 import { InvalidSurface } from '@/app/host/InvalidSurface'
-import { ShortcutReference } from '@/components/keyboard/reference/ShortcutReference'
+import { ShortcutReference } from '@/app/input/keyboard/reference/ShortcutReference'
 import { SurfaceHost } from '@/app/host/SurfaceHost'
 import { TagEditor } from '@/components/mail/tags/TagEditor'
 import { closeWebSurface } from '@/surfaces/useSurfaceRouting'

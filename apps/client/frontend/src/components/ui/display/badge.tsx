@@ -2,7 +2,7 @@ import * as React from 'react'
 import { type VariantProps } from 'class-variance-authority'
 import { Slot } from 'radix-ui'
 
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import { badgeVariants } from './badge-variants'
 
 function Badge({

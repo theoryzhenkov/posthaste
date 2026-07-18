@@ -5,8 +5,11 @@
  * Each method posts one typed command through the data layer's verb set. The
  * renderer keeps no optimistic overlay or undo history of its own: acceptance
  * invalidates every query, the answers catch up to the new generation, and
- * undo is the backend rev-log (a move toast's "Undo" reverses the latest
- * reversible action via the supplied {@link undo} callback).
+ * undo is the backend rev-log. A move toast's "Undo" issues the `undo` verb
+ * against THE ACCOUNT THE ACTION RAN ON ({@link undoToastOptions}) — not the
+ * shell's default-account binding, which serves only the global Cmd+Z
+ * (routing it to the default account silently no-oped the toast for every
+ * other account: docs/issues/integrated-send-undo-broken.md).
  */
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
@@ -145,14 +148,41 @@ function uniqueUserTags(tags: string[]): string[] {
 }
 
 /**
+ * The success-toast options for a dispatched action: a 5s notice, with Undo
+ * (when the action is reversible) bound to the rev-log of `undoSourceId` —
+ * the account the action ran against.
+ */
+export function undoToastOptions(
+  undoSourceId: string | undefined,
+  undo: (sourceId: string) => void,
+): { duration: number; action?: { label: string; onClick: () => void } } {
+  if (!undoSourceId) {
+    return { duration: 5000 }
+  }
+  return {
+    duration: 5000,
+    action: { label: 'Undo', onClick: () => undo(undoSourceId) },
+  }
+}
+
+/**
  * Provides email action methods backed by typed commands. Keyword changes
  * (`toggleRead`, `markRead`, `toggleFlag`, `setUserTags`) run silently; moves
- * (`archive`, `trash`, `moveToInbox`) toast with an Undo that calls the
- * supplied {@link undo} callback; `deletePermanently` is irreversible (no Undo).
+ * (`archive`, `trash`, `moveToInbox`) toast with an Undo against the acted-on
+ * account's rev-log; `deletePermanently` is irreversible (no Undo).
  */
-export function useEmailActions({ undo }: { undo: () => void }) {
+export function useEmailActions() {
   const queryClient = useQueryClient()
   const commands = useCommands()
+  /** The toast's Undo: move the acted-on account's rev-log cursor down. */
+  const undoOnSource = useCallback(
+    (sourceId: string) => {
+      void commands.undo(sourceId).catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : 'Nothing to undo')
+      })
+    },
+    [commands],
+  )
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const pendingRef = useRef(0)
   const [isPending, setIsPending] = useState(false)
@@ -184,18 +214,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
           if (!input.label) {
             return
           }
-          toast(
-            input.label,
-            input.undoSourceId
-              ? {
-                  action: {
-                    label: 'Undo',
-                    onClick: () => undo(),
-                  },
-                  duration: 5000,
-                }
-              : { duration: 5000 },
-          )
+          toast(input.label, undoToastOptions(input.undoSourceId, undoOnSource))
         })
         .catch((error: unknown) => {
           setErrorMessage(
@@ -204,7 +223,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
         })
         .finally(() => setPending(-1))
     },
-    [setPending, undo],
+    [setPending, undoOnSource],
   )
 
   const moveToRole = useCallback(
@@ -281,6 +300,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
     (
       message: ReadToggleTarget | FlagToggleTarget | MessageSummary,
       delta: { add: string[]; remove: string[] },
+      opts?: { recordUndo?: boolean },
     ) => {
       if (delta.add.length === 0 && delta.remove.length === 0) {
         return
@@ -293,6 +313,7 @@ export function useEmailActions({ undo }: { undo: () => void }) {
             target.messageId,
             delta.add,
             delta.remove,
+            opts,
           ),
       })
     },
@@ -314,7 +335,14 @@ export function useEmailActions({ undo }: { undo: () => void }) {
       if (previous.isRead) {
         return
       }
-      runKeywords(message, { add: [SYSTEM_KEYWORDS.Seen], remove: [] })
+      // The auto-mark-read on opening a message (this verb's only caller) is
+      // an implicit gesture: it stays out of the undo history so it cannot
+      // hijack the toast/shell Undo of the deliberate action before it.
+      runKeywords(
+        message,
+        { add: [SYSTEM_KEYWORDS.Seen], remove: [] },
+        { recordUndo: false },
+      )
     },
     toggleFlag: (message: FlagToggleTarget | MessageSummary) => {
       const previous = resolveKeywordState(queryClient, message)

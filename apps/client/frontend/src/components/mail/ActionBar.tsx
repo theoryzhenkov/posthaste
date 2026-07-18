@@ -1,6 +1,6 @@
 import { Command, Moon, PenSquare, Settings, SunMedium, X } from 'lucide-react'
 
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import { ViewModeToggle } from './list/ViewModeToggle'
 import { NotificationsButton } from './NotificationsButton'
 import { TrafficLightInset, WINDOW_TITLEBAR_HEIGHT } from '../ui/WindowChrome'

@@ -1,17 +1,29 @@
 /**
  * Unified action registry — core types.
  *
- * ONE definition per message/mail action, from which every surface (palette,
- * context menu, detail header, keyboard) resolves. Definitions are pure data:
- * titles/icons are values or `(ctx) => value` functions, never JSX, so the
- * whole registry is unit-testable without a DOM (same philosophy as
- * `components/keyboard/dispatch.ts`).
+ * ONE definition per action, from which every surface (palette, context menu,
+ * detail header, keyboard) resolves. Definitions are pure data: titles/icons
+ * are values or `(ctx) => value` functions, never JSX, so the whole registry is
+ * unit-testable without a DOM.
+ *
+ * The domain-free half of this contract (sections, param options, confirm
+ * copy, the resolved view components render, scope services) lives in
+ * `lib/command.ts` so `components/` can consume resolved actions without ever
+ * importing `commands/` (R11: commands bind UI to verbs, never the reverse).
  */
 import type { LucideIcon } from 'lucide-react'
 import type { Mailbox, MessageSummary, SourceMessageRef } from '../data/transport/api/index'
 import type { PaneId } from '../domain/vocabulary'
-import type { useMailClientHandlers } from '../app/mail/useMailClientHandlers'
+import type {
+  ActionConfirmCopy,
+  ActionParamOption,
+  ActionSection,
+  CommandInputOwner,
+  CommandScopeServices,
+} from '../lib/command'
 import type { EmailActions } from '../data/hooks/useEmailActions'
+
+export type { ActionConfirmCopy, ActionParamOption, ActionSection }
 
 /** Where an action can appear. A definition opts into surfaces; the resolver
  *  filters by the requesting surface. */
@@ -21,43 +33,26 @@ export type ActionSurface =
   | 'detail-header' // focused-mail action row (MessageHeader)
   | 'keyboard' // dispatchable via shortcut
 
-/** Section ordering within menus / palette groups. Supersedes the three-value
- *  `ActionGroup` in `contextualActions.ts`. */
-export type ActionSection =
-  | 'open'
-  | 'compose-reply'
-  | 'state'
-  | 'organize'
-  | 'move'
-  | 'navigate'
-  | 'app'
-
-/** Serializable shortcut descriptor — replaces the if-chains in dispatch.ts
- *  (consumed by the keyboard tier in a later slice). `key` is compared
- *  lowercased against `KeyboardEvent.key`. */
+/** Serializable shortcut descriptor. `key` is compared lowercased against
+ *  `KeyboardEvent.key`; a `code` chord matches `KeyboardEvent.code` instead
+ *  (layout-independent — e.g. macOS ⌥ dead keys mangle `key`). */
 export interface ShortcutChord {
   key: string
-  /** metaKey || ctrlKey (matches dispatch.ts). */
+  /** Match on `event.code` (physical key) instead of `event.key`; `key` then
+   *  only names the chord for display. */
+  code?: string
+  /** metaKey || ctrlKey. */
   mod?: boolean
   shift?: boolean
   alt?: boolean
   /** Fires even when an editable element is focused (the "modifier chords"
    *  tier). Default false. */
   inEditable?: boolean
-}
-
-/**
- * One choosable target of a PARAMETERIZED action (e.g. a mailbox for
- * `message.move-to-mailbox`, a snooze preset for `message.snooze`). Pure data —
- * `id` is the value `run` receives, `label` is what every surface renders
- * (context submenu row, palette pick-step row, header popover row).
- */
-export interface ActionParamOption {
-  id: string
-  label: string
-  icon?: LucideIcon
-  /** Extra search terms for the palette's pick-step filter. */
-  keywords?: string
+  /** Mail-dispatch tier: fires above lightweight overlays (palette, compose,
+   *  tag editor, shortcuts reference) — the former hard-coded modifier-chord
+   *  tier of `dispatchMailKey`. Unset = a plain mail-action chord that only
+   *  fires on the bare surface, after the focused pane's handler. */
+  aboveOverlay?: boolean
 }
 
 /** A single action subject. `targets` is a list from day one so multi-select is
@@ -85,22 +80,46 @@ export interface ActionContext {
   surface: ActionSurface
   /** Overlay/surface ownership — global app actions stay available; message
    *  actions are suppressed while a surface owns the screen. */
-  inputOwner: 'mail' | 'overlay' | 'surface'
+  inputOwner: CommandInputOwner
   /** From `useEmailActions.isPending` — lets consumers render disabled/spinner. */
   hasPendingMutation: boolean
   /** Reserved: wire to daemon connection events later; 'unknown' ⇒ permissive. */
   connection: 'online' | 'offline' | 'unknown'
 }
 
+/** The app-level handler bundle actions delegate to — the slice of
+ *  `useMailClientHandlers` the definitions consume. Declared HERE (not
+ *  inferred from `app/`) so `commands/` never imports the composition root
+ *  (R11); the app-side bundle satisfies it structurally. */
+interface MailAppCommandHandlers {
+  handleCompose: () => void
+  handleOpenSettings: (
+    category?: 'accounts' | 'mailboxes' | 'tags' | 'general' | 'appearance',
+  ) => void
+  handleToggleShortcuts: () => void
+  handleSelectMessage: (message: MessageSummary) => void
+  handleSearch: (query: string, append?: boolean) => void
+  handleOpenFocusedMessage: () => void
+  handleReply: () => void
+  handleReplyAll: () => void
+  handleForward: () => void
+  handleEditDraft: () => void
+  handleOpenTagEditor: () => void
+}
+
 /** Injected once at registry-bind time (per provider render), NOT per action:
- *  the domain + app handler bundles that already exist. */
-export interface ActionServices {
+ *  the domain + app handler bundles that already exist. Extends the
+ *  domain-free scope services (`desktop`, `surfaceHost`, `compose`) the
+ *  dispatcher's scopes bind. */
+export interface ActionServices extends CommandScopeServices {
   /** hooks/useEmailActions.ts — domain mutations (owns optimistic folds, toasts,
-   *  undo). Actions delegate here; they never reimplement. */
-  email: EmailActions
-  /** app/useMailClientHandlers.ts — selection-scoped wrappers / navigation /
-   *  overlays. Bound in later slices. */
-  app?: ReturnType<typeof useMailClientHandlers>
+   *  undo). Actions delegate here; they never reimplement. Absent in scopes
+   *  without mail context (the dispatcher's global/overlay scopes), where no
+   *  message action can resolve anyway (no targets). */
+  email?: EmailActions
+  /** The mail shell's handler bundle (`useMailClientHandlers`) — selection-
+   *  scoped wrappers / navigation / overlays. */
+  app?: MailAppCommandHandlers
   /** Row-scoped navigation the context menu binds per message row: the two
    *  `open` entries delegate here. Absent on every non-row surface — which is
    *  exactly how those entries stay context-menu-only (their `isAvailable`
@@ -118,8 +137,8 @@ export interface ActionServices {
   mailboxes?: {
     list: (sourceId: string) => Mailbox[]
   }
-  /** Detail-header-scoped handler bindings, bound by `MessageHeader` from its
-   *  callback props. Lets both header hosts (the mail shell, which also has
+  /** Detail-header-scoped handler bindings, bound by the header's host from
+   *  its callbacks. Lets both header hosts (the mail shell, which also has
    *  `app`, and the focused message window, which does not) drive the same
    *  definitions. Defs prefer these over `app` when present. */
   detail?: {
@@ -149,13 +168,6 @@ export interface ActionServices {
  *  hint; `{ reason }` = shown-but-disabled with hint text (palette
  *  discoverability). */
 export type ActionEnablement = boolean | { reason: string }
-
-/** Confirmation copy shown by the shared dialog host before a gated run. */
-export interface ActionConfirmCopy {
-  title: string
-  description: string
-  confirmLabel: string
-}
 
 export interface ActionDefinition {
   /** Stable namespaced id, e.g. `message.archive`. Persisted in

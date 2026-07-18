@@ -1,10 +1,9 @@
 import { messageRowHeight } from '@/lib/design'
 
 import type { MessageSummary } from '@/data/transport/api'
-import type { EmailActions } from '@/data/hooks/useEmailActions'
 import { useDesignTheme } from '@/lib/design/useDesignTheme'
 
-import { MessageRow } from './MessageRow'
+import { MessageRow, type RowContextMenuFor } from './MessageRow'
 import type { ColumnId, ThreadListLayout } from '../thread/columns'
 import type { ConversationTreeRow } from './model/conversationTree'
 import type { MailboxDirectory } from './model/useMailboxDirectory'
@@ -20,7 +19,7 @@ export interface MessageListErrorState {
 }
 
 export function MessageListRows({
-  actions,
+  contextMenuFor,
   columns,
   errorState,
   isFetchingNextPage,
@@ -38,12 +37,12 @@ export function MessageListRows({
   scrollTop,
   selectedKey,
   isPaneActive,
-  viewRole,
   viewportHeight,
   mailboxDirectory,
   excludeMailboxId,
 }: {
-  actions: EmailActions
+  /** Registry-resolved row context menu (commands/bind). */
+  contextMenuFor: RowContextMenuFor
   columns: ColumnId[]
   errorState: MessageListErrorState
   isFetchingNextPage: boolean
@@ -61,7 +60,6 @@ export function MessageListRows({
   scrollTop: number
   selectedKey: string | null
   isPaneActive: boolean
-  viewRole: string | null
   viewportHeight: number
   /** Cache-only mailbox resolver, consumed by the `sourceMailbox` column cell. */
   mailboxDirectory: MailboxDirectory
@@ -106,8 +104,7 @@ export function MessageListRows({
                 isStriped={(virtual.startIndex + index) % 2 === 1}
                 columns={columns}
                 layout={layout}
-                actions={actions}
-                viewRole={viewRole}
+                contextMenuFor={contextMenuFor}
                 onSelectMessage={onSelectRowMessage}
                 onViewConversation={onViewConversation}
                 treeRow={treeMode ? row : undefined}

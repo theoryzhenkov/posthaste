@@ -1,5 +1,5 @@
 /**
- * Actions barrel + registration bootstrap.
+ * Commands barrel + registration bootstrap.
  *
  * Importing this module is what POPULATES the registry: the side-effect import
  * of every `defs/*` module runs its top-level `registerActions(...)`. Because it
@@ -9,16 +9,23 @@
  *
  * Every surface should import the resolver + types from THIS barrel rather than
  * reaching into `resolve.ts` / `defs/*` directly, so registration is never
- * accidentally skipped.
+ * accidentally skipped. Only `app/` (and this subtree) may import it —
+ * components consume resolved actions through `lib/command` (R11).
  */
 
-// Side-effect imports: register the action definitions (message + app-level).
-import './defs/message'
-import './defs/app'
+// Side-effect imports: register the definitions (charter split — navigation,
+// compose, mail, global). Section sorting is stable, so cross-file order only
+// needs to stay deterministic.
+import './defs/navigation'
+import './defs/compose'
+import './defs/mail'
+import './defs/global'
 
-export { formatChord, formatChords } from './formatChord'
-export { resolveActions, type ResolvedAction } from './resolve'
+export { resolveActions } from './resolve'
 export {
+  firstMatchingChord,
+  formatChord,
+  formatChords,
   resolveKeyboardAction,
   runResolvedWithConfirm,
   matchesChord,
@@ -27,6 +34,8 @@ export {
   type ChordEvent,
 } from './keyboard'
 export { getAction, allActions } from './registry'
+export { CommandDispatcher } from './dispatcher'
+export { buildDetailHeaderActions, buildRowContextMenu } from './bind'
 export type {
   ActionContext,
   ActionDefinition,

@@ -6,7 +6,7 @@
  * from the same lookup the sidebar uses (`renderMailboxRoleIcon`).
  *
  */
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 import { renderMailboxRoleIcon } from '@/domain/role'
 
 export function MailboxChip({

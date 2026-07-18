@@ -10,7 +10,7 @@ import {
   useDeveloperToolsEnabled,
 } from '../../../desktop/devtools'
 import { useDiagnosticsBundle } from '../../../desktop/diagnostics/useDiagnosticsBundle'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import { Button } from '../../ui/form/button'
 import { SettingsAdvanced } from './SettingsAdvanced'
 import { SettingsPage, SettingsPageHeader, SettingsSection } from '../panel/shared'

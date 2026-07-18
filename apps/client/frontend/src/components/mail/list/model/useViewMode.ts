@@ -1,22 +1,21 @@
 /**
  * Per-view message-list display mode (flat messages vs conversation tree),
  * persisted to localStorage and keyed by view identity so each opened view
- * remembers its own mode. Mirrors the external-store pattern of
- * `useColumnConfig` so all list instances stay in sync.
- *
+ * remembers its own mode. A `createStoredStore` (R5) shared by every list
+ * instance so they all stay in sync.
  */
-import { useCallback, useSyncExternalStore } from 'react'
+import { useCallback } from 'react'
 
 import type { MessageListViewMode } from '@/domain/vocabulary'
+import { createStoredStore, useStore } from '@/lib/store'
 
 const STORAGE_KEY = 'posthaste-message-view-mode-v1'
 
 type ModeMap = Record<string, MessageListViewMode>
 
-function readFromStorage(): ModeMap {
+function readModeMap(raw: string | null): ModeMap {
+  if (!raw) return {}
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return {}
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return {}
     const result: ModeMap = {}
@@ -33,33 +32,18 @@ function readFromStorage(): ModeMap {
   }
 }
 
-let cached: ModeMap = readFromStorage()
-const listeners = new Set<() => void>()
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
-function getSnapshot(): ModeMap {
-  return cached
-}
-
-function persist(next: ModeMap) {
-  cached = next
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-  for (const listener of listeners) listener()
-}
+const viewModeStore = createStoredStore<ModeMap>({
+  key: STORAGE_KEY,
+  codec: { read: readModeMap, write: (map) => JSON.stringify(map) },
+})
 
 export function useViewMode(viewModeKey: string) {
-  const map = useSyncExternalStore(subscribe, getSnapshot)
+  const map = useStore(viewModeStore)
   const mode: MessageListViewMode = map[viewModeKey] ?? 'messages'
 
   const setMode = useCallback(
     (next: MessageListViewMode) => {
-      persist({ ...getSnapshot(), [viewModeKey]: next })
+      viewModeStore.set({ ...viewModeStore.get(), [viewModeKey]: next })
     },
     [viewModeKey],
   )

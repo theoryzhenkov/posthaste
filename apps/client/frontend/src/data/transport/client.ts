@@ -40,6 +40,7 @@ import type {
   ThreadView,
 } from '@/gen'
 import type { ConnectionStatus, QueryStatus } from '@/domain/vocabulary'
+import { createStore, type Store } from '@/lib/store'
 
 /** What a live query hook returns: the latest answer with its generation. */
 export interface LiveResult<T> {
@@ -174,8 +175,8 @@ interface Entry {
   /** Canonical request body, posted verbatim on every (re)fetch. */
   body: string
   refcount: number
-  listeners: Set<() => void>
-  snapshot: LiveResult<unknown>
+  /** The mirror cell (R5): current answer plus this entry's subscribers. */
+  store: Store<LiveResult<unknown>>
   /** Answers below this generation are discarded (out-of-order guard).
    * Reset to 0 when the backend run changes. */
   discardBelow: number
@@ -197,13 +198,12 @@ export class MailClient {
 
   private readonly entries = new Map<string, Entry>()
   private readonly eventListeners = new Map<string, Set<EventCallback>>()
-  private readonly connectionListeners = new Set<() => void>()
-  private readonly generationListeners = new Set<(generation: number) => void>()
+  private readonly connectionStore = createStore<ConnectionStatus>('reconnecting')
+  private readonly generationStore = createStore(0)
 
   private stream: EventSourceLike | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private refetchTimer: ReturnType<typeof setTimeout> | null = null
-  private connection: ConnectionStatus = 'reconnecting'
   private consecutiveFailures = 0
   private everConnected = false
   private closed = false
@@ -235,7 +235,7 @@ export class MailClient {
     this.stream = es
     es.onopen = () => {
       this.consecutiveFailures = 0
-      const wasDown = this.connection !== 'connected'
+      const wasDown = this.connectionStore.get() !== 'connected'
       this.setConnection('connected')
       // Recovery is the connect path: anything may have happened while the
       // stream was down, so refetch every mounted query.
@@ -273,18 +273,15 @@ export class MailClient {
   }
 
   getConnectionStatus(): ConnectionStatus {
-    return this.connection
+    return this.connectionStore.get()
   }
 
-  subscribeConnection = (cb: () => void): (() => void) => {
-    this.connectionListeners.add(cb)
-    return () => this.connectionListeners.delete(cb)
-  }
+  subscribeConnection = (cb: () => void): (() => void) =>
+    this.connectionStore.subscribe(cb)
 
   private setConnection(next: ConnectionStatus): void {
-    if (this.connection === next) return
-    this.connection = next
-    for (const cb of this.connectionListeners) cb()
+    if (this.connectionStore.get() === next) return
+    this.connectionStore.set(next)
   }
 
   private handleStreamMessage(raw: string): void {
@@ -328,14 +325,14 @@ export class MailClient {
    * react-query cache — invalidates everything it holds on each advance;
    * there is no per-key policy. */
   subscribeGeneration(cb: (generation: number) => void): () => void {
-    this.generationListeners.add(cb)
-    return () => {
-      this.generationListeners.delete(cb)
-    }
+    return this.generationStore.subscribe(() => cb(this.generationStore.get()))
   }
 
   private dispatchGeneration(generation: number): void {
-    for (const cb of this.generationListeners) cb(generation)
+    // The store notifies on every set (no equality gate), so a run rotation
+    // that lands on an already-seen generation number still reaches the
+    // external mirror.
+    this.generationStore.set(generation)
   }
 
   private scheduleRefetch(): void {
@@ -350,8 +347,9 @@ export class MailClient {
    * of them, on reconnect and run rotation). */
   private refetchMounted(all: boolean): void {
     for (const e of this.entries.values()) {
+      const snapshot = e.store.get()
       const behind =
-        e.snapshot.generation < this.latestGeneration || e.snapshot.status !== 'ready'
+        snapshot.generation < this.latestGeneration || snapshot.status !== 'ready'
       if (all || behind) void this.fetchEntry(e)
     }
   }
@@ -362,8 +360,9 @@ export class MailClient {
   private markAllStale(voidBaselines: boolean): void {
     for (const e of this.entries.values()) {
       if (voidBaselines) e.discardBelow = 0
-      if (e.snapshot.status === 'ready') {
-        this.setSnapshot(e, { ...e.snapshot, status: 'stale' })
+      const snapshot = e.store.get()
+      if (snapshot.status === 'ready') {
+        this.setSnapshot(e, { ...snapshot, status: 'stale' })
       }
     }
   }
@@ -404,8 +403,7 @@ export class MailClient {
         key,
         body: JSON.stringify(canonicalize(query)),
         refcount: 0,
-        listeners: new Set(),
-        snapshot: EMPTY_SNAPSHOT,
+        store: createStore<LiveResult<unknown>>(EMPTY_SNAPSHOT),
         discardBelow: 0,
         fetchSeq: 0,
         forgetTimer: null,
@@ -437,17 +435,15 @@ export class MailClient {
   subscribeQuery(key: string, cb: () => void): () => void {
     const e = this.entries.get(key)
     if (!e) return () => {}
-    e.listeners.add(cb)
-    return () => e.listeners.delete(cb)
+    return e.store.subscribe(cb)
   }
 
   getSnapshot<T>(key: string): LiveResult<T> {
-    return (this.entries.get(key)?.snapshot ?? EMPTY_SNAPSHOT) as LiveResult<T>
+    return (this.entries.get(key)?.store.get() ?? EMPTY_SNAPSHOT) as LiveResult<T>
   }
 
   private setSnapshot(e: Entry, next: LiveResult<unknown>): void {
-    e.snapshot = next
-    for (const cb of e.listeners) cb()
+    e.store.set(next)
   }
 
   private async fetchEntry(e: Entry): Promise<void> {
@@ -470,9 +466,10 @@ export class MailClient {
       if (this.entries.get(e.key) !== e || seq !== e.fetchSeq) return
       const error = err instanceof Error ? err : new Error(String(err))
       // A held answer stays displayable; without one the query is in error.
+      const snapshot = e.store.get()
       this.setSnapshot(e, {
-        ...e.snapshot,
-        status: e.snapshot.data !== undefined ? 'stale' : 'error',
+        ...snapshot,
+        status: snapshot.data !== undefined ? 'stale' : 'error',
         error,
       })
     }

@@ -1,10 +1,12 @@
 /**
  * Message detail header with registry-driven action row.
  *
- * The action row renders from `resolveActions(ctx, { surface: 'detail-header' })`,
- * the same resolver the context menu / palette / keyboard use. This makes the
- * row role-aware and the draft-vs-message branch availability-driven (a draft
- * resolves to edit/discard only).
+ * The action row renders the host-resolved `detail-header` actions
+ * (`headerActionsFor`, built by the app hosts via `commands/bind` — the same
+ * resolver the context menu / palette / keyboard use). This makes the row
+ * role-aware and the draft-vs-message branch availability-driven (a draft
+ * resolves to edit/discard only) — while this component stays pure UI over
+ * `lib/command`'s resolved view (R11: components never import `commands/`).
  *
  * Presentation: icon buttons in a fixed header order, a popover for
  * parameterized actions (Snooze presets), a confirm dialog for destructive
@@ -15,16 +17,10 @@ import { useState, type MouseEvent } from 'react'
 import { Paperclip } from 'lucide-react'
 
 import {
-  resolveActions,
-  runResolvedWithConfirm,
-  type ActionConfirm,
-  type ActionContext,
-  type ActionServices,
-  type ResolvedAction,
-} from '@/commands'
-import { openExternalUrl } from '@/desktop/runtime'
-import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
-import type { EmailActions } from '@/data/hooks/useEmailActions'
+  runActionWithConfirm,
+  type ActionConfirmCopy as ActionConfirm,
+  type ResolvedActionView,
+} from '@/lib/command'
 
 import type { MessageDetail, MessageSummary } from '@/data/transport/api'
 
@@ -42,84 +38,24 @@ import {
 export function MessageHeader({
   conversationSubject,
   message,
-  actions,
-  viewRole,
-  onEditDraft,
-  onForward,
-  onOpenFocusedMessage,
-  onReply,
-  onReplyAll,
+  headerActionsFor,
   onSearch,
-  onTag,
-  onUnsubscribeMailto,
   threadMessages,
 }: {
   conversationSubject: string | null | undefined
   message: MessageDetail
-  /** Domain mutations the resolved actions delegate to. */
-  actions: EmailActions
-  /** Role of the current view (null when ambiguous / focused window). */
-  viewRole: string | null
-  onEditDraft?: () => void
-  onForward: () => void
-  onOpenFocusedMessage?: () => void
-  onReply: () => void
-  onReplyAll: () => void
+  /** Host-resolved `detail-header` actions for a loaded message
+   *  (`commands/bind.buildDetailHeaderActions`) — callbacks pre-bound. */
+  headerActionsFor: (message: MessageDetail) => ResolvedActionView[]
   onSearch?: (query: string, append?: boolean) => void
-  onTag?: () => void
-  /** Open the composer prefilled from a `mailto:` unsubscribe URI. Hosts
-   *  without a composer fall back to the system mailto handler. */
-  onUnsubscribeMailto?: (mailtoUri: string) => void
   threadMessages: MessageSummary[]
 }) {
-  const isDraft = message.keywords.includes(SYSTEM_KEYWORDS.Draft)
   const senderName = message.fromName ?? message.fromEmail ?? 'Unknown sender'
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
   const recipientLabel = `to ${formatRecipientEmailList(message.to)}`
 
-  // The header's ActionContext/Services — built per render (cheap plain
-  // objects, exactly like MessageRow's). `detail` binds this host's callbacks;
-  // absent ones (e.g. no tag editor in the focused window) hide their actions.
-  const services: ActionServices = {
-    email: actions,
-    detail: {
-      reply: onReply,
-      replyAll: onReplyAll,
-      forward: onForward,
-      editDraft: onEditDraft,
-      openTagEditor: onTag,
-      openFocusedMessage: onOpenFocusedMessage,
-    },
-    // Bound here (and only here) because this host's execution path is
-    // `runResolvedWithConfirm` — the one-click POST always gets its dialog.
-    unsubscribe: {
-      oneClick: (ref) => void actions.unsubscribe(ref),
-      mailto: (mailtoUri) =>
-        onUnsubscribeMailto
-          ? onUnsubscribeMailto(mailtoUri)
-          : void openExternalUrl(mailtoUri),
-      openLink: (url) => void openExternalUrl(url),
-    },
-  }
-  const actionContext: ActionContext = {
-    targets: [
-      {
-        ref: { sourceId: message.sourceId, messageId: message.id },
-        summary: message,
-        isDraft,
-        draftId: message.draftId,
-        conversationId: message.conversationId,
-      },
-    ],
-    viewRole,
-    activePane: 'list',
-    surface: 'detail-header',
-    inputOwner: 'mail',
-    hasPendingMutation: actions.isPending,
-    connection: 'unknown',
-  }
-  const headerActions = orderForHeader(resolveActions(actionContext, services))
+  const headerActions = orderForHeader(headerActionsFor(message))
 
   return (
     <div className="shrink-0 border-b border-border bg-panel px-5 py-4">
@@ -222,9 +158,9 @@ const HEADER_ACTION_ORDER = [
   'message.open-focused',
 ]
 
-function orderForHeader(resolved: ResolvedAction[]): ResolvedAction[] {
-  const rank = (action: ResolvedAction) => {
-    const index = HEADER_ACTION_ORDER.indexOf(action.def.id)
+function orderForHeader(resolved: ResolvedActionView[]): ResolvedActionView[] {
+  const rank = (action: ResolvedActionView) => {
+    const index = HEADER_ACTION_ORDER.indexOf(action.id)
     return index === -1 ? HEADER_ACTION_ORDER.length : index
   }
   return [...resolved].sort((a, b) => rank(a) - rank(b))
@@ -232,7 +168,7 @@ function orderForHeader(resolved: ResolvedAction[]): ResolvedAction[] {
 
 /** "Snooze…" → "Snooze": the icon button needs the bare label (and the snooze
  *  e2e flow anchors on `aria-label="Snooze"`). */
-function headerLabel(action: ResolvedAction): string {
+function headerLabel(action: ResolvedActionView): string {
   return action.title.replace(/…$/, '')
 }
 
@@ -240,7 +176,7 @@ function HeaderActions({
   headerActions,
   isFlagged,
 }: {
-  headerActions: ResolvedAction[]
+  headerActions: ResolvedActionView[]
   isFlagged: boolean
 }) {
   // A destructive `confirm`-bearing action (delete-permanently) parks its
@@ -254,16 +190,16 @@ function HeaderActions({
     <div className="flex shrink-0 items-center gap-1">
       {headerActions.map((action) =>
         action.params ? (
-          <HeaderParamAction key={action.def.id} action={action} />
+          <HeaderParamAction key={action.id} action={action} />
         ) : (
           <Button
-            key={action.def.id}
+            key={action.id}
             aria-label={headerLabel(action)}
             data-tag-editor-trigger={
-              action.def.id === 'message.tag' ? 'true' : undefined
+              action.id === 'message.tag' ? 'true' : undefined
             }
             onClick={() =>
-              runResolvedWithConfirm(action, (confirm, onConfirm) =>
+              runActionWithConfirm(action, (confirm, onConfirm) =>
                 setPendingConfirm({ confirm, onConfirm }),
               )
             }
@@ -272,7 +208,7 @@ function HeaderActions({
             type="button"
             variant="ghost"
             className={
-              action.def.id === 'message.toggle-flag' && isFlagged
+              action.id === 'message.toggle-flag' && isFlagged
                 ? 'text-signal-flag'
                 : undefined
             }
@@ -295,7 +231,7 @@ function HeaderActions({
 
 /** A PARAMETERIZED action in the header renders as an icon button + popover of
  *  its options (the Snooze presets popover, generically). */
-function HeaderParamAction({ action }: { action: ResolvedAction }) {
+function HeaderParamAction({ action }: { action: ResolvedActionView }) {
   const [open, setOpen] = useState(false)
   const label = headerLabel(action)
   return (

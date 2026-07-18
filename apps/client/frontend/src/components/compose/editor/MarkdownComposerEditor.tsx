@@ -17,7 +17,8 @@ import {
   type ViewUpdate,
 } from '@codemirror/view'
 
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
+import { useDismissOnGlobalInteraction } from '@/lib/dom'
 
 import { filesFromDataTransfer } from '../attachments/attachments'
 import { FormatMenuButton } from './FormatMenuButton'
@@ -180,24 +181,10 @@ export const MarkdownComposerEditor = forwardRef<
     [],
   )
 
-  useEffect(() => {
-    if (!contextMenu) {
-      return
-    }
-
-    function closeMenu() {
-      setContextMenu(null)
-    }
-
-    window.addEventListener('mousedown', closeMenu)
-    window.addEventListener('keydown', closeMenu)
-    window.addEventListener('scroll', closeMenu, true)
-    return () => {
-      window.removeEventListener('mousedown', closeMenu)
-      window.removeEventListener('keydown', closeMenu)
-      window.removeEventListener('scroll', closeMenu, true)
-    }
-  }, [contextMenu])
+  // The custom format menu is a transient popup: ANY further interaction
+  // (press, keystroke, scroll) dismisses it.
+  const closeMenu = useCallback(() => setContextMenu(null), [])
+  useDismissOnGlobalInteraction(contextMenu !== null, closeMenu)
 
   function runFormat(marker: string) {
     const view = editorRef.current

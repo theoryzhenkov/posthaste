@@ -18,7 +18,7 @@
 import { useMemo } from 'react'
 
 import { isTauriRuntime } from '../../../desktop/runtime'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 
 interface EmailFrameProps {
   html: string

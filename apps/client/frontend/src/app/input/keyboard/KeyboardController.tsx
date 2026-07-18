@@ -18,6 +18,7 @@ import {
 } from 'react'
 
 import {
+  firstMatchingChord,
   resolveKeyboardAction,
   runResolvedWithConfirm,
   type ActionConfirm,
@@ -26,7 +27,7 @@ import {
   type MessageTarget,
 } from '@/commands'
 
-import { KeyboardContext, type KeyboardContextValue } from './context'
+import { KeyboardContext, type KeyboardContextValue } from '@/components/keyboard/context'
 import type { PaneId } from '@/domain/vocabulary'
 
 import {
@@ -35,8 +36,8 @@ import {
   type KeyboardDispatchContext,
   type PaneKeyHandler,
 } from './dispatch'
-import { KeyboardConfirmDialog } from './KeyboardConfirmDialog'
-import type { GotoPrefix, GotoRole } from './goto/goto'
+import { KeyboardConfirmDialog } from '@/components/keyboard/KeyboardConfirmDialog'
+import type { GotoPrefix, GotoRole } from '../goto/goto'
 
 /** How long a half-typed goto prefix (`g`, `gq`) waits for its next key. */
 const PREFIX_TIMEOUT_MS = 1500
@@ -48,20 +49,10 @@ export interface KeyboardControllerProps {
   hasSelectedMessage: boolean
   hasSearchQuery: boolean
   onOpenCommandPalette: () => void
-  onOpenSettings: () => void
-  onCompose: () => void
-  onReply: () => void
-  onReplyAll: () => void
-  onToggleFlag: () => void
   onUndo: () => void
   onRedo: () => void
-  onArchive: () => void
-  onTrash: () => void
-  onOpenTagEditor: () => void
-  onOpenFocusedMessage: () => void
   onClearSelectedMessage: () => void
   onClearSearchQuery: () => void
-  onToggleShortcuts: () => void
   /** A PARAMETERIZED action's chord (e.g. `m` → move-to-mailbox) can't run
    *  bare — this opens the command palette in that action's pick-step. */
   onOpenActionPicker: (actionId: string) => void
@@ -171,20 +162,10 @@ export function KeyboardController({
         onGoto: p.onGoto,
         onGotoConversation: p.onGotoConversation,
         onOpenCommandPalette: p.onOpenCommandPalette,
-        onOpenSettings: p.onOpenSettings,
-        onCompose: p.onCompose,
-        onReply: p.onReply,
-        onReplyAll: p.onReplyAll,
-        onToggleFlag: p.onToggleFlag,
         onUndo: p.onUndo,
         onRedo: p.onRedo,
-        onArchive: p.onArchive,
-        onTrash: p.onTrash,
-        onOpenTagEditor: p.onOpenTagEditor,
-        onOpenFocusedMessage: p.onOpenFocusedMessage,
         onClearSelectedMessage: p.onClearSelectedMessage,
         onClearSearchQuery: p.onClearSearchQuery,
-        onToggleShortcuts: p.onToggleShortcuts,
         // The registry tier is rebuilt per keydown from the ref snapshot (never
         // render-scope state) so it never races focus/selection changes.
         registryHook: {
@@ -195,23 +176,33 @@ export function KeyboardController({
               activePane: pane,
               surface: 'keyboard',
               inputOwner: 'mail',
-              hasPendingMutation: p.actionServices.email.isPending,
+              hasPendingMutation: p.actionServices.email?.isPending ?? false,
               connection: 'unknown',
             }
+            // `includeDisabled`: a chord the table CLAIMS but cannot run right
+            // now (e.g. ⌘R with no selection) must still swallow the event —
+            // matching the legacy modifier-chord feel (and keeping ⌘R from the
+            // browser); `run` below refuses the disabled resolution.
             const resolved = resolveKeyboardAction(
               keyEvent,
               keyboardCtx,
               p.actionServices,
+              { includeDisabled: true },
             )
             if (!resolved) return null
+            const chord = firstMatchingChord(resolved.def.shortcut, keyEvent)
             return {
               id: resolved.def.id,
+              aboveOverlay: chord?.aboveOverlay ?? false,
+              inEditable: chord?.inEditable ?? false,
               // Parameterized actions route to the palette pick-step (never a
               // silent no-op); destructive ones still gate on the confirm host.
-              run: () =>
+              run: () => {
+                if (!resolved.enabled) return
                 runResolvedWithConfirm(resolved, requestConfirm, (r) =>
                   stateRef.current.props.onOpenActionPicker(r.def.id),
-                ),
+                )
+              },
             }
           },
         },

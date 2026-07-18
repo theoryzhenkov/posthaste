@@ -1,5 +1,11 @@
-import { useCallback, useSyncExternalStore } from 'react'
+/**
+ * Message-table column layout — visible set, sort, and per-column widths —
+ * persisted to localStorage as one config. A `createStoredStore` (R5) shared
+ * by every table instance.
+ */
+import { useCallback } from 'react'
 import type { SortDirection } from '@/domain/vocabulary'
+import { createStoredStore, useStore } from '@/lib/store'
 
 import {
   type ColumnId,
@@ -32,22 +38,20 @@ function isValidColumnId(id: unknown): id is ColumnId {
   return typeof id === 'string' && validIds.has(id)
 }
 
-function readFromStorage(): StoredConfig {
+function readStoredConfig(raw: string | null): StoredConfig {
+  if (!raw) return DEFAULT_CONFIG
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_CONFIG
     const parsed: unknown = JSON.parse(raw)
 
-    // Migrate from old format (plain array of column IDs)
+    // Migrate from old format (plain array of column IDs); the migrated shape
+    // persists on the next change.
     if (Array.isArray(parsed)) {
       const columns = parsed.filter(isValidColumnId)
-      const migrated: StoredConfig = {
+      return {
         columns: columns.length > 0 ? columns : DEFAULT_CONFIG.columns,
         sort: DEFAULT_CONFIG.sort,
         widths: {},
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
-      return migrated
     }
 
     if (typeof parsed !== 'object' || parsed === null) return DEFAULT_CONFIG
@@ -96,35 +100,24 @@ function readFromStorage(): StoredConfig {
   }
 }
 
-let cached: StoredConfig = readFromStorage()
-const listeners = new Set<() => void>()
+const columnConfigStore = createStoredStore<StoredConfig>({
+  key: STORAGE_KEY,
+  codec: { read: readStoredConfig, write: (config) => JSON.stringify(config) },
+})
 
-function notify() {
-  for (const fn of listeners) fn()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
-function getSnapshot(): StoredConfig {
-  return cached
+function currentConfig(): StoredConfig {
+  return columnConfigStore.get()
 }
 
 function persist(config: StoredConfig) {
-  cached = config
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
-  notify()
+  columnConfigStore.set(config)
 }
 
 export function useColumnConfig() {
-  const config = useSyncExternalStore(subscribe, getSnapshot)
+  const config = useStore(columnConfigStore)
 
   const toggleColumn = useCallback((columnId: ColumnId) => {
-    const { columns, sort, widths } = getSnapshot()
+    const { columns, sort, widths } = currentConfig()
     if (columns.includes(columnId)) {
       if (columns.length <= 1) return
       const rest = { ...widths }
@@ -140,7 +133,7 @@ export function useColumnConfig() {
   }, [])
 
   const reorderColumns = useCallback((newColumns: ColumnId[]) => {
-    const { sort, widths } = getSnapshot()
+    const { sort, widths } = currentConfig()
     persist({ columns: newColumns, sort, widths })
   }, [])
 
@@ -157,14 +150,14 @@ export function useColumnConfig() {
     if (def.resizable !== true) {
       return
     }
-    const { columns, sort, widths } = getSnapshot()
+    const { columns, sort, widths } = currentConfig()
     const nextWidth = Math.max(def.minWidth ?? def.basis, Math.round(width))
     persist({ columns, sort, widths: { ...widths, [columnId]: nextWidth } })
   }, [])
 
   const toggleSort = useCallback((columnId: ColumnId) => {
     if (!SORTABLE_COLUMNS.has(columnId)) return
-    const { columns, sort, widths } = getSnapshot()
+    const { columns, sort, widths } = currentConfig()
     if (sort.columnId === columnId) {
       persist({
         columns,

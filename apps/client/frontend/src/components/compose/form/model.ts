@@ -13,7 +13,12 @@ import {
   patternMatchesEmail,
   type EmailPattern,
 } from '@/domain/address'
-import { formatRecipient } from '@/components/compose/form/composeMessage'
+import type { ComposeIntent, MailtoSeed } from '@/domain/composeIntent'
+import {
+  EMPTY_COMPOSE_FORM,
+  formatRecipient,
+  type ComposeForm,
+} from '@/components/compose/form/composeMessage'
 
 export type { ComposeAttachment, ComposeForm } from '@/components/compose/form/composeMessage'
 export {
@@ -128,7 +133,7 @@ export function insertSignatureAboveQuote(
  * missing or unparseable date degrades to `<sender> wrote:`; no sender at all
  * yields no attribution line (null).
  */
-export function formatReplyAttribution(
+function formatReplyAttribution(
   from: Recipient | null,
   date: string | null,
   options?: { locale?: string; timeZone?: string },
@@ -151,6 +156,137 @@ export function formatReplyAttribution(
     timeZone: options?.timeZone,
   }).format(parsed)
   return `On ${formatted} ${sender} wrote:`
+}
+
+/** The compose form seeded synchronously when the composer opens: a resumed
+ * draft's loaded content, a mailto's parsed fields, or (for every other kind)
+ * the empty form — a reply/forward starts empty and streams its seed in later
+ * (see {@link deriveReplySeed}). */
+export function initialComposeForm({
+  draftSeed,
+  intentKind,
+  mailtoSeed,
+}: {
+  draftSeed: DraftSeed | undefined
+  intentKind: ComposeIntent['kind']
+  mailtoSeed: MailtoSeed | undefined
+}): ComposeForm {
+  if (intentKind === 'draft') {
+    return draftSeed ? { ...draftSeed, attachments: [] } : EMPTY_COMPOSE_FORM
+  }
+  // A mailto compose is a `new` message whose fields are already known —
+  // seed them synchronously (nothing streams in later).
+  if (intentKind === 'mailto' && mailtoSeed) {
+    return {
+      ...EMPTY_COMPOSE_FORM,
+      to: mailtoSeed.to,
+      subject: mailtoSeed.subject,
+      body: mailtoSeed.body,
+    }
+  }
+  return EMPTY_COMPOSE_FORM
+}
+
+/** A resumed draft's loaded field values (no attachments — those seed
+ * separately through the forward-attachment path). */
+export interface DraftSeed {
+  from: string
+  to: string
+  cc: string
+  bcc: string
+  subject: string
+  body: string
+}
+
+/**
+ * Derive the reply-all recipient set: original From + To (minus self) go to
+ * `to`, original Cc (minus self) goes to `cc`. Recipients are de-duplicated by
+ * email (case-insensitive). Only the primary identity address is excluded;
+ * alias exclusion is a follow-up.
+ */
+export function replyAllRecipients(
+  replyTo: Recipient[],
+  originalTo: Recipient[],
+  cc: Recipient[],
+  selfEmail: string | undefined,
+): { to: Recipient[]; cc: Recipient[] } {
+  const self = selfEmail?.toLowerCase()
+  const dedupedExcludingSelf = (recipients: Recipient[]): Recipient[] => {
+    const seen = new Set<string>()
+    const out: Recipient[] = []
+    for (const r of recipients) {
+      const key = r.email.toLowerCase()
+      if (seen.has(key) || (self && key === self)) continue
+      seen.add(key)
+      out.push(r)
+    }
+    return out
+  }
+  return {
+    to: dedupedExcludingSelf([...replyTo, ...originalTo]),
+    cc: dedupedExcludingSelf(cc),
+  }
+}
+
+/** What a reply/reply-all/forward streams into the (already interactive)
+ * form once its anchored message's context arrives. */
+export interface ReplySeed {
+  to: Recipient[]
+  cc: Recipient[]
+  subject: string
+  /** The exact quote block appended below any early-typed text: attribution +
+   * `>`-quote for a reply, the forwarded-message block for a forward. */
+  quoteBlock: string | null
+}
+
+/**
+ * Build the {@link ReplySeed} for a message-anchored compose. A reply's quote
+ * is headed by the localized attribution line ("On <date> <sender> wrote:");
+ * a forward's block carries its own header. Reply-all derives the full
+ * recipient set (original From + To, plus the original Cc) with the user's
+ * own address excluded; a plain reply uses the original From only; forward
+ * starts unaddressed.
+ */
+export function deriveReplySeed(
+  intentKind: 'reply' | 'replyAll' | 'forward',
+  replyContext: ReplyContext,
+  selfEmail: string | undefined,
+): ReplySeed {
+  const attribution =
+    intentKind === 'forward'
+      ? null
+      : formatReplyAttribution(
+          replyContext.originalFrom[0] ?? replyContext.to[0] ?? null,
+          replyContext.originalDate,
+        )
+  const quotedWithAttribution = replyContext.quotedBody
+    ? attribution
+      ? `${attribution}\n${replyContext.quotedBody}`
+      : replyContext.quotedBody
+    : null
+  const { to, cc } =
+    intentKind === 'forward'
+      ? { to: [], cc: [] }
+      : intentKind === 'replyAll'
+        ? replyAllRecipients(
+            replyContext.to,
+            replyContext.originalTo,
+            replyContext.cc,
+            selfEmail,
+          )
+        : { to: replyContext.to, cc: [] }
+  return {
+    to,
+    cc,
+    subject:
+      intentKind === 'forward'
+        ? replyContext.forwardSubject
+        : replyContext.replySubject,
+    quoteBlock:
+      intentKind === 'forward'
+        ? replyContext.forwardedBody
+        : quotedWithAttribution,
+  }
 }
 
 /** `>`-prefix every line of a body for reply quoting. Mirrors the engine's

@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react'
 
 import type { AppSettings, TagAppearance } from '@/data/transport/api'
 import { useMailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
-import { cn } from '@/lib/cn'
+import { cn } from '@/lib/design/cn'
 
 import {
   AlertDialog,

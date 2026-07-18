@@ -8,7 +8,7 @@
 import { useState } from 'react'
 
 import type { Notifications } from '../../../data/transport/api/index'
-import { cn } from '../../../lib/cn'
+import { cn } from '../../../lib/design/cn'
 import {
   requestOsNotificationPermission,
   type OsNotificationPermission,

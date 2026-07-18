@@ -14,6 +14,13 @@ pub struct SetKeywordsIntent {
     pub message_id: domain::MessageId,
     #[ts(as = "crate::mirror::SetKeywordsCommand")]
     pub change: domain::SetKeywordsCommand,
+    /// Whether the change joins the account's undo history (absent = true).
+    /// The client sends `false` for IMPLICIT gestures — the auto-mark-read on
+    /// opening a message — so a deliberate action's toast/shell Undo is never
+    /// hijacked by the read-state side effect that follows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub record_undo: Option<bool>,
 }
 
 /// Target + mailbox replacement for [`crate::Command::ReplaceMailboxes`].
