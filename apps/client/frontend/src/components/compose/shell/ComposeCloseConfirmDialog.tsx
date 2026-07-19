@@ -1,23 +1,16 @@
 import type { ComposeIntent } from '@/domain/composeIntent'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/overlay/alert-dialog'
+import { SurfaceConfirm } from '@/components/ui/overlay/surface-confirm'
 import { Button } from '@/components/ui/form/button'
 
 import { composeCloseCopy } from './composeCloseGuard'
 
 /**
  * Close-without-send confirmation. Shown when the user closes a dirty compose
- * (X / Escape / click-away / footer Close). Three actions, matching the app's
- * AlertDialog styling: keep editing (cancel), discard the unsaved content, or
- * save it as a draft.
+ * (X / Escape / click-away / footer Close). Rendered INSIDE the compose
+ * surface — the scrim covers only the composer, the rest of the app stays
+ * interactive, and the panel's header (move/pin) keeps working. Three
+ * actions: keep editing (also Escape / scrim click), discard the unsaved
+ * content, or save it as a draft.
  */
 export function ComposeCloseConfirmDialog({
   open,
@@ -34,31 +27,21 @@ export function ComposeCloseConfirmDialog({
 }) {
   const copy = composeCloseCopy(intentKind)
   return (
-    <AlertDialog
+    <SurfaceConfirm
       open={open}
-      onOpenChange={(next) => {
-        // Radix requests close on Escape / overlay click / Cancel — treat any
-        // dismissal as "keep editing" (cancel the close).
-        if (!next) {
-          onKeepEditing()
-        }
-      }}
+      title={copy.title}
+      description={copy.description}
+      onDismiss={onKeepEditing}
     >
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{copy.title}</AlertDialogTitle>
-          <AlertDialogDescription>{copy.description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Keep editing</AlertDialogCancel>
-          <Button variant="ghost" onClick={onDiscard}>
-            Discard
-          </Button>
-          <AlertDialogAction onClick={onSaveAsDraft}>
-            {copy.saveLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      <Button variant="outline" onClick={onKeepEditing}>
+        Keep editing
+      </Button>
+      <Button variant="ghost" onClick={onDiscard}>
+        Discard
+      </Button>
+      <Button className="col-span-2" onClick={onSaveAsDraft}>
+        {copy.saveLabel}
+      </Button>
+    </SurfaceConfirm>
   )
 }

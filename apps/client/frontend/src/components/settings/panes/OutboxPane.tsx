@@ -9,13 +9,32 @@
 import type { OperationKind, OperationState, PendingOperationRow } from '@/gen'
 import { useCommands, usePendingOperations } from '@/data'
 import { notifyFromError } from '@/data/notifications/notifyFromError'
+import { now as currentTime } from '@/lib/ambient/time'
 
-import { formatScheduledTime } from '../../compose/shell/sendLaterPresets'
 import { SettingsPage, SettingsPageHeader } from '../panel/shared'
 
 /**
- * A queued send that is being HELD for a future `sendAt` (undo-send /
- * send-later): shown honestly as scheduled, with the local-first caveat, and
+ * Format a held send's `sendAt` for the outbox copy (e.g. "Jan 4, 9:00 AM").
+ * Falls back to the raw string if unparseable.
+ */
+function formatScheduledTime(sendAt: string): string {
+  const parsed = new Date(sendAt)
+  if (Number.isNaN(parsed.getTime())) {
+    return sendAt
+  }
+  const sameYear = parsed.getFullYear() === currentTime().getFullYear()
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  })
+}
+
+/**
+ * A queued send that is being HELD for a future `sendAt` (the undo-send
+ * hold): shown honestly as scheduled, with the local-first caveat, and
  * cancelable (the ✕ discard) while still queued.
  */
 function scheduledFor(operation: PendingOperationRow): string | null {
