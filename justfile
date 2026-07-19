@@ -66,7 +66,7 @@ disk:
 reclaim:
     bash tools/disk-guard.sh clean
 
-# Regenerate the client's TypeScript protocol types (apps/client/frontend/src/gen/)
+# Regenerate the client's TypeScript protocol types (apps/client/protocol/src/gen/)
 # from the Rust models crate. Committed output; the models crate's freshness
 # test fails when this is stale.
 gen-ts:

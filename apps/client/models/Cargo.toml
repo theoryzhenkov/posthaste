@@ -5,7 +5,7 @@ edition = "2021"
 
 # The client protocol's single source of truth: queries, commands, the event
 # stream, and the error envelope, exported to TypeScript via ts-rs into
-# `../frontend/src/gen/`.
+# `../protocol/src/gen/`.
 #
 # DEPENDENCY ALLOWLIST: serde/serde_json + ts-rs + the domain model, nothing
 # else.
@@ -19,7 +19,7 @@ serde_json = { workspace = true }
 # `#[ts(optional)]`, so the parse warning is pure noise.
 ts-rs = { workspace = true, features = ["no-serde-warnings"] }
 
-# Regenerates `../frontend/src/gen/` — run as `just gen-ts`.
+# Regenerates `../protocol/src/gen/` — run as `just gen-ts`.
 [[bin]]
 name = "export-ts"
 path = "src/bin/export_ts.rs"

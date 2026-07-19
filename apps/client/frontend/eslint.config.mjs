@@ -95,7 +95,7 @@ const ALL_SYNTAX_RULES = [R3_RULE, ...R5_RULES, R8_BARE_DATE_RULE]
 const restrictedProperties = (groups) => ['error', ...groups.flat()]
 
 export default [
-  { ignores: ['dist/**', 'node_modules/**', 'src/gen/**'] },
+  { ignores: ['dist/**', 'node_modules/**'] },
   {
     files: ['src/**/*.{ts,tsx}'],
     languageOptions: {

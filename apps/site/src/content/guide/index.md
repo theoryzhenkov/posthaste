@@ -7,22 +7,22 @@ sidebar:
 ---
 
 Posthaste can react to your mail on its own: tag an invoice the moment it lands,
-ping you when your boss writes, run a little script of yours, or hand a message
-to your AI agent. This guide shows you how, in plain language, starting from the
+file a newsletter where it belongs, run a little script of yours, or hand a
+message to your AI agent. This guide shows you how, in plain language, starting from the
 simplest thing that could work.
 
 ## New here? Start with one question
 
 **What do you want to happen when a message arrives?**
 
-- **"Just tag / file / notify me."**
+- **"Just tag / file / flag it."**
   You need a built-in rule. No code, no terminal — you build it in the app in a
-  minute. → [Automations](automations.md#level-1-built-in-automations-no-code)
+  minute. → [Automations](automations.md#level-1--built-in-automations-no-code)
 
 - **"Run my own logic."**
   You need a small script that Posthaste calls (or that watches for events). A
   copy-paste "hello world" gets you there. →
-  [Automations](automations.md#level-2-run-your-own-script)
+  [Automations](automations.md#level-2--run-your-own-script)
 
 - **"Let my AI agent handle it."**
   You need to plug your agent in — and there's one thing almost everyone gets
@@ -43,9 +43,9 @@ with a short decision guide that points you to the right level.
 ## Power users and protocol details
 
 This guide is deliberately non-technical. If you want the exact endpoints, the
-event tap, tokens, and every flag:
+event stream, and every flag:
 
 - **[Scripting quickstart](scripting-quickstart.md)** — the five-minute
-  technical version, with the reference agent loop.
+  technical version: queries, commands, the event stream, and `watch --exec`.
 - **[Scripting security & threat model](scripting-security.md)** — the full
   threat model behind the safety advice here.

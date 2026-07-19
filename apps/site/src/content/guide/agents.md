@@ -20,24 +20,20 @@ first — an agent is just one more kind of action wired to a trigger.
 
 Read that twice. Here's the picture.
 
-There's a standard way to connect an AI agent to an app called **MCP**. When you
-connect Posthaste to your agent over MCP, two things happen:
+There's a standard way to connect an AI agent to an app called **MCP**. When
+you connect Posthaste to your agent over MCP, your agent gets **tools** — it
+can now read your mail, tag messages, move them, and reply. This is the
+**capability**.
 
-- Your agent gets **tools** — it can now read your mail, tag messages, move them,
-  and reply. This is the **capability**.
-- Posthaste also **pushes a live feed of events** to the connection — including
-  "a rule just fired." This _looks_ like it should wake the agent.
+What it does _not_ get is a reason to act. An agent host — think a desktop
+chat app — sits idle until something starts a turn: usually you, typing. So
+mail can be landing, and your agent just… sits there. Nothing is broken.
+**Having the tools is not the same as waking up.**
 
-Here's the trap: a normal agent host — think a desktop chat app — treats that
-event feed as **logging**. It quietly notes the events. It does **not** start
-thinking on its own when one arrives. So mail can be landing, events can be
-flowing, and your agent just… sits there. Nothing is broken. The events are
-arriving. But **delivery is not the same as waking up.**
-
-A helpful mental model: connecting over MCP hands your agent a **toolbox** and
-sits it next to a **news ticker**. It can pick up any tool the moment you ask it
-to. But it reads the ticker like background noise — it won't act on a headline
-unless something tells it "this is a task, go."
+A helpful mental model: connecting over MCP hands your agent a **toolbox**. It
+can pick up any tool the moment you ask it to. But nobody rings its doorbell
+when mail arrives — unless you wire that up, which is exactly what the rest of
+this page does.
 
 So the real question is: **what wakes the agent?**
 
@@ -47,35 +43,36 @@ There are two working shapes. Pick by how you want the agent to start.
 
 ### Shape 1 — You drive it ("triage my inbox")
 
-You connect the MCP tools to your agent host and **you** start the conversation:
-"Summarize my unread mail," "Reply to that invoice." The agent uses the tools on
-demand. Nothing needs to wake automatically because _you_ are the trigger.
+You connect the MCP tools to your agent host and **you** start the
+conversation: "Summarize my unread mail," "Reply to that invoice." The agent
+uses the tools on demand. Nothing needs to wake automatically because _you_
+are the trigger.
 
 This is the dead-simple path, and it's the next section.
 
 ### Shape 2 — Mail wakes the agent ("act automatically when it arrives")
 
 You want a message to _trigger_ the agent with no human in the loop. For that,
-something has to do the waking. You have two ways:
+something has to do the waking:
 
-- **Let the app call your agent.** A rule fires and Posthaste reaches out —
-  through a **webhook**, a local **script**, or a **watcher** — and that runner
-  starts your agent. This is the most reliable path and the one we walk in full
-  below.
-- **Run an always-on agent loop.** A small program you keep running that treats
-  each incoming event as a task and acts on it. This is the elegant "just
-  connect over MCP and it reacts" story — but only because you built the loop
-  that consumes events as work. It doesn't come for free from a stock chat app.
+- **A watcher runs your agent.** `posthastectl watch --exec` runs a handler
+  per matching message, and the handler invokes your agent. This is the most
+  reliable path and the one we walk in full below.
+- **An always-on agent loop.** A small program you keep running that tails
+  Posthaste's event stream and treats each event as a task. This is the
+  elegant "it just reacts" story — but only because you built the loop that
+  consumes events as work. It doesn't come for free from a stock chat app.
 
-The rest of this page covers all three: the simple driven path, the always-on
-loop, and the app-calls-your-agent path — then one worked example.
+The rest of this page covers all three: the simple driven path, the
+watcher-wakes-the-agent path, and the always-on loop — then one worked
+example.
 
 ---
 
 ## The simple path: an MCP-capable agent host
 
-If you use an agent host that speaks MCP (many desktop AI apps do), this is all
-it takes to give it the mail tools.
+If you use an agent host that speaks MCP (many desktop AI apps do), this is
+all it takes to give it the mail tools.
 
 Add Posthaste to your host's MCP server configuration:
 
@@ -83,218 +80,188 @@ Add Posthaste to your host's MCP server configuration:
 {
   "mcpServers": {
     "posthaste": {
-      "command": "/Applications/PosthasteNightly.app/Contents/MacOS/posthastectl",
-      "args": ["mcp"],
-      "env": {
-        "POSTHASTE_MCP_GRANTS": "tap:read,read",
-        "POSTHASTE_MCP_TOKEN_EXPIRY": "1h"
-      }
+      "command": "posthastectl",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-- `command` is the path to `posthastectl`. Above is the copy bundled inside the
-  macOS app; if you ran `posthaste-wizard ctl install` it's at
-  `~/.local/bin/posthastectl`. Any `posthastectl` works.
-- `args` is just `["mcp"]` — that starts the MCP server.
-- `POSTHASTE_MCP_GRANTS` is what the agent is allowed to do. The default,
-  **`tap:read,read`**, means **read-only** (read your mail and receive the event
-  feed). Writing is an explicit opt-in — see [Give it the least access](#give-it-the-least-access-below).
+- `command` is the path to `posthastectl` — the same single binary as the CLI.
+  Use the copy on your `PATH`, or the one bundled inside the desktop app (on
+  macOS: `/Applications/Posthaste.app/Contents/MacOS/posthastectl`).
+- `args` is just `["mcp"]` — that starts the MCP server on stdio.
 
-Your agent finds your running Posthaste on its own — no URLs, no tokens to paste.
-
-### Tokens refresh themselves — you never manage a key
-
-This matters, so it's called out plainly: **you never copy, paste, or renew an
-access token for the agent.** Every time the agent connects, Posthaste mints a
-fresh, limited key scoped to exactly the permissions you granted, and uses it for
-that session. The key expires on its own; the next connection gets a new one.
-There is nothing to rotate and nothing to leak into a config file. The app hands
-your agent a limited, auto-renewing key.
+Your agent finds your running Posthaste on its own — the server reads the
+app's `connection-info.json` discovery file, so there are no URLs and no
+tokens to paste. If the app isn't running, the tools say so instead of
+hanging.
 
 ### What tools the agent gets
 
 Once connected, your agent can:
 
-- **Read your mail** — list and search conversations and messages, and open a
-  full message.
-- **Tag** a message (add or remove keywords).
-- **Move** a message to a mailbox.
-- **Reply** in-thread — you give it the message and the reply body, and it works
-  out the recipient, subject, and threading itself.
-- **Send** a new message, and **trigger a sync**.
+- **Read your mail** — `list_accounts`, `list_mailboxes`, `list_messages`,
+  `search_messages` (the full query grammar: `from:`, `is:unread`, `tag:`,
+  free text), `get_message` for a full message, `get_thread` for a whole
+  conversation, and `get_blob` for attachment bytes.
+- **See what's in flight** — `list_pending_operations` shows queued writes
+  and their settlement verdicts, so the agent can check that its own actions
+  landed.
+- **Tag** a message (`set_keywords` — tags, read state, and flags are all
+  keywords).
+- **Move** a message to a mailbox (`move_to_mailbox`).
+- **Reply** in-thread (`reply`) — the agent gives it the message and the reply
+  body, and it works out the recipient, subject, and threading itself.
+- **Send** a new message (`send_message`), **manage mailboxes**
+  (`create_mailbox`, `rename_mailbox`, `delete_mailbox`), and **trigger a
+  sync** (`trigger_sync`).
 
-With the read-only default, only the reading tools do anything; the write tools
-appear but are refused until you grant more. That's deliberate.
+Read tools are annotated read-only (MCP's `readOnlyHint`), so a host that
+distinguishes safe from unsafe tools can show them accordingly. Every write
+tool carries a client idempotency id under the hood, so a retried tool call
+never double-applies.
 
-### Give it the least access (below)
+### Give it the least access — honest version
 
 An agent reads mail — and anyone can email you, so some of what it reads is
-written by strangers. An agent that _also_ holds write or send permission **and**
-reads untrusted mail is the classic prompt-injection risk: a crafted message can
-try to instruct the agent, which then acts with your key. So:
+written by strangers. An agent that _also_ holds write or send capability
+**and** reads untrusted mail is the classic prompt-injection risk: a crafted
+message can try to instruct the agent, which then acts as you.
 
-- **Keep the default `tap:read,read`** unless the agent truly needs to write. A
-  summarizer never needs more.
-- Only add write permission (`apply`, or specific verbs like `tag`, `move`,
-  `send`) once you've accepted that a stranger's email might try to steer the
-  agent.
-- Always pair an autonomous agent with a **sender-scoped trigger** (below), so
-  only mail you trust can set it off.
+Here's the honest part: **today the MCP connection carries the app's session
+secret, which grants the full surface — read and write, every account.**
+Scoped, expiring capability tokens ("this agent may only read") are specified
+in the API design and are staged work, not implemented yet. Until they land:
 
-Before you grant an autonomous agent any write ability, read **threat 2 (prompt
+- Connecting an agent means trusting it — and its model — with your mailbox.
+- If your agent host supports **per-tool allow-lists**, use them: a summarizer
+  needs only the read tools. That's host-side policy, not enforcement in
+  Posthaste, but it's real friction against an injected instruction.
+- For anything autonomous, **gate the trigger on something only you control**
+  (like a tag you apply yourself — see the worked example), so a stranger's
+  mail can never start an agent turn in the first place.
+
+Before you let an autonomous agent write or send, read **threat 2 (prompt
 injection)** in the [security guide](scripting-security.md).
 
 ---
 
+## The watcher path: mail wakes the agent
+
+This is usually the easiest way to get automatic reactions. A
+`posthastectl watch --exec` watcher runs your handler per matching message;
+the handler invokes your agent; the agent's output is written back with
+`posthastectl`. The agent doesn't even need MCP for this — the handler feeds
+it the message and handles the write-back itself.
+
+The full worked example is below. The shape:
+
+```
+mail arrives → watch matches it → handler runs → agent thinks → posthastectl writes back
+```
+
+No inbound network port, no always-on connection to babysit — the watcher is
+the only long-lived piece, and it's a few flags.
+
 ## The always-on agent loop
 
-If you want the "just connect and it reacts" experience, you run a small program
-that stays connected, blocks waiting for events, and treats each one as work to
-do. That's the piece a stock chat app is missing — and once it exists, the event
-feed genuinely wakes your agent.
+If you want a persistently-connected agent that reacts on its own, you run a
+small program that stays up, tails the event stream, and treats each event as
+work: read `posthastectl events` (NDJSON, one `{generation, event}` object
+per line), and on a relevant event, run one agent turn — over MCP tools or
+plain `posthastectl` calls — to fetch the message, decide, and act.
 
-You don't have to design it from scratch: the technical
-[scripting quickstart](scripting-quickstart.md#reference-a-wake-on-event-agent-loop) describes a
-reference wake-on-event loop you can adapt. The shape is: connect over MCP with
-your grants, wait for a `rule.fired` event, then run one agent turn with the
-tools. To keep that loop alive across reboots, wrap it as a background
-service exactly like any watcher (see [Keeping it running](#keeping-it-running)).
+Two things your loop must respect, because the stream is honest about them:
 
-If building and babysitting a long-running loop sounds like more than you want,
-use the next path instead — it gets you automatic reactions with no loop to
-maintain.
+- **Events are prompts, not a ledger.** On any doubt (a reconnect, a fresh
+  `runId`), reconcile through queries instead of assuming you saw everything.
+- **No replay.** Events missed while your loop was down are gone; catch up
+  with a query on startup, exactly like a watcher restart.
 
----
-
-## The "app calls my agent" path
-
-This is usually the easiest way to get automatic reactions, because Posthaste
-does the waking for you. You write a rule; when it fires, the app runs your
-handler; your handler invokes the agent.
-
-- **Webhook:** a **Call a webhook** rule POSTs the message to a URL you run. Use
-  `posthastectl hook serve` (from [Automations](automations.md#the-webhook-shape-and-the-easy-listener))
-  as the listener, and have it invoke your agent.
-- **Watcher:** an **Emit a fact** rule announces "I fired," and a
-  `posthastectl watch` on your machine runs your handler in response. No inbound
-  port needed. This is the path in the worked example below.
-
-Either way, your handler receives the message and a ready-to-use, message-scoped
-access token, invokes your agent, and writes the result back with
-`posthastectl`.
+If building and babysitting a long-running loop sounds like more than you
+want, use the watcher path — it gets you automatic reactions with the restart
+semantics already handled.
 
 ---
 
 ## Worked example, end to end
 
-**Goal:** _When I get an email I've tagged `todo`, my agent reads it and replies
-with a short summary._
+**Goal:** _When I tag an email `todo`, my agent reads it and replies with a
+short summary._
 
-We'll use the app-calls-your-agent path with an **emit rule + watcher** — it's
-fully supported today, needs no inbound network port, and every piece is
-copy-paste correct.
+We'll use the watcher path. The trigger is a tag **you apply yourself** —
+that's doing real security work: a stranger can't tag your mail, so a
+stranger's email can never wake the agent. Only messages you deliberately
+hand over get processed.
 
-### Step 1 — Create the trigger in the app
+### Step 1 — Write the handler
 
-1. **Settings → Automations → New rule.**
-2. Name it `Summarize todo mail`.
-3. **When a message matches:** build `tag:todo from:you@yourdomain.com`. The
-   `from:` scope is doing real work — it means only mail from _you_ can ever wake
-   the agent, so a stranger can't tag their way into your agent. (You tag the
-   message `todo` yourself; the rule reacts to your own tagging.)
-4. **Then:** choose **Emit a fact**. On its own this just announces that the rule
-   fired — your watcher, next, does the rest.
-5. **Enabled**, **Save rule**.
-
-### Step 2 — Write the handler
-
-Save this as `summarize.sh`. It gets the full message as JSON on stdin, asks your
-agent for a summary, and replies in-thread. Replace `your-agent` with however you
-invoke your own agent (a CLI, a script — anything that reads the message on stdin
-and prints a summary):
+Save this as `summarize.sh`. It gets the full message detail as JSON on
+stdin, asks your agent for a summary, and replies in-thread. Replace
+`your-agent` with however you invoke your own agent (a CLI, a script —
+anything that reads the message JSON on stdin and prints a summary):
 
 ```sh
 #!/bin/sh
-# summarize.sh — the message arrives as JSON on stdin.
-# PH_MESSAGE_ID and the account are already set in the environment.
-summary=$(your-agent summarize)          # reads the message JSON on stdin, prints a summary
-posthastectl reply --message "$PH_MESSAGE_ID" --body "$summary"
+# summarize.sh — the message detail arrives as JSON on stdin.
+# The watcher exports PH_MESSAGE_ID and PH_ACCOUNT_ID for the triggering message.
+summary=$(your-agent summarize)   # reads the message JSON on stdin, prints a summary
+posthastectl reply "$PH_MESSAGE_ID" --account-id "$PH_ACCOUNT_ID" \
+  --body "$summary" --id "summarize:$PH_MESSAGE_ID"
 ```
 
-That's the whole handler. You don't pass a URL, a token, or an account —
-`posthastectl reply` picks up the message and your running app automatically, and
-makes the reply safe to retry.
+That's the whole handler. You don't pass a URL or a token — `posthastectl`
+discovers your running app on its own; the triggering message and account
+come from the `PH_*` variables the watcher already set. The `--id` derived
+from the message makes the reply idempotent: if the handler ever runs twice
+for the same message, the summary is sent once.
 
-### Step 3 — Run the watcher
+### Step 2 — Run the watcher
 
 ```sh
-posthastectl watch \
-  --topic rule.fired --rule summarize-todo-mail \
-  --exec 'sh ./summarize.sh' --cursor ./cursor
+posthastectl watch --keyword todo --all-updates --exec 'sh ./summarize.sh'
 ```
 
-- `--topic rule.fired --rule summarize-todo-mail` listens for _your_ rule firing,
-  rather than for every new message. (Use the rule's id here. If you're unsure of
-  it, this can also be a plain `--keyword todo` watch on new mail — the trigger's
-  `from:` scope still does the real gating.)
-- `--exec` runs your handler once per firing.
-- `--cursor` lets it resume cleanly after a restart.
+- `--keyword todo` fires the handler for messages carrying the `todo` tag.
+- `--all-updates` includes tag changes, not just arrivals — you're tagging
+  existing mail, so the tagging _is_ the event.
+- `--exec` runs your handler once per match, message on stdin.
 
-Tag any message `todo` (from yourself), and within moments your agent's summary
-lands as a reply in the thread.
+Tag any message `todo`, and within moments your agent's summary lands as a
+reply in the thread.
+
+### Step 3 — Catch up after downtime
+
+Missed events aren't replayed, so start each session (or boot) with a
+reconciliation pass before the watch — query for tagged-but-unsummarized
+mail and run the handler over it. The idempotent `--id` makes overlap
+harmless. The exact pattern is in the
+[scripting quickstart](scripting-quickstart.md#restart-semantics-at-most-once-reconcile-via-queries).
 
 ### Step 4 — Keep it running
 
-So it survives a reboot, install it as a background service:
-
-```sh
-posthaste-wizard ctl register-watch \
-  --topic rule.fired --rule summarize-todo-mail \
-  --exec 'sh /full/path/to/summarize.sh' --cursor /full/path/to/cursor \
-  --name summarize
-```
-
-Confirm once when it asks, and you're done. Remove it later with
-`posthaste-wizard ctl unregister-watch --name summarize`.
-
-> This handler **replies**, and that's safe on a redelivery: the app
-> de-duplicates `reply`/`send` (as it does `tag`/`move`), so a rare
-> double-delivery of the trigger still sends the summary only once.
-
----
-
-## Keeping it running
-
-Everything that has to stay alive — an always-on agent loop, a watcher, a webhook
-listener — uses the same wizard command to become a restart-on-failure
-background service:
-
-```sh
-posthaste-wizard ctl register-watch --exec 'sh ./handler.sh' --name myagent
-```
-
-It's a **user** service (no `sudo`), it asks for a one-time confirmation because
-it runs local code in response to server events, and `posthaste-wizard ctl
-status` lists everything you've registered. Full details, plus updating the
-tools, are in [Automations → Keeping it running](automations.md#keeping-it-running-and-up-to-date).
+Wrap the watcher in a user service — a `systemd --user` unit (Linux) or a
+launchd LaunchAgent (macOS) with restart-on-failure — as described in
+[Automations → Keeping it running](automations.md#keeping-it-running). It runs
+as you, and never needs `sudo`.
 
 ---
 
 ## The short version
 
-- Connecting over MCP gives your agent **tools + an event feed** — capability,
-  not a wake-up. A stock host logs the events; it doesn't act on them.
-- To **drive** the agent yourself: connect over MCP, keep the read-only default,
-  ask it to do things. Done.
-- To make mail **wake** the agent automatically: either run an always-on loop
-  that consumes events as work, or let the app **call** your agent via a
-  webhook / script / watcher rule.
-- **Tokens refresh themselves** — you never manage a key.
-- **Scope triggers to trusted senders** and **grant the least access** — always,
-  and especially before letting an autonomous agent write or send.
+- Connecting over MCP gives your agent **tools** — capability, not a wake-up.
+  A stock host won't act on incoming mail by itself.
+- To **drive** the agent yourself: add `posthastectl mcp` to your host's MCP
+  config and ask it to do things. Done.
+- To make mail **wake** the agent: run a `watch --exec` handler that invokes
+  it, or build an always-on loop that consumes the event stream as work.
+- **Today the connection grants the full mail surface** — scoped tokens are
+  coming, but until then, connecting an agent means trusting it with your
+  mailbox. Use host-side tool allow-lists where you can.
+- **Gate autonomous triggers on something only you control** (your own tag),
+  so strangers' mail can never start a turn.
 
-For the exact tools, the event contract, and the reference loop, see the
-[scripting quickstart](scripting-quickstart.md); for the full threat model,
-the [security guide](scripting-security.md).
+For the exact commands, the event contract, and the write-back idempotency
+story, see the [scripting quickstart](scripting-quickstart.md); for the full
+threat model, the [security guide](scripting-security.md).

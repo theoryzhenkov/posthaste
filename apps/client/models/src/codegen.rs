@@ -3,7 +3,7 @@
 //!
 //! Generation is explicit — `cargo run -p posthaste-client-models --bin
 //! export-ts` (wrapped by `just gen-ts`) writes into
-//! `apps/client/frontend/src/gen/`. Tests never write into the source tree;
+//! `apps/client/protocol/src/gen/`. Tests never write into the source tree;
 //! the freshness test exports into a temp directory and diffs.
 
 use std::error::Error;

@@ -21,6 +21,10 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
+        // '@/gen' is the generated wire protocol, served from the
+        // @posthaste/protocol workspace package; must precede the '@' entry
+        // (first match wins). Mirrors the tsconfig paths.
+        '@/gen': resolve(import.meta.dirname, '../protocol/src/gen'),
         '@': resolve(import.meta.dirname, 'src'),
       },
     },
