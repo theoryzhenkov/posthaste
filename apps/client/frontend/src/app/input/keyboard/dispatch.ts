@@ -59,6 +59,8 @@ export interface KeyboardDispatchContext {
   /** A lightweight overlay (palette, compose, tag editor, shortcuts) owns input. */
   overlayOwnsInput: boolean
   hasSelectedMessage: boolean
+  /** A message is OPEN in the reader (Escape closes it, keeping the cursor). */
+  hasOpenedMessage: boolean
   hasSearchQuery: boolean
   activePane: PaneId
   /** Panes currently mountable, in {@link PANE_ORDER}. */
@@ -78,7 +80,7 @@ export interface KeyboardDispatchContext {
   onOpenCommandPalette: () => void
   onUndo: () => void
   onRedo: () => void
-  onClearSelectedMessage: () => void
+  onCloseReader: () => void
   onClearSearchQuery: () => void
   /** Registry tier: every action chord — modifier chords (⌘R/⌘⇧R/⌘N/⌘,/⌘⇧L/`?`)
    *  and the contextual mail actions (archive/trash/delete/tag/open). The
@@ -156,9 +158,9 @@ export function dispatchMailKey(
   }
 
   if (key === 'Escape' && !ctx.overlayOwnsInput) {
-    if (ctx.hasSelectedMessage) {
+    if (ctx.hasOpenedMessage) {
       event.preventDefault()
-      ctx.onClearSelectedMessage()
+      ctx.onCloseReader()
       return
     }
     if (ctx.hasSearchQuery) {
