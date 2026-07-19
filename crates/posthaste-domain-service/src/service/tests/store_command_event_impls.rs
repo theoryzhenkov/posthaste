@@ -150,7 +150,13 @@ impl OperationOutboxStore for TestStore {
         Ok(ops
             .iter()
             .filter(|op| {
-                &op.account_id == account_id && !matches!(op.state, OperationState::Failed)
+                // Mirrors the store SQL: a failed INTENT op drops out (base
+                // wins), but a failed CONTENT op stays foldable so its parked
+                // authored row stays visible.
+                &op.account_id == account_id
+                    && (!matches!(op.state, OperationState::Failed)
+                        || op.kind.is_draft_save()
+                        || op.kind == OperationKind::Send)
             })
             .cloned()
             .collect())

@@ -303,15 +303,13 @@ impl MailService {
             .list_unsettled_operations(account_id)?
             .into_iter()
             .rfind(|operation| {
+                // Any state a draft-save content op can rest in carries live
+                // content authority — including `failed`/`dispatchUncertain`,
+                // where the save is parked with its authored row still visible
+                // and its body must stay retrievable.
                 operation.entity.kind == OperationEntityKind::Draft
                     && operation.entity.id == key
                     && operation.kind.is_draft_save()
-                    && matches!(
-                        operation.state,
-                        OperationState::Pending
-                            | OperationState::Inflight
-                            | OperationState::Applied
-                    )
             });
         let request = match newest_save {
             Some(operation) => {

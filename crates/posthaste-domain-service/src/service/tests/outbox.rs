@@ -574,6 +574,101 @@ async fn permanent_failure_of_a_draft_emits_no_base_correction() {
     assert!(events.iter().all(|event| event.topic != "message.updated"));
 }
 
+#[tokio::test]
+async fn permanently_failed_draft_stays_parked_with_its_row_and_body_visible() {
+    // A content op's authored words are never silently dropped: a putDraft that
+    // permanently fails stays PARKED in the outbox with its DERIVED row still
+    // visible and its body still retrievable. The optimistic row written at
+    // save time is a fold of the still-parked op, so the failure leaves it in
+    // place — the user keeps or discards it, no phantom, no data loss.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::default());
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("invalid draft".to_string())));
+
+    let (op, _events) = service
+        .save_draft(&account_id, None, draft_request("Parked words"))
+        .await
+        .expect("save draft");
+    let live_id = MessageId::from(op.entity.id.as_str());
+
+    service
+        .flush_account(&account_id, &gateway)
+        .await
+        .expect("flush fails the save permanently");
+
+    // The op is parked (Failed), still surfaced as outbox work.
+    let parked = service
+        .list_pending_operations(&account_id)
+        .expect("pending");
+    assert!(
+        parked
+            .iter()
+            .any(|operation| operation.id == op.id && operation.state == OperationState::Failed),
+        "the failed save stays parked in the outbox",
+    );
+
+    // Its derived row survives the failure — no input to the fold changed, and
+    // a failed content op keeps folding.
+    let summary = store
+        .get_message_summary(&account_id, &live_id)
+        .expect("effective read")
+        .expect("the parked save's authored row stays visible after failure");
+    assert_eq!(summary.subject.as_deref(), Some("Parked words"));
+    assert!(summary.keywords.iter().any(|keyword| keyword == "$draft"));
+
+    // Its body stays retrievable — the parked op is the content authority.
+    let content = service
+        .get_draft_content(&account_id, &live_id, None)
+        .await
+        .expect("draft content")
+        .content;
+    assert_eq!(content.subject, "Parked words");
+    assert_eq!(content.body, "draft body");
+
+    // The rebuild guarantee holds for the Failed state too: wipe the derived
+    // plane, run the full replay, and the parked row reappears from the op.
+    store
+        .overlay_rows
+        .lock()
+        .expect("overlay rows lock")
+        .clear();
+    service
+        .replay_account_overrides(&account_id)
+        .await
+        .expect("full rebuild");
+    let rebuilt = store
+        .get_message_summary(&account_id, &live_id)
+        .expect("effective read")
+        .expect("the parked row reappears from the log after a wipe + rebuild");
+    assert_eq!(rebuilt.subject.as_deref(), Some("Parked words"));
+
+    // Discard is the only thing that makes the parked row vanish.
+    service
+        .discard_operation(&op.id)
+        .await
+        .expect("discard the parked op")
+        .expect("the failed op was removed");
+    assert!(
+        store
+            .get_message_summary(&account_id, &live_id)
+            .expect("effective read")
+            .is_none(),
+        "discarding the parked op removes its derived row",
+    );
+}
+
 async fn queue_and_fail_one(
     service: &MailService,
     account: &AccountId,
@@ -1012,11 +1107,13 @@ async fn send_settlement_consumes_the_saved_draft_in_one_flush() {
     );
 }
 
-/// D125: a send parked `DispatchUncertain` KEEPS the draft — it is the user's
-/// recovery artifact. Destruction happens only when an explicit retry settles
-/// the send successfully.
+/// A send parked `DispatchUncertain` is a CONTENT op: it stays parked with its
+/// content intact — the provisional Sent row keeps deriving (visible,
+/// needs-attention) — never silently dropped. Its consumed draft folds away
+/// with the send. An explicit retry that settles successfully leaves the send
+/// resting in the log; discarding the parked send restores the draft.
 #[tokio::test]
-async fn parked_send_keeps_the_draft_until_settled_success() {
+async fn parked_send_keeps_its_row_until_settled_success() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -1049,21 +1146,21 @@ async fn parked_send_keeps_the_draft_until_settled_success() {
         .await
         .expect("flush parks");
 
-    // Parked: the draft survives locally (D125 — the fold unwinds, the row
-    // is the user's recovery artifact) and its registry identity is kept.
+    // Parked: the send stays queued (needs-attention) with its provisional
+    // Sent row still derived — content intact, never dropped.
     let pending = service.list_pending_operations(&account).expect("pending");
     assert_eq!(pending.len(), 1, "only the parked send remains queued");
     assert_eq!(pending[0].state, OperationState::DispatchUncertain);
     assert!(
         store
-            .get_message_summary(&account, &MessageId::from("provider-draft-1"))
+            .get_message_summary(&account, &MessageId::from(send.entity.id.as_str()))
             .expect("effective read")
             .is_some(),
-        "a parked send keeps the draft visible (D125)"
+        "a parked send keeps its provisional Sent row visible (content intact)"
     );
 
-    // Explicit user retry settles the send (deduplicated submission) — only
-    // now is the draft consumed and its row retired.
+    // Explicit user retry settles the send (deduplicated submission) — the
+    // send now rests settled in the log and the consumed draft stays retired.
     assert!(service.retry_operation(&send.id).expect("retry"));
     service
         .flush_account(&account, &gateway)
@@ -1078,14 +1175,15 @@ async fn parked_send_keeps_the_draft_until_settled_success() {
             .get_message_summary(&account, &MessageId::from("provider-draft-1"))
             .expect("effective read")
             .is_none(),
-        "the settled retry consumes the draft"
+        "the settled retry keeps the draft consumed"
     );
 }
 
-/// Ruling 24 idempotency: a redelivered send (same operation id) that
-/// settles again must not double-destroy the already-consumed draft — the
-/// registry forgot the mapping at the first settlement, so the redelivered
-/// flush resolves no consume target.
+/// Idempotency: a settled send rests in the log (`applied`), so re-enqueuing it
+/// under its original id is a no-op — the outbox never re-flushes it, so the
+/// consumed draft is never destroyed a second time. The consumed-draft mapping
+/// is also forgotten at settlement, so even a fresh resolve would find no
+/// target.
 #[tokio::test]
 async fn redelivered_send_settlement_does_not_double_destroy() {
     let account = AccountId::from("primary");
@@ -1115,11 +1213,18 @@ async fn redelivered_send_settlement_does_not_double_destroy() {
         gateway.send_consume_calls.lock().unwrap().as_slice(),
         &[Some(MessageId::from("provider-draft-1"))]
     );
+    // The settled send rests in the log; the consumed-draft mapping is forgotten.
+    assert_eq!(
+        service
+            .list_pending_operations(&account)
+            .expect("pending")
+            .len(),
+        0,
+        "the settled send is filtered out of the pending surface",
+    );
 
-    // Redelivery: the same send operation re-enqueued under its original id
-    // (the settled original was pruned). The gateway dedups the submission;
-    // the registry mapping is gone, so the redelivered push resolves NO
-    // consume target.
+    // Redelivery: re-enqueuing the same send id is idempotent — the op already
+    // rests settled, so the outbox never re-flushes it.
     service.enqueue_operation(send).expect("redelivered send");
     service
         .flush_account(&account, &gateway)
@@ -1129,17 +1234,17 @@ async fn redelivered_send_settlement_does_not_double_destroy() {
     assert_eq!(
         gateway.committed_send_keys.lock().unwrap().len(),
         1,
-        "the redelivered send is deduplicated, not resubmitted"
+        "the settled send is not resubmitted",
     );
     assert_eq!(
         gateway.send_consume_calls.lock().unwrap().as_slice(),
-        &[Some(MessageId::from("provider-draft-1")), None],
-        "the consumed draft must not be destroyed a second time"
+        &[Some(MessageId::from("provider-draft-1"))],
+        "the consumed draft is never destroyed a second time",
     );
     let pending = service.list_pending_operations(&account).expect("pending");
     assert!(
         pending.is_empty(),
-        "the redelivered settlement leaves no failed/queued ops: {pending:?}"
+        "the redelivery leaves no failed/queued ops: {pending:?}"
     );
 }
 
@@ -2043,16 +2148,18 @@ async fn discard_of_a_synced_draft_tombstones_and_enqueues_the_destroy() {
 #[tokio::test]
 async fn draft_save_settlement_carries_the_row_across_the_id_rotation() {
     // At settlement the provider assigned a new id (JMAP update = create-new
-    // + destroy-old). The overlay entry moves: old id dropped (+ prune echo),
-    // new id pinned with the settled fold (+ projection echo) — the draft
-    // never blinks out between settlement and the next sync.
+    // + destroy-old). The content op does NOT leave the log — it rests settled
+    // (`applied`), still folded — so the DERIVED row moves: old id dropped (+
+    // prune echo), the fold re-materializes at the new id (+ projection echo).
+    // The draft never blinks out between settlement and the next sync, and the
+    // op stays in the log until causal truncation confirms the provider copy.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
     let key = MessageId::from("draft-local-rotate");
 
-    service
+    let (save_op, _) = service
         .save_draft(&account, Some(key.clone()), draft_request("Hello"))
         .await
         .expect("save");
@@ -2061,17 +2168,24 @@ async fn draft_save_settlement_carries_the_row_across_the_id_rotation() {
         .await
         .expect("flush");
 
+    // The save rests in the log, settled — not removed.
+    let settled = store
+        .list_settled_operations(&account)
+        .expect("settled list");
+    assert_eq!(settled.len(), 1, "the settled save rests in the log");
+    assert_eq!(settled[0].operation.id, save_op.id);
+
     let overlay = store.overlay_rows.lock().expect("overlay lock");
     assert!(
         !overlay.contains_key(key.as_str()),
-        "the pre-flush entry under the stable key is gone"
+        "the pre-rotation entry under the stable key is gone"
     );
-    let pinned = overlay
+    let derived = overlay
         .get("provider-draft-1")
-        .expect("the settled fold is pinned at the assigned provider id");
-    let pinned = pinned.as_ref().expect("a folded row, not a tombstone");
-    assert_eq!(pinned.subject.as_deref(), Some("Hello"));
-    assert_eq!(pinned.draft_id.as_deref(), Some(key.as_str()));
+        .expect("the settled op's fold re-derives at the assigned provider id");
+    let derived = derived.as_ref().expect("a folded row, not a tombstone");
+    assert_eq!(derived.subject.as_deref(), Some("Hello"));
+    assert_eq!(derived.draft_id.as_deref(), Some(key.as_str()));
     drop(overlay);
 
     assert!(
@@ -2125,7 +2239,7 @@ async fn send_settlement_carries_the_typed_filing_outcome() {
     // only the filing detail differs.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
-    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
     gateway
         .send_results
@@ -2133,7 +2247,7 @@ async fn send_settlement_carries_the_typed_filing_outcome() {
         .unwrap()
         .push(Ok(posthaste_domain_model::SendFiling::PendingFiling));
 
-    service
+    let (send_op, _) = service
         .enqueue_send(&account, draft_request("Outgoing"))
         .await
         .expect("send queues");
@@ -2142,16 +2256,23 @@ async fn send_settlement_carries_the_typed_filing_outcome() {
         .await
         .expect("flush ok");
 
-    let settled = events
+    let settled_event = events
         .iter()
         .find(|event| event.topic == "operation.settled")
         .expect("send settles");
-    assert_eq!(settled.payload["outcome"], "applied");
+    assert_eq!(settled_event.payload["outcome"], "applied");
     assert_eq!(
-        settled.payload["sendFiling"], "pendingFiling",
+        settled_event.payload["sendFiling"], "pendingFiling",
         "the filing outcome rides the settlement: {:?}",
-        settled.payload
+        settled_event.payload
     );
+    // The send is a content op: it rests settled (`applied`) in the log, not
+    // removed — its provisional Sent row keeps deriving until truncation.
+    let settled = store
+        .list_settled_operations(&account)
+        .expect("settled list");
+    assert_eq!(settled.len(), 1, "the settled send rests in the log");
+    assert_eq!(settled[0].operation.id, send_op.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -2263,10 +2384,12 @@ async fn held_send_folds_nothing_and_undo_needs_no_repair() {
 
 #[tokio::test]
 async fn provisional_sent_row_is_adopted_when_the_provider_copy_syncs() {
-    // Reconcile-by-intent-id: the settled send pins its provisional Sent row;
-    // when sync lands the provider copy (matched by the transport-shared
-    // Message-ID prefix), the sweep retires the provisional row with a prune
-    // echo.
+    // The send content op rests settled (`applied`), its provisional Sent row
+    // derived and visible. When sync lands the provider copy (matched by the
+    // transport-shared Message-ID token), adoption retires the op AT ONCE — the
+    // base copy's presence is the causal evidence — so the derived row yields
+    // to base with a prune echo, and the local row and the base copy never both
+    // show.
     let account = sample_source();
     let account_id = account.id.clone();
     let store = Arc::new(TestStore::default());
@@ -2291,7 +2414,7 @@ async fn provisional_sent_row_is_adopted_when_the_provider_copy_syncs() {
             .get_message_summary(&account_id, &send_row_id)
             .expect("effective read")
             .is_some(),
-        "the settled send pins the provisional Sent row until sync"
+        "the settled send's provisional Sent row derives until sync"
     );
 
     // The provider copy arrives with the transport-shared Message-ID.
@@ -2522,12 +2645,14 @@ async fn send_l2_nofile_reconciles() {
             ..SyncBatch::default()
         },
     );
+    // Adoption files the ghost AND retires the settled send's provisional row
+    // (its provider copy is now in base under the shared token).
     service
         .flush_and_observe(&account_id, &sync_gateway)
         .await
         .expect("observe adopts + files");
 
-    // Adoption retired the provisional row and queued the filing repair.
+    // The ghost was filed and the provisional row retired by truncation.
     assert!(
         !store
             .overlay_rows
@@ -2754,27 +2879,13 @@ async fn permanently_failed_intent_leaves_lane_and_ops_behind_settle() {
 }
 
 #[tokio::test]
-async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
-    // PINNING TEST — this documents a DIAGNOSED BUG, not desired behavior.
-    // (dogfood "ephemeral emails/drafts": rows visible in Posthaste only,
-    // absent from the provider, "Failed to load conversation" on open,
-    // surviving re-sync and restart.)
-    //
-    // The stranding path: `save_draft` folds a pinned overlay row (`draft_id`
-    // set, no base row) the moment the op is queued. `discard_operation` —
-    // the Outbox pane's cancel — removes the op but unwinds folds ONLY for
-    // `Send` ops (outbox/queue.rs), so the draft pin stays. The post-sync
-    // sweep then preserves it forever: `refresh_message_overlay`'s no-ops
-    // arm deliberately passes through a pinned row with no base row
-    // (replay.rs) because it cannot tell "settled save awaiting its provider
-    // copy" from "orphan whose op is gone". Nothing ever retires it: a
-    // phantom in every effective read.
-    //
-    // The assertions below assert the CURRENT (buggy) behavior so the tree
-    // stays green while pinning the mechanism. A repair (an orphan sweep that
-    // retires pins with no live op and no base after a full sync, or an
-    // unwind in `discard_operation` for draft ops) must flip the final
-    // assertion — update this test to assert retirement then.
+async fn cancelled_draft_save_leaves_no_phantom_the_row_is_gone_with_its_op() {
+    // The orphan class is unrepresentable: a locally-authored draft is a
+    // CONTENT OP, and its visible row is DERIVED by replay from that op. A
+    // cancelled draft save therefore leaves NO phantom — removing the op is the
+    // whole of the cleanup, and the next replay forgets the row because there
+    // is no op to fold. No naming-convention pin survives, no orphan lingers in
+    // any effective read or overlay, and a full sync cycle has nothing to keep.
     let account = sample_source();
     let account_id = account.id.clone();
     let store = Arc::new(TestStore::default());
@@ -2785,7 +2896,7 @@ async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
     let service = MailService::new(store.clone(), config);
 
     let (op, _events) = service
-        .save_draft(&account_id, None, draft_request("Phantom-to-be"))
+        .save_draft(&account_id, None, draft_request("Never-a-phantom"))
         .await
         .expect("save draft");
     let live_id = MessageId::from(op.entity.id.as_str());
@@ -2794,15 +2905,15 @@ async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
             .get_message_summary(&account_id, &live_id)
             .expect("effective read")
             .is_some(),
-        "the queued save folds an instant draft row"
+        "the queued save derives an instant draft row"
     );
 
     // The user cancels the queued save from the Outbox pane.
     let removed = service
         .discard_operation(&op.id)
         .await
-        .expect("discard the queued save");
-    assert!(removed.is_some(), "the pending op was removed");
+        .expect("discard the queued save")
+        .expect("the pending op was removed");
     assert!(
         service
             .list_pending_operations(&account_id)
@@ -2810,38 +2921,51 @@ async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
             .is_empty(),
         "no op remains anywhere the user could see or retry it"
     );
+    assert!(
+        removed.iter().any(|event| {
+            event.payload["messageId"] == live_id.as_str()
+                && event.payload["deleted"] == serde_json::json!(true)
+        }),
+        "cancelling the save prunes the derived row client-side immediately"
+    );
 
-    // A full sync cycle (flush + pull + overlay sweep) runs. Nothing owns the
-    // pinned row any more, base never receives it (the save was cancelled
-    // before reaching the provider), yet the sweep keeps it.
+    // The row is gone the moment its op is gone — before any sync.
+    assert!(
+        store
+            .get_message_summary(&account_id, &live_id)
+            .expect("effective read")
+            .is_none(),
+        "the derived row vanishes with its op — no phantom",
+    );
+    assert!(
+        store
+            .read_overlay_message(&account_id, &live_id)
+            .expect("overlay read")
+            .is_none(),
+        "no overlay entry lingers — the row owned nothing to strand",
+    );
+
+    // A full sync cycle (flush + pull + overlay sweep) runs. There is nothing
+    // to keep: no op, no base row, no derived row.
     let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
     service
         .flush_and_observe(&account_id, &gateway)
         .await
         .expect("sync + sweep");
 
-    let phantom = store
-        .get_message_summary(&account_id, &live_id)
-        .expect("effective read");
     assert!(
-        phantom.is_some(),
-        "BUG PINNED: the orphaned draft pin survives the sweep — the phantom \
-         row persists with no outbox op, no base row, and no provider copy \
-         (fix = orphan retirement; then flip this assertion)"
+        store
+            .get_message_summary(&account_id, &live_id)
+            .expect("effective read")
+            .is_none(),
+        "the row stays gone across the sweep — the phantom class is \
+         unrepresentable",
     );
-    // The phantom's user-visible failure shape: the overlay carries no body
-    // and the op payload (the content authority) died with the op, so an
-    // online open lazy-fetches the body for an id the provider never had —
-    // the detail read fails ("Failed to load conversation").
     assert!(
         store
             .read_overlay_message(&account_id, &live_id)
             .expect("overlay read")
-            .expect("entry exists")
-            .expect("not a tombstone")
-            .draft_id
-            .is_some(),
-        "the stranded row is a draft PIN — exactly the shape the sweep's \
-         keep-pins gate refuses to retire"
+            .is_none(),
+        "no overlay entry reappears",
     );
 }
