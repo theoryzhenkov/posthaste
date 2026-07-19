@@ -71,20 +71,46 @@ pub enum OverlayMutation {
     Keep,
 }
 
-/// The overlay's visibility transition the derive produced, so the caller can
-/// emit the retire echo without a separate before/after read: a content op's
-/// local/provisional id yielding to base is `was_visible && !now_visible`.
+/// The visibility transition the derive produced for a row, so the caller can
+/// emit the retire echo without a separate before/after read. Carries TWO
+/// visibility notions because the echo sites differ:
+/// - the OVERLAY entry (a row, vs absent/tombstone) — for a provisional id
+///   that has NO base successor (a send's provisional Sent row on adoption):
+///   its row is gone and base never held it, so the client must prune it
+///   ([`DeriveDiff::retired`]);
+/// - EFFECTIVE visibility (base ∪ overlay; a tombstone hides base) — for an id
+///   that MAY have a base successor (a content op's live id on truncation):
+///   a base-backed row whose overlay retires is NOT gone (base shows through),
+///   so it echoes only when NEITHER serves it ([`DeriveDiff::effectively_retired`]).
 #[derive(Clone, Copy, Debug)]
 pub struct DeriveDiff {
+    /// The overlay held a row (not absent, not a tombstone) before this derive.
     pub was_visible: bool,
+    /// The overlay holds a row after this derive.
     pub now_visible: bool,
+    /// The row was effectively visible before (base or overlay served it).
+    pub was_effective: bool,
+    /// The row is effectively visible after.
+    pub now_effective: bool,
 }
 
 impl DeriveDiff {
-    /// The derived row retired this derive — a content op's local/provisional
-    /// id dropped, with no base row to replace it.
+    /// The overlay ENTRY retired: it was a row and is no longer. For ids with
+    /// no base successor (a send's provisional id on adoption) — the row is
+    /// gone from the overlay and base never held it, so the client prunes it.
     pub fn retired(self) -> bool {
         self.was_visible && !self.now_visible
+    }
+
+    /// The row's EFFECTIVE visibility retired: it was served by base or the
+    /// overlay, and is now served by neither. For ids that may have a base
+    /// successor (a content op's live id on truncation) — a base-backed row
+    /// whose overlay retires (base caught up) is NOT effectively retired (base
+    /// serves it), so it emits no `deleted` echo and no double-echo follows the
+    /// settlement identity-change echo. A tombstone over a surviving base row
+    /// IS effectively retired (the tombstone hides base).
+    pub fn effectively_retired(self) -> bool {
+        self.was_effective && !self.now_effective
     }
 }
 

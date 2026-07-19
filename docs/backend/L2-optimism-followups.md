@@ -18,6 +18,11 @@ integration, backend lib, send-path gate, live Stalwart 4/4, `fmt --check`,
 contract slices intact; the items below are debt it surfaced — tracked here,
 prioritized, with locations and fix sketches.
 
+**Progress (2026-07-18):** F7, F8, F10, F4–F5, and F11 are LANDED (commits
+`dd1589b9`, `3491fab4`, + the F11 echo conversion). Remaining: F6 (the
+5000-op cap — needs a policy call) and F9 (`replay_account_overrides` —
+wire or delete).
+
 ## P1 — phantom-prevention core
 
 These two sit inside the "words are never silently dropped" guarantee and are
@@ -39,7 +44,11 @@ newest, not oldest).
 (and log + refuse when hit) rather than a silent truncation. Measure the real
 ceiling before picking a number.
 
-### F7. The content-kind list `('draftCreate', 'draftUpdate', 'send')` is duplicated across five sites
+### F7. ✅ LANDED — content-kind list single-sourced
+
+The SQL fragment and the Rust predicate now both derive from
+`OperationKind::CONTENT_KINDS`; the compiler keeps them in lockstep (see
+commit `dd1589b9`). Kept here for history.
 
 The "failed content ops stay foldable" SQL fragment is copy-pasted at
 `outbox.rs:317`, `overlay.rs:130`, `overlay.rs:192`, plus the migration at
@@ -54,7 +63,11 @@ function. The three fold-SQL sites should share a single const/fragment.
 
 ## P2 — maintainability / dead surface
 
-### F8. The apply-mutation match block is duplicated 4×
+### F8. ✅ LANDED — apply-mutation match extracted
+
+`apply_overlay_mutation_tx` (prod) and `apply_mutation_to_overlay_map` (test)
+share the mutation→write mapping; a new `OverlayMutation` variant lands in one
+place per plane (commit `dd1589b9`). Kept here for history.
 
 `match mutation { Upsert(record) => upsert_overlay_tx(…), Tombstone => …,
 Remove => …, Keep => {} }` plus the `now_visible` derivation appears in both
@@ -79,7 +92,10 @@ specifies (L2-optimism "Durability classes"), or delete it and document that
 the per-row `replay_base_write` + sweep is the only recovery. Do not leave it
 ambiguous.
 
-### F10. Three "under the old…" design-history comments
+### F10. ✅ LANDED — design-history comments rewritten
+
+The three comments now state invariants directly (commit `dd1589b9`). Kept
+here for history.
 
 `tests/replay.rs:1415` and `:1505` (and one more) explain the new behavior by
 contrast with the retired non-atomic / clock-based fold. The house rule is
@@ -92,7 +108,16 @@ stays held…") without the comparative frame.
 
 ## P3 — echo / TOCTOU (self-healing, plumbing exists)
 
-### F4–F5. Two subtle echo/TOCTOU deltas in the truncate/adopt rewrite
+### F4–F5. ✅ LANDED — truncate echo uses effective visibility
+
+`DeriveDiff` now carries both `retired()` (overlay-only — for a provisional id
+with no base successor, e.g. adoption) and `effectively_retired()` (base ∪
+overlay — for an id that may have a base successor, e.g. truncation). The
+truncate site uses `effectively_retired()`, so a base-backed content row no
+longer emits a spurious/double `deleted` echo. Adopt keeps `retired()` (no-base
+provisional id — equivalent). See commit `3491fab4`. A dedicated base-caught-
+up content-op truncate test is still wanted (the TestStore's global base
+pretense makes a precise one subtle).
 
 The truncate/adopt echo now uses `DeriveDiff::retired()` (overlay-only), not
 the previous effective-visibility (`get_message_summary` before/after). For
@@ -106,7 +131,24 @@ found two sites where this delta is observable.
 echo. Computed in-txn, so it also closes the TOCTOU. (This is the same
 plumbing the deferred item below needs.)
 
-### Deferred. `unwind_send_fold` / `cancel` / `discard` echo sites still use before/after `get_message_summary`
+### F11. ✅ LANDED — echo visibility-decision sites use the in-txn `DeriveDiff`
+
+The five echo sites that used `get_message_summary` for a VISIBILITY decision
+(the TOCTOU reads) now use `refresh_message_overlay(...).effectively_retired()`
+from the in-txn fold: the three before/after TOCTOU sites (cancel-draft-save,
+unwind-send-row, held-send-consumed in `queue.rs`) and the two after-only
+retire sites (rotation old-key, settle old-id in `draft.rs`). Closes the
+race and drops ~7 effective-view reads.
+
+The projection-echo sites KEEP a single `get_message_summary` read — they
+serialize the `MessageSummary` as the event's `projection`, and that type
+carries joined account/conversation/version fields the overlay-plane derive
+cannot produce. `delete_draft` keeps its before-read for the deleted echo's
+mailbox scope. These are content reads, not visibility decisions — no TOCTOU.
+
+`refresh_message_overlay` already returned `DeriveDiff` (every caller ignored
+it); the echo sites now use it, so no port change was needed. Replaces the
+old "Deferred" item.
 
 These three (`outbox/queue.rs`, `outbox/draft.rs`) were not converted to
 `DeriveDiff` in the refactor — they read the effective view before and after

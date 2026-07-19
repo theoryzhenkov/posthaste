@@ -613,7 +613,7 @@ impl MailService {
                 // when truncated: the local/provisional id has no base row, so
                 // once the derived entry retires echo `deleted` so the client
                 // drops it.
-                if is_content && diff.retired() {
+                if is_content && diff.effectively_retired() {
                     events.push(self.events.append_event(
                         account_id,
                         EVENT_TOPIC_MESSAGE_UPDATED,
