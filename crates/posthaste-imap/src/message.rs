@@ -111,9 +111,15 @@ pub fn imap_header_message_record_with_gmail_metadata(
                 .collect()
         })
         .unwrap_or_default();
+    // Normalize to UTC before serializing: `DateTime::to_rfc3339` preserves
+    // the Date header's original offset (`+02:00`, `-08:00`, …), and the
+    // store sorts `received_at` as TEXT — lexicographic order is only
+    // chronological when every value shares the fixed-width `…Z` shape.
+    // (Round-tripping through the epoch yields tz 00:00, i.e. the `Z` form —
+    // the same shape the JMAP path emits.)
     let received_at = parsed
         .date()
-        .map(|date| date.to_rfc3339())
+        .map(|date| mail_parser::DateTime::from_timestamp(date.to_timestamp()).to_rfc3339())
         .unwrap_or_else(|| RFC3339_EPOCH.to_string());
 
     let message = MessageRecord {

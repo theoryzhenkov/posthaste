@@ -739,6 +739,122 @@ async fn smart_mailbox_crud_drives_the_list_and_scopes_the_mail_list() {
     server.shutdown().await;
 }
 
+/// Regression for "show conversation returns empty": the mail-list `freeText`
+/// rides the one query grammar, so `conversation:<id>` scopes the list to
+/// that conversation instead of literal-substring-matching to zero rows.
+#[tokio::test(flavor = "multi_thread")]
+async fn mail_list_free_text_speaks_the_query_grammar() {
+    let server = TestServer::spawn().await;
+
+    // Seed two drafts in one account: two subjects, two conversations.
+    json_body(
+        server
+            .post_json(
+                "/command",
+                serde_json::json!({
+                    "id": "cmd-grammar-account",
+                    "command": { "createAccount": { "name": "Grace" } }
+                }),
+            )
+            .await,
+    )
+    .await;
+    let accounts = json_body(
+        server
+            .post_json("/query", serde_json::json!({ "accounts": {} }))
+            .await,
+    )
+    .await;
+    let account_id = accounts["data"]["rows"][0]["id"]
+        .as_str()
+        .expect("account id")
+        .to_string();
+    for (command_id, subject) in [
+        ("cmd-grammar-draft-1", "Quarterly numbers"),
+        ("cmd-grammar-draft-2", "Lunch on Friday"),
+    ] {
+        json_body(
+            server
+                .post_json(
+                    "/command",
+                    serde_json::json!({
+                        "id": command_id,
+                        "command": { "createDraft": {
+                            "accountId": account_id,
+                            "draft": {
+                                "from": null,
+                                "to": [{ "name": null, "email": "to@example.com" }],
+                                "cc": [], "bcc": [],
+                                "subject": subject,
+                                "body": "grammar regression fixture",
+                                "inReplyTo": null, "references": null,
+                            }
+                        } }
+                    }),
+                )
+                .await,
+        )
+        .await;
+    }
+
+    // The unscoped list shows both; grab one row's conversation id.
+    let list = json_body(
+        server
+            .post_json("/query", serde_json::json!({ "mailList": {} }))
+            .await,
+    )
+    .await;
+    let rows = list["data"]["rows"].as_array().expect("rows");
+    assert_eq!(rows.len(), 2);
+    let target = rows
+        .iter()
+        .find(|row| row["subject"] == "Quarterly numbers")
+        .expect("seeded row");
+    let conversation_id = target["conversationId"].as_str().expect("conversation id");
+
+    // `conversation:<id>` returns exactly that conversation's messages.
+    let list = json_body(
+        server
+            .post_json(
+                "/query",
+                serde_json::json!({ "mailList": {
+                    "freeText": format!("conversation:{conversation_id}")
+                } }),
+            )
+            .await,
+    )
+    .await;
+    let rows = list["data"]["rows"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["subject"], "Quarterly numbers");
+    assert_eq!(rows[0]["conversationId"], conversation_id);
+
+    // Bare words still free-text match (here: via the subject).
+    let list = json_body(
+        server
+            .post_json(
+                "/query",
+                serde_json::json!({ "mailList": { "freeText": "Quarterly" } }),
+            )
+            .await,
+    )
+    .await;
+    let rows = list["data"]["rows"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["subject"], "Quarterly numbers");
+
+    // A string the grammar rejects is a malformed request, not silence.
+    let response = server
+        .post_json(
+            "/query",
+            serde_json::json!({ "mailList": { "freeText": "is:not-a-flag" } }),
+        )
+        .await;
+    assert_eq!(response.status(), 400);
+
+    server.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn mailbox_create_rename_role_and_delete_round_trip_through_the_provider() {
     let server = TestServer::spawn().await;

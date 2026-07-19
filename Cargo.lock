@@ -3918,6 +3918,7 @@ dependencies = [
  "posthaste-engine",
  "posthaste-imap",
  "posthaste-observability",
+ "posthaste-query-grammar",
  "posthaste-store",
  "posthaste-testkit",
  "reqwest 0.12.28",

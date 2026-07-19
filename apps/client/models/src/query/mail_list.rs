@@ -45,8 +45,10 @@ pub struct MailListQuery {
     #[serde(default)]
     #[ts(optional = nullable, as = "Option<crate::mirror::SmartMailboxId>")]
     pub smart_mailbox_id: Option<domain::SmartMailboxId>,
-    /// Free-text search over subject, sender, recipients, preview, and the
-    /// cached body index.
+    /// Search text in the one query grammar: prefixed tokens
+    /// (`conversation:`, `from:`, `is:`, ...) become field conditions; bare
+    /// words search sender, subject, preview, and the cached body index. A
+    /// string the grammar rejects fails the query as malformed.
     #[serde(default)]
     #[ts(optional = nullable)]
     pub free_text: Option<String>,
