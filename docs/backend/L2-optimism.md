@@ -1,7 +1,8 @@
 # L2 — Optimism: the replay model
 
 state: proposed, for redline
-foundation: the rebase lineage — Bayou; in production: Replicache, Linear, Figma
+foundation: server reconciliation — Bayou's lineage; in production: Replicache,
+Linear, Superhuman
 
 ## The model
 
@@ -45,6 +46,18 @@ the full message and waits out the undo window in the log. Their replay effect
 adds a row the provider does not have yet. They are never speculation: a
 permanently failed content op stays parked in the outbox with its content
 intact. Authored words are never silently dropped.
+
+Three rules govern the log:
+
+**Order.** The log is ordered. Replay folds ops in log order, and the flusher
+delivers in the same order, so the provider observes the sequence the user saw.
+
+**Determinism.** Replay is pure: every id, timestamp, and value an op needs is
+captured at command time and carried in the op. Replay generates nothing, so
+replaying twice yields the same rows.
+
+**No wedging.** A permanently failed op leaves the flush lane immediately —
+parked (content) or dead (intent) — and never blocks the ops behind it.
 
 ## Settlement and truncation
 
@@ -102,3 +115,19 @@ One pass at upgrade, audited, never recurring:
 
 Every slice lands green through the send-path gate and the live Stalwart
 suite.
+
+## Prior art
+
+Three production systems converged on this shape independently. Superhuman's
+modifier queues: pure pending mutations recombined with the server cache per
+thread; removal re-derives the view. Replicache: speculative mutations rebased
+over each pulled snapshot, acknowledged by `lastMutationID` — causal, never
+semantic. Linear: a persisted transaction queue rebased over sync-action
+deltas, completed by a `lastSyncId` watermark; clients mint permanent ids so
+nothing needs renumbering. The JMAP client guide teaches the same
+speculate-then-reconcile pattern with creation ids.
+
+The alternative — optimistic writes into the synced store itself, guarded by
+dirty-markers and reconciliation (Mailspring, Thunderbird) — publicly exhibits
+this system's retired bug class: archived mail resurrecting after sync, silent
+divergence, one wedged op blocking the queue.
