@@ -139,6 +139,10 @@ impl MessageOverlayStore for DatabaseStore {
             let draft_keys = read_draft_alias_map_on(tx, account_id)?;
             let drafts_mailbox = read_mailbox_id_by_role_on(tx, account_id, "drafts")?;
             let sent_mailbox = read_mailbox_id_by_role_on(tx, account_id, "sent")?;
+            let base_present = base.is_some();
+            let was_visible = overlay.as_ref().is_some_and(|entry| entry.is_some());
+            let was_effective =
+                overlay_effective_visible(overlay.as_ref().map(|o| o.as_ref()), base_present);
             let snapshot = DeriveSnapshot {
                 base,
                 overlay,
@@ -147,16 +151,21 @@ impl MessageOverlayStore for DatabaseStore {
                 drafts_mailbox,
                 sent_mailbox,
             };
-            let was_visible = snapshot
-                .overlay
-                .as_ref()
-                .is_some_and(|entry| entry.is_some());
             let mutation = fold(&snapshot)?;
-            let now_visible =
-                apply_overlay_mutation_tx(tx, account_id, message_id, mutation, was_visible)?;
+            let (now_visible, now_effective) = apply_overlay_mutation_tx(
+                tx,
+                account_id,
+                message_id,
+                mutation,
+                was_visible,
+                was_effective,
+                base_present,
+            )?;
             Ok(DeriveDiff {
                 was_visible,
                 now_visible,
+                was_effective,
+                now_effective,
             })
         })
     }
@@ -194,7 +203,10 @@ impl MessageOverlayStore for DatabaseStore {
             for row_id in row_ids {
                 let base = read_base_on(tx, account_id, row_id)?;
                 let overlay = read_overlay_on(tx, account_id, row_id)?;
+                let base_present = base.is_some();
                 let was_visible = overlay.as_ref().is_some_and(|entry| entry.is_some());
+                let was_effective =
+                    overlay_effective_visible(overlay.as_ref().map(|o| o.as_ref()), base_present);
                 let snapshot = DeriveSnapshot {
                     base: base.clone(),
                     overlay: overlay.clone(),
@@ -204,11 +216,20 @@ impl MessageOverlayStore for DatabaseStore {
                     sent_mailbox: sent_mailbox.clone(),
                 };
                 let mutation = fold(row_id, &snapshot)?;
-                let now_visible =
-                    apply_overlay_mutation_tx(tx, account_id, row_id, mutation, was_visible)?;
+                let (now_visible, now_effective) = apply_overlay_mutation_tx(
+                    tx,
+                    account_id,
+                    row_id,
+                    mutation,
+                    was_visible,
+                    was_effective,
+                    base_present,
+                )?;
                 diffs.push(DeriveDiff {
                     was_visible,
                     now_visible,
+                    was_effective,
+                    now_effective,
                 });
             }
             Ok(diffs)
@@ -222,22 +243,41 @@ impl MessageOverlayStore for DatabaseStore {
 /// `Connection`) so the derive can snapshot base + the log + the draft-key
 /// map, fold, and apply the mutation inside ONE write transaction.
 ///
+/// A row's EFFECTIVE visibility from its overlay entry and base presence: a
+/// folded overlay row serves it; a tombstone hides base; an absent overlay
+/// lets base show through. Used to compute the derive's visibility diff.
+fn overlay_effective_visible(
+    overlay: Option<Option<&posthaste_domain_model::MessageRecord>>,
+    base_present: bool,
+) -> bool {
+    match overlay {
+        Some(Some(_)) => true,
+        Some(None) => false,
+        None => base_present,
+    }
+}
+
 /// Apply one fold mutation to a row's overlay entry inside the derive
-/// transaction, returning the row's resulting visibility — `Keep` preserves
-/// `was_visible`, `Upsert` is visible, `Tombstone`/`Remove` are not. Shared
-/// by `derive_overlay` and `remove_op_and_derive` so the mutation→write
-/// mapping lives in exactly one place.
+/// transaction, returning the row's resulting `(now_visible, now_effective)`
+/// — `Keep` preserves the prior values; `Upsert` is visible (and effective);
+/// `Tombstone` hides the row and base (not effective); `Remove` drops the
+/// overlay entry (not visible) and is effective iff `base_present` (base shows
+/// through). Shared by `derive_overlay` and `remove_op_and_derive` so the
+/// mutation→write mapping lives in exactly one place.
 fn apply_overlay_mutation_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     message_id: &MessageId,
     mutation: OverlayMutation,
     was_visible: bool,
-) -> Result<bool, StoreError> {
-    let now_visible = match &mutation {
-        OverlayMutation::Upsert(_) => true,
-        OverlayMutation::Tombstone | OverlayMutation::Remove => false,
-        OverlayMutation::Keep => was_visible,
+    was_effective: bool,
+    base_present: bool,
+) -> Result<(bool, bool), StoreError> {
+    let (now_visible, now_effective) = match &mutation {
+        OverlayMutation::Upsert(_) => (true, true),
+        OverlayMutation::Tombstone => (false, false),
+        OverlayMutation::Remove => (false, base_present),
+        OverlayMutation::Keep => (was_visible, was_effective),
     };
     match mutation {
         OverlayMutation::Upsert(record) => upsert_overlay_tx(tx, account_id, &record)?,
@@ -245,7 +285,7 @@ fn apply_overlay_mutation_tx(
         OverlayMutation::Remove => remove_overlay_tx(tx, account_id, message_id)?,
         OverlayMutation::Keep => {}
     }
-    Ok(now_visible)
+    Ok((now_visible, now_effective))
 }
 
 fn upsert_overlay_tx(
