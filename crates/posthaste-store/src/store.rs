@@ -1,5 +1,6 @@
 use super::*;
 use crate::sql_cache::CachedSql;
+use rusqlite::OpenFlags;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::{Arc, Condvar};
@@ -96,6 +97,35 @@ pub struct RepairReport {
     pub quarantined_path: PathBuf,
     /// Human-readable reason the repair was triggered.
     pub reason: String,
+    /// Op-log rows salvaged out of the quarantined file and re-inserted into
+    /// the rebuilt database. The log is precious — it holds unacknowledged
+    /// intent AND authored content (a parked content op is the user's unsent
+    /// words) — so a repair carries it across the rebuild rather than losing
+    /// it with the disposable derived view.
+    pub salvaged_operations: usize,
+}
+
+/// The op log rescued out of a quarantined database file: the
+/// `outbox_operation` rows (in their original insertion order) and the
+/// `draft_alias` identity rows they depend on. Best-effort — a file too
+/// corrupt to read yields an empty salvage and the open still succeeds; the
+/// quarantined file is retained on disk so its bytes survive for manual
+/// recovery.
+#[derive(Default)]
+struct SalvagedLog {
+    /// One entry per `outbox_operation` row, each `(column_name, value)` pairs
+    /// in the file's own column order, ordered by the row's original rowid so
+    /// re-insertion preserves the log order replay and the flusher depend on.
+    operations: Vec<Vec<(String, SqlValue)>>,
+    /// `draft_alias` rows as `(account_id, draft_key, entity_id)` so a salvaged
+    /// draft op's stable key still resolves to its live id after the rebuild.
+    aliases: Vec<(String, String, String)>,
+}
+
+impl SalvagedLog {
+    fn is_empty(&self) -> bool {
+        self.operations.is_empty() && self.aliases.is_empty()
+    }
 }
 
 /// SQLite-backed store with a single serialized write connection and pooled
@@ -286,8 +316,15 @@ impl DatabaseStore {
         };
         let reason = repair_reason.expect("repair reason set on the repair path");
 
+        // Salvage the op log BEFORE quarantine moves the file aside. The
+        // derived view is disposable and base is re-syncable, but the log is
+        // precious: it carries unacknowledged intent and authored content
+        // (parked content ops = the user's unsent words). Best-effort — an
+        // unreadable file yields an empty salvage and the open still succeeds.
+        let salvaged = salvage_log(&db_path);
         let quarantined_path = quarantine_database(&db_path)?;
         let store = Self::try_open(&db_path, &data_root)?;
+        let salvaged_operations = store.restore_salvaged_log(&salvaged)?;
         if repair_requested {
             let _ = fs::remove_file(&marker);
         }
@@ -296,6 +333,7 @@ impl DatabaseStore {
             db_path = %db_path.display(),
             quarantined = %quarantined_path.display(),
             reason = %reason,
+            salvaged_operations = salvaged_operations,
             "database quarantined and rebuilt"
         );
         Ok((
@@ -303,8 +341,52 @@ impl DatabaseStore {
             Some(RepairReport {
                 quarantined_path,
                 reason,
+                salvaged_operations,
             }),
         ))
+    }
+
+    /// Re-insert a [`SalvagedLog`] into the freshly rebuilt database in one
+    /// transaction, preserving the op log's original insertion order.
+    ///
+    /// `outbox_operation` uses `INSERT OR IGNORE` (a salvaged id never
+    /// collides in a fresh DB, but this stays safe if it did); `draft_alias`
+    /// uses `INSERT OR REPLACE` (the alias is the log's identity dependency and
+    /// the salvaged value is authoritative). Rows are inserted in their
+    /// original rowid order so replay's fold order and the flusher's drain
+    /// order match what the user saw. Returns the number of op rows restored.
+    fn restore_salvaged_log(&self, salvaged: &SalvagedLog) -> Result<usize, StoreError> {
+        if salvaged.is_empty() {
+            return Ok(0);
+        }
+        self.write_transaction(|tx| {
+            for (account_id, draft_key, entity_id) in &salvaged.aliases {
+                tx.execute(
+                    "INSERT OR REPLACE INTO draft_alias (account_id, draft_key, entity_id)
+                     VALUES (?1, ?2, ?3)",
+                    params![account_id, draft_key, entity_id],
+                )
+                .map_err(sql_to_store_error)?;
+            }
+            for row in &salvaged.operations {
+                let columns: Vec<&str> = row.iter().map(|(name, _)| name.as_str()).collect();
+                let placeholders: Vec<String> = (1..=columns.len())
+                    .map(|index| format!("?{index}"))
+                    .collect();
+                let values: Vec<&SqlValue> = row.iter().map(|(_, value)| value).collect();
+                tx.execute(
+                    &format!(
+                        "INSERT OR IGNORE INTO outbox_operation ({}) VALUES ({})",
+                        columns.join(", "),
+                        placeholders.join(", ")
+                    ),
+                    params_from_iter(values),
+                )
+                .map_err(sql_to_store_error)?;
+            }
+            Ok(())
+        })?;
+        Ok(salvaged.operations.len())
     }
 
     fn try_open(db_path: &Path, data_root: &Path) -> Result<Self, StoreError> {
@@ -598,6 +680,98 @@ impl DatabaseStore {
         .map_err(sql_to_store_error)?;
         Ok(())
     }
+}
+
+/// Best-effort rescue of the op log from a database about to be quarantined.
+///
+/// Opens the file READ-ONLY (never mutating a file we are about to move aside)
+/// and SELECTs the full `outbox_operation` and `draft_alias` contents into
+/// owned rows. Reads defensively: the column set is probed from the file's own
+/// `sqlite_master`, so a corrupt-but-older-shape file (missing a late-added
+/// column) still salvages the columns it has. ANY error — unreadable file,
+/// missing table, malformed page — yields an empty [`SalvagedLog`] and a
+/// `ph_warn`; salvage NEVER fails the open. A truly unreadable file loses the
+/// log to this pass but is still quarantined (retained on disk), so its bytes
+/// survive for manual recovery.
+fn salvage_log(db_path: &Path) -> SalvagedLog {
+    if !db_path.exists() {
+        return SalvagedLog::default();
+    }
+    match read_salvageable_log(db_path) {
+        Ok(salvaged) => salvaged,
+        Err(error) => {
+            ph_warn!(
+                events::DATABASE_CORRUPT_REPAIRED,
+                db_path = %db_path.display(),
+                error = %error,
+                "op-log salvage failed; the quarantined file is retained for manual recovery"
+            );
+            SalvagedLog::default()
+        }
+    }
+}
+
+/// The fallible core of [`salvage_log`]: any error here degrades to an empty
+/// salvage at the call site.
+fn read_salvageable_log(db_path: &Path) -> Result<SalvagedLog, StoreError> {
+    let connection = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(sql_to_store_error)?;
+
+    let mut salvaged = SalvagedLog::default();
+
+    // `outbox_operation`: read `SELECT *` in the file's own column order,
+    // ordered by rowid so re-insertion preserves the log's insertion order.
+    if table_exists(&connection, "outbox_operation")? {
+        let mut statement = connection
+            .prepare("SELECT * FROM outbox_operation ORDER BY rowid ASC")
+            .map_err(sql_to_store_error)?;
+        let column_names: Vec<String> = statement
+            .column_names()
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let mut rows = statement.query([]).map_err(sql_to_store_error)?;
+        while let Some(row) = rows.next().map_err(sql_to_store_error)? {
+            let mut values: Vec<(String, SqlValue)> = Vec::with_capacity(column_names.len());
+            for (index, name) in column_names.iter().enumerate() {
+                let value: SqlValue = row.get(index).map_err(sql_to_store_error)?;
+                values.push((name.clone(), value));
+            }
+            salvaged.operations.push(values);
+        }
+    }
+
+    // `draft_alias`: the log's identity dependency, so a salvaged draft op's
+    // stable key still resolves to its live id after the rebuild.
+    if table_exists(&connection, "draft_alias")? {
+        let mut statement = connection
+            .prepare("SELECT account_id, draft_key, entity_id FROM draft_alias")
+            .map_err(sql_to_store_error)?;
+        let mut rows = statement.query([]).map_err(sql_to_store_error)?;
+        while let Some(row) = rows.next().map_err(sql_to_store_error)? {
+            salvaged.aliases.push((
+                row.get(0).map_err(sql_to_store_error)?,
+                row.get(1).map_err(sql_to_store_error)?,
+                row.get(2).map_err(sql_to_store_error)?,
+            ));
+        }
+    }
+
+    Ok(salvaged)
+}
+
+/// Whether a table exists in the (possibly corrupt) file being salvaged.
+fn table_exists(connection: &Connection, name: &str) -> Result<bool, StoreError> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            params![name],
+            |row| row.get(0),
+        )
+        .map_err(sql_to_store_error)
 }
 
 /// Moves the database and its WAL/SHM siblings aside to `<name>.corrupt-<unix>`.

@@ -266,6 +266,121 @@ fn v4_normalizes_offset_received_at_and_restores_date_sort_order() -> Result<(),
     Ok(())
 }
 
+/// Rewind a current-shape database to the genuinely-old v4 world: the
+/// `outbox_operation` columns that arrived additively (`payload_version`,
+/// `send_at`, `hold_until_mono`) and their partial indexes stripped back off,
+/// `user_version` set to 4. This reproduces the on-disk shape of a database
+/// that predates those columns — the shape the v0 downgrade fixtures do NOT
+/// reproduce, because they leave the current `outbox_operation` intact.
+fn downgrade_to_v4_pre_additive_outbox(path: &std::path::Path) {
+    let connection = raw(path);
+    connection
+        .execute_batch(
+            "DROP INDEX IF EXISTS idx_outbox_send_at;
+             DROP INDEX IF EXISTS idx_outbox_hold_until_mono;
+             ALTER TABLE outbox_operation DROP COLUMN payload_version;
+             ALTER TABLE outbox_operation DROP COLUMN send_at;
+             ALTER TABLE outbox_operation DROP COLUMN hold_until_mono;
+             PRAGMA user_version = 4;",
+        )
+        .expect("synthetic pre-additive v4 downgrade");
+}
+
+fn outbox_has_column(connection: &Connection, column: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('outbox_operation') WHERE name = ?1)",
+            [column],
+            |row| row.get(0),
+        )
+        .expect("column probe")
+}
+
+/// v5 on a GENUINELY-OLD database: one whose `outbox_operation` predates the
+/// additive `payload_version`/`send_at`/`hold_until_mono` columns the PARK
+/// insert names. The migration runs before `init_schema`'s additive pass, so it
+/// must ensure those columns itself — otherwise the PARK insert fails, the v5
+/// transaction aborts, and the database refuses to open. A stranded draft pin
+/// (no owning op, no base row) must still come back as a recoverable Failed
+/// draftCreate content op.
+#[test]
+fn v5_parks_stranded_pin_on_a_pre_additive_outbox_database() -> Result<(), StoreError> {
+    let root = temp_root();
+    let db_path = root.join("mail.sqlite");
+
+    // Build a current-shape store, then rewind it to the genuinely-old v4 shape
+    // (additive outbox columns and their indexes removed).
+    {
+        let store = DatabaseStore::open(&db_path, root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+    }
+    downgrade_to_v4_pre_additive_outbox(&db_path);
+    // Precondition: the columns v5's PARK insert names really are gone.
+    {
+        let connection = raw(&db_path);
+        assert_eq!(user_version(&connection), 4);
+        for column in ["payload_version", "send_at", "hold_until_mono"] {
+            assert!(
+                !outbox_has_column(&connection, column),
+                "the pre-additive fixture must not carry {column}"
+            );
+        }
+    }
+
+    // Seed a stranded pre-slice-3 draft pin: a non-tombstone overlay row with a
+    // `draft_id`, no owning op, and no same-id base row — content that exists
+    // nowhere else, so v5 must PARK it.
+    raw(&db_path)
+        .execute(
+            "INSERT INTO message_overlay (
+                 account_id, id, thread_id, subject, from_name, from_email,
+                 to_json, received_at, references_json, draft_id, tombstone
+             ) VALUES ('primary', 'draft-stranded', 'draft-stranded', 'Recovered draft',
+                       'Me', 'me@example.com', '[{\"email\":\"ada@example.com\"}]',
+                       '2026-05-01T09:00:00Z', '[]', 'draft-stranded', 0)",
+            [],
+        )
+        .expect("seed stranded draft pin");
+
+    // (1) The database opens successfully through the normal path — the v5
+    // migration ensured its own columns before the PARK insert.
+    let store = DatabaseStore::open(&db_path, root.join("data"))?;
+    let account = AccountId::from("primary");
+
+    // (2) The stranded pin came back as a recoverable Failed draftCreate content
+    // op, surfaced through the unchanged pendingOperations path.
+    let pending = store.list_pending_operations(&account)?;
+    let recovered = pending
+        .iter()
+        .find(|op| op.id.as_str() == "recovered-primary-draft-stranded")
+        .expect("the stranded draft is parked as a recovered content op");
+    assert_eq!(
+        recovered.kind,
+        OperationKind::DraftCreate,
+        "the parked op is a draftCreate"
+    );
+    assert_eq!(
+        recovered.state,
+        OperationState::Failed,
+        "the parked op is Failed (recoverable, foldable, discardable)"
+    );
+
+    // The overlay pin itself was deleted (replay re-materializes it from the op).
+    drop(store);
+    let connection = raw(&db_path);
+    assert_eq!(user_version(&connection), crate::db::SCHEMA_VERSION);
+    let overlay_remaining: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM message_overlay WHERE id = 'draft-stranded'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("overlay probe");
+    assert_eq!(overlay_remaining, 0, "the stale overlay copy was deleted");
+    Ok(())
+}
+
 #[test]
 fn downgrade_guard_refuses_a_newer_database_without_quarantining_it() -> Result<(), StoreError> {
     let root = temp_root();
