@@ -1,6 +1,6 @@
 # L2 — Optimism: the replay model
 
-state: proposed, for redline
+state: implemented
 foundation: server reconciliation — Bayou's lineage; in production: Replicache,
 Linear, Superhuman
 
@@ -112,11 +112,11 @@ One pass at upgrade, audited, never recurring:
    layer — no wire change.
 2. Causal truncation; the coverage sweep deleted.
 3. Content ops (`putDraft`, `send`) with the identity bridge; pins deleted.
+   The stranded-phantom reproduction test flips here — where the live minting
+   path disappears — from pinning the bug to guarding its absence.
 4. Quarantine salvage and the v5 migration.
-5. The stranded-phantom reproduction test flips from pinning the bug to
-   guarding its absence.
 
-Every slice lands green through the send-path gate and the live Stalwart
+Every slice landed green through the send-path gate and the live Stalwart
 suite.
 
 ## Prior art
