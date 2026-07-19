@@ -1,7 +1,7 @@
 //! Protocol models for the client API: queries, query answers, commands,
 //! the event stream, and the error envelope. The single source of truth for
 //! both ends — TypeScript types are GENERATED from this crate (ts-rs) into
-//! `frontend/src/gen/` via the `export-ts` binary (`just gen-ts`); nothing
+//! `protocol/src/gen/` via the `export-ts` binary (`just gen-ts`); nothing
 //! protocol-shaped is hand-written twice.
 //!
 //! Wire shapes reuse the domain-model types directly (message summaries,

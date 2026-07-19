@@ -3,8 +3,8 @@
  * R10 folder-shape check (docs/client/L2-charter.md): every folder under
  * src/ holds at most 8 entries (files + subfolders); non-leaf folders hold
  * at least 3; no folder holds fewer than 2 (no single-child folders).
- * Tests (*.test.*) colocate with their source and do not count. gen/ is
- * generated and exempt entirely.
+ * Tests (*.test.*) colocate with their source and do not count. Generated
+ * wire types live in apps/client/protocol, outside the scanned tree.
  *
  * Also enforces R6 naming: no file or folder basename of utils/helpers/misc
  * -- shared helpers live in lib/<domain>.ts named by what they operate on.
@@ -26,9 +26,7 @@ const failures = []
 
 function walk(dir) {
   const entries = readdirSync(dir, { withFileTypes: true })
-  const dirs = entries.filter(
-    (e) => e.isDirectory() && !(dir === root && e.name === 'gen'),
-  )
+  const dirs = entries.filter((e) => e.isDirectory())
   const files = entries.filter(
     (e) => e.isFile() && !/\.test\.[^.]+$/.test(e.name),
   )

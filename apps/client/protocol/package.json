@@ -1,0 +1,10 @@
+{
+  "name": "@posthaste/protocol",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./gen": "./src/gen/index.ts",
+    "./gen/*": "./src/gen/*.ts"
+  }
+}

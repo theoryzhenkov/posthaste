@@ -1,4 +1,4 @@
-//! Verifies the checked-in `frontend/src/gen/` matches what the models crate
+//! Verifies the checked-in `protocol/src/gen/` matches what the models crate
 //! generates today. Exports into a temp directory (never the source tree)
 //! and diffs; on mismatch the fix is `just gen-ts`.
 
@@ -26,7 +26,7 @@ fn read_ts_files(dir: &Path) -> BTreeMap<String, String> {
 
 #[test]
 fn checked_in_ts_types_are_fresh() {
-    let checked_in_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/src/gen");
+    let checked_in_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/src/gen");
     let temp_dir = std::env::temp_dir().join(format!(
         "posthaste-client-models-freshness-{}",
         std::process::id()
@@ -58,7 +58,7 @@ fn checked_in_ts_types_are_fresh() {
 
     assert!(
         problems.is_empty(),
-        "frontend/src/gen/ is out of date with the models crate — run `just gen-ts`:\n  {}",
+        "protocol/src/gen/ is out of date with the models crate — run `just gen-ts`:\n  {}",
         problems.join("\n  ")
     );
 }

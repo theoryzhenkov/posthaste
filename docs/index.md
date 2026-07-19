@@ -1,8 +1,8 @@
 ---
 title: Technical reference
 description: The durable, layered technical specs — architecture, API, backend, client, mail state, testing, and UI.
-modified: 2026-07-18
-reviewed: 2026-07-18
+modified: 2026-07-19
+reviewed: 2026-07-19
 ---
 
 The durable, layered technical specs live in domain directories. Each domain
@@ -33,6 +33,11 @@ structure → L3 implementation reference):
 
 Task-oriented, tool-facing guides live alongside the specs:
 
+- [Scripting quickstart](https://posthaste.theor.net/docs/scripting-quickstart):
+  automate Posthaste from a shell script — queries, commands, the event
+  stream, and `watch --exec`, driven by `posthastectl`.
+- [Scripting security & threat model](https://posthaste.theor.net/docs/scripting-security):
+  the threat model behind the scripting surface.
 - [User guide](https://posthaste.theor.net/docs): the walkthrough-style
   user/operator guide.
 
