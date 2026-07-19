@@ -5,7 +5,7 @@ import {
   type FloatingPanelSizePreset,
   floatingPanelSizeStyle,
 } from '@/components/floating/geometry/layout'
-import { nextWindowZIndex, Z } from '@/app/shell/layering'
+import { nextWindowZIndex, Z } from '@/lib/design/layering'
 import { cn } from '@/lib/design/cn'
 
 import { FloatingPanelGuides } from './panel/FloatingPanelGuides'

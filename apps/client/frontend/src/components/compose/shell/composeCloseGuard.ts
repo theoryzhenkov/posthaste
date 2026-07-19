@@ -3,7 +3,7 @@ import type { ComposeIntent } from '@/domain/composeIntent'
 import type { ComposeForm } from '../form/model'
 
 /** Whether the form holds anything worth persisting as a draft. */
-export function composeFormHasContent(form: ComposeForm): boolean {
+function composeFormHasContent(form: ComposeForm): boolean {
   return Boolean(
     form.to.trim() ||
     form.cc.trim() ||

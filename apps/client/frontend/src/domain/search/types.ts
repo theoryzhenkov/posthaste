@@ -13,7 +13,7 @@ export type QueryValidation =
   | { state: 'incomplete'; message: string }
   | { state: 'invalid'; message: string }
 
-export interface QueryCompletionSource {
+interface QueryCompletionSource {
   id: string
   name: string
   mailboxes: Mailbox[]

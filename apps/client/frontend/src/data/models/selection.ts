@@ -9,6 +9,21 @@ export type MailSelection = {
   conversationId: string
 }
 
+/**
+ * The sidebar's chosen view, with display names for the header/list chrome.
+ * `MailViewSelection` below is the name-free shape goto/navigation compare on;
+ * folding the two into one is tracked follow-up (the name fields would have to
+ * become lookups).
+ */
+export type SidebarSelection =
+  | { kind: 'smart-mailbox'; id: string; name: string }
+  | {
+      kind: 'source-mailbox'
+      sourceId: string
+      mailboxId: string
+      name: string
+    }
+
 /** Current sidebar selection — either a smart mailbox or a source+mailbox pair. */
 export type MailViewSelection =
   | { kind: 'smart-mailbox'; id: string }

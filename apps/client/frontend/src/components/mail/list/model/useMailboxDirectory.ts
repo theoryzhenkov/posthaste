@@ -13,7 +13,7 @@ import type { AccountDirectory } from '@/data/models/accountDirectory'
 import type { Mailbox, MessageSummary } from '@/data/transport/api'
 import { useMailboxCounts } from '@/data/queries/queries'
 
-export interface ResolvedMailbox {
+interface ResolvedMailbox {
   mailbox: Mailbox
   /** True when the message's account directory has more than one enabled
    *  account, so the chip should disambiguate with the account name. */

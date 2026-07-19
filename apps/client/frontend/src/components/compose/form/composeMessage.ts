@@ -3,6 +3,7 @@ import type {
   SendMessageAttachmentInput,
   SendMessageInput,
 } from '../../../data/transport/api/index'
+import { newId } from '../../../lib/ambient/random'
 
 export const MAX_COMPOSE_ATTACHMENTS = 10
 export const MAX_COMPOSE_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -64,7 +65,7 @@ export function parseRecipients(value: string): Recipient[] {
     })
 }
 
-export function parseSender(value: string): Recipient | null {
+function parseSender(value: string): Recipient | null {
   return parseRecipients(value)[0] ?? null
 }
 
@@ -86,7 +87,7 @@ export function buildSendInput(
 }
 
 export function composeAttachmentFromFile(file: File): ComposeAttachment {
-  const id = `${file.name}:${file.size}:${file.lastModified}:${crypto.randomUUID()}`
+  const id = `${file.name}:${file.size}:${file.lastModified}:${newId()}`
   return {
     id,
     file,

@@ -22,17 +22,12 @@ import { useMailClient } from '@/data/context'
 import { runCommand } from '@/data/transport/commands'
 import { ensureAppSettings, useAppSettings } from '@/data/queries/queries'
 import type { MailboxGroup } from '@/gen'
+import { newId } from '@/lib/ambient/random'
 
 const EMPTY_GROUPS: readonly MailboxGroup[] = Object.freeze([])
 
 function newGroupId(): string {
-  if (
-    typeof crypto !== 'undefined' &&
-    typeof crypto.randomUUID === 'function'
-  ) {
-    return `group-${crypto.randomUUID()}`
-  }
-  return `group-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `group-${newId()}`
 }
 
 /** Reactive read of the synced sidebar Groups. */

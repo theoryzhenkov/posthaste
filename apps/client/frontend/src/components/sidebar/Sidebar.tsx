@@ -9,6 +9,8 @@
  */
 import { useCallback, useMemo, useState } from 'react'
 
+import type { SidebarSelection } from '@/data/models/selection'
+
 import { useActivePane, useFocusedPaneHandler } from '../keyboard/usePane'
 import { useMailboxNavigationReadModels } from '../../data/models/mailboxNavigation'
 import {
@@ -33,15 +35,6 @@ import {
 } from './SidebarContent'
 
 /** Discriminated union representing the current sidebar selection. */
-export type SidebarSelection =
-  | { kind: 'smart-mailbox'; id: string; name: string }
-  | {
-      kind: 'source-mailbox'
-      sourceId: string
-      mailboxId: string
-      name: string
-    }
-
 interface SidebarProps {
   selectedView: SidebarSelection | null
   onOpenAccountSettings: (sourceId: string) => void

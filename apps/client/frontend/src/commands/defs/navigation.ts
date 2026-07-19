@@ -6,7 +6,7 @@
  * `open` entries keep their historical order.
  */
 import { MailOpen, Maximize2, MessagesSquare, X } from 'lucide-react'
-import { conversationViewQuery } from '../../domain/searchQuery'
+import { conversationViewQuery } from '../../domain/search'
 import { registerActions } from '../registry'
 import type { ActionDefinition } from '../types'
 import { notDraftOnHeader, primaryTarget, requireTarget } from './shared'

@@ -46,7 +46,7 @@ export type EmailActions = ReturnType<typeof useEmailActions>
  * replacing the Trash safety net a normal message relies on. The row
  * disappears when the command lands and the queries re-answer.
  */
-export const DRAFT_DISCARD_GRACE_MS = 5000
+const DRAFT_DISCARD_GRACE_MS = 5000
 
 interface KeywordState {
   isRead: boolean

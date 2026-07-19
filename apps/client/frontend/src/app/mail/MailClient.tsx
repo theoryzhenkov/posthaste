@@ -4,8 +4,8 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import type { ActionServices, MessageTarget } from '@/commands'
-import type { SidebarSelection } from '@/components/sidebar/Sidebar'
-import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
+import type { SidebarSelection } from '@/data/models/selection'
+import { messageTargetFromSelection } from '@/commands'
 import {
   closeCurrentSurfaceWindow,
   listenForDesktopCloseRequest,
@@ -17,7 +17,8 @@ import { KeyboardController } from '@/app/input/keyboard/KeyboardController'
 import { useGotoNavigation } from '@/app/input/goto/useGotoNavigation'
 import { useMailboxRole, useSmartMailboxRole } from '@/data/hooks/useMailboxRole'
 import { useMailLayoutPersistence } from '@/app/mail/useMailLayoutPersistence'
-import { closeWebSurface, useEffectiveSurface } from '@/surfaces/useSurfaceRouting'
+import { closeWebSurface } from '@/surfaces/navigation'
+import { useEffectiveSurface } from '@/surfaces/useSurfaceRouting'
 import {
   appReadinessStateFromAccountsQuery,
   LAB_READINESS_STATES,
@@ -31,8 +32,8 @@ import { fetchQuery, useAccounts, useCommands, useMailClient } from '@/data'
 import { queryKeys } from '@/data/queries/queryKeys'
 import type { MessageDetailResult } from '@/gen'
 import { consumeRepairCompletion } from '@/desktop/repair/feedback'
-import { conversationViewQuery, prepareServerSearchQuery } from '@/domain/searchQuery'
-import { type SurfaceDescriptor } from '@/surfaces'
+import { conversationViewQuery, prepareServerSearchQuery } from '@/domain/search'
+import { type SurfaceDescriptor } from '@/domain/surface'
 import { MailClientView } from './MailClientView'
 import { useMailClientHandlers } from './useMailClientHandlers'
 
@@ -182,18 +183,7 @@ export function MailClient({
   const keyboardTarget = useMemo<MessageTarget | null>(
     () =>
       selectedMessage
-        ? {
-            ref: {
-              sourceId: selectedMessage.sourceId,
-              messageId: selectedMessage.messageId,
-            },
-            summary: selectedMessageData,
-            isDraft:
-              selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft) ??
-              false,
-            draftId: selectedMessageData?.draftId ?? null,
-            conversationId: selectedMessage.conversationId,
-          }
+        ? messageTargetFromSelection(selectedMessage, selectedMessageData)
         : null,
     [selectedMessage, selectedMessageData],
   )

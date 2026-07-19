@@ -21,7 +21,7 @@ import {
   smartMailboxSettingsSurface,
   sourceMailboxSettingsSurface,
   type SettingsSurfaceDescriptor,
-} from '../../../surfaces/index'
+} from '@/domain/surface'
 import { SettingsPanelContent } from './SettingsPanelContent'
 import {
   SettingsRail,
@@ -45,7 +45,7 @@ import type { AccountRow } from '@/gen'
 import {
   markSurfaceBootstrap,
   markSurfaceBootstrapOnce,
-} from '../../../surfaces/bootstrapLog'
+} from '@/lib/log/surfaceBootstrap'
 
 interface SettingsPanelProps {
   accounts: AccountRow[]

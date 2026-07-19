@@ -52,31 +52,10 @@ export const SYSTEM_KEYWORDS = {
   Forwarded: '$forwarded',
 } as const
 
-export type SystemKeyword =
-  (typeof SYSTEM_KEYWORDS)[keyof typeof SYSTEM_KEYWORDS]
-
-export const KNOWN_SYSTEM_KEYWORDS = [
-  SYSTEM_KEYWORDS.Seen,
-  SYSTEM_KEYWORDS.Draft,
-  SYSTEM_KEYWORDS.Flagged,
-  SYSTEM_KEYWORDS.Answered,
-  SYSTEM_KEYWORDS.Forwarded,
-] as const satisfies readonly SystemKeyword[]
-
 // Event topics come from the generated protocol types in `src/gen/` (ts-rs
 // output of the models crate: `DomainEventKind`, the payload shapes), not
 // from this file. Below are the CLIENT-ONLY vocabularies: closed string sets
 // minted on this side of the wire, each owned here once.
-
-/** Lifecycle of one mirror entry, as rendered by the data hooks. */
-const QUERY_STATUS = {
-  Loading: 'loading',
-  Ready: 'ready',
-  Stale: 'stale',
-  Error: 'error',
-} as const
-
-export type QueryStatus = (typeof QUERY_STATUS)[keyof typeof QUERY_STATUS]
 
 /** Stream/connection state the data facade exposes to the UI. */
 const CONNECTION_STATUS = {
@@ -137,3 +116,14 @@ const SORT_DIRECTION = {
 
 export type SortDirection =
   (typeof SORT_DIRECTION)[keyof typeof SORT_DIRECTION]
+
+/** Parse a user-facing tag name (R3 — parse, don't validate): trims and
+ *  collapses whitespace; rejects empty, system ('$'-prefixed), and
+ *  hierarchical ('/') names. The one gate for tag creation and rename. */
+export function parseTagName(value: string): string | null {
+  const normalized = value.trim().replace(/\s+/g, ' ')
+  if (!normalized || normalized.startsWith('$') || normalized.includes('/')) {
+    return null
+  }
+  return normalized
+}

@@ -19,7 +19,7 @@ import {
 } from './theme/theme'
 
 /** Per-mode color knobs (mirrors `ThemeColors` in `themeSettings`). */
-export type RootThemeColors = {
+type RootThemeColors = {
   readonly accentHue?: number
   readonly surfaceHue?: number
 }
@@ -33,7 +33,7 @@ export type RootThemeState = {
   readonly glassTheme?: GlassThemeParameters
 }
 
-export type AppliedThemeColors = {
+type AppliedThemeColors = {
   readonly accentHue: number
   readonly surfaceHue: number
 }
@@ -48,7 +48,7 @@ export type AppliedRootTheme = {
   readonly glassTheme: GlassThemeParameters
 }
 
-export function resolveThemeMode(
+function resolveThemeMode(
   mode: ThemeMode,
   systemMode: ResolvedThemeMode,
 ): ResolvedThemeMode {

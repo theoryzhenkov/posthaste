@@ -21,19 +21,7 @@ import {
 } from '@/components/compose/form/composeMessage'
 
 export type { ComposeAttachment, ComposeForm } from '@/components/compose/form/composeMessage'
-export {
-  EMPTY_COMPOSE_FORM as EMPTY_FORM,
-  MAX_COMPOSE_ATTACHMENT_BYTES,
-  MAX_COMPOSE_ATTACHMENTS,
-  MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES,
-  buildSendInput,
-  composeAttachmentFromFile,
-  formatRecipient,
-  formatRecipients,
-  parseRecipients,
-  parseSender,
-  readAttachmentForSend,
-} from '@/components/compose/form/composeMessage'
+export { EMPTY_COMPOSE_FORM as EMPTY_FORM, MAX_COMPOSE_ATTACHMENT_BYTES, MAX_COMPOSE_ATTACHMENTS, MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES, buildSendInput, composeAttachmentFromFile, formatRecipient, formatRecipients, parseRecipients, readAttachmentForSend } from '@/components/compose/form/composeMessage'
 
 export interface FromAddressOption {
   sourceId: string

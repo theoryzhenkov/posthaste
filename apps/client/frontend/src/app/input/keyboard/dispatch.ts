@@ -47,7 +47,7 @@ export interface RegistryKeyMatch {
   run: () => void
 }
 
-export interface RegistryKeyHook {
+interface RegistryKeyHook {
   match(event: KeyboardEvent): RegistryKeyMatch | null
 }
 

@@ -72,8 +72,8 @@
 
   color-scheme: light;
 
-  /* Layering scale — single source of truth is src/app/shell/layering.ts. These MUST
-     mirror the `Z` values there (guarded by test/layering.test.ts). Class-based
+  /* Layering scale — single source of truth is src/lib/design/layering.ts. These MUST
+     mirror the `Z` values there (guarded by src/lib/design/layering.test.ts). Class-based
      surfaces reference them via Tailwind `z-(--z-popover)` etc. */
   --z-base: 0;
   --z-raised: 10;

@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { AlertCircle, AlertTriangle, Info, Loader2, X } from 'lucide-react'
 
+import { nowMs } from '@/lib/ambient/time'
 import { cn } from '@/lib/design/cn'
 import type { NotificationSeverity } from '@/domain/vocabulary'
 import {
@@ -29,7 +30,7 @@ const SEVERITY_CLASS: Record<NotificationSeverity, string> = {
 }
 
 function relativeTime(timestamp: number): string {
-  const seconds = Math.round((Date.now() - timestamp) / 1000)
+  const seconds = Math.round((nowMs() - timestamp) / 1000)
   if (seconds < 60) return 'just now'
   const minutes = Math.round(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`

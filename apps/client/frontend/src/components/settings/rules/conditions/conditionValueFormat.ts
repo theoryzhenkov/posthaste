@@ -55,7 +55,7 @@ export function dateInputValue(value: MailQueryValue): string {
 
 /** Turn a native date input's `YYYY-MM-DD` into the RFC3339 string the
  *  evaluator compares `received_at` against (stored as RFC3339 TEXT). */
-export function toRfc3339FromDateInput(dateStr: string): string {
+function toRfc3339FromDateInput(dateStr: string): string {
   return dateStr ? `${dateStr}T00:00:00Z` : ''
 }
 
@@ -175,7 +175,7 @@ export function sizeInputParts(value: MailQueryValue): {
 }
 
 /** Split the comma-separated `in` text box into a `string[]` (unchanged). */
-export function splitListValue(text: string): string[] {
+function splitListValue(text: string): string[] {
   return text
     .split(',')
     .map((entry) => entry.trim())

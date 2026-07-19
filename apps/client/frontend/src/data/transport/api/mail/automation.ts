@@ -1,4 +1,3 @@
-import type { MessageSummary } from './mail'
 import type { MailQueryRule } from './mailQuery'
 
 export type AutomationTrigger = 'messageArrived' | 'messageChanged' | 'manual'
@@ -20,14 +19,4 @@ export interface AutomationRule {
   condition: MailQueryRule
   actions: AutomationAction[]
   backfill: boolean
-}
-
-export interface AutomationRulePreviewInput {
-  condition: MailQueryRule
-  limit?: number
-}
-
-export interface AutomationRulePreviewResponse {
-  total: number
-  items: MessageSummary[]
 }

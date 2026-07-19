@@ -18,7 +18,12 @@ import type {
   AccountsResult,
   VerifyAccountResult,
 } from '@/gen'
-import { imapDefaultsForEmail } from '../forms'
+import {
+  formFieldSetter,
+  hasUnsavedAccountChanges,
+  imapDefaultsForEmail,
+  setupPrimaryEmail,
+} from '../forms'
 import { AccountMark } from '../../ui/display/AccountMark'
 import { Button } from '../../ui/form/button'
 import {
@@ -32,14 +37,11 @@ import { AccountHeaderMeta } from './editor/AccountHeaderMeta'
 import { ConnectionEditor } from './editor/ConnectionEditor'
 import { DangerSection } from './editor/DangerSection'
 import {
-  accountFieldsSignature,
-  appearanceFromForm,
-} from './editor/state'
-import {
   buildAccountEditorModel,
   type ExistingAccountEditorModel,
 } from './editor/accountEditorModel'
 import {
+  buildAccountAppearanceInput,
   buildCreateAccountIntent,
   buildIdentityPatch,
   buildSecretChange,
@@ -90,8 +92,9 @@ export function AccountEditor({
   const [verification, setVerification] = useState<VerifyAccountResult | null>(
     null,
   )
-  const [savedAccountFieldsSignature, setSavedAccountFieldsSignature] =
-    useState(() => accountFieldsSignature(form, editorModel.connection))
+  // The saved baseline the form diffs against: untouched fields patch as
+  // `keep`, and the Apply gate stays closed until something drifts from it.
+  const [savedForm, setSavedForm] = useState(form)
 
   const saveMutation = useMutation({
     mutationFn: async (currentForm: AccountFormState): Promise<string> => {
@@ -114,7 +117,11 @@ export function AccountEditor({
           )
         }
         await commands.run({
-          updateAccountTransport: buildTransportIntent(currentForm, created.id),
+          updateAccountTransport: buildTransportIntent(
+            currentForm,
+            savedForm,
+            created.id,
+          ),
         })
         const secret = buildSecretChange(currentForm)
         if (secret.kind !== 'keep') {
@@ -127,11 +134,15 @@ export function AccountEditor({
 
       const accountId = editorModel.account.id
       await commands.run({
-        updateAccount: buildIdentityPatch(currentForm, accountId),
+        updateAccount: buildIdentityPatch(currentForm, savedForm, accountId),
       })
       if (shouldWriteTransport(editorModel)) {
         await commands.run({
-          updateAccountTransport: buildTransportIntent(currentForm, accountId),
+          updateAccountTransport: buildTransportIntent(
+            currentForm,
+            savedForm,
+            accountId,
+          ),
         })
         const secret = buildSecretChange(currentForm)
         if (secret.kind !== 'keep') {
@@ -146,13 +157,11 @@ export function AccountEditor({
       setErrorMessage(null)
       setVerification(null)
       // The refreshed answer arrives through invalidation; locally only the
-      // password field resets (it is write-only) and the saved signature
+      // password field resets (it is write-only) and the saved baseline
       // catches up to what was submitted.
-      const savedForm = { ...currentForm, password: '' }
-      setForm(savedForm)
-      setSavedAccountFieldsSignature(
-        accountFieldsSignature(savedForm, editorModel.connection),
-      )
+      const nextSaved = { ...currentForm, password: '' }
+      setForm(nextSaved)
+      setSavedForm(nextSaved)
       await onSaved(accountId)
     },
     onError: (error: Error) => {
@@ -179,10 +188,12 @@ export function AccountEditor({
   const existingModel: ExistingAccountEditorModel | null =
     editorModel.kind === 'new' ? null : editorModel
   const existingAccount = existingModel?.account ?? null
-  const formAppearance = appearanceFromForm(form)
-  const hasUnsavedAccountChanges =
-    accountFieldsSignature(form, editorModel.connection) !==
-    savedAccountFieldsSignature
+  const formAppearance = buildAccountAppearanceInput(form)
+  const unsavedChanges = hasUnsavedAccountChanges(
+    form,
+    savedForm,
+    editorModel.connection,
+  )
 
   return (
     <div className="pb-8">
@@ -267,7 +278,7 @@ export function AccountEditor({
           <Button
             type="button"
             onClick={() => saveMutation.mutate(form)}
-            disabled={saveMutation.isPending || !hasUnsavedAccountChanges}
+            disabled={saveMutation.isPending || !unsavedChanges}
             className="bg-brand-coral text-white hover:bg-brand-coral/90"
           >
             Apply
@@ -280,7 +291,7 @@ export function AccountEditor({
               disabled={
                 verifyMutation.isPending ||
                 saveMutation.isPending ||
-                hasUnsavedAccountChanges
+                unsavedChanges
               }
               className="rounded-md border-border bg-background"
             >
@@ -288,7 +299,7 @@ export function AccountEditor({
             </Button>
           )}
           <span className="text-[12px] text-muted-foreground">
-            {hasUnsavedAccountChanges ? 'Unsaved changes' : 'Saved'}
+            {unsavedChanges ? 'Unsaved changes' : 'Saved'}
           </span>
         </div>
       </SettingsFooter>
@@ -304,15 +315,6 @@ export function AccountEditor({
   )
 }
 
-/** The concrete email an IMAP setup will connect as, for app-password hints. */
-function setupPrimaryEmail(form: AccountFormState): string {
-  const fromPatterns = form.emailPatternsText
-    .split(/[\n,]/)
-    .map((pattern) => pattern.trim())
-    .find((pattern) => !pattern.includes('*') && pattern.includes('@'))
-  return fromPatterns ?? form.username.trim()
-}
-
 function IdentitySection({
   form,
   onChange,
@@ -320,23 +322,20 @@ function IdentitySection({
   form: AccountFormState
   onChange: React.Dispatch<React.SetStateAction<AccountFormState>>
 }) {
+  const setField = formFieldSetter(onChange)
   return (
     <SettingsSection title="Identity">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
           label="Account name"
           value={form.name}
-          onChange={(value) =>
-            onChange((current) => ({ ...current, name: value }))
-          }
+          onChange={setField('name')}
         />
         <Field
           label="Full name"
           value={form.fullName}
           placeholder="Ada Lovelace"
-          onChange={(value) =>
-            onChange((current) => ({ ...current, fullName: value }))
-          }
+          onChange={setField('fullName')}
         />
       </div>
 
@@ -348,12 +347,7 @@ function IdentitySection({
           className="min-h-[72px] w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-[13px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           value={form.signature}
           placeholder="Optional signature appended to composed messages."
-          onChange={(event) =>
-            onChange((current) => ({
-              ...current,
-              signature: event.target.value,
-            }))
-          }
+          onChange={(event) => setField('signature')(event.target.value)}
         />
       </label>
 
@@ -365,12 +359,7 @@ function IdentitySection({
           className="min-h-[72px] w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-[13px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           value={form.emailPatternsText}
           placeholder={'you@example.com\n*@example.com'}
-          onChange={(event) =>
-            onChange((current) => ({
-              ...current,
-              emailPatternsText: event.target.value,
-            }))
-          }
+          onChange={(event) => setField('emailPatternsText')(event.target.value)}
         />
       </label>
     </SettingsSection>

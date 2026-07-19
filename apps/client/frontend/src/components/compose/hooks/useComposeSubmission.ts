@@ -6,6 +6,7 @@ import type { Recipient, ReplyContext, SendMessageInput } from '@/data/transport
 import { DEFAULT_UNDO_SEND_DELAY_SECONDS } from '@/data/transport/api/settings/settings'
 import type { ComposeIntent } from '@/domain/composeIntent'
 import { useAppSettings, useCommands } from '@/data'
+import { nowMs } from '@/lib/ambient/time'
 
 import {
   buildSendInput,
@@ -250,7 +251,7 @@ export function useComposeSubmission({
         sourceId,
         input,
         sendAt: new Date(
-          Date.now() + undoSendDelaySeconds * 1000,
+          nowMs() + undoSendDelaySeconds * 1000,
         ).toISOString(),
         undoWindowSeconds: undoSendDelaySeconds,
       })

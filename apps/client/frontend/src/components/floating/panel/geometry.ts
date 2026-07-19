@@ -1,63 +1,50 @@
 import type { PanelGeometry, PanelOffset } from '@/components/floating/geometry'
 import { isFiniteOffset } from '@/components/floating/geometry'
 import type { ViewportSize } from '@/components/floating/geometry/layout'
+import { readStorageItem, writeStorageItem } from '@/lib/ambient/storage'
 
 import type { PanelSize } from './types'
 
-export function readStoredPanelOffset(storageKey: string): PanelOffset {
-  if (typeof window === 'undefined') {
-    return { x: 0, y: 0 }
-  }
+// Persistence goes through the R8 storage seam: absent/blocked storage reads
+// as null and swallows writes — geometry is a preference; failing to persist
+// never breaks the panel.
+
+function readStoredJson(storageKey: string): unknown {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null')
-    return isFiniteOffset(parsed) ? parsed : { x: 0, y: 0 }
+    return JSON.parse(readStorageItem(storageKey) ?? 'null')
   } catch {
-    return { x: 0, y: 0 }
+    return null
   }
+}
+
+export function readStoredPanelOffset(storageKey: string): PanelOffset {
+  const parsed = readStoredJson(storageKey)
+  return isFiniteOffset(parsed) ? parsed : { x: 0, y: 0 }
 }
 
 export function persistPanelOffset(storageKey: string, offset: PanelOffset) {
-  if (typeof window === 'undefined') {
-    return
-  }
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(offset))
-  } catch {
-    // Placement is a preference; failing to persist should not break the panel.
-  }
+  writeStorageItem(storageKey, JSON.stringify(offset))
 }
 
 export function readStoredPanelSize(storageKey: string): PanelSize | null {
-  if (typeof window === 'undefined') {
-    return null
+  const parsed = readStoredJson(storageKey)
+  if (
+    parsed &&
+    typeof parsed === 'object' &&
+    'width' in parsed &&
+    'height' in parsed &&
+    typeof parsed.width === 'number' &&
+    typeof parsed.height === 'number' &&
+    Number.isFinite(parsed.width) &&
+    Number.isFinite(parsed.height)
+  ) {
+    return { width: parsed.width, height: parsed.height }
   }
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null')
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.width === 'number' &&
-      typeof parsed.height === 'number' &&
-      Number.isFinite(parsed.width) &&
-      Number.isFinite(parsed.height)
-    ) {
-      return { width: parsed.width, height: parsed.height }
-    }
-    return null
-  } catch {
-    return null
-  }
+  return null
 }
 
 export function persistPanelSize(storageKey: string, size: PanelSize) {
-  if (typeof window === 'undefined') {
-    return
-  }
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(size))
-  } catch {
-    // Size is a preference; failing to persist should not break the panel.
-  }
+  writeStorageItem(storageKey, JSON.stringify(size))
 }
 
 export function viewportSize(): ViewportSize {

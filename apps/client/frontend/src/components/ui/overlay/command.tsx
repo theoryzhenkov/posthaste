@@ -64,47 +64,6 @@ function CommandList({
   )
 }
 
-function CommandEmpty(
-  props: React.ComponentProps<typeof CommandPrimitive.Empty>,
-) {
-  return (
-    <CommandPrimitive.Empty
-      data-slot="command-empty"
-      className="py-10 text-center text-sm text-muted-foreground"
-      {...props}
-    />
-  )
-}
-
-function CommandGroup({
-  className,
-  ...props
-}: React.ComponentProps<typeof CommandPrimitive.Group>) {
-  return (
-    <CommandPrimitive.Group
-      data-slot="command-group"
-      className={cn(
-        'overflow-hidden px-0 py-1 text-foreground [&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.22em] [&_[cmdk-group-heading]]:text-muted-foreground/80',
-        className,
-      )}
-      {...props}
-    />
-  )
-}
-
-function CommandSeparator({
-  className,
-  ...props
-}: React.ComponentProps<typeof CommandPrimitive.Separator>) {
-  return (
-    <CommandPrimitive.Separator
-      data-slot="command-separator"
-      className={cn('-mx-1 h-px bg-border/70', className)}
-      {...props}
-    />
-  )
-}
-
 function CommandItem({
   className,
   ...props
@@ -121,29 +80,4 @@ function CommandItem({
   )
 }
 
-function CommandShortcut({
-  className,
-  ...props
-}: React.ComponentProps<'span'>) {
-  return (
-    <span
-      data-slot="command-shortcut"
-      className={cn(
-        'rounded-[4px] border border-white/10 bg-white/6 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground',
-        className,
-      )}
-      {...props}
-    />
-  )
-}
-
-export {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-  CommandShortcut,
-}
+export { Command, CommandInput, CommandItem, CommandList }

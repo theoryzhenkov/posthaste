@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef } from 'react'
 
-import { isMainDesktopWindow, isTauriRuntime } from '@/desktop/runtime'
+import { isMainDesktopWindow, isTauriRuntime } from '@/lib/platform/runtime'
 import { checkForDesktopUpdate, promptDesktopUpdate } from '@/desktop/updates/updates'
 import { LOG_EVENTS } from '@/lib/log/logEvents'
 import { syncLogger } from '@/lib/log/logger'

@@ -32,7 +32,7 @@ import {
 } from '@/data'
 import { familyKey } from '@/data/queries/queryKeys'
 
-export interface MailboxNavigationSource {
+interface MailboxNavigationSource {
   id: string
   name: string
   appearance: AccountAppearance
@@ -60,7 +60,7 @@ function isUserTag(tag: TagSummary): boolean {
 /** Stable name-derived appearance used until the account's configured
  * appearance (an `accountSettings` answer) arrives, and for accounts without
  * one. Matches the server's derivation: word initials + an id-hashed hue. */
-export function fallbackAppearance(account: {
+function fallbackAppearance(account: {
   id: string
   name: string
 }): AccountAppearance {

@@ -1,3 +1,4 @@
+import { now } from '@/lib/ambient/time'
 import { KNOWN_MAILBOX_ROLES } from '../vocabulary'
 import {
   IS_VALUES,
@@ -203,7 +204,7 @@ function candidatesForPrefix(
     case 'before':
     case 'after':
     case 'date': {
-      const today = todayIsoDate(context.now ?? new Date())
+      const today = todayIsoDate(context.now ?? now())
       return [{ value: today, label: today, detail: 'Today' }]
     }
     default:

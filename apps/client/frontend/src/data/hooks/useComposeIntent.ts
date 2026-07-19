@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 
 import type { ComposeIntent } from '@/domain/composeIntent'
-import type { SidebarSelection } from '@/components/sidebar/Sidebar'
+import type { SidebarSelection } from '@/data/models/selection'
 import type { MailSelection } from '@/data/models/selection'
 
 interface EnabledAccountRef {

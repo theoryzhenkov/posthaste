@@ -8,8 +8,10 @@ import { useMailboxCounts } from '@/data'
 import { SmartMailboxEditor } from '../SmartMailboxEditor'
 import { SourceMailboxEditor } from '../SourceMailboxEditor'
 import { FeedbackBanner } from '../../panel/shared'
-import type { SmartMailboxEditorTarget } from '../../panel/types'
-import type { MailboxEditorTarget } from '../SmartMailboxesPane'
+import type {
+  MailboxEditorTarget,
+  SmartMailboxEditorTarget,
+} from '../../panel/types'
 import { SmartMailboxesEmptyState } from './EmptyState'
 
 export function SmartMailboxDetail({

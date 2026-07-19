@@ -6,6 +6,7 @@
  * {@link ./useTagMaintenance}).
  *
  */
+import { parseTagName } from '@/domain/vocabulary'
 import { Check, Loader2, Pencil, Tags, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
@@ -28,6 +29,7 @@ import { Input } from '../../ui/form/input'
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/overlay/popover'
 import { TagChip } from '../../mail/tags/TagChip'
 import { TAG_COLOR_SWATCHES, TAG_ICONS, TAG_ICON_NAMES } from '../../mail/tags/model'
+import { mergeSparsePatch } from '../forms'
 import {
   FeedbackBanner,
   SettingsEmptyState,
@@ -38,15 +40,12 @@ import { classifyRename } from './tagMaintenance'
 import { useTagAppearanceMutation } from './useTagAppearanceMutation'
 import { useTagMaintenance } from './useTagMaintenance'
 
-type IconPatch = Partial<Pick<TagAppearance, 'fg' | 'bg' | 'icon'>>
+/** The curated overlay fields; a sparse patch over them follows the shared
+ * keep (absent) / clear (undefined) / set (value) semantics. */
+type TagAppearanceOverlay = Pick<TagAppearance, 'fg' | 'bg' | 'icon'>
+type IconPatch = Partial<TagAppearanceOverlay>
+const TAG_APPEARANCE_FIELDS = ['fg', 'bg', 'icon'] as const
 
-function normalizeTagName(value: string): string | null {
-  const normalized = value.trim().replace(/\s+/g, ' ')
-  if (!normalized || normalized.startsWith('$') || normalized.includes('/')) {
-    return null
-  }
-  return normalized
-}
 
 export function TagsPane({ settings }: { settings: AppSettings | null }) {
   const { tags: discovered } = useMailboxNavigationReadModels()
@@ -77,33 +76,19 @@ export function TagsPane({ settings }: { settings: AppSettings | null }) {
     configured.find((entry) => entry.name === name)
 
   function upsert(name: string, patch: IconPatch) {
-    const existing = overrideFor(name)
-    const merged: TagAppearance = {
-      name,
-      fg: existing?.fg,
-      bg: existing?.bg,
-      icon: existing?.icon,
-      ...patch,
-    }
     const rest = configured.filter((entry) => entry.name !== name)
-    const hasAny = merged.fg || merged.bg || merged.icon
-    if (!hasAny) {
-      mutation.mutate(rest)
-      return
-    }
-    const cleaned: TagAppearance = {
-      name,
-      ...(merged.fg ? { fg: merged.fg } : {}),
-      ...(merged.bg ? { bg: merged.bg } : {}),
-      ...(merged.icon ? { icon: merged.icon } : {}),
-    }
-    mutation.mutate([...rest, cleaned])
+    const merged = mergeSparsePatch<TagAppearanceOverlay>(
+      TAG_APPEARANCE_FIELDS,
+      overrideFor(name) ?? {},
+      patch,
+    )
+    mutation.mutate(merged ? [...rest, { name, ...merged }] : rest)
   }
 
   // A rename is applied directly unless the new name collides with an existing
   // tag, in which case it is a MERGE and we confirm first.
   function requestRename(oldName: string, rawNewName: string) {
-    const newName = normalizeTagName(rawNewName)
+    const newName = parseTagName(rawNewName)
     if (!newName) return
     const kind = classifyRename(oldName, newName, names)
     if (kind === 'noop') return

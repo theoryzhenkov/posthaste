@@ -2,9 +2,9 @@
 title: "Client charter (L2)"
 scope: L2
 summary: "The frontend constitution: the rules that generate refactoring decisions, the target directory shape, the owned vocabularies, the branded primitives, and the ratchet that keeps entropy from returning."
-modified: 2026-07-18
-reviewed: 2026-07-18
-state: draft
+modified: 2026-07-19
+reviewed: 2026-07-19
+state: active
 depends:
   - path: docs/client/L1-client
 dependents:
@@ -131,17 +131,24 @@ slice, all fail-on-NEW-only against committed baselines:
 
 ## Execution order
 
-1. **Moves-only slice** — the target tree, pure renames (R10), history
-   preserved. Everything after happens in the new geography.
-2. **Ratchet slice** — the tooling above, baselined.
-3. **Vocabulary slice** (R2), then **primitives slice** (R3) — these shrink
-   every later diff.
-4. **Commands slice** (R4) and **store slice** (R5) — absorbs refactor-ledger
-   item 1; compose/send work (ledger 3 + the send/undo bugs) rides behind it.
-5. **Helper/constant sweep** (R1, R6, R8, R9) — the long tail, largely
-   mechanical against the ratchet.
+All five slices LANDED (2026-07-19); the rules and the ratchet remain the
+live contract for new code.
 
-Each slice: green gate (tsc, tests, build), decision log in the commit
-message, baseline shrinks or holds. The refactor ledger
-(docs/issues/frontend-refactor-ledger.md) items map onto slices 3–5 and are
-retired as they land.
+1. **Moves-only slice** — LANDED. The target tree, pure renames (R10),
+   history preserved.
+2. **Ratchet slice** — LANDED. All five gates run under
+   `bun run check:charter`; every baseline burned to empty (depcruise 0
+   known violations, knip baseline 0, jscpd ceiling 0.35%).
+3. **Vocabulary slice** (R2) and **primitives slice** (R3) — LANDED.
+   `domain/vocabulary.ts` + the branded parser set under `domain/`.
+4. **Commands slice** (R4) and **store slice** (R5) — LANDED. One command
+   table (`commands/registry.ts` + defs), one `createStore<T>()`; absorbed
+   ledger items 1 and 3, and the send/undo fix rode behind the compose
+   machine.
+5. **Helper/constant sweep** (R1, R6, R8, R9) — LANDED. `utils/` dissolved
+   into `lib/`, ambient deps behind seams, ledger item 4 (declarative form
+   fields) retired with it.
+
+Each slice shipped a green gate (tsc, tests, build), a decision log in the
+commit message, and a shrinking baseline. The refactor ledger
+(docs/issues/frontend-refactor-ledger.md) is fully retired and closed.

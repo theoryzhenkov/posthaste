@@ -40,3 +40,10 @@ export interface SmartMailboxFormState {
   role: string | null
   rule: MailQueryRule
 }
+
+/** Which mailbox the mailboxes pane is editing: a smart mailbox (or 'new'),
+ *  or a concrete source mailbox. Owned here so the pane, its detail views,
+ *  and target routing share one definition without a cycle. */
+export type MailboxEditorTarget =
+  | { kind: 'smart'; id: SmartMailboxEditorTarget }
+  | { kind: 'source'; accountId: string; mailboxId: string }

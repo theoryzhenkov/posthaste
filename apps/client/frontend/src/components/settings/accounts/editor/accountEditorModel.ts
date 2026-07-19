@@ -4,7 +4,7 @@ import type { EditorTarget } from '../../panel/types'
 /** Whether the account's credentials are user-entered or provider-managed
  * (OAuth). Derived from the transport's auth kind — the secrets-safe
  * settings view carries no separate discriminator. */
-export interface ManualCredentialsConnectionModel {
+interface ManualCredentialsConnectionModel {
   kind: 'manualCredentials'
   account: AccountSettingsResult | null
 }
@@ -18,7 +18,7 @@ export type AccountEditorConnectionModel =
   | ManualCredentialsConnectionModel
   | ManagedOAuthConnectionModel
 
-export interface NewAccountEditorModel {
+interface NewAccountEditorModel {
   kind: 'new'
   connection: ManualCredentialsConnectionModel
 }

@@ -1,5 +1,5 @@
 {
-  "threshold": 0.71,
+  "threshold": 0.35,
   "pattern": "src/**/*.{ts,tsx}",
   "ignore": ["**/src/gen/**", "**/node_modules/**", "**/dist/**"],
   "reporters": ["console"],

@@ -9,12 +9,8 @@
  * Accounts and passwords (config + keychain) are unaffected and mail
  * re-syncs. Desktop-only — the browser build cannot relaunch.
  */
-import { isTauriRuntime } from '../runtime'
+import { isTauriRuntime } from '@/lib/platform/runtime'
 import { clearClientLocalState, markRepairRequested } from './feedback'
-
-export function canRepairLocalDatabase(): boolean {
-  return isTauriRuntime()
-}
 
 export async function repairLocalDatabaseAndRestart(): Promise<void> {
   if (!isTauriRuntime()) {

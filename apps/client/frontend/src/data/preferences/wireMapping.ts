@@ -55,6 +55,28 @@ export function wireAppearanceToDesign(
   }
 }
 
+/** The bloom fields that cross the wire unchanged, copied field-by-field so
+ *  neither side leaks extra properties into the other's shape. */
+function copyBloomFields<
+  T extends {
+    id: string
+    hue: number
+    x: number
+    y: number
+    opacity: number
+    radius: number
+  },
+>(bloom: T) {
+  return {
+    id: bloom.id,
+    hue: bloom.hue,
+    x: bloom.x,
+    y: bloom.y,
+    opacity: bloom.opacity,
+    radius: bloom.radius,
+  }
+}
+
 function wireGlassThemeToDesign(
   glass: Appearance['glassTheme'] | undefined,
   fallback: DesignThemePreferences['glassTheme'],
@@ -63,14 +85,7 @@ function wireGlassThemeToDesign(
     return fallback
   }
   return normalizeGlassThemeParameters({
-    blooms: glass.blooms.map((bloom) => ({
-      id: bloom.id,
-      hue: bloom.hue,
-      x: bloom.x,
-      y: bloom.y,
-      opacity: bloom.opacity,
-      radius: bloom.radius,
-    })),
+    blooms: glass.blooms.map(copyBloomFields),
   })
 }
 
@@ -94,14 +109,7 @@ export function designToWireAppearance(
     light: designColorsToWire(prefs.light),
     dark: designColorsToWire(prefs.dark),
     glassTheme: {
-      blooms: prefs.glassTheme.blooms.map((bloom) => ({
-        id: bloom.id,
-        hue: bloom.hue,
-        x: bloom.x,
-        y: bloom.y,
-        opacity: bloom.opacity,
-        radius: bloom.radius,
-      })),
+      blooms: prefs.glassTheme.blooms.map(copyBloomFields),
     },
   }
 }

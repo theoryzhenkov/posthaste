@@ -21,7 +21,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect, useRef } from 'react'
 
 import type { MailboxCountsRow } from '@/gen'
-import { isTauriRuntime } from '@/desktop/runtime'
+import { isTauriRuntime } from '@/lib/platform/runtime'
 import { MAILBOX_ROLES } from '@/domain/vocabulary'
 import { LOG_EVENTS, uiLogger } from '@/lib/log/logger'
 

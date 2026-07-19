@@ -5,7 +5,7 @@ import type { AccountRow } from '@/gen'
 import {
   settingsCategorySurface,
   type SettingsSurfaceDescriptor,
-} from '../../../surfaces/index'
+} from '@/domain/surface'
 import type { AccountActionTarget } from './editor/AccountActions'
 
 /** The lifecycle verbs the accounts pane offers on an existing account.

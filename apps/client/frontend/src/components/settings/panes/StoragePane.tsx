@@ -7,8 +7,7 @@
 import { useState } from 'react'
 
 import type { CachePolicy } from '../../../data/transport/api/index'
-import { cn } from '../../../lib/design/cn'
-import { SettingsPage, SettingsPageHeader, SettingsSection } from '../panel/shared'
+import { SettingsPage, SettingsPageHeader, SettingsSection, SettingsToggle } from '../panel/shared'
 
 const MB = 1024 * 1024
 const bytesToMb = (bytes: number): number => Math.round(bytes / MB)
@@ -70,51 +69,6 @@ function CapField({
   )
 }
 
-function Toggle({
-  label,
-  description,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string
-  description: string
-  checked: boolean
-  disabled: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-[1fr_280px] sm:items-center">
-      <div className="min-w-0">
-        <p className="text-[13px] font-medium text-foreground">{label}</p>
-        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-          {description}
-        </p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className={cn(
-          'ph-focus-ring relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors sm:justify-self-end',
-          checked
-            ? 'bg-[var(--brand-coral)]'
-            : 'bg-[color-mix(in_oklab,var(--foreground)_22%,transparent)]',
-        )}
-      >
-        <span
-          className={cn(
-            'inline-block size-4 rounded-full bg-white shadow-sm transition-transform',
-            checked ? 'translate-x-4' : 'translate-x-0.5',
-          )}
-        />
-      </button>
-    </div>
-  )
-}
 
 export function StoragePane({
   cachePolicy,
@@ -164,21 +118,21 @@ export function StoragePane({
       </SettingsSection>
 
       <SettingsSection title="What to cache">
-        <Toggle
+        <SettingsToggle
           label="Message bodies"
           description="Keep rendered message text + HTML for offline reading."
           checked={cachePolicy.cacheBodies}
           disabled={isPending}
           onChange={(value) => patch({ cacheBodies: value })}
         />
-        <Toggle
+        <SettingsToggle
           label="Raw messages"
           description="Keep the original MIME source. Larger; off by default."
           checked={cachePolicy.cacheRawMessages}
           disabled={isPending}
           onChange={(value) => patch({ cacheRawMessages: value })}
         />
-        <Toggle
+        <SettingsToggle
           label="Attachments"
           description="Keep downloaded attachments cached on disk."
           checked={cachePolicy.cacheAttachments}

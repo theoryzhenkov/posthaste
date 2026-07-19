@@ -1,24 +1,10 @@
 import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
 
-import {
-  isTauriRuntime,
-  openDesktopSurface,
-  openWebSurface,
-  replaceWebSurface,
-} from '@/desktop/runtime'
 import {
   surfaceRouteStateFromLocation,
   type SurfaceDescriptor,
   type SurfaceRouteState,
-} from '@/surfaces'
-
-export { closeWebSurface } from '@/desktop/runtime'
-
-export function useRouteSurface(): SurfaceDescriptor | null {
-  const state = useSurfaceRouteState()
-  return state.kind === 'valid' ? state.surface : null
-}
+} from '@/domain/surface'
 
 export function useSurfaceRouteState(): SurfaceRouteState {
   const [state, setState] = useState<SurfaceRouteState>(() =>
@@ -39,23 +25,6 @@ export function useSurfaceRouteState(): SurfaceRouteState {
   }, [])
 
   return state
-}
-
-export function openFocusedSurface(surface: SurfaceDescriptor): void {
-  if (isTauriRuntime()) {
-    void openDesktopSurface(surface).catch((error: unknown) => {
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to open window',
-      )
-    })
-    return
-  }
-
-  openWebSurface(surface)
-}
-
-export function replaceFocusedSurface(surface: SurfaceDescriptor): void {
-  replaceWebSurface(surface)
 }
 
 export function useEffectiveSurface({

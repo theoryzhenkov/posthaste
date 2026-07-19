@@ -7,7 +7,7 @@
 import { Loader2, WifiOff } from 'lucide-react'
 
 import { useConnectionStatus } from '@/data'
-import { Z } from '@/app/shell/layering'
+import { Z } from '@/lib/design/layering'
 
 export function ConnectionBanner() {
   const status = useConnectionStatus()

@@ -3,7 +3,7 @@
  *
  */
 import type { AccountRow } from '@/gen'
-import { isTauriRuntime } from '../../../desktop/runtime'
+import { isTauriRuntime } from '@/lib/platform/runtime'
 import {
   Select,
   SelectContent,

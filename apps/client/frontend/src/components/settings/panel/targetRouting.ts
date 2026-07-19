@@ -1,8 +1,8 @@
 import {
   SettingsSurfaceTargetKind,
   type SettingsSurfaceTarget,
-} from '../../../surfaces/index'
-import type { MailboxEditorTarget } from '../mailboxes/SmartMailboxesPane'
+} from '@/domain/surface'
+import type { MailboxEditorTarget } from './types'
 import type { EditorTarget } from './types'
 
 export function accountEditorTargetFromSettingsTarget(

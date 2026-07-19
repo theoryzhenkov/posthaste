@@ -17,12 +17,12 @@
  */
 import type { TagAppearance } from '@/gen'
 
-export interface TagCarrier {
+interface TagCarrier {
   sourceId: string
   messageId: string
 }
 
-export interface KeywordDelta {
+interface KeywordDelta {
   add: string[]
   remove: string[]
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { isMacDesktop } from '@/desktop/runtime'
+import { isMacDesktop } from '@/lib/platform/runtime'
 import { cn } from '@/lib/design/cn'
 
 // Shared macOS window chrome. On macOS every app window uses the inset/overlay
@@ -14,7 +14,7 @@ import { cn } from '@/lib/design/cn'
 // Keep these values in sync with `traffic_light_position` in
 // apps/desktop/src/lib.rs (currently LogicalPosition::new(14.0, 15.0)).
 export const WINDOW_TITLEBAR_HEIGHT = 42
-export const WINDOW_TRAFFIC_LIGHT_INSET = 78
+const WINDOW_TRAFFIC_LIGHT_INSET = 78
 
 // Draggable spacer that reserves the traffic-light zone inside an existing top
 // bar (e.g. the main toolbar). Renders nothing when no inset is needed.

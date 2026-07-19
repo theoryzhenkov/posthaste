@@ -2,10 +2,10 @@ import { useMemo } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { openSurfaceInSeparateWindow } from '@/desktop/runtime'
+import { openSurfaceInSeparateWindow } from './navigation'
 import { useCommandScope, type CommandScope } from '@/lib/command'
-import type { SurfaceDescriptor } from '@/surfaces'
-import { surfaceWindowPolicy } from '@/surfaces/windowPolicy'
+import type { SurfaceDescriptor } from '@/domain/surface'
+import { surfaceWindowPolicy } from '@/surfaces/window'
 import { Button } from '../../components/ui/form/button'
 import { FocusedSurface } from './FocusedSurface'
 
