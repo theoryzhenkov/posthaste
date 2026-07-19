@@ -89,9 +89,11 @@ async fn sync_applies_matching_automation_tag() {
         "post-sync outbox flush applied the automation assertion to the provider",
     );
     // The flush settled the op WITHOUT a readback (this gateway settles
-    // blind), so base never absorbed the tag — retire-on-confirmation keeps
-    // the folded overlay entry serving the tag until a later sync writes it
-    // into base. No flicker back to the untagged row.
+    // blind), so the op bridges in the log (`applied`, still folded) — the
+    // entry keeps serving the tag until causal truncation on a later cycle
+    // (this cycle started before the settlement, and the batch committed no
+    // Message cursor to match a watermark). No flicker back to the untagged
+    // row.
     let overlay_entry = store
         .overlay_rows
         .lock()
@@ -181,9 +183,10 @@ async fn automation_backfill_processes_one_bounded_batch() {
         2,
         "backfill outbox flush applied one automation assertion to the provider",
     );
-    // flush-and-observe settled the op blind (no readback) — retire-on-
-    // confirmation keeps the folded entry until a sync writes the tag into
-    // base, so the tagged view never flickers back.
+    // flush-and-observe settled the op blind (no readback) — it bridges in
+    // the log (`applied`, still folded; this cycle's entry stamp precedes the
+    // settlement, so no truncation yet) and the entry keeps serving the tag,
+    // so the tagged view never flickers back.
     let overlay_entry = store
         .overlay_rows
         .lock()

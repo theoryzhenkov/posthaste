@@ -108,9 +108,9 @@ fn flushable_lists_pending_and_inflight_in_insertion_order() -> Result<(), Store
 fn applied_op_is_unsettled_for_overlay_but_excluded_from_pending() -> Result<(), StoreError> {
     // A flushed message assertion rests in `applied`: the read overlay folds it
     // (list_unsettled), but it is not shown as pending/UI work (list_pending),
-    // until a sync retires it.
+    // until causal truncation removes it.
     //
-    // @spec docs/replication/L1#retire-on-confirmation
+    // @spec docs/backend/L2-optimism#settlement-and-truncation
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -644,5 +644,174 @@ fn cancel_of_a_failed_or_missing_op_keeps_prior_semantics() -> Result<(), StoreE
     );
     store.enqueue_operation(&op)?;
     assert!(store.remove_operation_unless_inflight(&op.id)?);
+    Ok(())
+}
+
+#[test]
+fn cancel_of_a_settled_op_leaves_it_in_the_log() -> Result<(), StoreError> {
+    // A settled (`applied`) op rests in the log until causal truncation: the
+    // provider already accepted its mutation, so a late cancel must not
+    // delete it (that would drop its replay fold before base catches up).
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    let op = operation(
+        "op-settled",
+        "message-1",
+        OperationKind::SetKeywords,
+        OperationState::Inflight,
+    );
+    store.enqueue_operation(&op)?;
+    store.mark_operation_settled(&op.id, 1_234, Some("state-w"))?;
+
+    assert!(
+        !store.remove_operation_unless_inflight(&op.id)?,
+        "a settled op must not be cancelable"
+    );
+    assert_eq!(
+        store.list_unsettled_operations(&account)?.len(),
+        1,
+        "the settled op still folds in the replay read"
+    );
+    Ok(())
+}
+
+#[test]
+fn mark_operation_settled_persists_markers_and_filters() -> Result<(), StoreError> {
+    // Settling IN PLACE: state becomes 'applied' with the causal-truncation
+    // markers persisted; the op leaves the flush lane and the pending (UI)
+    // list but stays in the unsettled (replay) list until truncation removes
+    // it.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+
+    store.enqueue_operation(&operation(
+        "op-1",
+        "message-1",
+        OperationKind::SetKeywords,
+        OperationState::Inflight,
+    ))?;
+    store.mark_operation_settled(&OperationId::from("op-1"), 1_234, Some("state-w"))?;
+
+    let settled = store.list_settled_operations(&account)?;
+    assert_eq!(settled.len(), 1);
+    assert_eq!(settled[0].operation.id.as_str(), "op-1");
+    assert_eq!(settled[0].operation.state, OperationState::Applied);
+    assert_eq!(settled[0].settled_at_mono, Some(1_234));
+    assert_eq!(settled[0].watermark.as_deref(), Some("state-w"));
+
+    assert!(
+        store
+            .list_flushable_operations(&account, NOW, 0)?
+            .is_empty(),
+        "a settled op is out of the flush lane — never re-delivered"
+    );
+    assert!(
+        store.list_pending_operations(&account)?.is_empty(),
+        "a settled op is not user-facing outstanding work"
+    );
+    assert_eq!(
+        store.list_unsettled_operations(&account)?.len(),
+        1,
+        "a settled op still folds in the replay read"
+    );
+
+    store.remove_operation(&OperationId::from("op-1"))?;
+    assert!(store.list_settled_operations(&account)?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn settled_list_orders_by_insertion_and_scopes_by_account() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+
+    store.enqueue_operation(&operation(
+        "op-1",
+        "message-1",
+        OperationKind::SetKeywords,
+        OperationState::Inflight,
+    ))?;
+    store.enqueue_operation(&operation(
+        "op-2",
+        "message-2",
+        OperationKind::Destroy,
+        OperationState::Inflight,
+    ))?;
+    let mut other = operation(
+        "op-other",
+        "message-3",
+        OperationKind::SetKeywords,
+        OperationState::Inflight,
+    );
+    other.account_id = AccountId::from("secondary");
+    store.enqueue_operation(&other)?;
+
+    store.mark_operation_settled(&OperationId::from("op-2"), 20, None)?;
+    store.mark_operation_settled(&OperationId::from("op-1"), 10, Some("w-1"))?;
+    store.mark_operation_settled(&OperationId::from("op-other"), 30, None)?;
+
+    let settled = store.list_settled_operations(&account)?;
+    let ids: Vec<&str> = settled
+        .iter()
+        .map(|settled| settled.operation.id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["op-1", "op-2"],
+        "insertion order, own account only"
+    );
+    assert_eq!(settled[0].watermark.as_deref(), Some("w-1"));
+    assert_eq!(settled[1].watermark, None, "no usable provider position");
+    Ok(())
+}
+
+#[test]
+fn legacy_applied_row_reads_with_null_markers() -> Result<(), StoreError> {
+    // A row settled before the marker columns existed (or written 'applied'
+    // directly) carries NULL markers: it must read back as `None`/`None` —
+    // the truncation pass treats it as eligible on any completed cycle.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+
+    store.enqueue_operation(&operation(
+        "op-legacy",
+        "message-1",
+        OperationKind::SetKeywords,
+        OperationState::Applied,
+    ))?;
+
+    let settled = store.list_settled_operations(&account)?;
+    assert_eq!(settled.len(), 1);
+    assert_eq!(settled[0].settled_at_mono, None);
+    assert_eq!(settled[0].watermark, None);
+    Ok(())
+}
+
+#[test]
+fn settled_marker_columns_are_idempotent_across_reopen() -> Result<(), StoreError> {
+    // The additive `ensure_column` evolution must be idempotent: reopening an
+    // existing database re-runs init_schema over the already-added columns,
+    // and persisted markers survive the reopen.
+    let root = temp_root();
+    let path = root.join("mail.sqlite");
+    {
+        let store = DatabaseStore::open(path.clone(), root.join("data"))?;
+        store.enqueue_operation(&operation(
+            "op-1",
+            "message-1",
+            OperationKind::SetKeywords,
+            OperationState::Inflight,
+        ))?;
+        store.mark_operation_settled(&OperationId::from("op-1"), 77, Some("w-77"))?;
+    }
+    let reopened = DatabaseStore::open(path, root.join("data"))?;
+    let settled = reopened.list_settled_operations(&AccountId::from("primary"))?;
+    assert_eq!(settled.len(), 1);
+    assert_eq!(settled[0].settled_at_mono, Some(77));
+    assert_eq!(settled[0].watermark.as_deref(), Some("w-77"));
     Ok(())
 }

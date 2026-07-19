@@ -2,6 +2,9 @@ use super::*;
 
 pub(super) type AppliedBodyRecord = (MessageId, Option<String>, Option<String>);
 
+/// op id → (settled_at_mono, watermark), the TestStore's marker side table.
+pub(super) type SettledMarkers = std::collections::HashMap<String, (Option<i64>, Option<String>)>;
+
 pub(super) struct TestStore {
     pub(super) smart_mailbox_counts_error: Option<String>,
     pub(super) list_mailboxes_error: Option<String>,
@@ -34,6 +37,11 @@ pub(super) struct TestStore {
     /// tests can assert the overlay lifecycle (accept/refold/retire).
     pub(super) overlay_rows: Mutex<std::collections::BTreeMap<String, Option<MessageRecord>>>,
     pub(super) outbox_operations: Mutex<Vec<Operation>>,
+    /// Causal-truncation markers for settled ('applied') ops:
+    /// op id → (settled_at_mono, watermark). Tests rewrite the settled_at
+    /// marker directly to simulate elapsed time between settlement and a
+    /// later cycle's entry stamp (the monotonic clock is second-granular).
+    pub(super) settled_markers: Mutex<SettledMarkers>,
     /// (account_id, draft_key, entity_id) draft-registry rows — the ONE
     /// authority for the stable-key → live-entity mapping (M69/D135). In the
     /// real store sync writes through to it in the same transaction as the
@@ -72,6 +80,7 @@ impl Default for TestStore {
             applied_messages: Mutex::new(Vec::new()),
             overlay_rows: Mutex::new(std::collections::BTreeMap::new()),
             outbox_operations: Mutex::new(Vec::new()),
+            settled_markers: Mutex::new(std::collections::HashMap::new()),
             draft_aliases: Mutex::new(Vec::new()),
             snoozes: Mutex::new(Vec::new()),
         }

@@ -83,12 +83,12 @@ pub trait OperationOutboxStore: Send + Sync {
         -> Result<Vec<Operation>, StoreError>;
 
     /// The read-time **overlay** source: every operation whose optimistic
-    /// effect may still need folding — `pending`, `inflight`, and
-    /// `applied`-awaiting-convergence (a flushed message assertion the provider
-    /// accepted but a sync has not yet confirmed into the projection). Excludes
-    /// only `failed`. In insertion order.
+    /// effect may still need folding — `pending`, `inflight`, and settled
+    /// (`applied`) ops awaiting causal truncation (a flushed message assertion
+    /// the provider accepted; its effect keeps serving until the sync chain
+    /// absorbs it). Excludes only `failed`. In insertion order.
     ///
-    /// @spec docs/replication/L1#retire-on-confirmation
+    /// @spec docs/backend/L2-optimism#settlement-and-truncation
     fn list_unsettled_operations(
         &self,
         account_id: &AccountId,
@@ -127,7 +127,30 @@ pub trait OperationOutboxStore: Send + Sync {
         to_entity_id: &str,
     ) -> Result<(), StoreError>;
 
-    /// Remove an operation after it has settled and been propagated downstream.
+    /// Settle an operation IN PLACE: state becomes `applied` and the causal
+    /// truncation markers are recorded — `settled_at_mono` (the daemon's
+    /// monotonic-anchored epoch seconds at settlement) and, when the provider
+    /// named a sync position that includes the change, `watermark` (the
+    /// stored-cursor encoding of that position). The op stays in the log:
+    /// excluded from the flush lane and from pendingOperations, still folded
+    /// by replay, until truncation removes it.
+    fn mark_operation_settled(
+        &self,
+        id: &OperationId,
+        settled_at_mono: i64,
+        watermark: Option<&str>,
+    ) -> Result<(), StoreError>;
+
+    /// The settled (`applied`) operations for an account with their causal
+    /// truncation markers, in insertion order — the truncation pass's read.
+    fn list_settled_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<SettledOperation>, StoreError>;
+
+    /// Remove an operation from the log: a settlement whose base write made
+    /// causality hold by construction (readback/rejection), a truncated
+    /// settled op, or a discarded one.
     fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError>;
 
     /// Atomically transition a still-flushable operation to `inflight`,
@@ -138,9 +161,11 @@ pub trait OperationOutboxStore: Send + Sync {
     /// pushed, and a claimed op can no longer be discarded.
     fn claim_operation_for_flush(&self, id: &OperationId) -> Result<bool, StoreError>;
 
-    /// Atomically remove an operation unless it is `inflight`, returning
-    /// whether a row was removed. The user-cancel half of the cancel-vs-flush
-    /// race — see [`Self::claim_operation_for_flush`].
+    /// Atomically remove an operation unless it is `inflight` or `applied`,
+    /// returning whether a row was removed. The user-cancel half of the
+    /// cancel-vs-flush race — see [`Self::claim_operation_for_flush`]. A
+    /// settled (`applied`) op is likewise untouchable: it rests in the log
+    /// until causal truncation, so a late cancel observes it as already gone.
     fn remove_operation_unless_inflight(&self, id: &OperationId) -> Result<bool, StoreError>;
 }
 

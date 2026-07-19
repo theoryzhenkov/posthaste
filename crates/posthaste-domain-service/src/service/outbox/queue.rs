@@ -47,7 +47,8 @@ impl MailService {
     /// error (the op is being — or has been — sent).
     ///
     /// Returns `Some(events)` when the op was removed (`None` = nothing to
-    /// remove). NS2 Slice 4: discarding a SEND also unwinds its folded
+    /// remove; a settled `applied` op counts as nothing to remove — it stays
+    /// in the log until causal truncation and its mutation stands). NS2 Slice 4: discarding a SEND also unwinds its folded
     /// effects — a due send's provisional Sent row is dropped and the
     /// consumed draft's row returns — with the echoes to publish.
     ///
@@ -92,8 +93,11 @@ impl MailService {
             }
             return Ok(Some(events));
         }
-        // Nothing removed: either the op is gone (settled/never existed — the
-        // pre-existing `None`), or it is in flight and must not be yanked.
+        // Nothing removed: the op never existed, it is in flight and must not
+        // be yanked, or it is settled (`applied`) — the provider already
+        // accepted it, so it rests in the log until causal truncation and the
+        // cancel observes it as already gone (`None`), exactly as if
+        // settlement had removed it.
         match self.outbox.get_operation(operation_id)? {
             Some(operation) if operation.state == OperationState::Inflight => Err(
                 GatewayError::Rejected("cannot discard an in-flight operation".to_string()).into(),
@@ -120,12 +124,15 @@ impl MailService {
             .message_detail_reader
             .get_message_summary(account_id, &send_row_id)?
             .is_some();
-        self.refresh_message_overlay(
-            account_id,
-            &send_row_id,
-            crate::service::replay::OverlayRetire::Immediate,
-        )
-        .await?;
+        // The provisional Sent row is send-minted (a pinned `phsend-` shape
+        // the no-ops replay arm would pass through): the unwound send no
+        // longer owns it, so drop the entry directly.
+        {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_row = send_row_id.clone();
+            offload(move || overlay.remove_overlay_message(&owned_account, &owned_row)).await?;
+        }
         if send_row_was_visible {
             events.push(self.events.append_event(
                 account_id,
@@ -147,12 +154,7 @@ impl MailService {
                     .resolve_draft_entity(account_id, key)?
                     .unwrap_or_else(|| key.to_string());
                 let live_id = MessageId::from(live.as_str());
-                self.refresh_message_overlay(
-                    account_id,
-                    &live_id,
-                    crate::service::replay::OverlayRetire::Immediate,
-                )
-                .await?;
+                self.refresh_message_overlay(account_id, &live_id).await?;
                 if self
                     .message_detail_reader
                     .get_message_summary(account_id, &live_id)?
@@ -495,19 +497,10 @@ impl MailService {
                 .is_some(),
             None => false,
         };
-        self.refresh_message_overlay(
-            account_id,
-            &send_row_id,
-            crate::service::replay::OverlayRetire::Immediate,
-        )
-        .await?;
-        if let Some(live_id) = &consumed_live {
-            self.refresh_message_overlay(
-                account_id,
-                live_id,
-                crate::service::replay::OverlayRetire::Immediate,
-            )
+        self.refresh_message_overlay(account_id, &send_row_id)
             .await?;
+        if let Some(live_id) = &consumed_live {
+            self.refresh_message_overlay(account_id, live_id).await?;
             match self
                 .message_detail_reader
                 .get_message_summary(account_id, live_id)?

@@ -197,16 +197,22 @@ impl MailService {
                             .await?;
                     }
                 }
-                Ok(Pushed::Message { readback, rejected }) => {
-                    // Settle now from the provider readback: remove the op, fold
-                    // the remaining unsettled assertions over the readback, and
-                    // write canonical — the settle write reverts a rejected change
-                    // (its readback is the unchanged row) and emits the recompute.
-                    //
-                    // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+                Ok(Pushed::Message {
+                    readback,
+                    rejected,
+                    cursor,
+                }) => {
+                    // Settle from the provider outcome: with a readback (or a
+                    // rejection) the op leaves the log now — the settle write
+                    // makes base authoritative; a blind settlement rests the
+                    // op in the log (state `applied`, still replayed) until
+                    // causal truncation, recording the returned sync position
+                    // as its watermark.
                     events.extend(
-                        self.settle_message_operation(account_id, &operation, readback, rejected)
-                            .await?,
+                        self.settle_message_operation(
+                            account_id, &operation, readback, rejected, cursor,
+                        )
+                        .await?,
                     );
                 }
                 Err(FlushError {

@@ -6,7 +6,6 @@ use posthaste_domain_model::{
 };
 use serde_json::json;
 
-use super::replay::OverlayRetire;
 use super::{encode_payload, MailService};
 
 impl MailService {
@@ -121,10 +120,7 @@ impl MailService {
             ))));
         }
 
-        // Ops are non-empty here (one was just queued), so no retire decision
-        // arises.
-        self.refresh_message_overlay(account_id, message_id, OverlayRetire::Immediate)
-            .await?;
+        self.refresh_message_overlay(account_id, message_id).await?;
 
         let (payload, scope_mailbox) = match operation.kind {
             OperationKind::SetKeywords => {

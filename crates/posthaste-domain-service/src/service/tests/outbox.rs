@@ -2661,6 +2661,98 @@ async fn send_l2_poison_does_not_wedge_outbox() {
     );
 }
 
+/// The no-wedging contract for INTENT ops (extends S-ISO-1 beyond sends): a
+/// permanently failed intent op leaves the flush lane immediately — dead,
+/// visibly errored — and the op behind it flushes and settles in the SAME
+/// pass; the dead op is never re-flushed.
+#[tokio::test]
+async fn permanently_failed_intent_leaves_lane_and_ops_behind_settle() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    service
+        .set_keywords(
+            &account,
+            &MessageId::from("m-poison"),
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("poisoned flag queues");
+    service
+        .set_keywords(
+            &account,
+            &MessageId::from("m-healthy"),
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("healthy flag queues");
+
+    // The first push fails PERMANENTLY (a transport-level rejection, not a
+    // MutationRejected settle); the second blind-settles.
+    let gateway = MutationGateway::with_revision(1);
+    {
+        let mut results = gateway.set_keywords_results.lock().expect("results lock");
+        // Popped LIFO: the healthy op's success first onto the stack.
+        results.push(Ok(MutationOutcome {
+            cursor: None,
+            message: None,
+        }));
+        results.push(Err(GatewayError::Rejected(
+            "poisoned: permission denied".to_string(),
+        )));
+    }
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("one pass");
+
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(
+        pending.len(),
+        1,
+        "only the dead intent remains user-visible",
+    );
+    assert_eq!(pending[0].entity.id, "m-poison");
+    assert_eq!(pending[0].state, OperationState::Failed, "dead, visible");
+    assert!(
+        pending[0]
+            .last_error
+            .as_deref()
+            .is_some_and(|reason| reason.contains("permission denied")),
+        "the failure reason is surfaced",
+    );
+    assert_eq!(
+        store
+            .list_settled_operations(&account)
+            .expect("settled list")
+            .iter()
+            .map(|settled| settled.operation.entity.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["m-healthy"],
+        "the op behind the dead one settled in the same pass",
+    );
+
+    // The dead op never re-enters the lane: another pass pushes nothing (the
+    // gateway would blind-settle any call — the revision counter stays put).
+    let revision_before = *gateway.revision.lock().expect("revision lock");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("second pass");
+    assert_eq!(
+        *gateway.revision.lock().expect("revision lock"),
+        revision_before,
+        "a permanently failed op is never re-flushed",
+    );
+}
+
 #[tokio::test]
 async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
     // PINNING TEST — this documents a DIAGNOSED BUG, not desired behavior.
@@ -2672,11 +2764,11 @@ async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
     // set, no base row) the moment the op is queued. `discard_operation` —
     // the Outbox pane's cancel — removes the op but unwinds folds ONLY for
     // `Send` ops (outbox/queue.rs), so the draft pin stays. The post-sync
-    // sweep then preserves it forever: `refresh_message_overlay`'s
-    // ConfirmAgainstBase arm deliberately keeps a pinned row with no base
-    // (replay.rs, the `(Some(folded), None)` match) because it cannot tell
-    // "settled save awaiting its provider copy" from "orphan whose op is
-    // gone". Nothing ever retires it: a phantom in every effective read.
+    // sweep then preserves it forever: `refresh_message_overlay`'s no-ops
+    // arm deliberately passes through a pinned row with no base row
+    // (replay.rs) because it cannot tell "settled save awaiting its provider
+    // copy" from "orphan whose op is gone". Nothing ever retires it: a
+    // phantom in every effective read.
     //
     // The assertions below assert the CURRENT (buggy) behavior so the tree
     // stays green while pinning the mechanism. A repair (an orphan sweep that
