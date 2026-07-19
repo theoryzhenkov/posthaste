@@ -26,7 +26,6 @@ pub(crate) const OUTBOX_FLUSH_BATCH_LIMIT: i64 = 200;
 /// only: it bounds the pathological case (N15) without changing behavior for
 /// any realistic per-account backlog. **Review**.
 pub(crate) const OUTBOX_LIST_SAFETY_LIMIT: i64 = 5_000;
-
 fn parse_operation_state(value: &str) -> Result<OperationState, StoreError> {
     match value {
         "pending" => Ok(OperationState::Pending),
@@ -96,8 +95,27 @@ fn entity_kind_str(kind: OperationEntityKind) -> &'static str {
     }
 }
 
+/// The content-op kind list as a SQL `IN (...)` fragment, built from the
+/// model's [`OperationKind::CONTENT_KINDS`] via [`operation_kind_str`] so the
+/// fold's "failed content ops stay foldable" SQL filter cannot drift from
+/// [`OperationKind::is_content_op`]. Built once (the kind set is compile-time
+/// fixed) and returned as a `&'static str`.
+pub(crate) fn content_op_kinds_in_sql() -> &'static str {
+    static FRAGMENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    FRAGMENT
+        .get_or_init(|| {
+            OperationKind::CONTENT_KINDS
+                .iter()
+                .map(|kind| format!("'{}'", operation_kind_str(*kind)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .as_str()
+}
+
 /// Columns selected by every operation read, in struct order.
-const OPERATION_COLUMNS: &str = "id, account_id, entity_kind, entity_id, kind, payload, \
+pub(crate) const OPERATION_COLUMNS: &str =
+    "id, account_id, entity_kind, entity_id, kind, payload, \
      payload_version, state, attempts, last_error, send_at, hold_until_mono, \
      created_at, updated_at";
 
@@ -142,7 +160,7 @@ fn row_to_operation(row: &Row) -> rusqlite::Result<Result<Operation, StoreError>
     })())
 }
 
-fn collect_operations(
+pub(crate) fn collect_operations(
     connection: &Connection,
     sql: &str,
     account_id: &AccountId,
@@ -157,6 +175,21 @@ fn collect_operations(
         operations.push(row.map_err(sql_to_store_error)??);
     }
     Ok(operations)
+}
+
+/// Delete one op on an existing transaction (shared by `remove_operation` and
+/// `MessageOverlayStore::remove_op_and_derive`, so the op removal and the
+/// overlay re-derivation commit atomically).
+pub(crate) fn remove_operation_tx(
+    tx: &Transaction<'_>,
+    id: &OperationId,
+) -> Result<(), StoreError> {
+    tx.execute(
+        "DELETE FROM outbox_operation WHERE id = ?1",
+        params![id.as_str()],
+    )
+    .map_err(sql_to_store_error)?;
+    Ok(())
 }
 
 impl OperationOutboxStore for DatabaseStore {
@@ -292,16 +325,19 @@ impl OperationOutboxStore for DatabaseStore {
         // `send`) carries authored mail that is never dropped: it stays parked
         // with its derived row visible, so it must remain foldable. The class
         // split by state lives in `is_replayable`; this source keeps failed
-        // content ops available for it to fold.
+        // content ops available for it to fold. The kind list is the model's
+        // `OperationKind::CONTENT_KINDS` (via `content_op_kinds_in_sql`), so
+        // the SQL cannot drift from `OperationKind::is_content_op`.
         collect_operations(
             &connection,
             &format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
                  WHERE account_id = ?1
                    AND (state != 'failed'
-                        OR kind IN ('draftCreate', 'draftUpdate', 'send'))
+                        OR kind IN ({content_kinds}))
                  ORDER BY rowid ASC
-                 LIMIT ?2"
+                 LIMIT ?2",
+                content_kinds = content_op_kinds_in_sql()
             ),
             account_id,
             OUTBOX_LIST_SAFETY_LIMIT,
@@ -455,14 +491,7 @@ impl OperationOutboxStore for DatabaseStore {
     }
 
     fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError> {
-        self.write_transaction(|tx| {
-            tx.execute(
-                "DELETE FROM outbox_operation WHERE id = ?1",
-                params![id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            Ok(())
-        })
+        self.write_transaction(|tx| remove_operation_tx(tx, id))
     }
 
     fn claim_operation_for_flush(&self, id: &OperationId) -> Result<bool, StoreError> {

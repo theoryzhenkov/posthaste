@@ -151,6 +151,20 @@ impl OperationKind {
     pub fn is_draft_save(self) -> bool {
         matches!(self, Self::DraftCreate | Self::DraftUpdate)
     }
+
+    /// The content ops: authored mail carried in the op payload. A content
+    /// op's derived row is never speculation — it survives failure and
+    /// dispatch-uncertain (stays parked, visible), and leaves the log only
+    /// by discard or causal truncation. This is the single source of truth
+    /// for the fold's "failed content ops stay foldable" rule; the store's
+    /// SQL `IN (...)` fragment for that filter is built from this list, so
+    /// the Rust predicate and the SQL cannot drift apart.
+    pub const CONTENT_KINDS: &'static [Self] = &[Self::DraftCreate, Self::DraftUpdate, Self::Send];
+
+    /// Whether this op is a content op (draft save or send).
+    pub fn is_content_op(self) -> bool {
+        Self::CONTENT_KINDS.contains(&self)
+    }
 }
 
 /// The kind of entity an operation targets.

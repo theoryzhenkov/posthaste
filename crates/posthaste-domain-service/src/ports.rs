@@ -33,7 +33,9 @@ pub use composite::{
 };
 pub use draft_registry::DraftRegistry;
 pub use gateway::{MailGateway, SyncChunkSink};
-pub use overlay_store::MessageOverlayStore;
+pub use overlay_store::{
+    DeriveDiff, DeriveSnapshot, MessageOverlayStore, OverlayFold, OverlayFoldMany, OverlayMutation,
+};
 pub use progress::SyncProgressReporter;
 pub use read_store::{
     ConversationReadStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore,

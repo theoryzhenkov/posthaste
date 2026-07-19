@@ -21,12 +21,12 @@
 
 use posthaste_domain_model::{
     AccountId, DomainEvent, MailboxId, MessageId, MessageRecord, Operation, OperationEntityKind,
-    OperationKind, OperationState, SendMessageRequest, ServiceError, SyncObject, ThreadId,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    OperationKind, OperationState, SendMessageRequest, ServiceError, StoreError, SyncObject,
+    ThreadId, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 
 use super::message_queries::{intent_fold_effect, project_record, FoldEffect};
-use super::{offload, MailService};
+use super::{offload, DeriveDiff, DeriveSnapshot, MailService, OverlayMutation};
 
 /// The role a visible row plays for an entity-intent op in the fold: draft
 /// ops address their key's live row; a send addresses TWO rows — its own
@@ -203,9 +203,208 @@ fn is_replayable(op: &Operation) -> bool {
 
 /// A content op carries authored mail — a draft save or a send. Its derived row
 /// is never speculation: it survives failure/park, and leaves only when the op
-/// is discarded or causally truncated.
+/// is discarded or causally truncated. Delegates to
+/// [`OperationKind::is_content_op`] — the single source shared with the
+/// store's fold SQL filter.
 fn is_content_op(op: &Operation) -> bool {
-    op.kind.is_draft_save() || op.kind == OperationKind::Send
+    op.kind.is_content_op()
+}
+
+/// Map a service-layer error to a store error for the fold's `StoreError`
+/// return. Decode/internal faults become `Failure`; a wrapped `StoreError` is
+/// unwrapped losslessly.
+fn to_store(error: ServiceError) -> StoreError {
+    match error {
+        ServiceError::Store(store) => store,
+        other => StoreError::Failure(other.to_string()),
+    }
+}
+
+/// The op→row mapping, resolver-agnostic: the live id a draft op's stable key
+/// maps to (and a send's consumed-draft key) come through `resolve` — the
+/// registry authority for the inventory callers, the snapshot's pre-resolved
+/// draft-key map for the atomic derive fold.
+fn op_row_touches_with(
+    op: &Operation,
+    resolve: &dyn Fn(&str) -> Result<Option<String>, StoreError>,
+) -> Result<Vec<(MessageId, OpRowRole)>, StoreError> {
+    Ok(match op.entity.kind {
+        OperationEntityKind::Message if op.kind == OperationKind::Send => {
+            let mut touches = vec![(
+                MessageId::from(op.entity.id.as_str()),
+                OpRowRole::Entity(EntityFoldRole::SendRow),
+            )];
+            // A malformed send payload contributes no consumed-draft touch;
+            // its own row still errors visibly in the fold.
+            if let Ok(Some(FoldEffect::SendEffects {
+                consumes_draft_key: Some(key),
+                ..
+            })) = intent_fold_effect(op)
+            {
+                let consumed_live = resolve(&key)?.unwrap_or(key);
+                if consumed_live != op.entity.id {
+                    touches.push((
+                        MessageId::from(consumed_live.as_str()),
+                        OpRowRole::Entity(EntityFoldRole::SendConsumedDraft),
+                    ));
+                }
+            }
+            touches
+        }
+        OperationEntityKind::Message if op.kind.is_state_assertion() => {
+            vec![(MessageId::from(op.entity.id.as_str()), OpRowRole::Assertion)]
+        }
+        OperationEntityKind::Message => Vec::new(),
+        OperationEntityKind::Draft => {
+            let live = resolve(&op.entity.id)?.unwrap_or_else(|| op.entity.id.clone());
+            vec![(
+                MessageId::from(live.as_str()),
+                OpRowRole::Entity(EntityFoldRole::DraftKey),
+            )]
+        }
+    })
+}
+
+/// The pure fold: one visible row as a function of the transaction-consistent
+/// snapshot. Reads ONLY from `snapshot` — including the role-mailbox ids it
+/// needs to file a draft or a provisional Sent row — and returns the overlay
+/// mutation for the store to apply inside the same transaction. This is
+/// `replay(log, base)` for one row — atomic, re-derivable, with no live-store
+/// reads, no second connection, and no clock.
+pub(crate) fn fold_overlay_row(
+    snapshot: &DeriveSnapshot,
+    message_id: &MessageId,
+) -> Result<OverlayMutation, StoreError> {
+    let resolve = |key: &str| Ok::<_, StoreError>(snapshot.draft_keys.get(key).cloned());
+    let mut message_ops: Vec<Operation> = Vec::new();
+    let mut entity_ops: Vec<(Operation, EntityFoldRole)> = Vec::new();
+    for op in &snapshot.ops {
+        if !is_replayable(op) {
+            continue;
+        }
+        for (row_id, role) in op_row_touches_with(op, &resolve)? {
+            if row_id != *message_id {
+                continue;
+            }
+            match role {
+                OpRowRole::Assertion => message_ops.push(op.clone()),
+                OpRowRole::Entity(entity_role) => entity_ops.push((op.clone(), entity_role)),
+            }
+        }
+    }
+    if message_ops.is_empty() && entity_ops.is_empty() {
+        // No replayable op touches the row: the entry derives from base
+        // alone, so it is removed (base shows through) — except a TOMBSTONE
+        // over a SURVIVING base row, which keeps hiding it.
+        return Ok(match &snapshot.overlay {
+            Some(None) if snapshot.base.is_some() => OverlayMutation::Keep,
+            Some(_) => OverlayMutation::Remove,
+            None => OverlayMutation::Keep,
+        });
+    }
+    // Entity-plane fold first (each effect is total), in insertion order:
+    // last queued save wins; a discard (or a due send's consume) folds the
+    // row away; a due send upserts its provisional Sent row. Message
+    // assertions replay on top of whatever row survives. The send fold is
+    // phase-aware: a HELD send — `Pending`, never yet dispatched
+    // (`attempts == 0`), with an undo hold or a send-later date — folds its
+    // draft-form row (cancelable) and flips to the provisional Sent row only
+    // once the flusher DISPATCHES it (Pending→Inflight). A transiently-failed
+    // send returns to `Pending` with `attempts > 0`, so it stays Sent across
+    // retries (the undo window is over once it has left). A no-hold send-now
+    // is committed the moment it is queued, so it is never held. The
+    // held→due transition is a LOG change (the dispatch / its retry state),
+    // not a replay-time clock read — so the fold stays a pure function of
+    // (log, base) and replaying twice yields the same rows.
+    let send_is_held = |op: &Operation| {
+        op.state == OperationState::Pending
+            && op.attempts == 0
+            && (op.send_at.is_some() || op.hold_until_mono.is_some())
+    };
+    let mut state = snapshot.base.clone();
+    let mut discarded_by_draft_op = false;
+    for (op, role) in &entity_ops {
+        match (intent_fold_effect(op).map_err(to_store)?, role) {
+            (Some(FoldEffect::UpsertDraft(request)), EntityFoldRole::DraftKey) => {
+                state = Some(synthesize_draft_record(
+                    state.take(),
+                    &request,
+                    op,
+                    snapshot.drafts_mailbox.as_ref(),
+                    message_id,
+                    &op.entity.id,
+                ));
+                discarded_by_draft_op = false;
+            }
+            (Some(FoldEffect::TombstoneDraft), EntityFoldRole::DraftKey) => {
+                state = None;
+                discarded_by_draft_op = true;
+            }
+            (Some(FoldEffect::SendEffects { request, .. }), EntityFoldRole::SendRow) => {
+                if !send_is_held(op) {
+                    state = Some(synthesize_sent_record(
+                        &request,
+                        op,
+                        snapshot.sent_mailbox.as_ref(),
+                        message_id,
+                    ));
+                    discarded_by_draft_op = false;
+                }
+            }
+            (
+                Some(FoldEffect::SendEffects {
+                    request,
+                    consumes_draft_key,
+                }),
+                EntityFoldRole::SendConsumedDraft,
+            ) => {
+                if send_is_held(op) {
+                    let key = consumes_draft_key.unwrap_or_default();
+                    state = Some(synthesize_draft_record(
+                        state.take(),
+                        &request,
+                        op,
+                        snapshot.drafts_mailbox.as_ref(),
+                        message_id,
+                        &key,
+                    ));
+                    discarded_by_draft_op = false;
+                } else {
+                    state = None;
+                    discarded_by_draft_op = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    let base_exists = snapshot.base.is_some();
+    Ok(match state {
+        Some(record) => match project_record(record, &message_ops).map_err(to_store)? {
+            Some(folded) => OverlayMutation::Upsert(Box::new(folded)),
+            None => OverlayMutation::Tombstone,
+        },
+        None if discarded_by_draft_op => {
+            if base_exists {
+                OverlayMutation::Tombstone
+            } else {
+                OverlayMutation::Remove
+            }
+        }
+        None => {
+            if message_ops
+                .iter()
+                .any(|op| op.kind == OperationKind::Destroy)
+            {
+                OverlayMutation::Tombstone
+            } else {
+                // Plain assertions over no base row fold to nothing.
+                match snapshot.overlay {
+                    Some(_) => OverlayMutation::Remove,
+                    None => OverlayMutation::Keep,
+                }
+            }
+        }
+    })
 }
 
 impl MailService {
@@ -235,224 +434,29 @@ impl MailService {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-    ) -> Result<(), ServiceError> {
+    ) -> Result<DeriveDiff, ServiceError> {
+        // Atomic derive: one store transaction snapshots base + the unsettled
+        // log + the draft-key map + the role mailboxes, runs the fold, and
+        // applies the mutation. SQLite serializes writers, so no concurrent
+        // base write (sync) or sibling refresh (another command) can
+        // interleave to produce a stale overlay. The fold closure captures
+        // only the row id — it reads everything else from the snapshot, so it
+        // is a pure function of (log, base) with no live-store reads.
         let overlay = self.overlay.clone();
-        let unsettled = {
-            let outbox = self.outbox.clone();
-            let account_id = account_id.clone();
-            offload(move || outbox.list_unsettled_operations(&account_id)).await?
-        };
-        let mut message_ops: Vec<Operation> = Vec::new();
-        // Entity-intent ops relevant to this row, in insertion order, tagged
-        // with the ROLE this row plays for them (a send is multi-row — its
-        // own provisional Sent row AND the consumed draft's live row).
-        // Relevance comes from the shared op→row mapping
-        // (`op_row_touches`), the same mapping the rebuild inventory inverts.
-        let mut entity_ops: Vec<(Operation, EntityFoldRole)> = Vec::new();
-        for op in unsettled {
-            if !is_replayable(&op) {
-                continue;
-            }
-            for (row_id, role) in self.op_row_touches(account_id, &op)? {
-                if row_id != *message_id {
-                    continue;
-                }
-                match role {
-                    OpRowRole::Assertion => message_ops.push(op.clone()),
-                    OpRowRole::Entity(entity_role) => entity_ops.push((op.clone(), entity_role)),
-                }
-            }
-        }
-        if message_ops.is_empty() && entity_ops.is_empty() {
-            // No replayable op touches the row: the entry derives from base
-            // alone, so it is removed and base shows through — except a
-            // TOMBSTONE over a SURVIVING base row (a provider-destroyed copy
-            // awaiting the sync prune), which keeps hiding it (an existence
-            // check, never a comparison of state); the sweep's lingering
-            // repair owns the stuck case. A content op that would materialize
-            // a row is itself replayable, so its row never reaches here — when
-            // it is truncated or discarded the fold is gone and the row is
-            // correctly removed.
-            let account_id = account_id.clone();
-            let message_id = message_id.clone();
-            offload(
-                move || match overlay.read_overlay_message(&account_id, &message_id)? {
-                    Some(None)
-                        if overlay
-                            .read_base_message_record(&account_id, &message_id)?
-                            .is_some() =>
-                    {
-                        Ok(())
-                    }
-                    Some(_) => overlay.remove_overlay_message(&account_id, &message_id),
-                    None => Ok(()),
-                },
-            )
-            .await?;
-            return Ok(());
-        }
-        let base = {
-            let overlay = overlay.clone();
-            let account_id = account_id.clone();
-            let message_id = message_id.clone();
-            offload(move || overlay.read_base_message_record(&account_id, &message_id)).await?
-        };
-        // Entity-plane fold first (each effect is total), in insertion
-        // order: the last queued save wins the row's content; a discard (or a
-        // due send's consume) folds the row away; a due send upserts its
-        // provisional Sent row. Message assertions then replay on top of
-        // whatever row survives. The send fold is phase-aware: a HELD send
-        // folds NOTHING — the draft stays visible and cancelable; the flip to
-        // tombstone+sent needs no new trigger (coming due re-derives via the
-        // flush/settle refreshes).
-        let needs_clocks = entity_ops
-            .iter()
-            .any(|(op, _)| op.kind == OperationKind::Send);
-        let (wall_now, mono_now) = if needs_clocks {
-            let wall = super::outbox::schedule::wall_now_rfc3339().map_err(|error| {
-                ServiceError::from(posthaste_domain_model::GatewayError::Rejected(error))
-            })?;
-            (wall, super::outbox::schedule::monotonic_now_secs())
-        } else {
-            (String::new(), 0)
-        };
-        let send_is_held = |op: &Operation| {
-            op.state == OperationState::Pending
-                && (op
-                    .send_at
-                    .as_deref()
-                    .is_some_and(|send_at| send_at > wall_now.as_str())
-                    || op.hold_until_mono.is_some_and(|hold| hold > mono_now))
-        };
-        let mut state = base.clone();
-        let mut discarded_by_draft_op = false;
-        let mut drafts_mailbox: Option<Option<MailboxId>> = None;
-        let mut sent_mailbox: Option<Option<MailboxId>> = None;
-        for (op, role) in &entity_ops {
-            match (intent_fold_effect(op)?, role) {
-                (Some(FoldEffect::UpsertDraft(request)), EntityFoldRole::DraftKey) => {
-                    let drafts_mailbox = match &drafts_mailbox {
-                        Some(resolved) => resolved.clone(),
-                        None => drafts_mailbox
-                            .insert(self.drafts_mailbox_id(account_id)?)
-                            .clone(),
-                    };
-                    state = Some(synthesize_draft_record(
-                        state.take(),
-                        &request,
-                        op,
-                        drafts_mailbox.as_ref(),
-                        message_id,
-                        &op.entity.id,
-                    ));
-                    discarded_by_draft_op = false;
-                }
-                (Some(FoldEffect::TombstoneDraft), EntityFoldRole::DraftKey) => {
-                    state = None;
-                    discarded_by_draft_op = true;
-                }
-                (Some(FoldEffect::SendEffects { request, .. }), EntityFoldRole::SendRow) => {
-                    if !send_is_held(op) {
-                        let sent_mailbox = match &sent_mailbox {
-                            Some(resolved) => resolved.clone(),
-                            None => sent_mailbox
-                                .insert(self.mailbox_id_by_role(account_id, "sent")?)
-                                .clone(),
-                        };
-                        state = Some(synthesize_sent_record(
-                            &request,
-                            op,
-                            sent_mailbox.as_ref(),
-                            message_id,
-                        ));
-                        discarded_by_draft_op = false;
-                    }
-                }
-                (
-                    Some(FoldEffect::SendEffects {
-                        request,
-                        consumes_draft_key,
-                    }),
-                    EntityFoldRole::SendConsumedDraft,
-                ) => {
-                    if send_is_held(op) {
-                        // A HELD send folds a DRAFT-FORM row — the hold's
-                        // content is visible and cancelable even with no
-                        // client-side save (the eager ensure step mirrors
-                        // it provider-side).
-                        let drafts_mailbox = match &drafts_mailbox {
-                            Some(resolved) => resolved.clone(),
-                            None => drafts_mailbox
-                                .insert(self.drafts_mailbox_id(account_id)?)
-                                .clone(),
-                        };
-                        let key = consumes_draft_key.unwrap_or_default();
-                        state = Some(synthesize_draft_record(
-                            state.take(),
-                            &request,
-                            op,
-                            drafts_mailbox.as_ref(),
-                            message_id,
-                            &key,
-                        ));
-                        discarded_by_draft_op = false;
-                    } else {
-                        // The due send consumes its draft: the row leaves
-                        // Drafts optimistically with the dispatch.
-                        state = None;
-                        discarded_by_draft_op = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let base_exists = base.is_some();
         let account_id = account_id.clone();
         let message_id = message_id.clone();
-        match state {
-            Some(record) => match project_record(record, &message_ops)? {
-                Some(folded) => {
-                    offload(move || overlay.upsert_overlay_message(&account_id, &folded)).await?;
-                }
-                None => {
-                    offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
-                        .await?;
-                }
-            },
-            None if discarded_by_draft_op => {
-                if base_exists {
-                    // Hide the base row until the provider destroy is
-                    // confirmed into base by sync.
-                    offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
-                        .await?;
-                } else {
-                    // Discard of a never-synced draft: nothing to hide.
-                    offload(move || overlay.remove_overlay_message(&account_id, &message_id))
-                        .await?;
-                }
-            }
-            None => {
-                if message_ops
-                    .iter()
-                    .any(|op| op.kind == OperationKind::Destroy)
-                {
-                    offload(move || overlay.tombstone_overlay_message(&account_id, &message_id))
-                        .await?;
-                } else {
-                    // Plain assertions over no base row fold to nothing: the
-                    // remote removal wins and the entry is dropped, keeping
-                    // the visible row derivable from (log, base) alone.
-                    offload(move || {
-                        match overlay.read_overlay_message(&account_id, &message_id)? {
-                            Some(_) => overlay.remove_overlay_message(&account_id, &message_id),
-                            None => Ok(()),
-                        }
-                    })
-                    .await?;
-                }
-            }
-        }
-        Ok(())
+        let diff = offload(move || {
+            overlay.derive_overlay(
+                &account_id,
+                &message_id,
+                Box::new({
+                    let message_id = message_id.clone();
+                    move |snapshot| fold_overlay_row(snapshot, &message_id)
+                }),
+            )
+        })
+        .await?;
+        Ok(diff)
     }
 
     /// The visible row(s) one op addresses, with the role each row plays in
@@ -466,47 +470,10 @@ impl MailService {
         account_id: &AccountId,
         op: &Operation,
     ) -> Result<Vec<(MessageId, OpRowRole)>, ServiceError> {
-        Ok(match op.entity.kind {
-            OperationEntityKind::Message if op.kind == OperationKind::Send => {
-                let mut touches = vec![(
-                    MessageId::from(op.entity.id.as_str()),
-                    OpRowRole::Entity(EntityFoldRole::SendRow),
-                )];
-                // A malformed send payload contributes no consumed-draft
-                // touch; its own row still errors visibly in the fold.
-                if let Ok(Some(FoldEffect::SendEffects {
-                    consumes_draft_key: Some(key),
-                    ..
-                })) = intent_fold_effect(op)
-                {
-                    let consumed_live = self
-                        .draft_registry
-                        .resolve_draft_entity(account_id, &key)?
-                        .unwrap_or(key);
-                    if consumed_live != op.entity.id {
-                        touches.push((
-                            MessageId::from(consumed_live.as_str()),
-                            OpRowRole::Entity(EntityFoldRole::SendConsumedDraft),
-                        ));
-                    }
-                }
-                touches
-            }
-            OperationEntityKind::Message if op.kind.is_state_assertion() => {
-                vec![(MessageId::from(op.entity.id.as_str()), OpRowRole::Assertion)]
-            }
-            OperationEntityKind::Message => Vec::new(),
-            OperationEntityKind::Draft => {
-                let live = self
-                    .draft_registry
-                    .resolve_draft_entity(account_id, &op.entity.id)?
-                    .unwrap_or_else(|| op.entity.id.clone());
-                vec![(
-                    MessageId::from(live.as_str()),
-                    OpRowRole::Entity(EntityFoldRole::DraftKey),
-                )]
-            }
-        })
+        let registry = self.draft_registry.clone();
+        let account_id = account_id.clone();
+        let resolver = move |key: &str| registry.resolve_draft_entity(&account_id, key);
+        op_row_touches_with(op, &resolver).map_err(ServiceError::from)
     }
 
     /// The live row ids one op's replay effect touches — the incremental
@@ -621,38 +588,37 @@ impl MailService {
             }
             let is_content = is_content_op(&settled_op.operation);
             let touched = self.op_touched_row_ids(account_id, &settled_op.operation)?;
-            self.outbox.remove_operation(&settled_op.operation.id)?;
-            for message_id in touched {
+            let account_id_owned = account_id.clone();
+            // Atomic: remove the op and re-derive its touched rows in ONE
+            // transaction, so a crash between them cannot leave a derived row
+            // whose owning op is gone — the orphan the model claims is
+            // unrepresentable. The per-row diff is the retire echo (no
+            // separate before/after reads).
+            let diffs = {
+                let overlay = self.overlay.clone();
+                let op_id = settled_op.operation.id.clone();
+                let touched_owned = touched.clone();
+                offload(move || {
+                    overlay.remove_op_and_derive(
+                        &account_id_owned,
+                        &op_id,
+                        &touched_owned,
+                        Box::new(|row_id, snapshot| fold_overlay_row(snapshot, row_id)),
+                    )
+                })
+                .await?
+            };
+            for (message_id, diff) in touched.iter().zip(diffs.into_iter()) {
                 // A content op's derived row changes identity to the provider's
-                // when truncated: capture whether the DERIVED overlay entry
-                // existed so a prune echo can drop the retired local/provisional
-                // id client-side. The overlay entry (not the effective read) is
-                // the signal — the row's local/provisional id has no base row,
-                // so base cannot serve it once the derived entry retires.
-                let had_derived_entry = is_content && {
-                    let overlay = self.overlay.clone();
-                    let owned_account = account_id.clone();
-                    let owned_row = message_id.clone();
-                    offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
-                        .await?
-                        .is_some()
-                };
-                self.refresh_message_overlay(account_id, &message_id)
-                    .await?;
-                let derived_entry_retired = had_derived_entry && {
-                    let overlay = self.overlay.clone();
-                    let owned_account = account_id.clone();
-                    let owned_row = message_id.clone();
-                    offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
-                        .await?
-                        .is_none()
-                };
-                if derived_entry_retired {
+                // when truncated: the local/provisional id has no base row, so
+                // once the derived entry retires echo `deleted` so the client
+                // drops it.
+                if is_content && diff.retired() {
                     events.push(self.events.append_event(
                         account_id,
                         EVENT_TOPIC_MESSAGE_UPDATED,
                         None,
-                        Some(&message_id),
+                        Some(message_id),
                         serde_json::json!({ "messageId": message_id.as_str(), "deleted": true }),
                     )?);
                 }
