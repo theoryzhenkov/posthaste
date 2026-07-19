@@ -15,35 +15,29 @@ import {
   type ComposeForm,
 } from '../form/model'
 import { validateAttachmentLimits } from '../attachments/attachments'
-import { formatScheduledTime } from '../shell/sendLaterPresets'
 import { validateComposeSubmission } from '../form/validation'
 
 /**
- * Compose submission: immediate send, undo-send, and send-later.
+ * Compose submission: immediate send and undo-send.
  *
- * ONE mechanism serves undo-send and send-later: the `send` command's hold
- * fields (`sendAt`/`undoWindowSeconds`), which travel inside the request. The
+ * The undo-send hold rides the `send` command's hold fields
+ * (`sendAt`/`undoWindowSeconds`), which travel inside the request. The
  * backend enqueues the send and HOLDS it until due; until then it is
  * cancelable via the `cancelOperation` command (the Undo toast and the
  * settings Outbox pane both route there, racing the flusher's atomic claim
  * with exactly one winner — a canceled send is never submitted).
  *
- * - Undo-send: the compose settings' `undoSendDelaySeconds` (default
- *   {@link DEFAULT_UNDO_SEND_DELAY_SECONDS}) becomes `undoWindowSeconds`; the
- *   server stamps and judges the deadline on ITS clock, `sendAt` rides along
- *   as display metadata. After sending, a countdown toast offers Undo until
- *   the hold expires. A delay of 0 sends immediately with no hold.
- * - Send-later: an explicit `sendAt` from the composer's "Send later" menu.
+ * Undo-send: the compose settings' `undoSendDelaySeconds` (default
+ * {@link DEFAULT_UNDO_SEND_DELAY_SECONDS}) becomes `undoWindowSeconds`; the
+ * server stamps and judges the deadline on ITS clock, `sendAt` rides along
+ * as display metadata. After sending, a countdown toast offers Undo until
+ * the hold expires. A delay of 0 sends immediately with no hold.
  *
  * UNDO RESTORES THE FULL COMPOSE: the held send is one intent — the backend
  * keeps the compose restorable as a draft under the request's `draftId`, and
  * a successful cancel reopens the composer on it via `onRestoreDraft`. If the
  * cancel loses the race with the flusher, the user is told the message
  * already went out.
- *
- * OFFLINE SEMANTICS (surfaced in the toast copy): a scheduled send is NOT a
- * server-side schedule — it fires when Posthaste is next running and online
- * at/after `sendAt`.
  */
 export function useComposeSubmission({
   draftKey,
@@ -130,8 +124,8 @@ export function useComposeSubmission({
       sourceId: string
       input: SendMessageInput
       sendAt: string
-      /** Undo-send hold in seconds; null for an explicit send-later schedule. */
-      undoWindowSeconds: number | null
+      /** Undo-send hold in seconds. */
+      undoWindowSeconds: number
     }) =>
       // The held send is ONE intent: the request carries the compose content,
       // its stable draft identity (the undo-restore handle), and the hold.
@@ -141,41 +135,21 @@ export function useComposeSubmission({
         toSendMessageRequest(variables.input, draftKey),
         {
           sendAt: variables.sendAt,
-          ...(variables.undoWindowSeconds !== null
-            ? { undoWindowSeconds: variables.undoWindowSeconds }
-            : {}),
+          undoWindowSeconds: variables.undoWindowSeconds,
         },
       ),
     onSuccess: (result, variables) => {
       onClose()
       const { operationId } = result
-      if (variables.undoWindowSeconds !== null) {
-        showUndoCountdown({
-          seconds: variables.undoWindowSeconds,
-          onUndo: (toastId) =>
-            void undoScheduledSend({
-              sourceId: variables.sourceId,
-              operationId,
-              toastId,
-            }),
-        })
-      } else {
-        const toastId = toast(
-          `Scheduled for ${formatScheduledTime(variables.sendAt)} — sends when Posthaste is open`,
-          {
-            duration: 10_000,
-            action: {
-              label: 'Undo',
-              onClick: () =>
-                void undoScheduledSend({
-                  sourceId: variables.sourceId,
-                  operationId,
-                  toastId,
-                }),
-            },
-          },
-        )
-      }
+      showUndoCountdown({
+        seconds: variables.undoWindowSeconds,
+        onUndo: (toastId) =>
+          void undoScheduledSend({
+            sourceId: variables.sourceId,
+            operationId,
+            toastId,
+          }),
+      })
     },
     onError: (error) => {
       setErrorMessage(error.message)
@@ -264,28 +238,8 @@ export function useComposeSubmission({
     undoSendDelaySeconds,
   ])
 
-  /** Send-later: schedule the send for an explicit future time. */
-  const handleSubmitLater = useCallback(
-    (sendAt: string) => {
-      void (async () => {
-        const input = await prepareInput()
-        if (!input) {
-          return
-        }
-        scheduleMutation.mutate({
-          sourceId: resolveSubmissionSourceId(input.from),
-          input,
-          sendAt,
-          undoWindowSeconds: null,
-        })
-      })()
-    },
-    [prepareInput, resolveSubmissionSourceId, scheduleMutation],
-  )
-
   return {
     handleSubmit,
-    handleSubmitLater,
     isSending: sendMutation.isPending || scheduleMutation.isPending,
   }
 }
