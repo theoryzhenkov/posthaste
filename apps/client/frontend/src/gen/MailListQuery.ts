@@ -25,8 +25,10 @@ mailboxId?: MailboxId | null,
  */
 smartMailboxId?: SmartMailboxId | null, 
 /**
- * Free-text search over subject, sender, recipients, preview, and the
- * cached body index.
+ * Search text in the one query grammar: prefixed tokens
+ * (`conversation:`, `from:`, `is:`, ...) become field conditions; bare
+ * words search sender, subject, preview, and the cached body index. A
+ * string the grammar rejects fails the query as malformed.
  */
 freeText?: string | null, 
 /**
