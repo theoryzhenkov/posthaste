@@ -106,10 +106,11 @@ impl MailService {
                     assigned_entity_id,
                     destroyed_entity_id,
                     send_filing,
+                    cursor,
                 }) => {
                     // The live id the draft's visible row is keyed under going
-                    // INTO this settlement (pre-repoint) — the overlay entry a
-                    // rotation must clean up.
+                    // INTO this settlement (pre-repoint) — the row a rotation
+                    // must re-derive away from.
                     let old_live = if operation.entity.kind == OperationEntityKind::Draft {
                         self.draft_registry
                             .resolve_draft_entity(account_id, &operation.entity.id)?
@@ -119,11 +120,15 @@ impl MailService {
                     };
                     if let Some(new_id) = assigned_entity_id.as_deref() {
                         if new_id != operation.entity.id {
-                            // M70 (D136): a draft op's entity id IS the stable
-                            // key and never rotates, so a provider rotation is
-                            // recorded as ONE registry write — key → live id.
-                            // Later ops carry the key too and resolve it fresh
-                            // at their own flush; no outbox rewrite is needed.
+                            // A draft op's entity id IS the stable key and never
+                            // rotates, so a provider rotation is recorded as ONE
+                            // registry write — key → live id. This IS the JMAP
+                            // adoption bridge: the provider now holds the draft
+                            // at `new_id`, and `op_row_touches` resolves the
+                            // still-settled save's key to it, so replay
+                            // materializes the derived row at the new id. Later
+                            // ops carry the key too and resolve it fresh at
+                            // their own flush; no outbox rewrite is needed.
                             self.draft_registry.set_draft_alias(
                                 account_id,
                                 &operation.entity.id,
@@ -146,10 +151,10 @@ impl MailService {
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
                     if operation.kind == OperationKind::DraftDelete {
-                        // M70: forget at SETTLEMENT — the provider has confirmed
-                        // the destroy, so only now does the stable key stop
-                        // naming a live draft (never at enqueue: an in-flight op
-                        // must still resolve its mapping). Converges with M69's
+                        // Forget at SETTLEMENT — the provider has confirmed the
+                        // destroy, so only now does the stable key stop naming a
+                        // live draft (never at enqueue: an in-flight op must
+                        // still resolve its mapping). Converges with the
                         // sync-observed forget (the confirmed-gone prune): both
                         // are idempotent deletes of the same registry row, so
                         // whichever observes the confirmed destruction second is
@@ -157,7 +162,7 @@ impl MailService {
                         // confirmed destruction.
                         self.draft_registry
                             .remove_draft_alias(account_id, &operation.entity.id)?;
-                        // D132: a settled DraftDelete emits the reconciling
+                        // A settled DraftDelete emits the reconciling
                         // `message.updated{deleted:true}` so the client's
                         // fold/prune converges without leaning on a follow-up
                         // sync (the send-consume path has no apply-time event;
@@ -179,22 +184,40 @@ impl MailService {
                             }),
                         )?);
                     }
-                    self.outbox.remove_operation(&operation.id)?;
-                    // NS2 Slice 3: a settled draft save carries its visible
-                    // row across the provider id rotation until sync confirms
-                    // it into base (old row hidden/dropped, new id pinned).
-                    if operation.kind.is_draft_save() {
-                        self.settle_draft_save_overlay(
+                    if operation.kind.is_draft_save() || operation.kind == OperationKind::Send {
+                        // A CONTENT op (putDraft / send): its authored row is
+                        // DERIVED from the op payload by replay, so the op does
+                        // not leave the log at settlement — it rests in the
+                        // `applied` state, still folded, until causal
+                        // truncation. The row therefore never blinks out
+                        // between settlement and the next sync, and it cannot
+                        // outlive its op. The truncation watermark is the
+                        // provider sync position the save/send returned (JMAP
+                        // `newState`) when the gateway exposes one; otherwise
+                        // the cycle rule retires it, one sync cycle later.
+                        let watermark = cursor
+                            .as_ref()
+                            .filter(|cursor| cursor.object_type == SyncObject::Message)
+                            .map(|cursor| cursor.state.as_str());
+                        self.outbox.mark_operation_settled(
+                            &operation.id,
+                            super::schedule::monotonic_now_secs(),
+                            watermark,
+                        )?;
+                        // Re-derive the row at both ends of a rotation: the
+                        // pre-repoint id (the fold no longer lands there, so it
+                        // retires — with a prune echo) and the post-repoint id
+                        // (the settled op still folds, so the derived row
+                        // materializes there — with a projection echo). A send
+                        // (no rotation) re-derives its one Sent row.
+                        self.settle_content_op_overlay(
                             account_id, &operation, &old_live, &new_live, events,
                         )
                         .await?;
-                    }
-                    // NS2 Slice 4: a settled send pins its provisional Sent
-                    // row and retires the consumed draft (the gateway already
-                    // destroyed the provider copy in the send's execution).
-                    if operation.kind == OperationKind::Send {
-                        self.settle_send_overlay(account_id, &operation, events)
-                            .await?;
+                    } else {
+                        // An intent-ish destroy (DraftDelete): its base-write
+                        // reconcile already settled it, so it leaves the log now.
+                        self.outbox.remove_operation(&operation.id)?;
                     }
                 }
                 Ok(Pushed::Message {
@@ -273,10 +296,11 @@ impl MailService {
                         Some(&message),
                     )?;
                     events.push(self.emit_dispatch_uncertain(account_id, &operation, message)?);
-                    // D125: the parked send's fold unwinds — the draft row
-                    // returns (the recovery artifact) and the provisional
-                    // Sent row leaves until an explicit retry settles.
-                    events.extend(self.unwind_send_fold(&operation).await?);
+                    // A parked send is a content op whose words are never
+                    // dropped: it stays PARKED with its provisional Sent row
+                    // derived and visible (a failed/parked content op keeps
+                    // folding — see `is_replayable`), surfaced as
+                    // needs-attention until the user retries or discards it.
                     // A send timeout signals a struggling link; stop draining so
                     // the rest retries on the next connectivity window.
                     return Ok(());
@@ -304,11 +328,17 @@ impl MailService {
                     {
                         events.push(correction);
                     }
-                    // A permanently failed send never went out: unwind its
-                    // fold so the provisional Sent row leaves and the
-                    // consumed draft returns.
-                    if operation.kind == OperationKind::Send {
-                        events.extend(self.unwind_send_fold(&operation).await?);
+                    // Re-derive the rows the op touched over the log that now
+                    // holds it as Failed. A CONTENT op (putDraft / send) stays
+                    // PARKED with its authored row visible — a failed content
+                    // op keeps folding (see `is_replayable`), so the re-derive
+                    // reproduces the same row; words are never silently
+                    // dropped, and the user keeps or discards it from the
+                    // outbox. An INTENT op is speculation that lost: it folds
+                    // nothing while Failed, so the re-derive reverts its row to
+                    // base at once.
+                    for row_id in self.op_touched_row_ids(account_id, &operation)? {
+                        self.refresh_message_overlay(account_id, &row_id).await?;
                     }
                 }
             }

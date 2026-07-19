@@ -190,39 +190,6 @@ async fn rebuild_reproduces_send_and_draft_intent_rows() {
 }
 
 #[tokio::test]
-async fn rebuild_passes_pinned_rows_through() {
-    // Pinned rows with NO owning op — a draft pin awaiting its provider copy
-    // and a phsend- provisional row awaiting adoption — are not derivable
-    // from the log; replay must pass them through byte-identically.
-    let account = AccountId::from("primary");
-    let store = Arc::new(TestStore::default());
-    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
-
-    let mut draft_pin = sample_message_record("pinned-draft", 64, false);
-    draft_pin.draft_id = Some("draft-local-pin".to_string());
-    store
-        .upsert_overlay_message(&account, &draft_pin)
-        .expect("place draft pin");
-    let mut sent_pin = sample_message_record("send-pin", 64, false);
-    sent_pin.rfc_message_id = Some("phsend-token@posthaste.local".to_string());
-    store
-        .upsert_overlay_message(&account, &sent_pin)
-        .expect("place provisional sent pin");
-
-    let before = overlay_snapshot(&store);
-    service
-        .replay_account_overrides(&account)
-        .await
-        .expect("full rebuild");
-
-    assert_eq!(
-        overlay_snapshot(&store),
-        before,
-        "ownerless pinned rows survive the rebuild unchanged"
-    );
-}
-
-#[tokio::test]
 async fn sync_base_write_rederives_under_pending_op() {
     // A base row rewritten by sync UNDER a pending op re-derives: the fresh
     // base fields show through with the folded intent on top — and the
@@ -779,6 +746,164 @@ async fn rebuild_reproduces_settled_op_rows() {
         overlay_snapshot(&store),
         before,
         "a settled op's override row reappears identically from (log, base)",
+    );
+}
+
+#[tokio::test]
+async fn rebuild_reproduces_settled_content_op_rows() {
+    // The rebuild guarantee is COMPLETE: it reproduces EVERY row of a wiped
+    // view, content rows included. A SETTLED (applied) draft save and a SETTLED
+    // send both rest in the log with their visible rows DERIVED from the op
+    // payload — a draft row at the provider id, a provisional Sent row. Wipe
+    // the derived plane, run the full rebuild, and both reappear identically:
+    // nothing is a non-derivable pass-through.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("state-1", &["drafts"]));
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+    let gateway = MutationGateway::with_revision(1);
+
+    // A draft save, flushed: it settles to `applied` and its derived row lives
+    // at the assigned provider id.
+    service
+        .save_draft(
+            &account_id,
+            Some(MessageId::from("draft-local-keep")),
+            draft_request("Parked draft"),
+        )
+        .await
+        .expect("save draft");
+    // A send, flushed: it settles to `applied` and derives its provisional
+    // Sent row.
+    let (send_op, _) = service
+        .enqueue_send(&account_id, draft_request("Outgoing"))
+        .await
+        .expect("send queues");
+    service
+        .flush_account(&account_id, &gateway)
+        .await
+        .expect("flush settles both content ops");
+
+    // Both content ops rest settled in the log.
+    assert_eq!(
+        store
+            .list_settled_operations(&account_id)
+            .expect("settled list")
+            .len(),
+        2,
+        "the draft save and the send rest settled-in-log",
+    );
+
+    let before = overlay_snapshot(&store);
+    {
+        let overlay = store.overlay_rows.lock().expect("overlay rows lock");
+        assert!(
+            matches!(overlay.get("provider-draft-1"), Some(Some(record)) if record.draft_id.is_some()),
+            "the settled draft save's row is derived at the provider id",
+        );
+        assert!(
+            matches!(
+                overlay.get(send_op.entity.id.as_str()),
+                Some(Some(record))
+                    if record.rfc_message_id.as_deref().is_some_and(|rfc| rfc.starts_with("phsend-"))
+            ),
+            "the settled send's provisional Sent row is derived",
+        );
+    }
+
+    wipe_overlay(&store);
+    service
+        .replay_account_overrides(&account_id)
+        .await
+        .expect("full rebuild");
+
+    assert_eq!(
+        overlay_snapshot(&store),
+        before,
+        "the settled draft row and provisional Sent row both reappear \
+         identically from (log, base) — the rebuild guarantee is complete",
+    );
+}
+
+#[tokio::test]
+async fn rebuild_reproduces_a_permanently_failed_content_op_row() {
+    // The rebuild guarantee is complete for the FAILED content-op state too. A
+    // putDraft and a send that both permanently fail stay PARKED in the log
+    // with their authored rows derived from the op payload — a draft row, a
+    // provisional Sent row. Wipe the derived plane, run the full rebuild, and
+    // both reappear identically from (log, base): a parked content op keeps
+    // folding, so nothing is a non-derivable pass-through.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::default());
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    // A gateway that permanently rejects both the draft save and the send.
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("no draft".to_string())));
+    gateway
+        .send_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("no send".to_string())));
+
+    let (save_op, _) = service
+        .save_draft(&account_id, None, draft_request("Parked draft"))
+        .await
+        .expect("save draft");
+    let draft_live_id = MessageId::from(save_op.entity.id.as_str());
+    let (send_op, _) = service
+        .enqueue_send(&account_id, draft_request("Parked send"))
+        .await
+        .expect("send queues");
+    let send_row_id = MessageId::from(send_op.entity.id.as_str());
+
+    service
+        .flush_account(&account_id, &gateway)
+        .await
+        .expect("flush fails both content ops permanently");
+
+    // Both content ops are parked (Failed) but keep their derived rows.
+    let before = overlay_snapshot(&store);
+    {
+        let overlay = store.overlay_rows.lock().expect("overlay rows lock");
+        assert!(
+            matches!(overlay.get(draft_live_id.as_str()), Some(Some(record)) if record.draft_id.is_some()),
+            "the failed draft save's row is still derived",
+        );
+        assert!(
+            matches!(
+                overlay.get(send_row_id.as_str()),
+                Some(Some(record))
+                    if record.rfc_message_id.as_deref().is_some_and(|rfc| rfc.starts_with("phsend-"))
+            ),
+            "the failed send's provisional Sent row is still derived",
+        );
+    }
+
+    wipe_overlay(&store);
+    service
+        .replay_account_overrides(&account_id)
+        .await
+        .expect("full rebuild");
+
+    assert_eq!(
+        overlay_snapshot(&store),
+        before,
+        "the parked draft row and provisional Sent row both reappear \
+         identically from the failed content ops still in the log",
     );
 }
 

@@ -287,11 +287,19 @@ impl OperationOutboxStore for DatabaseStore {
         account_id: &AccountId,
     ) -> Result<Vec<Operation>, StoreError> {
         let connection = self.read_connection()?;
+        // A failed INTENT op is speculation that lost — base wins, so it drops
+        // out of the fold. A failed CONTENT op (`draftCreate`/`draftUpdate`/
+        // `send`) carries authored mail that is never dropped: it stays parked
+        // with its derived row visible, so it must remain foldable. The class
+        // split by state lives in `is_replayable`; this source keeps failed
+        // content ops available for it to fold.
         collect_operations(
             &connection,
             &format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
-                 WHERE account_id = ?1 AND state != 'failed'
+                 WHERE account_id = ?1
+                   AND (state != 'failed'
+                        OR kind IN ('draftCreate', 'draftUpdate', 'send'))
                  ORDER BY rowid ASC
                  LIMIT ?2"
             ),

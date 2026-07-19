@@ -10,18 +10,25 @@ use posthaste_domain_model::{MessageReadback, MutationOutcome};
 /// Result of pushing one operation to the provider.
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Pushed {
-    /// A non-message entity op (draft/send): settle and remove.
+    /// A non-message entity op (draft/send).
     /// `assigned_entity_id` is the provider id a draft save returned — the
-    /// settlement repoints the op's stable draft key to it in the registry
-    /// (M70/D136: the op's entity id IS the key and never rotates).
+    /// settlement repoints the op's stable draft key to it in the registry (the
+    /// op's entity id IS the key and never rotates), and it is the adoption
+    /// bridge for a JMAP draft: the provider now holds the copy at this id.
     /// `destroyed_entity_id` is the live id a draft destroy resolved to at
     /// flush time, so the settlement's reconciling event names the projected
     /// row rather than the stable key the op carries.
+    /// `cursor` is the provider sync position a save/send returned, when the
+    /// gateway exposes one: a content op that rests settled (`applied`) records
+    /// it as its causal-truncation watermark, exactly like a blind-settled
+    /// message assertion. `None` falls back to the cycle rule (IMAP; a gateway
+    /// that returns no state).
     Entity {
         assigned_entity_id: Option<String>,
         destroyed_entity_id: Option<String>,
-        /// For an applied send: the typed Sent-copy filing outcome (D154).
+        /// For an applied send: the typed Sent-copy filing outcome.
         send_filing: Option<posthaste_domain_model::SendFiling>,
+        cursor: Option<posthaste_domain_model::SyncCursor>,
     },
     /// A message state assertion: settle now via the provider readback.
     /// `rejected` is `Some(reason)` when the provider rejected the change — the
@@ -86,6 +93,7 @@ impl MailService {
                     assigned_entity_id: Some(new_id.to_string()),
                     destroyed_entity_id: None,
                     send_filing: None,
+                    cursor: None,
                 })
             }
             MailIntent::SaveDraft {
@@ -128,6 +136,7 @@ impl MailService {
                     assigned_entity_id: Some(new_id.to_string()),
                     destroyed_entity_id: None,
                     send_filing: None,
+                    cursor: None,
                 })
             }
             MailIntent::DiscardDraft {
@@ -147,6 +156,7 @@ impl MailService {
                         assigned_entity_id: None,
                         destroyed_entity_id: Some(operation.entity.id.clone()),
                         send_filing: None,
+                        cursor: None,
                     });
                 };
                 let target = MessageId::from(target_id.as_str());
@@ -161,6 +171,7 @@ impl MailService {
                     assigned_entity_id: None,
                     destroyed_entity_id: Some(target_id),
                     send_filing: None,
+                    cursor: None,
                 })
             }
             MailIntent::Send(request) => {
@@ -198,6 +209,7 @@ impl MailService {
                     assigned_entity_id: None,
                     destroyed_entity_id: None,
                     send_filing: Some(filing),
+                    cursor: None,
                 })
             }
             MailIntent::SetKeywords(command) => {

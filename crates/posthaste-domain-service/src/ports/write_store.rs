@@ -86,7 +86,9 @@ pub trait OperationOutboxStore: Send + Sync {
     /// effect may still need folding — `pending`, `inflight`, and settled
     /// (`applied`) ops awaiting causal truncation (a flushed message assertion
     /// the provider accepted; its effect keeps serving until the sync chain
-    /// absorbs it). Excludes only `failed`. In insertion order.
+    /// absorbs it), plus `failed` CONTENT ops, whose authored row stays parked
+    /// and visible. Excludes only `failed` INTENT ops, which lost to base. In
+    /// insertion order.
     ///
     /// @spec docs/backend/L2-optimism#settlement-and-truncation
     fn list_unsettled_operations(

@@ -48,17 +48,22 @@ impl MailService {
     ///
     /// Returns `Some(events)` when the op was removed (`None` = nothing to
     /// remove; a settled `applied` op counts as nothing to remove — it stays
-    /// in the log until causal truncation and its mutation stands). NS2 Slice 4: discarding a SEND also unwinds its folded
-    /// effects — a due send's provisional Sent row is dropped and the
-    /// consumed draft's row returns — with the echoes to publish.
+    /// in the log until causal truncation and its mutation stands).
+    ///
+    /// Discarding a CONTENT op re-derives its authored row: removing the op is
+    /// the whole of the cleanup (the derived row cannot outlive its op). For a
+    /// draft save the row simply vanishes; for a SEND the provisional Sent row
+    /// vanishes, the consumed-draft tombstone lifts, and the send's content is
+    /// re-queued as a draft save (undo restores the full compose durably). The
+    /// echoes converge the client without a sync.
     ///
     /// @spec docs/L1-outbox#state-machine
     pub async fn discard_operation(
         &self,
         operation_id: &OperationId,
     ) -> Result<Option<Vec<DomainEvent>>, ServiceError> {
-        // Snapshot BEFORE the guarded removal (for the send-fold cleanup
-        // targets); the removal itself remains the single racing statement.
+        // Snapshot BEFORE the guarded removal (for the re-derivation targets);
+        // the removal itself remains the single racing statement.
         let snapshot = self.outbox.get_operation(operation_id)?;
         if self.outbox.remove_operation_unless_inflight(operation_id)? {
             let mut events = Vec::new();
@@ -66,10 +71,10 @@ impl MailService {
                 if operation.kind == OperationKind::Send {
                     events = self.unwind_send_fold(&operation).await?;
                     // Undo restores the FULL compose durably: the send's
-                    // content (the newest edit, D174 last-writer-wins) is
-                    // re-queued as an ordinary draft save under its compose
-                    // key — resumable offline, ensured provider-side on the
-                    // next flush. No client persist-then-schedule needed.
+                    // content (the newest edit, last-writer-wins) is re-queued
+                    // as an ordinary draft save under its compose key —
+                    // resumable offline, ensured provider-side on the next
+                    // flush. No client persist-then-schedule needed.
                     if let Ok(posthaste_domain_model::MailIntent::Send(request)) =
                         operation.intent()
                     {
@@ -89,6 +94,36 @@ impl MailService {
                             events.extend(save_events);
                         }
                     }
+                } else if operation.kind.is_draft_save() {
+                    // A cancelled draft save leaves NO phantom: its derived row
+                    // is gone the moment the op is removed. Re-derive the live
+                    // row (it retires — base alone remains, i.e. nothing) and
+                    // prune it client-side if it was showing.
+                    let live = self
+                        .draft_registry
+                        .resolve_draft_entity(&operation.account_id, &operation.entity.id)?
+                        .unwrap_or_else(|| operation.entity.id.clone());
+                    let live_id = MessageId::from(live.as_str());
+                    let was_visible = self
+                        .message_detail_reader
+                        .get_message_summary(&operation.account_id, &live_id)?
+                        .is_some();
+                    self.refresh_message_overlay(&operation.account_id, &live_id)
+                        .await?;
+                    if was_visible
+                        && self
+                            .message_detail_reader
+                            .get_message_summary(&operation.account_id, &live_id)?
+                            .is_none()
+                    {
+                        events.push(self.events.append_event(
+                            &operation.account_id,
+                            EVENT_TOPIC_MESSAGE_UPDATED,
+                            None,
+                            Some(&live_id),
+                            serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
+                        )?);
+                    }
                 }
             }
             return Ok(Some(events));
@@ -106,13 +141,15 @@ impl MailService {
         }
     }
 
-    /// Unwind a send's folded effects after its op stopped being foldable
-    /// (discarded/undone, parked `DispatchUncertain` — D125 keeps the draft
-    /// as the recovery artifact — or permanently failed): refresh the
-    /// provisional Sent row (entry removed) and the consumed draft's live row
-    /// (the tombstone lifts; the draft is visible again), echoing both so the
-    /// client converges without a sync. A HELD send folded nothing, so both
-    /// refreshes are no-ops for the common undo.
+    /// Unwind a discarded send's folded effects. Discard removed the send op,
+    /// so its derived rows are gone the moment replay runs — zero unwind
+    /// bookkeeping: re-derive the provisional Sent row (its entry retires, base
+    /// alone remains — nothing) and the consumed draft's live row (the send's
+    /// tombstone fold is gone, so the draft's own save op — if any — re-derives
+    /// it, or it retires), echoing both so the client converges without a sync.
+    /// A HELD send folded nothing, so both refreshes are no-ops for the common
+    /// undo. The caller re-queues the send's content as a fresh draft save,
+    /// which then derives the recovery draft row.
     pub(super) async fn unwind_send_fold(
         &self,
         operation: &Operation,
@@ -124,16 +161,16 @@ impl MailService {
             .message_detail_reader
             .get_message_summary(account_id, &send_row_id)?
             .is_some();
-        // The provisional Sent row is send-minted (a pinned `phsend-` shape
-        // the no-ops replay arm would pass through): the unwound send no
-        // longer owns it, so drop the entry directly.
+        // The provisional Sent row is derived from the (now-removed) send op:
+        // re-derive so it retires, and prune it client-side if it was showing.
+        self.refresh_message_overlay(account_id, &send_row_id)
+            .await?;
+        if send_row_was_visible
+            && self
+                .message_detail_reader
+                .get_message_summary(account_id, &send_row_id)?
+                .is_none()
         {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            let owned_row = send_row_id.clone();
-            offload(move || overlay.remove_overlay_message(&owned_account, &owned_row)).await?;
-        }
-        if send_row_was_visible {
             events.push(self.events.append_event(
                 account_id,
                 EVENT_TOPIC_MESSAGE_UPDATED,
@@ -155,29 +192,6 @@ impl MailService {
                     .unwrap_or_else(|| key.to_string());
                 let live_id = MessageId::from(live.as_str());
                 self.refresh_message_overlay(account_id, &live_id).await?;
-                if self
-                    .message_detail_reader
-                    .get_message_summary(account_id, &live_id)?
-                    .is_none()
-                {
-                    // The consume fold overwrote the settled save's pinned
-                    // row and base has not absorbed the draft yet: re-pin the
-                    // recovery artifact from the send's own content (which IS
-                    // the draft's content) so it never blinks out.
-                    let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
-                    let record = crate::service::replay::synthesize_draft_record(
-                        None,
-                        &request,
-                        operation,
-                        drafts_mailbox.as_ref(),
-                        &live_id,
-                        key,
-                    );
-                    let overlay = self.overlay.clone();
-                    let owned_account = account_id.clone();
-                    offload(move || overlay.upsert_overlay_message(&owned_account, &record))
-                        .await?;
-                }
                 if let Some(summary) = self
                     .message_detail_reader
                     .get_message_summary(account_id, &live_id)?

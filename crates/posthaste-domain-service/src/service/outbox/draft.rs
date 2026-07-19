@@ -1,27 +1,28 @@
-//! Draft lifecycle (NS2 Slice 3): local-first save/discard as typed intents
-//! whose fold effects land in the OVERLAY plane — a queued save is a visible
+//! Draft lifecycle: local-first save/discard as content ops whose visible
+//! rows are DERIVED by replay from the op payload — a queued save is a visible
 //! draft row immediately (no provider round trip, no sync lag), a queued
-//! discard hides the row immediately, and base stays sync-owned (the last
-//! non-reconciler base writer died with this cutover). Same-key saves
-//! COALESCE (D174, last-writer-wins per compose session); flush-time
-//! stable-key → live-id resolution stays the one registry seam (M70/D136).
+//! discard removes the op so the next replay forgets the row, and base stays
+//! sync-owned. Same-key saves COALESCE (last-writer-wins per compose session);
+//! flush-time stable-key → live-id resolution is the one registry seam. A
+//! draft's identity NEVER rotates: one stable key from the first keystroke
+//! through adoption, so a superseded/cancelled authoring path cannot strand a
+//! row — the row is a pure function of the op, and no op means no row.
 
 use super::classify::FlushError;
-use crate::service::replay::synthesize_draft_record;
 use crate::service::*;
 use posthaste_domain_model::CommandAck;
 
 impl MailService {
     /// Save a draft local-first: enqueue (or coalesce into) a draft
-    /// create/update operation, fold it into the overlay plane, and emit the
-    /// projection echo — the draft appears in Drafts the moment this returns.
+    /// create/update operation and re-derive its visible row from the overlay
+    /// plane, then emit the projection echo — the draft appears in Drafts the
+    /// moment this returns, materialized by replay from the op payload.
     ///
     /// `draft_key` is `None` for a brand-new draft (a stable local key is
-    /// minted) or the draft's stable key for an edit. D174: a save whose key
-    /// already has a still-queued save REPLACES that op's payload in place
-    /// (same op id — the create idempotency identity — and kind), so the
-    /// outbox holds at most one queued save per compose session and
-    /// `depends_on` chains are gone.
+    /// minted) or the draft's stable key for an edit. A save whose key already
+    /// has a still-queued save REPLACES that op's payload in place (same op id
+    /// — the create idempotency identity — and kind), so the outbox holds at
+    /// most one queued save per compose session.
     ///
     /// @spec docs/L1-outbox#operation-model
     /// @spec docs/L1-outbox#temp-id-reconciliation
@@ -44,13 +45,13 @@ impl MailService {
         // rotation a JMAP draft update causes and is read back on resume, so the
         // client always keys by a stable value.
         request.draft_id = Some(key.clone());
-        // M70 (D136): the op carries the STABLE key as its entity id — the live
-        // id is resolved at flush, immediately before the gateway call, so the
-        // push always targets the freshest mapping the registry knows (a
-        // rotation observed between enqueue and flush cannot stale it).
-        // Enqueue-time resolution only picks the kind, and REGISTERS the key
-        // (reserve-at-admission, D153): an unknown key self-maps until the
-        // first flush assigns a provider id.
+        // The op carries the STABLE key as its entity id — the live id is
+        // resolved at flush, immediately before the gateway call, so the push
+        // always targets the freshest mapping the registry knows (a rotation
+        // observed between enqueue and flush cannot stale it). Enqueue-time
+        // resolution only picks the kind, and REGISTERS the key
+        // (reserve-at-admission): an unknown key self-maps until the first
+        // flush assigns a provider id.
         let kind = match self.draft_registry.resolve_draft_entity(account_id, &key)? {
             Some(_) => OperationKind::DraftUpdate,
             None => {
@@ -69,10 +70,10 @@ impl MailService {
             }
         };
         let payload = encode_payload(request, "draft request")?;
-        // D174 coalescing: replace the still-queued save's payload in place.
-        // The guarded swap races the flusher's claim with exactly one winner —
-        // a claimed (inflight) save is never rewritten mid-push; the loser
-        // falls through and enqueues a fresh op.
+        // Coalescing: replace the still-queued save's payload in place. The
+        // guarded swap races the flusher's claim with exactly one winner — a
+        // claimed (inflight) save is never rewritten mid-push; the loser falls
+        // through and enqueues a fresh op.
         let mut coalesced: Option<Operation> = None;
         if let Some(queued) = self
             .outbox
@@ -106,9 +107,9 @@ impl MailService {
                 None,
             )?,
         };
-        // Instant draft: fold the queued save into the overlay plane and echo
-        // the projection from the effective read, exactly like a message
-        // assertion — the Drafts list row exists before any provider call.
+        // Instant draft: re-derive the row from the queued save and echo the
+        // projection from the effective read — the Drafts list row exists
+        // before any provider call, materialized by replay from the op.
         let live_id = self.live_draft_id(account_id, &key)?;
         self.refresh_message_overlay(account_id, &live_id).await?;
         let mut events = Vec::new();
@@ -133,25 +134,23 @@ impl MailService {
     }
 
     /// Delete a draft local-first: enqueue a draft delete operation carrying
-    /// the draft's STABLE key (M70/D136), fold the tombstone into the overlay
-    /// (the row disappears immediately), and emit the reconciling deletion
-    /// echo. The live entity id is resolved at flush, immediately before the
-    /// provider destroy, so a rotation observed between enqueue and flush
-    /// retargets the destroy to the current live draft.
+    /// the draft's STABLE key, re-derive its row (a tombstone hides it
+    /// immediately), and emit the reconciling deletion echo. The live entity id
+    /// is resolved at flush, immediately before the provider destroy, so a
+    /// rotation observed between enqueue and flush retargets the destroy to the
+    /// current live draft.
     ///
-    /// The registry mapping is NOT forgotten here (M70): identity survives
-    /// until the destruction is confirmed — at this op's settlement or at
-    /// sync-observed disappearance — so an in-flight op never references a
-    /// forgotten mapping.
+    /// The registry mapping is NOT forgotten here: identity survives until the
+    /// destruction is confirmed — at this op's settlement or at sync-observed
+    /// disappearance — so an in-flight op never references a forgotten mapping.
     ///
     /// `idempotent_redelivery` records whether a provider `notFound` at flush
-    /// time is a benign already-gone (the send-consume settlement effect —
-    /// D126) or a genuine failure a user-initiated discard must surface
-    /// (D133). It is stamped onto the op so the gateway narrows its
-    /// `notFound ⇒ Ok` mask to the idempotent case only.
+    /// time is a benign already-gone (the send-consume settlement effect) or a
+    /// genuine failure a user-initiated discard must surface. It is stamped
+    /// onto the op so the gateway narrows its `notFound ⇒ Ok` mask to the
+    /// idempotent case only.
     ///
     /// @spec docs/L1-outbox#operation-model
-    /// @spec docs/eph/RFC-L2-draft-identity#22-d136--one-seam-the-draftregistry-port-resolve-at-flush
     pub async fn delete_draft(
         &self,
         account_id: &AccountId,
@@ -159,11 +158,11 @@ impl MailService {
         idempotent_redelivery: bool,
     ) -> Result<(Operation, Vec<DomainEvent>), ServiceError> {
         let key = draft_key.to_string();
-        // Reserve-at-admission (D153), delete half: a key the registry does
-        // not know yet (a headerless legacy/foreign draft addressed by its
-        // provider id) self-maps here, so the flush-time resolve ALWAYS finds
-        // a mapping and a typed miss there can only mean confirmed
-        // destruction — never "this key was simply never registered".
+        // Reserve-at-admission, delete half: a key the registry does not know
+        // yet (a headerless legacy/foreign draft addressed by its provider id)
+        // self-maps here, so the flush-time resolve ALWAYS finds a mapping and a
+        // typed miss there can only mean confirmed destruction — never "this key
+        // was simply never registered".
         if self
             .draft_registry
             .resolve_draft_entity(account_id, &key)?
@@ -205,17 +204,16 @@ impl MailService {
         Ok((operation, events))
     }
 
-    /// Discard a draft, user-initiated (D130/D133).
+    /// Discard a draft, user-initiated.
     ///
-    /// D174/NS2: still-queued saves for the key are superseded (removed) —
-    /// the discard wins the compose session. A draft that never reached the
-    /// provider (no base row, no save ever in flight, never rotated) is
-    /// discarded entirely locally: registry forgotten, overlay entry removed,
-    /// no provider op at all. Otherwise the provider destroy is enqueued
-    /// non-idempotent so a `notFound` surfaces (D133). A key that no longer
-    /// names a live visible row is a surfaced `NotFound`, not a silent
-    /// success. Base is untouched either way — the NS1 seal holds (the last
-    /// `BaseWrite::legacy` production grant died with this rewrite).
+    /// Still-queued saves for the key are superseded (removed) — the discard
+    /// wins the compose session. A draft that never reached the provider (no
+    /// base row, no save ever in flight, never rotated) is discarded entirely
+    /// locally: the save ops are gone, so the next replay forgets its derived
+    /// row — no provider op at all, no unwind bookkeeping. Otherwise the
+    /// provider destroy is enqueued non-idempotent so a `notFound` surfaces. A
+    /// key that no longer names a live visible row is a surfaced `NotFound`,
+    /// not a silent success. Base is untouched either way.
     pub async fn discard_draft(
         &self,
         account_id: &AccountId,
@@ -225,9 +223,9 @@ impl MailService {
         let resolved = self.draft_registry.resolve_draft_entity(account_id, &key)?;
         let live = resolved.clone().unwrap_or_else(|| key.clone());
         let live_id = MessageId::from(live.as_str());
-        // A discard of a draft with no live visible row must surface (D133) —
-        // the client reverts the optimistic fold and shows the error. The
-        // effective read covers both a synced draft and a queued-only one.
+        // A discard of a draft with no live visible row must surface — the
+        // client reverts the optimistic fold and shows the error. The effective
+        // read covers both a synced draft and a queued-only one.
         let summary = self
             .message_detail_reader
             .get_message_summary(account_id, &live_id)?;
@@ -274,18 +272,12 @@ impl MailService {
             let (_operation, events) = self.delete_draft(account_id, draft_key, false).await?;
             return Ok(CommandAck { events });
         }
-        // Never reached the provider: a purely local discard. Forget the
-        // reserved mapping and drop the overlay entry directly (the queued
-        // save's instant draft row is a pinned shape the no-ops replay arm
-        // would pass through; the discard deliberately forgets it), then echo
-        // the deletion.
+        // Never reached the provider: a purely local discard. The queued saves
+        // are already removed above, so the draft's derived row is gone once
+        // replay runs — no op, no row. Forget the reserved mapping, re-derive
+        // (removing the now-ownerless entry), then echo the deletion.
         self.draft_registry.remove_draft_alias(account_id, &key)?;
-        {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            let owned_row = live_id.clone();
-            offload(move || overlay.remove_overlay_message(&owned_account, &owned_row)).await?;
-        }
+        self.refresh_message_overlay(account_id, &live_id).await?;
         let event = self.events.append_event(
             account_id,
             EVENT_TOPIC_MESSAGE_UPDATED,
@@ -332,120 +324,20 @@ impl MailService {
             .is_empty())
     }
 
-    /// Post-settlement overlay maintenance for a SEND (NS2 Slice 4): pin the
-    /// provisional Sent row at the send's entity id (visible until sync lands
-    /// the provider copy — adoption matches the transport-shared `Message-ID`
-    /// prefix), and retire the consumed draft. The provider copy of the draft
-    /// was destroyed inside the send's own gateway execution (gateway-owned
-    /// consumption — the D126 settlement fan-out op is gone), so this is
-    /// local-plane work only: registry forget, tombstone/remove, echoes.
+    /// The eager ensure-draft for HELD sends: during the hold the message is a
+    /// REAL provider draft, visible and editable on every device. Runs each
+    /// flush pass, before the readiness-gated drain; the registry is the step
+    /// ledger — done = the compose key maps to a provider id (a crash retry
+    /// re-creates under the same deterministic create-id, so the server dedups).
+    /// A queued save op on the same key IS the ensure step (it flushes eagerly
+    /// on its own), and a failure here only warns — cross-device visibility
+    /// degrades, the submit step is untouched.
     ///
-    /// On a parked send (`DispatchUncertain`) this is never reached — the
-    /// draft is KEPT as the user's recovery artifact (D125); consumption
-    /// happens only on settled success.
-    pub(super) async fn settle_send_overlay(
-        &self,
-        account_id: &AccountId,
-        operation: &Operation,
-        events: &mut Vec<DomainEvent>,
-    ) -> Result<(), ServiceError> {
-        // The payload decoded to push the send, so a failure here is
-        // unreachable in practice; it must not un-settle the settled send.
-        let Ok(posthaste_domain_model::MailIntent::Send(request)) = operation.intent() else {
-            return Ok(());
-        };
-        // Consumed draft: forget the mapping (confirmed destruction — the
-        // gateway destroyed the provider copy), hide/drop the local row, and
-        // echo the deletion so the client's Drafts list prunes.
-        if let Some(key) = request
-            .draft_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|key| !key.is_empty())
-        {
-            let live = self
-                .draft_registry
-                .resolve_draft_entity(account_id, key)?
-                .unwrap_or_else(|| key.to_string());
-            let live_id = MessageId::from(live.as_str());
-            self.draft_registry.remove_draft_alias(account_id, key)?;
-            let base_has_row = {
-                let overlay = self.overlay.clone();
-                let owned_account = account_id.clone();
-                let owned_message = live_id.clone();
-                offload(move || overlay.read_base_message_record(&owned_account, &owned_message))
-                    .await?
-                    .is_some()
-            };
-            {
-                let overlay = self.overlay.clone();
-                let owned_account = account_id.clone();
-                let owned_message = live_id.clone();
-                offload(move || {
-                    if base_has_row {
-                        // Hide the destroyed provider copy until sync prunes
-                        // it from base.
-                        overlay.tombstone_overlay_message(&owned_account, &owned_message)
-                    } else {
-                        overlay.remove_overlay_message(&owned_account, &owned_message)
-                    }
-                })
-                .await?;
-            }
-            events.push(self.events.append_event(
-                account_id,
-                EVENT_TOPIC_MESSAGE_UPDATED,
-                None,
-                Some(&live_id),
-                serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
-            )?);
-        }
-        // Pin the provisional Sent row: the op is settled (no longer folded),
-        // so the entry is the "applied awaiting convergence" representation;
-        // the sweep's adoption retires it once the provider copy lands in
-        // base under its own id.
-        let send_row_id = MessageId::from(operation.entity.id.as_str());
-        let sent_mailbox = self.mailbox_id_by_role(account_id, "sent")?;
-        let record = crate::service::replay::synthesize_sent_record(
-            &request,
-            operation,
-            sent_mailbox.as_ref(),
-            &send_row_id,
-        );
-        {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            offload(move || overlay.upsert_overlay_message(&owned_account, &record)).await?;
-        }
-        if let Some(summary) = self
-            .message_detail_reader
-            .get_message_summary(account_id, &send_row_id)?
-        {
-            let scope = summary.mailbox_ids.first().cloned();
-            events.push(self.events.append_event(
-                account_id,
-                EVENT_TOPIC_MESSAGE_UPDATED,
-                scope.as_ref(),
-                Some(&send_row_id),
-                serde_json::json!({
-                    "messageId": send_row_id.as_str(),
-                    "changes": { "mailboxes": true },
-                    "projection": &summary,
-                }),
-            )?);
-        }
-        Ok(())
-    }
-
-    /// D173 step 1 — the eager ensure-draft for HELD sends: during the hold
-    /// the message is a REAL provider draft, visible and editable on every
-    /// device. Runs each flush pass, before the readiness-gated drain; the
-    /// registry is the step ledger — done = the compose key maps to a
-    /// provider id (a crash retry re-creates under the same deterministic
-    /// create-id, DS2, so the server dedups). A queued save op on the same
-    /// key IS the ensure step (it flushes eagerly on its own), and a failure
-    /// here only warns — cross-device visibility degrades, the submit step
-    /// is untouched.
+    /// The visible row is DERIVED: this step provider-creates the draft and
+    /// repoints the registry key → provider id, and `refresh_message_overlay`
+    /// then re-materializes the held send's draft-form row at the new id from
+    /// the send op's own payload (the fold follows the rotation via the
+    /// registry). No row is written directly here.
     pub(super) async fn ensure_drafts_for_held_sends(
         &self,
         account_id: &AccountId,
@@ -508,34 +400,32 @@ impl MailService {
                 .await
             {
                 Ok(new_id) => {
-                    // The rotation write IS the durable step-complete marker.
+                    // The rotation write IS the durable step-complete marker,
+                    // and the identity bridge: the held send's draft-form row
+                    // now derives at the provider id via the fold. Re-derive
+                    // both ends of the rotation and echo the row's move.
+                    let rotated = new_id.as_str() != key;
                     self.draft_registry
                         .set_draft_alias(account_id, key, new_id.as_str())?;
-                    if new_id.as_str() != key {
-                        // The admission-time row was pinned under the compose
-                        // KEY; the visible row now lives under the provider id.
-                        // Without this retire the key row leaks — a phantom
-                        // draft that survives both the send's settlement and an
-                        // undo (which each clean up only the RESOLVED live id).
-                        self.retire_rotated_draft_row(account_id, key, events)
+                    if rotated {
+                        self.refresh_message_overlay(account_id, &MessageId::from(key))
                             .await?;
+                        if self
+                            .message_detail_reader
+                            .get_message_summary(account_id, &MessageId::from(key))?
+                            .is_none()
+                        {
+                            events.push(self.events.append_event(
+                                account_id,
+                                EVENT_TOPIC_MESSAGE_UPDATED,
+                                None,
+                                Some(&MessageId::from(key)),
+                                serde_json::json!({ "messageId": key, "deleted": true }),
+                            )?);
+                        }
                     }
                     let live_id = MessageId::from(new_id.as_str());
-                    let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
-                    let record = crate::service::replay::synthesize_draft_record(
-                        None,
-                        &request,
-                        operation,
-                        drafts_mailbox.as_ref(),
-                        &live_id,
-                        key,
-                    );
-                    {
-                        let overlay = self.overlay.clone();
-                        let owned_account = account_id.clone();
-                        offload(move || overlay.upsert_overlay_message(&owned_account, &record))
-                            .await?;
-                    }
+                    self.refresh_message_overlay(account_id, &live_id).await?;
                     if let Some(summary) = self
                         .message_detail_reader
                         .get_message_summary(account_id, &live_id)?
@@ -569,20 +459,15 @@ impl MailService {
         Ok(())
     }
 
-    /// M70 (D136): resolve a draft op's stable key to the live entity id at
-    /// flush time — immediately before the gateway call — so the push targets
-    /// the freshest mapping the registry knows. This closes the in-flight-op
-    /// vs sync race M69 flagged: a sync chunk that repointed the registry (a
-    /// rotation observed from another device) between enqueue and flush is
-    /// reflected in the target.
+    /// Resolve a draft op's stable key to the live entity id at flush time —
+    /// immediately before the gateway call — so the push targets the freshest
+    /// mapping the registry knows. This closes the in-flight-op vs sync race: a
+    /// sync chunk that repointed the registry (a rotation observed from another
+    /// device) between enqueue and flush is reflected in the target.
     ///
-    /// `None` is the TYPED miss (D153, replacing the old silent
-    /// `unwrap_or_else(key)` fallback): the registry forgets only on CONFIRMED
-    /// destruction, so a miss means the draft is gone — the caller decides
-    /// what its op means then (a save re-creates; a discard settles as
-    /// already-done).
-    ///
-    /// @spec docs/eph/RFC-L2-draft-identity#22-d136--one-seam-the-draftregistry-port-resolve-at-flush
+    /// `None` is the TYPED miss: the registry forgets only on CONFIRMED
+    /// destruction, so a miss means the draft is gone — the caller decides what
+    /// its op means then (a save re-creates; a discard settles as already-done).
     pub(super) fn resolve_draft_flush_target(
         &self,
         account_id: &AccountId,
@@ -595,66 +480,22 @@ impl MailService {
             })
     }
 
-    /// Retire the visible row a draft was keyed under BEFORE a provider id
-    /// rotation (`old_live` → a new live id): tombstone it while base still
-    /// shows the destroyed predecessor (sync prunes it later), drop the
-    /// overlay entry otherwise, and echo the deletion so clients prune the
-    /// stale row. Shared by the draft-save settlement and the held-send
-    /// eager ensure-draft — the two places a rotation retires a row.
-    async fn retire_rotated_draft_row(
-        &self,
-        account_id: &AccountId,
-        old_live: &str,
-        events: &mut Vec<DomainEvent>,
-    ) -> Result<(), ServiceError> {
-        let old_id = MessageId::from(old_live);
-        let base_has_old = {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            let owned_message = old_id.clone();
-            offload(move || overlay.read_base_message_record(&owned_account, &owned_message))
-                .await?
-                .is_some()
-        };
-        {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            let owned_message = old_id.clone();
-            offload(move || {
-                if base_has_old {
-                    // Base still shows the destroyed rotation predecessor:
-                    // hide it until sync prunes it.
-                    overlay.tombstone_overlay_message(&owned_account, &owned_message)
-                } else {
-                    overlay.remove_overlay_message(&owned_account, &owned_message)
-                }
-            })
-            .await?;
-        }
-        // Prune the stale row client-side.
-        events.push(self.events.append_event(
-            account_id,
-            EVENT_TOPIC_MESSAGE_UPDATED,
-            None,
-            Some(&old_id),
-            serde_json::json!({ "messageId": old_live, "deleted": true }),
-        )?);
-        Ok(())
-    }
-
-    /// Post-settlement overlay maintenance for a draft save (NS2 Slice 3):
-    /// carry the settled draft's visible row across the provider id rotation
-    /// until sync confirms it into base.
+    /// Post-settlement overlay maintenance for a CONTENT op (a draft save or a
+    /// send): the op does not leave the log — it rests settled (`applied`),
+    /// still folded — so its visible row is re-derived, not written. A JMAP
+    /// draft update rotates the provider id (create-new + destroy-old), so the
+    /// derived row moves: at the OLD live id the fold no longer lands (the row
+    /// retires — prune echo), and at the NEW id the still-settled op folds (the
+    /// row materializes there — projection echo). A send does not rotate; its
+    /// single Sent row re-derives at the same id. The row leaves the log only
+    /// by causal truncation, once its provider copy is confirmed into base.
     ///
-    /// A JMAP draft update is create-new + destroy-old, so at settlement the
-    /// OLD live row is provider-destroyed (tombstone it if base still shows
-    /// it; drop its overlay entry otherwise) and the NEW id has no base row
-    /// yet (write the settled fold there — the "applied awaiting convergence"
-    /// representation; it retires when replay sees a base row exist at the
-    /// new id, at which point base truth takes over the entry).
-    /// A newer queued save for the same key refolds through the one lifecycle
-    /// function instead.
-    pub(super) async fn settle_draft_save_overlay(
+    /// A settled send also CONSUMES its originating draft: the gateway destroyed
+    /// the provider copy inside the send's own execution, so the registry
+    /// mapping is forgotten here (confirmed destruction — a later save/redeliver
+    /// resolves nothing, never a double-destroy) and the draft's live row is
+    /// tombstoned/dropped with a deletion echo.
+    pub(super) async fn settle_content_op_overlay(
         &self,
         account_id: &AccountId,
         operation: &Operation,
@@ -662,72 +503,99 @@ impl MailService {
         new_live: &str,
         events: &mut Vec<DomainEvent>,
     ) -> Result<(), ServiceError> {
-        let new_id = MessageId::from(new_live);
+        // A settled send: retire the consumed draft (confirmed destroyed) —
+        // forget the registry mapping BEFORE re-deriving, so the send op's fold
+        // no longer re-tombstones the resolved live id, and hide/drop that live
+        // row until sync prunes the provider copy from base.
+        if operation.kind == OperationKind::Send {
+            if let Ok(posthaste_domain_model::MailIntent::Send(request)) = operation.intent() {
+                if let Some(key) = request
+                    .draft_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                {
+                    let live = self
+                        .draft_registry
+                        .resolve_draft_entity(account_id, key)?
+                        .unwrap_or_else(|| key.to_string());
+                    let live_id = MessageId::from(live.as_str());
+                    self.draft_registry.remove_draft_alias(account_id, key)?;
+                    let base_has_row = {
+                        let overlay = self.overlay.clone();
+                        let owned_account = account_id.clone();
+                        let owned_message = live_id.clone();
+                        offload(move || {
+                            overlay.read_base_message_record(&owned_account, &owned_message)
+                        })
+                        .await?
+                        .is_some()
+                    };
+                    {
+                        let overlay = self.overlay.clone();
+                        let owned_account = account_id.clone();
+                        let owned_message = live_id.clone();
+                        offload(move || {
+                            if base_has_row {
+                                overlay.tombstone_overlay_message(&owned_account, &owned_message)
+                            } else {
+                                overlay.remove_overlay_message(&owned_account, &owned_message)
+                            }
+                        })
+                        .await?;
+                    }
+                    events.push(self.events.append_event(
+                        account_id,
+                        EVENT_TOPIC_MESSAGE_UPDATED,
+                        None,
+                        Some(&live_id),
+                        serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
+                    )?);
+                }
+            }
+        }
+        // The old live id, if the provider rotated it away: the fold now lands
+        // at the new id, so re-derive the old one to retire its stale row.
         if old_live != new_live {
-            self.retire_rotated_draft_row(account_id, old_live, events)
-                .await?;
+            let old_id = MessageId::from(old_live);
+            self.refresh_message_overlay(account_id, &old_id).await?;
+            if self
+                .message_detail_reader
+                .get_message_summary(account_id, &old_id)?
+                .is_none()
+            {
+                events.push(self.events.append_event(
+                    account_id,
+                    EVENT_TOPIC_MESSAGE_UPDATED,
+                    None,
+                    Some(&old_id),
+                    serde_json::json!({ "messageId": old_live, "deleted": true }),
+                )?);
+            }
         }
-        // A remaining queued draft op on the same key (a newer save, or a
-        // discard racing this settlement) owns the row now — refold it at the
-        // new id. Otherwise pin the settled fold there.
-        let key = operation.entity.id.as_str();
-        let has_remaining_draft_ops = self
-            .outbox
-            .list_unsettled_operations(account_id)?
-            .into_iter()
-            .any(|existing| {
-                existing.entity.kind == OperationEntityKind::Draft
-                    && existing.entity.id == key
-                    && matches!(
-                        existing.state,
-                        OperationState::Pending
-                            | OperationState::Inflight
-                            | OperationState::Applied
-                    )
-            });
-        if has_remaining_draft_ops {
-            self.refresh_message_overlay(account_id, &new_id).await?;
-        } else if let Ok(posthaste_domain_model::MailIntent::SaveDraft { request, .. }) =
-            operation.intent()
-        {
-            let base = {
-                let overlay = self.overlay.clone();
-                let owned_account = account_id.clone();
-                let owned_message = new_id.clone();
-                offload(move || overlay.read_base_message_record(&owned_account, &owned_message))
-                    .await?
-            };
-            let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
-            let record = synthesize_draft_record(
-                base,
-                &request,
-                operation,
-                drafts_mailbox.as_ref(),
-                &new_id,
-                key,
-            );
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            offload(move || overlay.upsert_overlay_message(&owned_account, &record)).await?;
-        }
-        // Projection echo at the new id: the client swaps the row instantly
-        // instead of waiting for the next sync.
-        if let Some(summary) = self
-            .message_detail_reader
-            .get_message_summary(account_id, &new_id)?
-        {
-            let scope = summary.mailbox_ids.first().cloned();
-            events.push(self.events.append_event(
-                account_id,
-                EVENT_TOPIC_MESSAGE_UPDATED,
-                scope.as_ref(),
-                Some(&new_id),
-                serde_json::json!({
-                    "messageId": new_id.as_str(),
-                    "changes": { "mailboxes": true },
-                    "projection": &summary,
-                }),
-            )?);
+        // Re-derive every row the settled op still folds (the new draft id, or
+        // the send's Sent row + consumed-draft tombstone) and project the
+        // survivors so the client swaps rows instantly instead of waiting for
+        // the next sync.
+        for row_id in self.op_touched_row_ids(account_id, operation)? {
+            self.refresh_message_overlay(account_id, &row_id).await?;
+            if let Some(summary) = self
+                .message_detail_reader
+                .get_message_summary(account_id, &row_id)?
+            {
+                let scope = summary.mailbox_ids.first().cloned();
+                events.push(self.events.append_event(
+                    account_id,
+                    EVENT_TOPIC_MESSAGE_UPDATED,
+                    scope.as_ref(),
+                    Some(&row_id),
+                    serde_json::json!({
+                        "messageId": row_id.as_str(),
+                        "changes": { "mailboxes": true },
+                        "projection": &summary,
+                    }),
+                )?);
+            }
         }
         Ok(())
     }

@@ -11,18 +11,18 @@
 //! comparing base state against a fold.
 //! [`MailService::refresh_message_overlay`] is the incremental unit (one
 //! row); [`MailService::replay_account_overrides`] is the full rebuild from
-//! (log, base) — always legal, and the recovery path that reproduces every
-//! DERIVED override row of a wiped view, settled ops included.
-//!
-//! Pinned rows (a `draft_id`-carrying draft row or a `phsend-` provisional
-//! Sent row, with no base row under them) are not override rows: their owning
-//! entity op has already settled and left the log, so they are not derivable
-//! from (log, base) and a wipe loses them. Replay passes them through
-//! unchanged wherever they exist.
+//! (log, base) — always legal, and the recovery path that reproduces EVERY row
+//! of a wiped view. Nothing is a non-derivable pass-through: an intent op's
+//! override row folds over base, and a CONTENT op's authored row (a draft's
+//! visible row, a send's provisional Sent row) is materialized from the op
+//! payload by the same fold. A row that predates the provider cannot outlive
+//! its op — wipe the view, replay, and every draft and provisional-Sent row
+//! reappears from the content ops still in the log.
 
 use posthaste_domain_model::{
-    AccountId, MailboxId, MessageId, MessageRecord, Operation, OperationEntityKind, OperationKind,
-    OperationState, SendMessageRequest, ServiceError, SyncObject, ThreadId,
+    AccountId, DomainEvent, MailboxId, MessageId, MessageRecord, Operation, OperationEntityKind,
+    OperationKind, OperationState, SendMessageRequest, ServiceError, SyncObject, ThreadId,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 
 use super::message_queries::{intent_fold_effect, project_record, FoldEffect};
@@ -49,12 +49,13 @@ enum OpRowRole {
     Entity(EntityFoldRole),
 }
 
-/// Synthesize the provisional Sent overlay row a due/dispatched send folds
-/// to: visible in Sent from dispatch, adopted (retired) once
-/// sync lands the provider copy — matched by the transport-shared
-/// `Message-ID` prefix ([`posthaste_domain_model::send_identity_prefix`]).
-/// The domain half of the stamped id is a best-effort guess from the sender
-/// (adoption ignores it).
+/// The derived visible row of a send content op: the provisional Sent row,
+/// materialized purely from the op payload. Visible in Sent from dispatch; it
+/// leaves the log by causal truncation once adoption records the provider copy
+/// (matched by the transport-shared `Message-ID` prefix,
+/// [`posthaste_domain_model::send_identity_prefix`]), at which point base
+/// serves the row. The domain half of the stamped id is a best-effort guess
+/// from the sender (adoption ignores it).
 pub(crate) fn synthesize_sent_record(
     request: &SendMessageRequest,
     operation: &Operation,
@@ -112,11 +113,13 @@ pub(crate) fn synthesize_sent_record(
     }
 }
 
-/// Synthesize the overlay row a queued draft save folds to: the
-/// draft is VISIBLE the moment its op is queued — no provider round trip, no
-/// sync lag. Body fields stay `None` (the overlay never carries bodies); the
-/// queued request itself is the content authority until the save settles
-/// (`get_draft_content` reads it back from the op payload).
+/// The derived visible row of a draft save content op, materialized purely
+/// from the op payload: the draft is VISIBLE the moment its op is queued — no
+/// provider round trip, no sync lag — and stays derived while the op rests
+/// settled (`applied`), leaving the log by causal truncation once its provider
+/// copy is in base. Body fields stay `None` (the overlay never carries bodies);
+/// the op payload is the content authority until the save's provider copy
+/// serves it (`get_draft_content` reads it back from the op payload).
 pub(crate) fn synthesize_draft_record(
     prior: Option<MessageRecord>,
     request: &SendMessageRequest,
@@ -178,26 +181,31 @@ pub(crate) fn synthesize_draft_record(
     }
 }
 
-/// The op states whose effects the replay folds: pending and inflight intent,
-/// plus settled (`applied`) ops awaiting causal truncation — their effect
-/// keeps serving until base catches up. A rejected/failed op folds nothing
-/// (base wins), and a parked send unwinds its fold explicitly.
+/// The op states whose effects the replay folds.
+///
+/// Pending and inflight ops fold (optimism in flight); settled (`applied`) ops
+/// fold too, awaiting causal truncation — their effect keeps serving until base
+/// catches up.
+///
+/// The Failed/DispatchUncertain boundary splits by op class. An INTENT op
+/// (flag/move/delete) is speculation: when it fails or parks it folds nothing
+/// and base wins. A CONTENT op (`putDraft`/`send`) carries authored mail that
+/// is never dropped: a permanently failed or dispatch-uncertain content op
+/// stays PARKED with its derived row still visible, so the user can keep or
+/// discard it from the outbox. Discard (removing the op) is the only thing that
+/// makes a content row vanish.
 fn is_replayable(op: &Operation) -> bool {
-    matches!(
-        op.state,
-        OperationState::Pending | OperationState::Inflight | OperationState::Applied
-    )
+    match op.state {
+        OperationState::Pending | OperationState::Inflight | OperationState::Applied => true,
+        OperationState::Failed | OperationState::DispatchUncertain => is_content_op(op),
+    }
 }
 
-/// A pinned overlay row — a settled draft save awaiting its provider copy
-/// (`draft_id` set) or a provisional Sent row awaiting adoption (`phsend-`
-/// identity). Not derivable from the log; replay passes it through unchanged.
-fn is_pinned_row(record: &MessageRecord) -> bool {
-    record.draft_id.is_some()
-        || record
-            .rfc_message_id
-            .as_deref()
-            .is_some_and(|rfc| rfc.starts_with("phsend-"))
+/// A content op carries authored mail — a draft save or a send. Its derived row
+/// is never speculation: it survives failure/park, and leaves only when the op
+/// is discarded or causally truncated.
+fn is_content_op(op: &Operation) -> bool {
+    op.kind.is_draft_save() || op.kind == OperationKind::Send
 }
 
 impl MailService {
@@ -214,16 +222,15 @@ impl MailService {
     /// the visible row).
     ///
     /// No replayable ops → the entry derives from base alone, so it is
-    /// removed (base shows through) — except the ownerless entity-plane
-    /// artifacts: a pinned row with no base row passes through unchanged (its
-    /// provider copy has not synced yet), and a tombstone over a surviving
-    /// base row keeps hiding it (the provider destroy has not synced out
-    /// yet). Folded-to-removed → tombstone. A
-    /// discard folding over no base row removes the entry (nothing to hide).
-    /// No base row under plain assertions → the entry is removed too (a
-    /// pending flag folds over nothing once a remote delete wins; only a
-    /// pending Destroy keeps its tombstone), so the visible row stays a pure
-    /// function of (log, base) plus the passed-through pins.
+    /// removed (base shows through) — except a tombstone over a surviving base
+    /// row, which keeps hiding it (the provider destroy has not synced out
+    /// yet). Folded-to-removed → tombstone. A discard folding over no base row
+    /// removes the entry (nothing to hide). No base row under plain assertions
+    /// → the entry is removed too (a pending flag folds over nothing once a
+    /// remote delete wins; only a pending Destroy keeps its tombstone), so the
+    /// visible row stays a pure function of (log, base) — content rows
+    /// included, since a content op that would materialize its row is itself a
+    /// replayable op and takes the folding path below.
     pub(crate) async fn refresh_message_overlay(
         &self,
         account_id: &AccountId,
@@ -258,27 +265,18 @@ impl MailService {
         }
         if message_ops.is_empty() && entity_ops.is_empty() {
             // No replayable op touches the row: the entry derives from base
-            // alone, so it is removed and base shows through — except the two
-            // ownerless entity-plane artifacts, which survive exactly while
-            // base has not absorbed their settled effect (existence checks,
-            // never a comparison of state):
-            // - a PINNED row over NO base row (a settled draft save / send
-            //   awaiting its provider copy) passes through unchanged;
-            // - a TOMBSTONE over a SURVIVING base row (a provider-destroyed
-            //   copy awaiting the sync prune) keeps hiding it — the sweep's
-            //   D175 repair owns the stuck case.
+            // alone, so it is removed and base shows through — except a
+            // TOMBSTONE over a SURVIVING base row (a provider-destroyed copy
+            // awaiting the sync prune), which keeps hiding it (an existence
+            // check, never a comparison of state); the sweep's lingering
+            // repair owns the stuck case. A content op that would materialize
+            // a row is itself replayable, so its row never reaches here — when
+            // it is truncated or discarded the fold is gone and the row is
+            // correctly removed.
             let account_id = account_id.clone();
             let message_id = message_id.clone();
             offload(
                 move || match overlay.read_overlay_message(&account_id, &message_id)? {
-                    Some(Some(folded))
-                        if is_pinned_row(&folded)
-                            && overlay
-                                .read_base_message_record(&account_id, &message_id)?
-                                .is_none() =>
-                    {
-                        Ok(())
-                    }
                     Some(None)
                         if overlay
                             .read_base_message_record(&account_id, &message_id)?
@@ -443,11 +441,9 @@ impl MailService {
                 } else {
                     // Plain assertions over no base row fold to nothing: the
                     // remote removal wins and the entry is dropped, keeping
-                    // the visible row derivable from (log, base) alone. A
-                    // pinned row is not this fold's output — pass it through.
+                    // the visible row derivable from (log, base) alone.
                     offload(move || {
                         match overlay.read_overlay_message(&account_id, &message_id)? {
-                            Some(Some(folded)) if is_pinned_row(&folded) => Ok(()),
                             Some(_) => overlay.remove_overlay_message(&account_id, &message_id),
                             None => Ok(()),
                         }
@@ -530,8 +526,7 @@ impl MailService {
     /// Every row id replay must visit for an account: the union of the rows
     /// the replayable log touches — settled-awaiting-truncation ops included,
     /// so a wiped derived row reappears from the log alone — and the rows
-    /// currently overlaid (so entries whose ops truncated are removed and
-    /// pinned rows are passed through unchanged).
+    /// currently overlaid (so entries whose ops truncated are removed).
     pub(crate) async fn replay_inventory(
         &self,
         account_id: &AccountId,
@@ -590,22 +585,30 @@ impl MailService {
     /// truncates. If a provider consistency blip ever breaks the causal
     /// assumption, the next replay serves base truth and the following sync
     /// self-corrects — a one-cycle flicker, never durable wrong state.
+    ///
+    /// Returns the prune echoes a truncation produces: when a CONTENT op's
+    /// derived row (a draft's local-key row, a provisional Sent row) retires
+    /// and no row survives in its place, a `message.updated{deleted}` echo
+    /// fires so the client drops the local/provisional id — the row's identity
+    /// changed to the provider's, and refreshing the overlay alone emits no
+    /// event.
     pub(crate) async fn truncate_settled_operations(
         &self,
         account_id: &AccountId,
         cycle_started_mono: i64,
-    ) -> Result<(), ServiceError> {
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
         let settled: Vec<posthaste_domain_model::SettledOperation> = {
             let outbox = self.outbox.clone();
             let account_id = account_id.clone();
             offload(move || outbox.list_settled_operations(&account_id)).await?
         };
         if settled.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let message_cursor = self
             .sync_state
             .get_cursor(account_id, SyncObject::Message)?;
+        let mut events = Vec::new();
         for settled_op in settled {
             let cycle_started_after_settlement =
                 settled_op.settled_at_mono.unwrap_or(0) < cycle_started_mono;
@@ -616,14 +619,46 @@ impl MailService {
             if !(cycle_started_after_settlement || watermark_reached) {
                 continue;
             }
+            let is_content = is_content_op(&settled_op.operation);
             let touched = self.op_touched_row_ids(account_id, &settled_op.operation)?;
             self.outbox.remove_operation(&settled_op.operation.id)?;
             for message_id in touched {
+                // A content op's derived row changes identity to the provider's
+                // when truncated: capture whether the DERIVED overlay entry
+                // existed so a prune echo can drop the retired local/provisional
+                // id client-side. The overlay entry (not the effective read) is
+                // the signal — the row's local/provisional id has no base row,
+                // so base cannot serve it once the derived entry retires.
+                let had_derived_entry = is_content && {
+                    let overlay = self.overlay.clone();
+                    let owned_account = account_id.clone();
+                    let owned_row = message_id.clone();
+                    offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
+                        .await?
+                        .is_some()
+                };
                 self.refresh_message_overlay(account_id, &message_id)
                     .await?;
+                let derived_entry_retired = had_derived_entry && {
+                    let overlay = self.overlay.clone();
+                    let owned_account = account_id.clone();
+                    let owned_row = message_id.clone();
+                    offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
+                        .await?
+                        .is_none()
+                };
+                if derived_entry_retired {
+                    events.push(self.events.append_event(
+                        account_id,
+                        EVENT_TOPIC_MESSAGE_UPDATED,
+                        None,
+                        Some(&message_id),
+                        serde_json::json!({ "messageId": message_id.as_str(), "deleted": true }),
+                    )?);
+                }
             }
         }
-        Ok(())
+        Ok(events)
     }
 
     /// Incremental replay for one sync base write: re-derive every written
