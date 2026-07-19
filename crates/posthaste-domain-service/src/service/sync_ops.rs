@@ -271,44 +271,44 @@ impl MailService {
         publish(&sweep_events);
         events.extend(sweep_events);
         let sync_event = self.events.append_event(
-        account_id,
-        EVENT_TOPIC_SYNC_COMPLETED,
-        None,
-        None,
-        // Typed contract: `posthaste_domain_model::SyncCompletedPayload`
-        // (mirrored into the client protocol).
-        serde_json::to_value(posthaste_domain_model::SyncCompletedPayload {
-            mailbox_count,
-            message_count: sync_messages.len(),
-            deleted_imap_location_count,
-            deleted_message_count,
-            automation_event_count: action_count,
-            trigger,
-            mode,
-            resources: vec![
-                posthaste_domain_model::SyncResourceRef {
-                    kind: "sync".to_string(),
-                    operation: "completed".to_string(),
-                    account_id: account_id.clone(),
-                    mode: Some(mode),
-                },
-                posthaste_domain_model::SyncResourceRef {
-                    kind: "mailbox".to_string(),
-                    operation: "refreshed".to_string(),
-                    account_id: account_id.clone(),
-                    mode: None,
-                },
-                posthaste_domain_model::SyncResourceRef {
-                    kind: "message".to_string(),
-                    operation: "refreshed".to_string(),
-                    account_id: account_id.clone(),
-                    mode: None,
-                },
-            ],
-            post_commit_errors,
-        })
-        .unwrap_or(serde_json::Value::Null),
-    )?;
+            account_id,
+            EVENT_TOPIC_SYNC_COMPLETED,
+            None,
+            None,
+            // Typed contract: `posthaste_domain_model::SyncCompletedPayload`
+            // (mirrored into the client protocol).
+            serde_json::to_value(posthaste_domain_model::SyncCompletedPayload {
+                mailbox_count,
+                message_count: sync_messages.len(),
+                deleted_imap_location_count,
+                deleted_message_count,
+                automation_event_count: action_count,
+                trigger,
+                mode,
+                resources: vec![
+                    posthaste_domain_model::SyncResourceRef {
+                        kind: "sync".to_string(),
+                        operation: "completed".to_string(),
+                        account_id: account_id.clone(),
+                        mode: Some(mode),
+                    },
+                    posthaste_domain_model::SyncResourceRef {
+                        kind: "mailbox".to_string(),
+                        operation: "refreshed".to_string(),
+                        account_id: account_id.clone(),
+                        mode: None,
+                    },
+                    posthaste_domain_model::SyncResourceRef {
+                        kind: "message".to_string(),
+                        operation: "refreshed".to_string(),
+                        account_id: account_id.clone(),
+                        mode: None,
+                    },
+                ],
+                post_commit_errors,
+            })
+            .unwrap_or(serde_json::Value::Null),
+        )?;
         publish(std::slice::from_ref(&sync_event));
         events.push(sync_event);
         Ok(events)
