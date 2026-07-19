@@ -161,7 +161,7 @@ fn migrate_legacy_message_fts(connection: &Connection) -> Result<(), StoreError>
 /// or TRANSFORMATIVE changes (drops, renames, data rewrites, trigger
 /// replacements) are numbered migrations below — run exactly once per
 /// database, each in its own transaction, in order.
-pub(crate) const SCHEMA_VERSION: i64 = 3;
+pub(crate) const SCHEMA_VERSION: i64 = 4;
 
 /// The full open-time schema flow (replaces bare `init_schema` at the open
 /// call site):
@@ -216,6 +216,7 @@ fn apply_migration(tx: &Connection, version: i64) -> Result<(), StoreError> {
         1 => v1_retire_mailbox_counters(tx),
         2 => v2_recover_conflicted_outbox_rows(tx),
         3 => v3_drop_outbox_depends_on(tx),
+        4 => v4_normalize_received_at_to_utc(tx),
         other => Err(StoreError::Failure(format!(
             "unknown schema migration {other}"
         ))),
@@ -271,6 +272,49 @@ fn v3_drop_outbox_depends_on(tx: &Connection) -> Result<(), StoreError> {
     if has_column {
         tx.execute_batch("ALTER TABLE outbox_operation DROP COLUMN depends_on")
             .map_err(sql_to_store_error)?;
+    }
+    Ok(())
+}
+
+/// v4: rewrite offset-bearing `received_at` values to the canonical UTC `…Z`
+/// RFC 3339 shape. The IMAP header mapper used to serialize the Date header
+/// with its original offset (`2026-07-17T13:23:00+02:00`) while the JMAP path
+/// always emitted UTC; the store sorts these columns as TEXT, so mixed
+/// offsets made lexicographic order diverge from chronological order — a
+/// row could land pages away from its true position (the mail list's
+/// out-of-order DATE RECEIVED bug). The ingestion fix normalizes new rows;
+/// this rewrites the ones already stored, across every column that carries
+/// the value (`message`, the optimistic `message_overlay`, and the
+/// `conversation` projection's `latest_received_at`).
+///
+/// `strftime` parses ISO-8601 with a trailing offset and renders UTC; a
+/// value it cannot parse yields NULL and is left untouched (COALESCE) —
+/// better an odd sort key than destroying data or violating NOT NULL.
+fn v4_normalize_received_at_to_utc(tx: &Connection) -> Result<(), StoreError> {
+    for (table, column) in [
+        ("message", "received_at"),
+        ("message_overlay", "received_at"),
+        ("conversation", "latest_received_at"),
+    ] {
+        let has_table: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table],
+                |row| row.get(0),
+            )
+            .map_err(sql_to_store_error)?;
+        if !has_table {
+            continue;
+        }
+        tx.execute(
+            &format!(
+                "UPDATE {table}
+                 SET {column} = COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', {column}), {column})
+                 WHERE {column} NOT LIKE '%Z'"
+            ),
+            [],
+        )
+        .map_err(sql_to_store_error)?;
     }
     Ok(())
 }

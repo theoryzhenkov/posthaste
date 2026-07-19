@@ -21,6 +21,7 @@ posthaste-domain-service = { path = "../../../crates/posthaste-domain-service" }
 posthaste-engine = { path = "../../../crates/posthaste-engine" }
 posthaste-imap = { path = "../../../crates/posthaste-imap" }
 posthaste-observability = { path = "../../../crates/posthaste-observability" }
+posthaste-query-grammar = { path = "../../../crates/posthaste-query-grammar" }
 posthaste-store = { path = "../../../crates/posthaste-store" }
 
 async-stream = "0.3"

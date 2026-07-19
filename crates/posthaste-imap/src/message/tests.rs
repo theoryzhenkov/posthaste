@@ -37,9 +37,11 @@ fn maps_header_metadata_without_fetching_body() {
         mapped.message.from_email.as_deref(),
         Some("alice@example.test")
     );
+    // UTC-normalized from `14:22:01 -0800`: TEXT sort order in the store is
+    // only chronological when every received_at shares the `…Z` shape.
     assert_eq!(
         mapped.message.received_at,
-        "2021-11-20T14:22:01-08:00".to_string()
+        "2021-11-20T22:22:01Z".to_string()
     );
     assert_eq!(mapped.message.keywords, vec!["$flagged", "$seen"]);
     assert_eq!(mapped.message.body_text, None);

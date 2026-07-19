@@ -7,6 +7,7 @@ use posthaste_domain_model::{
     MailQueryOperator, MailQueryRule, MailQueryRuleNode, MailQueryValue, MessageCursor, MessageId,
     SortDirection,
 };
+use posthaste_query_grammar::parse_query;
 
 use super::{ApiFailure, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT};
 use crate::AppState;
@@ -41,12 +42,12 @@ pub(crate) fn evaluate_mail_list(
             // The saved rule scopes the list; the remaining filters AND on
             // top of it.
             let smart_mailbox = app.service.get_smart_mailbox(smart_mailbox_id)?;
-            let mut root = mail_list_rule(&query).root;
+            let mut root = mail_list_rule(&query)?.root;
             root.nodes
                 .insert(0, MailQueryRuleNode::Group(smart_mailbox.rule.root));
             MailQueryRule { root }
         }
-        None => mail_list_rule(&query),
+        None => mail_list_rule(&query)?,
     };
     let page = app.service.query_message_page_by_rule(
         &rule,
@@ -62,9 +63,11 @@ pub(crate) fn evaluate_mail_list(
 }
 
 /// Compile the mail-list filters into the shared mail-query AST: scope and
-/// flag filters AND together; free text is an OR group over subject, sender
-/// name/email, recipients, preview, and the cached body index.
-fn mail_list_rule(query: &MailListQuery) -> MailQueryRule {
+/// flag filters AND together; `freeText` is parsed by the one query grammar
+/// (`posthaste-query-grammar`), so prefixed tokens (`conversation:`, `from:`,
+/// `is:`, ...) become field conditions and bare words become the grammar's
+/// free-text OR group. A string the grammar rejects is a malformed request.
+fn mail_list_rule(query: &MailListQuery) -> Result<MailQueryRule, ApiFailure> {
     fn condition(field: MailQueryField, value: MailQueryValue) -> MailQueryRuleNode {
         MailQueryRuleNode::Condition(MailQueryCondition {
             field,
@@ -111,34 +114,17 @@ fn mail_list_rule(query: &MailListQuery) -> MailQueryRule {
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        let contains = |field| {
-            MailQueryRuleNode::Condition(MailQueryCondition {
-                field,
-                operator: MailQueryOperator::Contains,
-                negated: false,
-                value: MailQueryValue::String(text.to_string()),
-            })
-        };
-        nodes.push(MailQueryRuleNode::Group(MailQueryGroup {
-            operator: MailQueryGroupOperator::Any,
-            negated: false,
-            nodes: vec![
-                contains(MailQueryField::Subject),
-                contains(MailQueryField::FromName),
-                contains(MailQueryField::FromEmail),
-                contains(MailQueryField::To),
-                contains(MailQueryField::Preview),
-                contains(MailQueryField::Body),
-            ],
-        }));
+        let parsed = parse_query(text)
+            .map_err(|error| ApiFailure::malformed(format!("invalid search query: {error}")))?;
+        nodes.push(MailQueryRuleNode::Group(parsed.root));
     }
-    MailQueryRule {
+    Ok(MailQueryRule {
         root: MailQueryGroup {
             operator: MailQueryGroupOperator::All,
             negated: false,
             nodes,
         },
-    }
+    })
 }
 
 /// Opaque mail-list cursor codec:
@@ -184,6 +170,40 @@ fn parse_message_cursor(cursor: &str) -> Result<MessageCursor, ApiFailure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: `freeText` goes through the query grammar, so a prefixed
+    /// token like `conversation:<id>` compiles to a field condition — not a
+    /// literal substring search that can never match (the "show conversation
+    /// returns empty" bug).
+    #[test]
+    fn free_text_is_parsed_by_the_query_grammar() {
+        let query = MailListQuery {
+            free_text: Some("conversation:conv-abc123".to_string()),
+            ..Default::default()
+        };
+        let rule = mail_list_rule(&query).expect("valid query");
+        let [MailQueryRuleNode::Group(parsed)] = rule.root.nodes.as_slice() else {
+            panic!("expected the parsed grammar group, got {:?}", rule.root.nodes);
+        };
+        let [MailQueryRuleNode::Condition(condition)] = parsed.nodes.as_slice() else {
+            panic!("expected one condition, got {:?}", parsed.nodes);
+        };
+        assert_eq!(condition.field, MailQueryField::ConversationId);
+        assert_eq!(condition.operator, MailQueryOperator::Equals);
+        assert_eq!(
+            condition.value,
+            MailQueryValue::String("conv-abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn free_text_the_grammar_rejects_is_malformed() {
+        let query = MailListQuery {
+            free_text: Some("is:definitely-not-a-flag".to_string()),
+            ..Default::default()
+        };
+        assert!(mail_list_rule(&query).is_err());
+    }
 
     #[test]
     fn message_cursor_round_trips_multibyte_sort_values() {
