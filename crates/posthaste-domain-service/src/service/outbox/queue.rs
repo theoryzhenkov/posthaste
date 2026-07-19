@@ -104,18 +104,13 @@ impl MailService {
                         .resolve_draft_entity(&operation.account_id, &operation.entity.id)?
                         .unwrap_or_else(|| operation.entity.id.clone());
                     let live_id = MessageId::from(live.as_str());
-                    let was_visible = self
-                        .message_detail_reader
-                        .get_message_summary(&operation.account_id, &live_id)?
-                        .is_some();
-                    self.refresh_message_overlay(&operation.account_id, &live_id)
+                    // Atomic retire echo: the in-txn diff is the retire signal —
+                    // no before/after reads (closes the TOCTOU a racing base
+                    // write could flip between them).
+                    let diff = self
+                        .refresh_message_overlay(&operation.account_id, &live_id)
                         .await?;
-                    if was_visible
-                        && self
-                            .message_detail_reader
-                            .get_message_summary(&operation.account_id, &live_id)?
-                            .is_none()
-                    {
+                    if diff.effectively_retired() {
                         events.push(self.events.append_event(
                             &operation.account_id,
                             EVENT_TOPIC_MESSAGE_UPDATED,
@@ -157,20 +152,13 @@ impl MailService {
         let account_id = &operation.account_id;
         let mut events = Vec::new();
         let send_row_id = MessageId::from(operation.entity.id.as_str());
-        let send_row_was_visible = self
-            .message_detail_reader
-            .get_message_summary(account_id, &send_row_id)?
-            .is_some();
         // The provisional Sent row is derived from the (now-removed) send op:
         // re-derive so it retires, and prune it client-side if it was showing.
-        self.refresh_message_overlay(account_id, &send_row_id)
+        // The in-txn diff is the retire signal — no before/after reads.
+        let diff = self
+            .refresh_message_overlay(account_id, &send_row_id)
             .await?;
-        if send_row_was_visible
-            && self
-                .message_detail_reader
-                .get_message_summary(account_id, &send_row_id)?
-                .is_none()
-        {
+        if diff.effectively_retired() {
             events.push(self.events.append_event(
                 account_id,
                 EVENT_TOPIC_MESSAGE_UPDATED,
@@ -504,48 +492,41 @@ impl MailService {
             )),
             None => None,
         };
-        let consumed_was_visible = match &consumed_live {
-            Some(live_id) => self
-                .message_detail_reader
-                .get_message_summary(account_id, live_id)?
-                .is_some(),
-            None => false,
-        };
         self.refresh_message_overlay(account_id, &send_row_id)
             .await?;
         if let Some(live_id) = &consumed_live {
-            self.refresh_message_overlay(account_id, live_id).await?;
-            match self
+            // In-txn retire signal — no before/after reads (closes the TOCTOU).
+            // The projection branch still reads the effective summary for its
+            // content; the overlay-plane derive can't produce the joined
+            // MessageSummary (account/conversation/version fields it lacks).
+            let diff = self.refresh_message_overlay(account_id, live_id).await?;
+            if diff.effectively_retired() {
+                // The fold hid a visible row (a due consuming send): prune it.
+                events.push(self.events.append_event(
+                    account_id,
+                    EVENT_TOPIC_MESSAGE_UPDATED,
+                    None,
+                    Some(live_id),
+                    serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
+                )?);
+            } else if let Some(summary) = self
                 .message_detail_reader
                 .get_message_summary(account_id, live_id)?
             {
-                // The fold hid a visible row (a due consuming send): prune it.
-                None if consumed_was_visible => {
-                    events.push(self.events.append_event(
-                        account_id,
-                        EVENT_TOPIC_MESSAGE_UPDATED,
-                        None,
-                        Some(live_id),
-                        serde_json::json!({ "messageId": live_id.as_str(), "deleted": true }),
-                    )?);
-                }
                 // A held send's draft-form row (appeared or refreshed):
                 // project it so the hold is visible without any client save.
-                Some(summary) => {
-                    let scope = summary.mailbox_ids.first().cloned();
-                    events.push(self.events.append_event(
-                        account_id,
-                        EVENT_TOPIC_MESSAGE_UPDATED,
-                        scope.as_ref(),
-                        Some(live_id),
-                        serde_json::json!({
-                            "messageId": live_id.as_str(),
-                            "changes": { "mailboxes": true },
-                            "projection": &summary,
-                        }),
-                    )?);
-                }
-                None => {}
+                let scope = summary.mailbox_ids.first().cloned();
+                events.push(self.events.append_event(
+                    account_id,
+                    EVENT_TOPIC_MESSAGE_UPDATED,
+                    scope.as_ref(),
+                    Some(live_id),
+                    serde_json::json!({
+                        "messageId": live_id.as_str(),
+                        "changes": { "mailboxes": true },
+                        "projection": &summary,
+                    }),
+                )?);
             }
         }
         if let Some(summary) = self

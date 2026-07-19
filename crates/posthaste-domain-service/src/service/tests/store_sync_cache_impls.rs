@@ -195,21 +195,39 @@ impl crate::CacheStore for TestStore {
     }
 }
 
+/// A row's EFFECTIVE visibility from its overlay entry and base presence:
+/// a folded overlay row serves it; a tombstone hides base; an absent overlay
+/// lets base show through. Mirrors the store's `overlay_effective_visible`.
+fn overlay_entry_effective_visible(
+    overlay: Option<Option<&MessageRecord>>,
+    base_present: bool,
+) -> bool {
+    match overlay {
+        Some(Some(_)) => true,
+        Some(None) => false,
+        None => base_present,
+    }
+}
+
 /// In-memory mirror of the store's `apply_overlay_mutation_tx` for the test
 /// double: apply one fold mutation to the overlay map, returning the row's
-/// resulting visibility (`Keep` preserves `was_visible`). Shared by the test
-/// store's `derive_overlay` and `remove_op_and_derive` so the mutation→write
-/// mapping lives in one place, matching the production helper.
+/// resulting `(now_visible, now_effective)` (`Keep` preserves the prior
+/// values; `Upsert` visible/effective; `Tombstone` hides both; `Remove`
+/// not-visible, effective iff `base_present`). Shared by the test store's
+/// `derive_overlay` and `remove_op_and_derive`, matching production.
 fn apply_mutation_to_overlay_map(
     overlay: &mut std::collections::BTreeMap<String, Option<MessageRecord>>,
     message_id: &MessageId,
     mutation: OverlayMutation,
     was_visible: bool,
-) -> bool {
-    let now_visible = match &mutation {
-        OverlayMutation::Upsert(_) => true,
-        OverlayMutation::Tombstone | OverlayMutation::Remove => false,
-        OverlayMutation::Keep => was_visible,
+    was_effective: bool,
+    base_present: bool,
+) -> (bool, bool) {
+    let (now_visible, now_effective) = match &mutation {
+        OverlayMutation::Upsert(_) => (true, true),
+        OverlayMutation::Tombstone => (false, false),
+        OverlayMutation::Remove => (false, base_present),
+        OverlayMutation::Keep => (was_visible, was_effective),
     };
     let key = message_id.as_str().to_string();
     match mutation {
@@ -224,7 +242,7 @@ fn apply_mutation_to_overlay_map(
         }
         OverlayMutation::Keep => {}
     }
-    now_visible
+    (now_visible, now_effective)
 }
 
 impl MessageOverlayStore for TestStore {
@@ -410,6 +428,12 @@ impl MessageOverlayStore for TestStore {
             .iter()
             .find(|m| m.role.as_deref() == Some("sent"))
             .map(|m| m.id.clone());
+        let base_present = base.is_some();
+        let was_visible = overlay_entry.as_ref().is_some_and(|entry| entry.is_some());
+        let was_effective = overlay_entry_effective_visible(
+            overlay_entry.as_ref().map(|o| o.as_ref()),
+            base_present,
+        );
         let snapshot = DeriveSnapshot {
             base,
             overlay: overlay_entry,
@@ -418,16 +442,20 @@ impl MessageOverlayStore for TestStore {
             drafts_mailbox,
             sent_mailbox,
         };
-        let was_visible = snapshot
-            .overlay
-            .as_ref()
-            .is_some_and(|entry| entry.is_some());
         let mutation = fold(&snapshot)?;
-        let now_visible =
-            apply_mutation_to_overlay_map(&mut overlay, message_id, mutation, was_visible);
+        let (now_visible, now_effective) = apply_mutation_to_overlay_map(
+            &mut overlay,
+            message_id,
+            mutation,
+            was_visible,
+            was_effective,
+            base_present,
+        );
         Ok(DeriveDiff {
             was_visible,
             now_visible,
+            was_effective,
+            now_effective,
         })
     }
 
@@ -495,7 +523,12 @@ impl MessageOverlayStore for TestStore {
                 }
             };
             let overlay_entry = overlay.get(row_id.as_str()).cloned();
+            let base_present = base.is_some();
             let was_visible = overlay_entry.as_ref().is_some_and(|entry| entry.is_some());
+            let was_effective = overlay_entry_effective_visible(
+                overlay_entry.as_ref().map(|o| o.as_ref()),
+                base_present,
+            );
             let snapshot = DeriveSnapshot {
                 base: base.clone(),
                 overlay: overlay_entry,
@@ -505,11 +538,19 @@ impl MessageOverlayStore for TestStore {
                 sent_mailbox: sent_mailbox.clone(),
             };
             let mutation = fold(row_id, &snapshot)?;
-            let now_visible =
-                apply_mutation_to_overlay_map(&mut overlay, row_id, mutation, was_visible);
+            let (now_visible, now_effective) = apply_mutation_to_overlay_map(
+                &mut overlay,
+                row_id,
+                mutation,
+                was_visible,
+                was_effective,
+                base_present,
+            );
             diffs.push(DeriveDiff {
                 was_visible,
                 now_visible,
+                was_effective,
+                now_effective,
             });
         }
         Ok(diffs)

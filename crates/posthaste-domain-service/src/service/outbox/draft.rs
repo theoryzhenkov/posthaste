@@ -408,13 +408,10 @@ impl MailService {
                     self.draft_registry
                         .set_draft_alias(account_id, key, new_id.as_str())?;
                     if rotated {
-                        self.refresh_message_overlay(account_id, &MessageId::from(key))
+                        let diff = self
+                            .refresh_message_overlay(account_id, &MessageId::from(key))
                             .await?;
-                        if self
-                            .message_detail_reader
-                            .get_message_summary(account_id, &MessageId::from(key))?
-                            .is_none()
-                        {
+                        if diff.effectively_retired() {
                             events.push(self.events.append_event(
                                 account_id,
                                 EVENT_TOPIC_MESSAGE_UPDATED,
@@ -558,12 +555,8 @@ impl MailService {
         // at the new id, so re-derive the old one to retire its stale row.
         if old_live != new_live {
             let old_id = MessageId::from(old_live);
-            self.refresh_message_overlay(account_id, &old_id).await?;
-            if self
-                .message_detail_reader
-                .get_message_summary(account_id, &old_id)?
-                .is_none()
-            {
+            let diff = self.refresh_message_overlay(account_id, &old_id).await?;
+            if diff.effectively_retired() {
                 events.push(self.events.append_event(
                     account_id,
                     EVENT_TOPIC_MESSAGE_UPDATED,

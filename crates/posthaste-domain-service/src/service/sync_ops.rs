@@ -579,6 +579,9 @@ impl MailService {
                 })
                 .await?
             };
+            // The provisional Sent id has NO base successor (the provider copy
+            // lands under its own id), so the overlay-entry retire is the
+            // prune signal — `retired()`, not `effectively_retired()`.
             if diff.into_iter().next().is_some_and(|d| d.retired()) {
                 events.push(self.events.append_event(
                     account_id,
