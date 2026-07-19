@@ -69,11 +69,12 @@ export interface KeyboardControllerProps {
   effectiveSurfaceOpen: boolean
   overlayOwnsInput: boolean
   hasSelectedMessage: boolean
+  hasOpenedMessage: boolean
   hasSearchQuery: boolean
   onOpenCommandPalette: () => void
   onUndo: () => void
   onRedo: () => void
-  onClearSelectedMessage: () => void
+  onCloseReader: () => void
   onClearSearchQuery: () => void
   /** A PARAMETERIZED action's chord (e.g. `m` → move-to-mailbox) can't run
    *  bare — this opens the command palette in that action's pick-step. */
@@ -174,6 +175,7 @@ export function KeyboardController({
         effectiveSurfaceOpen: p.effectiveSurfaceOpen,
         overlayOwnsInput: p.overlayOwnsInput,
         hasSelectedMessage: p.hasSelectedMessage,
+        hasOpenedMessage: p.hasOpenedMessage,
         hasSearchQuery: p.hasSearchQuery,
         activePane: pane,
         availablePanes: panes,
@@ -187,7 +189,7 @@ export function KeyboardController({
         onOpenCommandPalette: p.onOpenCommandPalette,
         onUndo: p.onUndo,
         onRedo: p.onRedo,
-        onClearSelectedMessage: p.onClearSelectedMessage,
+        onCloseReader: p.onCloseReader,
         onClearSearchQuery: p.onClearSearchQuery,
         // The registry tier is rebuilt per keydown from the ref snapshot (never
         // render-scope state) so it never races focus/selection changes.

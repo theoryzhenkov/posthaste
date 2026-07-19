@@ -264,11 +264,12 @@ export function MailClient({
           isTagEditorOpen
         }
         hasSelectedMessage={selectedMessage !== null || openedMessage !== null}
+        hasOpenedMessage={openedMessage !== null}
         hasSearchQuery={searchQuery.trim().length > 0}
         onOpenCommandPalette={handleOpenCommandPalette}
         onUndo={undoRedo.undo}
         onRedo={undoRedo.redo}
-        onClearSelectedMessage={handlers.handleClearSelectedMessage}
+        onCloseReader={handlers.handleCloseReader}
         onClearSearchQuery={handlers.handleRejectSearchPreview}
         onOpenActionPicker={handleOpenActionPicker}
         onGoto={gotoNavigation.goto}

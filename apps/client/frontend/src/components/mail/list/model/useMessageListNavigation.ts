@@ -12,8 +12,11 @@ import { messageKey } from './model'
  * here only when the list (or detail, which reuses it) is focused; archive and
  * trash live in the controller as selection-scoped actions.
  *
- * `j`/`k` moves the SELECTION cursor only; Enter OPENS the cursor row in the
- * reader (realigning the ACTIVE message with the cursor).
+ * `j`/`k` moves the cursor AND opens the row in the reader (fused
+ * navigation). The cursor diverges from the opened message only when the
+ * reader is closed (Escape) or a view switch lands the anchor on the first
+ * row — the muted highlight then marks where `j`/`k` resumes; Enter re-opens
+ * the anchored row.
  */
 export function useMessageListNavigation({
   currentViewKey,
@@ -29,7 +32,8 @@ export function useMessageListNavigation({
   currentViewKey: string
   messages: MessageSummary[]
   onClearSelection: () => void
-  /** Move the SELECTION cursor only; the reader stays put. */
+  /** Move the SELECTION cursor only (anchor placement; the reader stays
+   *  put). `j`/`k` navigation uses `onOpenMessage` instead. */
   onSelectMessage: (message: MailSelection) => void
   /** OPEN a message: reader shows it and the cursor aligns with it. */
   onOpenMessage: (message: MailSelection) => void
@@ -106,10 +110,18 @@ export function useMessageListNavigation({
         rememberedSlot,
       })
       if (nextIndex === null) return
-      onSelectMessage(toSelection(messages[nextIndex]))
+      onOpenMessage(toSelection(messages[nextIndex]))
     },
-    [messages, onSelectMessage, selectedKey, currentViewKey],
+    [messages, onOpenMessage, selectedKey, currentViewKey],
   )
+
+  // The standing anchor: a list with rows always shows where `j`/`k` acts.
+  // A cleared cursor (view switch, app start) lands on the first row without
+  // opening it; Escape keeps the cursor, so this only fills a true void.
+  useEffect(() => {
+    if (selectedKey !== null || messages.length === 0) return
+    onSelectMessage(toSelection(messages[0]))
+  }, [messages, selectedKey, onSelectMessage])
 
   const openSelected = useCallback(() => {
     const current = messages.find(

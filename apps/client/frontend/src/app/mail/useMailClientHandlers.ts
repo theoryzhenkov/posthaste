@@ -135,10 +135,14 @@ export function useMailClientHandlers(input: {
     handleAddTag,
     handleRemoveTag,
     handleApplySearch: (query: string) => applySearchQuery(query),
+    // Full clear — the empty-list path (no rows left to anchor on).
     handleClearSelectedMessage: () => {
       setSelectedMessage(null)
       setOpenedMessage(null)
     },
+    // Escape: close the reader; the cursor stays as the muted anchor that
+    // shows where `j`/`k` resumes.
+    handleCloseReader: () => setOpenedMessage(null),
     handleCloseCommandPalette: () => setIsCommandPaletteOpen(false),
     handleCompose: compose.openCompose,
     handleDiscardDraft,
