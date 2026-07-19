@@ -17,10 +17,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use futures_util::{future::pending, StreamExt};
 use posthaste_domain_model::{
     AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent, GatewayError,
-    PushNotification, PushStatus, RemoteObservationPolicy, ServiceError, SyncMode, SyncTrigger,
-    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
+    Id, PushNotification, PushStatus, RemoteObservationPolicy, ServiceError, SyncMode,
+    SyncProgress, SyncProgressStage, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
+    EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
-use posthaste_domain_service::{MailService, MailStore, PushStreamEvent, SecretStore};
+use posthaste_domain_service::{
+    MailService, MailStore, PushStreamEvent, SecretStore, SyncProgressReporter,
+};
 use posthaste_observability::{events, ph_debug, ph_error, ph_info, ph_warn};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -85,6 +88,11 @@ const PER_ACCOUNT_STOP_DEADLINE: Duration = Duration::from_secs(3);
 /// Capacity of each account runtime's command channel.
 const COMMAND_CHANNEL_CAPACITY: usize = 32;
 
+/// Capacity of the per-cycle sync-progress forwarder channel. A full channel
+/// drops the newest update rather than blocking the reporter callback —
+/// progress is display-only and monotonically superseded.
+const SYNC_PROGRESS_CHANNEL_CAPACITY: usize = 32;
+
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
 pub struct AccountSupervisor {
@@ -105,6 +113,13 @@ struct SupervisorShared {
     gateways: RwLock<HashMap<String, posthaste_domain_service::SharedGateway>>,
     runtime_overviews: RwLock<HashMap<String, AccountRuntimeOverview>>,
     runtime_generations: RwLock<HashMap<String, u64>>,
+    /// Per-account sync-cycle tokens. Every progress write for a cycle
+    /// carries the token minted at the cycle's start; a write minted for a
+    /// cycle that has since been abandoned (an arm-budget timeout) or
+    /// superseded (a fresh cycle started) is dropped — a late progress write
+    /// can never revive a stale `Syncing` over a settled Ready/failed
+    /// status.
+    sync_cycles: RwLock<HashMap<String, u64>>,
     known_accounts: RwLock<HashSet<String>>,
     account_count: AtomicUsize,
     poll_interval: Duration,
@@ -238,6 +253,7 @@ impl AccountSupervisor {
                 gateways: RwLock::new(HashMap::new()),
                 runtime_overviews: RwLock::new(HashMap::new()),
                 runtime_generations: RwLock::new(HashMap::new()),
+                sync_cycles: RwLock::new(HashMap::new()),
                 known_accounts: RwLock::new(HashSet::new()),
                 account_count: AtomicUsize::new(0),
                 poll_interval,
@@ -573,6 +589,28 @@ impl SupervisorShared {
         generation
     }
 
+    /// Mint the next sync-cycle token for an account. Called at the start of
+    /// every cycle; progress writes carry the token they were minted with,
+    /// so [`Self::update_runtime_overview`] can drop writes from an
+    /// abandoned or superseded cycle.
+    async fn next_sync_cycle(&self, account_id: &AccountId) -> u64 {
+        let mut cycles = self.sync_cycles.write().await;
+        let cycle = cycles
+            .get(account_id.as_str())
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        cycles.insert(account_id.to_string(), cycle);
+        cycle
+    }
+
+    /// Invalidate the account's current sync cycle (an arm-budget timeout
+    /// dropped it mid-flight): any progress write still in flight for the
+    /// abandoned cycle is rejected from here on.
+    async fn invalidate_sync_cycle(&self, account_id: &AccountId) {
+        self.next_sync_cycle(account_id).await;
+    }
+
     /// Broadcast committed-write events on the bus (bumping the generation).
     fn publish_events(&self, batch: &[DomainEvent]) {
         self.events.publish(batch);
@@ -588,7 +626,7 @@ impl SupervisorShared {
     }
 
     async fn set_runtime_overview(&self, account_id: &AccountId, overview: AccountRuntimeOverview) {
-        self.update_runtime_overview(account_id, None, move |current| {
+        self.update_runtime_overview(account_id, None, None, move |current| {
             *current = overview;
             true
         })
@@ -601,19 +639,33 @@ impl SupervisorShared {
         generation: u64,
         overview: AccountRuntimeOverview,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), move |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, move |current| {
             *current = overview;
             true
         })
         .await;
     }
 
-    /// Mark the account as syncing while a cycle runs.
-    async fn mark_syncing(&self, account_id: &AccountId, generation: u64) {
-        self.update_runtime_overview(account_id, Some(generation), |current| {
-            if matches!(current.status, AccountStatus::Syncing) {
+    /// Update the running sync progress, setting account status to `Syncing`
+    /// while present. Guarded by both the incarnation generation and the
+    /// sync-cycle token, and — under the overviews lock — by the committed
+    /// status: a late non-`Connecting` progress write arriving after the
+    /// sync settled is dropped, so it cannot revive a stale `Syncing` over a
+    /// terminal Ready/failed status.
+    async fn set_sync_progress(
+        &self,
+        account_id: &AccountId,
+        generation: u64,
+        cycle: u64,
+        progress: SyncProgress,
+    ) {
+        self.update_runtime_overview(account_id, Some(generation), Some(cycle), move |current| {
+            if !matches!(progress.stage, SyncProgressStage::Connecting)
+                && !matches!(current.status, AccountStatus::Syncing)
+            {
                 return false;
             }
+            current.sync_progress = Some(progress);
             current.status = AccountStatus::Syncing;
             true
         })
@@ -622,7 +674,7 @@ impl SupervisorShared {
 
     /// Record a successful sync: status `Ready`, error cleared, timestamp.
     async fn mark_sync_success(&self, account_id: &AccountId, generation: u64) {
-        self.update_runtime_overview(account_id, Some(generation), |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = AccountStatus::Ready;
             current.last_sync_at = time::OffsetDateTime::now_utc()
                 .format(&time::format_description::well_known::Rfc3339)
@@ -647,7 +699,7 @@ impl SupervisorShared {
         error: &ServiceError,
     ) {
         let presented = error.user_facing();
-        self.update_runtime_overview(account_id, Some(generation), |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = match error {
                 ServiceError::Gateway(GatewayError::Auth) => AccountStatus::AuthError,
                 ServiceError::Gateway(GatewayError::Network(_))
@@ -668,7 +720,7 @@ impl SupervisorShared {
 
     /// Update only the push status, preserving other overview fields.
     async fn set_push_status(&self, account_id: &AccountId, generation: u64, push: PushStatus) {
-        self.update_runtime_overview(account_id, Some(generation), move |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, move |current| {
             if current.push == push {
                 return false;
             }
@@ -713,7 +765,7 @@ impl SupervisorShared {
         reason: &str,
     ) {
         let poll_secs = self.poll_interval.as_secs();
-        self.update_runtime_overview(account_id, Some(generation), move |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, move |current| {
             if current.push == PushStatus::Unsupported {
                 return false;
             }
@@ -732,7 +784,7 @@ impl SupervisorShared {
     /// unconditionally: the faulted incarnation is already dead and the next
     /// incarnation's own startup writes supersede this.
     async fn mark_account_faulted(&self, account_id: &AccountId, attempt: u32, reason: &str) {
-        self.update_runtime_overview(account_id, None, |current| {
+        self.update_runtime_overview(account_id, None, None, |current| {
             current.status = AccountStatus::Degraded;
             current.last_sync_error = Some(format!(
                 "account runtime fault (restart {attempt}/{WATCHDOG_MAX_RESTARTS}): {reason}"
@@ -752,7 +804,7 @@ impl SupervisorShared {
     /// truthful state; push is `Disabled` because nothing is left to
     /// reconnect it.
     async fn mark_account_halted(&self, account_id: &AccountId, reason: &str) {
-        self.update_runtime_overview(account_id, None, |current| {
+        self.update_runtime_overview(account_id, None, None, |current| {
             current.status = AccountStatus::Offline;
             current.push = PushStatus::Disabled;
             current.last_sync_error = Some(format!(
@@ -775,7 +827,7 @@ impl SupervisorShared {
         arm: &'static str,
         budget: Duration,
     ) {
-        self.update_runtime_overview(account_id, Some(generation), |current| {
+        self.update_runtime_overview(account_id, Some(generation), None, |current| {
             current.status = AccountStatus::Degraded;
             current.last_sync_error = Some(format!(
                 "supervisor arm '{arm}' exceeded its {budget:?} budget (provider/store call hung)"
@@ -788,14 +840,22 @@ impl SupervisorShared {
     }
 
     /// Atomically read-modify-write an account's runtime overview under the
-    /// overviews write lock, guarded by the incarnation generation when
-    /// given (a stale task's write is dropped). Persists + broadcasts an
-    /// account-status-changed event when the visible status changes, and
-    /// push connect/disconnect events on push transitions.
+    /// overviews write lock, guarded by the incarnation generation and the
+    /// sync-cycle token when given (a stale task's or abandoned cycle's
+    /// write is dropped). Persists + broadcasts an account-status-changed
+    /// event when the visible status or sync progress changes, and push
+    /// connect/disconnect events on push transitions.
+    ///
+    /// The in-memory overview commit is unconditional once the guards and
+    /// the closure accept: a failure to persist the change event is logged
+    /// and the store generation is still advanced, so the served status can
+    /// never latch on a stale value (e.g. `Syncing` after the cycle
+    /// settled) just because one event row failed to write.
     async fn update_runtime_overview(
         &self,
         account_id: &AccountId,
         generation: Option<u64>,
+        cycle: Option<u64>,
         update: impl FnOnce(&mut AccountRuntimeOverview) -> bool,
     ) {
         let generations = self.runtime_generations.read().await;
@@ -808,6 +868,14 @@ impl SupervisorShared {
             }
         }
 
+        if let Some(expected) = cycle {
+            let cycles = self.sync_cycles.read().await;
+            let current = cycles.get(account_id.as_str()).copied().unwrap_or(0);
+            if current != expected {
+                return;
+            }
+        }
+
         let mut overviews = self.runtime_overviews.write().await;
         let previous = overviews.get(account_id.as_str()).cloned();
         let mut overview = previous.clone().unwrap_or_default();
@@ -816,8 +884,10 @@ impl SupervisorShared {
         }
 
         let mut side_effects = Vec::new();
+        let mut persist_failed = false;
         if previous.as_ref().map(|item| &item.status) != Some(&overview.status)
             || previous.as_ref().map(|item| &item.push) != Some(&overview.push)
+            || previous.as_ref().map(|item| &item.sync_progress) != Some(&overview.sync_progress)
             || previous.as_ref().map(|item| &item.last_sync_error_code)
                 != Some(&overview.last_sync_error_code)
         {
@@ -832,18 +902,20 @@ impl SupervisorShared {
                     "lastSyncAt": overview.last_sync_at,
                     "lastSyncError": overview.last_sync_error,
                     "lastSyncErrorCode": overview.last_sync_error_code,
+                    "syncProgress": overview.sync_progress,
                 }),
             ) {
                 Ok(event) => side_effects.push(event),
                 Err(error) => {
+                    persist_failed = true;
                     ph_warn!(
                         events::SUPERVISOR_ACCOUNT_STATUS_PERSIST_FAILED,
                         account_id = %account_id,
                         topic = EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
                         error = %error,
-                        "failed to persist account status change event"
+                        "failed to persist account status change event; \
+                         committing the status and bumping the generation anyway"
                     );
-                    return;
                 }
             }
         }
@@ -888,7 +960,14 @@ impl SupervisorShared {
         overviews.insert(account_id.to_string(), overview);
         drop(overviews);
         drop(generations);
-        self.publish_events(&side_effects);
+        if side_effects.is_empty() && persist_failed {
+            // The status changed but its event could not be persisted: still
+            // advance the generation so connected clients refetch the
+            // accounts query and observe the committed status.
+            self.events.bump();
+        } else {
+            self.publish_events(&side_effects);
+        }
     }
 
     /// Wall-clock "now" in UNIX seconds, anchored against a monotonic
@@ -1276,6 +1355,10 @@ async fn record_arm_timeout(
     budget: Duration,
 ) {
     sync_state.reset().await;
+    // Invalidate the abandoned cycle's token so any progress write still in
+    // flight from its forwarder task is dropped instead of reviving a stale
+    // `Syncing` over the degraded status recorded below.
+    shared.invalidate_sync_cycle(account_id).await;
     ph_warn!(
         events::SUPERVISOR_ARM_TIMEOUT,
         account_id = %account_id,
@@ -1285,6 +1368,42 @@ async fn record_arm_timeout(
     shared
         .mark_arm_timeout(account_id, generation, arm, budget)
         .await;
+}
+
+/// Builds a [`SyncProgressReporter`] whose callback forwards progress
+/// updates to a single per-cycle writer task over a bounded channel, rather
+/// than spawning a task per progress event. One forwarder per cycle keeps
+/// writes ordered (a later value can never be overtaken by an earlier one)
+/// and bounded. `tx` is dropped with the reporter when the cycle ends —
+/// normally or via an arm-budget abandonment — closing the channel and
+/// letting the forwarder drain and exit; a write already dequeued when the
+/// cycle was abandoned is rejected by the cycle-token guard in
+/// `set_sync_progress`.
+fn sync_progress_reporter(
+    shared: &Arc<SupervisorShared>,
+    account_id: AccountId,
+    generation: u64,
+    cycle: u64,
+    sync_id: String,
+    trigger: SyncTrigger,
+    started_at: String,
+) -> SyncProgressReporter {
+    let (tx, mut rx) = mpsc::channel::<SyncProgress>(SYNC_PROGRESS_CHANNEL_CAPACITY);
+    let forwarder_shared = shared.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            forwarder_shared
+                .set_sync_progress(&account_id, generation, cycle, progress)
+                .await;
+        }
+    });
+    SyncProgressReporter::new(sync_id, trigger, started_at, move |progress| {
+        // A full channel means the forwarder is momentarily behind a burst;
+        // dropping the newest update (rather than blocking this synchronous
+        // callback) is fine — progress is display-only and superseded by
+        // whatever arrives next.
+        let _ = tx.try_send(progress);
+    })
 }
 
 /// A single sync request.
@@ -1356,19 +1475,57 @@ async fn process_sync_trigger(
     } = request;
     let account_id = account.id.clone();
     let started = Instant::now();
+    let sync_id = Id::generate().to_string();
+    let started_at = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default();
+    // Mint this cycle's token: every progress write for this cycle carries
+    // it, so an arm-budget timeout (or a fresh cycle) invalidates exactly
+    // this cycle's in-flight progress writes.
+    let cycle = shared.next_sync_cycle(&account_id).await;
     ph_info!(
         events::SUPERVISOR_SYNC_STARTED,
         account_id = %account_id,
+        sync_id = %sync_id,
         trigger = trigger.as_str(),
         "sync started"
     );
-    shared.mark_syncing(&account_id, generation).await;
+    shared
+        .set_sync_progress(
+            &account_id,
+            generation,
+            cycle,
+            SyncProgress {
+                sync_id: sync_id.clone(),
+                trigger: trigger.clone(),
+                started_at: started_at.clone(),
+                stage: SyncProgressStage::Connecting,
+                detail: "Connecting account".to_string(),
+                mailbox_name: None,
+                mailbox_index: None,
+                mailbox_count: None,
+                message_count: None,
+                total_count: None,
+            },
+        )
+        .await;
 
     let result = match ensure_connection(shared, account, generation, connection).await {
         Ok(()) => {
             if let Some(gateway) = connection.gateway() {
                 // Broadcast each event group as the sync produces it so mail
-                // surfaces progressively instead of after the whole sync.
+                // surfaces progressively instead of after the whole sync,
+                // and surface the gateway's step-level progress as account
+                // status detail.
+                let progress = sync_progress_reporter(
+                    shared,
+                    account_id.clone(),
+                    generation,
+                    cycle,
+                    sync_id.clone(),
+                    trigger.clone(),
+                    started_at.clone(),
+                );
                 let mut publish = |batch: &[DomainEvent]| shared.publish_events(batch);
                 shared
                     .service
@@ -1377,7 +1534,7 @@ async fn process_sync_trigger(
                         trigger.clone(),
                         mode,
                         gateway.as_ref(),
-                        None,
+                        Some(progress),
                         &mut publish,
                     )
                     .await

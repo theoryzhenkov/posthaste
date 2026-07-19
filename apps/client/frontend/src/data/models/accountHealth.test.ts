@@ -34,6 +34,31 @@ describe('accountHealth', () => {
     }
   })
 
+  test('syncing displays as an informational Syncing state', () => {
+    const health = accountHealth(row({ status: 'syncing' }), 'Work')
+    expect(health.label).toBe('Syncing')
+    expect(health.severity).toBe('info')
+    expect(health.autoRetrying).toBe(true)
+    expect(health.isUnhealthy).toBe(false)
+  })
+
+  test('the display state derives from the row alone: a refetched ready row shows Connected with no syncing remnant', () => {
+    // The stuck-"Syncing" regression contract: the read model holds no
+    // state, so re-deriving from a row whose wire status returned to rest
+    // must fully clear the syncing presentation.
+    expect(accountHealth(row({ status: 'syncing' }), 'Work').label).toBe(
+      'Syncing',
+    )
+    const settled = accountHealth(
+      row({ status: 'ready', lastSyncAt: '2026-07-19T00:00:00Z' }),
+      'Work',
+    )
+    expect(settled.label).toBe('Connected')
+    expect(settled.severity).toBe('ok')
+    expect(settled.autoRetrying).toBe(false)
+    expect(settled.isUnhealthy).toBe(false)
+  })
+
   test('authError presents as sign-in needed with reconnect', () => {
     const health = accountHealth(row({ status: 'authError' }), 'Work')
     expect(health.category).toBe('auth')

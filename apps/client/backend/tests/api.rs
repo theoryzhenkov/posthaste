@@ -3265,3 +3265,184 @@ async fn held_send_rotation_retires_the_compose_key_row() {
 
     server.shutdown().await;
 }
+
+/// The sync status lifecycle over the wire: `syncNow` moves the account to
+/// `syncing` with step-level progress visible in the runtime overview, and
+/// the cycle's completion restores the resting `ready` status (progress
+/// cleared, `lastSyncAt` stamped). Pins the dogfood regression where the
+/// served status latched on `Syncing` after the cycle settled.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_now_reports_steps_then_returns_to_ready() {
+    /// Clears the global mock sync delay even when an assertion panics.
+    struct DelayGuard;
+    impl Drop for DelayGuard {
+        fn drop(&mut self) {
+            posthaste_engine::MockJmapGateway::clear_sync_delay_for_tests();
+        }
+    }
+
+    let server = TestServer::spawn().await;
+    spawn_mock_account(&server, "m-sync-status").await;
+    let account_id = AccountId::from("m-sync-status");
+
+    posthaste_engine::MockJmapGateway::set_sync_delay_for_tests(400);
+    let _guard = DelayGuard;
+
+    let response = server
+        .post_json(
+            "/command",
+            serde_json::json!({
+                "id": "cmd-sync-status-lifecycle",
+                "command": { "syncNow": { "accountId": "m-sync-status" } }
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    // While the (artificially slowed) cycle runs, the overview reports the
+    // syncing status together with step-level progress, and the accounts
+    // query serves the syncing status.
+    let mut observed_syncing_with_steps = false;
+    for _ in 0..200 {
+        let overview = server.state.supervisor.runtime_overview(&account_id).await;
+        if overview.status == AccountStatus::Syncing {
+            assert!(
+                overview.sync_progress.is_some(),
+                "a syncing account reports its current sync step"
+            );
+            let accounts = json_body(
+                server
+                    .post_json("/query", serde_json::json!({ "accounts": {} }))
+                    .await,
+            )
+            .await;
+            let row = accounts["data"]["rows"]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .find(|row| row["id"] == "m-sync-status")
+                .expect("account row")
+                .clone();
+            assert_eq!(row["status"], "syncing");
+            observed_syncing_with_steps = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        observed_syncing_with_steps,
+        "the slowed sync cycle was observable as syncing-with-steps"
+    );
+
+    // The cycle settles: the resting status returns, the progress clears.
+    let mut resting = None;
+    for _ in 0..400 {
+        let overview = server.state.supervisor.runtime_overview(&account_id).await;
+        if overview.status == AccountStatus::Ready {
+            resting = Some(overview);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let resting = resting.expect("the account returned to ready after the sync completed");
+    assert!(
+        resting.sync_progress.is_none(),
+        "a settled sync leaves no stale progress behind"
+    );
+    assert!(resting.last_sync_at.is_some());
+    assert!(resting.last_sync_error.is_none());
+
+    let accounts = json_body(
+        server
+            .post_json("/query", serde_json::json!({ "accounts": {} }))
+            .await,
+    )
+    .await;
+    let row = accounts["data"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["id"] == "m-sync-status")
+        .expect("account row")
+        .clone();
+    assert_eq!(row["status"], "ready", "the wire serves the resting status");
+
+    server.shutdown().await;
+}
+
+/// A failing sync also restores a resting (non-syncing) status: an enabled
+/// account whose connection cannot be built settles into a truthful error
+/// status with the progress cleared — never a latched `Syncing`.
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_sync_settles_into_an_error_status_not_syncing() {
+    let server = TestServer::spawn().await;
+    let now = now_iso8601().expect("clock");
+    let account = AccountSettings {
+        id: "m-sync-fail".into(),
+        name: "Broken".to_string(),
+        full_name: None,
+        signature: None,
+        email_patterns: Vec::new(),
+        // An IMAP account with an empty transport: the connection build
+        // fails fast, exercising the sync-failure exit path.
+        driver: AccountDriver::ImapSmtp,
+        enabled: true,
+        appearance: None,
+        transport: AccountTransportSettings::default(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    server
+        .state
+        .config
+        .save_source(&account)
+        .expect("save account");
+    server
+        .state
+        .service
+        .sync_source_projections()
+        .expect("project sources");
+    server.state.supervisor.start_account(&account).await;
+
+    let account_id = AccountId::from("m-sync-fail");
+    let mut settled = None;
+    for _ in 0..400 {
+        let overview = server.state.supervisor.runtime_overview(&account_id).await;
+        // The startup overview is written as `Offline` before the first
+        // cycle runs; the settled failure is the error status carrying the
+        // recorded sync error.
+        let failed = matches!(
+            overview.status,
+            AccountStatus::Offline | AccountStatus::Degraded | AccountStatus::AuthError
+        ) && overview.last_sync_error.is_some();
+        if failed {
+            settled = Some(overview);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let settled = settled.expect("the failing account settled into an error status");
+    assert!(
+        settled.sync_progress.is_none(),
+        "a failed sync leaves no stale progress behind"
+    );
+
+    // The wire serves the same resting error status.
+    let accounts = json_body(
+        server
+            .post_json("/query", serde_json::json!({ "accounts": {} }))
+            .await,
+    )
+    .await;
+    let row = accounts["data"]["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["id"] == "m-sync-fail")
+        .expect("account row")
+        .clone();
+    assert_ne!(row["status"], "syncing");
+    assert!(row["lastSyncError"].is_string());
+
+    server.shutdown().await;
+}
