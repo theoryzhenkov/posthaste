@@ -42,9 +42,10 @@ export function toggleSubject(t: MessageTarget) {
 
 /** Base enablement shared by every message action: at least one target. In the
  *  context menu a target always exists, so these stay enabled — matching today.
- *  It exists so the palette can render "select a message first". */
-export function requireTarget(ctx: ActionContext) {
-  return ctx.targets.length > 0 || { reason: 'Select a message first' }
+ *  Without a target the action is not rendered anywhere; the keyboard
+ *  dispatcher still lets it claim (and swallow) its chord. */
+export function requireTarget(ctx: ActionContext): boolean {
+  return ctx.targets.length > 0
 }
 
 export function hasDraftTarget(ctx: ActionContext): boolean {

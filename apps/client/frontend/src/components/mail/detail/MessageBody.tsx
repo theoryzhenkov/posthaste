@@ -5,6 +5,10 @@ import { useBlobUrl } from '@/data/transport/blobs'
 import { resolveMessageBodyRender } from '@/data/models/messageBody'
 
 import { EmailFrame } from './EmailFrame'
+import { MESSAGE_SCROLL_ATTRIBUTE } from './model'
+
+/** Applied to each mode's scroll container so keyboard paging can find it. */
+const scrollRegion = { [MESSAGE_SCROLL_ATTRIBUTE]: '' }
 
 /**
  * Point `cid:` image references at the blob of the inline attachment that
@@ -59,18 +63,21 @@ export function MessageBody({ message }: { message: MessageDetail }) {
 
   if (bodyRender.kind === 'html') {
     return (
-      <div className="ph-scroll h-full overflow-auto px-[22px] py-[18px]">
-        <EmailFrame
-          className="h-full min-h-[480px] bg-transparent"
-          html={bodyRender.html}
-        />
+      <div
+        className="ph-scroll h-full overflow-y-auto px-[22px] py-[18px]"
+        {...scrollRegion}
+      >
+        <EmailFrame className="bg-transparent" html={bodyRender.html} />
       </div>
     )
   }
 
   if (bodyRender.kind === 'text') {
     return (
-      <article className="ph-scroll h-full overflow-auto px-[22px] py-[18px] text-[13px] leading-[1.6] text-foreground/92">
+      <article
+        className="ph-scroll h-full overflow-y-auto px-[22px] py-[18px] text-[13px] leading-[1.6] text-foreground/92"
+        {...scrollRegion}
+      >
         {bodyRender.paragraphs.map((paragraph, index) => (
           <p
             key={`${index}-${paragraph.slice(0, 20)}`}

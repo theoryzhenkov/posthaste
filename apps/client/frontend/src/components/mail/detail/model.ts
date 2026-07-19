@@ -1,5 +1,12 @@
 import type { MessageSummary, Recipient } from '@/data/transport/api'
 
+/**
+ * Marks the reading pane's body scroll container. The pane is display-only
+ * (never a keyboard focus region), so the keyboard controller pages the
+ * element carrying this attribute on Space / Shift+Space.
+ */
+export const MESSAGE_SCROLL_ATTRIBUTE = 'data-message-scroll'
+
 export function userTags(keywords: string[]): string[] {
   return keywords.filter((kw) => !kw.startsWith('$'))
 }

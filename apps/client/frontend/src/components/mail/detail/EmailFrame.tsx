@@ -12,10 +12,18 @@
  *   navigation handler opens external URLs externally and blocks the in-app nav.
  * - Browser: `<base target="_blank">` opens a new tab natively.
  *
- * Long messages scroll inside the iframe rather than expanding the detail pane.
+ * The iframe auto-sizes to its content: the parent (same-origin, so the
+ * embedding document may measure it) tracks the body's height with a
+ * ResizeObserver and grows the frame to match, and the frame's own document
+ * never scrolls (`html { overflow: hidden }`). Scrolling is owned by the
+ * surrounding pane — a regular DOM scroll container — so wheel and keyboard
+ * scrolling work identically over email bodies and the rest of the app, in
+ * every webview engine. (Scrolling INSIDE a no-scripts sandboxed frame is not
+ * reliably wheel-reachable in the desktop webviews, and app keyboard chords
+ * can never reach it.)
  *
  */
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { isTauriRuntime } from '@/lib/platform/runtime'
 import { cn } from '../../../lib/design/cn'
@@ -71,6 +79,9 @@ export function EmailFrame({
         :root { color-scheme: light; }
         html {
             background: transparent;
+            /* The parent sizes the frame to fit; the frame itself never
+               scrolls (scroll ownership lives in the detail pane). */
+            overflow: hidden;
         }
         body {
             font-family: "Geist", system-ui, sans-serif;
@@ -111,9 +122,50 @@ export function EmailFrame({
     [bodyHtml, linkTarget],
   )
 
+  // Auto-size: grow the frame to its document's height so the OUTER pane is
+  // the scroll container. The frame document is same-origin (srcdoc +
+  // allow-same-origin), so the parent measures it directly; the ResizeObserver
+  // keeps the height honest as images and webfonts land.
+  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null)
+  const [contentHeight, setContentHeight] = useState<number | null>(null)
+  useEffect(() => {
+    if (!frame) return
+    // A new document (message navigation) starts unmeasured: scrollHeight can
+    // never report below the frame's own height, so a stale tall frame would
+    // otherwise pin every later message to the tallest one seen.
+    setContentHeight(null)
+    let observer: ResizeObserver | null = null
+    const measure = () => {
+      const doc = frame.contentDocument
+      if (doc?.documentElement) {
+        setContentHeight(doc.documentElement.scrollHeight)
+      }
+    }
+    const attach = () => {
+      observer?.disconnect()
+      observer = null
+      measure()
+      const body = frame.contentDocument?.body
+      if (body) {
+        observer = new ResizeObserver(measure)
+        observer.observe(body)
+      }
+    }
+    // srcDoc loads asynchronously (and reloads when the message changes);
+    // attach now if the document is already there, and re-attach on load.
+    frame.addEventListener('load', attach)
+    if (frame.contentDocument?.body) attach()
+    return () => {
+      frame.removeEventListener('load', attach)
+      observer?.disconnect()
+    }
+  }, [frame, wrappedHtml])
+
   return (
     <iframe
-      className={cn('block h-full w-full border-0 bg-transparent', className)}
+      className={cn('block w-full border-0 bg-transparent', className)}
+      style={{ height: contentHeight === null ? undefined : contentHeight }}
+      ref={setFrame}
       sandbox={
         isDesktop
           ? 'allow-same-origin allow-top-navigation-by-user-activation'

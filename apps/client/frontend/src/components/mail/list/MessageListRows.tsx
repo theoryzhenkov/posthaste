@@ -36,6 +36,7 @@ export function MessageListRows({
   treeMode,
   scrollTop,
   selectedKey,
+  activeKey,
   isPaneActive,
   viewportHeight,
   mailboxDirectory,
@@ -51,6 +52,8 @@ export function MessageListRows({
   layout: ThreadListLayout
   rows: ConversationTreeRow[]
   treeMode: boolean
+  /** The ACTIVE (opened) message's key; `null` while the reader is closed. */
+  activeKey: string | null
   onClearSearchQuery: () => void
   onDismissError: () => void
   onRetry: () => void
@@ -100,6 +103,7 @@ export function MessageListRows({
               <MessageRow
                 message={row.message}
                 isSelected={messageKey(row.message) === selectedKey}
+                isActive={messageKey(row.message) === activeKey}
                 isPaneActive={isPaneActive}
                 isStriped={(virtual.startIndex + index) % 2 === 1}
                 columns={columns}

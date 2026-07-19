@@ -164,10 +164,6 @@ export interface ActionServices extends CommandScopeServices {
   }
 }
 
-/** Enablement result: `true` = runnable; `false` = shown-but-disabled with no
- *  hint; `{ reason }` = shown-but-disabled with hint text (palette
- *  discoverability). */
-type ActionEnablement = boolean | { reason: string }
 
 export interface ActionDefinition {
   /** Stable namespaced id, e.g. `message.archive`. Persisted in
@@ -186,8 +182,10 @@ export interface ActionDefinition {
    *  the surface provides (e.g. the row-scoped `open` entries require
    *  `services.row`). Most predicates only read `ctx`. */
   isAvailable?: (ctx: ActionContext, services: ActionServices) => boolean
-  /** Shown but not runnable when not `true`; `{ reason }` renders as hint. */
-  isEnabled?: (ctx: ActionContext) => ActionEnablement
+  /** Not runnable (and not rendered by any surface) when `false`; the keyboard
+   *  dispatcher still lets a disabled action claim its chord so the event is
+   *  swallowed rather than falling through to the browser. */
+  isEnabled?: (ctx: ActionContext) => boolean
   destructive?: boolean
   /** Confirmation before run — routed through a shared dialog host. Either
    *  static copy, or derived from context (`message.unsubscribe` confirms only

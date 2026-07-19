@@ -64,7 +64,6 @@ export interface ResolvedActionView {
   title: string
   icon: LucideIcon
   enabled: boolean
-  disabledReason?: string
   /** Context-resolved confirmation copy; `undefined` = run without a dialog. */
   confirm?: ActionConfirmCopy
   /** Context-resolved options of a PARAMETERIZED action; `undefined` for plain

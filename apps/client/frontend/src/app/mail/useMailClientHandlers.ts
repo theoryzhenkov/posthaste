@@ -29,7 +29,11 @@ export function useMailClientHandlers(input: {
   setIsCommandPaletteOpen: (open: boolean) => void
   setIsTagEditorOpen: (open: boolean) => void
   setSearchQuery: Dispatch<SetStateAction<string>>
+  /** The list's `j`/`k` SELECTION cursor — where the next list action lands. */
   setSelectedMessage: Dispatch<SetStateAction<MailSelection | null>>
+  /** The ACTIVE (opened) message the reader pane shows. Opening always aligns
+   *  the cursor with it; moving the cursor afterwards leaves it in place. */
+  setOpenedMessage: Dispatch<SetStateAction<MailSelection | null>>
   setSelectedView: Dispatch<SetStateAction<SidebarSelection | null>>
   setShowShortcuts: Dispatch<SetStateAction<boolean>>
 }) {
@@ -44,6 +48,7 @@ export function useMailClientHandlers(input: {
     setIsTagEditorOpen,
     setSearchQuery,
     setSelectedMessage,
+    setOpenedMessage,
     setSelectedView,
     setShowShortcuts,
   } = input
@@ -130,7 +135,10 @@ export function useMailClientHandlers(input: {
     handleAddTag,
     handleRemoveTag,
     handleApplySearch: (query: string) => applySearchQuery(query),
-    handleClearSelectedMessage: () => setSelectedMessage(null),
+    handleClearSelectedMessage: () => {
+      setSelectedMessage(null)
+      setOpenedMessage(null)
+    },
     handleCloseCommandPalette: () => setIsCommandPaletteOpen(false),
     handleCompose: compose.openCompose,
     handleDiscardDraft,
@@ -173,17 +181,29 @@ export function useMailClientHandlers(input: {
       }
     },
     handleSearch: applySearchQuery,
+    // OPEN a message (row click, palette result, thread switcher, context
+    // menu's Open): the reader shows it and the cursor aligns with it.
     handleSelectMessage: (message: MessageSummary) => {
-      setSelectedMessage({
+      const selection = {
         conversationId: message.conversationId,
         sourceId: message.sourceId,
         messageId: message.id,
-      })
+      }
+      setSelectedMessage(selection)
+      setOpenedMessage(selection)
     },
+    // Move the SELECTION cursor only (`j`/`k`): the reader keeps the message
+    // it has open, so cursor and active row may diverge.
     handleSelectMessageRef: setSelectedMessage,
+    // OPEN by reference — the selection-shaped twin of handleSelectMessage.
+    handleOpenMessageRef: (selection: MailSelection) => {
+      setSelectedMessage(selection)
+      setOpenedMessage(selection)
+    },
     handleSelectSmartMailbox: (smartMailboxId: string, name: string) => {
       setSelectedView({ kind: 'smart-mailbox', id: smartMailboxId, name })
       setSelectedMessage(null)
+      setOpenedMessage(null)
     },
     handleSelectSourceMailbox: (
       sourceId: string,
@@ -192,6 +212,7 @@ export function useMailClientHandlers(input: {
     ) => {
       setSelectedView({ kind: 'source-mailbox', sourceId, mailboxId, name })
       setSelectedMessage(null)
+      setOpenedMessage(null)
     },
     handleShowShortcuts: () => setShowShortcuts(true),
     handleToggleSettings: () => toggleSettingsSurface({ effectiveSurface }),

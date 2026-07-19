@@ -37,7 +37,11 @@ export interface MailClientViewProps {
   messageDefaultLayout: LayoutValue
   preparedSearchQuery: PreparedServerSearchQuery
   searchQuery: string
+  /** The list's `j`/`k` SELECTION cursor. */
   selectedMessage: MailSelection | null
+  /** The ACTIVE (opened) message the reader pane shows; diverges from the
+   *  cursor once `j`/`k` moves after an open. */
+  openedMessage: MailSelection | null
   selectedMessageData: MessageSummary | undefined
   shellDefaultLayout: LayoutValue
   showShortcuts: boolean
@@ -68,8 +72,12 @@ export interface MailClientViewProps {
    *  Unsubscribe mailto path); the source is the selected message's. */
   onUnsubscribeMailto: (mailtoUri: string) => void
   onSearch: (query: string, append?: boolean) => void
+  /** OPEN a message (summary form): reader shows it, cursor aligns. */
   onSelectMessage: (message: MessageSummary) => void
+  /** Move the SELECTION cursor only (`j`/`k`); the reader stays put. */
   onSelectMessageRef: (selection: MailSelection) => void
+  /** OPEN a message (selection form): reader shows it, cursor aligns. */
+  onOpenMessageRef: (selection: MailSelection) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onSelectSourceMailbox: (
     sourceId: string,

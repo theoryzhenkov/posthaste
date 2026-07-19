@@ -49,12 +49,7 @@ function bind(
     typeof def.icon === 'function'
       ? (def.icon as (c: ActionContext) => LucideIcon)(ctx)
       : def.icon
-  const enablement = def.isEnabled?.(ctx) ?? true
-  const enabled = enablement === true
-  const disabledReason =
-    enablement !== true && typeof enablement === 'object'
-      ? enablement.reason
-      : undefined
+  const enabled = def.isEnabled?.(ctx) ?? true
   const params = def.resolveParams?.(ctx, services)
   const confirm =
     typeof def.confirm === 'function' ? def.confirm(ctx) : def.confirm
@@ -66,7 +61,6 @@ function bind(
     title,
     icon,
     enabled,
-    disabledReason,
     confirm,
     params,
     execute: () => def.run(ctx, services),
@@ -79,8 +73,10 @@ function bind(
 /**
  * Resolve the ordered action list for `ctx.surface`.
  *
- * `includeDisabled` keeps shown-but-disabled entries (palette discoverability);
- * menus pass it falsy so disabled actions vanish, matching today's context menu.
+ * `includeDisabled` keeps disabled entries in the resolution — the keyboard
+ * dispatcher uses it so a chord the table CLAIMS but cannot run right now still
+ * swallows the event. Every rendering surface (menu, palette, header) passes it
+ * falsy, so disabled actions are simply not shown.
  */
 export function resolveActions(
   ctx: ActionContext,
@@ -95,9 +91,9 @@ export function resolveActions(
       .filter((r) => r.enabled || opts?.includeDisabled)
       // A parameterized action with NOTHING to pick (e.g. move-to-mailbox when
       // every candidate mailbox is excluded) is dropped like a failed
-      // availability check. A DISABLED row is kept (its options are naturally
-      // empty without a target) so the palette can still hint "Select a message
-      // first" under `includeDisabled`.
+      // availability check. A DISABLED resolution is kept (its options are
+      // naturally empty without a target) so `includeDisabled` — the keyboard
+      // dispatcher's chord-claiming path — still sees it.
       .filter(
         (r) => r.params === undefined || r.params.length > 0 || !r.enabled,
       )

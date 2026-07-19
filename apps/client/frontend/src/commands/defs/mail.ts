@@ -235,8 +235,8 @@ const mailActions: readonly ActionDefinition[] = [
   },
   {
     // "Tag" command: opens the tag editor for the focused message. The app
-    // handler already no-ops without a selection; `requireTarget` renders it
-    // disabled-with-reason in the palette instead of silently vanishing.
+    // handler already no-ops without a selection; `requireTarget` keeps the
+    // entry out of the palette (and the `t` chord inert) until one exists.
     id: 'message.tag',
     section: 'organize',
     title: 'Tag',
