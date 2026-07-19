@@ -1404,3 +1404,236 @@ async fn settled_destroy_blocks_tombstone_repair() {
         "the tombstone keeps hiding the surviving base row",
     );
 }
+
+#[tokio::test]
+async fn concurrent_refreshes_racing_base_writes_stay_consistent() {
+    // The atomic derive serializes a row's refresh against a concurrent base
+    // write (SQLite writers in production; the four state locks in the test),
+    // so the overlay write commits with the snapshot it folded from — a
+    // refresh can never read a stale base and clobber a fresher overlay write
+    // with it (no lost-update window). Hammer one row with refreshes racing
+    // direct base mutations: no deadlock, no panic, and the overlay settles to
+    // the one state `replay(log, base)` yields.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("state-1", &["inbox"]));
+    let service = Arc::new(MailService::new(
+        store.clone(),
+        Arc::new(TestConfig::default()),
+    ));
+
+    // Base row m in Inbox, and a pending flag op over it.
+    store
+        .applied_messages
+        .lock()
+        .expect("applied")
+        .push(MessageRecord {
+            id: MessageId::from("m"),
+            source_thread_id: ThreadId::from("m"),
+            mailbox_ids: vec![MailboxId::from("inbox")],
+            ..Default::default()
+        });
+    service
+        .set_keywords(
+            &account,
+            &MessageId::from("m"),
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("flag queues and derives m's overlay entry");
+
+    // Refreshes racing direct base mutations (remove + re-add m). The atomic
+    // derive serializes each refresh against the mutation.
+    let mut handles = Vec::new();
+    for i in 0..32 {
+        let store = store.clone();
+        let service = service.clone();
+        let account = account.clone();
+        handles.push(tokio::spawn(async move {
+            if i % 2 == 0 {
+                let mut applied = store.applied_messages.lock().expect("applied");
+                applied.retain(|r| r.id.as_str() != "m");
+                applied.push(MessageRecord {
+                    id: MessageId::from("m"),
+                    source_thread_id: ThreadId::from("m"),
+                    mailbox_ids: vec![MailboxId::from("inbox")],
+                    ..Default::default()
+                });
+            }
+            service
+                .refresh_message_overlay(&account, &MessageId::from("m"))
+                .await
+                .expect("concurrent derive")
+        }));
+    }
+    for handle in handles {
+        handle.await.expect("task joined");
+    }
+
+    // Settle: base[m] is present (every toggle re-adds), the flag op is
+    // pending, so the overlay must reflect base + the flag fold — never a
+    // stale entry left by a racing refresh.
+    service
+        .refresh_message_overlay(&account, &MessageId::from("m"))
+        .await
+        .expect("settle derive");
+    let entry = store
+        .overlay_rows
+        .lock()
+        .expect("overlay")
+        .get("m")
+        .expect("overlay entry present after settle")
+        .clone()
+        .expect("a folded row, not a tombstone");
+    assert!(
+        entry.keywords.contains(&"$flagged".to_string()),
+        "the flag fold survived the racing refreshes: {:?}",
+        entry.keywords
+    );
+}
+
+#[tokio::test]
+async fn held_send_fold_is_time_independent_and_flips_only_on_dispatch() {
+    // Determinism: the fold is a pure function of (log, base). A send's
+    // held→due transition is the flusher's Pending→Inflight dispatch (a LOG
+    // change), not a replay-time clock comparison. So a Pending send whose
+    // undo hold has elapsed (hold_until_mono in the past) but that the
+    // flusher has not dispatched STILL folds held — replaying the same
+    // (log, base) at any time yields the same row. The hold's expiry is
+    // observed by the flusher (which then dispatches), never by the fold.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("state-1", &["drafts"]));
+    let service = Arc::new(MailService::new(
+        store.clone(),
+        Arc::new(TestConfig {
+            sources: vec![account],
+            ..Default::default()
+        }),
+    ));
+
+    let (send_op, _) = service
+        .enqueue_send(
+            &account_id,
+            SendMessageRequest {
+                draft_id: Some("provider-draft-42".to_string()),
+                ..draft_request("Held send")
+            },
+        )
+        .await
+        .expect("send queues");
+    let send_row_id = MessageId::from(send_op.entity.id.as_str());
+
+    let rfc = || {
+        store
+            .overlay_rows
+            .lock()
+            .expect("overlay")
+            .get(send_row_id.as_str())
+            .and_then(|entry| entry.clone())
+            .and_then(|record| record.rfc_message_id)
+    };
+
+    // Give the send a PAST undo hold, still Pending (the flusher has not
+    // dispatched it). The old clock-based fold would flip this to the Sent
+    // row; the pure fold keeps it held (base shows through, no provisional
+    // Sent row).
+    {
+        let mut ops = store.outbox_operations.lock().expect("outbox lock");
+        for op in ops.iter_mut() {
+            if op.id.as_str() == send_op.id.as_str() {
+                op.hold_until_mono = Some(1);
+            }
+        }
+    }
+    service
+        .refresh_message_overlay(&account_id, &send_row_id)
+        .await
+        .expect("re-derive");
+    assert!(
+        rfc().is_none(),
+        "a Pending send with an elapsed but undispatched hold stays held — no Sent row"
+    );
+
+    // The flip is the dispatch (Pending→Inflight), a log change — not time.
+    {
+        let mut ops = store.outbox_operations.lock().expect("outbox lock");
+        for op in ops.iter_mut() {
+            if op.id.as_str() == send_op.id.as_str() {
+                op.state = OperationState::Inflight;
+            }
+        }
+    }
+    service
+        .refresh_message_overlay(&account_id, &send_row_id)
+        .await
+        .expect("re-derive");
+    assert!(
+        rfc().is_some(),
+        "the dispatched send folds its provisional Sent row (rfc_message_id token present)"
+    );
+}
+
+#[tokio::test]
+async fn retried_send_stays_sent_across_a_transient_failure() {
+    // The held→due transition is the dispatch — and a send that has BEEN
+    // dispatched (transiently failed, re-queued to Pending with attempts > 0)
+    // stays Sent: the undo window is over once it left. Under the bare
+    // field-presence rule this flipped back to a cancelable draft across
+    // retries (Sent↔Draft oscillation); gating `send_is_held` on
+    // `attempts == 0` reserves the held rendering for the first,
+    // never-dispatched attempt only.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("state-1", &["drafts"]));
+    let service = Arc::new(MailService::new(
+        store.clone(),
+        Arc::new(TestConfig {
+            sources: vec![account],
+            ..Default::default()
+        }),
+    ));
+
+    let (send_op, _) = service
+        .enqueue_send(
+            &account_id,
+            SendMessageRequest {
+                draft_id: Some("provider-draft-42".to_string()),
+                ..draft_request("Retried send")
+            },
+        )
+        .await
+        .expect("send queues");
+    let send_row_id = MessageId::from(send_op.entity.id.as_str());
+
+    // A transient failure: dispatched once, then re-queued Pending with
+    // attempts > 0 and a (now-elapsed) undo hold still on the op.
+    {
+        let mut ops = store.outbox_operations.lock().expect("outbox lock");
+        for op in ops.iter_mut() {
+            if op.id.as_str() == send_op.id.as_str() {
+                op.state = OperationState::Pending;
+                op.attempts = 1;
+                op.hold_until_mono = Some(1);
+            }
+        }
+    }
+    service
+        .refresh_message_overlay(&account_id, &send_row_id)
+        .await
+        .expect("re-derive");
+
+    let rfc = store
+        .overlay_rows
+        .lock()
+        .expect("overlay")
+        .get(send_row_id.as_str())
+        .and_then(|entry| entry.clone())
+        .and_then(|record| record.rfc_message_id);
+    assert!(
+        rfc.is_some(),
+        "a retried send (attempts > 0) stays Sent — no Sent↔Draft flip across retries"
+    );
+}

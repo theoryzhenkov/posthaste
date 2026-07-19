@@ -296,11 +296,17 @@ impl MailService {
                         Some(&message),
                     )?;
                     events.push(self.emit_dispatch_uncertain(account_id, &operation, message)?);
-                    // A parked send is a content op whose words are never
-                    // dropped: it stays PARKED with its provisional Sent row
-                    // derived and visible (a failed/parked content op keeps
-                    // folding — see `is_replayable`), surfaced as
-                    // needs-attention until the user retries or discards it.
+                    // Re-derive the rows the op touched over the log that now
+                    // holds it as DispatchUncertain. A parked send is a content
+                    // op whose words are never dropped: it keeps folding (see
+                    // `is_replayable`) — DispatchUncertain is not Pending, so the
+                    // fold is NOT held and reproduces its provisional Sent row,
+                    // visible as needs-attention until the user retries or
+                    // discards it. Without this re-derive the overlay would lag
+                    // the state change.
+                    for row_id in self.op_touched_row_ids(account_id, &operation)? {
+                        self.refresh_message_overlay(account_id, &row_id).await?;
+                    }
                     // A send timeout signals a struggling link; stop draining so
                     // the rest retries on the next connectivity window.
                     return Ok(());

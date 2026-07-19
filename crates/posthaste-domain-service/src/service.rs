@@ -5,11 +5,11 @@ use serde_json::json;
 
 use crate::{
     AutomationBackfillStore, BaseWrite, CacheStore, ConfigDiff, ConfigRepository,
-    ConversationReadStore, DraftRegistry, EventStore, MailGateway, MailStore, MailboxReadStore,
-    MailboxRoleOverrideStore, MessageDetailStore, MessageListStore, MessageMailboxStore,
-    MessageOverlayStore, OperationOutboxStore, ServiceResultExt, SharedConfigRepository,
-    SmartMailboxStore, SnoozeStore, SourceDataStore, SourceProjectionStore, SyncStateStore,
-    SyncWriteStore, TagReadStore,
+    ConversationReadStore, DeriveDiff, DeriveSnapshot, DraftRegistry, EventStore, MailGateway,
+    MailStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore, MessageListStore,
+    MessageMailboxStore, MessageOverlayStore, OperationOutboxStore, OverlayMutation,
+    ServiceResultExt, SharedConfigRepository, SmartMailboxStore, SnoozeStore, SourceDataStore,
+    SourceProjectionStore, SyncStateStore, SyncWriteStore, TagReadStore,
 };
 use posthaste_domain_model::{
     now_iso8601, AccountId, AccountSettings, AppSettings, CommandResult, ConversationCursor,

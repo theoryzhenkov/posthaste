@@ -6,7 +6,23 @@ use posthaste_domain_model::{
 };
 use serde_json::json;
 
-use super::{encode_payload, MailService};
+use super::{encode_payload, MailService, MailboxReadStore};
+
+/// The account's mailbox id for a role, resolved through a `MailboxReadStore`
+/// reader — the store-error-returning core shared by the `&self` methods and
+/// the derive fold (which captures an `Arc<dyn MailboxReadStore>` and runs
+/// inside the store transaction).
+pub(super) fn mailbox_id_by_role_on(
+    reader: &dyn MailboxReadStore,
+    account_id: &AccountId,
+    role: &str,
+) -> Result<Option<MailboxId>, StoreError> {
+    Ok(reader
+        .list_mailboxes(account_id)?
+        .into_iter()
+        .find(|mailbox| mailbox.role.as_deref() == Some(role))
+        .map(|mailbox| mailbox.id))
+}
 
 impl MailService {
     /// The account's mailbox id for a role, when discovered.
@@ -15,12 +31,11 @@ impl MailService {
         account_id: &AccountId,
         role: &str,
     ) -> Result<Option<MailboxId>, ServiceError> {
-        Ok(self
-            .mailbox_reader
-            .list_mailboxes(account_id)?
-            .into_iter()
-            .find(|mailbox| mailbox.role.as_deref() == Some(role))
-            .map(|mailbox| mailbox.id))
+        Ok(mailbox_id_by_role_on(
+            &*self.mailbox_reader,
+            account_id,
+            role,
+        )?)
     }
 
     /// The account's Drafts mailbox id by role, when discovered.
@@ -28,7 +43,11 @@ impl MailService {
         &self,
         account_id: &AccountId,
     ) -> Result<Option<MailboxId>, ServiceError> {
-        self.mailbox_id_by_role(account_id, "drafts")
+        Ok(mailbox_id_by_role_on(
+            &*self.mailbox_reader,
+            account_id,
+            "drafts",
+        )?)
     }
     fn queue_message_operation(
         &self,
