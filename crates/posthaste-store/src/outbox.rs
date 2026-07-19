@@ -387,6 +387,65 @@ impl OperationOutboxStore for DatabaseStore {
         })
     }
 
+    fn mark_operation_settled(
+        &self,
+        id: &OperationId,
+        settled_at_mono: i64,
+        watermark: Option<&str>,
+    ) -> Result<(), StoreError> {
+        // Settle IN PLACE: the op leaves the flush lane and pendingOperations
+        // via the state filters but stays in the log for replay until causal
+        // truncation.
+        self.write_transaction(|tx| {
+            tx.execute(
+                "UPDATE outbox_operation
+                 SET state = 'applied', settled_at_mono = ?2, settled_watermark = ?3,
+                     updated_at = ?4
+                 WHERE id = ?1",
+                params![id.as_str(), settled_at_mono, watermark, now_iso8601()?],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
+    fn list_settled_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<SettledOperation>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(&format!(
+                "SELECT {OPERATION_COLUMNS}, settled_at_mono, settled_watermark
+                 FROM outbox_operation
+                 WHERE account_id = ?1 AND state = 'applied'
+                 ORDER BY rowid ASC
+                 LIMIT ?2"
+            ))
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(
+                params![account_id.as_str(), OUTBOX_LIST_SAFETY_LIMIT],
+                |row| {
+                    let operation = row_to_operation(row)?;
+                    let settled_at_mono: Option<i64> = row.get(14)?;
+                    let watermark: Option<String> = row.get(15)?;
+                    Ok((operation, settled_at_mono, watermark))
+                },
+            )
+            .map_err(sql_to_store_error)?;
+        let mut operations = Vec::new();
+        for row in rows {
+            let (operation, settled_at_mono, watermark) = row.map_err(sql_to_store_error)?;
+            operations.push(SettledOperation {
+                operation: operation?,
+                settled_at_mono,
+                watermark,
+            });
+        }
+        Ok(operations)
+    }
+
     fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError> {
         self.write_transaction(|tx| {
             tx.execute(
@@ -424,13 +483,18 @@ impl OperationOutboxStore for DatabaseStore {
 
     fn remove_operation_unless_inflight(&self, id: &OperationId) -> Result<bool, StoreError> {
         // The cancel half of the cancel-vs-flush race (see
-        // `claim_operation_for_flush`): the not-inflight check and the delete are
-        // ONE guarded statement, so there is no check-then-delete window in which
+        // `claim_operation_for_flush`): the state check and the delete are ONE
+        // guarded statement, so there is no check-then-delete window in which
         // the flusher could claim the row between the check and the removal.
+        // `applied` is excluded too: a settled op rests in the log until
+        // causal truncation — the provider already accepted the mutation, so
+        // a late cancel must not delete it (that would drop its replay fold
+        // and flicker the row back to stale base).
         self.write_transaction(|tx| {
             let removed = tx
                 .execute(
-                    "DELETE FROM outbox_operation WHERE id = ?1 AND state != 'inflight'",
+                    "DELETE FROM outbox_operation
+                     WHERE id = ?1 AND state NOT IN ('inflight', 'applied')",
                     params![id.as_str()],
                 )
                 .map_err(sql_to_store_error)?;

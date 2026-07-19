@@ -192,9 +192,57 @@ impl OperationOutboxStore for TestStore {
         Ok(())
     }
 
+    fn mark_operation_settled(
+        &self,
+        id: &OperationId,
+        settled_at_mono: i64,
+        watermark: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        if let Some(op) = ops.iter_mut().find(|op| &op.id == id) {
+            op.state = OperationState::Applied;
+        }
+        self.settled_markers
+            .lock()
+            .expect("settled markers lock poisoned")
+            .insert(
+                id.to_string(),
+                (Some(settled_at_mono), watermark.map(str::to_string)),
+            );
+        Ok(())
+    }
+
+    fn list_settled_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<posthaste_domain_model::SettledOperation>, StoreError> {
+        let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        let markers = self
+            .settled_markers
+            .lock()
+            .expect("settled markers lock poisoned");
+        Ok(ops
+            .iter()
+            .filter(|op| &op.account_id == account_id && op.state == OperationState::Applied)
+            .map(|op| {
+                let (settled_at_mono, watermark) =
+                    markers.get(op.id.as_str()).cloned().unwrap_or((None, None));
+                posthaste_domain_model::SettledOperation {
+                    operation: op.clone(),
+                    settled_at_mono,
+                    watermark,
+                }
+            })
+            .collect())
+    }
+
     fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError> {
         let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         ops.retain(|op| &op.id != id);
+        self.settled_markers
+            .lock()
+            .expect("settled markers lock poisoned")
+            .remove(id.as_str());
         Ok(())
     }
 
@@ -217,10 +265,14 @@ impl OperationOutboxStore for TestStore {
 
     fn remove_operation_unless_inflight(&self, id: &OperationId) -> Result<bool, StoreError> {
         // Mirrors the real store's guarded conditional DELETE (one critical
-        // section with the not-inflight predicate).
+        // section excluding `inflight` and settled `applied` rows).
         let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         let before = ops.len();
-        ops.retain(|op| !(&op.id == id && op.state != OperationState::Inflight));
+        ops.retain(|op| {
+            !(&op.id == id
+                && op.state != OperationState::Inflight
+                && op.state != OperationState::Applied)
+        });
         Ok(ops.len() != before)
     }
 }

@@ -26,9 +26,13 @@ pub(super) enum Pushed {
     /// A message state assertion: settle now via the provider readback.
     /// `rejected` is `Some(reason)` when the provider rejected the change — the
     /// readback then carries the unchanged state, so the settle write reverts.
+    /// `cursor` is the provider sync position the mutation returned (a JMAP
+    /// `set` `newState`): a blind settlement (no readback) records it as the
+    /// op's causal-truncation watermark.
     Message {
         readback: Option<MessageReadback>,
         rejected: Option<String>,
+        cursor: Option<posthaste_domain_model::SyncCursor>,
     },
 }
 
@@ -40,10 +44,12 @@ fn message_pushed(result: Result<MutationOutcome, GatewayError>) -> Result<Pushe
         Ok(outcome) => Ok(Pushed::Message {
             readback: outcome.message,
             rejected: None,
+            cursor: outcome.cursor,
         }),
         Err(GatewayError::MutationRejected { readback, reason }) => Ok(Pushed::Message {
             readback: Some(*readback),
             rejected: Some(reason),
+            cursor: None,
         }),
         Err(transport) => Err(classify_gateway_error(transport)),
     }

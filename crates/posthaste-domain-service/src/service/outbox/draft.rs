@@ -7,7 +7,7 @@
 //! stable-key → live-id resolution stays the one registry seam (M70/D136).
 
 use super::classify::FlushError;
-use crate::service::replay::{synthesize_draft_record, OverlayRetire};
+use crate::service::replay::synthesize_draft_record;
 use crate::service::*;
 use posthaste_domain_model::CommandAck;
 
@@ -110,8 +110,7 @@ impl MailService {
         // the projection from the effective read, exactly like a message
         // assertion — the Drafts list row exists before any provider call.
         let live_id = self.live_draft_id(account_id, &key)?;
-        self.refresh_message_overlay(account_id, &live_id, OverlayRetire::Immediate)
-            .await?;
+        self.refresh_message_overlay(account_id, &live_id).await?;
         let mut events = Vec::new();
         if let Some(summary) = self
             .message_detail_reader
@@ -192,8 +191,7 @@ impl MailService {
         )?;
         // The tombstone fold: the draft leaves every effective view NOW; the
         // provider destroy follows through the outbox discipline.
-        self.refresh_message_overlay(account_id, &live_id, OverlayRetire::Immediate)
-            .await?;
+        self.refresh_message_overlay(account_id, &live_id).await?;
         let mut events = Vec::new();
         if let Some(previous) = previous {
             events.push(self.events.append_event(
@@ -277,11 +275,17 @@ impl MailService {
             return Ok(CommandAck { events });
         }
         // Never reached the provider: a purely local discard. Forget the
-        // reserved mapping, drop the overlay entry (no ops remain), echo the
-        // deletion.
+        // reserved mapping and drop the overlay entry directly (the queued
+        // save's instant draft row is a pinned shape the no-ops replay arm
+        // would pass through; the discard deliberately forgets it), then echo
+        // the deletion.
         self.draft_registry.remove_draft_alias(account_id, &key)?;
-        self.refresh_message_overlay(account_id, &live_id, OverlayRetire::Immediate)
-            .await?;
+        {
+            let overlay = self.overlay.clone();
+            let owned_account = account_id.clone();
+            let owned_row = live_id.clone();
+            offload(move || overlay.remove_overlay_message(&owned_account, &owned_row)).await?;
+        }
         let event = self.events.append_event(
             account_id,
             EVENT_TOPIC_MESSAGE_UPDATED,
@@ -646,7 +650,8 @@ impl MailService {
     /// OLD live row is provider-destroyed (tombstone it if base still shows
     /// it; drop its overlay entry otherwise) and the NEW id has no base row
     /// yet (write the settled fold there — the "applied awaiting convergence"
-    /// representation; the post-sync sweep retires it once base covers it).
+    /// representation; it retires when replay sees a base row exist at the
+    /// new id, at which point base truth takes over the entry).
     /// A newer queued save for the same key refolds through the one lifecycle
     /// function instead.
     pub(super) async fn settle_draft_save_overlay(
@@ -681,12 +686,7 @@ impl MailService {
                     )
             });
         if has_remaining_draft_ops {
-            self.refresh_message_overlay(
-                account_id,
-                &new_id,
-                crate::service::replay::OverlayRetire::ConfirmAgainstBase,
-            )
-            .await?;
+            self.refresh_message_overlay(account_id, &new_id).await?;
         } else if let Ok(posthaste_domain_model::MailIntent::SaveDraft { request, .. }) =
             operation.intent()
         {

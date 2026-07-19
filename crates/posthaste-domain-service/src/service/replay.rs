@@ -1,40 +1,32 @@
 //! The replay engine: visible mail state is `replay(log, base)`.
 //!
-//! The overlay plane's override rows are DERIVED — folded from the unsettled
-//! intent ops over the sync-owned base rows — and are recomputed whenever an
-//! input changes: a log write (command accepted, op settled, op removed) or a
-//! base write (each applied sync chunk, plus the post-sync sweep).
+//! The overlay plane's override rows are DERIVED — folded from the log's
+//! replayable ops over the sync-owned base rows — and are recomputed whenever
+//! an input changes: a log write (command accepted, op settled, op truncated)
+//! or a base write (each applied sync chunk, plus the post-sync sweep). The
+//! log includes SETTLED message assertions: a blind-settled op (no provider
+//! readback) rests in the `applied` state, still folded so its effect keeps
+//! serving until base catches up, and leaves the log only by CAUSAL
+//! truncation ([`MailService::truncate_settled_operations`]) — never by
+//! comparing base state against a fold.
 //! [`MailService::refresh_message_overlay`] is the incremental unit (one
 //! row); [`MailService::replay_account_overrides`] is the full rebuild from
 //! (log, base) — always legal, and the recovery path that reproduces every
-//! DERIVED override row of a wiped view.
+//! DERIVED override row of a wiped view, settled ops included.
 //!
 //! Pinned rows (a `draft_id`-carrying draft row or a `phsend-` provisional
-//! Sent row with no base row) are not override rows: their owning op has
-//! already settled, so they are not derivable from (log, base) and a wipe
-//! loses them. Replay passes them through unchanged wherever they exist (the
-//! keep-pins arm of the retire check).
+//! Sent row, with no base row under them) are not override rows: their owning
+//! entity op has already settled and left the log, so they are not derivable
+//! from (log, base) and a wipe loses them. Replay passes them through
+//! unchanged wherever they exist.
 
 use posthaste_domain_model::{
     AccountId, MailboxId, MessageId, MessageRecord, Operation, OperationEntityKind, OperationKind,
-    OperationState, SendMessageRequest, ServiceError, StoreError, ThreadId,
+    OperationState, SendMessageRequest, ServiceError, SyncObject, ThreadId,
 };
 
 use super::message_queries::{intent_fold_effect, project_record, FoldEffect};
 use super::{offload, MailService};
-
-/// How a refresh treats an overlay entry whose ops have ALL settled.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OverlayRetire {
-    /// Base was just made authoritative for this message (a provider readback
-    /// or a rejection was written): remove the entry unconditionally.
-    Immediate,
-    /// Base may not have absorbed the settled effect yet (no-readback
-    /// settlement, e.g. IMAP; or a periodic sweep): remove the entry only once
-    /// base COVERS its fold (tombstone: only once the base row is gone).
-    /// Retire-on-confirmation — prevents the settle→next-sync revert flicker.
-    ConfirmAgainstBase,
-}
 
 /// The role a visible row plays for an entity-intent op in the fold: draft
 /// ops address their key's live row; a send addresses TWO rows — its own
@@ -168,9 +160,8 @@ pub(crate) fn synthesize_draft_record(
         has_attachment: !request.attachments.is_empty(),
         size: request.body.len() as i64,
         mailbox_ids,
-        // `$seen` matches the gateways' save semantics (an own draft is never
-        // "new mail"); the retire compare treats it as soft (IMAP appends
-        // `\Draft` only).
+        // `$seen` matches the gateways' save semantics (an own draft is
+        // never "new mail"; IMAP itself appends `\Draft` only).
         keywords: vec!["$draft".to_string(), "$seen".to_string()],
         body_html: None,
         body_text: None,
@@ -187,8 +178,10 @@ pub(crate) fn synthesize_draft_record(
     }
 }
 
-/// The op states whose effects the replay folds: everything not yet retired
-/// by settlement coverage (a rejected/failed op folds nothing — base wins).
+/// The op states whose effects the replay folds: pending and inflight intent,
+/// plus settled (`applied`) ops awaiting causal truncation — their effect
+/// keeps serving until base catches up. A rejected/failed op folds nothing
+/// (base wins), and a parked send unwinds its fold explicitly.
 fn is_replayable(op: &Operation) -> bool {
     matches!(
         op.state,
@@ -209,28 +202,32 @@ fn is_pinned_row(record: &MessageRecord) -> bool {
 
 impl MailService {
     /// Incremental replay of one visible row: re-derive its OVERLAY entry
-    /// from base + its unsettled intents. The single maintenance function for
-    /// the derived plane, called at every lifecycle moment that changes the
+    /// from base + the replayable ops that touch it (pending, inflight, and
+    /// settled-awaiting-truncation). The single maintenance function for the
+    /// derived plane, called at every lifecycle moment that changes the
     /// replay's inputs — mutation queue, draft save/discard queue, op
-    /// settlement, and the post-sync sweep.
+    /// settlement, op truncation, and the post-sync sweep.
     ///
     /// `message_id` is the row's LIVE id: for message assertions the op's
     /// entity id; for draft intents the registry-resolved live id their stable
     /// key currently maps to (draft ops carry the KEY, the overlay is keyed by
     /// the visible row).
     ///
-    /// No unsettled ops → the entry is removed (base shows through), subject
-    /// to `retire`. Folded-to-removed → tombstone. A discard folding over no
-    /// base row removes the entry (nothing to hide). No base row under plain
-    /// assertions → the entry is removed too (a pending flag folds over
-    /// nothing once a remote delete wins; only a pending Destroy keeps its
-    /// tombstone), so the visible row stays a pure function of (log, base).
-    /// Pinned rows pass through unchanged in every arm.
+    /// No replayable ops → the entry derives from base alone, so it is
+    /// removed (base shows through) — except the ownerless entity-plane
+    /// artifacts: a pinned row with no base row passes through unchanged (its
+    /// provider copy has not synced yet), and a tombstone over a surviving
+    /// base row keeps hiding it (the provider destroy has not synced out
+    /// yet). Folded-to-removed → tombstone. A
+    /// discard folding over no base row removes the entry (nothing to hide).
+    /// No base row under plain assertions → the entry is removed too (a
+    /// pending flag folds over nothing once a remote delete wins; only a
+    /// pending Destroy keeps its tombstone), so the visible row stays a pure
+    /// function of (log, base) plus the passed-through pins.
     pub(crate) async fn refresh_message_overlay(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-        retire: OverlayRetire,
     ) -> Result<(), ServiceError> {
         let overlay = self.overlay.clone();
         let unsettled = {
@@ -260,63 +257,40 @@ impl MailService {
             }
         }
         if message_ops.is_empty() && entity_ops.is_empty() {
-            if retire == OverlayRetire::ConfirmAgainstBase {
-                let confirmed = {
-                    let overlay = overlay.clone();
-                    let account_id = account_id.clone();
-                    let message_id = message_id.clone();
-                    offload(move || {
-                        let Some(entry) = overlay.read_overlay_message(&account_id, &message_id)?
-                        else {
-                            return Ok::<bool, StoreError>(true); // nothing to retire
-                        };
-                        let base = overlay.read_base_message_record(&account_id, &message_id)?;
-                        Ok(match (entry, base) {
-                            // Tombstone: confirmed once the base row is gone.
-                            (None, base) => base.is_none(),
-                            // Folded row: confirmed once base carries the same
-                            // keyword + mailbox sets. A draft row compares
-                            // keywords modulo `$seen`: IMAP appends `\Draft`
-                            // only, so the synthesized `$seen` would otherwise
-                            // never be covered and the entry would linger.
-                            (Some(mut folded), Some(mut base)) => {
-                                folded.keywords.sort();
-                                base.keywords.sort();
-                                folded.mailbox_ids.sort();
-                                base.mailbox_ids.sort();
-                                let keywords_covered = if folded.draft_id.is_some() {
-                                    let soft = |keywords: &[String]| {
-                                        keywords
-                                            .iter()
-                                            .filter(|keyword| keyword.as_str() != "$seen")
-                                            .cloned()
-                                            .collect::<Vec<_>>()
-                                    };
-                                    soft(&folded.keywords) == soft(&base.keywords)
-                                } else {
-                                    folded.keywords == base.keywords
-                                };
-                                keywords_covered && folded.mailbox_ids == base.mailbox_ids
-                            }
-                            // Folded row but no base row. PINNED rows stay.
-                            // Anything else is a GHOST — its op settled and
-                            // base no longer holds the id, so the provider
-                            // row either rotated (IMAP moves re-key the id;
-                            // the new row is already in base) or was removed
-                            // remotely; keeping it would serve a duplicate of
-                            // the re-keyed row.
-                            (Some(folded), None) => !is_pinned_row(&folded),
-                        })
-                    })
-                    .await?
-                };
-                if !confirmed {
-                    return Ok(());
-                }
-            }
+            // No replayable op touches the row: the entry derives from base
+            // alone, so it is removed and base shows through — except the two
+            // ownerless entity-plane artifacts, which survive exactly while
+            // base has not absorbed their settled effect (existence checks,
+            // never a comparison of state):
+            // - a PINNED row over NO base row (a settled draft save / send
+            //   awaiting its provider copy) passes through unchanged;
+            // - a TOMBSTONE over a SURVIVING base row (a provider-destroyed
+            //   copy awaiting the sync prune) keeps hiding it — the sweep's
+            //   D175 repair owns the stuck case.
             let account_id = account_id.clone();
             let message_id = message_id.clone();
-            offload(move || overlay.remove_overlay_message(&account_id, &message_id)).await?;
+            offload(
+                move || match overlay.read_overlay_message(&account_id, &message_id)? {
+                    Some(Some(folded))
+                        if is_pinned_row(&folded)
+                            && overlay
+                                .read_base_message_record(&account_id, &message_id)?
+                                .is_none() =>
+                    {
+                        Ok(())
+                    }
+                    Some(None)
+                        if overlay
+                            .read_base_message_record(&account_id, &message_id)?
+                            .is_some() =>
+                    {
+                        Ok(())
+                    }
+                    Some(_) => overlay.remove_overlay_message(&account_id, &message_id),
+                    None => Ok(()),
+                },
+            )
+            .await?;
             return Ok(());
         }
         let base = {
@@ -554,9 +528,10 @@ impl MailService {
     }
 
     /// Every row id replay must visit for an account: the union of the rows
-    /// the unsettled log touches (so a wiped derived row reappears from the
-    /// log alone) and the rows currently overlaid (so all-settled entries get
-    /// their retire pass and pinned rows are passed through unchanged).
+    /// the replayable log touches — settled-awaiting-truncation ops included,
+    /// so a wiped derived row reappears from the log alone — and the rows
+    /// currently overlaid (so entries whose ops truncated are removed and
+    /// pinned rows are passed through unchanged).
     pub(crate) async fn replay_inventory(
         &self,
         account_id: &AccountId,
@@ -580,21 +555,73 @@ impl MailService {
     }
 
     /// Full rebuild of the account's derived override rows from (log, base):
-    /// replay every row in the inventory with the retire-on-confirmation
-    /// policy. Always legal — a wiped derived row reappears because the
-    /// inventory is log-derived, not overlay-derived — and idempotent; the
-    /// recovery path for a lost or distrusted derived view.
+    /// replay every row in the inventory. Always legal — a wiped derived row
+    /// reappears because the inventory is log-derived, not overlay-derived,
+    /// and the log's settled ops keep folding until truncation — and
+    /// idempotent; the recovery path for a lost or distrusted derived view.
     pub async fn replay_account_overrides(
         &self,
         account_id: &AccountId,
     ) -> Result<(), ServiceError> {
         for message_id in self.replay_inventory(account_id).await? {
-            self.refresh_message_overlay(
-                account_id,
-                &message_id,
-                OverlayRetire::ConfirmAgainstBase,
-            )
-            .await?;
+            self.refresh_message_overlay(account_id, &message_id)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Causal truncation: remove settled (`applied`) ops whose effect the
+    /// sync chain has provably absorbed, then re-derive the rows they
+    /// touched (base alone serves them from here). Two clocks, both pure
+    /// ordering checks — no comparison of state decides anything:
+    ///
+    /// - WATERMARK (JMAP): settlement captured the provider sync position
+    ///   that includes the change; the op truncates once the stored Message
+    ///   cursor equals it. Opaque states have no comparable order, so this is
+    ///   an equality fast path — a chain that jumps past the watermark
+    ///   without ever committing it exactly falls back to the cycle rule.
+    /// - CYCLE (IMAP; JMAP without a usable position): the op truncates once
+    ///   a sync cycle that STARTED (strictly) after its settlement completes
+    ///   — `cycle_started_mono` is the caller's cycle-entry stamp on the same
+    ///   monotonic-anchored clock that stamped `settled_at_mono`. A legacy
+    ///   row without a marker is truncate-eligible on any completed cycle.
+    ///
+    /// Runs only from a COMPLETED cycle's sweep: an aborted pull never
+    /// truncates. If a provider consistency blip ever breaks the causal
+    /// assumption, the next replay serves base truth and the following sync
+    /// self-corrects — a one-cycle flicker, never durable wrong state.
+    pub(crate) async fn truncate_settled_operations(
+        &self,
+        account_id: &AccountId,
+        cycle_started_mono: i64,
+    ) -> Result<(), ServiceError> {
+        let settled: Vec<posthaste_domain_model::SettledOperation> = {
+            let outbox = self.outbox.clone();
+            let account_id = account_id.clone();
+            offload(move || outbox.list_settled_operations(&account_id)).await?
+        };
+        if settled.is_empty() {
+            return Ok(());
+        }
+        let message_cursor = self
+            .sync_state
+            .get_cursor(account_id, SyncObject::Message)?;
+        for settled_op in settled {
+            let cycle_started_after_settlement =
+                settled_op.settled_at_mono.unwrap_or(0) < cycle_started_mono;
+            let watermark_reached = matches!(
+                (&settled_op.watermark, &message_cursor),
+                (Some(watermark), Some(cursor)) if *watermark == cursor.state
+            );
+            if !(cycle_started_after_settlement || watermark_reached) {
+                continue;
+            }
+            let touched = self.op_touched_row_ids(account_id, &settled_op.operation)?;
+            self.outbox.remove_operation(&settled_op.operation.id)?;
+            for message_id in touched {
+                self.refresh_message_overlay(account_id, &message_id)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -617,12 +644,8 @@ impl MailService {
             if !written_rows.contains(&message_id) {
                 continue;
             }
-            self.refresh_message_overlay(
-                account_id,
-                &message_id,
-                OverlayRetire::ConfirmAgainstBase,
-            )
-            .await?;
+            self.refresh_message_overlay(account_id, &message_id)
+                .await?;
         }
         Ok(())
     }

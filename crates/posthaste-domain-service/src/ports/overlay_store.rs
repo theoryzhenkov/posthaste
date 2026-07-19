@@ -10,14 +10,13 @@ use posthaste_domain_model::MessageRecord;
 /// plane over the sync-owned base tables for every SQL read (D168).
 ///
 /// One writer per plane: sync writes base ONLY (`SyncWriteStore`); the fold
-/// engine writes the overlay ONLY (this port). Lifecycle mirrors the pending
-/// set's retire-on-confirmation:
+/// engine writes the overlay ONLY (this port). Lifecycle:
 ///   accept  → [`upsert_overlay_message`] (folded row) or
 ///             [`tombstone_overlay_message`] (pending Destroy),
 ///   refold  → [`upsert_overlay_message`] again (base changed under a pending
 ///             effect; the fold recomputed),
-///   retire  → [`remove_overlay_message`] (the reconciler observed the effect
-///             in base; the base row shows through again).
+///   remove  → [`remove_overlay_message`] (the row's ops truncated out of the
+///             log; the entry re-derives from base alone and vanishes).
 ///
 /// NOTE (NS1 substrate increment): defined and store-implemented ahead of the
 /// fold-engine wiring. Nothing writes the overlay in production yet — every
@@ -71,9 +70,9 @@ pub trait MessageOverlayStore: Send + Sync {
 
     /// Read one overlay entry: `None` = no entry; `Some(None)` = a tombstone
     /// (pending destroy); `Some(Some(record))` = a folded row (keywords +
-    /// mailbox sets loaded; body fields `None`). Drives retire-on-confirmation:
-    /// an entry whose ops all settled is removed only once base COVERS its
-    /// fold (or, for a tombstone, once the base row is gone).
+    /// mailbox sets loaded; body fields `None`). Drives the no-ops replay
+    /// arm's ownerless-artifact pass-through (a pinned row with no base row;
+    /// a tombstone over a surviving base row).
     fn read_overlay_message(
         &self,
         account_id: &AccountId,

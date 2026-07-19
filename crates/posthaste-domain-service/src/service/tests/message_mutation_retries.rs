@@ -858,11 +858,12 @@ async fn rejected_mutation_settles_failed_and_bases_the_raw_readback() {
 }
 
 #[tokio::test]
-async fn unsettled_message_ids_tracks_queued_then_settled_assertions() {
-    // The unsettled set names exactly the messages whose overlay entries the
-    // NS1 sweep re-derives. A queued optimistic mutation puts its message in
-    // the set; settling it (flush/ack) removes it, so the overlay retires and
-    // base (plain provider state) shows through for that message.
+async fn unsettled_message_ids_tracks_queued_then_truncated_assertions() {
+    // The unsettled set names exactly the messages whose overlay entries
+    // replay re-derives. A queued optimistic mutation puts its message in the
+    // set; a BLIND settlement (no readback) keeps it there — the settled op
+    // bridges in the log, still folded — and only causal truncation removes
+    // it, so base (plain provider state) shows through for that message.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
@@ -886,7 +887,8 @@ async fn unsettled_message_ids_tracks_queued_then_settled_assertions() {
         "a queued optimistic mutation marks its message unsettled (sync-guarded)",
     );
 
-    // Flush settles + removes the op, so the message is no longer guarded.
+    // A blind flush settles the op IN PLACE: gone from the user-facing
+    // pending list, still in the unsettled (replay) set.
     let gateway = MutationGateway::with_revision(1);
     service
         .flush_account(&account, &gateway)
@@ -894,10 +896,35 @@ async fn unsettled_message_ids_tracks_queued_then_settled_assertions() {
         .expect("flush settles the assertion");
     assert!(
         service
+            .list_pending_operations(&account)
+            .expect("pending list")
+            .is_empty(),
+        "a settled op is not user-facing outstanding work",
+    );
+    assert!(
+        service
+            .unsettled_message_ids(&account)
+            .expect("unsettled set")
+            .contains("message-1"),
+        "the settled op bridges in the log until causal truncation",
+    );
+
+    // Let time pass on the settlement marker, then complete a sync cycle
+    // that started after it: the op truncates and the guard lifts.
+    backdate_settled_markers(&store, 10);
+    service
+        .flush_and_observe(
+            &account,
+            &MutationGateway::with_sync_batch(2, SyncBatch::default()),
+        )
+        .await
+        .expect("a completed cycle after settlement truncates");
+    assert!(
+        service
             .unsettled_message_ids(&account)
             .expect("unsettled set")
             .is_empty(),
-        "once settled, the message is no longer unsettled and sync applies to it",
+        "once truncated, the message is no longer unsettled and sync applies to it",
     );
 }
 

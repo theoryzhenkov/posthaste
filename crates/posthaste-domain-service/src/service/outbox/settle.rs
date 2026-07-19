@@ -1,8 +1,10 @@
-//! Settlement: write the provider readback to base RAW (it is provider truth
-//! arriving via the flush channel — the reconciler role, NS1 D161), re-derive
-//! the message's overlay entry from the remaining unsettled ops, and emit the
-//! `operation.settled` / `operation.dispatch_uncertain` / failure-correction
-//! events.
+//! Settlement: record the provider's acceptance of a message assertion and
+//! emit the `operation.settled` / `operation.dispatch_uncertain` /
+//! failure-correction events. A readback (or rejection) writes base RAW (it
+//! is provider truth arriving via the flush channel — the reconciler role,
+//! NS1 D161) and removes the op; a blind settlement rests the op in the log
+//! (`applied`, still folded by replay) until causal truncation. Either way
+//! the message's overlay entry re-derives from the log that remains.
 
 use crate::service::*;
 use posthaste_domain_model::{
@@ -28,28 +30,57 @@ fn delete_message_batch(message_id: &MessageId) -> SyncBatch {
 }
 
 impl MailService {
-    /// Settle a message state assertion from the provider readback: remove the
-    /// op, write the RAW readback to base (provider truth — no optimism is
-    /// folded into base, NS1), and re-derive the message's overlay entry from
-    /// whatever ops remain unsettled. `Removed` deletes the base row; a `None`
-    /// readback (a gateway that did not read back, e.g. IMAP) writes nothing —
-    /// the overlay keeps serving the fold until a later sync reconciles base.
+    /// Settle a message state assertion from the provider outcome.
     ///
-    /// @spec docs/eph/RFC-L2-client-replication-model#6-the-runtime-substrate-base--overlay--effective-d167d169
+    /// With a readback (or a rejection) the op leaves the log NOW and the RAW
+    /// readback is written to base (provider truth — no optimism is folded
+    /// into base, NS1): the settlement itself writes a post-change base
+    /// state, so removal is causal by construction. `Removed` deletes the
+    /// base row.
+    ///
+    /// A `None` readback (a gateway that did not read back, e.g. IMAP; a JMAP
+    /// readback-fetch failure) settles BLIND: the op rests in the log in the
+    /// `applied` state — excluded from the flush lane, still folded by replay
+    /// so its effect keeps serving — until causal truncation removes it
+    /// ([`MailService::truncate_settled_operations`]). `cursor` is the
+    /// provider sync position the mutation returned; a blind settlement
+    /// records it as the op's truncation watermark.
+    ///
+    /// @spec docs/backend/L2-optimism#settlement-and-truncation
     pub(super) async fn settle_message_operation(
         &self,
         account_id: &AccountId,
         operation: &Operation,
         readback: Option<MessageReadback>,
         rejected: Option<String>,
+        cursor: Option<posthaste_domain_model::SyncCursor>,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let message_id = MessageId::from(operation.entity.id.as_str());
-        // Remove the settled op FIRST so the overlay re-derivation below sees
-        // only the ops that remain.
-        self.outbox.remove_operation(&operation.id)?;
         let mut events = Vec::new();
         let had_readback = readback.is_some();
         let rejected_settlement = rejected.is_some();
+        if had_readback || rejected_settlement {
+            // Base becomes authoritative in this settlement — remove the op
+            // FIRST so the re-derivation below sees only the ops that remain
+            // (a rejection reverts the optimism NOW).
+            self.outbox.remove_operation(&operation.id)?;
+        } else {
+            // Blind settlement: the op bridges until truncation. The marker is
+            // the daemon's monotonic-anchored clock — the same clock that
+            // stamps sync-cycle-start markers, so the "cycle started after
+            // settlement" check is single-clock (across a daemon restart the
+            // anchor re-derives from the wall clock; any skew is bounded by
+            // the one-cycle-flicker failure mode).
+            let watermark = cursor
+                .as_ref()
+                .filter(|cursor| cursor.object_type == SyncObject::Message)
+                .map(|cursor| cursor.state.as_str());
+            self.outbox.mark_operation_settled(
+                &operation.id,
+                super::schedule::monotonic_now_secs(),
+                watermark,
+            )?;
+        }
         let batch = match readback {
             Some(MessageReadback::Present(record)) => Some(upsert_message_batch(record)),
             Some(MessageReadback::Removed) => Some(delete_message_batch(&message_id)),
@@ -69,18 +100,11 @@ impl MailService {
                 .await?,
             );
         }
-        // Overlay retire/refold. With a readback (or a rejection) base was just
-        // made authoritative for this message → retire immediately (a rejection
-        // reverts the optimism NOW). Without one (e.g. IMAP settles blind), the
-        // settled effect has NOT reached base yet — retire only on confirmation
-        // (the sweep removes the entry once a sync writes the effect into
-        // base), so the row never flickers back between settle and sync.
-        let retire = if had_readback || rejected_settlement {
-            crate::service::replay::OverlayRetire::Immediate
-        } else {
-            crate::service::replay::OverlayRetire::ConfirmAgainstBase
-        };
-        self.refresh_message_overlay(account_id, &message_id, retire)
+        // Re-derive the message's overlay entry from the log that remains: a
+        // blind-settled op still folds (visible state unchanged between settle
+        // and truncation); a readback/rejection settlement folds only the ops
+        // left behind over the just-written base.
+        self.refresh_message_overlay(account_id, &message_id)
             .await?;
         let settlement = OperationSettlement {
             id: operation.id.clone(),
