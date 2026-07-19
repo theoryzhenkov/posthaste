@@ -20,6 +20,9 @@ use posthaste_domain_model::{MessageRecord, SyncBatch};
 /// chunk emit.
 struct ServiceSyncSink<'a> {
     sync_writer: Arc<dyn SyncWriteStore>,
+    /// Drives the per-base-write replay: each applied chunk re-derives the
+    /// override rows it touched before its events are published.
+    service: &'a MailService,
     account_id: &'a AccountId,
     publish: &'a mut (dyn FnMut(&[DomainEvent]) + Send),
     applied_events: Vec<DomainEvent>,
@@ -30,16 +33,15 @@ struct ServiceSyncSink<'a> {
     error: Option<ServiceError>,
 }
 
-// NS1 cutover note: the M35 `guard_unsettled` sync-time fold and the
-// `protected_message_ids` prune exemption are GONE. Sync writes RAW provider
-// truth to base; un-acked optimism lives only in the overlay plane
-// (`message_overlay`), which every effective read folds in and which the
-// post-sync sweep below re-derives over the fresh base. A not-yet-settled
-// local effect therefore survives any snapshot without base ever holding
-// folded state: a pending flag rides the overlay; a pending Destroy is an
-// overlay tombstone the snapshot upsert cannot resurrect; a server
-// delete-delta for an overlaid message removes only the base row while the
-// overlay keeps serving the pending intent until its op settles.
+// Sync writes RAW provider truth to base; un-acked optimism lives only in
+// the overlay plane (`message_overlay`), which every effective read folds in
+// and which the per-chunk replay plus the post-sync sweep re-derive over the
+// fresh base. A not-yet-settled local effect therefore survives any snapshot
+// without base ever holding folded state: a pending flag rides the overlay;
+// a pending Destroy is an overlay tombstone the snapshot upsert cannot
+// resurrect; a server delete-delta for an overlaid message removes the base
+// row AND the replay drops the pending intent's fold with it (base wins —
+// only a pending Destroy keeps its tombstone).
 
 #[async_trait]
 impl SyncChunkSink for ServiceSyncSink<'_> {
@@ -56,6 +58,35 @@ impl SyncChunkSink for ServiceSyncSink<'_> {
         .await;
         match result {
             Ok(events) => {
+                // This chunk is a base write: re-derive the override rows it
+                // touched BEFORE publishing, so no effective read (or
+                // event-driven re-query) observes a pending op's fold over
+                // the old base — and an abort later in the cycle leaves no
+                // stale override behind.
+                let mut written: std::collections::BTreeSet<MessageId> = batch
+                    .messages
+                    .iter()
+                    .map(|record| record.id.clone())
+                    .collect();
+                written.extend(batch.deleted_message_ids.iter().cloned());
+                written.extend(batch.absence_deleted_message_ids.iter().cloned());
+                written.extend(
+                    batch
+                        .deleted_imap_message_locations
+                        .iter()
+                        .chain(&batch.absence_deleted_imap_message_locations)
+                        .map(|location| location.message_id.clone()),
+                );
+                if let Err(error) = self
+                    .service
+                    .replay_base_write(self.account_id, &written)
+                    .await
+                {
+                    self.error = Some(error);
+                    return Err(GatewayError::Rejected(
+                        "post-chunk overlay replay failed".to_string(),
+                    ));
+                }
                 (self.publish)(&events);
                 self.applied_events.extend(events);
                 self.mailbox_count += batch.mailboxes.len();
@@ -134,8 +165,9 @@ impl MailService {
         // OBSERVE: stream the pull as chunks, applying + publishing each so mail
         // surfaces progressively. The sink accumulates messages/counts; the
         // outcome carries any reconciliation set for the final pass. Base
-        // receives RAW provider truth (NS1) — the overlay sweep below refolds
-        // any still-unsettled optimism over the fresh base afterwards.
+        // receives RAW provider truth; each applied chunk re-derives the
+        // override rows it touched, and the end-of-cycle sweep below refolds
+        // whatever the flush legs settled.
         let (
             sync_messages,
             mailbox_count,
@@ -145,6 +177,7 @@ impl MailService {
         ) = {
             let mut sink = ServiceSyncSink {
                 sync_writer: self.sync_writer.clone(),
+                service: self,
                 account_id,
                 publish,
                 applied_events: Vec::new(),
@@ -193,6 +226,13 @@ impl MailService {
                 )
             })
             .await?;
+            // The prune is a base write too: re-derive the pruned rows'
+            // overrides before publishing.
+            let pruned: std::collections::BTreeSet<MessageId> = reconcile_events
+                .iter()
+                .filter_map(|event| event.message_id.clone())
+                .collect();
+            self.replay_base_write(account_id, &pruned).await?;
             publish(&reconcile_events);
             events.extend(reconcile_events);
         }
@@ -264,9 +304,9 @@ impl MailService {
                 post_commit_errors.push(error.code().to_string());
             }
         }
-        // NS1 overlay sweep: refold every still-overlaid message over the base
-        // this sync just rewrote (or drop entries whose ops settled during the
-        // flush legs). The inventory is bounded by the pending outbox — small.
+        // Replay on the base this sync just rewrote: re-derive every row in
+        // the replay inventory (op-touched ∪ overlaid) and drop entries whose
+        // ops settled during the flush legs. Bounded by the outbox — small.
         let sweep_events = self.sweep_message_overlay(account_id).await?;
         publish(&sweep_events);
         events.extend(sweep_events);
@@ -330,7 +370,7 @@ impl MailService {
         let mut events = self.flush_account(account_id, gateway).await?;
         let cursors = self.sync_state.get_sync_cursors(account_id)?;
         let batch = gateway.sync(account_id, &cursors, None).await?;
-        // NS1: raw provider truth to base; the sweep refolds any surviving
+        // Raw provider truth to base; the sweep refolds any surviving
         // optimism over it afterwards.
         let sync_writer = self.sync_writer.clone();
         let owned_account_id = account_id.clone();
@@ -349,23 +389,23 @@ impl MailService {
         Ok(events)
     }
 
-    /// Re-derive every overlaid message for the account (NS1): the sync-side
-    /// leg of the overlay lifecycle. Entries whose ops settled are removed;
-    /// entries with surviving ops are refolded over the just-written base.
-    /// Returns the adoption prune echoes (NS2 Slice 4) for the caller to
-    /// publish.
+    /// The end-of-cycle replay sweep: re-derive every row in the replay
+    /// inventory — rows the unsettled log touches (so a base row rewritten by
+    /// this sync under a pending op re-derives even if its override row was
+    /// never written or was wiped) plus rows currently overlaid (all-settled
+    /// entries retire once base covers them). The per-chunk
+    /// `replay_base_write` covers rows as each base write lands; this sweep
+    /// adds the whole-cycle passes — retirement of entries whose ops settled
+    /// during the flush legs, provisional-Sent adoption, and tombstone
+    /// repair. Returns the adoption prune echoes for the caller to publish.
     async fn sweep_message_overlay(
         &self,
         account_id: &AccountId,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        let overlay_ids = {
-            let overlay = self.overlay.clone();
-            let owned_account_id = account_id.clone();
-            offload(move || overlay.list_overlay_message_ids(&owned_account_id)).await?
-        };
+        let inventory = self.replay_inventory(account_id).await?;
         let mut events = Vec::new();
-        for message_id in overlay_ids {
-            // NS2 Slice 4 adoption: a provisional Sent row whose provider
+        for message_id in inventory {
+            // Adoption: a provisional Sent row whose provider
             // copy landed in base (matched by the transport-shared
             // Message-ID prefix) retires WITH a prune echo — the visible row
             // changes identity, so the client must drop the provisional id.
@@ -394,7 +434,7 @@ impl MailService {
             self.refresh_message_overlay(
                 account_id,
                 &message_id,
-                super::mutation::OverlayRetire::ConfirmAgainstBase,
+                super::replay::OverlayRetire::ConfirmAgainstBase,
             )
             .await?;
         }
@@ -452,8 +492,8 @@ impl MailService {
     }
 
     /// Retire a provisional Sent overlay row whose provider copy has arrived
-    /// in base under its own id (NS2 Slice 4, reconcile-by-intent-id +
-    /// adopt-by-header), filing an unfiled copy into Sent (S-CONV-2).
+    /// in base under its own id (reconcile-by-intent-id + adopt-by-header),
+    /// filing an unfiled copy into Sent (S-CONV-2).
     /// `None` = not such a row / not adopted yet.
     async fn try_adopt_provisional_sent(
         &self,

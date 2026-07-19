@@ -7,7 +7,7 @@
 //! stable-key → live-id resolution stays the one registry seam (M70/D136).
 
 use super::classify::FlushError;
-use crate::service::mutation::{synthesize_draft_record, OverlayRetire};
+use crate::service::replay::{synthesize_draft_record, OverlayRetire};
 use crate::service::*;
 use posthaste_domain_model::CommandAck;
 
@@ -402,7 +402,7 @@ impl MailService {
         // base under its own id.
         let send_row_id = MessageId::from(operation.entity.id.as_str());
         let sent_mailbox = self.mailbox_id_by_role(account_id, "sent")?;
-        let record = crate::service::mutation::synthesize_sent_record(
+        let record = crate::service::replay::synthesize_sent_record(
             &request,
             operation,
             sent_mailbox.as_ref(),
@@ -518,7 +518,7 @@ impl MailService {
                     }
                     let live_id = MessageId::from(new_id.as_str());
                     let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
-                    let record = crate::service::mutation::synthesize_draft_record(
+                    let record = crate::service::replay::synthesize_draft_record(
                         None,
                         &request,
                         operation,
@@ -684,7 +684,7 @@ impl MailService {
             self.refresh_message_overlay(
                 account_id,
                 &new_id,
-                crate::service::mutation::OverlayRetire::ConfirmAgainstBase,
+                crate::service::replay::OverlayRetire::ConfirmAgainstBase,
             )
             .await?;
         } else if let Ok(posthaste_domain_model::MailIntent::SaveDraft { request, .. }) =

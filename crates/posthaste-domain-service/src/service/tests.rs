@@ -47,6 +47,7 @@ mod message_mutation_cursors;
 mod message_mutation_retries;
 mod offload;
 mod outbox;
+mod replay;
 mod smart_mailboxes;
 mod snooze;
 mod source_cleanup;
