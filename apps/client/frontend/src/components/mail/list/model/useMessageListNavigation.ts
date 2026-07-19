@@ -11,21 +11,33 @@ import { messageKey } from './model'
  * handler. The keyboard controller owns the window listener and routes keys
  * here only when the list (or detail, which reuses it) is focused; archive and
  * trash live in the controller as selection-scoped actions.
+ *
+ * `j`/`k` moves the SELECTION cursor only; Enter OPENS the cursor row in the
+ * reader (realigning the ACTIVE message with the cursor).
  */
 export function useMessageListNavigation({
   currentViewKey,
   messages,
   onClearSelection,
   onSelectMessage,
+  onOpenMessage,
   selectedKey,
+  activeKey,
   onCollapseFocused,
   onExpandFocused,
 }: {
   currentViewKey: string
   messages: MessageSummary[]
   onClearSelection: () => void
+  /** Move the SELECTION cursor only; the reader stays put. */
   onSelectMessage: (message: MailSelection) => void
+  /** OPEN a message: reader shows it and the cursor aligns with it. */
+  onOpenMessage: (message: MailSelection) => void
   selectedKey: string | null
+  /** The ACTIVE (opened) message's key, so a removed opened-and-selected row
+   *  (archive-and-advance triage) re-OPENS its successor instead of merely
+   *  moving the cursor to it. */
+  activeKey: string | null
   /** Collapse the focused conversation node (`h`/←). Tree view only; a no-op on
    *  a leaf or already-collapsed node. Absent in flat list mode. */
   onCollapseFocused?: () => void
@@ -58,8 +70,23 @@ export function useMessageListNavigation({
     }
 
     const nextMessage = messages[Math.min(slot.index, messages.length - 1)]
-    onSelectMessage(toSelection(nextMessage))
-  }, [messages, selectedKey, currentViewKey, onSelectMessage, onClearSelection])
+    // If the vanished cursor row was also the OPENED one (e.g. `e` archived the
+    // message being read), keep the triage flow: open the successor. A cursor
+    // that had already diverged from the reader moves alone.
+    if (activeKey !== null && activeKey === selectedKey) {
+      onOpenMessage(toSelection(nextMessage))
+    } else {
+      onSelectMessage(toSelection(nextMessage))
+    }
+  }, [
+    messages,
+    selectedKey,
+    activeKey,
+    currentViewKey,
+    onSelectMessage,
+    onOpenMessage,
+    onClearSelection,
+  ])
 
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
@@ -84,10 +111,24 @@ export function useMessageListNavigation({
     [messages, onSelectMessage, selectedKey, currentViewKey],
   )
 
+  const openSelected = useCallback(() => {
+    const current = messages.find(
+      (message) => messageKey(message) === selectedKey,
+    )
+    if (!current) return
+    onOpenMessage(toSelection(current))
+  }, [messages, onOpenMessage, selectedKey])
+
   useFocusedPaneHandler('list', (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
       return false
     switch (event.key) {
+      case 'Enter':
+        // OPEN the cursor row in the reader pane (no-op with no cursor).
+        if (selectedKey === null) return false
+        event.preventDefault()
+        openSelected()
+        return true
       case 'j':
       case 'ArrowDown':
         event.preventDefault()

@@ -37,10 +37,32 @@ import {
   type PaneKeyHandler,
 } from './dispatch'
 import { KeyboardConfirmDialog } from '@/components/keyboard/KeyboardConfirmDialog'
+import { MESSAGE_SCROLL_ATTRIBUTE } from '@/components/mail/detail/model'
 import type { GotoPrefix, GotoRole } from '../goto/goto'
 
 /** How long a half-typed goto prefix (`g`, `gq`) waits for its next key. */
 const PREFIX_TIMEOUT_MS = 1500
+
+/** Fraction of the reading pane kept in view across a Space page-scroll. */
+const PAGE_SCROLL_OVERLAP = 0.15
+
+/**
+ * Page the reading pane's scroll container (Space / Shift+Space). The detail
+ * pane is display-only — never a keyboard focus region — so the dispatcher
+ * reaches it by its marker attribute rather than through pane registration.
+ * Returns `false` when no pane is open or nothing overflows, letting the key
+ * fall through.
+ */
+function scrollMessagePane(direction: 1 | -1): boolean {
+  const pane = document.querySelector(`[${MESSAGE_SCROLL_ATTRIBUTE}]`)
+  if (!(pane instanceof HTMLElement)) return false
+  if (pane.scrollHeight <= pane.clientHeight) return false
+  pane.scrollBy({
+    top: direction * pane.clientHeight * (1 - PAGE_SCROLL_OVERLAP),
+    behavior: 'smooth',
+  })
+  return true
+}
 
 /** Callbacks + flags the dispatcher needs; mirrors the prior shortcut hooks. */
 export interface KeyboardControllerProps {
@@ -161,6 +183,7 @@ export function KeyboardController({
         setPendingPrefix,
         onGoto: p.onGoto,
         onGotoConversation: p.onGotoConversation,
+        onScrollMessagePane: scrollMessagePane,
         onOpenCommandPalette: p.onOpenCommandPalette,
         onUndo: p.onUndo,
         onRedo: p.onRedo,

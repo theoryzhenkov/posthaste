@@ -58,33 +58,18 @@ function renderRow(
       )
     case 'item': {
       const entry = row.candidate.entry
-      const isDisabled = entry.disabled === true
-      // Disabled rows stay visible and highlightable (discoverability) but are
-      // inert: onSelect no-ops so Enter/click skip them.
       return (
         <CommandItem
           key={row.id}
           value={commandPaletteEntryValue(row.candidate)}
-          aria-disabled={isDisabled || undefined}
-          className={
-            isDisabled
-              ? 'mx-0 px-4 py-2.5 text-muted-foreground/60 data-[selected=true]:bg-[var(--hover-bg)]'
-              : 'mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]'
-          }
-          onSelect={
-            isDisabled ? undefined : () => onRunCandidate(row.candidate)
-          }
+          className="mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]"
+          onSelect={() => onRunCandidate(row.candidate)}
         >
           <span className="flex size-4 shrink-0 items-center justify-center">
             {entry.icon}
           </span>
           <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-          {isDisabled && entry.disabledReason && (
-            <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground/70 italic">
-              {entry.disabledReason}
-            </span>
-          )}
-          {!isDisabled && entry.subtitle && (
+          {entry.subtitle && (
             <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground">
               {entry.subtitle}
             </span>

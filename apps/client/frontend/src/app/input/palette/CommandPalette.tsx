@@ -93,7 +93,8 @@ export function CommandPalette({
 
   // The ActionContext for the palette surface: the focused message becomes the
   // single target, so registry actions resolve exactly as the context menu does
-  // (contextual availability, disabled-with-reason). Rebuilt per render — cheap.
+  // (contextual availability — unavailable actions are not listed). Rebuilt per
+  // render — cheap.
   const actionContext = useMemo<ActionContext>(() => {
     const targets = selectedMessage
       ? [messageTargetFromSelection(selectedMessage, selectedMessageData)]
@@ -212,8 +213,6 @@ export function CommandPalette({
   const executeAction = usePaletteActions({ actionContext, services, nav })
 
   function runEntry(entry: CommandPaletteEntry) {
-    // Disabled registry rows are inert — skip on Enter/click.
-    if (entry.disabled) return
     executeAction(entry.action)
     if (entry.closeOnSelect !== false) {
       onClose()

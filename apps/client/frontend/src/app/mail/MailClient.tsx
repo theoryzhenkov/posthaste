@@ -60,7 +60,13 @@ export function MailClient({
   const [selectedView, setSelectedView] = useState<SidebarSelection | null>(
     DEFAULT_VIEW,
   )
+  // The list's `j`/`k` SELECTION cursor: the row keyboard actions target.
   const [selectedMessage, setSelectedMessage] = useState<MailSelection | null>(
+    null,
+  )
+  // The ACTIVE (opened) message the reader pane shows. Opening aligns the
+  // cursor with it; a later `j`/`k` moves the cursor while this stays put.
+  const [openedMessage, setOpenedMessage] = useState<MailSelection | null>(
     null,
   )
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
@@ -126,8 +132,9 @@ export function MailClient({
   useDesktopCloseRequest(effectiveSurface)
 
   const mailClient = useMailClient()
-  // The reader pane's source of truth: the `messageDetail` family, widened to
-  // its summary row (bodies render inside MessageDetail from its own query).
+  // The CURSOR message's summary — what actions/palette/tags operate on — from
+  // the `messageDetail` family, widened to its summary row. The reader pane is
+  // keyed on `openedMessage` and loads its own detail inside MessageDetail.
   const selectedMessageQuery = useQuery({
     queryKey: selectedMessage
       ? queryKeys.messageDetail({
@@ -145,11 +152,24 @@ export function MailClient({
     select: (detail: MessageDetailResult) => detail.summary,
     enabled: selectedMessage !== null,
   })
-  const isMessageDetailOpen = selectedMessage !== null
+  const isMessageDetailOpen = openedMessage !== null
   const layout = useMailLayoutPersistence(isMessageDetailOpen)
   const syncSourceMutation = useSyncSourceMutation()
 
-  useAutoMarkRead(selectedMessage, selectedMessageQuery.data, actions)
+  // Auto-mark-read follows the OPENED message, not the cursor: at open time the
+  // two align (opening sets both), so the cursor-keyed summary above is the
+  // opened message's; once the cursor moves away the ref-dedupe in the hook has
+  // already fired and passing null keeps merely-traversed rows unread.
+  useAutoMarkRead(
+    openedMessage !== null &&
+      selectedMessage !== null &&
+      openedMessage.sourceId === selectedMessage.sourceId &&
+      openedMessage.messageId === selectedMessage.messageId
+      ? openedMessage
+      : null,
+    selectedMessageQuery.data,
+    actions,
+  )
 
   const handleToggleTheme = useCallback(() => {
     theme.setMode(theme.resolvedMode === 'dark' ? 'light' : 'dark')
@@ -166,6 +186,7 @@ export function MailClient({
     setIsTagEditorOpen,
     setSearchQuery,
     setSelectedMessage,
+    setOpenedMessage,
     setSelectedView,
     setShowShortcuts,
   })
@@ -242,7 +263,7 @@ export function MailClient({
           showShortcuts ||
           isTagEditorOpen
         }
-        hasSelectedMessage={selectedMessage !== null}
+        hasSelectedMessage={selectedMessage !== null || openedMessage !== null}
         hasSearchQuery={searchQuery.trim().length > 0}
         onOpenCommandPalette={handleOpenCommandPalette}
         onUndo={undoRedo.undo}
@@ -281,6 +302,7 @@ export function MailClient({
           preparedSearchQuery={preparedSearchQuery}
           searchQuery={searchQuery}
           selectedMessage={selectedMessage}
+          openedMessage={openedMessage}
           selectedMessageData={selectedMessageQuery.data}
           shellDefaultLayout={layout.shellDefaultLayout}
           showShortcuts={showShortcuts}
@@ -308,6 +330,7 @@ export function MailClient({
           onSearch={handlers.handleSearch}
           onSelectMessage={handlers.handleSelectMessage}
           onSelectMessageRef={handlers.handleSelectMessageRef}
+          onOpenMessageRef={handlers.handleOpenMessageRef}
           onSelectSmartMailbox={handlers.handleSelectSmartMailbox}
           onSelectSourceMailbox={handlers.handleSelectSourceMailbox}
           onSetTagEditorOpen={setIsTagEditorOpen}

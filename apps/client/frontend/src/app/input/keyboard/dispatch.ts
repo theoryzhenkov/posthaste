@@ -8,7 +8,9 @@
  * {@link dispatchMailKey}). The only native keys are the ones with no registry
  * definition at all: the palette openers (⌘K, `/` — the opener clears the
  * palette's seeded pick-step, a shell concern), undo/redo (⌘Z/⌘⇧Z), Escape
- * clears, the goto prefix machine, and pane movement (`Shift+H`/`Shift+L` —
+ * clears, the goto prefix machine, reading-pane paging (Space/Shift+Space —
+ * the detail pane is display-only, so its scrolling cannot be a pane
+ * handler), and pane movement (`Shift+H`/`Shift+L` —
  * `Tab` is left to native focus traversal for accessibility). Keeping the
  * function pure makes the precedence order testable without a DOM.
  */
@@ -70,6 +72,9 @@ export interface KeyboardDispatchContext {
   onGoto: (role: GotoRole, options: { forceSmart: boolean }) => void
   /** `gc` — filter the list to the selected message's conversation. */
   onGotoConversation: () => void
+  /** Space / Shift+Space — page the reading pane's scroll container. Returns
+   *  `false` when there is nothing to scroll so the key falls through. */
+  onScrollMessagePane: (direction: 1 | -1) => boolean
   onOpenCommandPalette: () => void
   onUndo: () => void
   onRedo: () => void
@@ -99,7 +104,8 @@ function moveFocus(ctx: KeyboardDispatchContext, direction: 1 | -1): void {
  *     (fire above overlays; inside text inputs only when `inEditable`);
  *  2. nothing else fires while typing;
  *  3. undo/redo, Escape clears, `/` (work regardless of overlay focus);
- *  4. pane-focus movement and the focused pane's handler;
+ *  4. reading-pane paging (Space/Shift+Space), pane-focus movement, and the
+ *     focused pane's handler;
  *  5. the registry's plain mail-action chords (`e`/`#`/`u`/`m`/`t`/`o`), whose
  *     availability the action table alone decides — a chord no definition
  *     claims in this context does nothing (e.g. `e` in the Archive view).
@@ -200,6 +206,16 @@ export function dispatchMailKey(
     return
   }
 
+  // ---- Reading-pane paging: Space / Shift+Space scroll the open message.
+  // The detail pane is display-only (never a focus region), so this is a
+  // native behavior, not a pane handler. Falls through when nothing scrolls.
+  if (key === ' ' && ctx.hasSelectedMessage) {
+    if (ctx.onScrollMessagePane(event.shiftKey ? -1 : 1)) {
+      event.preventDefault()
+      return
+    }
+  }
+
   // Pane rotation: `Shift+H`/`Shift+L` (Vim-style, wraps at the ends). `Tab` is
   // deliberately NOT hijacked — it keeps its native focus-traversal behavior so
   // keyboard/AT users can still reach controls within a pane. Plain `h`/`l` fall
@@ -216,8 +232,9 @@ export function dispatchMailKey(
   }
 
   // Within-pane navigation (j/k vertical, h/l horizontal) belongs to the focused
-  // pane. While a message is open the list stays the active pane, so j/k there
-  // step the selection — which is what the detail pane shows.
+  // pane. While a message is open the list stays the active pane; j/k there
+  // steps the SELECTION cursor while the detail pane keeps the OPENED message
+  // (Enter re-opens the cursor row, realigning the two).
   const paneHandler = ctx.resolvePaneHandler(ctx.activePane)
   if (paneHandler && paneHandler(event)) return
 
