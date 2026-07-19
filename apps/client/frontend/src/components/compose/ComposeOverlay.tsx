@@ -30,7 +30,7 @@ interface ComposeOverlayProps {
   shell?: 'floating' | 'document'
   onClose: () => void
   /**
-   * Reopen the composer on a kept draft after a scheduled send is undone
+   * Reopen the composer on a kept draft after a held send is undone
    * (the undo-restores-compose path). Optional: shells without a compose
    * router (e.g. a focused window) fall back to the draft simply remaining
    * in Drafts.
@@ -139,14 +139,14 @@ export function ComposeOverlay({
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
   })
 
-  const { handleSubmit, handleSubmitLater, isSending } = useComposeSubmission({
+  const { handleSubmit, isSending } = useComposeSubmission({
     draftKey: autosave.draftKey,
     form: formState.form,
     intentKind: intent.kind,
     isPreparingMessage,
     onClose,
-    // Scheduled (undo-send / send-later) sends persist the compose as a draft
-    // first, so Undo can restore it with full fidelity.
+    // Held (undo-send) sends persist the compose as a draft first, so Undo
+    // can restore it with full fidelity.
     onRestoreDraft,
     onSent: autosave.discardDraft,
     replyContext: queries.replyContextQuery.data,
@@ -172,9 +172,9 @@ export function ComposeOverlay({
     onClose()
   }, [formState.form, formState.hasUserEdited, isSending, onClose])
   const handleKeepEditing = useCallback(() => setShowCloseConfirm(false), [])
-  // While the confirm dialog is up the panel's own dismissal is disabled so it
-  // does not race Radix's overlay/Escape handling (a panel pointerdown fires
-  // before a dialog button's click and would tear the dialog down first).
+  // While the confirm dialog is up the panel's own dismissal is disabled:
+  // Escape and click-away belong to the prompt (the dialog consumes Escape
+  // itself), not to the compose surface behind it.
   const ignoreClose = useCallback(() => {}, [])
   const handleDiscardOnClose = useCallback(() => {
     // Discard the unsaved edits — for a resumed draft the existing draft is left
@@ -285,24 +285,24 @@ export function ComposeOverlay({
         onAttachFiles={formState.handleAttachFiles}
         onClose={requestClose}
         onSubmit={handleSubmit}
-        onSubmitLater={handleSubmitLater}
       />
       {isDragActive ? (
         <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-ring bg-background/75 text-sm font-medium text-foreground">
           Drop files to attach
         </div>
       ) : null}
+      {/* Scoped to the compose surface: the prompt's scrim covers only this
+          composer (a confirmation appears over the window it affects); the
+          rest of the app stays interactive and the panel header keeps
+          working (move/pin). */}
+      <ComposeCloseConfirmDialog
+        open={showCloseConfirm}
+        intentKind={intent.kind}
+        onKeepEditing={handleKeepEditing}
+        onDiscard={handleDiscardOnClose}
+        onSaveAsDraft={handleSaveAsDraft}
+      />
     </div>
-  )
-
-  const closeConfirmDialog = (
-    <ComposeCloseConfirmDialog
-      open={showCloseConfirm}
-      intentKind={intent.kind}
-      onKeepEditing={handleKeepEditing}
-      onDiscard={handleDiscardOnClose}
-      onSaveAsDraft={handleSaveAsDraft}
-    />
   )
 
   if (shell === 'document') {
@@ -312,31 +312,27 @@ export function ComposeOverlay({
           {header}
         </div>
         {content}
-        {closeConfirmDialog}
       </div>
     )
   }
 
   return (
-    <>
-      <FloatingPanel
-        panelLabel={panelLabel}
-        storageKey="posthaste.compose.panelOffset"
-        sizePreset="compose"
-        className="flex flex-col"
-        header={header}
-        // While the confirm dialog is up, Radix owns dismissal (Escape / overlay)
-        // — disable the panel's own Escape/click-away so the two don't fight.
-        onClose={showCloseConfirm ? ignoreClose : requestClose}
-        onOpenInWindow={
-          !formState.hasUserEdited && !isOpeningWindow
-            ? openInitialComposeInWindow
-            : undefined
-        }
-      >
-        {content}
-      </FloatingPanel>
-      {closeConfirmDialog}
-    </>
+    <FloatingPanel
+      panelLabel={panelLabel}
+      storageKey="posthaste.compose.panelOffset"
+      sizePreset="compose"
+      className="flex flex-col"
+      header={header}
+      // While the confirm prompt is up it owns Escape/click-away — the panel's
+      // own dismissal must not close the compose underneath it.
+      onClose={showCloseConfirm ? ignoreClose : requestClose}
+      onOpenInWindow={
+        !formState.hasUserEdited && !isOpeningWindow
+          ? openInitialComposeInWindow
+          : undefined
+      }
+    >
+      {content}
+    </FloatingPanel>
   )
 }
