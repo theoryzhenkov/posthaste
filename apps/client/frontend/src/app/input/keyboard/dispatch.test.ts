@@ -47,6 +47,7 @@ function baseCtx(
     effectiveSurfaceOpen: false,
     overlayOwnsInput: false,
     hasSelectedMessage: true,
+    hasOpenedMessage: true,
     hasSearchQuery: false,
     activePane: 'list',
     availablePanes: ['sidebar', 'list'],
@@ -60,7 +61,7 @@ function baseCtx(
     onOpenCommandPalette: () => {},
     onUndo: () => {},
     onRedo: () => {},
-    onClearSelectedMessage: () => {},
+    onCloseReader: () => {},
     onClearSearchQuery: () => {},
     ...partial,
   }
@@ -199,5 +200,49 @@ describe('dispatchMailKey — registry tiers', () => {
       baseCtx({ effectiveSurfaceOpen: true, registryHook: hook }),
     )
     expect(runs).toEqual([])
+  })
+})
+
+describe('escape tier', () => {
+  test('Escape with an open reader closes it and keeps the cursor', () => {
+    let closed = 0
+    let clearedSearch = 0
+    const { event, record } = stubEvent({ key: 'Escape' })
+    dispatchMailKey(
+      event,
+      baseCtx({
+        hasOpenedMessage: true,
+        hasSearchQuery: true,
+        onCloseReader: () => {
+          closed += 1
+        },
+        onClearSearchQuery: () => {
+          clearedSearch += 1
+        },
+      }),
+    )
+    expect(closed).toBe(1)
+    expect(clearedSearch).toBe(0)
+    expect(record.prevented).toBe(true)
+  })
+
+  test('Escape with no open reader falls through to clearing the search', () => {
+    let closed = 0
+    let clearedSearch = 0
+    dispatchMailKey(
+      stubEvent({ key: 'Escape' }).event,
+      baseCtx({
+        hasOpenedMessage: false,
+        hasSearchQuery: true,
+        onCloseReader: () => {
+          closed += 1
+        },
+        onClearSearchQuery: () => {
+          clearedSearch += 1
+        },
+      }),
+    )
+    expect(closed).toBe(0)
+    expect(clearedSearch).toBe(1)
   })
 })
