@@ -272,8 +272,26 @@ impl MailGateway for MockJmapGateway {
         &self,
         account_id: &AccountId,
         _cursors: &[SyncCursor],
-        _progress: Option<posthaste_domain_service::SyncProgressReporter>,
+        progress: Option<posthaste_domain_service::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
+        use posthaste_domain_model::{SyncProgress, SyncProgressStage, SyncTrigger};
+        let report = |stage: SyncProgressStage, detail: &str, message_count: Option<usize>| {
+            if let Some(progress) = progress.as_ref() {
+                progress.report(SyncProgress {
+                    sync_id: String::new(),
+                    trigger: SyncTrigger::Manual,
+                    started_at: String::new(),
+                    stage,
+                    detail: detail.to_string(),
+                    mailbox_name: None,
+                    mailbox_index: None,
+                    mailbox_count: None,
+                    message_count,
+                    total_count: None,
+                });
+            }
+        };
+        report(SyncProgressStage::Discovering, "Listing mailboxes", None);
         // Boot-storm test seam: count concurrent syncs for the probed prefix for
         // the whole `sync` body (held across the gate + delay below), so a test
         // can assert the supervisor's global concurrent-sync cap holds. Placed
@@ -294,12 +312,18 @@ impl MailGateway for MockJmapGateway {
         }
         let delay_millis = SYNC_DELAY_MILLIS.load(Ordering::SeqCst);
         if delay_millis > 0 {
+            report(SyncProgressStage::Fetching, "Fetching messages", None);
             tokio::time::sleep(Duration::from_millis(delay_millis as u64)).await;
         }
         let state = self
             .state
             .lock()
             .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
+        report(
+            SyncProgressStage::Storing,
+            "Applying synced changes",
+            Some(state.messages.len()),
+        );
         Ok(SyncBatch {
             mailboxes: state.mailboxes.clone(),
             messages: state.messages.clone(),

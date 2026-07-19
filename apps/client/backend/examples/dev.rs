@@ -67,6 +67,38 @@ async fn main() {
         .insert_source(&settings)
         .expect("insert account settings");
     state.supervisor.start_account(&settings).await;
+
+    // Optional slow mock account for exercising the sync-status UI: set
+    // POSTHASTE_DEV_MOCK_SYNC_DELAY_MS to add a second, mock-driver account
+    // whose sync cycles sleep for that long, so `Syncing` (and its steps)
+    // stay observable in the frontend.
+    if let Ok(delay) = std::env::var("POSTHASTE_DEV_MOCK_SYNC_DELAY_MS") {
+        if let Ok(millis) = delay.parse::<usize>() {
+            posthaste_engine::MockJmapGateway::set_sync_delay_for_tests(millis);
+            let now = time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .expect("format timestamp");
+            let mock = AccountSettings {
+                id: AccountId::from("mockdev"),
+                name: "mockdev".to_string(),
+                full_name: Some("Slow Mock".to_string()),
+                signature: None,
+                email_patterns: Vec::new(),
+                driver: AccountDriver::Mock,
+                enabled: true,
+                appearance: None,
+                transport: Default::default(),
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            state
+                .service
+                .insert_source(&mock)
+                .expect("insert mock account settings");
+            state.supervisor.start_account(&mock).await;
+            println!("mock account 'mockdev' up with {millis}ms sync delay");
+        }
+    }
     state
         .supervisor
         .sync_account(&settings.id)
