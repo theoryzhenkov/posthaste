@@ -288,6 +288,24 @@ fn downgrade_to_v0(db_path: &Path) {
         .expect("synthetic v0 downgrade");
 }
 
+/// Seed a non-tombstone `message_overlay` draft pin — the shape a pre-slice-3
+/// database stranded — with no owning op and no base row, so the v5 migration
+/// parks it as a recovered content op.
+fn seed_stranded_draft_pin(db_path: &Path, account_id: &str, id: &str, subject: &str) {
+    rusqlite::Connection::open(db_path)
+        .expect("raw sqlite open")
+        .execute(
+            "INSERT INTO message_overlay (
+                 account_id, id, thread_id, subject, from_name, from_email,
+                 to_json, received_at, references_json, draft_id, tombstone
+             ) VALUES (?1, ?2, ?2, ?3, 'Me', 'me@example.com',
+                       '[{\"email\":\"ada@example.com\"}]',
+                       '2026-05-01T09:00:00Z', '[]', ?2, 0)",
+            rusqlite::params![account_id, id, subject],
+        )
+        .expect("seed stranded draft pin");
+}
+
 /// An older-schema database opens through `AppState::assemble`: the schema
 /// migrates forward in place — no quarantine, no data loss — and accounts,
 /// settings, and messages read back afterwards.
@@ -320,6 +338,17 @@ async fn older_schema_database_migrates_in_place_through_assemble() {
     downgrade_to_v0(&paths.db_path());
     assert_eq!(user_version(&paths.db_path()), 0);
 
+    // Seed one stranded pre-slice-3 draft pin (no owning op, no base row): the
+    // v5 migration must recover it end-to-end as a parked content op, visible
+    // through the same pendingOperations wire shape a live parked draft uses —
+    // no wire change, no quarantine.
+    seed_stranded_draft_pin(
+        &paths.db_path(),
+        "primary",
+        "draft-stranded",
+        "Recovered draft",
+    );
+
     let state = assemble(&paths).await;
     assert!(
         state.repair.is_none(),
@@ -333,6 +362,18 @@ async fn older_schema_database_migrates_in_place_through_assemble() {
         message_count(&state),
         seeded,
         "every pre-migration message survives"
+    );
+    // The stranded phantom came back as a parked (Failed) DraftCreate content
+    // op, surfaced through the unchanged pendingOperations path.
+    let pending = state
+        .service
+        .list_pending_operations(&AccountId::from("primary"))
+        .expect("pending operations readable");
+    assert!(
+        pending
+            .iter()
+            .any(|op| op.id.as_str() == "recovered-primary-draft-stranded"),
+        "the stranded draft is recovered as a parked content op: {pending:?}"
     );
     state.shutdown().await;
 
