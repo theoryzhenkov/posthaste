@@ -179,7 +179,7 @@ fn migrate_legacy_message_fts(connection: &Connection) -> Result<(), StoreError>
 /// or TRANSFORMATIVE changes (drops, renames, data rewrites, trigger
 /// replacements) are numbered migrations below — run exactly once per
 /// database, each in its own transaction, in order.
-pub(crate) const SCHEMA_VERSION: i64 = 4;
+pub(crate) const SCHEMA_VERSION: i64 = 5;
 
 /// The full open-time schema flow (replaces bare `init_schema` at the open
 /// call site):
@@ -235,6 +235,7 @@ fn apply_migration(tx: &Connection, version: i64) -> Result<(), StoreError> {
         2 => v2_recover_conflicted_outbox_rows(tx),
         3 => v3_drop_outbox_depends_on(tx),
         4 => v4_normalize_received_at_to_utc(tx),
+        5 => v5_reconcile_pre_slice3_debris(tx),
         other => Err(StoreError::Failure(format!(
             "unknown schema migration {other}"
         ))),
@@ -331,6 +332,359 @@ fn v4_normalize_received_at_to_utc(tx: &Connection) -> Result<(), StoreError> {
                  WHERE {column} NOT LIKE '%Z'"
             ),
             [],
+        )
+        .map_err(sql_to_store_error)?;
+    }
+    Ok(())
+}
+
+/// v5: reconcile a pre-replay-model database — the drafts and sends the old
+/// pin machinery stranded in the overlay plane before content ops existed. A
+/// pin here is a non-tombstone `message_overlay` row that carries locally
+/// authored identity: a draft (`draft_id` set) or a provisional Sent
+/// (`rfc_message_id LIKE 'phsend-%'`). Tombstone rows are NOT pins — they are
+/// pending Destroys the replay owns — and are left alone.
+///
+/// The OVERRIDING RULE is preservation over deletion: this runs against real
+/// authored words, and a wrong delete is unrecoverable. A pin is deleted ONLY
+/// when its content is provably reconstructible from base or the live log;
+/// anything ambiguous is PARKED as a visible, discardable content op, never
+/// silently dropped. Three exhaustive cases, checked in order:
+///
+/// - DROP: a LIVE owning op resolves to the pin. Replay re-derives the row from
+///   that op after upgrade, so the stale overlay copy is deleted.
+/// - DELETE: the pin is PROVABLY DERIVED debris — a base `message` row with the
+///   pin's exact id AND identical content (a pure override base now serves, not
+///   a divergent edit), or a `phsend-` pin whose provider Sent copy has already
+///   arrived in base (matched by the shared `Message-ID` token). A same-id base
+///   row whose content DIFFERS is NOT derived — the overlay shadows it, so the
+///   edit survives nowhere else — and falls through to PARK.
+/// - PARK: everything else — content that exists nowhere else. Synthesize a
+///   `Failed` `DraftCreate` content op from the pin's surviving fields (subject,
+///   recipients, threading; the body was only ever in the lost op payload, so
+///   an empty body is the honest floor) and self-map its draft alias, then
+///   delete the overlay copy. `is_replayable` keeps a failed content op
+///   folding, so the row reappears in Drafts and the outbox for the user to
+///   keep or discard.
+///
+/// Deterministic and idempotent-safe: pure SQL plus serde over already-stored
+/// bytes; the synthesized op's id derives from the pin id and its timestamps
+/// from the pin's own `received_at` (no clock, no randomness), with
+/// `INSERT OR IGNORE`, so a re-run mints no duplicates. A fresh/clean database
+/// finds no pins and is a clean no-op.
+/// One stranded overlay pin salvaged from the migration's collection pass.
+struct Pin {
+    account_id: String,
+    id: String,
+    subject: Option<String>,
+    from_name: Option<String>,
+    from_email: Option<String>,
+    received_at: String,
+    to_json: String,
+    in_reply_to: Option<String>,
+    references_json: String,
+    rfc_message_id: Option<String>,
+}
+
+fn has_outbox_operation(tx: &Connection) -> Result<bool, StoreError> {
+    tx.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outbox_operation'
+         )",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(sql_to_store_error)
+}
+
+fn v5_reconcile_pre_slice3_debris(tx: &Connection) -> Result<(), StoreError> {
+    // Guard: the overlay plane may be absent on very old fixtures. No overlay,
+    // no pins — clean no-op (idempotent-safe).
+    let has_overlay: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_overlay'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_to_store_error)?;
+    if !has_overlay {
+        return Ok(());
+    }
+
+    // Migrations run before the additive `init_schema` pass, so on a database
+    // predating these `outbox_operation` columns they are not yet present. The
+    // PARK insert names all three; ensure them here (the same idempotent
+    // `ensure_column` `init_schema` uses) so a genuinely-old database can be
+    // reconciled. On a database that already has them this is a no-op probe.
+    if has_outbox_operation(tx)? {
+        ensure_column(
+            tx,
+            "outbox_operation",
+            "send_at",
+            "ALTER TABLE outbox_operation ADD COLUMN send_at TEXT",
+        )?;
+        ensure_column(
+            tx,
+            "outbox_operation",
+            "hold_until_mono",
+            "ALTER TABLE outbox_operation ADD COLUMN hold_until_mono INTEGER",
+        )?;
+        ensure_column(
+            tx,
+            "outbox_operation",
+            "payload_version",
+            "ALTER TABLE outbox_operation ADD COLUMN payload_version INTEGER NOT NULL DEFAULT 1",
+        )?;
+    }
+
+    // Collect every debris pin first (drop the statement before mutating).
+    let pins: Vec<Pin> = {
+        let mut statement = tx
+            .prepare(
+                "SELECT account_id, id, subject, from_name, from_email, received_at,
+                        to_json, in_reply_to, references_json, rfc_message_id
+                 FROM message_overlay
+                 WHERE tombstone = 0
+                   AND (draft_id IS NOT NULL OR rfc_message_id LIKE 'phsend-%')",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(Pin {
+                    account_id: row.get(0)?,
+                    id: row.get(1)?,
+                    subject: row.get(2)?,
+                    from_name: row.get(3)?,
+                    from_email: row.get(4)?,
+                    received_at: row.get(5)?,
+                    to_json: row.get(6)?,
+                    in_reply_to: row.get(7)?,
+                    references_json: row.get(8)?,
+                    rfc_message_id: row.get(9)?,
+                })
+            })
+            .map_err(sql_to_store_error)?;
+        let mut pins = Vec::new();
+        for pin in rows {
+            pins.push(pin.map_err(sql_to_store_error)?);
+        }
+        pins
+    };
+
+    for pin in &pins {
+        if pin_has_live_owning_op(tx, pin.account_id.as_str(), pin.id.as_str())? {
+            // DROP: replay re-derives the row from the live op.
+            delete_overlay_pin(tx, pin.account_id.as_str(), pin.id.as_str())?;
+        } else if pin_is_provably_derived(
+            tx,
+            pin.account_id.as_str(),
+            pin.id.as_str(),
+            pin.rfc_message_id.as_deref(),
+        )? {
+            // DELETE: base reconstructs the row.
+            delete_overlay_pin(tx, pin.account_id.as_str(), pin.id.as_str())?;
+        } else {
+            // PARK: content that exists nowhere else — recover it, then delete
+            // the stale overlay copy (replay re-materializes it from the op).
+            park_pin_as_content_op(tx, pin)?;
+            delete_overlay_pin(tx, pin.account_id.as_str(), pin.id.as_str())?;
+        }
+    }
+    Ok(())
+}
+
+/// DROP predicate: a still-live op in the log resolves to this pin's row id —
+/// directly (`entity_id` == the pin id: a send whose provisional row id is the
+/// op id, or a self-mapped draft whose key is the pin id) or through a
+/// `draft_alias` mapping the op's stable key to the pin id (a rotated draft). A
+/// failed op only counts when it is a content op (a failed intent folds
+/// nothing and would not re-derive the row).
+fn pin_has_live_owning_op(
+    tx: &Connection,
+    account_id: &str,
+    pin_id: &str,
+) -> Result<bool, StoreError> {
+    tx.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM outbox_operation o
+             WHERE o.account_id = ?1
+               AND (o.state != 'failed'
+                    OR o.kind IN ('draftCreate', 'draftUpdate', 'send'))
+               AND (
+                   o.entity_id = ?2
+                   OR EXISTS(
+                       SELECT 1 FROM draft_alias a
+                       WHERE a.account_id = ?1
+                         AND a.entity_id = ?2
+                         AND a.draft_key = o.entity_id
+                   )
+               )
+         )",
+        params![account_id, pin_id],
+        |row| row.get(0),
+    )
+    .map_err(sql_to_store_error)
+}
+
+/// DELETE predicate: the pin is provably reconstructible from base. Two checks,
+/// each naming the base row that serves it. The overriding rule is preservation
+/// over deletion, so a same-id base row deletes the overlay ONLY when its
+/// content is byte-for-byte the base's — a divergent override carries the user's
+/// unflushed edit and MUST fall through to PARK:
+///
+/// - a base `message` row with the pin's exact id AND identical content on every
+///   authored/derived column (the overlay was a pure override base now serves,
+///   not an edit stranded nowhere else); or
+/// - a `phsend-` pin whose provider Sent copy has arrived in base, matched by
+///   the shared `Message-ID` token (the pin's `rfc_message_id` up to and
+///   including the `@` — [`send_identity_prefix`]'s shape).
+///
+/// A same-id base row whose content DIFFERS is deliberately NOT provably derived:
+/// the overlay shadows it in `message_effective`, so the divergent columns are
+/// the only surviving copy of the user's edit. Returning `false` sends it to
+/// PARK, where its words come back as a visible, discardable content op.
+fn pin_is_provably_derived(
+    tx: &Connection,
+    account_id: &str,
+    pin_id: &str,
+    rfc_message_id: Option<&str>,
+) -> Result<bool, StoreError> {
+    // A same-id base row proves derivation only when the overlay adds NOTHING
+    // over base — every authored/derived content column matches (null-safe
+    // `IS`). Any divergence means the overlay carries an edit that exists
+    // nowhere else; it is not derivable and must be preserved. `draft_id` is
+    // excluded: it is the pin marker (always set on the overlay), and a synced
+    // base copy legitimately lacks it, so it is not an authored-content
+    // divergence.
+    let base_covers_content: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM message m
+                 JOIN message_overlay o
+                   ON o.account_id = m.account_id AND o.id = m.id
+                 WHERE m.account_id = ?1
+                   AND m.id = ?2
+                   AND m.subject            IS o.subject
+                   AND m.normalized_subject IS o.normalized_subject
+                   AND m.from_name          IS o.from_name
+                   AND m.from_email         IS o.from_email
+                   AND m.to_json            IS o.to_json
+                   AND m.preview            IS o.preview
+                   AND m.received_at        IS o.received_at
+                   AND m.has_attachment     IS o.has_attachment
+                   AND m.size               IS o.size
+                   AND m.is_read            IS o.is_read
+                   AND m.is_flagged         IS o.is_flagged
+                   AND m.rfc_message_id     IS o.rfc_message_id
+                   AND m.in_reply_to        IS o.in_reply_to
+                   AND m.references_json    IS o.references_json
+             )",
+            params![account_id, pin_id],
+            |row| row.get(0),
+        )
+        .map_err(sql_to_store_error)?;
+    if base_covers_content {
+        return Ok(true);
+    }
+    // phsend adoption: only when the pin's Message-ID carries the send token
+    // (`phsend-<op>@…`); take the prefix up to and including the first `@`.
+    if let Some(rfc) = rfc_message_id {
+        if let Some(at) = rfc.find('@') {
+            let token = &rfc[..=at];
+            if token.starts_with("phsend-") {
+                let escaped = token
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_");
+                let adopted: bool = tx
+                    .query_row(
+                        "SELECT EXISTS(
+                             SELECT 1 FROM message m
+                             WHERE m.account_id = ?1
+                               AND m.rfc_message_id LIKE ?2 || '%' ESCAPE '\\'
+                         )",
+                        params![account_id, escaped],
+                        |row| row.get(0),
+                    )
+                    .map_err(sql_to_store_error)?;
+                return Ok(adopted);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// PARK: synthesize a `Failed` `DraftCreate` content op from the pin's
+/// surviving fields so replay materializes a visible, editable draft the user
+/// can keep or discard. The op is fully deterministic — its id derives from the
+/// (account-scoped, unique) pin id and every timestamp is the pin's own
+/// `received_at` — so `INSERT OR IGNORE` makes a re-run a clean no-op. The body
+/// was only ever in the now-gone op payload; an empty body is the honest floor
+/// (subject/recipients/threading come back).
+fn park_pin_as_content_op(tx: &Connection, pin: &Pin) -> Result<(), StoreError> {
+    let from = pin.from_email.as_ref().map(|email| Recipient {
+        name: pin.from_name.clone(),
+        email: email.clone(),
+    });
+    let to: Vec<Recipient> = serde_json::from_str(&pin.to_json).unwrap_or_default();
+    let references = {
+        let refs: Vec<String> = serde_json::from_str(&pin.references_json).unwrap_or_default();
+        (!refs.is_empty()).then(|| refs.join(" "))
+    };
+    let request = posthaste_domain_model::SendMessageRequest {
+        from,
+        to,
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: pin.subject.clone().unwrap_or_default(),
+        body: String::new(),
+        in_reply_to: pin.in_reply_to.clone(),
+        references,
+        attachments: Vec::new(),
+        draft_id: Some(pin.id.clone()),
+        send_at: None,
+        undo_window_seconds: None,
+    };
+    let payload = serde_json::to_string(&request).map_err(json_to_store_error)?;
+    // Account-scope the derived id so it is globally unique even if two accounts
+    // stranded a pin under the same id.
+    let op_id = format!("recovered-{}-{}", pin.account_id, pin.id);
+    tx.execute(
+        "INSERT OR IGNORE INTO outbox_operation (
+             id, account_id, entity_kind, entity_id, kind, payload,
+             payload_version, state, attempts, last_error,
+             send_at, hold_until_mono, created_at, updated_at
+         )
+         VALUES (?1, ?2, 'draft', ?3, 'draftCreate', ?4, 1, 'failed', 0, NULL,
+                 NULL, NULL, ?5, ?5)",
+        params![op_id, pin.account_id, pin.id, payload, pin.received_at],
+    )
+    .map_err(sql_to_store_error)?;
+    // Self-map the stable key to the pin id so `op_row_touches` resolves the
+    // draft op back to its own row.
+    tx.execute(
+        "INSERT OR IGNORE INTO draft_alias (account_id, draft_key, entity_id)
+         VALUES (?1, ?2, ?2)",
+        params![pin.account_id, pin.id],
+    )
+    .map_err(sql_to_store_error)?;
+    Ok(())
+}
+
+/// Delete an overlay pin and its overlay set rows (mailbox + keyword
+/// memberships), account-scoped by id.
+fn delete_overlay_pin(tx: &Connection, account_id: &str, pin_id: &str) -> Result<(), StoreError> {
+    for (table, id_column) in [
+        ("message_mailbox_overlay", "message_id"),
+        ("message_keyword_overlay", "message_id"),
+        ("message_overlay", "id"),
+    ] {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE account_id = ?1 AND {id_column} = ?2"),
+            params![account_id, pin_id],
         )
         .map_err(sql_to_store_error)?;
     }
