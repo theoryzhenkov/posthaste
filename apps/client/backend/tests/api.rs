@@ -2298,7 +2298,12 @@ async fn undo_reverts_the_cursor_step_and_redo_reapplies_it() {
 async fn forward_mutations_record_rev_log_steps_and_undo_reverts_them() {
     let server = TestServer::spawn().await;
     let account = create_plain_account(&server, "cmd-revrec-account", "Recorder").await;
-    let mut seeded = message_record("m-rec", "sender@example.com", "2026-07-01T00:00:00Z", "inbox");
+    let mut seeded = message_record(
+        "m-rec",
+        "sender@example.com",
+        "2026-07-01T00:00:00Z",
+        "inbox",
+    );
     seeded.keywords = vec!["$seen".to_string()];
     seed_mail(
         &server,
@@ -2847,7 +2852,12 @@ async fn frontend_send_envelope_holds_flushes_and_cancels_by_command_id() {
             }),
         )
         .await;
-    assert_eq!(response.status(), 200, "{}", response.text().await.unwrap_or_default());
+    assert_eq!(
+        response.status(),
+        200,
+        "{}",
+        response.text().await.unwrap_or_default()
+    );
 
     let pending = json_body(
         server
@@ -2860,7 +2870,10 @@ async fn frontend_send_envelope_holds_flushes_and_cancels_by_command_id() {
     .await;
     let rows = pending["data"]["rows"].as_array().expect("rows").clone();
     assert_eq!(rows.len(), 1, "one held send row: {rows:?}");
-    assert_eq!(rows[0]["id"], "01PROBECMDSENDFLUSH0000001", "outbox op id IS the command id");
+    assert_eq!(
+        rows[0]["id"], "01PROBECMDSENDFLUSH0000001",
+        "outbox op id IS the command id"
+    );
 
     // Wait out the hold + the 5s scheduled-send tick.
     let mut flushed = false;
@@ -2927,7 +2940,12 @@ async fn frontend_send_envelope_holds_flushes_and_cancels_by_command_id() {
             }),
         )
         .await;
-    assert_eq!(response.status(), 200, "cancel by command id: {}", response.text().await.unwrap_or_default());
+    assert_eq!(
+        response.status(),
+        200,
+        "cancel by command id: {}",
+        response.text().await.unwrap_or_default()
+    );
 
     server.shutdown().await;
 }
@@ -2977,10 +2995,20 @@ async fn held_send_rotation_retires_the_compose_key_row() {
     let response = server
         .post_json(
             "/api/command",
-            send("01PROBEPHANTOMFLUSH0000001", "Phantom flushed", "draft-key-phantom-1", 2),
+            send(
+                "01PROBEPHANTOMFLUSH0000001",
+                "Phantom flushed",
+                "draft-key-phantom-1",
+                2,
+            ),
         )
         .await;
-    assert_eq!(response.status(), 200, "{}", response.text().await.unwrap_or_default());
+    assert_eq!(
+        response.status(),
+        200,
+        "{}",
+        response.text().await.unwrap_or_default()
+    );
     // Wait for the SEND op to settle (its slower chore ops may outlive it
     // until a later sync window; the list assertions below are what matter).
     let mut settled = false;
@@ -2996,7 +3024,10 @@ async fn held_send_rotation_retires_the_compose_key_row() {
         )
         .await;
         let rows = pending["data"]["rows"].as_array().expect("rows").clone();
-        if !rows.iter().any(|row| row["id"] == "01PROBEPHANTOMFLUSH0000001") {
+        if !rows
+            .iter()
+            .any(|row| row["id"] == "01PROBEPHANTOMFLUSH0000001")
+        {
             settled = true;
             break;
         }
@@ -3031,7 +3062,12 @@ async fn held_send_rotation_retires_the_compose_key_row() {
     let response = server
         .post_json(
             "/api/command",
-            send("01PROBEPHANTOMUNDO00000001", "Phantom undone", "draft-key-phantom-2", 3600),
+            send(
+                "01PROBEPHANTOMUNDO00000001",
+                "Phantom undone",
+                "draft-key-phantom-2",
+                3600,
+            ),
         )
         .await;
     assert_eq!(response.status(), 200);
@@ -3039,14 +3075,18 @@ async fn held_send_rotation_retires_the_compose_key_row() {
     for _ in 0..120 {
         tokio::time::sleep(Duration::from_millis(250)).await;
         let rows = list_rows().await;
-        if rows.iter().any(|row| {
-            row["subject"] == "Phantom undone" && row["id"] != "draft-key-phantom-2"
-        }) {
+        if rows
+            .iter()
+            .any(|row| row["subject"] == "Phantom undone" && row["id"] != "draft-key-phantom-2")
+        {
             ensured = true;
             break;
         }
     }
-    assert!(ensured, "the eager ensure-draft rotated the key to a provider id");
+    assert!(
+        ensured,
+        "the eager ensure-draft rotated the key to a provider id"
+    );
     let response = server
         .post_json(
             "/api/command",
@@ -3059,7 +3099,12 @@ async fn held_send_rotation_retires_the_compose_key_row() {
             }),
         )
         .await;
-    assert_eq!(response.status(), 200, "{}", response.text().await.unwrap_or_default());
+    assert_eq!(
+        response.status(),
+        200,
+        "{}",
+        response.text().await.unwrap_or_default()
+    );
     let mut converged: Option<Vec<serde_json::Value>> = None;
     for _ in 0..120 {
         tokio::time::sleep(Duration::from_millis(250)).await;

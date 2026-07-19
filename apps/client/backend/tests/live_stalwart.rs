@@ -1072,10 +1072,7 @@ async fn live_frontend_shaped_held_send_delivers_and_cancels() {
         match send_row {
             None => break,
             Some(row) => {
-                assert_ne!(
-                    row["state"], "failed",
-                    "held send parked failed: {rows:?}"
-                );
+                assert_ne!(row["state"], "failed", "held send parked failed: {rows:?}");
             }
         }
         assert!(
