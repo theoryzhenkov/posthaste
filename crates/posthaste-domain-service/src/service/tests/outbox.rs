@@ -2674,7 +2674,7 @@ async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
     // `Send` ops (outbox/queue.rs), so the draft pin stays. The post-sync
     // sweep then preserves it forever: `refresh_message_overlay`'s
     // ConfirmAgainstBase arm deliberately keeps a pinned row with no base
-    // (mutation.rs, the `(Some(folded), None)` match) because it cannot tell
+    // (replay.rs, the `(Some(folded), None)` match) because it cannot tell
     // "settled save awaiting its provider copy" from "orphan whose op is
     // gone". Nothing ever retires it: a phantom in every effective read.
     //

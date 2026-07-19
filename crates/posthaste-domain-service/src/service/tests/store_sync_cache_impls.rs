@@ -7,10 +7,15 @@ impl SyncWriteStore for TestStore {
         _account_id: &AccountId,
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError> {
-        self.applied_messages
-            .lock()
-            .expect("applied messages lock poisoned")
-            .extend(batch.messages.iter().cloned());
+        {
+            let mut applied = self
+                .applied_messages
+                .lock()
+                .expect("applied messages lock poisoned");
+            // Mirror the real store: a deleted id loses its base record.
+            applied.retain(|record| !batch.deleted_message_ids.contains(&record.id));
+            applied.extend(batch.messages.iter().cloned());
+        }
         let mut state = self
             .mutation_state
             .lock()

@@ -76,9 +76,9 @@ impl MailService {
         // (the sweep removes the entry once a sync writes the effect into
         // base), so the row never flickers back between settle and sync.
         let retire = if had_readback || rejected_settlement {
-            crate::service::mutation::OverlayRetire::Immediate
+            crate::service::replay::OverlayRetire::Immediate
         } else {
-            crate::service::mutation::OverlayRetire::ConfirmAgainstBase
+            crate::service::replay::OverlayRetire::ConfirmAgainstBase
         };
         self.refresh_message_overlay(account_id, &message_id, retire)
             .await?;

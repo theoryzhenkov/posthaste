@@ -123,7 +123,7 @@ impl MailService {
         self.refresh_message_overlay(
             account_id,
             &send_row_id,
-            crate::service::mutation::OverlayRetire::Immediate,
+            crate::service::replay::OverlayRetire::Immediate,
         )
         .await?;
         if send_row_was_visible {
@@ -150,7 +150,7 @@ impl MailService {
                 self.refresh_message_overlay(
                     account_id,
                     &live_id,
-                    crate::service::mutation::OverlayRetire::Immediate,
+                    crate::service::replay::OverlayRetire::Immediate,
                 )
                 .await?;
                 if self
@@ -163,7 +163,7 @@ impl MailService {
                     // recovery artifact from the send's own content (which IS
                     // the draft's content) so it never blinks out.
                     let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
-                    let record = crate::service::mutation::synthesize_draft_record(
+                    let record = crate::service::replay::synthesize_draft_record(
                         None,
                         &request,
                         operation,
@@ -498,14 +498,14 @@ impl MailService {
         self.refresh_message_overlay(
             account_id,
             &send_row_id,
-            crate::service::mutation::OverlayRetire::Immediate,
+            crate::service::replay::OverlayRetire::Immediate,
         )
         .await?;
         if let Some(live_id) = &consumed_live {
             self.refresh_message_overlay(
                 account_id,
                 live_id,
-                crate::service::mutation::OverlayRetire::Immediate,
+                crate::service::replay::OverlayRetire::Immediate,
             )
             .await?;
             match self
