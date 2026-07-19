@@ -2660,3 +2660,96 @@ async fn send_l2_poison_does_not_wedge_outbox() {
         "both ops settled: one failed, one applied"
     );
 }
+
+#[tokio::test]
+async fn cancelled_draft_save_strands_a_pinned_phantom_overlay_row() {
+    // PINNING TEST — this documents a DIAGNOSED BUG, not desired behavior.
+    // (dogfood "ephemeral emails/drafts": rows visible in Posthaste only,
+    // absent from the provider, "Failed to load conversation" on open,
+    // surviving re-sync and restart.)
+    //
+    // The stranding path: `save_draft` folds a pinned overlay row (`draft_id`
+    // set, no base row) the moment the op is queued. `discard_operation` —
+    // the Outbox pane's cancel — removes the op but unwinds folds ONLY for
+    // `Send` ops (outbox/queue.rs), so the draft pin stays. The post-sync
+    // sweep then preserves it forever: `refresh_message_overlay`'s
+    // ConfirmAgainstBase arm deliberately keeps a pinned row with no base
+    // (mutation.rs, the `(Some(folded), None)` match) because it cannot tell
+    // "settled save awaiting its provider copy" from "orphan whose op is
+    // gone". Nothing ever retires it: a phantom in every effective read.
+    //
+    // The assertions below assert the CURRENT (buggy) behavior so the tree
+    // stays green while pinning the mechanism. A repair (an orphan sweep that
+    // retires pins with no live op and no base after a full sync, or an
+    // unwind in `discard_operation` for draft ops) must flip the final
+    // assertion — update this test to assert retirement then.
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::default());
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    let (op, _events) = service
+        .save_draft(&account_id, None, draft_request("Phantom-to-be"))
+        .await
+        .expect("save draft");
+    let live_id = MessageId::from(op.entity.id.as_str());
+    assert!(
+        store
+            .get_message_summary(&account_id, &live_id)
+            .expect("effective read")
+            .is_some(),
+        "the queued save folds an instant draft row"
+    );
+
+    // The user cancels the queued save from the Outbox pane.
+    let removed = service
+        .discard_operation(&op.id)
+        .await
+        .expect("discard the queued save");
+    assert!(removed.is_some(), "the pending op was removed");
+    assert!(
+        service
+            .list_pending_operations(&account_id)
+            .expect("pending")
+            .is_empty(),
+        "no op remains anywhere the user could see or retry it"
+    );
+
+    // A full sync cycle (flush + pull + overlay sweep) runs. Nothing owns the
+    // pinned row any more, base never receives it (the save was cancelled
+    // before reaching the provider), yet the sweep keeps it.
+    let gateway = MutationGateway::with_sync_batch(1, SyncBatch::default());
+    service
+        .flush_and_observe(&account_id, &gateway)
+        .await
+        .expect("sync + sweep");
+
+    let phantom = store
+        .get_message_summary(&account_id, &live_id)
+        .expect("effective read");
+    assert!(
+        phantom.is_some(),
+        "BUG PINNED: the orphaned draft pin survives the sweep — the phantom \
+         row persists with no outbox op, no base row, and no provider copy \
+         (fix = orphan retirement; then flip this assertion)"
+    );
+    // The phantom's user-visible failure shape: the overlay carries no body
+    // and the op payload (the content authority) died with the op, so an
+    // online open lazy-fetches the body for an id the provider never had —
+    // the detail read fails ("Failed to load conversation").
+    assert!(
+        store
+            .read_overlay_message(&account_id, &live_id)
+            .expect("overlay read")
+            .expect("entry exists")
+            .expect("not a tombstone")
+            .draft_id
+            .is_some(),
+        "the stranded row is a draft PIN — exactly the shape the sweep's \
+         keep-pins gate refuses to retire"
+    );
+}
