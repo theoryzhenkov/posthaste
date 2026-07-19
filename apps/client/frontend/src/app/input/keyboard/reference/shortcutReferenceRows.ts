@@ -55,7 +55,7 @@ function displayTitle(
 }
 
 /** Action rows derived from the registry, in registration (section) order. */
-export function registryShortcutRows(): ShortcutRow[] {
+function registryShortcutRows(): ShortcutRow[] {
   return allActions()
     .filter((def) => def.shortcut)
     .map((def) => ({

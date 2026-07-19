@@ -8,19 +8,18 @@ import {
   type UIEvent as ReactUIEvent,
 } from 'react'
 
-import { getAction, type ActionContext, type ActionServices } from '@/commands'
+import { messageTargetFromSelection, getAction, type ActionContext, type ActionServices } from '@/commands'
 import type { MessageSummary } from '@/gen'
 import type {
   CommandPaletteEntry,
   SearchCandidate,
 } from '@/app/input/palette/search/types'
-import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
 import type { useMailClientHandlers } from '@/app/mail/useMailClientHandlers'
 import type { EmailActions } from '@/data/hooks/useEmailActions'
 import { useMailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
 import type { MailSelection } from '@/data/models/selection'
 import { validateSearchQuery } from '@/domain/search'
-import { normalizeAppliedSearchQuery } from '@/domain/searchQuery'
+import { normalizeAppliedSearchQuery } from '@/domain/search'
 
 import { CommandPaletteList } from './CommandPaletteList'
 import {
@@ -97,20 +96,7 @@ export function CommandPalette({
   // (contextual availability, disabled-with-reason). Rebuilt per render — cheap.
   const actionContext = useMemo<ActionContext>(() => {
     const targets = selectedMessage
-      ? [
-          {
-            ref: {
-              sourceId: selectedMessage.sourceId,
-              messageId: selectedMessage.messageId,
-            },
-            summary: selectedMessageData,
-            isDraft:
-              selectedMessageData?.keywords.includes(SYSTEM_KEYWORDS.Draft) ??
-              false,
-            draftId: selectedMessageData?.draftId ?? null,
-            conversationId: selectedMessage.conversationId,
-          },
-        ]
+      ? [messageTargetFromSelection(selectedMessage, selectedMessageData)]
       : []
     return {
       targets,

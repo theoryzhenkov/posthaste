@@ -12,12 +12,8 @@ import {
 import { draftToRule, ruleToDraft } from './drafts'
 import type { AutomationRuleDraft } from './types'
 
-export const SMART_MAILBOX_RULE_PREFIX = 'smart-mailbox'
-export const SOURCE_MAILBOX_RULE_PREFIX = 'source-mailbox'
-
-export function accountRulePrefix(accountId: string): string {
-  return `account:${accountId}:`
-}
+const SMART_MAILBOX_RULE_PREFIX = 'smart-mailbox'
+const SOURCE_MAILBOX_RULE_PREFIX = 'source-mailbox'
 
 export function sourceMailboxRulePrefix(
   accountId: string,

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { ActionParamOption } from '@/commands'
 import type { ComposeIntent } from '@/domain/composeIntent'
-import type { SettingsSurfaceCategory } from '@/surfaces'
+import type { SettingsSurfaceCategory } from '@/domain/surface'
 
 export type SearchVertical =
   | 'command'
@@ -29,7 +29,7 @@ export interface ProviderSearchRequest {
   signal?: AbortSignal
 }
 
-export interface ProviderResultPage {
+interface ProviderResultPage {
   candidates: SearchCandidate[]
   nextCursor: string | null
   indexVersion?: string
@@ -47,7 +47,7 @@ export interface SearchCandidate {
   features: SearchFeatureMap
 }
 
-export type SearchFeatureMap = Record<string, number | boolean | string>
+type SearchFeatureMap = Record<string, number | boolean | string>
 
 export interface MatchEvidence {
   query: string
@@ -120,7 +120,7 @@ export type PaletteAction =
   | { kind: 'open-tag-editor' }
   | { kind: 'noop'; label: string }
 
-export type CommandActionId =
+type CommandActionId =
   | 'compose'
   | 'reply'
   | 'archive'
@@ -137,7 +137,7 @@ export interface DecayedCounter {
   entries: Record<string, { value: number; updatedAt: number }>
 }
 
-export interface LocalRankingModelSnapshot {
+interface LocalRankingModelSnapshot {
   version: string
   featureWeights: Record<string, number>
 }

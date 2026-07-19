@@ -7,7 +7,12 @@
  * also hide NEW dead exports appearing in the same files. Instead knip runs
  * with its JSON reporter and every finding is flattened to an exact key
  * (file::category::symbol) and diffed against the committed baseline —
- * scripts/knip-baseline.json, the slice 3-5 burn-down list.
+ * scripts/knip-baseline.json.
+ *
+ * The slice-5 sweep burned the 261-entry burn-down list to zero. Anything
+ * appearing here now is dead code: delete it, don't baseline it. A knip
+ * false positive (none known today) is the only thing that may be listed,
+ * and it needs a justifying comment right here.
  *
  * Usage:
  *   node scripts/check-dead.mjs            diff against the baseline

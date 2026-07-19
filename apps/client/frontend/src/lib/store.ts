@@ -6,10 +6,17 @@
  * onboarding, the transport mirror) builds on it instead of hand-rolling a
  * listener set. React reads a store through `useStore`
  * (useSyncExternalStore); non-React code reads through `get` and writes
- * through `set`. `createStoredStore` adds the localStorage seam (R8) for
- * preference-shaped state.
+ * through `set`. `createStoredStore` adds persistence (via the R8 storage
+ * seam, lib/ambient/storage) for preference-shaped state.
  */
 import { useSyncExternalStore } from 'react'
+
+import {
+  ambientStorage,
+  readStorageItem,
+  writeStorageItem,
+  type StorageLike,
+} from './ambient/storage'
 
 export interface Store<T> {
   /** Current value; safe from any code path, React or not. */
@@ -77,15 +84,12 @@ export function useStore<T, U>(
   )
 }
 
-/** How a stored value crosses the string boundary of localStorage. */
+/** How a stored value crosses the string boundary of web storage. */
 interface StorageCodec<T> {
   /** Parse, don't validate (R3): absent or corrupt raw yields a default T. */
   read(raw: string | null): T
   write(value: T): string
 }
-
-/** The subset of Storage a stored store needs; injectable for tests (R8). */
-export type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
 
 export interface StoredStoreOptions<T> {
   key: string
@@ -110,7 +114,7 @@ export function createStoredStore<T>({
   sync,
   storage = ambientStorage(),
 }: StoredStoreOptions<T>): Store<T> {
-  const read = () => codec.read(readItem(storage, key))
+  const read = () => codec.read(readStorageItem(key, storage))
   const inner = createStore(read())
   if (sync === true && typeof window !== 'undefined') {
     window.addEventListener('storage', (event) => {
@@ -121,33 +125,8 @@ export function createStoredStore<T>({
     get: inner.get,
     subscribe: inner.subscribe,
     set: (next) => {
-      writeItem(storage, key, codec.write(next))
+      writeStorageItem(key, codec.write(next), storage)
       inner.set(next)
     },
-  }
-}
-
-function ambientStorage(): StorageLike | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
-function readItem(storage: StorageLike | null, key: string): string | null {
-  try {
-    return storage?.getItem(key) ?? null
-  } catch {
-    return null
-  }
-}
-
-function writeItem(storage: StorageLike | null, key: string, value: string) {
-  try {
-    storage?.setItem(key, value)
-  } catch {
-    // Best-effort persistence; see createStoredStore.
   }
 }

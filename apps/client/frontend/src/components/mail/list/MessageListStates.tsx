@@ -2,8 +2,8 @@ import type { MouseEvent } from 'react'
 import { Inbox, Loader2, MailPlus, MousePointerClick } from 'lucide-react'
 
 import { Button } from '@/components/ui/form/button'
-import { openFocusedSurface } from '@/surfaces/useSurfaceRouting'
-import { settingsCategorySurface } from '@/surfaces'
+import { usePlatformServices } from '@/lib/platform/services'
+import { settingsCategorySurface } from '@/domain/surface'
 
 export function NoMailboxSelected({
   onMouseDown,
@@ -12,6 +12,7 @@ export function NoMailboxSelected({
   onMouseDown: (event: MouseEvent<HTMLDivElement>) => void
   hasNoAccounts?: boolean
 }) {
+  const { openSurface } = usePlatformServices()
   // With no enabled accounts the runtime serves no view, so the list lands here
   // on first launch. That's onboarding, not a missing selection — offer a direct
   // path into account setup instead of the dead-end "pick a mailbox".
@@ -39,7 +40,7 @@ export function NoMailboxSelected({
           size="sm"
           className="mt-1"
           onClick={() =>
-            openFocusedSurface(settingsCategorySurface('accounts'))
+            openSurface(settingsCategorySurface('accounts'))
           }
         >
           <MailPlus />

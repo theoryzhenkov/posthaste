@@ -7,7 +7,7 @@ import { InvalidSurface } from '@/app/host/InvalidSurface'
 import { ShortcutReference } from '@/app/input/keyboard/reference/ShortcutReference'
 import { SurfaceHost } from '@/app/host/SurfaceHost'
 import { TagEditor } from '@/components/mail/tags/TagEditor'
-import { closeWebSurface } from '@/surfaces/useSurfaceRouting'
+import { closeWebSurface } from '@/surfaces/navigation'
 
 import type { MailClientViewProps } from './MailClientView.types'
 

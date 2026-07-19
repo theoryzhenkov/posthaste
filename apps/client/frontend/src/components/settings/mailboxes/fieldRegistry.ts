@@ -1,10 +1,10 @@
 import type { MailQueryField, MailQueryOperator } from '../../../data/transport/api/index'
 
 /** The coarse value-shape family of a query field. */
-export type QueryValueType = 'text' | 'bool' | 'date' | 'number'
+type QueryValueType = 'text' | 'bool' | 'date' | 'number'
 
 /** A field's canonical spec: its value type and the operators it accepts. */
-export interface QueryFieldSchema {
+interface QueryFieldSchema {
   valueType: QueryValueType
   operators: readonly MailQueryOperator[]
 }
@@ -25,7 +25,7 @@ const ORDERED_OPERATORS: readonly MailQueryOperator[] = ['lt', 'gt', 'le', 'ge']
  * compiler's accepted set (`MailQueryField`/`MailQueryOperator` are the
  * generated wire enums; this table is the per-field pairing).
  */
-export const QUERY_FIELD_SCHEMA: Record<MailQueryField, QueryFieldSchema> = {
+const QUERY_FIELD_SCHEMA: Record<MailQueryField, QueryFieldSchema> = {
   sourceId: { valueType: 'text', operators: ID_OPERATORS },
   sourceName: { valueType: 'text', operators: TEXT_OPERATORS },
   messageId: { valueType: 'text', operators: ID_OPERATORS },
@@ -66,7 +66,7 @@ export type ConditionValueType =
   | 'size'
 
 /** Descriptor for a single condition field: its widget value type + operators. */
-export interface FieldDescriptor {
+interface FieldDescriptor {
   /** Drives the type-directed value widget in the condition editor. */
   valueType: ConditionValueType
   /**
@@ -118,7 +118,7 @@ const WIDGET_OVERRIDE: Partial<Record<MailQueryField, ConditionValueType>> = {
  * operators + coarse value type) is generated from the Rust schema; only the
  * widget refinement above is hand-maintained here.
  */
-export const FIELD_REGISTRY: Record<MailQueryField, FieldDescriptor> =
+const FIELD_REGISTRY: Record<MailQueryField, FieldDescriptor> =
   Object.fromEntries(
     (Object.keys(QUERY_FIELD_SCHEMA) as MailQueryField[]).map((field) => {
       const spec = QUERY_FIELD_SCHEMA[field]
@@ -144,7 +144,7 @@ export function valueTypeForField(field: MailQueryField): ConditionValueType {
  * at most / at least", while a date field reads "before / after / on or before /
  * on or after". `equals`/`contains`/`in` are type-agnostic.
  */
-export function operatorLabel(
+function operatorLabel(
   operator: MailQueryOperator,
   valueType: ConditionValueType,
 ): string {

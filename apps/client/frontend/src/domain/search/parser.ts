@@ -115,11 +115,9 @@ function scanTokenValue(
   return { value: chars.slice(start, end).join(''), end }
 }
 
-function startsKnownPrefixTokenAt(chars: string[], position: number): boolean {
-  if (position >= chars.length) {
-    return false
-  }
-
+/** Scans `-`?`word:` from `position` and reports whether `word` is a known
+ *  prefix — the shared tail of the two starts-known-prefix probes below. */
+function knownPrefixScanFrom(chars: string[], position: number): boolean {
   let index = position
   if (chars[index] === '-') {
     index += 1
@@ -135,6 +133,13 @@ function startsKnownPrefixTokenAt(chars: string[], position: number): boolean {
   return false
 }
 
+function startsKnownPrefixTokenAt(chars: string[], position: number): boolean {
+  if (position >= chars.length) {
+    return false
+  }
+  return knownPrefixScanFrom(chars, position)
+}
+
 function startsKnownPrefixAt(chars: string[], position: number): boolean {
   if (position >= chars.length || !WHITESPACE.test(chars[position] ?? '')) {
     return false
@@ -144,16 +149,5 @@ function startsKnownPrefixAt(chars: string[], position: number): boolean {
   while (index < chars.length && WHITESPACE.test(chars[index] ?? '')) {
     index += 1
   }
-  if (chars[index] === '-') {
-    index += 1
-  }
-
-  const start = index
-  while (index < chars.length && !WHITESPACE.test(chars[index] ?? '')) {
-    if (chars[index] === ':') {
-      return prefixDefinition(chars.slice(start, index).join('')) !== undefined
-    }
-    index += 1
-  }
-  return false
+  return knownPrefixScanFrom(chars, index)
 }

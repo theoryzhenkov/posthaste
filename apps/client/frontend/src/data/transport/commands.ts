@@ -6,7 +6,8 @@
 
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import { newId, type MailClient } from '@/data/transport/client'
+import type { MailClient } from '@/data/transport/client'
+import { newId } from '@/lib/ambient/random'
 import type {
   AccountId,
   AppSettings,
@@ -167,5 +168,3 @@ function makeCommands(client: MailClient, queryClient: QueryClient) {
       }),
   }
 }
-
-export type MailCommands = ReturnType<typeof makeCommands>

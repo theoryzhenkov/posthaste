@@ -62,7 +62,7 @@ export const defaultGlassThemeParameters = {
 
 const legacyBloomIds = new Set(['primary', 'warm', 'cool', 'fresh'])
 
-export function clampNumber(
+function clampNumber(
   value: unknown,
   min: number,
   max: number,
@@ -153,7 +153,7 @@ export function updateGlassBloom(
   })
 }
 
-export function createGlassBloom(
+function createGlassBloom(
   parameters: GlassThemeParameters,
   patch: GlassBloomPatch = {},
 ): GlassBloom {
@@ -206,7 +206,7 @@ export function removeGlassBloom(
   })
 }
 
-export function glassBloomColor(
+function glassBloomColor(
   bloom: GlassBloom,
   mode: ResolvedThemeMode,
 ): string {

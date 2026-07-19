@@ -5,6 +5,7 @@
  * send until due; local-first — it fires when Posthaste is next running and
  * online at/after that time).
  */
+import { now as currentTime } from '@/lib/ambient/time'
 
 export interface SendLaterPreset {
   label: string
@@ -48,7 +49,7 @@ function preset(label: string, at: Date): SendLaterPreset {
   }
 }
 
-export function sendLaterPresets(now: Date = new Date()): SendLaterPreset[] {
+export function sendLaterPresets(now: Date = currentTime()): SendLaterPreset[] {
   const presets: SendLaterPreset[] = []
   const tonight = atHour(now, 18)
   if (tonight > now) {
@@ -68,7 +69,7 @@ export function formatScheduledTime(sendAt: string): string {
   if (Number.isNaN(parsed.getTime())) {
     return sendAt
   }
-  const sameYear = parsed.getFullYear() === new Date().getFullYear()
+  const sameYear = parsed.getFullYear() === currentTime().getFullYear()
   return parsed.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',

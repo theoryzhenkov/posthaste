@@ -3,7 +3,7 @@ import { MessageSquareText } from 'lucide-react'
 import type { MailListResult, MessageSummary } from '@/gen'
 import type { MailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
 import { validateSearchQuery } from '@/domain/search'
-import { normalizeAppliedSearchQuery } from '@/domain/searchQuery'
+import { normalizeAppliedSearchQuery } from '@/domain/search'
 
 import { matchEvidence, textMatch } from '../match'
 import type {

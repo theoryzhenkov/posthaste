@@ -14,7 +14,7 @@ import { MailApiError } from '@/data/transport/client'
 import type { AccountRow, AccountStatus } from '@/gen'
 import type { AccountHealthSeverity } from '@/domain/vocabulary'
 
-export type AccountErrorCategory =
+type AccountErrorCategory =
   | 'network'
   | 'auth'
   | 'rateLimited'
@@ -23,7 +23,7 @@ export type AccountErrorCategory =
   | 'internal'
 
 /** The recovery affordance to render for an unhealthy account. */
-export type AccountRecoveryAction = 'retry' | 'reconnect' | 'edit' | null
+type AccountRecoveryAction = 'retry' | 'reconnect' | 'edit' | null
 
 export interface AccountHealth {
   status: AccountStatus

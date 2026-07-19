@@ -13,10 +13,10 @@ import {
 } from 'lucide-react'
 
 import { brandAccents } from '../../../lib/design/tokens/tokens'
-import { isTauriRuntime } from '../../../desktop/runtime'
+import { isTauriRuntime } from '@/lib/platform/runtime'
 import { cn } from '../../../lib/design/cn'
-import { isNightly, releaseChannel } from '@/desktop/releaseChannel'
-import type { SettingsSurfaceCategory } from '../../../surfaces/index'
+import { isNightly, releaseChannel } from '@/lib/platform/releaseChannel'
+import type { SettingsSurfaceCategory } from '@/domain/surface'
 import { Button } from '../../ui/form/button'
 
 export type SettingsCategory = SettingsSurfaceCategory

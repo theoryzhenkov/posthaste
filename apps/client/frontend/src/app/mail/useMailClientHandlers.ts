@@ -2,12 +2,12 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
 
 import type { AccountRow, MessageSummary } from '@/gen'
-import type { SidebarSelection } from '@/components/sidebar/Sidebar'
+import type { SidebarSelection } from '@/data/models/selection'
 import { useComposeIntent } from '@/data/hooks/useComposeIntent'
 import type { useEmailActions } from '@/data/hooks/useEmailActions'
-import { openFocusedSurface } from '@/surfaces/useSurfaceRouting'
+import { openFocusedSurface } from '../host/navigation'
 import type { MailSelection } from '@/data/models/selection'
-import { parseSearchQuery } from '@/domain/searchQuery'
+import { parseSearchQuery } from '@/domain/search'
 import {
   accountSettingsSurface,
   messageSurfaceFromSelection,
@@ -16,7 +16,7 @@ import {
   smartMailboxSettingsSurface,
   type SettingsSurfaceCategory,
   type SurfaceDescriptor,
-} from '@/surfaces'
+} from '@/domain/surface'
 import { toggleSettingsSurface } from './mailOverlayActions'
 
 export function useMailClientHandlers(input: {

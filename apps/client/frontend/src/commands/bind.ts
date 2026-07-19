@@ -17,7 +17,7 @@ import type {
 import type { EmailActions } from '../data/hooks/useEmailActions'
 import { SYSTEM_KEYWORDS } from '../domain/vocabulary'
 import { resolveActions, type ResolvedAction } from './resolve'
-import type { ActionContext, ActionServices } from './types'
+import type { ActionContext, ActionServices, MessageTarget } from './types'
 
 export interface DetailHeaderBinding {
   /** Domain mutations the resolved actions delegate to. */
@@ -128,5 +128,22 @@ export function buildRowContextMenu(
       connection: 'unknown',
     }
     return resolveActions(ctx, services)
+  }
+}
+
+/** The focused selection as an action target: ref + whatever summary the
+ *  surface has cached (label-flipping actions read it; absent is fine). The
+ *  ONE constructor for keyboard/palette targets, so draft detection and the
+ *  summary fallback can never drift between surfaces. */
+export function messageTargetFromSelection(
+  message: { sourceId: string; messageId: string; conversationId: string },
+  summary: MessageSummary | undefined,
+): MessageTarget {
+  return {
+    ref: { sourceId: message.sourceId, messageId: message.messageId },
+    summary,
+    isDraft: summary?.keywords.includes(SYSTEM_KEYWORDS.Draft) ?? false,
+    draftId: summary?.draftId ?? null,
+    conversationId: message.conversationId,
   }
 }

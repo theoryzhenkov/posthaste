@@ -13,13 +13,6 @@ export function normalizeAccentHue(value: number): number {
   return Math.round(((value % 360) + 360) % 360)
 }
 
-export function parseAccentHue(value: string | null): number {
-  if (value === null) {
-    return defaultAccentHue
-  }
-  return normalizeAccentHue(Number(value))
-}
-
 export function accentColor(
   hue: number,
   lightness = 0.68,

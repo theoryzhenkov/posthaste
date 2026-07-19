@@ -7,7 +7,7 @@
 import { useCallback, useMemo } from 'react'
 
 import { useAccountDirectory } from '@/data/models/accountDirectory'
-import type { SidebarSelection } from '@/components/sidebar/Sidebar'
+import type { SidebarSelection } from '@/data/models/selection'
 import { useMailboxCounts, useSmartMailboxes } from '@/data/queries/queries'
 
 import { resolveGotoTarget, type GotoRole } from './goto'

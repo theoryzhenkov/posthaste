@@ -10,13 +10,8 @@ import type { SmartMailboxRow } from '@/gen'
 import type { SmartMailboxFormState } from '../panel/types'
 import { operatorOptionsForField, valueTypeForField } from './fieldRegistry'
 
-export {
-  operatorLabel,
-  operatorLabelForField,
-  operatorOptionsForField,
-  valueTypeForField,
-} from './fieldRegistry'
-export type { ConditionValueType, FieldDescriptor } from './fieldRegistry'
+export { operatorLabelForField, operatorOptionsForField, valueTypeForField } from './fieldRegistry'
+export type { ConditionValueType } from './fieldRegistry'
 
 /** Default empty form state for creating a new smart mailbox. */
 export const EMPTY_SMART_MAILBOX_FORM: SmartMailboxFormState = {

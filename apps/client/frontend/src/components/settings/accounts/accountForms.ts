@@ -3,25 +3,34 @@ import type {
   AccountSecretChange,
   AccountSettingsResult,
   CreateAccountIntent,
-  FieldPatch,
   ProviderAuthKind,
   ProviderHint,
   TransportSecurity,
   UpdateAccountIntent,
   UpdateAccountTransportIntent,
 } from '@/gen'
-import type { ExistingAccountEditorModel } from './editor/accountEditorModel'
+import { randomInt } from '@/lib/ambient/random'
+import {
+  anyFieldDirty,
+  clearableTextField,
+  fieldPatch,
+  textField,
+} from '../forms/fields'
+import type {
+  AccountEditorConnectionModel,
+  ExistingAccountEditorModel,
+} from './editor/accountEditorModel'
 import type { AccountFormState } from '../panel/types'
 
 /** host/port/security for one endpoint (the shared IMAP/SMTP wire shape). */
-export interface EndpointSettings {
+interface EndpointSettings {
   host: string
   port: number
   security: TransportSecurity
 }
 
 /** Default empty form state for creating a new account. */
-export const EMPTY_FORM: AccountFormState = {
+const EMPTY_FORM: AccountFormState = {
   name: '',
   fullName: '',
   signature: '',
@@ -44,7 +53,7 @@ export function emptyAccountForm(): AccountFormState {
   return {
     ...EMPTY_FORM,
     driver: 'imapSmtp',
-    appearanceColorHue: Math.floor(Math.random() * 361),
+    appearanceColorHue: randomInt(361),
   }
 }
 
@@ -87,15 +96,73 @@ export function buildSecretChange(form: AccountFormState): AccountSecretChange {
   return { kind: 'keep' }
 }
 
-/** The patch for a clearable text field: an emptied input clears the stored
- * value; anything else sets the trimmed text. */
-export function textFieldPatch(value: string): FieldPatch<string> {
-  const trimmed = value.trim()
-  return trimmed === '' ? { kind: 'clear' } : { kind: 'set', value: trimmed }
+/** The clearable fields (FieldPatch on the wire): untouched keeps, emptied
+ * clears, anything else sets the trimmed text. */
+const CLEARABLE_FIELDS = {
+  fullName: clearableTextField<AccountFormState>(
+    'fullName',
+    (form) => form.fullName,
+  ),
+  signature: clearableTextField<AccountFormState>(
+    'signature',
+    (form) => form.signature,
+  ),
+  baseUrl: clearableTextField<AccountFormState>(
+    'baseUrl',
+    (form) => form.baseUrl,
+  ),
+  username: clearableTextField<AccountFormState>(
+    'username',
+    (form) => form.username,
+  ),
+}
+
+/** Identity fields every account edits — the identity half of the unsaved
+ * gate. Appearance is excluded: it autosaves through its own debounced patch
+ * (AccountAppearanceFields). */
+const IDENTITY_FIELDS = [
+  textField<AccountFormState>('name', (form) => form.name),
+  CLEARABLE_FIELDS.fullName,
+  CLEARABLE_FIELDS.signature,
+  textField<AccountFormState>(
+    'emailPatternsText',
+    (form) => form.emailPatternsText,
+  ),
+]
+
+/** Transport + secret fields only manual-credential accounts edit. */
+const TRANSPORT_FIELDS = [
+  textField<AccountFormState>('driver', (form) => form.driver),
+  CLEARABLE_FIELDS.baseUrl,
+  CLEARABLE_FIELDS.username,
+  textField<AccountFormState>('imapHost', (form) => form.imapHost),
+  textField<AccountFormState>('imapPort', (form) => form.imapPort),
+  textField<AccountFormState>('imapSecurity', (form) => form.imapSecurity),
+  textField<AccountFormState>('smtpHost', (form) => form.smtpHost),
+  textField<AccountFormState>('smtpPort', (form) => form.smtpPort),
+  textField<AccountFormState>('smtpSecurity', (form) => form.smtpSecurity),
+  textField<AccountFormState>('password', (form) => form.password),
+]
+
+/** Unsaved-changes gate: identity always; transport + secret only when the
+ * account's credentials are user-entered (OAuth transport is
+ * provider-managed). */
+export function hasUnsavedAccountChanges(
+  form: AccountFormState,
+  saved: AccountFormState,
+  connection: AccountEditorConnectionModel,
+): boolean {
+  if (anyFieldDirty(IDENTITY_FIELDS, form, saved)) {
+    return true
+  }
+  return (
+    connection.kind === 'manualCredentials' &&
+    anyFieldDirty(TRANSPORT_FIELDS, form, saved)
+  )
 }
 
 /** Parse newline/comma-separated addresses and catch-all patterns. */
-export function parseEmailPatterns(value: string): string[] {
+function parseEmailPatterns(value: string): string[] {
   return value
     .split(/[\n,]/)
     .map((pattern) => pattern.trim())
@@ -124,6 +191,7 @@ export function buildCreateAccountIntent(
  */
 export function buildTransportIntent(
   form: AccountFormState,
+  saved: AccountFormState,
   accountId: string,
 ): UpdateAccountTransportIntent {
   if (form.driver !== 'imapSmtp') {
@@ -131,8 +199,8 @@ export function buildTransportIntent(
       accountId,
       provider: 'generic',
       auth: 'password',
-      baseUrl: textFieldPatch(form.baseUrl),
-      username: textFieldPatch(form.username),
+      baseUrl: fieldPatch(CLEARABLE_FIELDS.baseUrl, form, saved),
+      username: fieldPatch(CLEARABLE_FIELDS.username, form, saved),
     }
   }
   const email = primaryEmailFor(form)
@@ -143,7 +211,7 @@ export function buildTransportIntent(
     auth: defaults?.auth ?? 'password',
     // The base URL belongs to the JMAP driver; an IMAP/SMTP save clears it.
     baseUrl: { kind: 'clear' },
-    username: textFieldPatch(form.username),
+    username: fieldPatch(CLEARABLE_FIELDS.username, form, saved),
     imap: {
       host: form.imapHost.trim(),
       port: parsePort(form.imapPort, 993),
@@ -162,6 +230,13 @@ function parsePort(value: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 && parsed <= 65535
     ? parsed
     : fallback
+}
+
+/** The concrete email an IMAP setup will connect as: the first claimed
+ * address, falling back to the username (drives provider defaults and
+ * app-password hints in the editors). */
+export function setupPrimaryEmail(form: AccountFormState): string {
+  return primaryEmailFor(form) ?? form.username.trim()
 }
 
 /** First concrete (non-wildcard) email address the account claims. */
@@ -292,16 +367,18 @@ export function applyImapDefaults(form: AccountFormState): AccountFormState {
   }
 }
 
-/** Identity/appearance patch for the `updateAccount` command. */
+/** Identity/appearance patch for the `updateAccount` command. Fields the
+ * user did not touch relative to `saved` stay `keep`. */
 export function buildIdentityPatch(
   form: AccountFormState,
+  saved: AccountFormState,
   accountId: string,
 ): UpdateAccountIntent {
   return {
     accountId,
     name: form.name.trim(),
-    fullName: textFieldPatch(form.fullName),
-    signature: textFieldPatch(form.signature),
+    fullName: fieldPatch(CLEARABLE_FIELDS.fullName, form, saved),
+    signature: fieldPatch(CLEARABLE_FIELDS.signature, form, saved),
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
     appearance: buildAccountAppearanceInput(form),
   }
@@ -332,7 +409,7 @@ export function buildAccountAppearanceInput(
   }
 }
 
-export function normalizeAccountInitials(value: string): string {
+function normalizeAccountInitials(value: string): string {
   const trimmed = value.trim().toUpperCase()
   return trimmed.length === 0 ? 'A' : Array.from(trimmed).slice(0, 1).join('')
 }

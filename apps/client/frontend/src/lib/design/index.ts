@@ -3,32 +3,18 @@ export {
   defaultAccentHue,
   defaultSurfaceHue,
   normalizeAccentHue,
-  parseAccentHue,
 } from './tokens/accent'
-export {
-  designClassNames,
-  designDataAttributes,
-  designStorageKeys,
-  type DesignClassName,
-  type DesignDataAttribute,
-  type DesignDataAttributeName,
-  type DesignStorageKey,
-  type DesignStorageKeyName,
-} from './tokens/attributes'
+export { designStorageKeys } from './tokens/attributes'
 export {
   defaultUiDensity,
   parseUiDensity,
   messageRowHeight,
   uiDensities,
-  uiDensitySettings,
   type UiDensity,
 } from './tokens/density'
 export {
   appendGlassBloom,
-  createGlassBloom,
-  defaultGlassThemeParameters,
   glassBloomDisplayColor,
-  glassBloomColor,
   glassMeshBackground,
   maxGlassBloomCount,
   minGlassBloomCount,
@@ -40,15 +26,7 @@ export {
   type GlassBloomPatch,
   type GlassThemeParameters,
 } from './theme/glassTheme'
-export {
-  applyRootTheme,
-  getSystemThemeMode,
-  resolveThemeMode,
-  type AppliedRootTheme,
-  type AppliedThemeColors,
-  type RootThemeColors,
-  type RootThemeState,
-} from './applyRootTheme'
+export { applyRootTheme, getSystemThemeMode, type AppliedRootTheme } from './applyRootTheme'
 export {
   builtInThemes,
   builtInThemeIds,
@@ -57,29 +35,8 @@ export {
   parseThemeMode,
   resolvedThemeModes,
   themeModes,
-  themeStyle,
   type BuiltInThemeId,
   type ResolvedThemeMode,
-  type ThemeDefinition,
   type ThemeMode,
-  type ThemeStyle,
 } from './theme/theme'
-export {
-  brandAccents,
-  designTokenMetadata,
-  fontStacks,
-  iconSizes,
-  iconStrokeWidths,
-  radii,
-  semanticSignals,
-  type BrandAccentName,
-  type FontStackName,
-  type IconSizeName,
-  type IconSizePx,
-  type IconStrokeSize,
-  type RadiusName,
-  type SemanticSignalName,
-  type TypeScaleName,
-  type TypeScalePx,
-  typeScale,
-} from './tokens/tokens'
+

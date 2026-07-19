@@ -3,8 +3,8 @@ import { toast } from 'sonner'
 
 import type { ComposeIntent } from '@/domain/composeIntent'
 import { shouldCloseOriginalComposeAfterWindowOpen } from '@/components/compose/hooks/composeWindowElevation'
-import { openSurfaceInSeparateWindow } from '@/desktop/runtime'
-import { composeSurface } from '@/surfaces'
+import { usePlatformServices } from '@/lib/platform/services'
+import { composeSurface } from '@/domain/surface'
 
 export function useComposeWindowElevation({
   editedResetKeyRef,
@@ -17,6 +17,7 @@ export function useComposeWindowElevation({
   intent: ComposeIntent
   onClose: () => void
 }) {
+  const { openSurfaceInSeparateWindow } = usePlatformServices()
   const [isOpeningWindow, setIsOpeningWindow] = useState(false)
   const openInitialComposeInWindow = useCallback(() => {
     const openingResetKey = formResetKey
@@ -38,7 +39,7 @@ export function useComposeWindowElevation({
         )
       })
       .finally(() => setIsOpeningWindow(false))
-  }, [editedResetKeyRef, formResetKey, intent, onClose])
+  }, [editedResetKeyRef, formResetKey, intent, onClose, openSurfaceInSeparateWindow])
 
   return { isOpeningWindow, openInitialComposeInWindow }
 }

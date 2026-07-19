@@ -10,29 +10,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query'
 import type { MailClient } from '@/data/transport/client'
-import type {
-  AccountId,
-  AccountSettingsResult,
-  AccountsResult,
-  AppSettings,
-  AppSettingsResult,
-  MailboxCountsResult,
-  MailListQuery,
-  MailListResult,
-  MessageDetailQuery,
-  MessageDetailResult,
-  MessageRawSourceQuery,
-  MessageRawSourceResult,
-  PendingOperationsResult,
-  Query,
-  RevLogQuery,
-  RevLogResult,
-  SenderAddressesResult,
-  SmartMailboxesResult,
-  TagsResult,
-  ThreadQuery,
-  ThreadView,
-} from '@/gen'
+import type { AccountId, AccountSettingsResult, AccountsResult, AppSettings, AppSettingsResult, MailboxCountsResult, MessageDetailQuery, MessageDetailResult, PendingOperationsResult, Query, RevLogQuery, RevLogResult, SenderAddressesResult, SmartMailboxesResult, TagsResult, ThreadQuery, ThreadView } from '@/gen'
 import { useMailClient } from '../context'
 import { familyKey } from '@/data/queries/queryKeys'
 
@@ -55,14 +33,6 @@ function useFamilyQuery<T>(query: Query, opts?: FamilyOptions): UseQueryResult<T
   })
 }
 
-/** A windowed mail list; the empty scope is "all mail, date descending". */
-export function useMailList(
-  scope: MailListQuery = {},
-  opts?: FamilyOptions,
-): UseQueryResult<MailListResult> {
-  return useFamilyQuery<MailListResult>({ mailList: scope }, opts)
-}
-
 export function useThread(q: ThreadQuery, opts?: FamilyOptions): UseQueryResult<ThreadView> {
   return useFamilyQuery<ThreadView>({ thread: q }, opts)
 }
@@ -72,13 +42,6 @@ export function useMessageDetail(
   opts?: FamilyOptions,
 ): UseQueryResult<MessageDetailResult> {
   return useFamilyQuery<MessageDetailResult>({ messageDetail: q }, opts)
-}
-
-export function useMessageRawSource(
-  q: MessageRawSourceQuery,
-  opts?: FamilyOptions,
-): UseQueryResult<MessageRawSourceResult> {
-  return useFamilyQuery<MessageRawSourceResult>({ messageRawSource: q }, opts)
 }
 
 export function useMailboxCounts(

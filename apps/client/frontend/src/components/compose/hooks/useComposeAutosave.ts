@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { Recipient, ReplyContext } from '@/data/transport/api'
 import type { ComposeIntent } from '@/domain/composeIntent'
-import { newId } from '@/data/transport/client'
+import { newId } from '@/lib/ambient/random'
 import { useCommands } from '@/data'
 
 import {

@@ -33,7 +33,7 @@ import { useAppSettings, useMailClient } from '@/data'
  * are write-through (the theme setters persist via `updateSettings`), so the
  * cache and the document stay in sync without re-reconciling.
  */
-export function useAppearanceSettingsSync(
+function useAppearanceSettingsSync(
   store: ClientPreferencesStore = clientPreferencesStore,
 ) {
   const client = useMailClient()

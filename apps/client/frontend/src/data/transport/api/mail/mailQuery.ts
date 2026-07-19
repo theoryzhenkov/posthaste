@@ -46,7 +46,7 @@ export interface MailQueryCondition {
   value: MailQueryValue
 }
 
-export interface MailQueryRuleGroup {
+interface MailQueryRuleGroup {
   type: 'group'
   operator: MailQueryGroupOperator
   negated: boolean

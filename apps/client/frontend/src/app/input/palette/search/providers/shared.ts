@@ -1,4 +1,4 @@
-import { matchEvidence, textMatch } from '../match'
+import { matchEvidence, matchesQuery, textMatch } from '../match'
 import type {
   CommandPaletteEntry,
   SearchCandidate,
@@ -28,5 +28,25 @@ export function candidateFromEntry(
       matchScore: match.score,
       vertical: provider.vertical,
     },
+  }
+}
+
+/** The providers' shared tail: filter entries against the query, cap to the
+ *  request's limit, and wrap each survivor as a ranked candidate page. */
+export function matchedCandidatePage(
+  provider: SearchProvider,
+  entries: CommandPaletteEntry[],
+  req: { query: string; limit: number },
+): { candidates: SearchCandidate[]; nextCursor: null } {
+  const matched = entries.filter((entry) =>
+    matchesQuery(req.query, entry.label, entry.keywords),
+  )
+  return {
+    candidates: matched
+      .slice(0, req.limit)
+      .map((entry, index) =>
+        candidateFromEntry(provider, entry, req.query, index),
+      ),
+    nextCursor: null,
   }
 }

@@ -18,7 +18,7 @@ import { MailApiError } from '@/data/transport/client'
 
 import type { MailSelection } from '@/data/models/selection'
 import { useActivePane } from '../../keyboard/usePane'
-import type { PreparedServerSearchQuery } from '../../../domain/searchQuery'
+import type { PreparedServerSearchQuery } from '../../../domain/search'
 import { flatMessageRows } from './model/conversationTree'
 import {
   MessageListRows,
@@ -37,7 +37,7 @@ import { useMailListView } from './model/useMailListView'
 import { useMessageListNavigation } from './model/useMessageListNavigation'
 import { useMessageListScroll } from './model/useMessageListScroll'
 import { useViewMode } from './model/useViewMode'
-import type { SidebarSelection } from '../../sidebar/Sidebar'
+import type { SidebarSelection } from '@/data/models/selection'
 import { buildThreadListLayout } from '../thread/columns'
 import { ThreadListHeader } from '../thread/ThreadListHeader'
 import type { RowContextMenuFor } from './MessageRow'

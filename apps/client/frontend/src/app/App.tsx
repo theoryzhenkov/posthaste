@@ -9,13 +9,15 @@ import { Toaster } from 'sonner'
 import { CommandDispatcher } from '../commands/index'
 import { ConnectionBanner } from './shell/ConnectionBanner'
 import { MailClient } from './mail/MailClient'
-import { Z } from './shell/layering'
+import { Z } from '@/lib/design/layering'
 import { queryClient, useStreamInvalidation } from '../data/index'
 import { ErrorBoundary } from './shell/ErrorBoundary'
 import { FocusedSurfaceDocument } from './host/FocusedSurface'
 import { InvalidSurfaceDocument } from './host/InvalidSurface'
 import { DesignThemeProvider } from './shell/ThemeProvider'
-import { isMainDesktopWindow, isTauriRuntime, toggleDevtools } from '../desktop/runtime'
+import { PlatformServicesProvider } from './shell/PlatformServicesProvider'
+import { toggleDevtools } from '../desktop/runtime'
+import { isMainDesktopWindow, isTauriRuntime } from '@/lib/platform/runtime'
 import { isDeveloperToolsEnabled } from '../desktop/devtools'
 import type { CommandScope } from '../lib/command'
 import { useNewMailNotifications } from '../data/notifications/newMailArrivals'
@@ -26,7 +28,7 @@ import { useSurfaceRouteState } from '../surfaces/useSurfaceRouting'
 import {
   markSurfaceBootstrap,
   markSurfaceBootstrapOnce,
-} from '../surfaces/bootstrapLog'
+} from '@/lib/log/surfaceBootstrap'
 
 /** The ONE liveness policy: a generation advance on the event stream
  * invalidates every query react-query holds (debounced). */
@@ -82,6 +84,7 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <PlatformServicesProvider>
       <CommandDispatcher scope={APP_COMMAND_SCOPE}>
       <DesignThemeProvider writeThrough>
         <AppearanceSettingsSync />
@@ -116,6 +119,7 @@ export default function App() {
         />
       </DesignThemeProvider>
       </CommandDispatcher>
+      </PlatformServicesProvider>
     </QueryClientProvider>
   )
 }

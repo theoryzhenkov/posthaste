@@ -6,24 +6,22 @@ import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import {
-  checkForDesktopUpdate,
-  promptDesktopUpdate,
-} from '../../../desktop/updates/updates'
+import { usePlatformServices } from '@/lib/platform/services'
 import { LOG_EVENTS } from '../../../lib/log/logEvents'
 import { syncLogger } from '../../../lib/log/logger'
 import { Button } from '../../ui/form/button'
 import { SettingsSection } from '../panel/shared'
 
 export function UpdatesSection() {
+  const { updates } = usePlatformServices()
   const [checking, setChecking] = useState(false)
 
   async function handleCheck() {
     setChecking(true)
     try {
-      const update = await checkForDesktopUpdate()
+      const update = await updates.check()
       if (update) {
-        promptDesktopUpdate(update)
+        update.prompt()
       } else {
         toast.success('Posthaste is up to date.')
       }
