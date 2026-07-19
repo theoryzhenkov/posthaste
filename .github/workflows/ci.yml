@@ -95,6 +95,26 @@ jobs:
       - run: bun --cwd=apps/client/frontend test
       - run: bun --cwd=apps/client/frontend run build
 
+  # The tools package (apps/tools): posthastectl + the MCP server over the
+  # shared operation registry — typecheck, tests, and a compile smoke of the
+  # standalone binary.
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - run: bun --cwd=apps/tools run typecheck
+      - run: bun --cwd=apps/tools test
+      - run: bun --cwd=apps/tools run build:cli
+
   # HARD live gate for the integrated backend: the full loop (account -> sync
   # -> inject -> converge -> command -> counts) plus the new-surfaces scenario
   # against a real pinned Stalwart — same deterministic provisioning as

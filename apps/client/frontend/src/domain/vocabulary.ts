@@ -52,7 +52,7 @@ export const SYSTEM_KEYWORDS = {
   Forwarded: '$forwarded',
 } as const
 
-// Event topics come from the generated protocol types in `src/gen/` (ts-rs
+// Event topics come from the generated protocol types in `@/gen` (ts-rs
 // output of the models crate: `DomainEventKind`, the payload shapes), not
 // from this file. Below are the CLIENT-ONLY vocabularies: closed string sets
 // minted on this side of the wire, each owned here once.

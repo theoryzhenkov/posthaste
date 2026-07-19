@@ -6,13 +6,15 @@
  * `bun run check:boundaries` passes them via --ignore-known.
  */
 
-// Every home may import its own subtree plus the four shared homes.
-const SHARED = ['lib', 'domain', 'data', 'gen']
-const HOMES = ['commands', 'components', 'data', 'desktop', 'domain', 'gen', 'lib', 'surfaces']
+// Every home may import its own subtree plus the shared homes. Generated wire
+// types live outside src/ in the @posthaste/protocol workspace package
+// (imported as '@/gen'), so they sit beyond these src-scoped rules.
+const SHARED = ['lib', 'domain', 'data']
+const HOMES = ['commands', 'components', 'data', 'desktop', 'domain', 'lib', 'surfaces']
 
 const homeRules = HOMES.map((home) => ({
   name: `r11-${home}-boundary`,
-  comment: `R11: src/${home} imports only its own subtree, lib/, domain/, data/, gen/`,
+  comment: `R11: src/${home} imports only its own subtree, lib/, domain/, data/`,
   severity: 'error',
   from: { path: `^src/${home}/` },
   to: {
@@ -43,17 +45,17 @@ module.exports = {
       name: 'no-circular',
       comment: 'Import cycles defeat locality of reasoning (tenet I)',
       severity: 'error',
-      // Documented exception (charter slice 5): src/gen/ is generated wire
-      // types and never hand-touched; the generator emits mutually recursive
-      // TYPE-ONLY imports (MailQueryGroup <-> MailQueryRuleNode) for recursive
-      // protocol shapes. Erased at runtime and correct by construction — the
-      // rule mis-classifies them, so gen/ is exempt rather than baselined.
-      from: { pathNot: '^src/gen/' },
+      from: {},
       to: { circular: true },
     },
   ],
   options: {
-    doNotFollow: { path: 'node_modules' },
+    // ../protocol/src/gen is generated wire types and never hand-touched; the
+    // generator emits mutually recursive TYPE-ONLY imports (MailQueryGroup <->
+    // MailQueryRuleNode) for recursive protocol shapes — erased at runtime and
+    // correct by construction, so the package is not followed rather than
+    // baselined under no-circular.
+    doNotFollow: { path: 'node_modules|^\\.\\./protocol/' },
     tsConfig: { fileName: 'tsconfig.json' },
     tsPreCompilationDeps: true,
     exclude: { path: '\\.test\\.[^.]+$' },
