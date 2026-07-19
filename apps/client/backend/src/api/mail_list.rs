@@ -183,7 +183,10 @@ mod tests {
         };
         let rule = mail_list_rule(&query).expect("valid query");
         let [MailQueryRuleNode::Group(parsed)] = rule.root.nodes.as_slice() else {
-            panic!("expected the parsed grammar group, got {:?}", rule.root.nodes);
+            panic!(
+                "expected the parsed grammar group, got {:?}",
+                rule.root.nodes
+            );
         };
         let [MailQueryRuleNode::Condition(condition)] = parsed.nodes.as_slice() else {
             panic!("expected one condition, got {:?}", parsed.nodes);
