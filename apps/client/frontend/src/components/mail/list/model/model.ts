@@ -1,13 +1,53 @@
 import type { MessageSortField, MessageSummary } from '@/data/transport/api'
-import type { MailListQuery } from '@/gen'
-import type { PreparedServerSearchQuery } from '@/domain/searchQuery'
-import type { SidebarSelection } from '../../../sidebar/Sidebar'
+import type { MailListQuery, MailListResult } from '@/gen'
+import type { PreparedServerSearchQuery } from '@/domain/search'
+import type { SidebarSelection } from '@/data/models/selection'
+import type { MailClient } from '@/data/transport/client'
+import { fetchQuery } from '@/data/queries/queries'
 import type { SortConfig } from '../../thread/columns'
 
 export const ROW_HEIGHT = 30
 export const OVERSCAN_ROWS = 6
 export const MESSAGE_PAGE_SIZE = 100
 export const scrollOffsetByView = new Map<string, number>()
+
+/** How many pages deep each view's window has grown, per canonical scope
+ * key. Module-level for the same reason as scrollOffsetByView: a remounted
+ * list must find its window again so scroll restoration has its rows. */
+export const windowPagesByScope = new Map<string, number>()
+
+/**
+ * One live window over a mail list, fetched from the top in server-capped
+ * chunks. The window — not each scroll page — is the unit react-query caches
+ * and refetches: a deep-scrolled list is ONE query, so an invalidation costs
+ * one refetch regardless of depth (refactor-ledger item 6; the accumulated
+ * per-page queries refetched 11–13 times per mutation).
+ *
+ * Each chunk asks for the whole remainder; the backend clamps the limit to
+ * its own page cap (MAX_LIST_LIMIT) and hands back a continuation cursor, so
+ * the chunk size is server policy, never restated here. Cursors restart from
+ * the top on every refetch, which keeps rows live and the scroll prefix
+ * stable across invalidations.
+ */
+export async function fetchMailListWindow(
+  client: MailClient,
+  scope: MailListQuery,
+  windowSize: number,
+): Promise<MailListResult> {
+  const rows: MessageSummary[] = []
+  let cursor: string | null = null
+  let nextCursor: string | null = null
+  do {
+    const page: MailListResult = await fetchQuery<MailListResult>(client, {
+      mailList: { ...scope, limit: windowSize - rows.length, cursor },
+    })
+    rows.push(...page.rows)
+    nextCursor = page.nextCursor
+    if (page.rows.length === 0) break // a stuck cursor must not loop
+    cursor = page.nextCursor
+  } while (cursor !== null && rows.length < windowSize)
+  return { rows, nextCursor }
+}
 
 export function messageKey(message: MessageSummary): string {
   return `${message.sourceId}:${message.id}`

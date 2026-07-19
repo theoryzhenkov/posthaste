@@ -6,6 +6,8 @@
  * surface a notification without prop drilling. The bell button and panel
  * read it via `useStore`.
  */
+import { newId } from '@/lib/ambient/random'
+import { nowMs } from '@/lib/ambient/time'
 import { createStore, useStore } from '@/lib/store'
 
 import type { NotificationSeverity } from '@/domain/vocabulary'
@@ -49,7 +51,7 @@ export function pushNotification(input: NotificationInput): string {
         ...existing,
         ...input,
         id: existing.id,
-        createdAt: Date.now(),
+        createdAt: nowMs(),
         read: false,
       }
       notificationStore.set([
@@ -59,13 +61,10 @@ export function pushNotification(input: NotificationInput): string {
       return existing.id
     }
   }
-  const id =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `n-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const id = newId()
   notificationStore.set(
     [
-      { ...input, id, createdAt: Date.now(), read: false },
+      { ...input, id, createdAt: nowMs(), read: false },
       ...notifications,
     ].slice(0, MAX_NOTIFICATIONS),
   )

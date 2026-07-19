@@ -12,7 +12,7 @@ import type {
 } from './types'
 import { FLOATING_PANEL_RAIL_RESISTANCE_DISTANCE } from './types'
 
-export function panelRailOffsets(
+function panelRailOffsets(
   panel: PanelGeometry,
   viewport: ViewportSize,
 ): PanelRails {

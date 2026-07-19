@@ -6,9 +6,8 @@ import {
   type ActionServices,
 } from '@/commands'
 
-import { matchesQuery } from '../match'
 import type { CommandPaletteEntry, SearchProvider } from '../types'
-import { candidateFromEntry } from './shared'
+import { matchedCandidatePage } from './shared'
 
 /**
  * The palette PICK-STEP provider for a parameterized action.
@@ -58,18 +57,7 @@ export function createActionParamProvider(input: {
         }),
       )
 
-      const matched = entries.filter((entry) =>
-        matchesQuery(req.query, entry.label, entry.keywords),
-      )
-
-      return {
-        candidates: matched
-          .slice(0, req.limit)
-          .map((entry, index) =>
-            candidateFromEntry(provider, entry, req.query, index),
-          ),
-        nextCursor: null,
-      }
+      return matchedCandidatePage(provider, entries, req)
     },
   }
   return provider

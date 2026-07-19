@@ -29,19 +29,19 @@ export {
   resolveKeyboardAction,
   runResolvedWithConfirm,
   matchesChord,
-  shortcutMatches,
   type ActionConfirm,
   type ChordEvent,
 } from './keyboard'
 export { getAction, allActions } from './registry'
 export { CommandDispatcher } from './dispatcher'
-export { buildDetailHeaderActions, buildRowContextMenu } from './bind'
+export {
+  buildDetailHeaderActions,
+  buildRowContextMenu,
+  messageTargetFromSelection,
+} from './bind'
 export type {
   ActionContext,
-  ActionDefinition,
   ActionParamOption,
-  ActionSection,
   ActionServices,
-  ActionSurface,
   MessageTarget,
 } from './types'

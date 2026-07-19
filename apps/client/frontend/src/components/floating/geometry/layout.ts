@@ -21,11 +21,6 @@ export interface ViewportSize {
   height: number
 }
 
-export interface ResolvedFloatingPanelSize {
-  width: number
-  height?: number
-}
-
 const FLOATING_PANEL_SIZE_POLICIES = {
   command: {
     widthColumns: 6,
@@ -44,7 +39,7 @@ const FLOATING_PANEL_SIZE_POLICIES = {
   },
 } as const satisfies Record<FloatingPanelSizePreset, FloatingPanelSizePolicy>
 
-export function floatingPanelSizePolicy(
+function floatingPanelSizePolicy(
   preset: FloatingPanelSizePreset,
 ): FloatingPanelSizePolicy {
   return FLOATING_PANEL_SIZE_POLICIES[preset]
@@ -94,44 +89,6 @@ export function floatingPanelResizeConstraints(
   }
 }
 
-export function resolveFloatingPanelSize(
-  preset: FloatingPanelSizePreset,
-  viewport: ViewportSize,
-): ResolvedFloatingPanelSize {
-  const policy = floatingPanelSizePolicy(preset)
-  const usableWidth = Math.max(
-    0,
-    viewport.width - FLOATING_PANEL_GRID.screenMargin * 2,
-  )
-  const desiredWidth =
-    (usableWidth * policy.widthColumns) / FLOATING_PANEL_GRID.columns
-  const width = clamp(
-    desiredWidth,
-    Math.min(policy.minWidth, usableWidth),
-    Math.min(policy.maxWidth, usableWidth),
-  )
-
-  if (policy.heightRows === undefined) {
-    return { width }
-  }
-
-  const usableHeight = Math.max(
-    0,
-    viewport.height -
-      FLOATING_PANEL_GRID.topOffset -
-      FLOATING_PANEL_GRID.screenMargin,
-  )
-  const desiredHeight =
-    (usableHeight * policy.heightRows) / FLOATING_PANEL_GRID.rows
-  const height = clamp(
-    desiredHeight,
-    Math.min(policy.minHeight, usableHeight),
-    Math.min(policy.maxHeight ?? usableHeight, usableHeight),
-  )
-
-  return { width, height }
-}
-
 export function floatingPanelSizeStyle(
   preset: FloatingPanelSizePreset,
 ): Record<string, string> {
@@ -161,8 +118,4 @@ export function floatingPanelSizeStyle(
 
 function ratio(parts: number, total: number): string {
   return `${(parts / total).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, Math.min(min, max)), Math.max(min, max))
 }

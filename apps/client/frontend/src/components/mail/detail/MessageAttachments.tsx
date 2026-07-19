@@ -3,11 +3,11 @@ import { Download, Ellipsis, Eye, FileText } from 'lucide-react'
 
 import type { MessageAttachment } from '@/data/transport/api'
 import { canPreviewAttachment, formatAttachmentSize } from '@/data/models/attachments'
-import { openFocusedSurface } from '@/surfaces/useSurfaceRouting'
+import { usePlatformServices } from '@/lib/platform/services'
 import { cn } from '@/lib/design/cn'
-import { downloadFileFromUrl } from '@/lib/download'
+import { downloadFileFromUrl } from '@/lib/platform/download'
 import { useBlobUrl } from '@/data/transport/blobs'
-import { attachmentSurface } from '@/surfaces'
+import { attachmentSurface } from '@/domain/surface'
 
 import { Button } from '../../ui/form/button'
 
@@ -57,9 +57,10 @@ function AttachmentRow({
   messageId: string
   sourceId: string
 }) {
+  const { openSurface } = usePlatformServices()
   const canPreview = canPreviewAttachment(attachment)
   const openPreview = () =>
-    openFocusedSurface(
+    openSurface(
       attachmentSurface({ sourceId, messageId, attachmentId: attachment.id }),
     )
 

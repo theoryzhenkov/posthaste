@@ -2,6 +2,7 @@
  * Calendar-date parsing (the R3 boundary for `date:` search values and any
  * other `yyyy-mm-dd` input) and the snooze-preset clock math.
  */
+import { now as currentTime } from '@/lib/ambient/time'
 
 /** A validated `yyyy-mm-dd` calendar date (a REAL date, not just the shape). */
 export type IsoDate = string & { readonly __brand: 'IsoDate' }
@@ -59,7 +60,7 @@ function nextWeekdayMorning(now: Date, weekday: number): Date {
 
 /** The snooze presets shown in the message-header popover. "Later today" is
  * omitted once it's past 18:00 (there's no meaningful "later" left today). */
-export function snoozePresets(now: Date = new Date()): SnoozePreset[] {
+export function snoozePresets(now: Date = currentTime()): SnoozePreset[] {
   const presets: SnoozePreset[] = []
   const laterToday = atHour(now, 18)
   if (laterToday > now) {

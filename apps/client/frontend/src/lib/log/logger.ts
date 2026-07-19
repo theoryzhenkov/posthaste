@@ -106,7 +106,7 @@ const logger = pino({
   browser: browserOpts,
 })
 
-export type LogFields = {
+type LogFields = {
   event: LogEvent
   requestId?: string
   operationId?: string
@@ -137,7 +137,5 @@ function typedLogger(domain: string): TypedLogger {
 
 export const syncLogger = typedLogger('sync')
 export const uiLogger = typedLogger('ui')
-export const apiLogger = typedLogger('api')
-export const undoLogger = typedLogger('undo')
 
 export { LOG_EVENTS } from './logEvents'

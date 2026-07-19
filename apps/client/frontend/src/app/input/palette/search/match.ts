@@ -1,6 +1,6 @@
 import type { MatchEvidence } from './types'
 
-export type QueryMatchKind =
+type QueryMatchKind =
   | 'exact'
   | 'prefix'
   | 'acronym'
@@ -14,7 +14,7 @@ export interface TextMatchResult {
   score: number
 }
 
-export function normalizeSearchText(value: string): string {
+function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase()
 }
 

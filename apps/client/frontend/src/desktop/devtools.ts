@@ -4,11 +4,12 @@
 // `createStoredStore` (R5): localStorage-backed so it survives restarts, and
 // mirrored across the app's windows (same origin) via storage events, like the
 // appearance preferences.
-import { createStoredStore, useStore } from '@/lib/store'
+import { createStoredStore } from '@/lib/store'
 
 const STORAGE_KEY = 'posthaste.developerTools.v1'
 
-const developerToolsStore = createStoredStore<boolean>({
+/** The store itself — handed to components via PlatformServices (R11). */
+export const developerToolsStore = createStoredStore<boolean>({
   key: STORAGE_KEY,
   codec: { read: (raw) => raw === 'true', write: String },
   sync: true,
@@ -16,13 +17,4 @@ const developerToolsStore = createStoredStore<boolean>({
 
 export function isDeveloperToolsEnabled(): boolean {
   return developerToolsStore.get()
-}
-
-export function setDeveloperToolsEnabled(enabled: boolean): void {
-  developerToolsStore.set(enabled)
-}
-
-/** Reactive read of the "Developer tools" setting. */
-export function useDeveloperToolsEnabled(): boolean {
-  return useStore(developerToolsStore)
 }

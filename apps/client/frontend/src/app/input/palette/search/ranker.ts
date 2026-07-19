@@ -148,7 +148,7 @@ function rankCandidate(
   }
 }
 
-export function rankCandidates(
+function rankCandidates(
   candidates: SearchCandidate[],
   query: string,
   context: RankingContext,

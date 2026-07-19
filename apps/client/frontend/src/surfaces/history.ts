@@ -1,10 +1,7 @@
-const SURFACE_HISTORY_KIND = 'posthaste.surface'
+import { isSurfaceLocation } from '../domain/surface/location'
+import type { SurfaceLocation } from '../domain/surface/types'
 
-export interface SurfaceHistoryLocation {
-  hash: string
-  pathname: string
-  search: string
-}
+const SURFACE_HISTORY_KIND = 'posthaste.surface'
 
 export interface SurfaceHistoryState {
   kind: typeof SURFACE_HISTORY_KIND
@@ -24,18 +21,8 @@ export function isSurfaceHistoryState(
   )
 }
 
-export function isSurfaceLocation(location: SurfaceHistoryLocation): boolean {
-  const hashRoute = location.hash.startsWith('#')
-    ? location.hash.slice(1)
-    : location.hash
-  return (
-    hashRoute.startsWith('/surface/') ||
-    location.pathname.startsWith('/surface/')
-  )
-}
-
 export function currentSurfaceDepth(
-  location: SurfaceHistoryLocation,
+  location: SurfaceLocation,
   state: unknown,
 ): number {
   if (isSurfaceHistoryState(state)) {
@@ -56,12 +43,12 @@ export function surfaceHistoryState(
 }
 
 export function surfaceUrl(
-  location: SurfaceHistoryLocation,
+  location: SurfaceLocation,
   route: string,
 ): string {
   return `${location.pathname}${location.search}#${route}`
 }
 
-export function rootUrl(location: SurfaceHistoryLocation): string {
+export function rootUrl(location: SurfaceLocation): string {
   return `${location.pathname}${location.search}`
 }

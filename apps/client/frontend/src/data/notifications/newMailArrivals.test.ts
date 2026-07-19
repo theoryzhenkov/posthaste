@@ -4,8 +4,8 @@ import type { DomainEventPayload } from '@/gen'
 import {
   createNewMailArrivalCoordinator,
   type NewMailArrivalDeps,
-  type NewMailBanner,
 } from './newMailArrivals'
+import type { NewMailBanner } from './osNotifier'
 
 function arrivalEvent(
   overrides: Partial<DomainEventPayload> = {},

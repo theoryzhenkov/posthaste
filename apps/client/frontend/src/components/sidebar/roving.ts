@@ -2,17 +2,13 @@
  * Pure helpers for the sidebar's `j`/`k` roving cursor.
  *
  */
-import type { SidebarSelection } from './Sidebar'
+import type { SidebarSelection } from '@/data/models/selection'
 
 /** Stable key for a navigable sidebar row (smart mailbox, tag, or folder). */
 export type SidebarNavKey = string
 
 export function smartNavKey(id: string): SidebarNavKey {
   return `smart:${id}`
-}
-
-export function tagNavKey(name: string): SidebarNavKey {
-  return `tag:${name}`
 }
 
 export function sourceNavKey(

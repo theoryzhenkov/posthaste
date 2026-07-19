@@ -13,7 +13,7 @@ import type {
   CommandAccepted,
 } from '@/gen'
 import { DEFAULT_UNDO_SEND_DELAY_SECONDS } from '../../../data/transport/api/settings/settings'
-import type { SettingsSurfaceDescriptor } from '../../../surfaces/index'
+import type { SettingsSurfaceDescriptor } from '@/domain/surface'
 import type {
   AccountActionTarget,
   AccountCommandAction,
@@ -26,12 +26,9 @@ import { NotificationsPane } from '../panes/NotificationsPane'
 import { OutboxPane } from '../panes/OutboxPane'
 import { StoragePane } from '../panes/StoragePane'
 import { TagsPane } from '../tags/TagsPane'
-import { TroubleshootingPane } from '../panes/TroubleshootingPane'
-import {
-  SmartMailboxesPane,
-  type MailboxEditorTarget,
-} from '../mailboxes/SmartMailboxesPane'
-import type { EditorTarget } from './types'
+import { TroubleshootingPane } from '../panes/troubleshooting/TroubleshootingPane'
+import { SmartMailboxesPane } from '../mailboxes/SmartMailboxesPane'
+import type { EditorTarget, MailboxEditorTarget } from './types'
 
 interface SettingsPanelContentProps {
   accounts: AccountRow[]

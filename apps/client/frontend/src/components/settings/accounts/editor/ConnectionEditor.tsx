@@ -13,7 +13,12 @@ import type {
   AccountEditorConnectionModel,
   ManagedOAuthConnectionModel,
 } from './accountEditorModel'
-import { applyImapDefaults, imapDefaultsForEmail } from '../../forms'
+import {
+  applyImapDefaults,
+  formFieldSetter,
+  imapDefaultsForEmail,
+  setupPrimaryEmail,
+} from '../../forms'
 import { Field, SettingsSection } from '../../panel/shared'
 import type { AccountFormState, ManualAccountDriver } from '../../panel/types'
 import { authLabel, driverLabel, providerLabel } from './labels'
@@ -60,8 +65,9 @@ function ManualConnectionEditor({
   onChange: Dispatch<SetStateAction<AccountFormState>>
 }) {
   const isImap = form.driver === 'imapSmtp'
+  const setField = formFieldSetter(onChange)
   const appPasswordHint = isImap
-    ? (imapDefaultsForEmail(primaryEmail(form))?.appPasswordHint ?? null)
+    ? (imapDefaultsForEmail(setupPrimaryEmail(form))?.appPasswordHint ?? null)
     : null
 
   return (
@@ -87,17 +93,13 @@ function ManualConnectionEditor({
               label="Base URL"
               value={form.baseUrl}
               placeholder="https://mail.example.com/jmap"
-              onChange={(value) =>
-                onChange((current) => ({ ...current, baseUrl: value }))
-              }
+              onChange={setField('baseUrl')}
             />
             <Field
               label="Username"
               value={form.username}
               placeholder="you@example.com"
-              onChange={(value) =>
-                onChange((current) => ({ ...current, username: value }))
-              }
+              onChange={setField('username')}
             />
           </div>
         </SettingsSection>
@@ -125,12 +127,7 @@ function ManualConnectionEditor({
               ? '********'
               : 'Password'
           }
-          onChange={(event) =>
-            onChange((current) => ({
-              ...current,
-              password: event.target.value,
-            }))
-          }
+          onChange={(event) => setField('password')(event.target.value)}
         />
       </SettingsSection>
     </>
@@ -189,6 +186,7 @@ function ImapServerFields({
   form: AccountFormState
   onChange: Dispatch<SetStateAction<AccountFormState>>
 }) {
+  const setField = formFieldSetter(onChange)
   return (
     <>
       <SettingsSection title="Incoming (IMAP)">
@@ -197,34 +195,26 @@ function ImapServerFields({
             label="Username"
             value={form.username}
             placeholder="you@example.com"
-            onChange={(value) =>
-              onChange((current) => ({ ...current, username: value }))
-            }
+            onChange={setField('username')}
           />
           <div />
           <Field
             label="IMAP host"
             value={form.imapHost}
             placeholder="imap.example.com"
-            onChange={(value) =>
-              onChange((current) => ({ ...current, imapHost: value }))
-            }
+            onChange={setField('imapHost')}
           />
           <div className="grid grid-cols-2 gap-3">
             <Field
               label="Port"
               value={form.imapPort}
               placeholder="993"
-              onChange={(value) =>
-                onChange((current) => ({ ...current, imapPort: value }))
-              }
+              onChange={setField('imapPort')}
             />
             <SecurityField
               label="Security"
               value={form.imapSecurity}
-              onChange={(security) =>
-                onChange((current) => ({ ...current, imapSecurity: security }))
-              }
+              onChange={setField('imapSecurity')}
             />
           </div>
         </div>
@@ -236,25 +226,19 @@ function ImapServerFields({
             label="SMTP host"
             value={form.smtpHost}
             placeholder="smtp.example.com"
-            onChange={(value) =>
-              onChange((current) => ({ ...current, smtpHost: value }))
-            }
+            onChange={setField('smtpHost')}
           />
           <div className="grid grid-cols-2 gap-3">
             <Field
               label="Port"
               value={form.smtpPort}
               placeholder="465"
-              onChange={(value) =>
-                onChange((current) => ({ ...current, smtpPort: value }))
-              }
+              onChange={setField('smtpPort')}
             />
             <SecurityField
               label="Security"
               value={form.smtpSecurity}
-              onChange={(security) =>
-                onChange((current) => ({ ...current, smtpSecurity: security }))
-              }
+              onChange={setField('smtpSecurity')}
             />
           </div>
         </div>
@@ -297,17 +281,6 @@ function SecurityField({
       </Select>
     </label>
   )
-}
-
-function primaryEmail(form: AccountFormState): string {
-  const fromPatterns = form.emailPatternsText
-    .split(/[\n,]/)
-    .map((pattern) => pattern.trim())
-    .find((pattern) => !pattern.includes('*') && pattern.includes('@'))
-  if (fromPatterns) {
-    return fromPatterns
-  }
-  return form.username.trim()
 }
 
 function OAuthConnectionDetails({

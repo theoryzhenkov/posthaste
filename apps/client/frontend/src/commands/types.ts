@@ -27,7 +27,7 @@ export type { ActionConfirmCopy, ActionParamOption, ActionSection }
 
 /** Where an action can appear. A definition opts into surfaces; the resolver
  *  filters by the requesting surface. */
-export type ActionSurface =
+type ActionSurface =
   | 'palette' // ⌘K list (searchable)
   | 'context-menu' // right-click on a message row
   | 'detail-header' // focused-mail action row (MessageHeader)
@@ -167,7 +167,7 @@ export interface ActionServices extends CommandScopeServices {
 /** Enablement result: `true` = runnable; `false` = shown-but-disabled with no
  *  hint; `{ reason }` = shown-but-disabled with hint text (palette
  *  discoverability). */
-export type ActionEnablement = boolean | { reason: string }
+type ActionEnablement = boolean | { reason: string }
 
 export interface ActionDefinition {
   /** Stable namespaced id, e.g. `message.archive`. Persisted in

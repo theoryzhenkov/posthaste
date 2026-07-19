@@ -16,7 +16,7 @@ import type { AccountAppearance, Mailbox, MailboxGroup } from '@/data/transport/
 import { useMailboxColorLookup } from '@/data/hooks/useMailboxColors'
 
 import { AccountMark } from '../ui/display/AccountMark'
-import type { SidebarSelection } from './Sidebar'
+import type { SidebarSelection } from '@/data/models/selection'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -25,7 +25,7 @@ import {
   ContextMenuTrigger,
 } from '../ui/overlay/context-menu'
 import { GroupNameDialog } from './dialogs/GroupNameDialog'
-import { partitionSourceMailboxes } from './model'
+import { groupIdByMailbox, partitionSourceMailboxes } from './model'
 import { MailboxItem } from './SidebarItems'
 import { useMailboxGroups, useMailboxGroupMutations } from './hooks/useMailboxGroups'
 import { NewMailboxDialog } from './dialogs/NewMailboxDialog'
@@ -84,15 +84,10 @@ export function SourceSection({
     () => partition.groups.map((entry) => entry.group),
     [partition.groups],
   )
-  const currentGroupIdByMailbox = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const entry of partition.groups) {
-      for (const mailbox of entry.mailboxes) {
-        map.set(mailbox.id, entry.group.id)
-      }
-    }
-    return map
-  }, [partition.groups])
+  const currentGroupIdByMailbox = useMemo(
+    () => groupIdByMailbox(partition.groups),
+    [partition.groups],
+  )
   // The account header's aggregate unread sums the react-query mailbox rows'
   // counts: invalidation + the optimistic overlay keep `unreadEmails` live,
   // so no separate live-count source exists.

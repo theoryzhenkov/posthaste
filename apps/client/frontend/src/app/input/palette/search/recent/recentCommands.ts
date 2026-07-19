@@ -13,6 +13,9 @@
  * Pure/localStorage-only — no React, no cross-window sync (a per-tab bias is
  * fine; correctness never depends on it).
  */
+import { readStorageItem, writeStorageItem } from '@/lib/ambient/storage'
+import { nowMs } from '@/lib/ambient/time'
+
 import type { DecayedCounter } from '../types'
 
 const STORAGE_KEY = 'posthaste.commandPalette.recents.v1'
@@ -20,10 +23,6 @@ const HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000 // one week
 
 function emptyCounter(): DecayedCounter {
   return { halfLifeMs: HALF_LIFE_MS, entries: {} }
-}
-
-function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof localStorage !== 'undefined'
 }
 
 /** Decay a stored value to `now` using the counter half-life. */
@@ -39,9 +38,8 @@ function decayed(
 
 /** Read the persisted counter, tolerating absent/corrupt storage. */
 export function loadRecentCommands(): DecayedCounter {
-  if (!isBrowser()) return emptyCounter()
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = readStorageItem(STORAGE_KEY)
     if (!raw) return emptyCounter()
     const parsed = JSON.parse(raw) as Partial<DecayedCounter> | null
     if (!parsed || typeof parsed !== 'object' || !parsed.entries) {
@@ -64,15 +62,11 @@ export function loadRecentCommands(): DecayedCounter {
  * Called from the palette's execute path for registry (`kind: 'action'`) rows.
  */
 export function recordCommandUse(actionId: string): void {
-  if (!isBrowser()) return
-  const now = Date.now()
+  const now = nowMs()
   const counter = loadRecentCommands()
   const previous = counter.entries[actionId]
   const base = previous ? decayed(previous, now, counter.halfLifeMs) : 0
   counter.entries[actionId] = { value: base + 1, updatedAt: now }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(counter))
-  } catch {
-    // Storage full / unavailable — recents are best-effort, so swallow.
-  }
+  // Absent/full storage no-ops inside the seam — recents are best-effort.
+  writeStorageItem(STORAGE_KEY, JSON.stringify(counter))
 }

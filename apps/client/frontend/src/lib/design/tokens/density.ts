@@ -13,7 +13,7 @@ export const defaultUiDensity = 'compact' as const satisfies UiDensity
  * `var(--density-*)`; `messageRowHeight` additionally feeds the message list's
  * hand-rolled virtualizer, which needs a JS number for its spacer/index math.
  */
-export const uiDensitySettings = {
+const uiDensitySettings = {
   compact: {
     toolbarHeight: 38,
     sidebarRowHeight: 24,

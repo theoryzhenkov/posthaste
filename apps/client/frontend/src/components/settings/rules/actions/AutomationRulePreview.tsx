@@ -1,5 +1,5 @@
 import type { MessageSummary } from '../../../../data/transport/api/index'
-import { formatRelativeTime } from '../../../../lib/time'
+import { formatRelativeTime } from '../../../../lib/ambient/time'
 import { Button } from '../../../ui/form/button'
 import { FeedbackBanner } from '../../panel/shared'
 

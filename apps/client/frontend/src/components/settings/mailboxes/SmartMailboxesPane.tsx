@@ -20,7 +20,7 @@ import {
   SettingsPage,
   SettingsPageHeader,
 } from '../panel/shared'
-import type { SmartMailboxEditorTarget } from '../panel/types'
+import type { MailboxEditorTarget } from '../panel/types'
 import {
   SmartMailboxDetail,
   SourceMailboxDetail,
@@ -28,10 +28,6 @@ import {
 import { SmartMailboxesEmptyState } from './pane/EmptyState'
 import { MailboxListRow } from './pane/MailboxListRow'
 import { SourceMailboxListSection } from './pane/SourceMailboxListSection'
-
-export type MailboxEditorTarget =
-  | { kind: 'smart'; id: SmartMailboxEditorTarget }
-  | { kind: 'source'; accountId: string; mailboxId: string }
 
 export function SmartMailboxesPane({
   smartMailboxes,

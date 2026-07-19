@@ -16,10 +16,15 @@
  * from the delivery path, so the user is never surprise-prompted by an
  * arriving message.
  */
-import { isTauriRuntime } from '../../desktop/runtime'
-import type { NewMailBanner } from './newMailArrivals'
-
+import { isTauriRuntime } from '@/lib/platform/runtime'
 export type OsNotificationPermission = 'granted' | 'denied' | 'unavailable'
+
+/** One OS banner, already formatted; `sound` mirrors the pane's Sounds toggle. */
+export interface NewMailBanner {
+  title: string
+  body: string
+  sound: boolean
+}
 
 /** Fire-and-forget delivery; failures are swallowed (banners are best-effort). */
 export function postOsNotification(banner: NewMailBanner): void {

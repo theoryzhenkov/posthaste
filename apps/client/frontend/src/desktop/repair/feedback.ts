@@ -6,7 +6,17 @@
  * The breadcrumb lives in `localStorage`, which survives the IndexedDB replica
  * reset and the relaunch (a factory reset clears localStorage first, then sets
  * the breadcrumb, so it still survives). Read once on the next boot.
+ * Everything here is best-effort feedback: storage access rides the R8 seam
+ * (lib/ambient/storage), which swallows blocked storage.
  */
+import {
+  clearAmbientStorage,
+  readStorageItem,
+  removeStorageItem,
+  writeStorageItem,
+} from '@/lib/ambient/storage'
+import { nowMs } from '@/lib/ambient/time'
+
 export type RepairKind = 'repair' | 'factory-reset'
 
 const REPAIR_BREADCRUMB_KEY = 'posthaste.repair.completed'
@@ -14,30 +24,19 @@ const REPAIR_BREADCRUMB_KEY = 'posthaste.repair.completed'
 const FRESHNESS_MS = 5 * 60 * 1000
 
 export function markRepairRequested(kind: RepairKind = 'repair'): void {
-  try {
-    window.localStorage.setItem(REPAIR_BREADCRUMB_KEY, `${kind}:${Date.now()}`)
-  } catch {
-    // Best-effort feedback; never block the repair on storage.
-  }
+  writeStorageItem(REPAIR_BREADCRUMB_KEY, `${kind}:${nowMs()}`)
 }
 
 /** The repair kind at most once after a recent repair; clears the breadcrumb. */
 export function consumeRepairCompletion(): RepairKind | null {
-  let raw: string | null = null
-  try {
-    raw = window.localStorage.getItem(REPAIR_BREADCRUMB_KEY)
-    if (raw !== null) {
-      window.localStorage.removeItem(REPAIR_BREADCRUMB_KEY)
-    }
-  } catch {
-    return null
-  }
+  const raw = readStorageItem(REPAIR_BREADCRUMB_KEY)
   if (raw === null) {
     return null
   }
+  removeStorageItem(REPAIR_BREADCRUMB_KEY)
   const separator = raw.indexOf(':')
   const at = Number(raw.slice(separator + 1))
-  if (!Number.isFinite(at) || Date.now() - at >= FRESHNESS_MS) {
+  if (!Number.isFinite(at) || nowMs() - at >= FRESHNESS_MS) {
     return null
   }
   return raw.slice(0, separator) === 'factory-reset'
@@ -51,9 +50,5 @@ export function consumeRepairCompletion(): RepairKind | null {
  * separately. Call BEFORE setting the breadcrumb so the breadcrumb survives.
  */
 export function clearClientLocalState(): void {
-  try {
-    window.localStorage.clear()
-  } catch {
-    // Best-effort.
-  }
+  clearAmbientStorage()
 }

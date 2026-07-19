@@ -7,7 +7,7 @@ import type { PaneId } from '@/domain/vocabulary'
 import { MessageDetail as MessageDetailPane } from '@/components/mail/detail/MessageDetail'
 import { MessageList } from '@/components/mail/list/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'
-import { conversationViewQuery } from '@/domain/searchQuery'
+import { conversationViewQuery } from '@/domain/search'
 import {
   ResizableHandle,
   ResizablePanel,

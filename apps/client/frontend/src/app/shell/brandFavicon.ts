@@ -9,7 +9,7 @@
  *
  * @see docs/eph/DESIGN-L2-release-channels.md
  */
-import { isNightly } from '../../desktop/releaseChannel'
+import { isNightly } from '@/lib/platform/releaseChannel'
 
 const NIGHTLY_FAVICON = '/favicon-night.svg'
 

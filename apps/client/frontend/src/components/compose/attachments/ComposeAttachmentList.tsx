@@ -1,7 +1,7 @@
 import { Paperclip, X } from 'lucide-react'
 
 import type { ComposeForm } from '../form/model'
-import { formatFileSize } from './attachments'
+import { formatAttachmentSize } from '@/data/models/attachments'
 
 export function ComposeAttachmentList({
   attachments,
@@ -31,7 +31,7 @@ export function ComposeAttachmentList({
           <span className="min-w-0 max-w-56 truncate text-foreground">
             {attachment.filename}
           </span>
-          <span>{formatFileSize(attachment.size)}</span>
+          <span>{formatAttachmentSize(attachment.size)}</span>
           <button
             type="button"
             className="rounded-full p-0.5 hover:bg-[var(--hover-bg)]"

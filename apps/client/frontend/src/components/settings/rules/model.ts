@@ -7,6 +7,7 @@
  *
  */
 import type { AccountRow } from '@/gen'
+import { newId } from '@/lib/ambient/random'
 import type {
   AutomationAction,
   AutomationRule,
@@ -44,11 +45,8 @@ export interface AutomationRuleItem {
   draft: AutomationRuleDraft
 }
 
-export function createRuleId(prefix = 'automation'): string {
-  if (globalThis.crypto && 'randomUUID' in globalThis.crypto) {
-    return `${prefix}:${globalThis.crypto.randomUUID()}`
-  }
-  return `${prefix}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+function createRuleId(prefix = 'automation'): string {
+  return `${prefix}:${newId()}`
 }
 
 export function defaultAction(): AutomationAction {
@@ -76,7 +74,7 @@ export function actionForKind(
   }
 }
 
-export function isActionComplete(action: AutomationAction): boolean {
+function isActionComplete(action: AutomationAction): boolean {
   switch (action.kind) {
     case 'applyTag':
     case 'removeTag':
@@ -144,7 +142,7 @@ export function triggerLabel(trigger: AutomationTrigger): string {
   )
 }
 
-export function actionSummary(action: AutomationAction): string {
+function actionSummary(action: AutomationAction): string {
   switch (action.kind) {
     case 'applyTag':
       return action.tag.trim() ? `Tag ${action.tag.trim()}` : 'Apply tag'

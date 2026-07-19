@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react'
 
 import type { ProviderHint } from '@/gen'
 import { providerOAuthClientCredentials } from './oauthProviders'
-import { openExternalUrl } from '../../../../desktop/runtime'
+import { usePlatformServices } from '@/lib/platform/services'
 import { Button } from '../../../ui/form/button'
 import { SettingsPageHeader } from '../../panel/shared'
 import {
@@ -24,6 +24,7 @@ class OAuthOpenError extends Error {
 }
 
 export function AccountSetupChoice({ onManual }: { onManual: () => void }) {
+  const { openExternalUrl } = usePlatformServices()
   const startOauth = useStartOauth()
   const callback = useOauthCallbackCapture()
   const [errorMessage, setErrorMessage] = useState<string | null>(null)

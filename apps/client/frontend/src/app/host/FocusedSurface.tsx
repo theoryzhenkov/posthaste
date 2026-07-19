@@ -1,23 +1,23 @@
 import { useEffect, useMemo } from 'react'
 
 import type { MessageSummary } from '@/data/transport/api'
-import type { SurfaceDescriptor } from '@/surfaces'
+import type { SurfaceDescriptor } from '@/domain/surface'
 import { useAccounts } from '@/data/queries/queries'
 import {
   closeCurrentSurfaceWindow,
-  isTauriRuntime,
   listenForDesktopCloseRequest,
   openExternalUrl,
 } from '@/desktop/runtime'
+import { isTauriRuntime } from '@/lib/platform/runtime'
 import { useComposeIntent } from '@/data/hooks/useComposeIntent'
 import { useEmailActions } from '@/data/hooks/useEmailActions'
 import { buildDetailHeaderActions } from '@/commands'
 import { useCommandScope, type CommandScope } from '@/lib/command'
-import { replaceFocusedSurface } from '@/surfaces/useSurfaceRouting'
+import { replaceFocusedSurface } from './navigation'
 import {
   markSurfaceBootstrap,
   markSurfaceBootstrapOnce,
-} from '@/surfaces/bootstrapLog'
+} from '@/lib/log/surfaceBootstrap'
 import { AttachmentSurface } from './AttachmentSurface'
 import { ComposeOverlay } from '../../components/compose/ComposeOverlay'
 import { MessageDetail } from '../../components/mail/detail/MessageDetail'

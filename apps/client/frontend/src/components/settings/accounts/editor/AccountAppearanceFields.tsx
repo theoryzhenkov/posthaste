@@ -8,15 +8,21 @@ import {
 import { useMutation } from '@tanstack/react-query'
 
 import { useCommands } from '@/data'
+import type { AccountAppearance } from '@/gen'
 import { AccountMark } from '../../../ui/display/AccountMark'
-import { buildAccountAppearanceInput } from '../../forms'
+import { buildAccountAppearanceInput, formFieldSetter } from '../../forms'
 import { FeedbackBanner, Field } from '../../panel/shared'
 import type { AccountFormState } from '../../panel/types'
-import {
-  accountAppearanceSignature,
-  accountHueGradient,
-  appearanceFromForm,
-} from './state'
+
+const accountHueGradient =
+  'linear-gradient(90deg, oklch(0.68 0.17 0), oklch(0.68 0.17 45), oklch(0.68 0.17 90), oklch(0.68 0.17 145), oklch(0.68 0.17 205), oklch(0.68 0.17 260), oklch(0.68 0.17 315), oklch(0.68 0.17 360))'
+
+/** Change key for the debounced autosave: fires only when the normalized
+ * appearance actually differs from what was last saved. */
+function accountAppearanceSignature(appearance: AccountAppearance): string {
+  const imagePart = appearance.kind === 'image' ? appearance.imageId : ''
+  return `${appearance.kind}:${appearance.initials}:${appearance.colorHue}:${imagePart}`
+}
 
 /**
  * Letter + hue editor with debounced autosave: an existing account's
@@ -33,7 +39,11 @@ export function AccountAppearanceFields({
   onChange: Dispatch<SetStateAction<AccountFormState>>
 }) {
   const commands = useCommands()
-  const previewAppearance = useMemo(() => appearanceFromForm(form), [form])
+  const setField = formFieldSetter(onChange)
+  const previewAppearance = useMemo(
+    () => buildAccountAppearanceInput(form),
+    [form],
+  )
   const appearanceKey = accountAppearanceSignature(previewAppearance)
   const savedAppearanceKeyRef = useRef<string | null>(
     accountId ? appearanceKey : null,
@@ -48,7 +58,7 @@ export function AccountAppearanceFields({
       }),
     onSuccess: (_accepted, currentForm) => {
       savedAppearanceKeyRef.current = accountAppearanceSignature(
-        appearanceFromForm(currentForm),
+        buildAccountAppearanceInput(currentForm),
       )
     },
   })
@@ -79,10 +89,7 @@ export function AccountAppearanceFields({
             label="Letter"
             value={form.appearanceInitials}
             onChange={(value) =>
-              onChange((current) => ({
-                ...current,
-                appearanceInitials: value.toUpperCase().slice(0, 1),
-              }))
+              setField('appearanceInitials')(value.toUpperCase().slice(0, 1))
             }
           />
           <label className="grid gap-1.5 text-[13px]">
@@ -97,10 +104,7 @@ export function AccountAppearanceFields({
               step={1}
               value={form.appearanceColorHue}
               onChange={(event) =>
-                onChange((current) => ({
-                  ...current,
-                  appearanceColorHue: Number(event.target.value),
-                }))
+                setField('appearanceColorHue')(Number(event.target.value))
               }
               className="ph-hue-range h-4 w-full cursor-pointer appearance-none rounded-full border border-border-soft bg-transparent accent-primary"
               style={{ background: accountHueGradient }}

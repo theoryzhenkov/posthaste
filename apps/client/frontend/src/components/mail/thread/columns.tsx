@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { MessageSummary } from '../../../data/transport/api/index'
 import type { SortDirection } from '../../../domain/vocabulary'
 import { cn } from '../../../lib/design/cn'
-import { formatRelativeTime } from '../../../lib/time'
+import { formatRelativeTime } from '../../../lib/ambient/time'
 import { userTags } from '../detail/model'
 import { MailboxChip } from '../list/MailboxChip'
 import type { MailboxDirectory } from '../list/model/useMailboxDirectory'
@@ -45,11 +45,11 @@ interface BaseColumnDef {
   render: (message: MessageSummary, context: ColumnRenderContext) => ReactNode
 }
 
-export interface FixedColumnDef extends BaseColumnDef {
+interface FixedColumnDef extends BaseColumnDef {
   kind: 'fixed'
 }
 
-export interface StretchColumnDef extends BaseColumnDef {
+interface StretchColumnDef extends BaseColumnDef {
   kind: 'stretch'
   grow: number
 }
@@ -281,7 +281,7 @@ export function getColumnBasis(id: ColumnId, widths?: ColumnWidths): number {
   return Math.max(def.minWidth ?? def.basis, widths?.[id] ?? def.basis)
 }
 
-export function buildGridTemplate(
+function buildGridTemplate(
   columns: ColumnId[],
   widths?: ColumnWidths,
 ): string {

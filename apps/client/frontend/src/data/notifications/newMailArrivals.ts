@@ -34,6 +34,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 
 import { useDomainEvent } from '@/data'
+import { nowMs } from '@/lib/ambient/time'
 import { queryKeys } from '@/data/queries/queryKeys'
 import { parseMessageUpdated } from '@/data/transport/stream'
 import { SYSTEM_KEYWORDS } from '@/domain/vocabulary'
@@ -45,29 +46,22 @@ import type {
   Notifications,
 } from '@/gen'
 
-import { postOsNotification } from './osNotifier'
+import { postOsNotification, type NewMailBanner } from './osNotifier'
 
 /** Sliding burst window for coalescing arrival events into one banner. */
-export const NEW_MAIL_BURST_WINDOW_MS = 300
+const NEW_MAIL_BURST_WINDOW_MS = 300
 
 /** Hard cap on total coalescing deferral: a steady sub-window trickle must not
  * postpone the banner forever. */
-export const NEW_MAIL_MAX_COALESCE_MS = 10 * NEW_MAIL_BURST_WINDOW_MS
+const NEW_MAIL_MAX_COALESCE_MS = 10 * NEW_MAIL_BURST_WINDOW_MS
 
 /** A burst bigger than this is treated as sync backfill and never notifies. */
-export const NEW_MAIL_BACKFILL_THRESHOLD = 25
+const NEW_MAIL_BACKFILL_THRESHOLD = 25
 
 /** How many "Sender — Subject" lines a multi-message summary body lists. */
 const SUMMARY_BODY_LINES = 3
 
 const MAX_BODY_LINE_LENGTH = 120
-
-/** One OS banner, already formatted; `sound` mirrors the pane's Sounds toggle. */
-export interface NewMailBanner {
-  title: string
-  body: string
-  sound: boolean
-}
 
 export interface NewMailArrivalDeps {
   /** Deliver one banner (the OS notifier; mocked in tests). */
@@ -160,7 +154,7 @@ export function createNewMailArrivalCoordinator(
   const maxCoalesceMs = deps.maxCoalesceMs ?? NEW_MAIL_MAX_COALESCE_MS
   const backfillThreshold =
     deps.backfillThreshold ?? NEW_MAIL_BACKFILL_THRESHOLD
-  const now = deps.now ?? Date.now
+  const now = deps.now ?? nowMs
 
   let pending: PendingArrival[] = []
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -274,7 +268,7 @@ function defaultDeps(queryClient: QueryClient): NewMailArrivalDeps {
  * Feed one `message.updated` event through the arrival gate, lazily creating
  * the per-queryClient coordinator with the production deps.
  */
-export function notifyNewMailFromEvent(
+function notifyNewMailFromEvent(
   queryClient: QueryClient,
   event: DomainEventPayload,
 ): void {

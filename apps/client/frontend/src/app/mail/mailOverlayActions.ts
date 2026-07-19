@@ -1,5 +1,6 @@
-import { closeWebSurface, openFocusedSurface } from '@/surfaces/useSurfaceRouting'
-import { settingsSurface, type SurfaceDescriptor } from '@/surfaces'
+import { closeWebSurface } from '@/surfaces/navigation'
+import { openFocusedSurface } from '../host/navigation'
+import { settingsSurface, type SurfaceDescriptor } from '@/domain/surface'
 
 export function toggleSettingsSurface(input: {
   effectiveSurface: SurfaceDescriptor | null

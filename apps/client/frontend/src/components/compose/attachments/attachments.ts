@@ -1,4 +1,5 @@
 import type { ComposeForm } from '../form/model'
+import { formatAttachmentSize } from '@/data/models/attachments'
 import {
   MAX_COMPOSE_ATTACHMENT_BYTES,
   MAX_COMPOSE_ATTACHMENTS,
@@ -50,16 +51,6 @@ export function withPastedFileName(file: File, ordinal: number): File {
   })
 }
 
-export function formatFileSize(size: number): string {
-  if (size < 1024) {
-    return `${size} B`
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`
-  }
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
-}
-
 export function validateAttachmentLimits(
   attachments: ComposeForm['attachments'],
 ): string | null {
@@ -70,14 +61,14 @@ export function validateAttachmentLimits(
     (attachment) => attachment.size > MAX_COMPOSE_ATTACHMENT_BYTES,
   )
   if (oversized) {
-    return `${oversized.filename} is larger than ${formatFileSize(MAX_COMPOSE_ATTACHMENT_BYTES)}.`
+    return `${oversized.filename} is larger than ${formatAttachmentSize(MAX_COMPOSE_ATTACHMENT_BYTES)}.`
   }
   const totalSize = attachments.reduce(
     (total, attachment) => total + attachment.size,
     0,
   )
   if (totalSize > MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES) {
-    return `Attachments can total at most ${formatFileSize(MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES)}.`
+    return `Attachments can total at most ${formatAttachmentSize(MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES)}.`
   }
   return null
 }

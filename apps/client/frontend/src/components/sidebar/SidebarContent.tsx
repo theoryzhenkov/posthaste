@@ -5,9 +5,9 @@ import type { SmartMailboxSummary } from '@/data/transport/api'
 import { smartMailboxAccent } from '@/domain/role'
 import type { useMailboxNavigationReadModels } from '@/data/models/mailboxNavigation'
 
-import type { SidebarSelection } from './Sidebar'
+import type { SidebarSelection } from '@/data/models/selection'
 import { SortableList, SortableRow } from '../ui/display/SortableList'
-import {
+import { groupIdByMailbox,
   fallbackAccountAppearance,
   partitionSmartMailboxes,
   smartAssignableGroups,
@@ -98,15 +98,10 @@ export function SmartMailboxSection({
     () => smartAssignableGroups(groups, smartIds),
     [groups, smartIds],
   )
-  const currentGroupIdByMailbox = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const entry of partition.groups) {
-      for (const mailbox of entry.mailboxes) {
-        map.set(mailbox.id, entry.group.id)
-      }
-    }
-    return map
-  }, [partition.groups])
+  const currentGroupIdByMailbox = useMemo(
+    () => groupIdByMailbox(partition.groups),
+    [partition.groups],
+  )
 
   const renderSmartMailboxItem = (
     smartMailbox: SmartMailboxSummary,

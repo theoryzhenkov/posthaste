@@ -9,7 +9,7 @@
  */
 import { toast } from 'sonner'
 
-import { isTauriRuntime } from '../runtime'
+import { isTauriRuntime } from '@/lib/platform/runtime'
 import { LOG_EVENTS } from '../../lib/log/logEvents'
 import { syncLogger } from '../../lib/log/logger'
 
@@ -40,7 +40,7 @@ export function promptDesktopUpdate(update: DesktopUpdate): void {
 }
 
 /** Download, install, and relaunch into the new version. */
-export async function installDesktopUpdate(
+async function installDesktopUpdate(
   update: DesktopUpdate,
 ): Promise<void> {
   const toastId = toast.loading('Downloading update...')

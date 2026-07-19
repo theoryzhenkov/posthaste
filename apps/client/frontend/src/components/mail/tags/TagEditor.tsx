@@ -1,3 +1,4 @@
+import { parseTagName } from '@/domain/vocabulary'
 import { Settings2, Tag } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
@@ -25,13 +26,6 @@ function userTags(keywords: string[]): string[] {
   return keywords.filter((keyword) => !keyword.startsWith('$'))
 }
 
-function normalizeTag(value: string): string | null {
-  const normalized = value.trim().replace(/\s+/g, ' ')
-  if (!normalized || normalized.startsWith('$') || normalized.includes('/')) {
-    return null
-  }
-  return normalized
-}
 
 function hasTag(tags: string[], tag: string): boolean {
   return tags.some((candidate) => candidate.toLowerCase() === tag.toLowerCase())
@@ -72,7 +66,7 @@ export function TagEditor({
   }
 
   function addTag(value: string) {
-    const tag = normalizeTag(value)
+    const tag = parseTagName(value)
     if (!tag || hasTag(tags, tag)) {
       setDraft('')
       return

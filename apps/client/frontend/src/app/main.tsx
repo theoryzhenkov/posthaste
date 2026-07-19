@@ -10,7 +10,7 @@ import { applyBrandFavicon } from './shell/brandFavicon'
 import { bootstrapClientOptions, MailClient } from '../data/transport/client'
 import { MailClientProvider } from '../data/index'
 import { ackDesktopWebviewBoot } from '../desktop/runtime'
-import { markSurfaceBootstrap } from '../surfaces/bootstrapLog'
+import { markSurfaceBootstrap } from '@/lib/log/surfaceBootstrap'
 
 applyBrandFavicon()
 

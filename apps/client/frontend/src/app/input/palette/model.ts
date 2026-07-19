@@ -4,8 +4,7 @@ import type {
   RankingContext,
   SearchCandidate,
 } from '@/app/input/palette/search/types'
-import { validateSearchQuery } from '@/domain/search'
-import { normalizeAppliedSearchQuery } from '@/domain/searchQuery'
+import { nowMs } from '@/lib/ambient/time'
 
 export const COMMAND_PANEL_STORAGE_KEY = 'posthaste.commandPalette.panelOffset'
 export const NO_COMMAND_PALETTE_SELECTION = '__posthaste_no_selection__'
@@ -46,15 +45,6 @@ export function resolvePaletteEnter(input: {
   return 'none'
 }
 
-export function currentSearchableServerQuery(query: string): string {
-  const validation = validateSearchQuery(query)
-  if (validation.state !== 'valid') return ''
-  const normalized = normalizeAppliedSearchQuery(query)
-  if (!normalized) return ''
-  if (normalized.includes(':')) return normalized
-  return normalized.length >= 2 ? normalized : ''
-}
-
 export function createRankingContext(input: {
   hasSelectedMessage: boolean
   /** Persisted per-command recency/frequency counter. Defaults to an empty
@@ -62,7 +52,7 @@ export function createRankingContext(input: {
   recentCommands?: DecayedCounter
 }): RankingContext {
   return {
-    now: Date.now(),
+    now: nowMs(),
     app: {
       route: input.hasSelectedMessage ? 'thread' : 'mailbox',
       hasSelectedMessage: input.hasSelectedMessage,

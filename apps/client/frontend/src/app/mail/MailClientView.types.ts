@@ -7,14 +7,14 @@ import type { ComposeIntent } from '@/domain/composeIntent'
 import type { EmailActions } from '@/data/hooks/useEmailActions'
 import type { useMailClientHandlers } from '@/app/mail/useMailClientHandlers'
 import type { MailSelection } from '@/data/models/selection'
-import type { PreparedServerSearchQuery } from '@/domain/searchQuery'
-import type { SettingsSurfaceCategory, SurfaceDescriptor } from '@/surfaces'
-import type { SidebarSelection } from '@/components/sidebar/Sidebar'
+import type { PreparedServerSearchQuery } from '@/domain/search'
+import type { SettingsSurfaceCategory, SurfaceDescriptor } from '@/domain/surface'
+import type { SidebarSelection } from '@/data/models/selection'
 
 type PanelGroupProps = ComponentProps<typeof ResizablePanelGroup>
 
-export type LayoutValue = PanelGroupProps['defaultLayout']
-export type LayoutHandler = NonNullable<PanelGroupProps['onLayoutChanged']>
+type LayoutValue = PanelGroupProps['defaultLayout']
+type LayoutHandler = NonNullable<PanelGroupProps['onLayoutChanged']>
 
 export interface MailClientViewProps {
   actions: EmailActions

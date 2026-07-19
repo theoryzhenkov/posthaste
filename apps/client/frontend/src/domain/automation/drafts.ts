@@ -33,7 +33,7 @@ export function actionConditionFromAccountRule(
   return cloneRule(rule.condition)
 }
 
-export function normalizeAction(action: AutomationAction): AutomationAction {
+function normalizeAction(action: AutomationAction): AutomationAction {
   switch (action.kind) {
     case 'applyTag':
       return { kind: 'applyTag', tag: action.tag.trim() }

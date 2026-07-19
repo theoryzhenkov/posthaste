@@ -43,7 +43,12 @@ module.exports = {
       name: 'no-circular',
       comment: 'Import cycles defeat locality of reasoning (tenet I)',
       severity: 'error',
-      from: {},
+      // Documented exception (charter slice 5): src/gen/ is generated wire
+      // types and never hand-touched; the generator emits mutually recursive
+      // TYPE-ONLY imports (MailQueryGroup <-> MailQueryRuleNode) for recursive
+      // protocol shapes. Erased at runtime and correct by construction — the
+      // rule mis-classifies them, so gen/ is exempt rather than baselined.
+      from: { pathNot: '^src/gen/' },
       to: { circular: true },
     },
   ],

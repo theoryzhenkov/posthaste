@@ -50,37 +50,43 @@ export function sortSmartMailboxes(
   return smartMailboxes
 }
 
-/** One rendered Group within a source: the group and its member mailboxes, in
- *  the source's own mailbox order. */
-export interface SourceMailboxGroup {
+/** One rendered Group within a section: the group and its member items, in
+ *  the section's own item order. */
+interface MailboxGroupEntry<T> {
   group: MailboxGroup
-  mailboxes: Mailbox[]
+  mailboxes: T[]
 }
 
-/** The partition of a source's mailboxes into client-side Groups + an ungrouped
+/** The partition of a section's items into client-side Groups + an ungrouped
  *  remainder. Presentation only. */
-export interface PartitionedSourceMailboxes {
-  /** Mailboxes belonging to no group, in their original order. */
-  ungrouped: Mailbox[]
-  /** Groups that have at least one member among this source's mailboxes,
-   *  ordered by `group.order` (ties broken by name for stability). */
-  groups: SourceMailboxGroup[]
+interface PartitionedMailboxes<T> {
+  /** Items belonging to no group, in their original order. */
+  ungrouped: T[]
+  /** Groups that have at least one member in this section, ordered by
+   *  `group.order` (ties broken by name for stability). */
+  groups: MailboxGroupEntry<T>[]
 }
+
+export type PartitionedSourceMailboxes = PartitionedMailboxes<Mailbox>
+export type PartitionedSmartMailboxes = PartitionedMailboxes<SmartMailboxSummary>
 
 /**
- * Partition a source's mailboxes into Groups + ungrouped remainder, driven by
- * the synced `mailboxGroups` setting. A Group surfaces under a source only when
- * it holds ≥1 of that source's mailboxes (groups are keyed by member id, not by
- * source). Member order follows the source's own mailbox order — stable and
- * independent of the order ids were assigned. Purely presentational: a mailbox
- * in no group is unaffected.
+ * Partition a section's items into Groups + ungrouped remainder, driven by the
+ * synced `mailboxGroups` setting. A Group surfaces in a section only when it
+ * holds >=1 of that section's items (groups are keyed by member id, not by
+ * section) — iterating over the section's own items IS the membership filter,
+ * so a mixed or foreign group shows only (or none of) its members here. Member
+ * order follows the section's own item order — stable and independent of the
+ * order ids were assigned. Purely presentational: an item in no group is
+ * unaffected. Group ids share one namespace across the Smart and source
+ * sections; membership is homogeneous per the UI's enforcement.
  */
-export function partitionSourceMailboxes(
-  mailboxes: Mailbox[],
+function partitionByGroup<T extends { id: string }>(
+  items: T[],
   groups: readonly MailboxGroup[],
-): PartitionedSourceMailboxes {
-  // The group each mailbox id belongs to (one-group-per-mailbox); last write
-  // wins if data ever drifts to double-membership.
+): PartitionedMailboxes<T> {
+  // The group each item id belongs to (one-group-per-item); last write wins
+  // if data ever drifts to double-membership.
   const groupByMailboxId = new Map<string, string>()
   for (const group of groups) {
     for (const mailboxId of group.mailboxIds) {
@@ -88,19 +94,19 @@ export function partitionSourceMailboxes(
     }
   }
 
-  const ungrouped: Mailbox[] = []
-  const membersByGroupId = new Map<string, Mailbox[]>()
-  for (const mailbox of mailboxes) {
-    const groupId = groupByMailboxId.get(mailbox.id)
+  const ungrouped: T[] = []
+  const membersByGroupId = new Map<string, T[]>()
+  for (const item of items) {
+    const groupId = groupByMailboxId.get(item.id)
     if (groupId == null) {
-      ungrouped.push(mailbox)
+      ungrouped.push(item)
       continue
     }
     const members = membersByGroupId.get(groupId)
     if (members) {
-      members.push(mailbox)
+      members.push(item)
     } else {
-      membersByGroupId.set(groupId, [mailbox])
+      membersByGroupId.set(groupId, [item])
     }
   }
 
@@ -116,115 +122,55 @@ export function partitionSourceMailboxes(
   return { ungrouped, groups: orderedGroups }
 }
 
+export function partitionSourceMailboxes(
+  mailboxes: Mailbox[],
+  groups: readonly MailboxGroup[],
+): PartitionedSourceMailboxes {
+  return partitionByGroup(mailboxes, groups)
+}
+
+export function partitionSmartMailboxes(
+  smartMailboxes: SmartMailboxSummary[],
+  groups: readonly MailboxGroup[],
+): PartitionedSmartMailboxes {
+  return partitionByGroup(smartMailboxes, groups)
+}
+
 /**
- * The source's mailboxes in `j`/`k` walk order, honoring Group collapse: every
- * ungrouped mailbox, then each expanded Group's members in order. A collapsed
- * Group contributes nothing — its members are hidden from the walk exactly as a
- * collapsed source hides all of its rows. Shared by the sidebar render and the
- * keyboard walker so they never drift.
+ * A section's items in `j`/`k` walk order, honoring Group collapse: every
+ * ungrouped item, then each expanded Group's members in order. A collapsed
+ * Group contributes nothing — its members are hidden from the walk exactly as
+ * a collapsed source hides all of its rows. Shared by the sidebar render and
+ * the keyboard walker so they never drift.
  */
+function visibleByGroup<T extends { id: string }>(
+  items: T[],
+  groups: readonly MailboxGroup[],
+  collapsedGroupIds: ReadonlySet<string>,
+): T[] {
+  const partition = partitionByGroup(items, groups)
+  const visible = [...partition.ungrouped]
+  for (const entry of partition.groups) {
+    if (collapsedGroupIds.has(entry.group.id)) continue
+    visible.push(...entry.mailboxes)
+  }
+  return visible
+}
+
 export function visibleSourceMailboxes(
   mailboxes: Mailbox[],
   groups: readonly MailboxGroup[],
   collapsedGroupIds: ReadonlySet<string>,
 ): Mailbox[] {
-  const partition = partitionSourceMailboxes(mailboxes, groups)
-  const visible = [...partition.ungrouped]
-  for (const entry of partition.groups) {
-    if (collapsedGroupIds.has(entry.group.id)) continue
-    visible.push(...entry.mailboxes)
-  }
-  return visible
+  return visibleByGroup(mailboxes, groups, collapsedGroupIds)
 }
 
-/** One rendered Group within the Smart section: the group and its member smart
- *  mailboxes, in the section's own (resolved) smart-mailbox order. */
-export interface SmartMailboxGroupEntry {
-  group: MailboxGroup
-  mailboxes: SmartMailboxSummary[]
-}
-
-/** The partition of the smart mailboxes into client-side Groups + an ungrouped
- *  remainder. Presentation only. Mirrors {@link PartitionedSourceMailboxes}. */
-export interface PartitionedSmartMailboxes {
-  /** Smart mailboxes belonging to no group, in their original order. */
-  ungrouped: SmartMailboxSummary[]
-  /** Groups that hold at least one SMART mailbox, ordered by `group.order`
-   *  (ties broken by name for stability). */
-  groups: SmartMailboxGroupEntry[]
-}
-
-/**
- * Partition the smart mailboxes into Groups + ungrouped remainder, driven by the
- * SAME synced `mailboxGroups` setting used for source mailboxes. A Group
- * surfaces in the Smart section only when it holds ≥1 smart mailbox, and each
- * group's members are FILTERED to the smart-mailbox id set — so a stray mixed
- * group (smart + source ids) shows only its smart members here, and a purely
- * source group (no smart members) is dropped from this section entirely. This is
- * what keeps a source group out of the Smart section: group ids share one
- * namespace, but membership is homogeneous per the UI's enforcement.
- *
- * Mirrors {@link partitionSourceMailboxes}: iterating over `smartMailboxes` and
- * grouping by id is itself the smart-set filter (a non-smart member id never
- * matches a smart mailbox, so it contributes nothing here).
- */
-export function partitionSmartMailboxes(
-  smartMailboxes: SmartMailboxSummary[],
-  groups: readonly MailboxGroup[],
-): PartitionedSmartMailboxes {
-  const groupByMailboxId = new Map<string, string>()
-  for (const group of groups) {
-    for (const mailboxId of group.mailboxIds) {
-      groupByMailboxId.set(mailboxId, group.id)
-    }
-  }
-
-  const ungrouped: SmartMailboxSummary[] = []
-  const membersByGroupId = new Map<string, SmartMailboxSummary[]>()
-  for (const mailbox of smartMailboxes) {
-    const groupId = groupByMailboxId.get(mailbox.id)
-    if (groupId == null) {
-      ungrouped.push(mailbox)
-      continue
-    }
-    const members = membersByGroupId.get(groupId)
-    if (members) {
-      members.push(mailbox)
-    } else {
-      membersByGroupId.set(groupId, [mailbox])
-    }
-  }
-
-  const orderedGroups = [...groups]
-    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
-    .flatMap((group) => {
-      const members = membersByGroupId.get(group.id)
-      return members && members.length > 0
-        ? [{ group, mailboxes: members }]
-        : []
-    })
-
-  return { ungrouped, groups: orderedGroups }
-}
-
-/**
- * The smart mailboxes in `j`/`k` walk order, honoring Group collapse: every
- * ungrouped smart mailbox, then each expanded Group's members. A collapsed Group
- * contributes nothing. Mirrors {@link visibleSourceMailboxes} so the Smart
- * section render and the keyboard walker never drift.
- */
 export function visibleSmartMailboxes(
   smartMailboxes: SmartMailboxSummary[],
   groups: readonly MailboxGroup[],
   collapsedGroupIds: ReadonlySet<string>,
 ): SmartMailboxSummary[] {
-  const partition = partitionSmartMailboxes(smartMailboxes, groups)
-  const visible = [...partition.ungrouped]
-  for (const entry of partition.groups) {
-    if (collapsedGroupIds.has(entry.group.id)) continue
-    visible.push(...entry.mailboxes)
-  }
-  return visible
+  return visibleByGroup(smartMailboxes, groups, collapsedGroupIds)
 }
 
 /**
@@ -267,4 +213,19 @@ export function itemButtonClass(
     !isSelected && 'text-sidebar-foreground/92',
     depth > 0 ? 'pl-[22px]' : 'pl-2',
   )
+}
+
+/** Member-id -> group-id lookup over a partition's groups — the "which group
+ *  is this row in" answer behind the Add-to/Remove-from-group menu items.
+ *  Shared by the Smart section and SourceSection so they never drift. */
+export function groupIdByMailbox<T extends { id: string }>(
+  groups: readonly MailboxGroupEntry<T>[],
+): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const entry of groups) {
+    for (const mailbox of entry.mailboxes) {
+      map.set(mailbox.id, entry.group.id)
+    }
+  }
+  return map
 }

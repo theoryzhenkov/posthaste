@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createStore, createStoredStore, type StorageLike } from './store'
+import type { StorageLike } from './ambient/storage'
+import { createStore, createStoredStore } from './store'
 
 function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
   data: Map<string, string>

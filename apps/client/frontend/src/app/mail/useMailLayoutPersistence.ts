@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useDefaultLayout } from 'react-resizable-panels'
 
+import { ambientStorage } from '@/lib/ambient/storage'
+
 const SHELL_PANEL_IDS = ['sidebar', 'mail-content']
 
 export function useMailLayoutPersistence(isMessageDetailOpen: boolean) {
@@ -17,7 +19,7 @@ export function useMailLayoutPersistence(isMessageDetailOpen: boolean) {
   } = useDefaultLayout({
     id: 'posthaste-shell-panels',
     panelIds: SHELL_PANEL_IDS,
-    storage: localStorage,
+    storage: ambientStorage() ?? undefined,
   })
   const {
     defaultLayout: messageDefaultLayout,
@@ -25,7 +27,7 @@ export function useMailLayoutPersistence(isMessageDetailOpen: boolean) {
   } = useDefaultLayout({
     id: 'posthaste-message-panels',
     panelIds: messagePanelIds,
-    storage: localStorage,
+    storage: ambientStorage() ?? undefined,
   })
 
   return {
