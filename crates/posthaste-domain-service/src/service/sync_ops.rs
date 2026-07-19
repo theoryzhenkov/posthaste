@@ -404,39 +404,33 @@ impl MailService {
         Ok(events)
     }
 
-    /// The completed-cycle sweep: causal truncation first, then re-derive
-    /// every row in the replay inventory — rows the replayable log touches
-    /// (so a base row rewritten by this sync under a pending op re-derives
-    /// even if its override row was never written or was wiped) plus rows
-    /// currently overlaid. The per-chunk `replay_base_write` covers rows as
-    /// each base write lands; this sweep adds the whole-cycle passes —
-    /// truncation of settled ops the sync chain has absorbed,
-    /// provisional-Sent adoption, and tombstone repair. Runs only after a
-    /// cycle completes (an aborted stream returns before it), so truncation
-    /// never fires on an incomplete pull. Returns the adoption prune echoes
-    /// for the caller to publish.
+    /// The completed-cycle sweep, in order: ADOPT settled sends whose provider
+    /// copy has synced back (retire the derived provisional row to base at once,
+    /// and file an unfiled Drafts ghost) — this runs before truncation so the
+    /// send op is still present to match by token; causal TRUNCATION of the
+    /// remaining settled ops the sync chain has absorbed (a truncated content op
+    /// yields its derived row to base, WITH a prune echo); then RE-DERIVE every
+    /// row in the replay inventory — rows the replayable log touches (so a base
+    /// row rewritten by this sync under a pending op re-derives even if its
+    /// override row was never written or was wiped) plus rows currently
+    /// overlaid — and the lingering-tombstone REPAIR. The per-chunk
+    /// `replay_base_write` covers rows as each base write lands; this sweep adds
+    /// the whole-cycle passes. Runs only after a cycle completes (an aborted
+    /// stream returns before it), so truncation never fires on an incomplete
+    /// pull. Returns the prune + filing echoes for the caller to publish.
     async fn sweep_message_overlay(
         &self,
         account_id: &AccountId,
         cycle_started_mono: i64,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        self.truncate_settled_operations(account_id, cycle_started_mono)
-            .await?;
+        let mut events = self.adopt_sent_copies(account_id).await?;
+        events.extend(
+            self.truncate_settled_operations(account_id, cycle_started_mono)
+                .await?,
+        );
         let inventory = self.replay_inventory(account_id).await?;
-        let mut events = Vec::new();
         for message_id in inventory {
-            // Adoption: a provisional Sent row whose provider
-            // copy landed in base (matched by the transport-shared
-            // Message-ID prefix) retires WITH a prune echo — the visible row
-            // changes identity, so the client must drop the provisional id.
-            if let Some(adoption_events) = self
-                .try_adopt_provisional_sent(account_id, &message_id)
-                .await?
-            {
-                events.extend(adoption_events);
-                continue;
-            }
-            // D175 lingering-destruction repair: a TOMBSTONE whose base row
+            // Lingering-destruction repair: a TOMBSTONE whose base row
             // survived the sync this sweep follows means the provider still
             // holds what we committed to destroying (a lost IMAP expunge, a
             // silently no-opped JMAP destroy). One idempotent cleanup delete
@@ -457,9 +451,14 @@ impl MailService {
         Ok(events)
     }
 
-    /// D175: enqueue ONE idempotent provider delete for an orphaned tombstone
-    /// (no outstanding op, base row still present after the sync). Bounded:
-    /// any existing op keyed to the row — including a previous repair, even a
+    /// Enqueue ONE idempotent provider delete for an orphaned tombstone (no
+    /// outstanding op, base row still present after the sync): a Destroy /
+    /// DiscardDraft whose provider delete was lost — a silently no-opped JMAP
+    /// destroy or a lost IMAP expunge — leaves a tombstone hiding a base row
+    /// the provider still holds. This is orthogonal to content ops: it fires on
+    /// a TOMBSTONE over a surviving base row, never on a derived content row,
+    /// so deleting pins does not remove its reason to exist. Bounded: any
+    /// existing op keyed to the row — including a previous repair, even a
     /// failed one — blocks a re-enqueue; a premature repair is safe (the
     /// delete is `notFound`-masked). `None` = not such an entry.
     async fn try_repair_lingering_tombstone(
@@ -506,89 +505,95 @@ impl MailService {
             account_id = %account_id,
             message_id = %row_id,
             "destroyed message survived the sync in base; enqueueing one \
-             idempotent cleanup delete (D175)"
+             idempotent cleanup delete"
         );
         let (_operation, delete_events) =
             self.delete_draft(account_id, row_id.clone(), true).await?;
         Ok(Some(delete_events))
     }
 
-    /// Retire a provisional Sent overlay row whose provider copy has arrived
-    /// in base under its own id (reconcile-by-intent-id + adopt-by-header),
-    /// filing an unfiled copy into Sent (S-CONV-2).
-    /// `None` = not such a row / not adopted yet.
-    async fn try_adopt_provisional_sent(
+    /// Adoption for the send content op — the identity bridge to the
+    /// provider's copy, and the retirement it triggers. For every settled send
+    /// whose provider copy has arrived in base (matched by the transport-shared
+    /// `Message-ID` token — [`posthaste_domain_model::send_identity_prefix`];
+    /// the same match key in BOTH worlds, since the send stamps the token into
+    /// the JMAP `EmailSubmission`/`Email` and the SMTP header alike):
+    ///
+    /// - RETIRE the send op NOW. The base copy's presence under the token IS
+    ///   the causal evidence the change is absorbed — stronger and more
+    ///   immediate than the cycle rule — so the derived provisional Sent row
+    ///   yields to base at once (no window where the local row and the base
+    ///   copy both show), with a prune echo dropping the provisional id.
+    /// - FILE the copy into Sent when it synced back as an unfiled Drafts
+    ///   GHOST: one ordinary mailbox assertion, Sent ADDED and only Drafts
+    ///   dropped.
+    ///
+    /// A settled send whose copy has NOT yet synced back falls through to the
+    /// cycle-rule truncation. Runs BEFORE truncation so the op is still present
+    /// to match. Returns the prune + filing echoes.
+    async fn adopt_sent_copies(
         &self,
         account_id: &AccountId,
-        row_id: &MessageId,
-    ) -> Result<Option<Vec<DomainEvent>>, ServiceError> {
-        let entry = {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            let owned_row = row_id.clone();
-            offload(move || overlay.read_overlay_message(&owned_account, &owned_row)).await?
-        };
-        let Some(Some(folded)) = entry else {
-            return Ok(None);
-        };
-        // Only send-minted rows: the transport-shared identity token, and
-        // never a draft row (those leave once base absorbs their copy).
-        let Some(prefix) = folded
-            .rfc_message_id
-            .as_deref()
-            .filter(|rfc| rfc.starts_with("phsend-"))
-            .and_then(|rfc| rfc.split_once('@'))
-            .map(|(token, _)| format!("{token}@"))
-        else {
-            return Ok(None);
-        };
-        if folded.draft_id.is_some() {
-            return Ok(None);
-        }
-        // A live op still keyed here (pending/held/parked send) owns the
-        // entry — adoption applies only to settled rows awaiting the sync.
-        let has_live_op = self
-            .outbox
-            .list_unsettled_operations(account_id)?
-            .into_iter()
-            .any(|op| op.entity.id == row_id.as_str());
-        if has_live_op {
-            return Ok(None);
-        }
-        let adopted = {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            offload(move || overlay.find_base_message_id_by_rfc_prefix(&owned_account, &prefix))
-                .await?
-        };
-        let Some(adopted_id) = adopted else {
-            return Ok(None);
-        };
-        {
-            let overlay = self.overlay.clone();
-            let owned_account = account_id.clone();
-            let owned_row = row_id.clone();
-            offload(move || overlay.remove_overlay_message(&owned_account, &owned_row)).await?;
-        }
-        let mut events = vec![self.events.append_event(
-            account_id,
-            EVENT_TOPIC_MESSAGE_UPDATED,
-            None,
-            Some(row_id),
-            json!({ "messageId": row_id.as_str(), "deleted": true }),
-        )?];
-        // S-CONV-2: a delivered-but-UNFILED copy — the server ignored the
-        // Drafts→Sent move / the Sent append failed, so the copy syncs back
-        // AS A DRAFTS GHOST. File it with one ordinary mailbox assertion:
-        // Sent is ADDED and only Drafts dropped (never a wholesale replace —
-        // stripping other memberships would delete the copy on
-        // all-mail-style providers). Triggered strictly on the ghost shape
-        // (in Drafts, not in Sent): partially-applied mid-sync memberships
-        // must never fire it.
-        if let (Some(sent_mailbox), Some(drafts_mailbox)) = (
-            self.mailbox_id_by_role(account_id, "sent")?,
-            self.drafts_mailbox_id(account_id)?,
-        ) {
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let sent_mailbox = self.mailbox_id_by_role(account_id, "sent")?;
+        let drafts_mailbox = self.drafts_mailbox_id(account_id)?;
+        let settled = self.outbox.list_settled_operations(account_id)?;
+        let mut events = Vec::new();
+        for settled_op in settled {
+            let operation = &settled_op.operation;
+            if operation.kind != OperationKind::Send {
+                continue;
+            }
+            let prefix = posthaste_domain_model::send_identity_prefix(operation.id.as_str());
+            let adopted_id = {
+                let overlay = self.overlay.clone();
+                let owned_account = account_id.clone();
+                offload(move || overlay.find_base_message_id_by_rfc_prefix(&owned_account, &prefix))
+                    .await?
+            };
+            let Some(adopted_id) = adopted_id else {
+                continue;
+            };
+            // The bridge is complete: base holds the provider copy under its own
+            // id. Retire the send op and re-derive its provisional Sent row —
+            // the derived entry drops, base serves the copy, and the client
+            // prunes the provisional id.
+            let send_row_id = MessageId::from(operation.entity.id.as_str());
+            let had_derived_entry = {
+                let overlay = self.overlay.clone();
+                let owned_account = account_id.clone();
+                let owned_row = send_row_id.clone();
+                offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
+                    .await?
+                    .is_some()
+            };
+            self.outbox.remove_operation(&operation.id)?;
+            self.refresh_message_overlay(account_id, &send_row_id)
+                .await?;
+            if had_derived_entry && {
+                let overlay = self.overlay.clone();
+                let owned_account = account_id.clone();
+                let owned_row = send_row_id.clone();
+                offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
+                    .await?
+                    .is_none()
+            } {
+                events.push(self.events.append_event(
+                    account_id,
+                    EVENT_TOPIC_MESSAGE_UPDATED,
+                    None,
+                    Some(&send_row_id),
+                    json!({ "messageId": send_row_id.as_str(), "deleted": true }),
+                )?);
+            }
+            // File a delivered-but-UNFILED copy that synced back as a Drafts
+            // ghost. Needs both role mailboxes known; a ghost is in Drafts,
+            // not in Sent.
+            let (Some(sent_mailbox), Some(drafts_mailbox)) =
+                (sent_mailbox.as_ref(), drafts_mailbox.as_ref())
+            else {
+                continue;
+            };
             let adopted_record = {
                 let overlay = self.overlay.clone();
                 let owned_account = account_id.clone();
@@ -596,35 +601,37 @@ impl MailService {
                 offload(move || overlay.read_base_message_record(&owned_account, &owned_adopted))
                     .await?
             };
-            if let Some(record) = adopted_record {
-                let is_drafts_ghost = record.mailbox_ids.contains(&drafts_mailbox)
-                    && !record.mailbox_ids.contains(&sent_mailbox);
-                if is_drafts_ghost {
-                    ph_warn!(
-                        events::SEND_ADOPTED_COPY_UNFILED,
-                        account_id = %account_id,
-                        message_id = %adopted_id,
-                        "adopted sent copy is a Drafts ghost; filing it (S-CONV-2)"
-                    );
-                    let mut mailbox_ids: Vec<MailboxId> = record
-                        .mailbox_ids
-                        .iter()
-                        .filter(|mailbox_id| **mailbox_id != drafts_mailbox)
-                        .cloned()
-                        .collect();
-                    mailbox_ids.push(sent_mailbox);
-                    let ack = self
-                        .replace_mailboxes(
-                            account_id,
-                            &adopted_id,
-                            &posthaste_domain_model::ReplaceMailboxesCommand { mailbox_ids },
-                        )
-                        .await?;
-                    events.extend(ack.events);
-                }
+            let Some(record) = adopted_record else {
+                continue;
+            };
+            let is_drafts_ghost = record.mailbox_ids.contains(drafts_mailbox)
+                && !record.mailbox_ids.contains(sent_mailbox);
+            if !is_drafts_ghost {
+                continue;
             }
+            ph_warn!(
+                events::SEND_ADOPTED_COPY_UNFILED,
+                account_id = %account_id,
+                message_id = %adopted_id,
+                "adopted sent copy is a Drafts ghost; filing it (S-CONV-2)"
+            );
+            let mut mailbox_ids: Vec<MailboxId> = record
+                .mailbox_ids
+                .iter()
+                .filter(|mailbox_id| *mailbox_id != drafts_mailbox)
+                .cloned()
+                .collect();
+            mailbox_ids.push(sent_mailbox.clone());
+            let ack = self
+                .replace_mailboxes(
+                    account_id,
+                    &adopted_id,
+                    &posthaste_domain_model::ReplaceMailboxesCommand { mailbox_ids },
+                )
+                .await?;
+            events.extend(ack.events);
         }
-        Ok(Some(events))
+        Ok(events)
     }
 
     /// Append a `sync.failed` event to the event log.
