@@ -65,9 +65,12 @@ An op settles when the provider accepts it. Settlement records the provider's
 outcome; for content ops that includes the provider-assigned id, which bridges
 the local identity to the base identity until truncation.
 
-Truncation is causal, not semantic: a settled op leaves the log once a sync
-cycle that started after its settlement completes — that cycle must have
-observed the acknowledged effect. No comparison of state decides anything.
+Truncation is causal, not semantic. Where the provider names sync positions,
+settlement captures the one that includes the change — a JMAP `set` returns
+`newState` — and the op leaves the log once sync's state chain passes it.
+Where the provider does not (IMAP), the op leaves once a sync cycle that
+started after settlement completes. Both are ordering checks; no comparison
+of state decides anything.
 
 If a provider consistency blip ever breaks the causal assumption, the failure
 is a one-cycle flicker corrected by the next replay — never durable wrong
