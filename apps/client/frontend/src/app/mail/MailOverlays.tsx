@@ -79,7 +79,8 @@ function CommandPaletteOverlay(props: MailClientViewProps) {
         selectedMessageData={props.selectedMessageData}
         onApplySearch={props.onApplySearch}
         onClose={props.onCloseCommandPalette}
-        onSelectMessage={props.onSelectMessageRef}
+        // A palette message result OPENS the message (reader + cursor).
+        onSelectMessage={props.onOpenMessageRef}
         onSelectSmartMailbox={props.onSelectSmartMailbox}
         onSelectSourceMailbox={props.onSelectSourceMailbox}
       />

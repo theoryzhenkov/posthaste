@@ -42,7 +42,10 @@ export type RowContextMenuFor = (input: {
 
 interface MessageRowProps {
   message: MessageSummary
+  /** The `j`/`k` SELECTION cursor sits on this row. */
   isSelected: boolean
+  /** This row is the ACTIVE (opened) message the reader pane shows. */
+  isActive?: boolean
   isPaneActive?: boolean
   isStriped: boolean
   onSelectMessage: (message: MessageSummary) => void
@@ -74,6 +77,7 @@ const TREE_INDENT_PX = 22
 export const MessageRow = memo(function MessageRow({
   message,
   isSelected,
+  isActive = false,
   isPaneActive = false,
   isStriped,
   onSelectMessage,
@@ -109,13 +113,24 @@ export const MessageRow = memo(function MessageRow({
         'flex h-full w-full items-center gap-0',
         'text-left text-[13px] transition-colors',
         'ph-focus-ring',
-        isSelected &&
+        // The ACTIVE (opened) row carries the strong accent while the list is
+        // the focused pane, greying out otherwise — accent means "focused",
+        // exactly as the sidebar's itemButtonClass does for the active mailbox.
+        isActive &&
           isPaneActive &&
           'bg-[var(--list-selection)] text-[var(--list-selection-foreground)]',
-        isSelected &&
+        isActive &&
           !isPaneActive &&
           'bg-[var(--list-selection-muted)] text-[var(--list-selection-muted-foreground)]',
-        !isSelected &&
+        // A SELECTED-but-not-active row (the `j`/`k` cursor after it diverges
+        // from the opened message — or before anything is opened) reuses the
+        // sidebar's muted selection treatment, so the user always sees where
+        // the next `j`/`k` lands.
+        !isActive &&
+          isSelected &&
+          'bg-[var(--list-selection-muted)] text-[var(--list-selection-muted-foreground)]',
+        !isActive &&
+          !isSelected &&
           (isStriped
             ? 'bg-[var(--list-zebra-alt)] text-panel-foreground hover:bg-[var(--list-hover)]'
             : 'bg-[var(--list-zebra)] text-panel-foreground hover:bg-[var(--list-hover)]'),

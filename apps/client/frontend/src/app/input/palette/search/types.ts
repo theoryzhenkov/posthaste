@@ -75,11 +75,6 @@ export interface CommandPaletteEntry {
   icon?: ReactNode
   action: PaletteAction
   closeOnSelect?: boolean
-  /** Registry-backed palette rows: shown greyed and non-runnable when the
-   *  action's `isEnabled` predicate fails. */
-  disabled?: boolean
-  /** Hint rendered under a disabled row (e.g. "Select a message first"). */
-  disabledReason?: string
   /** Pre-formatted shortcut hint (e.g. `⌘⇧L`) rendered right-aligned on the
    *  row. */
   shortcut?: string

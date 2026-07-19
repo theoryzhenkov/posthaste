@@ -56,6 +56,7 @@ function baseCtx(
     setPendingPrefix: () => {},
     onGoto: () => {},
     onGotoConversation: () => {},
+    onScrollMessagePane: () => false,
     onOpenCommandPalette: () => {},
     onUndo: () => {},
     onRedo: () => {},
@@ -146,6 +147,44 @@ describe('dispatchMailKey — registry tiers', () => {
     const { hook } = hookReturning(null)
     const { event, record } = stubEvent({ key: 'e' })
     dispatchMailKey(event, baseCtx({ registryHook: hook }))
+    expect(record.prevented).toBe(false)
+  })
+
+  test('Space / Shift+Space page the reading pane while a message is open', () => {
+    const scrolled: number[] = []
+    const scrollingCtx = () =>
+      baseCtx({
+        onScrollMessagePane: (direction) => {
+          scrolled.push(direction)
+          return true
+        },
+      })
+    const down = stubEvent({ key: ' ' })
+    dispatchMailKey(down.event, scrollingCtx())
+    const up = stubEvent({ key: ' ', shiftKey: true })
+    dispatchMailKey(up.event, scrollingCtx())
+    expect(scrolled).toEqual([1, -1])
+    expect(down.record.prevented).toBe(true)
+    expect(up.record.prevented).toBe(true)
+  })
+
+  test('Space stays inert with no open message or nothing to scroll', () => {
+    const scrolled: number[] = []
+    // No selected message: the pane callback is never consulted.
+    dispatchMailKey(
+      stubEvent({ key: ' ' }).event,
+      baseCtx({
+        hasSelectedMessage: false,
+        onScrollMessagePane: (direction) => {
+          scrolled.push(direction)
+          return true
+        },
+      }),
+    )
+    expect(scrolled).toEqual([])
+    // Nothing overflows: the key falls through unprevented.
+    const { event, record } = stubEvent({ key: ' ' })
+    dispatchMailKey(event, baseCtx({ onScrollMessagePane: () => false }))
     expect(record.prevented).toBe(false)
   })
 

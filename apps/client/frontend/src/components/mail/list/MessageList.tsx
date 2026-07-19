@@ -45,8 +45,14 @@ import { useColumnConfig } from '../thread/useColumnConfig'
 
 interface MessageListProps {
   selectedView: SidebarSelection | null
+  /** The `j`/`k` SELECTION cursor row. */
   selection: MailSelection | null
+  /** The ACTIVE (opened) message the reader shows; may differ from the cursor. */
+  opened: MailSelection | null
+  /** Move the SELECTION cursor only (`j`/`k`); the reader stays put. */
   onSelectMessage: (message: MailSelection) => void
+  /** OPEN a message (row click / Enter): reader shows it, cursor aligns. */
+  onOpenMessage: (message: MailSelection) => void
   onClearSelection: () => void
   onClearSearchQuery: () => void
   /** Registry-resolved row context menu (commands/bind, built by the app
@@ -67,7 +73,9 @@ interface MessageListProps {
 export function MessageList({
   selectedView,
   selection,
+  opened,
   onSelectMessage,
+  onOpenMessage,
   onClearSelection,
   onClearSearchQuery,
   contextMenuFor,
@@ -148,13 +156,15 @@ export function MessageList({
     )
   }, [accountDirectory.accounts, selectedView])
   const selectedKey = selectionKey(selection)
+  const activeKey = selectionKey(opened)
 
   const { activePane } = useActivePane()
   const isListActive = activePane === 'list'
 
+  // A row CLICK opens (reader + cursor); `j`/`k` below moves the cursor only.
   const handleSelectRowMessage = useCallback(
-    (message: MessageSummary) => onSelectMessage(toSelection(message)),
-    [onSelectMessage],
+    (message: MessageSummary) => onOpenMessage(toSelection(message)),
+    [onOpenMessage],
   )
 
   // A fatal load failure surfaces here as an inline error + retry (instead
@@ -183,7 +193,9 @@ export function MessageList({
     messages: navMessages,
     onClearSelection,
     onSelectMessage,
+    onOpenMessage,
     selectedKey,
+    activeKey,
     onCollapseFocused: treeMode
       ? () => {
           if (selectedKey && focusedRow?.hasChildren && !focusedRow.collapsed) {
@@ -288,6 +300,7 @@ export function MessageList({
               treeMode={treeMode}
               scrollTop={scrollTop}
               selectedKey={selectedKey}
+              activeKey={activeKey}
               isPaneActive={isListActive}
               viewportHeight={viewportHeight}
               mailboxDirectory={mailboxDirectory}

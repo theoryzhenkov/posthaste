@@ -138,7 +138,9 @@ function MessagePanels(props: MailClientViewProps) {
           <MessageList
             selectedView={props.effectiveView}
             selection={props.selectedMessage}
+            opened={props.openedMessage}
             onSelectMessage={props.onSelectMessageRef}
+            onOpenMessage={props.onOpenMessageRef}
             onClearSelection={props.onClearSelectedMessage}
             onClearSearchQuery={props.onRejectSearchPreview}
             contextMenuFor={contextMenuFor}
@@ -155,10 +157,11 @@ function MessagePanels(props: MailClientViewProps) {
           <ResizableHandle />
           <ResizablePanel id="message-detail" minSize="300px">
             {/* The detail pane is not a keyboard focus region — it displays the
-                list's selected message; `j`/`k` in the list drive it. */}
+                OPENED message and keeps it while `j`/`k` moves the list's
+                selection cursor; opening (click/Enter) realigns the two. */}
             <div className="h-full min-h-0">
               <MessageDetailPane
-                selection={props.selectedMessage}
+                selection={props.openedMessage}
                 headerActionsFor={headerActionsFor}
                 onSelectMessage={props.onSelectMessage}
                 onSearch={props.onSearch}
