@@ -7,6 +7,10 @@ pub(super) struct MutationGateway {
     /// When set, `sync_streamed` emits these chunks in order and returns the
     /// reconciliation set, exercising the progressive-delivery service path.
     pub(super) stream: Option<(Vec<SyncBatch>, posthaste_domain_model::SyncReconciliation)>,
+    /// When set, `sync_streamed` returns this error AFTER emitting the
+    /// configured chunks — a stream that aborts mid-cycle with some chunks
+    /// already applied.
+    pub(super) stream_error: Mutex<Option<GatewayError>>,
     pub(super) fetch_body_result: Mutex<Option<Result<FetchedBody, GatewayError>>>,
     /// When set, `fetch_message_body` sleeps for this long before answering —
     /// a slow (or, with a large value, effectively hung) body source for the
@@ -93,6 +97,7 @@ impl MutationGateway {
             revision: Mutex::new(revision),
             batch: None,
             stream: None,
+            stream_error: Mutex::new(None),
             fetch_body_result: Mutex::new(None),
             fetch_body_delay: Mutex::new(None),
             fetch_body_fallback: Mutex::new(None),
@@ -137,6 +142,13 @@ impl MutationGateway {
             fetch_identity_result: Mutex::new(Some(Ok(identity))),
             ..Self::with_revision(1)
         }
+    }
+
+    fn take_stream_error(&self) -> Option<GatewayError> {
+        self.stream_error
+            .lock()
+            .expect("stream error lock poisoned")
+            .take()
     }
 
     fn apply(&self, expected_state: Option<&str>) -> Result<MutationOutcome, GatewayError> {
@@ -196,12 +208,18 @@ impl MailGateway for MutationGateway {
             for chunk in chunks {
                 sink.emit(chunk.clone()).await?;
             }
+            if let Some(error) = self.take_stream_error() {
+                return Err(error);
+            }
             return Ok(posthaste_domain_model::SyncOutcome {
                 reconciliation: Some(reconciliation.clone()),
             });
         }
         let batch = self.sync(account_id, cursors, progress).await?;
         sink.emit(batch).await?;
+        if let Some(error) = self.take_stream_error() {
+            return Err(error);
+        }
         Ok(posthaste_domain_model::SyncOutcome::single_batch())
     }
 

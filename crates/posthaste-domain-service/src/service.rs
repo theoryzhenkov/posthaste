@@ -32,6 +32,7 @@ mod mailbox_queries;
 mod message_queries;
 mod mutation;
 mod outbox;
+mod replay;
 mod smart_mailbox_queries;
 mod sync_ops;
 #[cfg(test)]
