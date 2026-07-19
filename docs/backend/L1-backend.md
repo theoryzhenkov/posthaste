@@ -2,8 +2,8 @@
 title: "Backend (L1)"
 scope: L1
 summary: "The backend's internal structure: the domain service over the SQLite store, provider gateways, per-account runtimes, the outbox, events and the store generation, query evaluation, and command execution."
-modified: 2026-07-17
-reviewed: 2026-07-17
+modified: 2026-07-18
+reviewed: 2026-07-18
 state: draft
 depends:
   - path: docs/architecture/L1-architecture
@@ -48,17 +48,24 @@ the exactly-once discipline lives at this seam.
 
 ## 4. The store
 
-One SQLite database holds three planes: base (provider truth), the overlay
-(folded effect of pending intents), and the outbox (the intents themselves).
+One SQLite database holds three planes: base (provider truth), the op log
+(the outbox — the intents themselves), and the derived view (the overlay —
+`replay(log, base)`, the folded effect of the log's pending ops over base).
 The ownership rules are absolute: sync writes base and nothing else does —
-enforced at compile time by a write-capability type — the command fold
+enforced at compile time by a write-capability type — the replay engine
 writes the overlay, and nothing ever copies overlay state into base; when a
 provider confirms an intent, sync writes the resulting truth into base and
-the overlay entry retires. All reads go through effective views that serve
-base + overlay already folded. The schema carries a version; migrations run
-forward on open, and an older binary refuses a newer database cleanly. The
-full state model — projections, freshness, query semantics — is specified in
-the mail-state docs; this document's contract is the ownership rules above.
+the overlay entry is re-derived (retiring when base alone serves it). The
+overlay owns nothing and is wipeable at any moment; a full rebuild from the
+log is always legal and is the recovery path. The re-derive is atomic: one
+transaction snapshots base + the log + the draft-key map, folds, and writes,
+so a concurrent sync base write or a sibling command refresh cannot leave a
+stale entry (SQLite serializes writers). All reads go through effective views
+that serve base + overlay already folded. The schema carries a version;
+migrations run forward on open, and an older binary refuses a newer database
+cleanly. The full state model — projections, freshness, query semantics — is
+specified in the mail-state docs; this document's contract is the ownership
+rules above.
 
 ## 5. Account runtimes
 
@@ -73,16 +80,25 @@ account restarts its runtime; no other component notices.
 ## 6. The outbox
 
 Mail mutations live as typed intents with a full lifecycle. Acceptance
-enqueues the intent and folds its effect into the overlay in one
-transaction — the user-visible optimism and the durable record are the same
-write. A flush pass pushes ready intents through the gateway; settlement
-records the verdict. Confirmed intents retire when sync lands the provider
-truth in base; uncertain dispatches park for explicit resolution rather than
-blind retry; permanent failures keep their verdict as queryable state. The
-intent id is the idempotency key end to end — retries at every layer, up to
-provider-visible send identity, deduplicate against it. Readiness gates
-scheduled work: undo-send holds on the monotonic clock, send-later on wall
-time, so clock skew can never fire a send early or strand it.
+enqueues the intent (the durable record) and re-derives the touched overlay
+row (the user-visible optimism) — the re-derive is atomic: one transaction
+snapshots base + the log + the draft-key map, folds, and writes, so the
+optimism is consistent with the log that produced it and a concurrent sync
+or sibling command cannot leave a stale entry. A flush pass pushes ready
+intents through the gateway; settlement records the verdict. Confirmed
+intents truncate causally (by provider watermark where one is named, else by
+a sync cycle started after settlement) — the op and its overlay row are
+re-derived in one transaction, so the row never outlives its owning op; base
+alone serves it from there. Uncertain dispatches park for explicit
+resolution rather than blind retry; permanent failures keep their verdict as
+queryable state. The intent id is the idempotency key end to end — retries
+at every layer, up to provider-visible send identity, deduplicate against
+it. The replay fold is pure: it reads no clock, so a send's held→due
+transition is the flusher's `Pending`→`Inflight` dispatch (a log change),
+not a replay-time comparison — replaying the same log and base yields the
+same rows. Readiness gates scheduled work: undo-send holds on the monotonic
+clock, send-later on wall time, so clock skew can never fire a send early
+or strand it.
 
 ## 7. Events and the generation
 

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use super::replay::fold_overlay_row;
 use super::*;
 use crate::{SyncChunkSink, SyncWriteStore};
 use posthaste_domain_model::{MessageRecord, SyncBatch};
@@ -559,25 +560,26 @@ impl MailService {
             // the derived entry drops, base serves the copy, and the client
             // prunes the provisional id.
             let send_row_id = MessageId::from(operation.entity.id.as_str());
-            let had_derived_entry = {
+            let account_id_owned = account_id.clone();
+            // Atomic: retire the send op and re-derive its provisional Sent
+            // row in ONE transaction (no orphan window between remove and
+            // re-derive). The diff is the prune echo for the provisional id —
+            // no separate before/after reads.
+            let diff = {
                 let overlay = self.overlay.clone();
-                let owned_account = account_id.clone();
-                let owned_row = send_row_id.clone();
-                offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
-                    .await?
-                    .is_some()
+                let op_id = operation.id.clone();
+                let send_row_id_owned = send_row_id.clone();
+                offload(move || {
+                    overlay.remove_op_and_derive(
+                        &account_id_owned,
+                        &op_id,
+                        &[send_row_id_owned],
+                        Box::new(|row_id, snapshot| fold_overlay_row(snapshot, row_id)),
+                    )
+                })
+                .await?
             };
-            self.outbox.remove_operation(&operation.id)?;
-            self.refresh_message_overlay(account_id, &send_row_id)
-                .await?;
-            if had_derived_entry && {
-                let overlay = self.overlay.clone();
-                let owned_account = account_id.clone();
-                let owned_row = send_row_id.clone();
-                offload(move || overlay.read_overlay_message(&owned_account, &owned_row))
-                    .await?
-                    .is_none()
-            } {
+            if diff.into_iter().next().is_some_and(|d| d.retired()) {
                 events.push(self.events.append_event(
                     account_id,
                     EVENT_TOPIC_MESSAGE_UPDATED,
