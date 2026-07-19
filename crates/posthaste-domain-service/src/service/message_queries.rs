@@ -78,8 +78,6 @@ impl MailService {
     /// Conversation-list envelope aggregates (unread/flagged counts) are a
     /// separate, harder case (re-derivation over folded membership) and are
     /// not folded here yet — they converge on the next sync.
-    ///
-    /// @spec docs/replication/L1#retire-on-confirmation
     pub fn get_conversation(
         &self,
         conversation_id: &ConversationId,

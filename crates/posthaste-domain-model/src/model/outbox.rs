@@ -43,14 +43,14 @@ pub enum OperationKind {
 /// Lifecycle state of an operation within the runtime/provider outbox.
 ///
 /// ```text
-/// pending ─▶ inflight ─▶ applied ─▶ (retired/removed on convergence)
+/// pending ─▶ inflight ─▶ applied ─▶ (removed by causal truncation)
 ///    ▲          │  ├──▶ failed
 ///    │          │  └──▶ dispatchUncertain (send only)
 ///    └──────────┴────────────┘  (explicit user retry re-arms)
 /// ```
 ///
 /// @spec docs/L1-outbox#state-machine
-/// @spec docs/replication/L1#retire-on-confirmation
+/// @spec docs/backend/L2-optimism#settlement-and-truncation
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -59,11 +59,14 @@ pub enum OperationState {
     Pending,
     /// Currently being flushed to the provider.
     Inflight,
-    /// Accepted by the provider. A message state assertion rests here, folded
-    /// by the read-time overlay, until a sync observes its effect into the
-    /// projection and retires (removes) it; entity ops (drafts/sends) are pruned
-    /// on flush instead. See [`OperationState::is_flushable`] and the
-    /// retire-on-confirmation rule in `docs/replication/L1`.
+    /// Settled: the provider accepted the op. It rests in the log — still
+    /// folded by replay (its effect keeps serving until base catches up),
+    /// excluded from the flush lane (never re-delivered) and from the
+    /// pendingOperations surface — until CAUSAL truncation removes it: for a
+    /// JMAP settlement that captured a provider sync position, once the sync
+    /// state chain reaches that watermark; otherwise, once a sync cycle that
+    /// started after settlement completes. Both are pure ordering checks — no
+    /// comparison of state decides retirement.
     Applied,
     /// Permanently failed (e.g. validation); surfaced to the user.
     Failed,
@@ -83,10 +86,8 @@ impl OperationState {
     /// Whether the operation has reached a resting state that will not change
     /// without an explicit user action. `Failed` and `DispatchUncertain` both
     /// rest until the user retries or discards them. `Applied` is **not**
-    /// resting — it is awaiting confirmation and is removed once a sync confirms
-    /// its effect into the projection.
-    ///
-    /// @spec docs/replication/L1#retire-on-confirmation
+    /// resting — it is settled and leaves the log by causal truncation on a
+    /// later sync cycle (see [`OperationState::Applied`]).
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Failed | Self::DispatchUncertain)
     }
@@ -224,6 +225,26 @@ pub struct Operation {
     pub hold_until_mono: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// A settled (`applied`) operation with its truncation markers, as the store
+/// returns it to the truncation pass. Backend-internal — never mirrored into
+/// the client protocol (settled ops are invisible to the wire; they filter out
+/// of pendingOperations exactly like a removed op).
+#[derive(Clone, Debug)]
+pub struct SettledOperation {
+    pub operation: Operation,
+    /// When the op settled, on the daemon's monotonic-anchored epoch-seconds
+    /// clock (the clock that also stamps sync-cycle-start markers, so the
+    /// "cycle started after settlement" ordering check is single-clock).
+    /// `None` on a legacy row settled before the markers existed — treated as
+    /// truncate-eligible on any completed cycle.
+    pub settled_at_mono: Option<i64>,
+    /// The provider sync position that includes the settled change (a JMAP
+    /// `set` response's `newState`, in the stored cursor encoding). `None`
+    /// when the provider named no usable position (IMAP; a JMAP mutation
+    /// without a state) — the cycle rule alone truncates then.
+    pub watermark: Option<String>,
 }
 
 /// How the provider filed the Sent copy of a DELIVERED send (D154). The full

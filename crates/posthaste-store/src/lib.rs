@@ -53,9 +53,9 @@ use posthaste_domain_model::{
     MailboxId, MailboxRole, MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage,
     MessageSortField, MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId,
     OperationKind, OperationState, RawMessageRef, Recipient, RevCursor, RevLogSnapshot, RevLogStep,
-    SortDirection, StoreError, SyncBatch, SyncCursor, SyncObject, SyncReconciliation, TagSummary,
-    ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    SettledOperation, SortDirection, StoreError, SyncBatch, SyncCursor, SyncObject,
+    SyncReconciliation, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
+    EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_domain_service::{
     cache_signal_rescore_priority, AutomationBackfillStore, BaseWrite, CacheStore,

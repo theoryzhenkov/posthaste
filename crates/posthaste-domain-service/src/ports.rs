@@ -10,8 +10,8 @@ use posthaste_domain_model::{
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
     MutationOutcome, Operation, OperationId, OperationState, Recipient, ReplyContext,
     RevLogSnapshot, SecretRef, SecretStoreError, SendFiling, SendMessageRequest,
-    SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome,
-    SyncProgress, SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
+    SetKeywordsCommand, SettledOperation, SortDirection, SyncBatch, SyncCursor, SyncObject,
+    SyncOutcome, SyncProgress, SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
 use posthaste_domain_model::{DomainEvent, EventLogBounds, GatewayError, ServiceError, StoreError};
 

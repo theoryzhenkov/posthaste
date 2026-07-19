@@ -174,3 +174,19 @@ pub(super) fn sample_automation_rule() -> AutomationRule {
         backfill: true,
     }
 }
+
+/// Rewind every settled op's `settled_at_mono` marker by `secs`: simulates
+/// real time elapsing between a settlement and a later cycle's entry stamp
+/// (the monotonic clock is second-granular, so an in-test cycle otherwise
+/// starts within the settlement's own second and correctly does not truncate).
+pub(super) fn backdate_settled_markers(store: &TestStore, secs: i64) {
+    let mut markers = store
+        .settled_markers
+        .lock()
+        .expect("settled markers lock poisoned");
+    for (settled_at, _) in markers.values_mut() {
+        if let Some(at) = settled_at.as_mut() {
+            *at -= secs;
+        }
+    }
+}

@@ -33,10 +33,11 @@ struct ServiceSyncSink<'a> {
     error: Option<ServiceError>,
 }
 
-// Sync writes RAW provider truth to base; un-acked optimism lives only in
-// the overlay plane (`message_overlay`), which every effective read folds in
-// and which the per-chunk replay plus the post-sync sweep re-derive over the
-// fresh base. A not-yet-settled local effect therefore survives any snapshot
+// Sync writes RAW provider truth to base; local optimism lives only in the
+// overlay plane (`message_overlay`), which every effective read folds in and
+// which the per-chunk replay plus the post-sync sweep re-derive over the
+// fresh base. A local effect not yet absorbed by the sync chain — pending,
+// inflight, or settled-awaiting-truncation — therefore survives any snapshot
 // without base ever holding folded state: a pending flag rides the overlay;
 // a pending Destroy is an overlay tombstone the snapshot upsert cannot
 // resurrect; a server delete-delta for an overlaid message removes the base
@@ -146,15 +147,21 @@ impl MailService {
         progress: Option<crate::SyncProgressReporter>,
         publish: &mut (dyn FnMut(&[DomainEvent]) + Send),
     ) -> Result<Vec<DomainEvent>, ServiceError> {
+        // Stamped at cycle ENTRY (before the flush leg) on the same
+        // monotonic-anchored clock that stamps settlement markers: an op this
+        // cycle's own flush settles is NOT "settled before a cycle that
+        // started after it", so it bridges until the NEXT completed cycle.
+        // The sweep's truncation pass reads this as its cycle clock.
+        let cycle_started_mono = super::outbox::schedule::monotonic_now_secs();
         let mut cursors = self.sync_state.get_sync_cursors(account_id)?;
         if mode.requires_full_message_metadata() {
             cursors.retain(|cursor| cursor.object_type != SyncObject::Message);
         }
         // FLUSH: push pending local-first ops before the pull so the observe
-        // sees post-mutation provider state. Successful message state
-        // assertions rest in `applied` (folded by the read overlay); they are
-        // retired below once this sync writes their effect into the projection.
-        // Best-effort: offline leaves them pending and the overlay still folds.
+        // sees post-mutation provider state. Blind settlements (no provider
+        // readback) rest in `applied` — still folded by the read overlay —
+        // until a later cycle's causal truncation. Best-effort: offline
+        // leaves ops pending and the overlay still folds.
         //
         // @spec docs/replication/L1#convergence-cycle
         let mut events = Vec::new();
@@ -287,8 +294,8 @@ impl MailService {
         let action_count = action_events.len();
         publish(&action_events);
         events.extend(action_events);
-        // Push any ops automation enqueued while applying the batch; they rest
-        // in `applied` and retire on the next sync cycle.
+        // Push any ops automation enqueued while applying the batch; blind
+        // settlements rest in `applied` and truncate on a later cycle.
         match self.flush_account(account_id, gateway).await {
             Ok(settlement_events) => {
                 publish(&settlement_events);
@@ -304,10 +311,12 @@ impl MailService {
                 post_commit_errors.push(error.code().to_string());
             }
         }
-        // Replay on the base this sync just rewrote: re-derive every row in
-        // the replay inventory (op-touched ∪ overlaid) and drop entries whose
-        // ops settled during the flush legs. Bounded by the outbox — small.
-        let sweep_events = self.sweep_message_overlay(account_id).await?;
+        // Replay on the base this sync just rewrote: truncate settled ops the
+        // chain has absorbed, then re-derive every row in the replay
+        // inventory (op-touched ∪ overlaid). Bounded by the outbox — small.
+        let sweep_events = self
+            .sweep_message_overlay(account_id, cycle_started_mono)
+            .await?;
         publish(&sweep_events);
         events.extend(sweep_events);
         let sync_event = self.events.append_event(
@@ -355,11 +364,11 @@ impl MailService {
     }
 
     /// One convergence observation: flush pending ops, pull authoritative
-    /// provider state into the projection, and retire the message assertions
-    /// the pull confirmed. Used where a projection-walking loop (automation
-    /// backfill) must see its own progress reflected in the projection before
-    /// the next batch query, since query filters read the projection before the
-    /// read overlay folds.
+    /// provider state into the projection, and run the sweep (truncation +
+    /// replay). Used where a projection-walking loop (automation backfill)
+    /// must see its own progress reflected in the projection before the next
+    /// batch query, since query filters read the projection before the read
+    /// overlay folds.
     ///
     /// @spec docs/replication/L1#convergence-cycle
     pub(crate) async fn flush_and_observe(
@@ -367,6 +376,9 @@ impl MailService {
         account_id: &AccountId,
         gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
+        // Cycle-entry stamp, same discipline as `sync_account_with_mode`: ops
+        // settled by THIS flush wait for the next completed cycle.
+        let cycle_started_mono = super::outbox::schedule::monotonic_now_secs();
         let mut events = self.flush_account(account_id, gateway).await?;
         let cursors = self.sync_state.get_sync_cursors(account_id)?;
         let batch = gateway.sync(account_id, &cursors, None).await?;
@@ -385,23 +397,31 @@ impl MailService {
             })
             .await?,
         );
-        events.extend(self.sweep_message_overlay(account_id).await?);
+        events.extend(
+            self.sweep_message_overlay(account_id, cycle_started_mono)
+                .await?,
+        );
         Ok(events)
     }
 
-    /// The end-of-cycle replay sweep: re-derive every row in the replay
-    /// inventory — rows the unsettled log touches (so a base row rewritten by
-    /// this sync under a pending op re-derives even if its override row was
-    /// never written or was wiped) plus rows currently overlaid (all-settled
-    /// entries retire once base covers them). The per-chunk
-    /// `replay_base_write` covers rows as each base write lands; this sweep
-    /// adds the whole-cycle passes — retirement of entries whose ops settled
-    /// during the flush legs, provisional-Sent adoption, and tombstone
-    /// repair. Returns the adoption prune echoes for the caller to publish.
+    /// The completed-cycle sweep: causal truncation first, then re-derive
+    /// every row in the replay inventory — rows the replayable log touches
+    /// (so a base row rewritten by this sync under a pending op re-derives
+    /// even if its override row was never written or was wiped) plus rows
+    /// currently overlaid. The per-chunk `replay_base_write` covers rows as
+    /// each base write lands; this sweep adds the whole-cycle passes —
+    /// truncation of settled ops the sync chain has absorbed,
+    /// provisional-Sent adoption, and tombstone repair. Runs only after a
+    /// cycle completes (an aborted stream returns before it), so truncation
+    /// never fires on an incomplete pull. Returns the adoption prune echoes
+    /// for the caller to publish.
     async fn sweep_message_overlay(
         &self,
         account_id: &AccountId,
+        cycle_started_mono: i64,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
+        self.truncate_settled_operations(account_id, cycle_started_mono)
+            .await?;
         let inventory = self.replay_inventory(account_id).await?;
         let mut events = Vec::new();
         for message_id in inventory {
@@ -429,14 +449,10 @@ impl MailService {
                 events.extend(repair_events);
                 continue;
             }
-            // Retire-on-confirmation: an all-settled entry is removed only
-            // once this sync's base write actually carries its effect.
-            self.refresh_message_overlay(
-                account_id,
-                &message_id,
-                super::replay::OverlayRetire::ConfirmAgainstBase,
-            )
-            .await?;
+            // Re-derive from (log, base): entries whose ops truncated above
+            // fall back to base; still-bridging settled ops keep folding.
+            self.refresh_message_overlay(account_id, &message_id)
+                .await?;
         }
         Ok(events)
     }
@@ -471,10 +487,16 @@ impl MailService {
         if !base_survives {
             return Ok(None); // sync pruned it — the ordinary retire handles this
         }
+        // Any op keyed to the row, in ANY state, blocks the repair: a failed
+        // prior repair (pending list) must not re-enqueue every cycle, and a
+        // settled-awaiting-truncation Destroy (unsettled list) already
+        // committed its provider delete — re-enqueueing during its bridge
+        // window would issue a duplicate delete each cycle until truncation.
         let has_op = self
             .outbox
             .list_pending_operations(account_id)?
             .into_iter()
+            .chain(self.outbox.list_unsettled_operations(account_id)?)
             .any(|op| op.entity.id == row_id.as_str());
         if has_op {
             return Ok(None); // its own lifecycle (or a prior repair) owns it
@@ -510,7 +532,7 @@ impl MailService {
             return Ok(None);
         };
         // Only send-minted rows: the transport-shared identity token, and
-        // never a draft row (those retire via base coverage).
+        // never a draft row (those leave once base absorbs their copy).
         let Some(prefix) = folded
             .rfc_message_id
             .as_deref()

@@ -69,6 +69,24 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
         "payload_version",
         "ALTER TABLE outbox_operation ADD COLUMN payload_version INTEGER NOT NULL DEFAULT 1",
     )?;
+    // Causal-truncation markers for settled ('applied') ops: when the op
+    // settled on the daemon's monotonic-anchored clock, and the provider sync
+    // position (stored-cursor encoding) that includes its change. NULL
+    // `settled_at_mono` on an 'applied' row (a legacy row) is
+    // truncate-eligible on any completed sync cycle; NULL `settled_watermark`
+    // means no usable position — the cycle rule alone truncates.
+    ensure_column(
+        connection,
+        "outbox_operation",
+        "settled_at_mono",
+        "ALTER TABLE outbox_operation ADD COLUMN settled_at_mono INTEGER",
+    )?;
+    ensure_column(
+        connection,
+        "outbox_operation",
+        "settled_watermark",
+        "ALTER TABLE outbox_operation ADD COLUMN settled_watermark TEXT",
+    )?;
     connection
         .execute(
             // Partial index for the scheduler tick's "any send due?" probe and
