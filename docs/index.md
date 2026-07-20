@@ -31,16 +31,6 @@ structure → L3 implementation reference):
 - [UI](ui/L0.md): the mail shell's navigation model — view kinds, pane
   focus, and the keyboard contract.
 
-Task-oriented, tool-facing guides live alongside the specs:
-
-- [Scripting quickstart](https://posthaste.theor.net/docs/scripting-quickstart):
-  automate Posthaste from a shell script — queries, commands, the event
-  stream, and `watch --exec`, driven by `posthastectl`.
-- [Scripting security & threat model](https://posthaste.theor.net/docs/scripting-security):
-  the threat model behind the scripting surface.
-- [User guide](https://posthaste.theor.net/docs): the walkthrough-style
-  user/operator guide.
-
 ## Decision records and design history
 
 The durable specs above record *what is true now* (drafts marked `state:
