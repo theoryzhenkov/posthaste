@@ -3,6 +3,7 @@
 mod template
 mod backend 'crates/justfile'
 mod site 'apps/site/justfile'
+mod desktop 'apps/client/desktop/justfile'
 mod dev 'tools/dev/justfile'
 mod lab 'tools/lab/justfile'
 mod docs 'docs/justfile'
