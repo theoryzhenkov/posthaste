@@ -13,12 +13,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use posthaste_client_backend::{keyring_entry_location, AppPaths, AppState, BuildOptions};
+use posthaste_client_backend::{
+    keyring_entry_location, AppPaths, AppState, BuildOptions, REPAIR_MARKER_FILE,
+};
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain_model::{
     now_iso8601, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    MailQueryGroup, MailQueryGroupOperator, MailQueryRule, MessageSortField, SecretKind, SecretRef,
-    SecretStoreError, SortDirection,
+    MailQueryGroup, MailQueryGroupOperator, MailQueryRule, MessageId, MessageSortField, SecretKind,
+    SecretRef, SecretStoreError, SendMessageRequest, SortDirection,
 };
 use posthaste_domain_service::{ConfigRepository, SecretStore};
 
@@ -385,6 +387,77 @@ async fn older_schema_database_migrates_in_place_through_assemble() {
 }
 
 // -- 4. Config continuity ----------------------------------------------------
+
+/// Count the overlay rows for any account — the derived plane's size.
+fn overlay_row_count(db_path: &Path) -> i64 {
+    rusqlite::Connection::open(db_path)
+        .expect("raw sqlite open")
+        .query_row("SELECT COUNT(*) FROM message_overlay", [], |row| row.get(0))
+        .expect("overlay count")
+}
+
+/// A quarantined-and-rebuilt store salvages the op log (and the `draft_alias`
+/// map) but starts with an EMPTY overlay. The post-repair wiring replays each
+/// account's overrides from the salvaged log, so parked content — here an
+/// unsent draft — reappears without waiting for the first completed sync's
+/// sweep.
+///
+/// Uses a DISABLED account so the supervisor skips it (no sync/flush): the
+/// overlay is touched only by `save_draft` and the post-repair replay,
+/// isolating the wiring from the supervisor's non-deterministic settle.
+#[tokio::test]
+async fn repaired_store_rebuilds_the_overlay_from_the_salvaged_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = AppPaths::with_roots(dir.path().join("config"), dir.path().join("state"));
+    let config = TomlConfigRepository::open(&paths.config_root).expect("config opens");
+    let mut account = mock_account("primary");
+    account.enabled = false;
+    config.save_source(&account).expect("account saved");
+    drop(config);
+
+    let account_id = AccountId::from("primary");
+
+    // Enqueue a parked draft (a DraftCreate op + its derived overlay row).
+    let state = assemble(&paths).await;
+    state
+        .service
+        .save_draft(
+            &account_id,
+            Some(MessageId::from("draft-recover")),
+            SendMessageRequest {
+                subject: "Recovered".to_string(),
+                body: "parked draft body".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("save draft");
+    assert!(
+        overlay_row_count(&paths.db_path()) > 0,
+        "the parked draft's overlay row is visible before shutdown"
+    );
+    state.shutdown().await;
+
+    // Force a quarantine-and-rebuild: the marker makes open_with_repair move
+    // the file aside and recreate it. The op log is salvaged; the overlay
+    // starts EMPTY.
+    std::fs::write(paths.state_root.join(REPAIR_MARKER_FILE), "").expect("write repair marker");
+
+    let state = assemble(&paths).await;
+    assert!(
+        state.repair.is_some(),
+        "the marker forced a quarantine rebuild"
+    );
+    // The post-repair replay re-derived the salvaged draft's overlay row —
+    // without the wiring the overlay would stay empty until the first
+    // completed sync's sweep (and a disabled account never syncs).
+    assert!(
+        overlay_row_count(&paths.db_path()) > 0,
+        "the salvaged parked draft is re-derived by the post-repair replay, \
+         without a sync"
+    );
+    state.shutdown().await;
+}
 
 const EXISTING_APP_TOML: &str = r##"schema_version = 1
 default_source_id = "primary"
