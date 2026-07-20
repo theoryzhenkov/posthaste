@@ -9,8 +9,9 @@
 //   - the user GUIDE at `apps/site/src/content/guide/*.md`  → /docs, /docs/<name>
 //   - the technical SPECS at `docs/**/*.md` (canonical, @spec-referenced)
 //                                                            → /docs/<path>
-// `docs/index.md` (the specs landing) maps to /docs/reference so the guide's
-// "Start here" can own /docs. `docs/eph/**` and `docs/issues/**` stay internal.
+// `docs/index.md` (the specs landing) owns /docs (the user guide that used to
+// own it has been removed for hand-rewrite). `docs/eph/**` and `docs/issues/**`
+// stay internal.
 
 import { fileURLToPath } from 'node:url'
 import { relative } from 'node:path'
@@ -36,7 +37,7 @@ export function routeIdFromRepoRel(relPosix) {
     return name === 'index' ? 'docs' : `docs/${name}`
   }
 
-  if (p === 'docs' || p === 'docs/index') return 'docs/reference'
+  if (p === 'docs' || p === 'docs/index') return 'docs'
 
   if (p.startsWith('docs/')) {
     if (p.startsWith('docs/eph/') || p.startsWith('docs/issues/')) return null

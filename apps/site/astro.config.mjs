@@ -46,22 +46,9 @@ export default defineConfig({
       },
       sidebar: [
         {
-          label: 'Guide',
-          items: [
-            { label: 'Start here', slug: 'docs' },
-            { label: 'Automations', slug: 'docs/automations' },
-            { label: 'Plug in an agent', slug: 'docs/agents' },
-            {
-              label: 'Scripting quickstart',
-              slug: 'docs/scripting-quickstart',
-            },
-            { label: 'Security', slug: 'docs/scripting-security' },
-          ],
-        },
-        {
           label: 'Reference',
           items: [
-            { label: 'Overview', slug: 'docs/reference' },
+            { label: 'Overview', slug: 'docs' },
             {
               label: 'Architecture',
               items: [
