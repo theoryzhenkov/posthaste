@@ -128,13 +128,11 @@ impl MessageOverlayStore for DatabaseStore {
                      WHERE account_id = ?1
                        AND (state != 'failed'
                             OR kind IN ({content_kinds}))
-                     ORDER BY rowid ASC
-                     LIMIT ?2",
+                     ORDER BY rowid ASC",
                     crate::outbox::OPERATION_COLUMNS,
                     content_kinds = crate::outbox::content_op_kinds_in_sql()
                 ),
                 account_id,
-                crate::outbox::OUTBOX_LIST_SAFETY_LIMIT,
             )?;
             let draft_keys = read_draft_alias_map_on(tx, account_id)?;
             let drafts_mailbox = read_mailbox_id_by_role_on(tx, account_id, "drafts")?;
@@ -191,13 +189,11 @@ impl MessageOverlayStore for DatabaseStore {
                      WHERE account_id = ?1
                        AND (state != 'failed'
                             OR kind IN ({content_kinds}))
-                     ORDER BY rowid ASC
-                     LIMIT ?2",
+                     ORDER BY rowid ASC",
                     crate::outbox::OPERATION_COLUMNS,
                     content_kinds = crate::outbox::content_op_kinds_in_sql()
                 ),
                 account_id,
-                crate::outbox::OUTBOX_LIST_SAFETY_LIMIT,
             )?;
             let mut diffs = Vec::with_capacity(row_ids.len());
             for row_id in row_ids {
