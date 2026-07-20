@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useCallback, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import {
   type FloatingPanelSizePreset,
@@ -105,7 +106,17 @@ export function FloatingPanel({
         }
       : {}
 
-  return (
+  // Portal to document.body so the panel escapes any ancestor that
+  // establishes a backdrop root or a containing block for `fixed` (a
+  // `backdrop-filter`/`transform`/`filter` ancestor — e.g. the ActionBar
+  // header's `bg-chrome` in the glass theme). Without this, the panel's own
+  // `backdrop-filter` frosts the ancestor's chrome instead of the page, and
+  // `fixed inset-0` resolves against the ancestor rather than the viewport.
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  return createPortal(
     <div
       className={cn(
         'pointer-events-none fixed inset-0 flex items-start justify-center px-4',
@@ -171,6 +182,7 @@ export function FloatingPanel({
         />
         <ResizeCellBadge isResizing={resize.isResizing} panelSize={panelSize} />
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
