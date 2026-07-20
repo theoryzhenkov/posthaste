@@ -18,31 +18,28 @@ integration, backend lib, send-path gate, live Stalwart 4/4, `fmt --check`,
 contract slices intact; the items below are debt it surfaced — tracked here,
 prioritized, with locations and fix sketches.
 
-**Progress (2026-07-18):** F7, F8, F10, F4–F5, and F11 are LANDED (commits
-`dd1589b9`, `3491fab4`, + the F11 echo conversion). Remaining: F6 (the
-5000-op cap — needs a policy call) and F9 (`replay_account_overrides` —
-wire or delete).
+**Progress (2026-07-18):** ALL ITEMS LANDED. F7/F8/F10 (`dd1589b9`),
+F4–F5+F11 (`b83ba529`), F9 (`f8dd8ba0`), F6 (this change). The ledger is now
+history — kept so the original findings stay traceable.
 
 ## P1 — phantom-prevention core
 
 These two sit inside the "words are never silently dropped" guarantee and are
 the highest priority.
 
-### F6. `OUTBOX_LIST_SAFETY_LIMIT = 5000` is baked into the atomicity core
+### F6. ✅ LANDED — the 5000-op cap is removed
 
-`list_unsettled_operations` / the derive's in-txn log read cap the fold at
-5000 ops (`crates/posthaste-store/src/outbox.rs:28`, used at `outbox.rs:317`,
-`overlay.rs:130`, `overlay.rs:192`). The const's own comment says "picked
-sane, not measured." The fold now runs inside the atomicity core, so an
-account that exceeds 5000 unsettled ops silently drops the **newest** ops
-from the fold — a user's latest draft save vanishing from the view is exactly
-the phantom-shaped failure the refactor eradicated elsewhere. Self-heals on
-truncation (ops leave the log) but the window is real and wrong-shaped (drops
-newest, not oldest).
-
-**Fix:** page the fold, or make the limit an explicit part of the invariant
-(and log + refuse when hit) rather than a silent truncation. Measure the real
-ceiling before picking a number.
+`OUTBOX_LIST_SAFETY_LIMIT` capped the fold's in-txn log read (and the pending /
+unsettled / settled listings) at 5000 ops, silently dropping the **newest** ops
+from the fold when an account exceeded it — a phantom inside the atomicity
+core. The cap is deleted; `collect_operations` no longer takes a `limit`, and
+all five reads (`list_pending_operations`, `list_unsettled_operations`,
+`list_settled_operations`, `derive_overlay`, `remove_op_and_derive`) read the
+full account log. Chosen over paging/backpressure for simplicity and
+correctness; the O(rows × ops) cost during sync is the accepted trade-off
+(realistic backlogs are tiny; a pathologically large outbox is a root-cause
+problem — stuck flusher / no sync — to fix separately, not by truncating the
+fold).
 
 ### F7. ✅ LANDED — content-kind list single-sourced
 
@@ -80,12 +77,17 @@ added at every site.
 -> bool` (returns `now_visible`) shared by both derives; the test store gets
 a matching helper.
 
-### F9. `replay_account_overrides` has no production caller
+### F9. ✅ LANDED — `replay_account_overrides` wired to the post-repair path
 
-The full-rebuild recovery path (`replay.rs`) is referenced only by its own
-doc comment and the tests. It is the documented recovery path for a wiped
-derived view, but nothing wires it to a quarantine/rebuild trigger. It may be
-dead, or it may be load-bearing for a path not yet exercised in production.
+It was load-bearing, not dead: a quarantined-and-rebuilt store salvages the
+op log and `draft_alias` map but starts with an EMPTY overlay, and the only
+thing that re-derived parked content (an unsent draft, a provisional Sent row
+with no base successor) was the post-sync sweep — which runs only at a
+completed cycle's end. `AppState::assemble` now replays each account's
+overrides when `open_with_repair` reports a repair, before starting the
+supervisor, so the derived view reappears immediately. Tested with a
+disabled-account continuity test (the supervisor skips a disabled account, so
+no sync/flush runs — isolating the wiring).
 
 **Fix:** either wire it to the quarantine-and-rebuild path the model
 specifies (L2-optimism "Durability classes"), or delete it and document that
