@@ -88,16 +88,23 @@ export default function App() {
       <CommandDispatcher scope={APP_COMMAND_SCOPE}>
       <DesignThemeProvider writeThrough>
         <AppearanceSettingsSync />
-        {/* Liveness rides the facade's event stream in the MAIN window; a
-            standalone surface window keeps its queries mount-fetched only. */}
-        {!isStandaloneSurface && <StreamInvalidationBridge key="mail" />}
-        {/* New-mail banners ride the same stream — main window only, so a
-            secondary surface window never double-notifies. */}
-        {!isStandaloneSurface && <NewMailNotificationsBridge />}
-        {!isStandaloneSurface && <ConnectionBanner />}
-        {/* App-wide unread badge — main window only; a standalone surface
-            window must not drive the shared Dock counter to 0. */}
-        {!isStandaloneSurface && <DockBadge />}
+        {/* Main-window-only services — a standalone surface window must not
+            run these (duplicate liveness, double-notify, or drive the shared
+            Dock counter). */}
+        {!isStandaloneSurface && (
+          <>
+            {/* Liveness rides the facade's event stream in the MAIN window; a
+                standalone surface window keeps its queries mount-fetched only. */}
+            <StreamInvalidationBridge />
+            {/* New-mail banners ride the same stream — main window only, so a
+                secondary surface window never double-notifies. */}
+            <NewMailNotificationsBridge />
+            <ConnectionBanner />
+            {/* App-wide unread badge — main window only; a standalone surface
+                window must not drive the shared Dock counter to 0. */}
+            <DockBadge />
+          </>
+        )}
         <ErrorBoundary label="app-root" fallback={renderAppRootError}>
           {isStandaloneSurface && routeSurface ? (
             <FocusedSurfaceDocument surface={routeSurface} />
