@@ -1,8 +1,19 @@
+---
+title: "Optimism: the replay model (L2)"
+scope: L2
+summary: "The replay model: visible mail state is a pure function replay(log, base) — optimism, offline, and recovery are one operation. Covers the op log, settlement and causal truncation, durability classes, the v5 migration, and prior art."
+state: implemented
+modified: 2026-07-20
+reviewed: 2026-07-20
+depends:
+  - path: docs/backend/L1-backend
+dependents:
+  - path: docs/backend/L2-optimism-followups
+---
+
 # L2 — Optimism: the replay model
 
-state: implemented
-foundation: server reconciliation — Bayou's lineage; in production: Replicache,
-Linear, Superhuman
+> Foundation: server reconciliation — Bayou's lineage; in production: Replicache, Linear, Superhuman.
 
 ## The model
 
