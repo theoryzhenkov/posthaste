@@ -4,8 +4,6 @@
 
 Posthaste is a fast & smart local email workstation. Posthaste adapts to your workflow, whenever you want smart command palette, custom scripting, MCP server, themes, integrations with your personal tools, and other things. 
 
-Posthaste runs via Vite from local .ts files on your device, meaning you can edit it in-place and it will hot reload. Something is missing? Build it yourself!  
-
 [posthaste.theor.net](https://posthaste.theor.net)
 
 ## Install
