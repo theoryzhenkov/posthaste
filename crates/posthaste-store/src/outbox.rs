@@ -16,16 +16,6 @@ use super::*;
 /// cycle picks up whatever remains. **Review** (picked sane, not measured).
 pub(crate) const OUTBOX_FLUSH_BATCH_LIMIT: i64 = 200;
 
-/// Bound on `list_pending_operations`/`list_unsettled_operations`. Unlike
-/// `list_flushable_operations` these two are not drained in a retry loop —
-/// `list_pending_operations` backs a compose/detail UI listing and
-/// `list_unsettled_operations` is folded over to compute a message's
-/// remaining state assertions at settlement time — so an aggressive per-cycle
-/// batch would risk silently truncating a correctness-relevant read instead
-/// of just being retried later. This is a generous worst-case safety cap
-/// only: it bounds the pathological case (N15) without changing behavior for
-/// any realistic per-account backlog. **Review**.
-pub(crate) const OUTBOX_LIST_SAFETY_LIMIT: i64 = 5_000;
 fn parse_operation_state(value: &str) -> Result<OperationState, StoreError> {
     match value {
         "pending" => Ok(OperationState::Pending),
@@ -164,11 +154,10 @@ pub(crate) fn collect_operations(
     connection: &Connection,
     sql: &str,
     account_id: &AccountId,
-    limit: i64,
 ) -> Result<Vec<Operation>, StoreError> {
     let mut statement = connection.prepare(sql).map_err(sql_to_store_error)?;
     let rows = statement
-        .query_map(params![account_id.as_str(), limit], row_to_operation)
+        .query_map(params![account_id.as_str()], row_to_operation)
         .map_err(sql_to_store_error)?;
     let mut operations = Vec::new();
     for row in rows {
@@ -307,11 +296,9 @@ impl OperationOutboxStore for DatabaseStore {
             &format!(
                 "SELECT {OPERATION_COLUMNS} FROM outbox_operation
                  WHERE account_id = ?1 AND state != 'applied'
-                 ORDER BY rowid ASC
-                 LIMIT ?2"
+                 ORDER BY rowid ASC"
             ),
             account_id,
-            OUTBOX_LIST_SAFETY_LIMIT,
         )
     }
 
@@ -335,12 +322,10 @@ impl OperationOutboxStore for DatabaseStore {
                  WHERE account_id = ?1
                    AND (state != 'failed'
                         OR kind IN ({content_kinds}))
-                 ORDER BY rowid ASC
-                 LIMIT ?2",
+                 ORDER BY rowid ASC",
                 content_kinds = content_op_kinds_in_sql()
             ),
             account_id,
-            OUTBOX_LIST_SAFETY_LIMIT,
         )
     }
 
@@ -463,20 +448,16 @@ impl OperationOutboxStore for DatabaseStore {
                 "SELECT {OPERATION_COLUMNS}, settled_at_mono, settled_watermark
                  FROM outbox_operation
                  WHERE account_id = ?1 AND state = 'applied'
-                 ORDER BY rowid ASC
-                 LIMIT ?2"
+                 ORDER BY rowid ASC"
             ))
             .map_err(sql_to_store_error)?;
         let rows = statement
-            .query_map(
-                params![account_id.as_str(), OUTBOX_LIST_SAFETY_LIMIT],
-                |row| {
-                    let operation = row_to_operation(row)?;
-                    let settled_at_mono: Option<i64> = row.get(14)?;
-                    let watermark: Option<String> = row.get(15)?;
-                    Ok((operation, settled_at_mono, watermark))
-                },
-            )
+            .query_map(params![account_id.as_str()], |row| {
+                let operation = row_to_operation(row)?;
+                let settled_at_mono: Option<i64> = row.get(14)?;
+                let watermark: Option<String> = row.get(15)?;
+                Ok((operation, settled_at_mono, watermark))
+            })
             .map_err(sql_to_store_error)?;
         let mut operations = Vec::new();
         for row in rows {
