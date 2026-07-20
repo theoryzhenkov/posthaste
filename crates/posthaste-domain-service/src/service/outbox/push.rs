@@ -2,7 +2,7 @@
 //! [`OperationKind`], mapping the result to a [`Pushed`] outcome or a typed
 //! flush error.
 
-use super::classify::{classify_gateway_error, FlushError};
+use super::classify::{classify_gateway_error, FlushDisposition, FlushError};
 use crate::service::*;
 use posthaste_domain_model::MailIntent;
 use posthaste_domain_model::{MessageReadback, MutationOutcome};
@@ -35,28 +35,47 @@ pub(super) enum Pushed {
     /// readback then carries the unchanged state, so the settle write reverts.
     /// `cursor` is the provider sync position the mutation returned (a JMAP
     /// `set` `newState`): a blind settlement (no readback) records it as the
-    /// op's causal-truncation watermark.
+    /// op's causal-truncation watermark. `retargeted_to` is `Some(adopted_id)`
+    /// when the assertion was retargeted from a provisional `send-<id>` to its
+    /// adopted real id — the settlement then writes base for the adopted id
+    /// AND re-derives the op's `send-<id>` (the pre-adoption fold reverts).
+    /// `None` for a normal assertion (the op's entity id IS the target).
     Message {
         readback: Option<MessageReadback>,
         rejected: Option<String>,
         cursor: Option<posthaste_domain_model::SyncCursor>,
+        retargeted_to: Option<MessageId>,
     },
+    /// A state-assertion op against a provisional `send-<id>` whose send was
+    /// NOT adopted (failed or gone): there is no real message to assert on, so
+    /// the op settles as applied and leaves the log. The overlay re-derives
+    /// the `send-<id>` (a tombstone reverts; the send op's own fold, if any,
+    /// reproduces the row). No base write — the provider holds nothing to
+    /// assert against.
+    NoOp,
 }
 
 /// Normalize a message-mutation gateway result into a [`Pushed::Message`]:
 /// `Ok` (accepted) and `MutationRejected` (rejected) both carry a readback and
 /// settle in one path; only a transport error is a flush error (retry).
-fn message_pushed(result: Result<MutationOutcome, GatewayError>) -> Result<Pushed, FlushError> {
+/// `retargeted_to` is `Some` when the assertion was retargeted from a
+/// provisional `send-<id>` to its adopted real id (see [`Pushed::Message`]).
+fn message_pushed(
+    result: Result<MutationOutcome, GatewayError>,
+    retargeted_to: Option<MessageId>,
+) -> Result<Pushed, FlushError> {
     match result {
         Ok(outcome) => Ok(Pushed::Message {
             readback: outcome.message,
             rejected: None,
             cursor: outcome.cursor,
+            retargeted_to,
         }),
         Err(GatewayError::MutationRejected { readback, reason }) => Ok(Pushed::Message {
             readback: Some(*readback),
             rejected: Some(reason),
             cursor: None,
+            retargeted_to,
         }),
         Err(transport) => Err(classify_gateway_error(transport)),
     }
@@ -213,25 +232,89 @@ impl MailService {
                 })
             }
             MailIntent::SetKeywords(command) => {
-                let target = MessageId::from(operation.entity.id.as_str());
-                message_pushed(
-                    gateway
-                        .set_keywords(account_id, &target, None, &command)
-                        .await,
-                )
+                match self.resolve_assertion_target(account_id, operation)? {
+                    Some((target, retargeted_to)) => message_pushed(
+                        gateway
+                            .set_keywords(account_id, &target, None, &command)
+                            .await,
+                        retargeted_to,
+                    ),
+                    None => Ok(Pushed::NoOp),
+                }
             }
             MailIntent::ReplaceMailboxes(command) => {
-                let target = MessageId::from(operation.entity.id.as_str());
-                message_pushed(
-                    gateway
-                        .replace_mailboxes(account_id, &target, None, &command.mailbox_ids)
-                        .await,
-                )
+                match self.resolve_assertion_target(account_id, operation)? {
+                    Some((target, retargeted_to)) => message_pushed(
+                        gateway
+                            .replace_mailboxes(account_id, &target, None, &command.mailbox_ids)
+                            .await,
+                        retargeted_to,
+                    ),
+                    None => Ok(Pushed::NoOp),
+                }
             }
-            MailIntent::Destroy => {
-                let target = MessageId::from(operation.entity.id.as_str());
-                message_pushed(gateway.destroy_message(account_id, &target, None).await)
-            }
+            MailIntent::Destroy => match self.resolve_assertion_target(account_id, operation)? {
+                Some((target, retargeted_to)) => message_pushed(
+                    gateway.destroy_message(account_id, &target, None).await,
+                    retargeted_to,
+                ),
+                None => Ok(Pushed::NoOp),
+            },
+        }
+    }
+
+    /// Resolve a state-assertion op's (Destroy/ReplaceMailboxes/SetKeywords)
+    /// target id. For a normal message id the target is the op's entity id.
+    /// For a provisional `send-<id>` (a not-yet-adopted sent message — no IMAP
+    /// message behind it), resolve the adoption alias:
+    /// - alias set → retarget to the adopted real id (the op asserts on it);
+    ///   `retargeted_to` carries the adopted id so the settlement writes base
+    ///   for it AND re-derives the op's `send-<id>` (the pre-adoption fold
+    ///   reverts).
+    /// - alias absent + send op still in flight (pending/inflight/applied) →
+    ///   `Err(Defer)`: re-queue without bumping attempts; the next flush after
+    ///   adoption retargets.
+    /// - alias absent + send op terminal (failed/dispatchUncertain) or gone →
+    ///   `Ok(None)`: no-op (nothing to assert; the send produced no real copy
+    ///   or was discarded).
+    ///
+    /// Store errors map to `Permanent` (matching `resolve_draft_flush_target`).
+    fn resolve_assertion_target(
+        &self,
+        account_id: &AccountId,
+        operation: &Operation,
+    ) -> Result<Option<(MessageId, Option<MessageId>)>, FlushError> {
+        let entity_id = operation.entity.id.as_str();
+        if !posthaste_domain_model::is_provisional_sent_id(entity_id) {
+            return Ok(Some((MessageId::from(entity_id), None)));
+        }
+        if let Some(adopted) = self
+            .send_registry
+            .resolve_send_alias(account_id, entity_id)
+            .map_err(|error| {
+                FlushError::permanent(format!("send alias resolution failed: {error}"))
+            })?
+        {
+            return Ok(Some((
+                MessageId::from(adopted.as_str()),
+                Some(MessageId::from(entity_id)),
+            )));
+        }
+        // Alias absent: the send isn't adopted. Find the send op to decide
+        // whether to defer (in flight) or no-op (terminal/gone). At most one
+        // send op exists per `send-<id>`.
+        let send_op = self
+            .outbox
+            .find_operation_by_entity_id(account_id, entity_id, OperationKind::Send)
+            .map_err(|error| FlushError::permanent(format!("send op lookup failed: {error}")))?;
+        match send_op {
+            Some(op) if !op.state.is_terminal() => Err(FlushError {
+                disposition: FlushDisposition::Defer,
+                message:
+                    "state assertion on a provisional send-<id> deferred: send not yet adopted"
+                        .to_string(),
+            }),
+            Some(_) | None => Ok(None),
         }
     }
 }

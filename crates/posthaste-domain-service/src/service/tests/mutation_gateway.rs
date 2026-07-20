@@ -62,6 +62,11 @@ pub(super) struct MutationGateway {
     /// Results returned by `set_keywords`, popped front-first; empty falls back
     /// to the revision-based success path.
     pub(super) set_keywords_results: Mutex<Vec<Result<MutationOutcome, GatewayError>>>,
+    /// The target `message_id` of each `set_keywords`/`replace_mailboxes`/
+    /// `destroy_message` call, in order — lets the send-alias retarget tests
+    /// assert a state-assertion op against a provisional `send-<id>` retargeted
+    /// to the adopted real id.
+    pub(super) message_mutation_targets: Mutex<Vec<MessageId>>,
     /// Readbacks attached to each accepted message mutation's `MutationOutcome`,
     /// popped front-first (the `get` of set+get). Empty => `message: None`.
     pub(super) readbacks: Mutex<Vec<posthaste_domain_model::MessageReadback>>,
@@ -115,6 +120,7 @@ impl MutationGateway {
             committed_send_keys: Mutex::new(Vec::new()),
             send_results: Mutex::new(Vec::new()),
             set_keywords_results: Mutex::new(Vec::new()),
+            message_mutation_targets: Mutex::new(Vec::new()),
             readbacks: Mutex::new(Vec::new()),
             reject_next: Mutex::new(None),
             destroy_mailbox_calls: Mutex::new(Vec::new()),
@@ -268,10 +274,14 @@ impl MailGateway for MutationGateway {
     async fn set_keywords(
         &self,
         _account_id: &AccountId,
-        _message_id: &MessageId,
+        message_id: &MessageId,
         expected_state: Option<&str>,
         _command: &SetKeywordsCommand,
     ) -> Result<MutationOutcome, GatewayError> {
+        self.message_mutation_targets
+            .lock()
+            .expect("message mutation targets poisoned")
+            .push(message_id.clone());
         let set_keywords_result = self
             .set_keywords_results
             .lock()
@@ -286,19 +296,27 @@ impl MailGateway for MutationGateway {
     async fn replace_mailboxes(
         &self,
         _account_id: &AccountId,
-        _message_id: &MessageId,
+        message_id: &MessageId,
         expected_state: Option<&str>,
         _mailbox_ids: &[MailboxId],
     ) -> Result<MutationOutcome, GatewayError> {
+        self.message_mutation_targets
+            .lock()
+            .expect("message mutation targets poisoned")
+            .push(message_id.clone());
         self.apply(expected_state)
     }
 
     async fn destroy_message(
         &self,
         _account_id: &AccountId,
-        _message_id: &MessageId,
+        message_id: &MessageId,
         expected_state: Option<&str>,
     ) -> Result<MutationOutcome, GatewayError> {
+        self.message_mutation_targets
+            .lock()
+            .expect("message mutation targets poisoned")
+            .push(message_id.clone());
         self.apply(expected_state)
     }
 

@@ -169,6 +169,19 @@ pub trait OperationOutboxStore: Send + Sync {
     /// settled (`applied`) op is likewise untouchable: it rests in the log
     /// until causal truncation, so a late cancel observes it as already gone.
     fn remove_operation_unless_inflight(&self, id: &OperationId) -> Result<bool, StoreError>;
+
+    /// Find the first operation for an account whose entity id + kind match.
+    /// Used by the flush to locate a provisional send's op by its `send-<id>`
+    /// entity id (to decide whether a state-assertion op against that
+    /// `send-<id>` should defer — the send is still in flight — or no-op — the
+    /// send failed/gone). Served by `idx_outbox_operation_account_entity`; at
+    /// most one send op exists per `send-<id>`.
+    fn find_operation_by_entity_id(
+        &self,
+        account_id: &AccountId,
+        entity_id: &str,
+        kind: OperationKind,
+    ) -> Result<Option<Operation>, StoreError>;
 }
 
 /// Account/source projection maintenance boundary.

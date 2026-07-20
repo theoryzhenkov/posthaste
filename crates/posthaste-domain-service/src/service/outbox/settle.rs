@@ -46,6 +46,13 @@ impl MailService {
     /// provider sync position the mutation returned; a blind settlement
     /// records it as the op's truncation watermark.
     ///
+    /// `retargeted_to` is `Some(adopted_id)` when the assertion was retargeted
+    /// from a provisional `send-<id>` to its adopted real id: the base write
+    /// (the readback's upsert, or the `Removed` delete) targets the adopted
+    /// id, and BOTH the op's `send-<id>` (the pre-adoption fold reverts) AND
+    /// the adopted id (its overlay may hold a prior op's fold) re-derive.
+    /// `None` for a normal assertion (the op's entity id IS the target).
+    ///
     /// @spec docs/backend/L2-optimism#settlement-and-truncation
     pub(super) async fn settle_message_operation(
         &self,
@@ -54,8 +61,12 @@ impl MailService {
         readback: Option<MessageReadback>,
         rejected: Option<String>,
         cursor: Option<posthaste_domain_model::SyncCursor>,
+        retargeted_to: Option<&MessageId>,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let message_id = MessageId::from(operation.entity.id.as_str());
+        // The id the base write targets: the adopted real id when retargeted,
+        // else the op's entity id.
+        let target_id = retargeted_to.unwrap_or(&message_id);
         let mut events = Vec::new();
         let had_readback = readback.is_some();
         let rejected_settlement = rejected.is_some();
@@ -83,7 +94,7 @@ impl MailService {
         }
         let batch = match readback {
             Some(MessageReadback::Present(record)) => Some(upsert_message_batch(record)),
-            Some(MessageReadback::Removed) => Some(delete_message_batch(&message_id)),
+            Some(MessageReadback::Removed) => Some(delete_message_batch(target_id)),
             None => None,
         };
         if let Some(batch) = batch {
@@ -103,9 +114,15 @@ impl MailService {
         // Re-derive the message's overlay entry from the log that remains: a
         // blind-settled op still folds (visible state unchanged between settle
         // and truncation); a readback/rejection settlement folds only the ops
-        // left behind over the just-written base.
+        // left behind over the just-written base. A retargeted assertion
+        // re-derives BOTH its `send-<id>` (the pre-adoption fold reverts) AND
+        // the adopted id (its overlay may hold a prior op's fold over the
+        // just-written base).
         self.refresh_message_overlay(account_id, &message_id)
             .await?;
+        if retargeted_to.is_some() {
+            self.refresh_message_overlay(account_id, target_id).await?;
+        }
         let settlement = OperationSettlement {
             id: operation.id.clone(),
             outcome: if rejected.is_some() {

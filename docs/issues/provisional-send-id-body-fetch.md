@@ -63,3 +63,9 @@ message) still fails at push with the same "missing IMAP location" — that
 needs the adoption alias bridge (send-`<id>` → real provider id, resolved at
 flush, mirroring `resolve_draft_flush_target` for drafts). It is a separate,
 user-action-gated path; this fix addresses the no-user-action toast.
+
+**Update (2026-07-18):** the adoption alias bridge is now implemented — a
+`send_alias` table + `SendRegistry` port record `send-<id>` → adopted real id
+at adoption, and the flush retargets state-assertion ops to it (deferring while
+the send is in flight, no-op-ing when it failed/was discarded). See
+`feat(service): retarget state-assertion ops on a provisional send-<id>`.
