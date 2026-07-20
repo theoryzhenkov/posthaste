@@ -142,26 +142,6 @@ jobs:
           shared-key: release-desktop-${{ matrix.platform }}
           cache-on-failure: true
 
-      - name: Stage posthastectl sidecar
-        shell: bash
-        run: |
-          # `bundle.externalBin` in apps/client/desktop/tauri.conf.json requires
-          # apps/client/desktop/binaries/posthastectl-<host-triple>[.exe] to
-          # exist before `tauri build` (Tauri validates it at bundle time).
-          # Build the host posthastectl (Bun --compile, same platform as this
-          # desktop build) and stage it. Local dev: `just desktop stage-sidecar`.
-          triple="$(rustc -vV | sed -n 's/^host: //p')"
-          ext=""
-          case "$triple" in *windows*) ext=".exe";; esac
-          dest="apps/client/desktop/binaries/posthastectl-${triple}${ext}"
-          mkdir -p apps/client/desktop/binaries
-          # build-cli.ts prints the final artifact path (incl. .exe on windows)
-          # as its last stdout line so CI can capture it.
-          artifact="$(bun run apps/tools/scripts/build-cli.ts | tail -1)"
-          test -n "$artifact" && test -f "$artifact" || { echo "posthastectl build failed" >&2; exit 1; }
-          cp "$artifact" "$dest"
-          echo "staged sidecar: $dest"
-
       - uses: oven-sh/setup-bun@v2
 
       - name: Cache Bun download cache
@@ -174,6 +154,28 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
+
+      - name: Stage posthastectl sidecar
+        shell: bash
+        run: |
+          # `bundle.externalBin` in apps/client/desktop/tauri.conf.json requires
+          # apps/client/desktop/binaries/posthastectl-<host-triple>[.exe] to
+          # exist before `tauri build` (Tauri validates it at bundle time).
+          # Build the host posthastectl (Bun --compile, same platform as this
+          # desktop build) and stage it. Local dev: `just desktop stage-sidecar`.
+          # Runs after `bun install` so apps/tools deps resolve; rustc (set up
+          # earlier in the job) provides the host triple.
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          ext=""
+          case "$triple" in *windows*) ext=".exe";; esac
+          dest="apps/client/desktop/binaries/posthastectl-${triple}${ext}"
+          mkdir -p apps/client/desktop/binaries
+          # build-cli.ts prints the final artifact path (incl. .exe on windows)
+          # as its last stdout line so CI can capture it.
+          artifact="$(bun run apps/tools/scripts/build-cli.ts | tail -1)"
+          test -n "$artifact" && test -f "$artifact" || { echo "posthastectl build failed" >&2; exit 1; }
+          cp "$artifact" "$dest"
+          echo "staged sidecar: $dest"
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
