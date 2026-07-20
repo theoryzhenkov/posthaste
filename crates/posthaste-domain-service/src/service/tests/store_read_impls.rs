@@ -207,10 +207,25 @@ impl ConversationReadStore for TestStore {
 impl MessageDetailStore for TestStore {
     fn get_message_detail(
         &self,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
+        account_id: &AccountId,
+        message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, StoreError> {
-        Ok(None)
+        // EFFECTIVE-read mock (NS1): the overlay wins (a tombstone reads as
+        // gone), else base — the same merge the real `_effective` views serve.
+        // The body is not held in the overlay row; a caller that needs it
+        // fetches it via the gateway (see `MailService::get_message_detail`).
+        if let Some(entry) = self
+            .overlay_rows
+            .lock()
+            .expect("overlay rows lock poisoned")
+            .get(message_id.as_str())
+        {
+            return Ok(entry.as_ref().map(record_to_detail));
+        }
+        Ok(self
+            .read_base_message_record(account_id, message_id)?
+            .as_ref()
+            .map(record_to_detail))
     }
 
     /// EFFECTIVE-read mock (NS1): the overlay wins (a tombstone reads as
@@ -266,6 +281,19 @@ fn record_to_summary(record: &MessageRecord) -> MessageSummary {
         rfc_message_id: record.rfc_message_id.clone(),
         in_reply_to: record.in_reply_to.clone(),
         draft_id: record.draft_id.clone(),
+    }
+}
+
+/// A detail over an overlay/base row, without a body — the body is fetched
+/// lazily via the gateway (see `MailService::get_message_detail`).
+fn record_to_detail(record: &MessageRecord) -> MessageDetail {
+    MessageDetail {
+        summary: record_to_summary(record),
+        body_html: None,
+        body_text: None,
+        raw_message: None,
+        attachments: Vec::new(),
+        list_unsubscribe: None,
     }
 }
 
