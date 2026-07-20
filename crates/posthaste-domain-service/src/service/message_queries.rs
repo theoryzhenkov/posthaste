@@ -175,6 +175,19 @@ impl MailService {
             });
         };
 
+        // A provisional `send-<id>` names an overlay-only Sent row for a
+        // dispatched-but-unadopted send: it has no IMAP message to fetch (the
+        // real copy lands under its own provider id and is adopted by
+        // RFC-`Message-ID` prefix). Fetching its body would reject with
+        // "missing IMAP location"; return the detail without a body — it
+        // becomes available under the real id once adoption retires this row.
+        if posthaste_domain_model::is_provisional_sent_id(message_id.as_str()) {
+            return Ok(CommandResult {
+                detail: Some(detail),
+                events: Vec::new(),
+            });
+        }
+
         let fetched = gateway.fetch_message_body(account_id, message_id).await?;
         let sync_writer = self.sync_writer.clone();
         let owned_account_id = account_id.clone();

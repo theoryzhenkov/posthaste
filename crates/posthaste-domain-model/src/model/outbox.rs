@@ -449,9 +449,38 @@ pub fn send_identity_prefix(operation_id: &str) -> String {
     format!("{}@", send_identity_token(operation_id))
 }
 
+/// The prefix of a send op's provisional entity id — the derived Sent row's id
+/// until adoption retires it. A `send-`-prefixed id names an overlay-only row
+/// with no IMAP message behind it (the real copy lands under its own provider
+/// id and is adopted by RFC-`Message-ID` prefix), so its body cannot be
+/// fetched and its keywords/mailboxes cannot be asserted until adoption.
+pub const SEND_ENTITY_ID_PREFIX: &str = "send-";
+
+/// Whether `id` is a provisional send entity id — the overlay-only Sent row a
+/// dispatched-but-unadopted send surfaces. Such a row has no IMAP message, so a
+/// body fetch or state assertion against it cannot resolve an IMAP location.
+pub fn is_provisional_sent_id(id: &str) -> bool {
+    id.starts_with(SEND_ENTITY_ID_PREFIX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provisional_sent_id_is_recognized_by_its_prefix() {
+        // The send op's entity id is `send-<uuid>` — the derived Sent row's id
+        // until adoption retires it. A real provider id never carries this
+        // prefix, so the prefix alone identifies a provisional, locationless row.
+        assert!(is_provisional_sent_id(
+            "send-c4f1a435c83f4d9abf0de707268b20d7"
+        ));
+        assert!(is_provisional_sent_id("send-"));
+        assert!(!is_provisional_sent_id("m-42"));
+        assert!(!is_provisional_sent_id("provider-draft-42"));
+        assert!(!is_provisional_sent_id(""));
+        assert_eq!(SEND_ENTITY_ID_PREFIX, "send-");
+    }
 
     #[test]
     fn pending_and_inflight_operations_are_flushable() {
