@@ -172,6 +172,21 @@ impl AppState {
         let store: Arc<dyn MailStore> = database_store.clone();
         let service = Arc::new(MailService::new(database_store.clone(), config.clone()));
         service.sync_source_projections()?;
+        let sources = service.list_sources()?;
+
+        // A quarantined-and-rebuilt store salvaged the op log (and the
+        // `draft_alias` map) but starts with an EMPTY overlay. Repopulate it
+        // from (log, base) now so parked content — unsent drafts, provisional
+        // Sent rows awaiting adoption — does not vanish for the
+        // repair → first-completed-sync window. The post-sync sweep would
+        // otherwise be the first thing to re-derive it, and only at the end of
+        // a completed cycle; rows with no base successor (a provisional Sent
+        // id) are not touched by a sync base-write in the meantime.
+        if repair.is_some() {
+            for source in &sources {
+                service.replay_account_overrides(&source.id).await?;
+            }
+        }
 
         let events = EventBus::new(event_capacity);
         let secret_store: Arc<dyn SecretStore> =
@@ -184,7 +199,7 @@ impl AppState {
             events.clone(),
             poll_interval,
         ));
-        for source in service.list_sources()? {
+        for source in sources {
             supervisor.start_account(&source).await;
         }
 
