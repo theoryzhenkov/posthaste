@@ -8,8 +8,8 @@ use posthaste_domain_model::{
     ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
     ImapMailboxSyncState, ImapMessageLocation, MailQueryRule, MailboxId, MailboxSummary,
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
-    MutationOutcome, Operation, OperationId, OperationState, Recipient, ReplyContext,
-    RevLogSnapshot, SecretRef, SecretStoreError, SendFiling, SendMessageRequest,
+    MutationOutcome, Operation, OperationId, OperationKind, OperationState, Recipient,
+    ReplyContext, RevLogSnapshot, SecretRef, SecretStoreError, SendFiling, SendMessageRequest,
     SetKeywordsCommand, SettledOperation, SortDirection, SyncBatch, SyncCursor, SyncObject,
     SyncOutcome, SyncProgress, SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
@@ -23,6 +23,7 @@ mod gateway;
 mod overlay_store;
 mod progress;
 mod read_store;
+mod send_registry;
 mod sync_store;
 mod write_store;
 
@@ -41,6 +42,7 @@ pub use read_store::{
     ConversationReadStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore,
     MessageListStore, RevLogStore, SmartMailboxStore, SnoozeStore, TagReadStore,
 };
+pub use send_registry::SendRegistry;
 pub use sync_store::{
     ImapMessageLocationStore, ImapMessageLocationWriteStore, ImapSyncStateStore,
     ImapSyncStateWriteStore, MessageMailboxStore, SyncStateStore, SyncWriteStore,

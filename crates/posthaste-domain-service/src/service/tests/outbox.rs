@@ -2452,6 +2452,16 @@ async fn provisional_sent_row_is_adopted_when_the_provider_copy_syncs() {
         }),
         "the adoption prunes the provisional id client-side"
     );
+    // The adoption alias bridge: adoption set send-<id> -> adopted id BEFORE
+    // retiring the send op, so a later state-assertion op against send-<id>
+    // retargets to the real id at flush.
+    assert_eq!(
+        store
+            .resolve_send_alias(&account_id, send.entity.id.as_str())
+            .expect("resolve alias"),
+        Some("provider-sent-1".to_string()),
+        "adoption recorded the send-<id> -> adopted id alias"
+    );
 }
 
 #[tokio::test]

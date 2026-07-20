@@ -519,6 +519,30 @@ impl OperationOutboxStore for DatabaseStore {
             Ok(removed > 0)
         })
     }
+
+    fn find_operation_by_entity_id(
+        &self,
+        account_id: &AccountId,
+        entity_id: &str,
+        kind: OperationKind,
+    ) -> Result<Option<Operation>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(&format!(
+                "SELECT {OPERATION_COLUMNS} FROM outbox_operation
+                 WHERE account_id = ?1 AND entity_id = ?2 AND kind = ?3
+                 LIMIT 1"
+            ))
+            .map_err(sql_to_store_error)?;
+        statement
+            .query_row(
+                params![account_id.as_str(), entity_id, operation_kind_str(kind)],
+                row_to_operation,
+            )
+            .optional()
+            .map_err(sql_to_store_error)?
+            .transpose()
+    }
 }
 
 /// M68/M69: the draft-identity methods behind the `DraftRegistry` port, backed
@@ -576,6 +600,53 @@ impl DraftRegistry for DatabaseStore {
             tx.execute(
                 "DELETE FROM draft_alias WHERE account_id = ?1 AND draft_key = ?2",
                 params![account_id.as_str(), draft_key],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+}
+
+/// The adoption alias bridge for provisional sent messages, backed by the
+/// `send_alias` table. Mirrors the `DraftRegistry` impl above: resolution is one
+/// lookup against one authority (adoption writes through here in the same
+/// transaction as the send op's retirement). Aliases linger past the adopted
+/// message's destruction (see the table's schema comment) — there is no
+/// `remove_send_alias`.
+impl SendRegistry for DatabaseStore {
+    fn resolve_send_alias(
+        &self,
+        account_id: &AccountId,
+        send_entity_id: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT adopted_message_id FROM send_alias
+                 WHERE account_id = ?1 AND send_entity_id = ?2",
+            )
+            .map_err(sql_to_store_error)?;
+        statement
+            .query_row(params![account_id.as_str(), send_entity_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(sql_to_store_error)
+    }
+
+    fn set_send_alias(
+        &self,
+        account_id: &AccountId,
+        send_entity_id: &str,
+        adopted_message_id: &str,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO send_alias (account_id, send_entity_id, adopted_message_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(account_id, send_entity_id)
+                 DO UPDATE SET adopted_message_id = excluded.adopted_message_id",
+                params![account_id.as_str(), send_entity_id, adopted_message_id],
             )
             .map_err(sql_to_store_error)?;
             Ok(())

@@ -17,6 +17,12 @@ pub(super) enum FlushDisposition {
     /// (RFC-L2 D86) — never blind-resent; only an explicit user retry (under the
     /// same idempotency identity) or a discard resolves it.
     Uncertain,
+    /// A state-assertion op against a provisional `send-<id>` whose send is
+    /// still in flight (not yet adopted): re-queue `pending` WITHOUT bumping
+    /// `attempts` (this is not a failure — the op is waiting for adoption to
+    /// retarget it) and CONTINUE draining (unrelated ops are not blocked). The
+    /// op retargets on a later flush once adoption sets the alias.
+    Defer,
 }
 
 /// Outcome of attempting to push one operation to the provider: the routing

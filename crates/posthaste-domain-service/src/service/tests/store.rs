@@ -48,6 +48,11 @@ pub(super) struct TestStore {
     /// message projection; tests seeding a synced/other-device draft seed this
     /// directly (there is no projection fallback anymore).
     pub(super) draft_aliases: Mutex<Vec<(String, String, String)>>,
+    /// (account_id, send_entity_id, adopted_message_id) send-alias rows — the
+    /// adoption alias bridge for provisional sent messages. Mirrors
+    /// `draft_aliases`; `adopt_sent_copies` writes through here before retiring
+    /// the send op, and the flush reads it to retarget state-assertion ops.
+    pub(super) send_aliases: Mutex<Vec<(String, String, String)>>,
     /// Snooze return rows for the scheduler: (message_id, until_unix_secs).
     pub(super) snoozes: Mutex<Vec<(MessageId, i64)>>,
 }
@@ -82,6 +87,7 @@ impl Default for TestStore {
             outbox_operations: Mutex::new(Vec::new()),
             settled_markers: Mutex::new(std::collections::HashMap::new()),
             draft_aliases: Mutex::new(Vec::new()),
+            send_aliases: Mutex::new(Vec::new()),
             snoozes: Mutex::new(Vec::new()),
         }
     }

@@ -28,6 +28,7 @@ pub trait MailStore:
     + AutomationBackfillStore
     + OperationOutboxStore
     + DraftRegistry
+    + SendRegistry
     + MessageOverlayStore
     + RevLogStore
     + SnoozeStore
@@ -56,6 +57,7 @@ impl<T> MailStore for T where
         + AutomationBackfillStore
         + OperationOutboxStore
         + DraftRegistry
+        + SendRegistry
         + MessageOverlayStore
         + RevLogStore
         + SnoozeStore
