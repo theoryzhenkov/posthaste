@@ -555,6 +555,18 @@ impl MailService {
             let Some(adopted_id) = adopted_id else {
                 continue;
             };
+            // Set the adoption alias BEFORE retiring the send op: a
+            // state-assertion op (Destroy/ReplaceMailboxes/SetKeywords)
+            // enqueued against this provisional `send-<id>` resolves the alias
+            // at flush to retarget to the real id. Setting it first means the
+            // alias is always present before the send op leaves the log — a
+            // flush never observes "alias absent + send op gone" on an adopted
+            // send (only on a discarded one, which no-ops correctly).
+            self.send_registry.set_send_alias(
+                account_id,
+                operation.entity.id.as_str(),
+                adopted_id.as_str(),
+            )?;
             // The bridge is complete: base holds the provider copy under its own
             // id. Retire the send op and re-derive its provisional Sent row —
             // the derived entry drops, base serves the copy, and the client

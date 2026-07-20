@@ -224,6 +224,7 @@ impl MailService {
                     readback,
                     rejected,
                     cursor,
+                    retargeted_to,
                 }) => {
                     // Settle from the provider outcome: with a readback (or a
                     // rejection) the op leaves the log now — the settle write
@@ -233,10 +234,35 @@ impl MailService {
                     // as its watermark.
                     events.extend(
                         self.settle_message_operation(
-                            account_id, &operation, readback, rejected, cursor,
+                            account_id,
+                            &operation,
+                            readback,
+                            rejected,
+                            cursor,
+                            retargeted_to.as_ref(),
                         )
                         .await?,
                     );
+                }
+                Ok(Pushed::NoOp) => {
+                    // A state-assertion op against a provisional `send-<id>`
+                    // whose send was NOT adopted (failed or gone): nothing to
+                    // assert on the provider. Settle as applied + leave the
+                    // log; the overlay re-derives the `send-<id>` (a tombstone
+                    // reverts; the send op's own fold, if any, reproduces the
+                    // row). No base write — the provider holds nothing to
+                    // assert against.
+                    self.outbox.remove_operation(&operation.id)?;
+                    let row_id = MessageId::from(operation.entity.id.as_str());
+                    self.refresh_message_overlay(account_id, &row_id).await?;
+                    let settlement = OperationSettlement {
+                        id: operation.id.clone(),
+                        outcome: OperationOutcome::Applied,
+                        assigned_entity_id: None,
+                        error: None,
+                        send_filing: None,
+                    };
+                    events.push(self.emit_settlement(account_id, &operation, &settlement)?);
                 }
                 Err(FlushError {
                     disposition: FlushDisposition::Transient,
@@ -346,6 +372,25 @@ impl MailService {
                     for row_id in self.op_touched_row_ids(account_id, &operation)? {
                         self.refresh_message_overlay(account_id, &row_id).await?;
                     }
+                }
+                Err(FlushError {
+                    disposition: FlushDisposition::Defer,
+                    message,
+                }) => {
+                    // A state-assertion op against a provisional `send-<id>`
+                    // whose send is still in flight (not yet adopted):
+                    // re-queue `pending` WITHOUT bumping `attempts` (this is
+                    // not a failure — the op is waiting for adoption to
+                    // retarget it) and CONTINUE draining (unrelated ops are
+                    // not blocked — unlike a Transient failure, a deferred op
+                    // does not stop the drain). The op retargets on a later
+                    // flush once adoption sets the alias.
+                    self.outbox.update_operation_state(
+                        &operation.id,
+                        OperationState::Pending,
+                        operation.attempts,
+                        Some(&message),
+                    )?;
                 }
             }
         }

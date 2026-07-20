@@ -7,7 +7,7 @@ use crate::{
     AutomationBackfillStore, BaseWrite, CacheStore, ConfigDiff, ConfigRepository,
     ConversationReadStore, DeriveDiff, DeriveSnapshot, DraftRegistry, EventStore, MailGateway,
     MailStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore, MessageListStore,
-    MessageMailboxStore, MessageOverlayStore, OperationOutboxStore, OverlayMutation,
+    MessageMailboxStore, MessageOverlayStore, OperationOutboxStore, OverlayMutation, SendRegistry,
     ServiceResultExt, SharedConfigRepository, SmartMailboxStore, SnoozeStore, SourceDataStore,
     SourceProjectionStore, SyncStateStore, SyncWriteStore, TagReadStore,
 };
@@ -65,6 +65,7 @@ pub struct MailService {
     snooze_reader: Arc<dyn SnoozeStore>,
     outbox: Arc<dyn OperationOutboxStore>,
     draft_registry: Arc<dyn DraftRegistry>,
+    send_registry: Arc<dyn SendRegistry>,
     overlay: Arc<dyn MessageOverlayStore>,
 }
 
@@ -94,6 +95,7 @@ impl MailService {
             snooze_reader: store.clone(),
             outbox: store.clone(),
             draft_registry: store.clone(),
+            send_registry: store.clone(),
             overlay: store,
         }
     }

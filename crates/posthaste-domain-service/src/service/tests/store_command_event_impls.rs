@@ -281,6 +281,19 @@ impl OperationOutboxStore for TestStore {
         });
         Ok(ops.len() != before)
     }
+
+    fn find_operation_by_entity_id(
+        &self,
+        account_id: &AccountId,
+        entity_id: &str,
+        kind: OperationKind,
+    ) -> Result<Option<Operation>, StoreError> {
+        let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        Ok(ops
+            .iter()
+            .find(|op| &op.account_id == account_id && op.entity.id == entity_id && op.kind == kind)
+            .cloned())
+    }
 }
 
 /// M68/M69: the draft-identity methods behind the `DraftRegistry` port. Since
@@ -329,6 +342,46 @@ impl DraftRegistry for TestStore {
     ) -> Result<(), StoreError> {
         let mut aliases = self.draft_aliases.lock().expect("alias lock poisoned");
         aliases.retain(|(account, key, _)| !(account == account_id.as_str() && key == draft_key));
+        Ok(())
+    }
+}
+
+/// The adoption alias bridge for provisional sent messages, mirroring the
+/// `DraftRegistry` impl above. Backed by `send_aliases`; `adopt_sent_copies`
+/// writes through here before retiring the send op.
+impl SendRegistry for TestStore {
+    fn resolve_send_alias(
+        &self,
+        account_id: &AccountId,
+        send_entity_id: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let aliases = self.send_aliases.lock().expect("send alias lock poisoned");
+        Ok(aliases
+            .iter()
+            .find(|(account, send_id, _)| {
+                account == account_id.as_str() && send_id == send_entity_id
+            })
+            .map(|(_, _, adopted)| adopted.clone()))
+    }
+
+    fn set_send_alias(
+        &self,
+        account_id: &AccountId,
+        send_entity_id: &str,
+        adopted_message_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut aliases = self.send_aliases.lock().expect("send alias lock poisoned");
+        if let Some(row) = aliases.iter_mut().find(|(account, send_id, _)| {
+            account == account_id.as_str() && send_id == send_entity_id
+        }) {
+            row.2 = adopted_message_id.to_string();
+        } else {
+            aliases.push((
+                account_id.to_string(),
+                send_entity_id.to_string(),
+                adopted_message_id.to_string(),
+            ));
+        }
         Ok(())
     }
 }

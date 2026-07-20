@@ -160,6 +160,27 @@ pub(super) const SCHEMA_SQL: &str = "
                 PRIMARY KEY (account_id, draft_key)
             );
 
+            -- The adoption alias bridge for provisional sent messages. A
+            -- state-assertion op (Destroy/ReplaceMailboxes/SetKeywords)
+            -- enqueued against a provisional `send-<id>` (the overlay-only
+            -- Sent row a dispatched-but-unadopted send surfaces) cannot be
+            -- pushed until adoption matches the real provider copy. This
+            -- table remembers the `send-<id>` → adopted real id mapping past
+            -- the send op's retirement (adoption retires the send op, so the
+            -- prefix can no longer be computed from the log), so a later flush
+            -- of the state-assertion op retargets to the real id. Mirrors
+            -- `draft_alias` for drafts. Aliases linger past the adopted
+            -- message's destruction (one row per sent message; a GC pass is a
+            -- follow-up) — a stale row maps a dead `send-<id>` to a dead real
+            -- id, and no op targets a `send-<id>` once adoption retires its
+            -- row, so lingering rows are harmless.
+            CREATE TABLE IF NOT EXISTS send_alias (
+                account_id TEXT NOT NULL,
+                send_entity_id TEXT NOT NULL,
+                adopted_message_id TEXT NOT NULL,
+                PRIMARY KEY (account_id, send_entity_id)
+            );
+
             CREATE TABLE IF NOT EXISTS outbox_operation (
                 id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL,
@@ -301,6 +322,8 @@ pub(super) const SCHEMA_SQL: &str = "
                 ON outbox_operation (account_id, state);
             CREATE INDEX IF NOT EXISTS idx_draft_alias_entity
                 ON draft_alias (account_id, entity_id);
+            CREATE INDEX IF NOT EXISTS idx_send_alias_adopted
+                ON send_alias (account_id, adopted_message_id);
             CREATE INDEX IF NOT EXISTS idx_conversation_message_lookup
                 ON conversation_message (account_id, message_id);
             CREATE INDEX IF NOT EXISTS idx_automation_backfill_pending
