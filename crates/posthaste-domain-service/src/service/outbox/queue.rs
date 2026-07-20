@@ -470,7 +470,11 @@ impl MailService {
             account_id,
             OperationEntity {
                 kind: OperationEntityKind::Message,
-                id: format!("send-{}", Id::generate()),
+                id: format!(
+                    "{}{}",
+                    posthaste_domain_model::SEND_ENTITY_ID_PREFIX,
+                    Id::generate()
+                ),
             },
             OperationKind::Send,
             payload,
