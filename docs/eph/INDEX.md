@@ -12,6 +12,13 @@ gone; the pre-deletion tree survives on `legacy/split-model-final`). Status
 determined from each doc's own markers and cross-checked against the commit
 history (M-step / S-step / slice landings).
 
+Added 2026-07-30: `AUDIT-L2-architecture-review`. Note that its §2.3 and §2.4
+contradict two status rows in this table — `RFC-L2-provider-reliability` is
+recorded below as **SHIPPED — M30–M37 all landed**, while D98 (in M36's
+contents) still reads `proposed` in that RFC with no implementation; and the
+`legacy/split-model-final` recovery branch referenced above no longer exists on
+the remote (`git ls-remote --heads origin` returns only `main`).
+
 ## Status vocabulary
 
 - **SHIPPED** — all migration steps landed.
@@ -40,6 +47,7 @@ history (M-step / S-step / slice landings).
 | **AUDIT-L2-imap-sync-scheduling** | IMAP gateway + sync scheduling/supervision robustness: P1 data-loss window, no-timeout connection layer, no supervision, P5 flake verdict. | **EVIDENCE/AUDIT** — feeds RFC-L2-provider-reliability (M34–M36 shipped). |
 | **AUDIT-L2-jmap-push** | JMAP engine + push pipeline robustness: S1 duplicate-send, A1 OAuth lockout, PP1 silent push death, F2 timeout monoculture, PP2 reconnect defect. | **EVIDENCE/AUDIT** — feeds RFC-L2-provider-reliability (M32/M33/M37 shipped). |
 | **AUDIT-L2-lifecycle-resources** | Re-verified lifecycle/resource debt register + 22 new rows (N1–N22) + watchdog census + top-10. | **EVIDENCE/AUDIT** — feeds RFC-L2-lifecycle-and-errors (M20–M31 shipped). |
+| **AUDIT-L2-architecture-review** | Post-pivot review of the integrated app: the account-scoped derive read under the global write lock, four guards enforcing less than they document, the unobservable provider breaker + unpaced poll loop, 647/727 dead `@spec` pointers. Sequenced next steps. | **EVIDENCE/AUDIT** (2026-07-30) — 4 confirmed / 2 contested / 4 **unverified** (§4 is leads only). Successor pass to AUDIT-L2-architecture-health; re-measures its open `@spec` lint row (degraded 473 → 647). |
 | **DESIGN-L2-deployment-topology** | Forward design: productize the deployment topology over the realized link mechanism (control-pane UI, transport selector, native IPC, hardening). | **REFERENCE** (design note) — link mechanism realized; productization partial. |
 | **DESIGN-L2-release-channels** | Release channels as a first-class concept: a single per-channel policy table (identity, updater manifest, devtools, signing, smoke gates). | **REFERENCE** (design note) — machinery realized and in use (tools/release/*). |
 | **DESIGN-L2-undo-redo-synced-history** | The model: per-account durable server-authoritative reversible-op log, cursor synced as a view, evaluation stays local-optimistic; cross-device undo. | **REFERENCE** (design note) — Phase 1 shipped; Phase 2 implemented (see revlog-contract). |
