@@ -1,7 +1,7 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-04-29
+modified: 2026-05-24
 reviewed: 2026-04-29
 depends:
   - path: docs/L0-api
@@ -244,6 +244,8 @@ The API never returns secret values. Responses include `SecretStatus` with `stor
 **Reset defaults**: `POST /smart-mailboxes:reset-defaults` restores all default smart mailboxes (Inbox, Archive, Drafts, Sent, Junk, Trash, All Mail) and returns the full list.
 
 ## Message body sanitization
+
+Message summary and detail responses include sender metadata and the `to` recipient list captured during provider sync. Clients use the stored recipients to label sent/outgoing messages without re-fetching raw message headers.
 
 `GET /sources/{source_id}/messages/{id}` sanitizes `body_html` through `sanitize_email_html` before returning to the frontend. This is the only place HTML is sanitized in the API layer; the sanitization runs in Rust before the response is serialized.
 

@@ -364,7 +364,7 @@ fn non_empty_state(state: &str) -> Option<&str> {
     (!state.is_empty()).then_some(state)
 }
 
-fn email_metadata_properties() -> [email::Property; 14] {
+fn email_metadata_properties() -> [email::Property; 15] {
     [
         email::Property::Id,
         email::Property::ThreadId,
@@ -373,6 +373,7 @@ fn email_metadata_properties() -> [email::Property; 14] {
         email::Property::Keywords,
         email::Property::Subject,
         email::Property::From,
+        email::Property::To,
         email::Property::Preview,
         email::Property::ReceivedAt,
         email::Property::HasAttachment,
@@ -404,9 +405,10 @@ mod tests {
     }
 
     #[test]
-    fn email_metadata_sync_requests_threading_headers() {
+    fn email_metadata_sync_requests_threading_headers_and_recipients() {
         let properties = super::email_metadata_properties();
 
+        assert!(properties.contains(&email::Property::To));
         assert!(properties.contains(&email::Property::MessageId));
         assert!(properties.contains(&email::Property::References));
         assert!(properties.contains(&email::Property::InReplyTo));

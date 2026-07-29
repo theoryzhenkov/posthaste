@@ -27,8 +27,11 @@ import {
   fetchMessage,
 } from '../api/client'
 import type {
+  AccountOverview,
   MessageDetail as MessageDetailRecord,
   MessageSummary,
+  Recipient,
+  SidebarResponse,
   SourceMessageRef,
 } from '../api/types'
 import { canPreviewAttachment, formatAttachmentSize } from '../attachments'
@@ -50,6 +53,11 @@ interface MessageSelection extends SourceMessageRef {
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageDetailProps {
   selection: MessageSelection | null
+  accounts?: AccountOverview[]
+  sidebar?: SidebarResponse
+  onArchive: () => void
+  onForward: () => void
+  onReply: () => void
   onSelectMessage: (message: MessageSummary) => void
   onSearch?: (query: string, append?: boolean) => void
 }
@@ -92,6 +100,64 @@ function formatAbsoluteDate(value: string): string {
   }).format(new Date(value))
 }
 
+function formatRecipient(recipient: Recipient): string {
+  return recipient.name?.trim() || recipient.email
+}
+
+function formatRecipientList(recipients: Recipient[]): string {
+  if (recipients.length === 0) {
+    return 'recipients unavailable'
+  }
+  const names = recipients.map(formatRecipient)
+  if (names.length <= 2) {
+    return names.join(', ')
+  }
+  return `${names.slice(0, 2).join(', ')} +${names.length - 2}`
+}
+
+function emailMatchesPattern(email: string, pattern: string): boolean {
+  const normalizedEmail = email.trim().toLowerCase()
+  const normalizedPattern = pattern.trim().toLowerCase()
+  if (normalizedPattern.length === 0) {
+    return false
+  }
+  if (!normalizedPattern.includes('*')) {
+    return normalizedEmail === normalizedPattern
+  }
+  const escaped = normalizedPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+  const regex = new RegExp(`^${escaped.replaceAll('*', '.*')}$`)
+  return regex.test(normalizedEmail)
+}
+
+function isOutgoingMessage(
+  message: MessageDetailRecord,
+  accounts: AccountOverview[],
+  sidebar?: SidebarResponse,
+): boolean {
+  const source = sidebar?.sources.find(
+    (candidate) => candidate.id === message.sourceId,
+  )
+  const sentMailboxIds =
+    source?.mailboxes
+      .filter((mailbox) => mailbox.role === 'sent')
+      .map((mailbox) => mailbox.id) ?? []
+  if (
+    message.mailboxIds.some((mailboxId) => sentMailboxIds.includes(mailboxId))
+  ) {
+    return true
+  }
+
+  const account = accounts.find(
+    (candidate) => candidate.id === message.sourceId,
+  )
+  if (!account || !message.fromEmail) {
+    return false
+  }
+  return account.emailPatterns.some((pattern) =>
+    emailMatchesPattern(message.fromEmail ?? '', pattern),
+  )
+}
+
 /**
  * Message detail pane with sticky header, thread switcher, and email body.
  *
@@ -99,6 +165,11 @@ function formatAbsoluteDate(value: string): string {
  */
 export function MessageDetail({
   selection,
+  accounts = [],
+  sidebar,
+  onArchive,
+  onForward,
+  onReply,
   onSelectMessage,
   onSearch,
 }: MessageDetailProps) {
@@ -221,6 +292,9 @@ export function MessageDetail({
   const senderName = message.fromName ?? message.fromEmail ?? 'Unknown sender'
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
+  const recipientLabel = isOutgoingMessage(message, accounts, sidebar)
+    ? `to ${formatRecipientList(message.to)}`
+    : 'to me'
   const threadMessages = dedupeConversationMessages(conversation.messages)
   const bodyRender = resolveMessageBodyRender(message)
   const sourceId = message.sourceId
@@ -292,7 +366,9 @@ export function MessageDetail({
                       </button>
                     )}
                   </span>
-                  <span className="text-muted-foreground/60">to me</span>
+                  <span className="text-muted-foreground/60">
+                    {recipientLabel}
+                  </span>
                   <span className="font-mono text-[11px] text-muted-foreground">
                     {formatAbsoluteDate(message.receivedAt)}
                   </span>
@@ -305,7 +381,8 @@ export function MessageDetail({
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <Button
-                  disabled
+                  aria-label="Reply"
+                  onClick={onReply}
                   size="icon-sm"
                   title="Reply"
                   type="button"
@@ -314,7 +391,8 @@ export function MessageDetail({
                   <Reply size={14} strokeWidth={1.6} />
                 </Button>
                 <Button
-                  disabled
+                  aria-label="Forward"
+                  onClick={onForward}
                   size="icon-sm"
                   title="Forward"
                   type="button"
@@ -323,7 +401,8 @@ export function MessageDetail({
                   <Forward size={14} strokeWidth={1.6} />
                 </Button>
                 <Button
-                  disabled
+                  aria-label="Archive"
+                  onClick={onArchive}
                   size="icon-sm"
                   title="Archive"
                   type="button"

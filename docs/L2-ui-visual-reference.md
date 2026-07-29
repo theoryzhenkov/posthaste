@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Precise visual contract for the handoff-matched PostHaste interface"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-24
+reviewed: 2026-05-24
 depends:
   - path: docs/L0-branding
   - path: docs/L0-ui
@@ -611,6 +611,7 @@ Overlay:
 - No background scrim or backdrop blur; the app remains visible and interactive.
 - Outside pointer interaction closes the panel unless it is pinned.
 - Dragged panel offset is persisted locally and restored on the next open.
+- Floating panels are user-resizable within the viewport.
 - During drag, show faint guide rails sized to the panel: left/center/right modal-width columns and top/bottom modal-height rows, with no fill. When the panel reaches a rail it resists movement for `12px` before breaking out, and the active rail highlights while resisting.
 
 Panel sheet:
@@ -624,7 +625,7 @@ Panel sheet:
 - Overflow: hidden.
 - Text color: theme foreground tokens, not hard-coded white.
 - Font: Geist.
-- Move and pin icon buttons sit at the left of the input row. Move drags the panel around the screen and persists the final placement; pin keeps it open during outside interaction.
+- Move, pin, and expand/restore icon buttons sit at the left of the input row. Move drags the panel around the screen and persists the final placement; pin keeps it open during outside interaction; expand temporarily fills the viewport and restores back to the floating panel.
 - The close button is icon-only and aligned to the far right independently of header content width.
 
 ## Command Palette
