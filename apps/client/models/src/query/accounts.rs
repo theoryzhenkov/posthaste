@@ -32,6 +32,12 @@ pub struct AccountRow {
     pub push: domain::PushStatus,
     pub last_sync_at: Option<String>,
     pub last_sync_error: Option<String>,
+    /// Live detail for the sync cycle in flight, cleared when it comes to rest.
+    /// Present only while `status` is `syncing`, so the UI can name the stage
+    /// instead of showing a bare indeterminate spinner.
+    #[serde(default)]
+    #[ts(optional, as = "Option<crate::mirror::SyncProgress>")]
+    pub sync_progress: Option<domain::SyncProgress>,
 }
 
 /// Every configured account with health/status.

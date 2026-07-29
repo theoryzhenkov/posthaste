@@ -25,6 +25,7 @@ export function MessageListRows({
   isFetchingNextPage,
   isLoading,
   isSyncing,
+  syncDetail,
   layout,
   onClearSearchQuery,
   onDismissError,
@@ -49,6 +50,8 @@ export function MessageListRows({
   isFetchingNextPage: boolean
   isLoading: boolean
   isSyncing: boolean
+  /** Live sync stage line, shown in the empty state during a cycle. */
+  syncDetail?: string | null
   layout: ThreadListLayout
   rows: ConversationTreeRow[]
   treeMode: boolean
@@ -87,7 +90,7 @@ export function MessageListRows({
         />
       )}
       {!isLoading && !errorState.showError && rows.length === 0 && (
-        <EmptyMessages isSyncing={isSyncing} />
+        <EmptyMessages isSyncing={isSyncing} syncDetail={syncDetail} />
       )}
       {rows.length > 0 && (
         <>

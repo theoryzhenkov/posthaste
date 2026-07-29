@@ -17,6 +17,7 @@ import type { MessageSummary } from '../../../data/transport/api/index'
 import { MailApiError } from '@/data/transport/client'
 
 import type { MailSelection } from '@/data/models/selection'
+import { syncProgressView } from '@/data/models/syncProgress'
 import { useActivePane } from '../../keyboard/usePane'
 import type { PreparedServerSearchQuery } from '../../../domain/search'
 import { flatMessageRows } from './model/conversationTree'
@@ -143,18 +144,27 @@ export function MessageList({
   // No accounts configured at all → the empty list is onboarding, not an empty
   // mailbox; the empty state offers an "Add an account" CTA instead.
   const hasNoAccounts = accountDirectory.accounts.length === 0
-  const isSyncing = useMemo(() => {
+  // Resolve the account whose cycle the empty state narrates, then derive both
+  // the flag and the detail line from it, so the two always describe the same
+  // account rather than the flag coming from one and the stage from another.
+  const syncingAccount = useMemo(() => {
     const accounts = accountDirectory.accounts
     if (selectedView?.kind === 'source-mailbox') {
-      return (
-        accounts.find((account) => account.id === selectedView.sourceId)
-          ?.status === 'syncing'
+      const account = accounts.find(
+        (item) => item.id === selectedView.sourceId,
       )
+      return account?.status === 'syncing' ? account : null
     }
-    return accounts.some(
-      (account) => account.enabled && account.status === 'syncing',
+    return (
+      accounts.find(
+        (account) => account.enabled && account.status === 'syncing',
+      ) ?? null
     )
   }, [accountDirectory.accounts, selectedView])
+  const isSyncing = syncingAccount !== null
+  const syncDetail = syncingAccount?.syncProgress
+    ? syncProgressView(syncingAccount.syncProgress).label
+    : null
   const selectedKey = selectionKey(selection)
   const activeKey = selectionKey(opened)
 
@@ -289,6 +299,7 @@ export function MessageList({
               isFetchingNextPage={mailListView.isLoadingMore}
               isLoading={mailListView.isLoading}
               isSyncing={isSyncing}
+              syncDetail={syncDetail}
               layout={tableLayout}
               onClearSearchQuery={onClearSearchQuery}
               onDismissError={() => setDismissedErrorKey(errorKey)}

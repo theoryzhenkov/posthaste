@@ -131,6 +131,8 @@ export * from "./SnoozeIntent";
 export * from "./SyncCompletedPayload";
 export * from "./SyncMode";
 export * from "./SyncNowIntent";
+export * from "./SyncProgress";
+export * from "./SyncProgressStage";
 export * from "./SyncResourceRef";
 export * from "./SyncTrigger";
 export * from "./TagAppearance";

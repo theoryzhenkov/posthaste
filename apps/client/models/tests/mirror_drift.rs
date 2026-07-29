@@ -56,6 +56,38 @@ fn message_summary() -> domain::MessageSummary {
 #[test]
 fn structs_decode_strictly_from_domain_serialization() {
     assert_mirrors::<mirror::Recipient>("Recipient", &recipient());
+    // Both shapes the gateways actually emit: IMAP fills the mailbox counters,
+    // JMAP reports stage + detail only.
+    assert_mirrors::<mirror::SyncProgress>(
+        "SyncProgress",
+        &domain::SyncProgress {
+            sync_id: "sync-1".into(),
+            trigger: domain::SyncTrigger::Poll,
+            started_at: "2026-07-30T08:00:00Z".into(),
+            stage: domain::SyncProgressStage::Fetching,
+            detail: "Fetching mailbox".into(),
+            mailbox_name: Some("Inbox".into()),
+            mailbox_index: Some(2),
+            mailbox_count: Some(7),
+            message_count: Some(120),
+            total_count: Some(400),
+        },
+    );
+    assert_mirrors::<mirror::SyncProgress>(
+        "SyncProgress",
+        &domain::SyncProgress {
+            sync_id: "sync-2".into(),
+            trigger: domain::SyncTrigger::Push,
+            started_at: "2026-07-30T08:00:00Z".into(),
+            stage: domain::SyncProgressStage::Discovering,
+            detail: "Checking for changes".into(),
+            mailbox_name: None,
+            mailbox_index: None,
+            mailbox_count: None,
+            message_count: None,
+            total_count: None,
+        },
+    );
     assert_mirrors::<mirror::MessageSummary>("MessageSummary", &message_summary());
     assert_mirrors::<mirror::MailboxSummary>(
         "MailboxSummary",
@@ -450,12 +482,24 @@ fn enums_decode_every_domain_variant() {
             P::Connected | P::Reconnecting | P::Unsupported | P::Disabled => {}
         }
     }
+    fn covered_sync_stage(value: domain::SyncProgressStage) {
+        use domain::SyncProgressStage as S;
+        match value {
+            S::Connecting
+            | S::Discovering
+            | S::Planning
+            | S::Fetching
+            | S::Storing
+            | S::Waiting => {}
+        }
+    }
     covered_sort(domain::MessageSortField::Date);
     covered_kind(domain::OperationKind::Send);
     covered_state(domain::OperationState::Pending);
     covered_entity(domain::OperationEntityKind::Message);
     covered_status(domain::AccountStatus::Ready);
     covered_push(domain::PushStatus::Connected);
+    covered_sync_stage(domain::SyncProgressStage::Fetching);
 
     for field in [
         domain::MessageSortField::Date,
@@ -510,6 +554,16 @@ fn enums_decode_every_domain_variant() {
         domain::PushStatus::Disabled,
     ] {
         assert_mirrors::<mirror::PushStatus>("PushStatus", &push);
+    }
+    for stage in [
+        domain::SyncProgressStage::Connecting,
+        domain::SyncProgressStage::Discovering,
+        domain::SyncProgressStage::Planning,
+        domain::SyncProgressStage::Fetching,
+        domain::SyncProgressStage::Storing,
+        domain::SyncProgressStage::Waiting,
+    ] {
+        assert_mirrors::<mirror::SyncProgressStage>("SyncProgressStage", &stage);
     }
 }
 

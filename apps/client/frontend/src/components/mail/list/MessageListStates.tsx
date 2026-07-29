@@ -96,7 +96,14 @@ export function LoadingRows({ rowHeight }: { rowHeight: number }) {
   )
 }
 
-export function EmptyMessages({ isSyncing = false }: { isSyncing?: boolean }) {
+export function EmptyMessages({
+  isSyncing = false,
+  syncDetail,
+}: {
+  isSyncing?: boolean
+  /** Live stage line for the running cycle, when the provider reports one. */
+  syncDetail?: string | null
+}) {
   // During an initial/repair sync the projection is legitimately empty while
   // mail streams in — show a syncing state rather than a bare "no messages".
   if (isSyncing) {
@@ -114,8 +121,10 @@ export function EmptyMessages({ isSyncing = false }: { isSyncing?: boolean }) {
           <p className="text-sm font-medium text-muted-foreground">
             Syncing your mail…
           </p>
+          {/* Prefer the live stage over the generic reassurance: on a big
+              initial sync it is the only thing that shows the run moving. */}
           <p className="mt-1 text-xs text-muted-foreground/60">
-            Messages will appear as they arrive
+            {syncDetail || 'Messages will appear as they arrive'}
           </p>
         </div>
       </div>

@@ -2,6 +2,7 @@
 import type { AccountId } from "./AccountId";
 import type { AccountStatus } from "./AccountStatus";
 import type { PushStatus } from "./PushStatus";
+import type { SyncProgress } from "./SyncProgress";
 
 /**
  * One account as the client renders it: identity plus live health. The full
@@ -17,4 +18,10 @@ status: AccountStatus,
 /**
  * Push transport state.
  */
-push: PushStatus, lastSyncAt: string | null, lastSyncError: string | null, };
+push: PushStatus, lastSyncAt: string | null, lastSyncError: string | null, 
+/**
+ * Live detail for the sync cycle in flight, cleared when it comes to rest.
+ * Present only while `status` is `syncing`, so the UI can name the stage
+ * instead of showing a bare indeterminate spinner.
+ */
+syncProgress?: SyncProgress, };

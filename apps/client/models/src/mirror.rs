@@ -814,6 +814,52 @@ pub enum SyncTrigger {
     Manual,
 }
 
+/// Twin of [`posthaste_domain_model::SyncProgressStage`].
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncProgressStage {
+    Connecting,
+    Discovering,
+    Planning,
+    Fetching,
+    Storing,
+    Waiting,
+}
+
+/// Twin of [`posthaste_domain_model::SyncProgress`] — live detail for the sync
+/// cycle currently in flight.
+///
+/// Counts are provider-dependent and every one of them is optional: the IMAP
+/// gateway walks mailboxes and reports `mailbox_name`/`mailbox_index`/
+/// `mailbox_count`, so its progress can be shown as a determinate fraction,
+/// while the JMAP gateway reports `stage` and `detail` only. Consumers must
+/// render the stage without them.
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgress {
+    pub sync_id: String,
+    pub trigger: SyncTrigger,
+    pub started_at: String,
+    pub stage: SyncProgressStage,
+    /// Short human-readable phrase, e.g. "Fetching mailbox".
+    pub detail: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub mailbox_name: Option<String>,
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub mailbox_index: Option<usize>,
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub mailbox_count: Option<usize>,
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub message_count: Option<usize>,
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub total_count: Option<usize>,
+}
+
 /// Twin of [`posthaste_domain_model::SyncResourceRef`].
 #[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

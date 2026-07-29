@@ -62,6 +62,7 @@ pub(crate) async fn evaluate_accounts(app: &AppState) -> Result<AccountsResult, 
                 push: overview.push,
                 last_sync_at: overview.last_sync_at,
                 last_sync_error: overview.last_sync_error,
+                sync_progress: overview.sync_progress,
             }
         })
         .collect();
