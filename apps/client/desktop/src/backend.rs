@@ -7,11 +7,10 @@
 //! and removes it on exit, so local consumers (CLI, scripts) find the same
 //! port + token the webviews get injected.
 
-use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 use axum::http::{HeaderValue, Method};
-use posthaste_client_backend::{AppPaths, AppState, BuildOptions, ConnectionInfo};
+use posthaste_client_backend::{AppPaths, AppState, BuildOptions, ConnectionInfo, ServerHandle};
 use tower_http::cors::CorsLayer;
 
 /// Webview and dev origins allowed to call the loopback API. The webview
@@ -33,6 +32,9 @@ pub(crate) struct EmbeddedBackend {
     pub(crate) port: u16,
     pub(crate) auth_token: String,
     pub(crate) info_path: PathBuf,
+    /// The serving task, so teardown can stop answering requests *before*
+    /// [`AppState::shutdown`] closes the store the handlers read through.
+    server: ServerHandle,
 }
 
 /// Assemble the backend service core over `paths`, bind the API on an
@@ -48,21 +50,14 @@ pub(crate) async fn start(paths: AppPaths) -> Result<EmbeddedBackend, String> {
     let mut info = ConnectionInfo::generate(0);
     let router = posthaste_client_backend::router(state.clone(), info.token.clone()).layer(cors());
 
-    let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+    let server = posthaste_client_backend::serve_router(router, 0)
         .await
         .map_err(|error| format!("failed to bind the API port: {error}"))?;
-    let addr = listener
-        .local_addr()
-        .map_err(|error| format!("failed to resolve the bound API address: {error}"))?;
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = axum::serve(listener, router).await {
-            tracing::error!(%error, "embedded API server exited with an error");
-        }
-    });
 
-    info.port = addr.port();
+    info.port = server.addr.port();
     let info_path = state.paths.connection_info_path();
     if let Err(error) = info.write(&info_path) {
+        server.abort();
         state.shutdown().await;
         return Err(format!(
             "failed to write connection info at {}: {error}",
@@ -71,19 +66,27 @@ pub(crate) async fn start(paths: AppPaths) -> Result<EmbeddedBackend, String> {
     }
 
     Ok(EmbeddedBackend {
+        port: server.addr.port(),
         state,
-        port: addr.port(),
         auth_token: info.token,
         info_path,
+        server,
     })
 }
 
-/// Remove the connection-info file and run the backend's ordered teardown.
-/// Idempotent; called from the `RunEvent::Exit` hook.
+/// Ordered teardown: drop the discovery document, stop serving, then run the
+/// backend's own teardown. Idempotent; called from the `RunEvent::Exit` hook.
+///
+/// The server is stopped *before* [`AppState::shutdown`], not after: shutdown
+/// stops the account runtimes, closes the store and releases the state-root
+/// lock, and any request still in flight — including the SSE stream the
+/// webviews hold open — would otherwise be reading a closed store through a
+/// handler that has no idea teardown has begun.
 pub(crate) async fn stop(backend: &EmbeddedBackend) {
     if let Err(error) = ConnectionInfo::remove(&backend.info_path) {
         tracing::warn!(%error, "failed to remove connection info during shutdown");
     }
+    backend.server.abort();
     backend.state.shutdown().await;
 }
 

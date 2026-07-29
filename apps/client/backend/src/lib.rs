@@ -296,21 +296,32 @@ impl ServerHandle {
     }
 }
 
-/// Bind the API on loopback and serve [`router`] over it. `port` 0 requests
-/// an ephemeral port; the bound address is on the returned handle. `token`
-/// is the session secret every request must present — the caller publishes
-/// it through the connection-info file.
-pub async fn serve(state: AppState, port: u16, token: String) -> std::io::Result<ServerHandle> {
+/// Bind the API on loopback and serve `app` over it. `port` 0 requests an
+/// ephemeral port; the bound address is on the returned handle.
+///
+/// This is the one bind-and-serve path. Embeddings that must decorate the
+/// router — the desktop shell layers CORS on for the webview origins — build
+/// it with [`router`] and come through here rather than re-spawning
+/// `axum::serve` themselves, so every embedding gets a handle that can stop
+/// the server before [`AppState::shutdown`] closes the store underneath it.
+pub async fn serve_router(app: axum::Router, port: u16) -> std::io::Result<ServerHandle> {
     let listener =
         tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
     let addr = listener.local_addr()?;
-    let app = router(state, token);
     let task = tokio::spawn(async move {
         if let Err(error) = axum::serve(listener, app).await {
             tracing::error!(%error, "API server exited with an error");
         }
     });
     Ok(ServerHandle { addr, task })
+}
+
+/// Bind the API on loopback and serve [`router`] over it. `port` 0 requests
+/// an ephemeral port; the bound address is on the returned handle. `token`
+/// is the session secret every request must present — the caller publishes
+/// it through the connection-info file.
+pub async fn serve(state: AppState, port: u16, token: String) -> std::io::Result<ServerHandle> {
+    serve_router(router(state, token), port).await
 }
 
 /// The API router over [`AppState`]: queries, commands, the event stream,
