@@ -3,30 +3,12 @@
 
 set working-directory := '../../..'
 
-# Stage the posthastectl Tauri sidecar for a LOCAL `tauri build`.
+# Thin wrapper over the shared script the release build and the CI packaging
+# gate also call, so local staging cannot drift from what ships. Idempotent —
+# delete apps/client/desktop/binaries/posthastectl-* to refresh after changing
+# the CLI. See tools/release/stage-sidecar.sh for the contract.
 #
-# `bundle.externalBin` in tauri.conf.json requires
-# apps/client/desktop/binaries/posthastectl-<host-target-triple>[.exe] to exist
-# before `tauri build` (Tauri validates it at bundle time; `tauri dev` does not).
-# Idempotent — skips if already staged; delete the file to refresh after
-# changing the CLI. CI stages the sidecar itself in the build-desktop job
-# (.github/workflows/release.yml); this recipe is for local bundle testing.
+# Stage the posthastectl Tauri sidecar for a local `tauri build`.
 stage-sidecar:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    triple="$(rustc -vV | sed -n 's/^host: //p')"
-    ext=""
-    case "$triple" in *windows*) ext=".exe";; esac
-    dest="apps/client/desktop/binaries/posthastectl-${triple}${ext}"
-    mkdir -p apps/client/desktop/binaries
-    if [ -f "$dest" ]; then
-      echo "sidecar already staged: $dest"
-      exit 0
-    fi
-    # Build the host posthastectl binary (Bun --compile). build-cli.ts prints
-    # the final artifact path as its last stdout line.
-    artifact="$(bun run apps/tools/scripts/build-cli.ts | tail -1)"
-    test -n "$artifact" && test -f "$artifact" || { echo "posthastectl build failed" >&2; exit 1; }
-    cp "$artifact" "$dest"
-    echo "staged sidecar: $dest"
+    bash tools/release/stage-sidecar.sh
 
