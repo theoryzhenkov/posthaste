@@ -6,7 +6,7 @@
   Tauri's macOS signing pass is "inside-out": it applies ONE entitlements file
   to every binary it bundles — the app itself AND any `bundle.externalBin`
   sidecars. This plist exists because the `posthastectl` sidecar
-  (`bundle.externalBin`) is a Bun `--compile` executable that embeds
+  (`bundle.externalBin`) is a Bun-compiled executable that embeds
   JavaScriptCore and JIT-compiles at runtime. Notarization requires the
   hardened runtime, which blocks JIT / writable-executable memory / unsigned
   dynamic code by default — without these entitlements the sidecar crashes on
