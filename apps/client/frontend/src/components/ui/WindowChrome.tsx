@@ -41,7 +41,7 @@ export function WindowTitlebar({ title }: { title?: ReactNode }) {
   return (
     <div
       data-tauri-drag-region
-      className="relative flex shrink-0 select-none items-center border-b border-border-soft bg-chrome text-chrome-foreground"
+      className="surface-chrome relative flex shrink-0 select-none items-center border-b text-chrome-foreground"
       style={{
         height: WINDOW_TITLEBAR_HEIGHT,
         paddingLeft: WINDOW_TRAFFIC_LIGHT_INSET,

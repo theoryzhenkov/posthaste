@@ -19,7 +19,7 @@ export function NoMailboxSelected({
   if (hasNoAccounts) {
     return (
       <div
-        className="flex h-full flex-col items-center justify-center gap-3 bg-panel p-6"
+        className="surface-pane flex h-full flex-col items-center justify-center gap-3 p-6"
         data-message-list-empty="true"
         onMouseDown={onMouseDown}
       >
@@ -51,7 +51,7 @@ export function NoMailboxSelected({
   }
   return (
     <div
-      className="flex h-full flex-col items-center justify-center gap-3 bg-panel p-6"
+      className="surface-pane flex h-full flex-col items-center justify-center gap-3 p-6"
       data-message-list-empty="true"
       onMouseDown={onMouseDown}
     >

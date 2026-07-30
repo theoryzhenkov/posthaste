@@ -308,7 +308,7 @@ export function ComposeOverlay({
   if (shell === 'document') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-        <div className="shrink-0 border-b border-border/70 bg-chrome text-chrome-foreground">
+        <div className="surface-chrome shrink-0 border-b text-chrome-foreground">
           {header}
         </div>
         {content}

@@ -194,7 +194,7 @@ export function Sidebar({
   })
 
   return (
-    <aside className="flex h-full min-h-0 min-w-0 flex-col bg-sidebar text-sidebar-foreground">
+    <aside className="surface-sidebar flex h-full min-h-0 min-w-0 flex-col text-sidebar-foreground">
       <nav className="ph-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-3">
         {isLoading && <SidebarLoading />}
         {error && <SidebarError onRetry={() => void refetchBootstrap()} />}

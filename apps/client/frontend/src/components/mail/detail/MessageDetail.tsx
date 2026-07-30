@@ -105,7 +105,7 @@ export function MessageDetail({
   void onSelectMessage
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel">
+    <div className="surface-pane flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <MessageHeader
         conversationSubject={conversation.subject}
         message={message}
@@ -119,7 +119,7 @@ export function MessageDetail({
           messageId={message.id}
           sourceId={message.sourceId}
         />
-        <div className="min-h-0 flex-1 overflow-hidden bg-panel">
+        <div className="min-h-0 flex-1 overflow-hidden">
           <MessageBody message={message} />
         </div>
       </div>

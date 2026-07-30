@@ -208,7 +208,7 @@ export function SettingsPanel({
       data-posthaste-state={settingsReadinessState}
       className={cn(
         'flex h-full min-h-0 w-full flex-col overflow-hidden text-card-foreground md:flex-row',
-        shell === 'overlay' ? 'bg-background' : 'bg-card',
+        shell === 'overlay' ? 'bg-background' : 'surface-card',
       )}
     >
       <SettingsRail

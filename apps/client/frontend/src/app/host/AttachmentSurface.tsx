@@ -29,7 +29,7 @@ function AttachmentPreviewContent({
 
   if (attachment.mimeType.startsWith('image/')) {
     return (
-      <div className="relative flex h-full min-h-0 items-center justify-center bg-panel p-5">
+      <div className="relative flex h-full min-h-0 items-center justify-center p-5">
         {progress}
         <img
           alt={attachment.filename ?? 'Attachment preview'}
@@ -43,7 +43,7 @@ function AttachmentPreviewContent({
   }
 
   return (
-    <div className="relative h-full min-h-0 bg-panel">
+    <div className="relative h-full min-h-0">
       {progress}
       <iframe
         className="h-full w-full border-0 bg-panel"
@@ -76,7 +76,7 @@ export function AttachmentSurface({
 
   if (messageQuery.isPending) {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-panel">
+      <div className="surface-pane flex h-full min-h-0 flex-col">
         <ProgressBar
           label="Loading attachment"
           className="border-b border-border px-4 py-2"
@@ -98,7 +98,7 @@ export function AttachmentSurface({
 
   if (messageQuery.error || !messageQuery.data || !attachment) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-panel">
+      <div className="surface-pane flex h-full flex-col items-center justify-center gap-3">
         <AlertCircle
           size={32}
           strokeWidth={1.5}
@@ -119,8 +119,8 @@ export function AttachmentSurface({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-panel">
-      <header className="flex h-[54px] shrink-0 items-center gap-3 border-b border-border bg-panel px-4">
+    <div className="surface-pane flex h-full min-h-0 flex-col">
+      <header className="flex h-[54px] shrink-0 items-center gap-3 border-b border-border px-4">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-[5px] bg-brand-coral text-brand-coral-foreground">
           <FileText size={16} strokeWidth={1.6} />
         </div>
@@ -154,9 +154,9 @@ export function AttachmentSurface({
         )}
       </header>
 
-      <div className="min-h-0 flex-1 bg-panel">
+      <div className="min-h-0 flex-1">
         {!canPreviewAttachment(attachment) || !attachmentUrl ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 bg-panel text-center">
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <FileText
               size={34}
               strokeWidth={1.5}

@@ -28,7 +28,7 @@ export function ResizeCellBadge({
   }
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-md border [border-color:color-mix(in_oklab,var(--brand-coral)_30%,var(--border))] bg-[color-mix(in_oklab,var(--panel)_85%,transparent)] px-2 py-1 font-mono text-[11px] font-medium text-foreground/80 shadow-sm backdrop-blur-sm">
+    <div className="pointer-events-none absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-md border [border-color:color-mix(in_oklab,var(--brand-coral)_30%,var(--border))] bg-[color-mix(in_oklab,var(--panel)_85%,transparent)] px-2 py-1 font-mono text-[11px] font-medium text-foreground/80 shadow-sm">
       {resizeCells.columns} × {resizeCells.rows}
     </div>
   )

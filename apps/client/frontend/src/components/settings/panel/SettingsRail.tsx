@@ -114,7 +114,7 @@ export function SettingsRail({
       )
 
   return (
-    <aside className="flex max-h-[190px] min-h-0 w-full shrink-0 flex-col border-b border-sidebar-border bg-sidebar text-sidebar-foreground md:h-full md:max-h-none md:w-[210px] md:border-b-0 md:border-r">
+    <aside className="surface-sidebar flex max-h-[190px] min-h-0 w-full shrink-0 flex-col border-b text-sidebar-foreground md:h-full md:max-h-none md:w-[210px] md:border-b-0 md:border-r">
       <div className="flex h-12 shrink-0 items-center px-4 md:h-14">
         {onClose && (
           <Button

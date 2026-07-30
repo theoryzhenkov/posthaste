@@ -91,7 +91,7 @@ export function SurfaceHost({
       data-posthaste-state={`state.surface.${surface.kind}.ready.test`}
       data-posthaste-surface-kind={surface.kind}
     >
-      <header className="flex h-[42px] shrink-0 items-center gap-3 border-b border-border-soft bg-chrome px-3 text-chrome-foreground">
+      <header className="surface-chrome flex h-[42px] shrink-0 items-center gap-3 border-b px-3 text-chrome-foreground">
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold">
             {surfaceWindowPolicy(surface).title}

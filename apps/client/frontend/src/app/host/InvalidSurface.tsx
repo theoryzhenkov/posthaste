@@ -22,7 +22,7 @@ export function InvalidSurface({
       data-posthaste-state="state.surface.invalid.ready.test"
       data-posthaste-surface-kind="invalid"
     >
-      <section className="grid max-w-md gap-4 rounded-lg border border-border bg-card p-5 text-card-foreground shadow-lg">
+      <section className="surface-card grid max-w-md gap-4 rounded-lg border p-5 text-card-foreground">
         <div className="flex items-start gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
             <AlertTriangle size={18} />

@@ -58,7 +58,7 @@ export function MessageHeader({
   const headerActions = orderForHeader(headerActionsFor(message))
 
   return (
-    <div className="shrink-0 border-b border-border bg-panel px-5 py-4">
+    <div className="shrink-0 border-b border-border px-5 py-4">
       <div className="flex items-start gap-3">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-coral text-[11px] font-semibold text-brand-coral-foreground">
           {initialsForSender(senderName)}

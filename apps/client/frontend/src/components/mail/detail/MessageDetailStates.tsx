@@ -4,7 +4,7 @@ import { ProgressBar } from '../../ui/display/progress'
 
 export function EmptyMessageDetail() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 bg-panel px-6">
+    <div className="surface-pane flex h-full flex-col items-center justify-center gap-4 px-6">
       <div className="flex size-18 items-center justify-center rounded-2xl border border-border bg-card shadow-[var(--shadow-pane)]">
         <Mail
           size={30}
@@ -26,7 +26,7 @@ export function EmptyMessageDetail() {
 
 export function LoadingMessageDetail({ label }: { label: string }) {
   return (
-    <div className="flex h-full flex-col bg-panel">
+    <div className="surface-pane flex h-full flex-col">
       <ProgressBar
         label={label}
         className="border-b border-border px-5 py-2"
@@ -51,7 +51,7 @@ export function LoadingMessageDetail({ label }: { label: string }) {
 
 export function ErrorMessageDetail({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-panel">
+    <div className="surface-pane flex h-full flex-col items-center justify-center gap-3">
       <AlertCircle
         size={32}
         strokeWidth={1.5}

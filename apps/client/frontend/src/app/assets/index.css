@@ -372,17 +372,6 @@
   );
 }
 
-[data-palette-preset='glass'] .bg-chrome,
-[data-palette-preset='glass'] .bg-sidebar,
-[data-palette-preset='glass'] .bg-panel,
-[data-palette-preset='glass'] .bg-background,
-[data-palette-preset='glass'] .bg-card,
-[data-palette-preset='glass'] .bg-bg-elev {
-  background-clip: padding-box;
-  -webkit-backdrop-filter: blur(44px) saturate(180%);
-  backdrop-filter: blur(44px) saturate(180%);
-}
-
 [data-ui-density='compact'] {
   --density-toolbar-height: 2.375rem;
   --density-sidebar-row-height: 1.5rem;

@@ -108,7 +108,7 @@ export function ActionBar({
 }: ActionBarProps) {
   return (
     <header
-      className="flex shrink-0 items-center gap-1 border-b border-border-soft bg-chrome px-3 text-chrome-foreground"
+      className="surface-chrome flex shrink-0 items-center gap-1 border-b px-3 text-chrome-foreground"
       style={{ height: WINDOW_TITLEBAR_HEIGHT }}
     >
       <TrafficLightInset />

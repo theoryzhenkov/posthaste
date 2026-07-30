@@ -97,7 +97,7 @@ export function OnboardingTour() {
         role="dialog"
         aria-modal="true"
         aria-label="Posthaste tour"
-        className="absolute w-[340px] max-w-[calc(100vw-24px)] rounded-xl border border-border bg-panel p-4 text-foreground shadow-[0_24px_70px_rgb(0_0_0/0.4)]"
+        className="surface-floating absolute w-[340px] max-w-[calc(100vw-24px)] rounded-xl border p-4 text-foreground"
         style={
           cardPos
             ? { top: cardPos.top, left: cardPos.left }
