@@ -5,6 +5,7 @@ import {
 } from './tokens/accent'
 import { designClassNames, designDataAttributes } from './tokens/attributes'
 import { defaultUiDensity, type UiDensity } from './tokens/density'
+import { surfaceCustomProperties, surfaceThemeFor } from './tokens/surfaces'
 import {
   defaultGlassThemeParameters,
   glassMeshBackground,
@@ -97,10 +98,12 @@ export function applyRootTheme(
       : `oklch(0.90 0.075 ${accentHue} / 0.56)`
   const accentForeground = `oklch(0.14 0.035 ${accentHue})`
 
+  const style = themeStyle(theme)
+
   root.setAttribute(designDataAttributes.themeMode, mode)
   root.setAttribute(designDataAttributes.resolvedThemeMode, resolvedMode)
   root.setAttribute(designDataAttributes.palettePreset, theme)
-  root.setAttribute(designDataAttributes.paletteStyle, themeStyle(theme))
+  root.setAttribute(designDataAttributes.paletteStyle, style)
   root.setAttribute(designDataAttributes.uiDensity, density)
   root.classList.toggle(designClassNames.dark, resolvedMode === 'dark')
   root.style.setProperty('--ph-accent-hue', String(accentHue))
@@ -155,6 +158,14 @@ export function applyRootTheme(
     '--glass-mesh-background',
     glassMeshBackground(glassTheme, resolvedMode),
   )
+  // Surface materials come last: they are allowed to compose the accent tokens
+  // written above (the floating wash does), and publishing them here rather
+  // than as CSS blocks is what keeps a theme from owning a selector.
+  for (const [property, value] of surfaceCustomProperties(
+    surfaceThemeFor(style, resolvedMode),
+  )) {
+    root.style.setProperty(property, value)
+  }
 
   return {
     mode,

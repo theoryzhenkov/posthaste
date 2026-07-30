@@ -432,6 +432,66 @@
 }
 
 @layer utilities {
+  /*
+   * Surface roles — the ONE way each kind of region is painted.
+   *
+   * Source of truth is src/lib/design/tokens/surfaces.ts: themes are typed data
+   * and `applyRootTheme` publishes `--surface-<role>-<facet>` onto the root
+   * element. These rules are the only consumers, and surfaces.test.ts asserts
+   * the two sides match exactly.
+   *
+   * The `var(…, fallback)` second argument is the palette token this role used
+   * to be painted with. It covers the first frame only — the theme is applied
+   * in an effect, so a paint happens before any --surface-* exists.
+   *
+   * NOTE the asymmetry, which is the point of the whole system: only
+   * `.surface-floating` and `.surface-overlay` declare `backdrop-filter`.
+   * Compositing a content pane makes it a stacking context and a backdrop root,
+   * which is what let an in-flow pane occlude a portaled floating panel it
+   * outranks. Content roles buy their translucency with fill alpha instead.
+   */
+  .surface-chrome {
+    background: var(--surface-chrome-fill, var(--chrome));
+    border-color: var(--surface-chrome-border, var(--border-soft));
+    box-shadow: var(--surface-chrome-shadow, none);
+  }
+
+  .surface-sidebar {
+    background: var(--surface-sidebar-fill, var(--sidebar));
+    border-color: var(--surface-sidebar-border, var(--sidebar-border));
+    box-shadow: var(--surface-sidebar-shadow, none);
+  }
+
+  .surface-pane {
+    background: var(--surface-pane-fill, var(--panel));
+    border-color: var(--surface-pane-border, var(--border));
+    box-shadow: var(--surface-pane-shadow, none);
+  }
+
+  .surface-card {
+    background: var(--surface-card-fill, var(--card));
+    border-color: var(--surface-card-border, var(--border));
+    box-shadow: var(--surface-card-shadow, none);
+  }
+
+  .surface-floating {
+    background: var(--surface-floating-fill, var(--panel));
+    background-clip: padding-box;
+    border-color: var(--surface-floating-border, var(--border));
+    box-shadow: var(--surface-floating-shadow, none);
+    -webkit-backdrop-filter: var(--surface-floating-blur, none);
+    backdrop-filter: var(--surface-floating-blur, none);
+  }
+
+  .surface-overlay {
+    background: var(--surface-overlay-fill, var(--popover));
+    background-clip: padding-box;
+    border-color: var(--surface-overlay-border, var(--border));
+    box-shadow: var(--surface-overlay-shadow, none);
+    -webkit-backdrop-filter: var(--surface-overlay-blur, none);
+    backdrop-filter: var(--surface-overlay-blur, none);
+  }
+
   .ph-scroll {
     scrollbar-width: thin;
     scrollbar-color: color-mix(

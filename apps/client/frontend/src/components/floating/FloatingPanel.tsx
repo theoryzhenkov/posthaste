@@ -168,7 +168,12 @@ export function FloatingPanel({
         ref={panelRef}
         onPointerDownCapture={bringToFront}
         className={cn(
-          'pointer-events-auto relative w-full overflow-hidden rounded-[14px] border [border-color:color-mix(in_oklab,var(--brand-coral)_22%,var(--border))] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--brand-coral)_14%,var(--panel))_0%,color-mix(in_oklab,var(--ring)_7%,var(--panel))_50%,var(--panel)_100%)] text-foreground shadow-[0_28px_80px_rgb(0_0_0/0.24)] backdrop-blur-[24px] backdrop-saturate-150 dark:shadow-[0_28px_80px_rgb(0_0_0/0.48)]',
+          'pointer-events-auto relative w-full overflow-hidden rounded-[14px] border text-foreground',
+          // The panel's material is the theme's, not this component's. It used
+          // to hand-roll a gradient plus a 24px blur while the glass palette
+          // blurred every other surface at 44px — one look, two implementations,
+          // neither aware of the other.
+          layer === 'overlay' ? 'surface-overlay' : 'surface-floating',
           className,
           isExpanded
             ? 'h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)]'
