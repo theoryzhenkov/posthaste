@@ -259,6 +259,7 @@
   --muted-foreground: #584f70;
   --accent: rgba(0, 0, 0, 0.03);
   --accent-foreground: #1a1728;
+  --destructive: oklch(0.58 0.22 25);
   --border: rgba(0, 0, 0, 0.08);
   --input: rgba(0, 0, 0, 0.08);
   --ring: #b882ff;
@@ -291,6 +292,8 @@
   --list-hover: rgba(0, 0, 0, 0.03);
   --list-selection: rgba(180, 130, 255, 0.35);
   --list-selection-foreground: #2a1a50;
+  --list-selection-muted: rgba(90, 84, 110, 0.22);
+  --list-selection-muted-foreground: #2a2440;
   --list-divider: rgba(0, 0, 0, 0.04);
   --hover-bg: rgba(0, 0, 0, 0.03);
   --focus-soft: rgba(184, 130, 255, 0.24);
@@ -317,6 +320,7 @@
   --muted-foreground: #b0a8c8;
   --accent: rgba(255, 255, 255, 0.05);
   --accent-foreground: #f0ecff;
+  --destructive: #f87171;
   --border: rgba(255, 255, 255, 0.1);
   --input: rgba(255, 255, 255, 0.1);
   --ring: #b882ff;
@@ -349,6 +353,8 @@
   --list-hover: rgba(255, 255, 255, 0.05);
   --list-selection: rgba(180, 130, 255, 0.25);
   --list-selection-foreground: #f5f0ff;
+  --list-selection-muted: rgba(255, 255, 255, 0.13);
+  --list-selection-muted-foreground: #ded9ee;
   --list-divider: rgba(255, 255, 255, 0.06);
   --hover-bg: rgba(255, 255, 255, 0.05);
   --focus-soft: rgba(184, 130, 255, 0.34);
