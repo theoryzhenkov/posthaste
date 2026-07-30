@@ -12,6 +12,10 @@ gone; the pre-deletion tree survives on `legacy/split-model-final`). Status
 determined from each doc's own markers and cross-checked against the commit
 history (M-step / S-step / slice landings).
 
+Added 2026-07-30: `DESIGN-L2-theming` — the client theming rework, implemented.
+Its §4 records where the motivating diagnosis was wrong and §5 lists what was
+deliberately left undone; no claim it makes about appearance was observed.
+
 Added 2026-07-30: `AUDIT-L2-architecture-review`. Note that its §2.3 and §2.4
 contradict two status rows in this table — `RFC-L2-provider-reliability` is
 recorded below as **SHIPPED — M30–M37 all landed**, while D98 (in M36's
@@ -50,6 +54,7 @@ the remote (`git ls-remote --heads origin` returns only `main`).
 | **AUDIT-L2-architecture-review** | Post-pivot review of the integrated app: the account-scoped derive read under the global write lock, four guards enforcing less than they document, the unobservable provider breaker + unpaced poll loop, 647/727 dead `@spec` pointers. Sequenced next steps. | **EVIDENCE/AUDIT** (2026-07-30) — 4 confirmed / 2 contested / 4 **unverified** (§4 is leads only). Successor pass to AUDIT-L2-architecture-health; re-measures its open `@spec` lint row (degraded 473 → 647). |
 | **DESIGN-L2-deployment-topology** | Forward design: productize the deployment topology over the realized link mechanism (control-pane UI, transport selector, native IPC, hardening). | **REFERENCE** (design note) — link mechanism realized; productization partial. |
 | **DESIGN-L2-release-channels** | Release channels as a first-class concept: a single per-channel policy table (identity, updater manifest, devtools, signing, smoke gates). | **REFERENCE** (design note) — machinery realized and in use (tools/release/*). |
+| **DESIGN-L2-theming** | Separate palette / material / compositing in the client theme system: six surface roles supplied as typed per-theme data, `backdrop-filter` confined to the floating tiers (killing the glass-only notifications-panel occlusion by construction), themes forbidden from writing selectors, and completeness gates on both the typed materials and the hand-written palette blocks. | **DESIGN — IMPLEMENTED** (2026-07-30) — all four migration steps landed, one commit each; structural claims mutation-tested, visual claims unverified (never rendered). |
 | **DESIGN-L2-undo-redo-synced-history** | The model: per-account durable server-authoritative reversible-op log, cursor synced as a view, evaluation stays local-optimistic; cross-device undo. | **REFERENCE** (design note) — Phase 1 shipped; Phase 2 implemented (see revlog-contract). |
 | **DESIGN-L2-undo-redo-revlog-contract** | Phase 2 implementable contract: rev_log store table + cursor + RevLog synced view; client proposes idempotent cursor moves, server arbitrates. | **REFERENCE** (design contract) — Slices 1–5c landed; remaining JMAP per-message version + e2e. |
 | **PLAN-L2-client-link-unification** | Forward plan: finish unifying the client↔runtime link onto assertion-replication (U1 recompute, U3 replica-default, U4 coverage, U5 one BackendApi). | **SUPERSEDED** by RFC-L2-mirror-client — the client↔runtime link it unified is deleted (2026-07-18). U2 view-deltas landed pre-retirement; U1/U3/U4/U5 will not be implemented. |
