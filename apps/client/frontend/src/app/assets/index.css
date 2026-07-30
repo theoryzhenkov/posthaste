@@ -245,7 +245,14 @@
   color-scheme: light;
 
   --radius: 0.625rem;
-  --background: transparent;
+  /* `--background` is the token a component reaches for when it must COVER
+     something — full-screen route takeovers, error states, the connection
+     banner. Glass used to set it to `transparent` and lean on the palette's
+     blanket backdrop-filter rule over `.bg-background` to make it read as a
+     frosted sheet, which left the token itself meaning "nothing". With that
+     rule gone it has to carry its own weight: a high-alpha wash occludes for
+     real while still letting the mesh tint what sits on it. */
+  --background: rgba(250, 248, 255, 0.92);
   --foreground: #1a1728;
   --card: rgba(255, 255, 255, 0.55);
   --card-foreground: #1a1728;
@@ -306,7 +313,7 @@
 .dark[data-palette-preset='glass'] {
   color-scheme: dark;
 
-  --background: transparent;
+  --background: rgba(10, 8, 18, 0.92);
   --foreground: #f0ecff;
   --card: rgba(20, 18, 30, 0.4);
   --card-foreground: #f0ecff;

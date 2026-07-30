@@ -12,7 +12,9 @@ import {
 
 /** The only consumer of the surface tokens (`.surface-<role>` rules). */
 const CSS_PATH = join(import.meta.dir, '../../../app/assets/index.css')
-const css = readFileSync(CSS_PATH, 'utf8')
+// Comments are stripped: the assertions below scan for rule shapes, and the
+// stylesheet's own prose quotes the very patterns they forbid.
+const css = readFileSync(CSS_PATH, 'utf8').replaceAll(/\/\*[\s\S]*?\*\//g, '')
 
 const themeKeys = Object.keys(surfaceThemes) as (keyof typeof surfaceThemes)[]
 

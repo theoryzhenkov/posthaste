@@ -78,21 +78,28 @@ const EXEMPT_TOKENS: Readonly<Record<string, string>> = {
   '--ph-surface-chroma': 'runtime-owned; unused by the glass literals',
 }
 
-/** The `--token: value;` declarations inside one top-level block. */
-function blockTokens(selector: string): ReadonlySet<string> {
+/** The `--token: value` declarations inside one top-level block. */
+function blockDeclarations(selector: string): ReadonlyMap<string, string> {
   const start = css.indexOf(`\n${selector} {`)
   expect(start, `${selector} block not found in index.css`).toBeGreaterThan(-1)
   const end = css.indexOf('\n}\n', start)
   const body = css.slice(start, end)
-  return new Set(
-    [...body.matchAll(/^\s*(--[a-z0-9-]+):/gm)].map(
-      (match) => match[1] as string,
-    ),
+  return new Map(
+    [...body.matchAll(/^\s*(--[a-z0-9-]+):([^;]*);/gm)].map((match) => [
+      match[1] as string,
+      (match[2] as string).trim(),
+    ]),
   )
 }
 
+const declarations = new Map(
+  THEME_BLOCKS.map((theme) => [theme.label, blockDeclarations(theme.selector)]),
+)
 const blocks = new Map(
-  THEME_BLOCKS.map((theme) => [theme.label, blockTokens(theme.selector)]),
+  [...declarations].map(([label, declared]) => [
+    label,
+    new Set(declared.keys()) as ReadonlySet<string>,
+  ]),
 )
 
 /** What every theme owes: `:root`'s tokens, less structure and exemptions. */
@@ -132,6 +139,21 @@ describe('palette block completeness', () => {
         structural,
         `${label} redeclares structural token(s) ${structural.join(', ')}`,
       ).toEqual([])
+    }
+  })
+
+  test('no theme makes a semantic token mean nothing', () => {
+    // A token that resolves to `transparent` in one theme and to a colour in
+    // another has no stable contract: `bg-background` is what a component uses
+    // to COVER something, and glass used to define it as nothing at all,
+    // leaning on a blanket backdrop-filter rule to fake the fill. Themes may
+    // vary alpha; they may not opt out of having a value.
+    for (const [label, declared] of declarations) {
+      for (const [token, value] of declared) {
+        expect(value, `${label} defines ${token} as nothing`).not.toBe(
+          'transparent',
+        )
+      }
     }
   })
 
