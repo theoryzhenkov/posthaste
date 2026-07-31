@@ -1,13 +1,21 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { useCallback, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import {
   type FloatingPanelSizePreset,
   floatingPanelSizeStyle,
 } from '@/components/floating/geometry/layout'
-import { nextWindowZIndex, Z } from '@/lib/design/layering'
+import {
+  acquireWindowSlot,
+  raiseWindowSlot,
+  releaseWindowSlot,
+  Z,
+  type WindowSlot,
+} from '@/lib/design/layering'
 import { cn } from '@/lib/design/cn'
+
+import { floatingRoot } from './floatingRoot'
 
 import { FloatingPanelGuides } from './panel/FloatingPanelGuides'
 import { FloatingPanelHeader } from './panel/FloatingPanelHeader'
@@ -53,15 +61,37 @@ export function FloatingPanel({
   onClose,
   onOpenInWindow,
 }: FloatingPanelProps) {
-  // WINDOW-tier panels claim a fresh z within the band on mount (newest above
-  // its peers) and re-claim it on any pointer interaction (focus raises). The
-  // OVERLAY tier is a single fixed value above the whole band.
-  const [zIndex, setZIndex] = useState(() =>
-    layer === 'overlay' ? Z.OVERLAY : nextWindowZIndex(),
+  // WINDOW-tier panels hold a slot in the band for as long as they are mounted:
+  // it opens at the front (newest above its peers) and is re-raised on any
+  // pointer interaction (focus raises). The allocator re-seats live slots when
+  // the band would otherwise run off its ceiling, hence the change callback —
+  // a panel's z can move without that panel doing anything. The OVERLAY tier is
+  // a single fixed value above the whole band and claims no slot.
+  const [zIndex, setZIndex] = useState<number>(() =>
+    layer === 'overlay' ? Z.OVERLAY : Z.WINDOW,
   )
+  const slotRef = useRef<WindowSlot | null>(null)
+  // Layout effect, not effect: the slot must be claimed before the browser
+  // paints, or the panel shows for one frame at the band floor — behind the
+  // peers it just opened over.
+  useLayoutEffect(() => {
+    if (layer === 'overlay') {
+      return
+    }
+    const slot = acquireWindowSlot(setZIndex)
+    slotRef.current = slot
+    setZIndex(slot.z)
+    return () => {
+      releaseWindowSlot(slot)
+      slotRef.current = null
+    }
+  }, [layer])
   const bringToFront = useCallback(() => {
     if (layer === 'overlay') return
-    setZIndex(nextWindowZIndex())
+    const slot = slotRef.current
+    if (slot) {
+      raiseWindowSlot(slot)
+    }
   }, [layer])
   const [isPinned, setIsPinned] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
@@ -106,7 +136,7 @@ export function FloatingPanel({
         }
       : {}
 
-  // Portal to document.body so the panel escapes any ancestor that
+  // Portal into the floating root so the panel escapes any ancestor that
   // establishes a backdrop root or a containing block for `fixed` (a
   // `backdrop-filter`/`transform`/`filter` ancestor — e.g. the ActionBar
   // header's `bg-chrome` in the glass theme). Without this, the panel's own
@@ -183,6 +213,6 @@ export function FloatingPanel({
         <ResizeCellBadge isResizing={resize.isResizing} panelSize={panelSize} />
       </div>
     </div>,
-    document.body,
+    floatingRoot(),
   )
 }
