@@ -1,8 +1,7 @@
 /**
- * Root application component: QueryClientProvider, stream-driven invalidation,
- * three-column layout, and focused surfaces.
+ * Root application component: this window's live mirror, three-column layout,
+ * and focused surfaces.
  */
-import { QueryClientProvider } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { Toaster } from 'sonner'
 
@@ -10,7 +9,7 @@ import { CommandDispatcher } from '../commands/index'
 import { ConnectionBanner } from './shell/ConnectionBanner'
 import { MailClient } from './mail/MailClient'
 import { Z } from '@/lib/design/layering'
-import { queryClient, useStreamInvalidation } from '../data/index'
+import { MirrorProvider } from '../data/index'
 import { ErrorBoundary } from './shell/ErrorBoundary'
 import { FocusedSurfaceDocument } from './host/FocusedSurface'
 import { InvalidSurfaceDocument } from './host/InvalidSurface'
@@ -29,13 +28,6 @@ import {
   markSurfaceBootstrap,
   markSurfaceBootstrapOnce,
 } from '@/lib/log/surfaceBootstrap'
-
-/** The ONE liveness policy: a generation advance on the event stream
- * invalidates every query react-query holds (debounced). */
-function StreamInvalidationBridge() {
-  useStreamInvalidation()
-  return null
-}
 
 /** New-mail OS banners: `message.updated` payloads prompt the arrival gate. */
 function NewMailNotificationsBridge() {
@@ -82,20 +74,15 @@ export default function App() {
 
   useDesktopUpdates()
 
+  // Every window gets a live mirror: MirrorProvider creates this window's
+  // QueryClient and subscribes it to the stream in one act, so there is no
+  // "and remember to mount the bridge" step left to forget.
   return (
-    <QueryClientProvider client={queryClient}>
+    <MirrorProvider>
       <PlatformServicesProvider>
       <CommandDispatcher scope={APP_COMMAND_SCOPE}>
       <DesignThemeProvider writeThrough>
         <AppearanceSettingsSync />
-        {/* Liveness, in EVERY window. Each webview is its own JS realm with
-            its own QueryClient, so a second window invalidating can only
-            refresh its OWN mirror — there is no shared cache for a duplicate
-            subscription to disturb. Skipping it does not save work, it strands
-            the window: `staleTime: Infinity` with no focus/reconnect refetch
-            means an unsubscribed mirror is mount-fetched once and never again,
-            which reads as a UI frozen mid-progress until the user reloads. */}
-        <StreamInvalidationBridge />
         <ConnectionBanner />
         {/* Process-wide OS effects — one window at most, or the app
             double-notifies and two windows fight over the shared Dock
@@ -128,7 +115,7 @@ export default function App() {
       </DesignThemeProvider>
       </CommandDispatcher>
       </PlatformServicesProvider>
-    </QueryClientProvider>
+    </MirrorProvider>
   )
 }
 

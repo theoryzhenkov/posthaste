@@ -17,9 +17,9 @@ import {
   type ClientPreferencesStore,
 } from '@/data/preferences'
 import { persistAppearance } from '@/data/preferences/persistAppearance'
-import { queryClient } from '@/data/queries/queryClient'
 import { useOptionalMailClient } from '@/data/context'
 import type { DesignThemePreferences } from '@/lib/design/theme/themeSettings'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   useCallback,
   useEffect,
@@ -54,6 +54,9 @@ interface DesignThemeProviderProps {
    * Write appearance changes through to the settings document (the
    * `updateSettings` command) — the single source of truth. Off in tests
    * (which exercise the localStorage cache in isolation); on in the app.
+   *
+   * Either way this provider reads the window's mirror from context, so it
+   * must be mounted under `MirrorProvider`.
    */
   writeThrough?: boolean
 }
@@ -70,6 +73,10 @@ export function DesignThemeProvider({
   )
   const { density, glassTheme, light, dark, mode, theme } = preferences
   const mailClient = useOptionalMailClient()
+  // This window's mirror, from context — the write-through persist invalidates
+  // it on acceptance. Read here rather than imported, because the mirror is
+  // per-window state and only its provider hands one out.
+  const mirror = useQueryClient()
 
   // Coalesce write-through settings updates: a continuous gesture (dragging a
   // hue slider fires onChange per tick) would otherwise storm `updateSettings`
@@ -98,10 +105,10 @@ export function DesignThemeProvider({
     // failure, roll the local cache back to the burst baseline so it never
     // diverges from what persisted.
     const latest = store.getSnapshot().appearance
-    void persistAppearance(mailClient, queryClient, latest).catch(() => {
+    void persistAppearance(mailClient, mirror, latest).catch(() => {
       store.setAppearance(baseline)
     })
-  }, [mailClient, store])
+  }, [mailClient, mirror, store])
 
   // Flush any pending appearance persist on unmount so a change made just
   // before the settings panel closes still reaches the settings document.
