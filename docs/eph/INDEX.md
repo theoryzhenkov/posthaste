@@ -16,6 +16,12 @@ Added 2026-07-30: `DESIGN-L2-theming` — the client theming rework, implemented
 Its §4 records where the motivating diagnosis was wrong and §5 lists what was
 deliberately left undone; no claim it makes about appearance was observed.
 
+Added 2026-07-31: `DESIGN-L2-window-liveness` — the client window-liveness fix,
+implemented. Narrower than the theming rework: three steps, one frontend
+composition defect. Its §5 is the important half — the frontend suite has no
+DOM, so nothing about React composition or real multi-window behaviour is
+tested, and the ownership scheme it lands is a lease rather than an election.
+
 Added 2026-07-30: `AUDIT-L2-architecture-review`. Note that its §2.3 and §2.4
 contradict two status rows in this table — `RFC-L2-provider-reliability` is
 recorded below as **SHIPPED — M30–M37 all landed**, while D98 (in M36's
@@ -55,6 +61,7 @@ the remote (`git ls-remote --heads origin` returns only `main`).
 | **DESIGN-L2-deployment-topology** | Forward design: productize the deployment topology over the realized link mechanism (control-pane UI, transport selector, native IPC, hardening). | **REFERENCE** (design note) — link mechanism realized; productization partial. |
 | **DESIGN-L2-release-channels** | Release channels as a first-class concept: a single per-channel policy table (identity, updater manifest, devtools, signing, smoke gates). | **REFERENCE** (design note) — machinery realized and in use (tools/release/*). |
 | **DESIGN-L2-theming** | Separate palette / material / compositing in the client theme system: six surface roles supplied as typed per-theme data, `backdrop-filter` confined to the floating tiers (killing the glass-only notifications-panel occlusion by construction), themes forbidden from writing selectors, and completeness gates on both the typed materials and the hand-written palette blocks. | **DESIGN — IMPLEMENTED** (2026-07-30) — all four migration steps landed, one commit each; structural claims mutation-tested, visual claims unverified (never rendered). |
+| **DESIGN-L2-window-liveness** | Split the one boolean answering two questions in the client's app root: liveness (the stream subscription that keeps a window's mirror fresh) belongs in EVERY window and is now inseparable from the mirror — one provider creates the `QueryClient` and subscribes it, and no bare client is exported — while ownership of the process-wide OS surfaces (Dock badge, new-mail banners) stops being inferred from window identity and becomes a leased claim that survives its holder closing. | **DESIGN — IMPLEMENTED** (2026-07-31) — three migration steps landed, one commit each; the ownership claim is unit-tested (mutation-checked), React composition and multi-window runtime behaviour are untested (no DOM) and unobserved. |
 | **DESIGN-L2-undo-redo-synced-history** | The model: per-account durable server-authoritative reversible-op log, cursor synced as a view, evaluation stays local-optimistic; cross-device undo. | **REFERENCE** (design note) — Phase 1 shipped; Phase 2 implemented (see revlog-contract). |
 | **DESIGN-L2-undo-redo-revlog-contract** | Phase 2 implementable contract: rev_log store table + cursor + RevLog synced view; client proposes idempotent cursor moves, server arbitrates. | **REFERENCE** (design contract) — Slices 1–5c landed; remaining JMAP per-message version + e2e. |
 | **PLAN-L2-client-link-unification** | Forward plan: finish unifying the client↔runtime link onto assertion-replication (U1 recompute, U3 replica-default, U4 coverage, U5 one BackendApi). | **SUPERSEDED** by RFC-L2-mirror-client — the client↔runtime link it unified is deleted (2026-07-18). U2 view-deltas landed pre-retirement; U1/U3/U4/U5 will not be implemented. |
