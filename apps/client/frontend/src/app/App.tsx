@@ -88,20 +88,21 @@ export default function App() {
       <CommandDispatcher scope={APP_COMMAND_SCOPE}>
       <DesignThemeProvider writeThrough>
         <AppearanceSettingsSync />
-        {/* Main-window-only services — a standalone surface window must not
-            run these (duplicate liveness, double-notify, or drive the shared
-            Dock counter). */}
+        {/* Liveness, in EVERY window. Each webview is its own JS realm with
+            its own QueryClient, so a second window invalidating can only
+            refresh its OWN mirror — there is no shared cache for a duplicate
+            subscription to disturb. Skipping it does not save work, it strands
+            the window: `staleTime: Infinity` with no focus/reconnect refetch
+            means an unsubscribed mirror is mount-fetched once and never again,
+            which reads as a UI frozen mid-progress until the user reloads. */}
+        <StreamInvalidationBridge />
+        <ConnectionBanner />
+        {/* Process-wide OS effects — one window at most, or the app
+            double-notifies and two windows fight over the shared Dock
+            counter, which is app-wide rather than per-window. */}
         {!isStandaloneSurface && (
           <>
-            {/* Liveness rides the facade's event stream in the MAIN window; a
-                standalone surface window keeps its queries mount-fetched only. */}
-            <StreamInvalidationBridge />
-            {/* New-mail banners ride the same stream — main window only, so a
-                secondary surface window never double-notifies. */}
             <NewMailNotificationsBridge />
-            <ConnectionBanner />
-            {/* App-wide unread badge — main window only; a standalone surface
-                window must not drive the shared Dock counter to 0. */}
             <DockBadge />
           </>
         )}
