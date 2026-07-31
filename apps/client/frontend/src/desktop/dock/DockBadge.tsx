@@ -2,7 +2,9 @@
  * App-root Dock/taskbar unread-badge driver. Sums inbox unread across enabled
  * accounts from the `accounts` + `mailboxCounts` families and pushes it to
  * the app icon (see useDockBadge.ts for the count selection + Tauri sink).
- * Renders nothing; mount once in the main window.
+ * Renders nothing; mount in the one window holding the shared-OS-surface
+ * claim (lib/platform/sharedOsSurfaces.ts) — the badge is a single app-wide
+ * counter, so a second driver would fight the first.
  */
 import { useMemo, type ReactNode } from 'react'
 

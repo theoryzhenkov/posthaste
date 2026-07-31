@@ -280,8 +280,11 @@ function notifyNewMailFromEvent(
   coordinator.onMessageUpdated(event)
 }
 
-/** Mounts the arrival gate on the event stream (main window only). The event
- * payload prompts a banner decision and nothing else. */
+/** Mounts the arrival gate on the event stream. Every window is subscribed to
+ * that stream, so App mounts this only in the window holding the shared-OS-
+ * surface claim (lib/platform/sharedOsSurfaces.ts) — one arrival must not be
+ * one banner per open window. The event payload prompts a banner decision and
+ * nothing else. */
 export function useNewMailNotifications(): void {
   const queryClient = useQueryClient()
   useDomainEvent('message.updated', (payload) =>

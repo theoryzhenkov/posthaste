@@ -15,7 +15,9 @@
  *
  * Badge API (Tauri v2): `getCurrentWindow().setBadgeCount(count?)` from
  * `@tauri-apps/api/window`; `undefined`/`0` clears the badge. It is app-wide, not
- * per-window, so only the main mail window drives it.
+ * per-window, so exactly one window drives it — whichever holds the
+ * shared-OS-surface claim (lib/platform/sharedOsSurfaces.ts), which is the main
+ * window while there is one and a surviving surface window after there is not.
  */
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect, useRef } from 'react'

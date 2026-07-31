@@ -17,6 +17,7 @@ import { DesignThemeProvider } from './shell/ThemeProvider'
 import { PlatformServicesProvider } from './shell/PlatformServicesProvider'
 import { toggleDevtools } from '../desktop/runtime'
 import { isMainDesktopWindow, isTauriRuntime } from '@/lib/platform/runtime'
+import { useOwnsSharedOsSurfaces } from '@/lib/platform/sharedOsSurfaces'
 import { isDeveloperToolsEnabled } from '../desktop/devtools'
 import type { CommandScope } from '../lib/command'
 import { useNewMailNotifications } from '../data/notifications/newMailArrivals'
@@ -62,6 +63,10 @@ export default function App() {
     routeState.kind === 'invalid' ? routeState.route : null
   const isStandaloneSurface =
     isTauriRuntime() && routeState.kind !== 'none' && !isMainDesktopWindow()
+  // Which DOCUMENT this window renders is a question about the window; whether
+  // it may drive the Dock badge and the OS banners is a question about the
+  // process. Separate concepts, separately answered.
+  const ownsSharedOsSurfaces = useOwnsSharedOsSurfaces()
 
   markSurfaceBootstrapOnce('app_render', {
     isStandaloneSurface,
@@ -84,10 +89,11 @@ export default function App() {
       <DesignThemeProvider writeThrough>
         <AppearanceSettingsSync />
         <ConnectionBanner />
-        {/* Process-wide OS effects — one window at most, or the app
-            double-notifies and two windows fight over the shared Dock
-            counter, which is app-wide rather than per-window. */}
-        {!isStandaloneSurface && (
+        {/* Process-wide OS effects — whichever window holds the claim, and
+            only that one: the Dock counter is app-wide rather than
+            per-window, and two windows on the arrival gate post two banners.
+            The claim survives its holder closing (sharedOsSurfaces.ts). */}
+        {ownsSharedOsSurfaces && (
           <>
             <NewMailNotificationsBridge />
             <DockBadge />
