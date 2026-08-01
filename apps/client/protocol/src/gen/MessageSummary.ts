@@ -10,4 +10,4 @@ import type { ThreadId } from "./ThreadId";
  * Twin of [`posthaste_domain_model::MessageSummary`] — the list-row
  * projection.
  */
-export type MessageSummary = { id: MessageId, sourceId: AccountId, sourceName: string, sourceThreadId: ThreadId, conversationId: ConversationId, subject: string | null, fromName: string | null, fromEmail: string | null, to: Array<Recipient>, preview: string | null, receivedAt: string, hasAttachment: boolean, isRead: boolean, isFlagged: boolean, mailboxIds: Array<MailboxId>, keywords: Array<string>, version?: number, rfcMessageId?: string, inReplyTo?: string, draftId?: string, };
+export type MessageSummary = { id: MessageId, sourceId: AccountId, sourceName: string, sourceThreadId: ThreadId, conversationId: ConversationId, subject: string | null, fromName: string | null, fromEmail: string | null, to: Array<Recipient>, cc?: Array<Recipient>, bcc?: Array<Recipient>, replyTo?: Array<Recipient>, preview: string | null, receivedAt: string, hasAttachment: boolean, isRead: boolean, isFlagged: boolean, mailboxIds: Array<MailboxId>, keywords: Array<string>, version?: number, rfcMessageId?: string, inReplyTo?: string, draftId?: string, };

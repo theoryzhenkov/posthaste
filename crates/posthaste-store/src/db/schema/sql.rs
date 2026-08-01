@@ -26,6 +26,9 @@ pub(super) const SCHEMA_SQL: &str = "
                 from_name TEXT,
                 from_email TEXT,
                 to_json TEXT NOT NULL DEFAULT '[]',
+                cc_json TEXT NOT NULL DEFAULT '[]',
+                bcc_json TEXT NOT NULL DEFAULT '[]',
+                reply_to_json TEXT NOT NULL DEFAULT '[]',
                 preview TEXT,
                 received_at TEXT NOT NULL,
                 has_attachment INTEGER NOT NULL DEFAULT 0,
@@ -507,6 +510,9 @@ pub(super) const SCHEMA_SQL: &str = "
                 from_name TEXT,
                 from_email TEXT,
                 to_json TEXT NOT NULL DEFAULT '[]',
+                cc_json TEXT NOT NULL DEFAULT '[]',
+                bcc_json TEXT NOT NULL DEFAULT '[]',
+                reply_to_json TEXT NOT NULL DEFAULT '[]',
                 preview TEXT,
                 received_at TEXT NOT NULL,
                 has_attachment INTEGER NOT NULL DEFAULT 0,
@@ -552,7 +558,8 @@ pub(super) const EFFECTIVE_VIEWS_SQL: &str = "
             CREATE VIEW IF NOT EXISTS message_effective AS
                 SELECT m.account_id, m.id, m.thread_id, m.conversation_id,
                        m.remote_blob_id, m.subject, m.normalized_subject,
-                       m.from_name, m.from_email, m.to_json, m.preview,
+                       m.from_name, m.from_email, m.to_json, m.cc_json,
+                       m.bcc_json, m.reply_to_json, m.preview,
                        m.received_at, m.has_attachment, m.size, m.is_read,
                        m.is_flagged, m.rfc_message_id, m.in_reply_to,
                        m.references_json, m.draft_id, m.list_unsubscribe
@@ -564,7 +571,8 @@ pub(super) const EFFECTIVE_VIEWS_SQL: &str = "
                 UNION ALL
                 SELECT o.account_id, o.id, o.thread_id, o.conversation_id,
                        o.remote_blob_id, o.subject, o.normalized_subject,
-                       o.from_name, o.from_email, o.to_json, o.preview,
+                       o.from_name, o.from_email, o.to_json, o.cc_json,
+                       o.bcc_json, o.reply_to_json, o.preview,
                        o.received_at, o.has_attachment, o.size, o.is_read,
                        o.is_flagged, o.rfc_message_id, o.in_reply_to,
                        o.references_json, o.draft_id, o.list_unsubscribe

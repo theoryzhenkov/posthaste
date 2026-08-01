@@ -108,8 +108,8 @@ pub(crate) fn upsert_message_record_tx(
             account_id, id, thread_id, conversation_id, remote_blob_id, subject,
             normalized_subject, from_name, from_email, to_json, preview, received_at,
             has_attachment, size, is_read, is_flagged, rfc_message_id, in_reply_to,
-            references_json, draft_id, list_unsubscribe
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            references_json, draft_id, list_unsubscribe, cc_json, bcc_json, reply_to_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
          ON CONFLICT(account_id, id) DO UPDATE SET
             thread_id = excluded.thread_id,
             conversation_id = excluded.conversation_id,
@@ -129,7 +129,16 @@ pub(crate) fn upsert_message_record_tx(
             in_reply_to = excluded.in_reply_to,
             references_json = excluded.references_json,
             draft_id = excluded.draft_id,
-            list_unsubscribe = COALESCE(excluded.list_unsubscribe, list_unsubscribe)",
+            list_unsubscribe = COALESCE(excluded.list_unsubscribe, list_unsubscribe),
+            -- The Vec analogue of the COALESCE above: an empty incoming array
+            -- means 'this record carried no header data', never 'the header
+            -- was removed' — Cc/Bcc/Reply-To are immutable per message — so a
+            -- partial re-apply cannot blank a value an earlier parse found.
+            cc_json = CASE WHEN excluded.cc_json = '[]' THEN cc_json ELSE excluded.cc_json END,
+            bcc_json = CASE WHEN excluded.bcc_json = '[]' THEN bcc_json ELSE excluded.bcc_json END,
+            reply_to_json = CASE
+                WHEN excluded.reply_to_json = '[]' THEN reply_to_json
+                ELSE excluded.reply_to_json END",
         params![
             account_id.as_str(),
             message.id.as_str(),
@@ -162,7 +171,10 @@ pub(crate) fn upsert_message_record_tx(
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()
-                .map_err(json_to_store_error)?
+                .map_err(json_to_store_error)?,
+            serde_json::to_string(&message.cc).map_err(json_to_store_error)?,
+            serde_json::to_string(&message.bcc).map_err(json_to_store_error)?,
+            serde_json::to_string(&message.reply_to).map_err(json_to_store_error)?
         ],
     )
     .map_err(sql_to_store_error)?;

@@ -471,7 +471,7 @@ async fn fetch_all_remote_email_ids(client: &Client) -> Result<(Vec<String>, boo
     Ok((ids, complete))
 }
 
-pub(crate) fn email_metadata_properties() -> [email::Property; 19] {
+pub(crate) fn email_metadata_properties() -> [email::Property; 22] {
     [
         email::Property::Id,
         email::Property::ThreadId,
@@ -481,6 +481,12 @@ pub(crate) fn email_metadata_properties() -> [email::Property; 19] {
         email::Property::Subject,
         email::Property::From,
         email::Property::To,
+        // The rest of the recipient set the message-field registry projects.
+        // Structured JMAP properties, so no header parsing and no extra round
+        // trip — they ride the `Email/get` the metadata sync already issues.
+        email::Property::Cc,
+        email::Property::Bcc,
+        email::Property::ReplyTo,
         email::Property::Preview,
         email::Property::ReceivedAt,
         email::Property::SentAt,

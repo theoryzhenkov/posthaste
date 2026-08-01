@@ -372,6 +372,9 @@ impl MailGateway for MockJmapGateway {
             .find(|message| &message.id == message_id)
             .ok_or_else(|| GatewayError::Rejected("unknown message".to_string()))?;
         Ok(FetchedBody {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             body_html: message.body_html.clone(),
             body_text: message.body_text.clone(),
             raw_mime: message.raw_mime.clone(),
@@ -673,6 +676,9 @@ impl MailGateway for MockJmapGateway {
         bump_revision(&mut state);
         let new_id = MessageId::from(format!("draft-created-{}", state.revision));
         state.messages.push(MessageRecord {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             id: new_id.clone(),
             source_thread_id: ThreadId::from(new_id.as_str()),
             remote_blob_id: None,

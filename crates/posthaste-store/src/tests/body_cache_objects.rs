@@ -66,6 +66,9 @@ fn apply_message_body_marks_body_cache_object_cached() -> Result<(), StoreError>
         &account,
         &message_id,
         &FetchedBody {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             body_html: Some("<p>Hello</p>".to_string()),
             body_text: Some("Hello".to_string()),
             attachments: Vec::new(),
@@ -114,6 +117,9 @@ fn read_raw_message_returns_cached_raw_bytes() -> Result<(), StoreError> {
         &account,
         &message_id,
         &FetchedBody {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             body_html: None,
             body_text: Some("Body".to_string()),
             attachments: Vec::new(),

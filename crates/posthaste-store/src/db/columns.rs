@@ -2,9 +2,11 @@ use super::*;
 
 pub(super) fn ensure_column(
     connection: &Connection,
-    table_name: &'static str,
-    column_name: &'static str,
-    alter_sql: &'static str,
+    table_name: &str,
+    column_name: &str,
+    // Borrowed rather than `&'static`: a caller adding the same column to both
+    // message planes builds the statement with `format!`.
+    alter_sql: &str,
 ) -> Result<(), StoreError> {
     let mut statement = connection
         .prepare(&format!("PRAGMA table_info({table_name})"))

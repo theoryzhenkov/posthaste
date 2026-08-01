@@ -52,6 +52,9 @@ pub(super) fn sample_message_summary(id: &str, keywords: Vec<String>) -> Message
         from_name: Some("PostHaste Updates".to_string()),
         from_email: Some("hello@example.com".to_string()),
         to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
         preview: None,
         received_at: posthaste_domain_model::RFC3339_EPOCH.to_string(),
         has_attachment: false,
@@ -139,6 +142,9 @@ pub(super) fn sample_fetched_body() -> FetchedBody {
         raw_mime: None,
         attachments: Vec::new(),
         list_unsubscribe: None,
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
     }
 }
 

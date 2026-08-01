@@ -27,6 +27,18 @@ pub struct MessageRecord {
     pub from_email: Option<String>,
     #[serde(default)]
     pub to: Vec<Recipient>,
+    /// Carbon-copy recipients, projected onto the list row beside [`to`].
+    ///
+    /// [`to`]: Self::to
+    #[serde(default)]
+    pub cc: Vec<Recipient>,
+    /// Blind-carbon-copy recipients — present only on sent copies and drafts;
+    /// delivering MTAs strip the header from received mail.
+    #[serde(default)]
+    pub bcc: Vec<Recipient>,
+    /// `Reply-To` addresses, when the sender nominated any.
+    #[serde(default)]
+    pub reply_to: Vec<Recipient>,
     pub preview: Option<String>,
     pub received_at: String,
     pub has_attachment: bool,
@@ -182,6 +194,20 @@ pub struct FetchedBody {
     /// without a provider-wide resync.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub list_unsubscribe: Option<ListUnsubscribe>,
+    /// `Cc`/`Bcc`/`Reply-To` re-extracted from the fetched message, same
+    /// old-mail backfill role as [`list_unsubscribe`]: rows synced before
+    /// these columns existed gain them at message-open instead of forcing a
+    /// provider-wide resync. Empty means "nothing to contribute" — the store
+    /// side only ever fills a column that is still empty, so a re-fetch can
+    /// never blank a value the ingest path already parsed.
+    ///
+    /// [`list_unsubscribe`]: Self::list_unsubscribe
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cc: Vec<Recipient>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bcc: Vec<Recipient>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reply_to: Vec<Recipient>,
 }
 
 /// An ordered domain event stored in `event_log` and published via SSE.

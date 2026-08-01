@@ -59,6 +59,10 @@ pub(crate) async fn fetch_message_body(
         email::Property::Subject,
         email::Property::TextBody,
         email::Property::To,
+        // Completes the recipient set the body fetch already asked for (Cc and
+        // Bcc were here for draft-resume MIME synthesis), so it doubles as the
+        // old-mail backfill source for the recipient columns.
+        email::Property::ReplyTo,
         // Unsubscribe headers ride along on the body fetch so messages synced
         // before the `list_unsubscribe` column existed are backfilled at
         // message-open (JMAP serves no raw RFC822 here, so headers must be
@@ -143,6 +147,9 @@ pub(crate) async fn fetch_message_body(
         raw_mime: Some(raw_mime),
         attachments,
         list_unsubscribe: crate::conversions::list_unsubscribe_from_email(&email),
+        cc: crate::conversions::recipients_from(email.cc()),
+        bcc: crate::conversions::recipients_from(email.bcc()),
+        reply_to: crate::conversions::recipients_from(email.reply_to()),
     })
 }
 

@@ -181,6 +181,7 @@ mod outbox;
 mod overlay;
 mod prune_floor_guard;
 mod reads_events_integrity;
+mod recipient_columns;
 mod reconcile;
 mod repair;
 mod rev_log;

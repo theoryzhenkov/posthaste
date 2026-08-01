@@ -44,6 +44,29 @@ pub struct MessageSummary {
     pub from_name: Option<String>,
     pub from_email: Option<String>,
     pub to: Vec<Recipient>,
+    /// Carbon-copy recipients. Kept beside [`to`] on the SUMMARY rather than
+    /// the detail so the message list and the detail pane project ONE
+    /// recipient field set: a field can be shown as a list column or as a
+    /// detail row without two divergent derivations.
+    ///
+    /// Empty for most mail, and omitted from the wire when empty, so a
+    /// list-query page pays nothing for the rows that have none.
+    ///
+    /// [`to`]: Self::to
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cc: Vec<Recipient>,
+    /// Blind-carbon-copy recipients. Almost always EMPTY on received mail:
+    /// delivering MTAs strip `Bcc` by design, so a value here means the
+    /// message is one the user sent (with a provider that preserved the
+    /// header on the Sent copy) or an unsent draft. Consumers must treat
+    /// permanent absence as normal, never as missing data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bcc: Vec<Recipient>,
+    /// `Reply-To` addresses, when the sender nominated somewhere other than
+    /// `From` for replies (mailing lists; no-reply senders naming a real
+    /// contact). Empty when the header is absent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reply_to: Vec<Recipient>,
     pub preview: Option<String>,
     pub received_at: String,
     pub has_attachment: bool,

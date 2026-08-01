@@ -32,6 +32,9 @@ pub(super) fn sample_mailboxes() -> Vec<MailboxRecord> {
 pub(super) fn sample_messages() -> Vec<MessageRecord> {
     vec![
         MessageRecord {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             id: MessageId::from("em-001"),
             source_thread_id: posthaste_domain_model::ThreadId::from("th-roadmap"),
             remote_blob_id: None,
@@ -55,6 +58,9 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             list_unsubscribe: None,
         },
         MessageRecord {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             id: MessageId::from("em-002"),
             source_thread_id: posthaste_domain_model::ThreadId::from("th-roadmap"),
             remote_blob_id: None,
@@ -78,6 +84,9 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             list_unsubscribe: None,
         },
         MessageRecord {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             id: MessageId::from("em-003"),
             source_thread_id: posthaste_domain_model::ThreadId::from("th-invoice"),
             remote_blob_id: None,

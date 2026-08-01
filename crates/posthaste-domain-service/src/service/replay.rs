@@ -89,6 +89,13 @@ pub(crate) fn synthesize_sent_record(
             .as_ref()
             .map(|recipient| recipient.email.clone()),
         to: request.to.clone(),
+        // The compose form's own Cc/Bcc. This is the ONE place a `Bcc` is
+        // genuinely observable: delivering MTAs strip the header, so a Bcc can
+        // only ever come from mail the user sent or is still drafting.
+        cc: request.cc.clone(),
+        bcc: request.bcc.clone(),
+        // Compose offers no Reply-To.
+        reply_to: Vec::new(),
         preview: (!preview.is_empty()).then_some(preview),
         received_at: operation.updated_at.clone(),
         has_attachment: !request.attachments.is_empty(),
@@ -156,6 +163,11 @@ pub(crate) fn synthesize_draft_record(
             .as_ref()
             .map(|recipient| recipient.email.clone()),
         to: request.to.clone(),
+        // Carried for the same reason as on the send row above: a draft's Bcc
+        // is real, and it is the only Bcc that survives anywhere.
+        cc: request.cc.clone(),
+        bcc: request.bcc.clone(),
+        reply_to: Vec::new(),
         preview: (!preview.is_empty()).then_some(preview),
         // Each coalesced save bumps the op's `updated_at`, so the draft sorts
         // like real autosave (most recently edited first).

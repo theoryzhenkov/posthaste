@@ -7,6 +7,9 @@ use super::*;
 /// still leaves no state behind (P6).
 fn fetched_body(raw_mime: Option<&str>) -> FetchedBody {
     FetchedBody {
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
         body_html: Some("<p>hi</p>".to_string()),
         body_text: Some("hi".to_string()),
         raw_mime: raw_mime.map(str::to_string),

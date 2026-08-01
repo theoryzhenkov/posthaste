@@ -381,6 +381,84 @@ fn v5_parks_stranded_pin_on_a_pre_additive_outbox_database() -> Result<(), Store
     Ok(())
 }
 
+/// Rewind a current-shape database to the v5 world: no recipient columns, and
+/// `message_effective` published over the narrower column list.
+fn downgrade_to_v5_pre_recipient_columns(path: &std::path::Path) {
+    let connection = raw(path);
+    // The view must go first — SQLite refuses to drop a column a view names.
+    connection
+        .execute_batch("DROP VIEW IF EXISTS message_effective")
+        .expect("drop view");
+    for table in ["message", "message_overlay"] {
+        for column in ["cc_json", "bcc_json", "reply_to_json"] {
+            connection
+                .execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))
+                .expect("drop recipient column");
+        }
+    }
+    connection
+        .execute_batch(
+            "CREATE VIEW message_effective AS
+                 SELECT m.account_id, m.id, m.thread_id, m.conversation_id,
+                        m.remote_blob_id, m.subject, m.normalized_subject,
+                        m.from_name, m.from_email, m.to_json, m.preview,
+                        m.received_at, m.has_attachment, m.size, m.is_read,
+                        m.is_flagged, m.rfc_message_id, m.in_reply_to,
+                        m.references_json, m.draft_id, m.list_unsubscribe
+                 FROM message m
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM message_overlay o
+                     WHERE o.account_id = m.account_id AND o.id = m.id
+                 )
+                 UNION ALL
+                 SELECT o.account_id, o.id, o.thread_id, o.conversation_id,
+                        o.remote_blob_id, o.subject, o.normalized_subject,
+                        o.from_name, o.from_email, o.to_json, o.preview,
+                        o.received_at, o.has_attachment, o.size, o.is_read,
+                        o.is_flagged, o.rfc_message_id, o.in_reply_to,
+                        o.references_json, o.draft_id, o.list_unsubscribe
+                 FROM message_overlay o
+                 WHERE o.tombstone = 0;
+             PRAGMA user_version = 5;",
+        )
+        .expect("republish the v5-shape view");
+}
+
+/// v6 republishes `message_effective`. The columns arrive additively via
+/// `ensure_column`, but the view over them is created `IF NOT EXISTS` — so
+/// without the migration an upgraded database would keep the old column list
+/// and every list read (which resolves the recipients through the view) would
+/// fail on a missing column. This is the regression that guards it.
+#[test]
+fn v6_republishes_the_effective_view_over_the_recipient_columns() -> Result<(), StoreError> {
+    let root = temp_root();
+    let db_path = root.join("mail.sqlite");
+    let account = AccountId::from("primary");
+    {
+        let store = DatabaseStore::open(&db_path, root.join("data"))?;
+        setup_source(&store, &account, "Primary")?;
+        seed_messages(
+            &store,
+            &account,
+            vec![sample_message("message-1", "inbox", None)],
+            "seed",
+        )?;
+    }
+    downgrade_to_v5_pre_recipient_columns(&db_path);
+
+    let store = DatabaseStore::open(&db_path, root.join("data"))?;
+    assert_eq!(user_version(&raw(&db_path)), crate::db::SCHEMA_VERSION);
+    // The read that goes through the view: it would raise "no such column"
+    // against the stale definition.
+    let rows = store.list_messages(&account, Some(&MailboxId::from("inbox")))?;
+    assert_eq!(rows.len(), 1, "the upgraded database still serves its mail");
+    assert!(
+        rows[0].cc.is_empty(),
+        "a pre-column row reads as no-recipients, not as an error"
+    );
+    Ok(())
+}
+
 #[test]
 fn downgrade_guard_refuses_a_newer_database_without_quarantining_it() -> Result<(), StoreError> {
     let root = temp_root();

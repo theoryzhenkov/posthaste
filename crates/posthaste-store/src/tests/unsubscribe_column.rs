@@ -90,6 +90,9 @@ fn body_fetch_backfills_targets_for_pre_column_rows() -> Result<(), StoreError> 
         &account,
         &message_id,
         &FetchedBody {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             body_html: None,
             body_text: Some("Hello".to_string()),
             raw_mime: None,

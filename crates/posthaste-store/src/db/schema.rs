@@ -33,6 +33,21 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
         "list_unsubscribe",
         "ALTER TABLE message ADD COLUMN list_unsubscribe TEXT",
     )?;
+    // The recipient fields the message-field registry projects beside `to_json`.
+    // Empty-array default rather than NULL: "no cc/bcc/reply-to" is the normal
+    // state, not missing data (a delivered message's Bcc is stripped in
+    // transit), and the registry renders empty as a non-render either way.
+    // Both planes, so the `message_effective` UNION keeps matching column lists.
+    for table in ["message", "message_overlay"] {
+        for column in ["cc_json", "bcc_json", "reply_to_json"] {
+            ensure_column(
+                connection,
+                table,
+                column,
+                &format!("ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT '[]'"),
+            )?;
+        }
+    }
     ensure_column(
         connection,
         "cache_rescore_queue",
@@ -179,7 +194,7 @@ fn migrate_legacy_message_fts(connection: &Connection) -> Result<(), StoreError>
 /// or TRANSFORMATIVE changes (drops, renames, data rewrites, trigger
 /// replacements) are numbered migrations below — run exactly once per
 /// database, each in its own transaction, in order.
-pub(crate) const SCHEMA_VERSION: i64 = 5;
+pub(crate) const SCHEMA_VERSION: i64 = 6;
 
 /// The full open-time schema flow (replaces bare `init_schema` at the open
 /// call site):
@@ -236,6 +251,7 @@ fn apply_migration(tx: &Connection, version: i64) -> Result<(), StoreError> {
         3 => v3_drop_outbox_depends_on(tx),
         4 => v4_normalize_received_at_to_utc(tx),
         5 => v5_reconcile_pre_slice3_debris(tx),
+        6 => v6_refresh_message_effective_view(tx),
         other => Err(StoreError::Failure(format!(
             "unknown schema migration {other}"
         ))),
@@ -493,6 +509,25 @@ fn v5_reconcile_pre_slice3_debris(tx: &Connection) -> Result<(), StoreError> {
         }
     }
     Ok(())
+}
+
+/// v6: republish `message_effective` so it projects the newly added
+/// `cc_json`/`bcc_json`/`reply_to_json`.
+///
+/// The columns themselves are additive and land via `ensure_column`, but the
+/// VIEW over them is not self-healing: `init_schema` creates it with
+/// `CREATE VIEW IF NOT EXISTS`, so an existing database keeps whatever column
+/// list it was created with and every read through the view would keep seeing
+/// the old shape. A view holds no data, so refreshing it is just a DROP —
+/// `init_schema` recreates it from `EFFECTIVE_VIEWS_SQL` immediately after the
+/// migration loop, and strictly after the `ensure_column` calls the new SELECT
+/// depends on.
+///
+/// This is the numbered-migration case for any future change to a view's
+/// shape, not just this one.
+fn v6_refresh_message_effective_view(tx: &Connection) -> Result<(), StoreError> {
+    tx.execute_batch("DROP VIEW IF EXISTS message_effective")
+        .map_err(sql_to_store_error)
 }
 
 /// DROP predicate: a still-live op in the log resolves to this pin's row id —

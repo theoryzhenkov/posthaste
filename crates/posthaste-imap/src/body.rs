@@ -90,9 +90,12 @@ pub fn imap_body_from_raw_mime(
         .map(|(index, part)| imap_attachment_from_part(message_id, index, part))
         .collect::<Vec<_>>();
     // Old-mail backfill: the full raw message carries the headers, so a body
-    // fetch re-extracts the unsubscribe targets for rows synced before the
-    // `list_unsubscribe` column existed.
+    // fetch re-extracts the unsubscribe targets and the recipient set for rows
+    // synced before those columns existed.
     let list_unsubscribe = crate::message::list_unsubscribe_from_parsed(&parsed);
+    let cc = crate::message::recipients_from(parsed.cc());
+    let bcc = crate::message::recipients_from(parsed.bcc());
+    let reply_to = crate::message::recipients_from(parsed.reply_to());
     let raw_mime = String::from_utf8(raw_mime).ok();
 
     Ok(FetchedBody {
@@ -101,6 +104,9 @@ pub fn imap_body_from_raw_mime(
         raw_mime,
         attachments,
         list_unsubscribe,
+        cc,
+        bcc,
+        reply_to,
     })
 }
 

@@ -12,6 +12,9 @@ pub(super) fn jmap_sync_batch() -> SyncBatch {
             total_emails: 1,
         }],
         messages: vec![MessageRecord {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             id: MessageId::from("jmap-message-1"),
             source_thread_id: ThreadId::from("thread-1"),
             remote_blob_id: None,
@@ -91,6 +94,9 @@ fn jmap_label_batch(mailbox_ids: Vec<MailboxId>, state: &str) -> SyncBatch {
             },
         ],
         messages: vec![MessageRecord {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             id: MessageId::from("jmap-label-message"),
             source_thread_id: ThreadId::from("jmap-label-thread"),
             remote_blob_id: None,

@@ -38,6 +38,7 @@ pub(crate) fn apply_message_body_tx(
         )
         .map_err(sql_to_store_error)?;
     }
+    backfill_recipients_tx(tx, account_id, message_id, body)?;
     ensure_body_cache_object_tx(
         tx,
         account_id,
@@ -60,6 +61,45 @@ pub(crate) fn apply_message_body_tx(
         detail: Some(detail),
         events: vec![event],
     })
+}
+
+/// Old-mail backfill for `cc`/`bcc`/`reply_to`, on the same footing as the
+/// `list_unsubscribe` one above: a body fetch re-serves the full headers, so a
+/// message ingested before these columns existed gains them at message-open
+/// rather than needing a provider-wide resync (which delta sync would not do
+/// anyway — it never re-fetches an unchanged message).
+///
+/// Only fills a column that is STILL EMPTY, and only from a non-empty fetched
+/// value: an ingest-time parse always wins, and a fetch that carried nothing
+/// can never blank a stored value.
+fn backfill_recipients_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+    body: &FetchedBody,
+) -> Result<(), StoreError> {
+    for (column, recipients) in [
+        ("cc_json", &body.cc),
+        ("bcc_json", &body.bcc),
+        ("reply_to_json", &body.reply_to),
+    ] {
+        if recipients.is_empty() {
+            continue;
+        }
+        tx.execute_cached(
+            &format!(
+                "UPDATE message SET {column} = ?3
+                 WHERE account_id = ?1 AND id = ?2 AND {column} = '[]'"
+            ),
+            params![
+                account_id.as_str(),
+                message_id.as_str(),
+                serde_json::to_string(recipients).map_err(json_to_store_error)?
+            ],
+        )
+        .map_err(sql_to_store_error)?;
+    }
+    Ok(())
 }
 
 /// Adds and removes keywords on a message, updates the `is_read`/`is_flagged`

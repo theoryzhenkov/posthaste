@@ -45,13 +45,12 @@ pub(crate) fn hydrate_message_summaries(
     let mut mailbox_ids = fetch_mailbox_ids_bulk(connection, &rows)?.into_iter();
     let mut keywords = fetch_keywords_bulk(connection, &rows)?.into_iter();
     let mut versions = fetch_versions_bulk(connection, &rows)?.into_iter();
-    let mut threading = fetch_threading_bulk(connection, &rows)?.into_iter();
+    let mut extras = fetch_summary_extras_bulk(connection, &rows)?.into_iter();
 
     Ok(rows
         .into_iter()
         .map(|row| {
-            let (rfc_message_id, in_reply_to, draft_id) =
-                threading.next().unwrap_or((None, None, None));
+            let extra = extras.next().unwrap_or_default();
             MessageSummary {
                 id: row.id,
                 source_id: row.source_id,
@@ -62,6 +61,9 @@ pub(crate) fn hydrate_message_summaries(
                 from_name: row.from_name,
                 from_email: row.from_email,
                 to: row.to,
+                cc: extra.cc,
+                bcc: extra.bcc,
+                reply_to: extra.reply_to,
                 preview: row.preview,
                 received_at: row.received_at,
                 has_attachment: row.has_attachment,
@@ -70,9 +72,9 @@ pub(crate) fn hydrate_message_summaries(
                 mailbox_ids: mailbox_ids.next().unwrap_or_default(),
                 keywords: keywords.next().unwrap_or_default(),
                 version: versions.next().flatten(),
-                rfc_message_id,
-                in_reply_to,
-                draft_id,
+                rfc_message_id: extra.rfc_message_id,
+                in_reply_to: extra.in_reply_to,
+                draft_id: extra.draft_id,
             }
         })
         .collect())
@@ -131,22 +133,39 @@ fn fetch_versions_bulk(
     Ok(versions)
 }
 
-/// A message's threading headers plus its stable draft id:
-/// `(rfc_message_id, in_reply_to, draft_id)`, each optional (`None` for a row
-/// with no stored value; `draft_id` is `Some` only for a saved draft, D131).
-pub(crate) type ThreadingHeaders = (Option<String>, Option<String>, Option<String>);
+/// The summary fields that ride a second, row-aligned lookup rather than the
+/// list SELECT itself: the threading headers, the stable `draft_id`, and the
+/// `cc`/`bcc`/`reply_to` recipient sets.
+///
+/// They share one query because they share one join — `message_effective`, keyed
+/// by `(account_id, id)`. Widening the existing lookup rather than adding a
+/// second one is what keeps the recipient fields close to free on the list hot
+/// path: no extra statement, no extra index probe, just three more TEXT columns
+/// off a row already being read.
+#[derive(Default)]
+pub(crate) struct SummaryExtras {
+    pub(crate) rfc_message_id: Option<String>,
+    pub(crate) in_reply_to: Option<String>,
+    /// `Some` only for a saved draft (D131).
+    pub(crate) draft_id: Option<String>,
+    pub(crate) cc: Vec<Recipient>,
+    pub(crate) bcc: Vec<Recipient>,
+    pub(crate) reply_to: Vec<Recipient>,
+}
 
-/// Bulk-fetches the RFC `Message-ID`/`In-Reply-To` headers and the stable
-/// `draft_id` for a set of messages, row-aligned, so the conversation view can
-/// build a real reply tree and a draft list row carries its stable id (D131).
-/// `(None, None, None)` for a message row with no stored values.
-fn fetch_threading_bulk(
+/// Bulk-fetches [`SummaryExtras`] for a set of messages, row-aligned, so the
+/// conversation view can build a real reply tree, a draft list row carries its
+/// stable id (D131), and the message-field registry can project the full
+/// recipient set. Defaults for a message row with no stored values.
+fn fetch_summary_extras_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
-) -> Result<Vec<ThreadingHeaders>, StoreError> {
+) -> Result<Vec<SummaryExtras>, StoreError> {
     const CHUNK_SIZE: usize = 300;
 
-    let mut threading = vec![(None, None, None); rows.len()];
+    let mut extras = (0..rows.len())
+        .map(|_| SummaryExtras::default())
+        .collect::<Vec<_>>();
     for (chunk_offset, chunk) in rows.chunks(CHUNK_SIZE).enumerate() {
         let start_index = chunk_offset * CHUNK_SIZE;
         let mut params = Vec::with_capacity(chunk.len() * 3);
@@ -159,7 +178,8 @@ fn fetch_threading_bulk(
         }
         let sql = format!(
             "WITH requested(row_index, account_id, message_id) AS (VALUES {})
-             SELECT requested.row_index, m.rfc_message_id, m.in_reply_to, m.draft_id
+             SELECT requested.row_index, m.rfc_message_id, m.in_reply_to, m.draft_id,
+                    m.cc_json, m.bcc_json, m.reply_to_json
                FROM requested
                JOIN message_effective m
                  ON m.account_id = requested.account_id
@@ -173,19 +193,39 @@ fn fetch_threading_bulk(
             .query_map(params_from_iter(params), |row| {
                 Ok((
                     row.get::<_, i64>(0)? as usize,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
+                    SummaryExtras {
+                        rfc_message_id: row.get(1)?,
+                        in_reply_to: row.get(2)?,
+                        draft_id: row.get(3)?,
+                        cc: parse_recipient_column(row.get(4)?),
+                        bcc: parse_recipient_column(row.get(5)?),
+                        reply_to: parse_recipient_column(row.get(6)?),
+                    },
                 ))
             })
             .map_err(sql_to_store_error)?;
         for entry in fetched {
-            let (row_index, rfc, reply, draft_id) = entry.map_err(sql_to_store_error)?;
-            threading[row_index] = (rfc, reply, draft_id);
+            let (row_index, extra) = entry.map_err(sql_to_store_error)?;
+            extras[row_index] = extra;
         }
     }
 
-    Ok(threading)
+    Ok(extras)
+}
+
+/// Parses a stored recipient-array column, short-circuiting the empty case.
+///
+/// `cc` is empty on most mail and `bcc` on effectively all of it (delivering
+/// MTAs strip the header), so matching the literal `[]` keeps a list page from
+/// paying three JSON parser setups per row for values that are almost always
+/// nothing. Malformed JSON degrades to empty rather than failing the read —
+/// the same posture the detail read takes on `list_unsubscribe`, and the right
+/// one here: one unparseable column must not blank a whole mail list.
+pub(super) fn parse_recipient_column(value: String) -> Vec<Recipient> {
+    if value == "[]" {
+        return Vec::new();
+    }
+    serde_json::from_str(&value).unwrap_or_default()
 }
 
 /// Maps a database row to a `MessageSummaryRow`.

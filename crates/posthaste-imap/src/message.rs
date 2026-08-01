@@ -97,20 +97,7 @@ pub fn imap_header_message_record_with_gmail_metadata(
         .map(gmail_thread_id)
         .unwrap_or_else(|| imap_thread_id(&message_id, rfc_message_id.as_deref(), &references));
     let from = parsed.from().and_then(|address| address.first());
-    let to = parsed
-        .to()
-        .map(|addresses| {
-            addresses
-                .iter()
-                .filter_map(|address| {
-                    Some(Recipient {
-                        name: address.name.as_ref().map(|name| name.to_string()),
-                        email: address.address.as_ref()?.to_string(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let to = recipients_from(parsed.to());
     // Normalize to UTC before serializing: `DateTime::to_rfc3339` preserves
     // the Date header's original offset (`+02:00`, `-08:00`, …), and the
     // store sorts `received_at` as TEXT — lexicographic order is only
@@ -130,6 +117,13 @@ pub fn imap_header_message_record_with_gmail_metadata(
         from_name: from.and_then(|addr| addr.name.as_ref().map(|name| name.to_string())),
         from_email: from.and_then(|addr| addr.address.as_ref().map(|email| email.to_string())),
         to,
+        // No fetch change buys these: the sync FETCH asks for RFC822.HEADER,
+        // i.e. the WHOLE header block, so Cc/Bcc/Reply-To were already on the
+        // wire and merely unparsed. Zero added bytes and zero added round
+        // trips for the IMAP path.
+        cc: recipients_from(parsed.cc()),
+        bcc: recipients_from(parsed.bcc()),
+        reply_to: recipients_from(parsed.reply_to()),
         preview: None,
         received_at,
         has_attachment: fetched.has_attachment,
@@ -161,6 +155,26 @@ pub fn imap_header_message_record_with_gmail_metadata(
         mailbox_membership_source: ImapMailboxMembershipSource::SelectedMailbox,
         provider_absent_mailbox_ids: Vec::new(),
     })
+}
+
+/// Projects one of `mail_parser`'s address headers (`To`, `Cc`, `Bcc`,
+/// `Reply-To`) into the domain recipient shape. An address with no
+/// `addr-spec` is dropped rather than stored under an empty email — a
+/// display-name-only group construct is not a recipient anything can act on.
+pub(crate) fn recipients_from(addresses: Option<&mail_parser::Address<'_>>) -> Vec<Recipient> {
+    addresses
+        .map(|addresses| {
+            addresses
+                .iter()
+                .filter_map(|address| {
+                    Some(Recipient {
+                        name: address.name.as_ref().map(|name| name.to_string()),
+                        email: address.address.as_ref()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Extracts and parses the RFC 2369/8058 unsubscribe headers from a parsed

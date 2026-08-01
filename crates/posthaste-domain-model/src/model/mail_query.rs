@@ -46,8 +46,10 @@ pub enum MailQueryField {
     FromName,
     FromEmail,
     /// Recipient (`To`) address or display name, matched against the stored
-    /// `to_json` recipient list. Cc/Bcc are not projected as separate columns
-    /// today, so only the `To` recipient set is queryable (see field compiler).
+    /// `to_json` recipient list. Cc/Bcc DO have their own columns now, but the
+    /// query grammar has no term for them, so only the `To` recipient set is
+    /// queryable (see field compiler). Adding one is a grammar term plus a
+    /// compiler arm — no longer a schema change.
     To,
     Subject,
     Preview,

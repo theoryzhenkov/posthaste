@@ -50,18 +50,6 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
             )
         })
         .unwrap_or((None, None));
-    let to = email
-        .to()
-        .map(|addresses| {
-            addresses
-                .iter()
-                .map(|address| Recipient {
-                    name: address.name().map(String::from),
-                    email: address.email().to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
     MessageRecord {
         id: MessageId(email.id().unwrap_or_default().to_string()),
         source_thread_id: posthaste_domain_model::ThreadId(
@@ -71,7 +59,10 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
         subject: email.subject().map(String::from),
         from_name,
         from_email,
-        to,
+        to: recipients_from(email.to()),
+        cc: recipients_from(email.cc()),
+        bcc: recipients_from(email.bcc()),
+        reply_to: recipients_from(email.reply_to()),
         preview: email.preview().map(String::from),
         received_at: message_display_timestamp(email)
             .and_then(timestamp_to_iso8601)
@@ -101,6 +92,26 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
             .and_then(header_text_value),
         list_unsubscribe: list_unsubscribe_from_email(email),
     }
+}
+
+/// Projects one of JMAP's structured address properties (`to`, `cc`, `bcc`,
+/// `replyTo`) into the domain recipient shape. An absent property and an empty
+/// one collapse to the same empty vector — for these headers the distinction
+/// carries no meaning.
+pub(crate) fn recipients_from(
+    addresses: Option<&[jmap_client::email::EmailAddress]>,
+) -> Vec<Recipient> {
+    addresses
+        .map(|addresses| {
+            addresses
+                .iter()
+                .map(|address| Recipient {
+                    name: address.name().map(String::from),
+                    email: address.email().to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Extracts and parses the RFC 2369/8058 unsubscribe headers from a JMAP

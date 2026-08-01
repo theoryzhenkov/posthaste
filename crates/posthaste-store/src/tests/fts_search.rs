@@ -111,6 +111,9 @@ fn body_search_hits_only_after_body_cache_write() -> Result<(), StoreError> {
         &account,
         &message_id,
         &FetchedBody {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             body_html: Some("<p>the zanzibar shipment arrived</p>".to_string()),
             body_text: Some("the zanzibar shipment arrived".to_string()),
             attachments: Vec::new(),
@@ -318,6 +321,9 @@ fn fts_index_stays_consistent_across_write_lifecycle() -> Result<(), StoreError>
         &account,
         &MessageId::from("m-1"),
         &FetchedBody {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             body_html: None,
             body_text: Some("first fetched body with a pangolin".to_string()),
             attachments: Vec::new(),
@@ -330,6 +336,9 @@ fn fts_index_stays_consistent_across_write_lifecycle() -> Result<(), StoreError>
         &account,
         &MessageId::from("m-1"),
         &FetchedBody {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
             body_html: None,
             body_text: Some("second fetched body with an axolotl".to_string()),
             attachments: Vec::new(),

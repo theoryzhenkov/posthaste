@@ -39,6 +39,9 @@ fn message_summary() -> domain::MessageSummary {
         from_name: Some("Ada".into()),
         from_email: Some("ada@example.com".into()),
         to: vec![recipient()],
+        cc: vec![recipient()],
+        bcc: vec![recipient()],
+        reply_to: vec![recipient()],
         preview: Some("preview".into()),
         received_at: "2026-01-01T00:00:00Z".into(),
         has_attachment: true,
@@ -89,6 +92,19 @@ fn structs_decode_strictly_from_domain_serialization() {
         },
     );
     assert_mirrors::<mirror::MessageSummary>("MessageSummary", &message_summary());
+    // The shape real mail actually serializes to: `cc`/`bcc`/`replyTo` are
+    // skipped when empty, so the twin must still decode with those keys
+    // ABSENT — the case the fully-populated literal above can never reach,
+    // and the one the generated TS optionality (`cc?:`) rests on.
+    assert_mirrors::<mirror::MessageSummary>(
+        "MessageSummary (no cc/bcc/replyTo)",
+        &domain::MessageSummary {
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            ..message_summary()
+        },
+    );
     assert_mirrors::<mirror::MailboxSummary>(
         "MailboxSummary",
         &domain::MailboxSummary {

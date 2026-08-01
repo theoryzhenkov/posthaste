@@ -83,6 +83,20 @@ pub struct MessageSummary {
     pub from_name: Option<String>,
     pub from_email: Option<String>,
     pub to: Vec<Recipient>,
+    // `Option<Vec<_>>` where the domain has a plain `Vec`: this twin tracks
+    // the WIRE shape, and the domain skips these keys when empty (the usual
+    // case; always, for `bcc`). So the generated TS is `cc?: Recipient[]`,
+    // and the message-field registry is the ONE place that resolves an absent
+    // list to an empty one.
+    #[serde(default)]
+    #[ts(optional)]
+    pub cc: Option<Vec<Recipient>>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub bcc: Option<Vec<Recipient>>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub reply_to: Option<Vec<Recipient>>,
     pub preview: Option<String>,
     pub received_at: String,
     pub has_attachment: bool,

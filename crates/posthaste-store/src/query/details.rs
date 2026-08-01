@@ -1,4 +1,4 @@
-use super::summaries::parse_recipients_json;
+use super::summaries::{parse_recipient_column, parse_recipients_json};
 use super::*;
 
 /// Fetches a single message's full detail (summary + body + raw ref) within
@@ -13,7 +13,7 @@ pub(crate) fn query_message_detail_tx(
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged, m.draft_id, m.rfc_message_id, m.in_reply_to,
-                    m.list_unsubscribe
+                    m.list_unsubscribe, m.cc_json, m.bcc_json, m.reply_to_json
              FROM message m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
@@ -35,6 +35,9 @@ pub(crate) fn query_message_detail_tx(
                     from_name: row.get(6)?,
                     from_email: row.get(7)?,
                     to: parse_recipients_json(row.get(8)?)?,
+                    cc: parse_recipient_column(row.get(18)?),
+                    bcc: parse_recipient_column(row.get(19)?),
+                    reply_to: parse_recipient_column(row.get(20)?),
                     preview: row.get(9)?,
                     received_at: row.get(10)?,
                     has_attachment: row.get::<_, i64>(11)? != 0,
@@ -120,7 +123,8 @@ pub(crate) fn query_message_summary_tx(
         .prepare_cached(
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
-                    m.is_read, m.is_flagged, m.rfc_message_id, m.in_reply_to, m.draft_id
+                    m.is_read, m.is_flagged, m.rfc_message_id, m.in_reply_to, m.draft_id,
+                    m.cc_json, m.bcc_json, m.reply_to_json
              FROM message m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
@@ -139,6 +143,9 @@ pub(crate) fn query_message_summary_tx(
                 from_name: row.get(6)?,
                 from_email: row.get(7)?,
                 to: parse_recipients_json(row.get(8)?)?,
+                cc: parse_recipient_column(row.get(17)?),
+                bcc: parse_recipient_column(row.get(18)?),
+                reply_to: parse_recipient_column(row.get(19)?),
                 preview: row.get(9)?,
                 received_at: row.get(10)?,
                 has_attachment: row.get::<_, i64>(11)? != 0,

@@ -292,6 +292,9 @@ fn upsert_overlay_tx(
     let seen = message.keywords.iter().any(|keyword| keyword == "$seen");
     let flagged = message.keywords.iter().any(|keyword| keyword == "$flagged");
     let to_json = serde_json::to_string(&message.to).map_err(json_to_store_error)?;
+    let cc_json = serde_json::to_string(&message.cc).map_err(json_to_store_error)?;
+    let bcc_json = serde_json::to_string(&message.bcc).map_err(json_to_store_error)?;
+    let reply_to_json = serde_json::to_string(&message.reply_to).map_err(json_to_store_error)?;
     let references_json =
         serde_json::to_string(&message.references).map_err(json_to_store_error)?;
     let list_unsubscribe = message
@@ -305,12 +308,14 @@ fn upsert_overlay_tx(
                     account_id, id, thread_id, conversation_id, remote_blob_id, subject,
                     normalized_subject, from_name, from_email, to_json, preview, received_at,
                     has_attachment, size, is_read, is_flagged, rfc_message_id, in_reply_to,
-                    references_json, draft_id, list_unsubscribe, tombstone
+                    references_json, draft_id, list_unsubscribe, cc_json, bcc_json,
+                    reply_to_json, tombstone
                  ) VALUES (
                     ?1, ?2, ?3,
                     COALESCE((SELECT conversation_id FROM message
                               WHERE account_id = ?1 AND id = ?2), ?2),
-                    ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 0
+                    ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                    ?21, ?22, ?23, 0
                  )
                  ON CONFLICT(account_id, id) DO UPDATE SET
                     thread_id = excluded.thread_id,
@@ -332,6 +337,9 @@ fn upsert_overlay_tx(
                     references_json = excluded.references_json,
                     draft_id = excluded.draft_id,
                     list_unsubscribe = excluded.list_unsubscribe,
+                    cc_json = excluded.cc_json,
+                    bcc_json = excluded.bcc_json,
+                    reply_to_json = excluded.reply_to_json,
                     tombstone = 0",
         params![
             account_id.as_str(),
@@ -357,6 +365,9 @@ fn upsert_overlay_tx(
             references_json,
             message.draft_id,
             list_unsubscribe,
+            cc_json,
+            bcc_json,
+            reply_to_json,
         ],
     )
     .map_err(sql_to_store_error)?;
@@ -500,7 +511,8 @@ fn read_base_on(
         .query_row(
             "SELECT thread_id, remote_blob_id, subject, from_name, from_email, to_json,
                     preview, received_at, has_attachment, size, rfc_message_id, in_reply_to,
-                    references_json, draft_id, list_unsubscribe
+                    references_json, draft_id, list_unsubscribe, cc_json, bcc_json,
+                    reply_to_json
              FROM message
              WHERE account_id = ?1 AND id = ?2",
             params![account_id.as_str(), message_id.as_str()],
@@ -521,6 +533,9 @@ fn read_base_on(
                     row.get::<_, String>(12)?,
                     row.get::<_, Option<String>>(13)?,
                     row.get::<_, Option<String>>(14)?,
+                    row.get::<_, String>(15)?,
+                    row.get::<_, String>(16)?,
+                    row.get::<_, String>(17)?,
                 ))
             },
         )
@@ -542,6 +557,9 @@ fn read_base_on(
         references_json,
         draft_id,
         list_unsubscribe,
+        cc_json,
+        bcc_json,
+        reply_to_json,
     )) = row
     else {
         return Ok(None);
@@ -582,6 +600,12 @@ fn read_base_on(
         from_name,
         from_email,
         to: serde_json::from_str(&to_json).map_err(json_to_store_error)?,
+        // Degrade to empty on drift, as the detail read does: these are
+        // decoration on the fold's input, never identity, so a malformed
+        // column must not fail a replay.
+        cc: serde_json::from_str(&cc_json).unwrap_or_default(),
+        bcc: serde_json::from_str(&bcc_json).unwrap_or_default(),
+        reply_to: serde_json::from_str(&reply_to_json).unwrap_or_default(),
         preview,
         received_at,
         has_attachment: has_attachment != 0,

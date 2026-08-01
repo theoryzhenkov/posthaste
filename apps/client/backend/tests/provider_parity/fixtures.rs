@@ -2,6 +2,9 @@ use posthaste_domain_model::{BlobId, FetchedBody};
 
 pub(super) fn empty_body() -> FetchedBody {
     FetchedBody {
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
         body_html: None,
         body_text: None,
         raw_mime: None,
@@ -12,6 +15,9 @@ pub(super) fn empty_body() -> FetchedBody {
 
 pub(super) fn parity_body() -> FetchedBody {
     FetchedBody {
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
         body_html: Some("<p>HTML body</p>".to_string()),
         body_text: Some("Plain body".to_string()),
         raw_mime: None,
