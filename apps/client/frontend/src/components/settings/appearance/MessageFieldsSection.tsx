@@ -12,100 +12,91 @@
  * under Appearance because that is where a reader looks for what the app puts
  * on screen, and because the alternative — its own rail category — would buy
  * a vocabulary entry and rail wiring for a single section.
+ *
+ * The two halves are not symmetric, and should not be. A column carries its
+ * order and its width on the header itself, where dragging is expected; a
+ * detail row carries emphasis, its label and its place, none of which belong
+ * on the reading pane — so the header half is the fuller editor
+ * (`DetailRowEditor`) and this file keeps the columns' plain checklist.
  */
 import { ALL_COLUMNS } from '../../mail/thread/columns'
-import {
-  fieldPickerOptions,
-  type FieldPickerOption,
-} from '../../mail/thread/fieldPicker'
+import { fieldPickerOptions } from '../../mail/thread/fieldPicker'
 import {
   useColumnConfig,
   useDetailFieldConfig,
 } from '../../mail/thread/useFieldConfig'
-import { fieldsForSurface, type MessageFieldId } from '../../mail/fields'
+import { fieldsForSurface } from '../../mail/fields'
 import { Button } from '../../ui/form/button'
 import { Checkbox } from '../../ui/form/checkbox'
 import { SettingsSection } from '../panel/shared'
+import { DetailRowEditor } from './DetailRowEditor'
 
 const DETAIL_FIELDS = fieldsForSurface('detail')
 
 export function MessageFieldsSection() {
   const { columns, toggleColumn, resetColumns } = useColumnConfig()
-  const { detailFields, toggleDetailField, resetDetailFields } =
-    useDetailFieldConfig()
+  const { detailFields, resetDetailFields } = useDetailFieldConfig()
+
+  const columnOptions = fieldPickerOptions(
+    ALL_COLUMNS,
+    columns,
+    // The table needs one column to lay out, so the last one standing shows as
+    // locked rather than as a click that does nothing.
+    columns.length === 1 ? columns[0] : null,
+  )
 
   return (
     <>
-      <FieldGroup
-        description="Columns in the message list. Drag a column header to reorder, or its edge to resize."
-        options={fieldPickerOptions(
-          ALL_COLUMNS,
-          columns,
-          // The table needs one column to lay out, so the last one standing
-          // shows as locked rather than as a click that does nothing.
-          columns.length === 1 ? columns[0] : null,
-        )}
-        onReset={resetColumns}
-        onToggle={toggleColumn}
+      <SettingsSection
+        actions={<RevertButton onClick={resetColumns} />}
         title="List columns"
-      />
-      <FieldGroup
-        description="Rows above the message you are reading. A field with nothing in it — a message with no CC — shows no row at all."
-        options={fieldPickerOptions(DETAIL_FIELDS, detailFields)}
-        onReset={resetDetailFields}
-        onToggle={toggleDetailField}
+      >
+        <p className="text-ui leading-5 text-muted-foreground">
+          Columns in the message list. Drag a column header to reorder, or its
+          edge to resize.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {columnOptions.map((option) => (
+            <label
+              className="flex items-center gap-2 text-body text-foreground has-disabled:opacity-50"
+              key={option.id}
+            >
+              <Checkbox
+                checked={option.checked}
+                disabled={option.locked}
+                onCheckedChange={() => toggleColumn(option.id)}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        actions={<RevertButton onClick={resetDetailFields} />}
         title="Message header"
-      />
+      >
+        <p className="text-ui leading-5 text-muted-foreground">
+          Rows above the message you are reading, in the order they appear. A
+          field with nothing in it — a message with no CC — shows no row at
+          all.
+        </p>
+        <DetailRowEditor fields={detailFields} offered={DETAIL_FIELDS} />
+      </SettingsSection>
     </>
   )
 }
 
-/** One surface's fields. Generic over the id so the list keeps its narrower
- *  `ColumnId` through to `toggleColumn`. */
-function FieldGroup<Id extends MessageFieldId>({
-  description,
-  options,
-  onReset,
-  onToggle,
-  title,
-}: {
-  description: string
-  options: FieldPickerOption<Id>[]
-  onReset: () => void
-  onToggle: (id: Id) => void
-  title: string
-}) {
+function RevertButton({ onClick }: { onClick: () => void }) {
   return (
-    <SettingsSection
-      actions={
-        <Button
-          className="text-muted-foreground"
-          onClick={onReset}
-          size="xs"
-          type="button"
-          variant="ghost"
-        >
-          Revert to default
-        </Button>
-      }
-      title={title}
+    <Button
+      className="text-muted-foreground"
+      onClick={onClick}
+      size="xs"
+      type="button"
+      variant="ghost"
     >
-      <p className="text-ui leading-5 text-muted-foreground">{description}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {options.map((option) => (
-          <label
-            className="flex items-center gap-2 text-body text-foreground has-disabled:opacity-50"
-            key={option.id}
-          >
-            <Checkbox
-              checked={option.checked}
-              disabled={option.locked}
-              onCheckedChange={() => onToggle(option.id)}
-            />
-            {option.label}
-          </label>
-        ))}
-      </div>
-    </SettingsSection>
+      Revert to default
+    </Button>
   )
 }
