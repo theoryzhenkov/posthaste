@@ -13,12 +13,22 @@
  * `confirm`-bearing actions (delete-permanently), the flag tint, and the tag
  * editor's outside-click anchor attribute.
  *
- * The message's own properties are NOT laid out here: `MessageFieldRows`
- * renders them as labelled rows off the shared message-field registry, so the
- * detail pane and the message list describe a field the same way.
+ * The message's own properties are NOT laid out here — none of them.
+ * `MessageFieldRows` renders every one as a labelled row off the shared
+ * message-field registry, so the detail pane and the message list describe a
+ * field the same way.
+ *
+ * That now includes the subject, the sender and the tag chips, which this
+ * component used to draw itself as a heading, a byline and a trailing row.
+ * They were the properties a reader could not turn off, reorder or find in the
+ * picker, purely because they were hard-coded here. The avatar circle went
+ * with them: its initials stood in for a portrait that mail does not carry,
+ * and what is left is a document header rather than a chat bubble.
+ *
+ * What remains is the header's own furniture — actions, which are verbs rather
+ * than properties of the message.
  */
-import { useState, type MouseEvent } from 'react'
-import { Paperclip } from 'lucide-react'
+import { useState } from 'react'
 
 import {
   runActionWithConfirm,
@@ -28,12 +38,14 @@ import {
 
 import type { MessageDetail, MessageSummary } from '@/data/transport/api'
 
-import { Badge } from '../../ui/display/badge'
 import { Button } from '../../ui/form/button'
 import { KeyboardConfirmDialog } from '../../keyboard/KeyboardConfirmDialog'
-import { Popover, PopoverContent, PopoverTrigger } from '../../ui/overlay/popover'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '../../ui/overlay/popover'
 import { MessageFieldRows } from './MessageFieldRows'
-import { initialsForSender, userTags } from './model'
 
 export function MessageHeader({
   conversationSubject,
@@ -50,83 +62,25 @@ export function MessageHeader({
   onSearch?: (query: string, append?: boolean) => void
   threadMessages: MessageSummary[]
 }) {
-  const senderName = message.fromName ?? message.fromEmail ?? 'Unknown sender'
-  const senderEmail = message.fromEmail ?? ''
-  const tags = userTags(message.keywords)
-
   const headerActions = orderForHeader(headerActionsFor(message))
 
   return (
     <div className="shrink-0 border-b border-border px-5 py-4">
-      <div className="flex items-start gap-3">
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-coral text-[11px] font-semibold text-brand-coral-foreground">
-          {initialsForSender(senderName)}
-        </div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1.5">
-              <h2 className="text-[17px] font-semibold leading-tight text-foreground">
-                {conversationSubject ?? message.subject ?? '(no subject)'}
-              </h2>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted-foreground">
-                <SenderButtons
-                  senderEmail={senderEmail}
-                  senderName={senderName}
-                  onSearch={onSearch}
-                />
-              </div>
-              <MessageFieldRows
-                message={message}
-                threadMessageCount={threadMessages.length}
-              />
-            </div>
-            <HeaderActions
-              headerActions={headerActions}
-              isFlagged={message.isFlagged}
-            />
-          </div>
-          <MessageTagRow
-            tags={tags}
-            hasAttachment={message.hasAttachment}
-            attachmentCount={message.attachments.length}
+          <MessageFieldRows
+            conversationSubject={conversationSubject}
+            message={message}
             onSearch={onSearch}
+            threadMessageCount={threadMessages.length}
           />
         </div>
+        <HeaderActions
+          headerActions={headerActions}
+          isFlagged={message.isFlagged}
+        />
       </div>
     </div>
-  )
-}
-
-function SenderButtons({
-  senderEmail,
-  senderName,
-  onSearch,
-}: {
-  senderEmail: string
-  senderName: string
-  onSearch?: (query: string, append?: boolean) => void
-}) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 text-foreground">
-      <button
-        className="truncate font-medium hover:text-primary hover:underline"
-        onClick={(event) =>
-          onSearch?.(`from:${senderEmail || senderName}`, event.shiftKey)
-        }
-        title="Search emails from this sender"
-      >
-        {senderName}
-      </button>
-      {senderEmail && senderName !== senderEmail && (
-        <button
-          className="font-mono text-[11px] text-muted-foreground hover:text-primary hover:underline"
-          onClick={(event) => onSearch?.(`from:${senderEmail}`, event.shiftKey)}
-          title="Search emails from this sender"
-        >
-          &lt;{senderEmail}&gt;
-        </button>
-      )}
-    </span>
   )
 }
 
@@ -257,48 +211,5 @@ function HeaderParamAction({ action }: { action: ResolvedActionView }) {
         ))}
       </PopoverContent>
     </Popover>
-  )
-}
-
-function MessageTagRow({
-  attachmentCount,
-  hasAttachment,
-  tags,
-  onSearch,
-}: {
-  attachmentCount: number
-  hasAttachment: boolean
-  tags: string[]
-  onSearch?: (query: string, append?: boolean) => void
-}) {
-  if (tags.length === 0 && !hasAttachment && attachmentCount === 0) {
-    return null
-  }
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      {tags.map((tag) => (
-        <Badge
-          variant="outline"
-          className="cursor-pointer rounded-[4px] border-border/80 bg-background/45 px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground hover:border-primary hover:text-primary"
-          key={tag}
-          onClick={(event: MouseEvent) =>
-            onSearch?.(`tag:${tag}`, event.shiftKey)
-          }
-          title={`Search emails tagged "${tag}"`}
-        >
-          {tag}
-        </Badge>
-      ))}
-      {hasAttachment && (
-        <button
-          className="inline-flex items-center gap-1.5 rounded-[4px] border border-border/80 bg-background/45 px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-          onClick={(event) => onSearch?.('has:attachment', event.shiftKey)}
-          title="Search emails with attachments"
-        >
-          <Paperclip size={12} strokeWidth={1.6} />
-          Has attachment
-        </button>
-      )}
-    </div>
   )
 }

@@ -3,7 +3,9 @@
  * from a module-scoped store seeded once at import (and there is no DOM or
  * localStorage under `bun test`), so selection-dependent behaviour is tested
  * against `visibleDetailFields` in ../fields.test.ts instead — this file
- * exercises the default selection, which needs no seeding.
+ * exercises the DEFAULT selection, which needs no seeding and which is now
+ * load-bearing: these rows are the whole message header, so a default that
+ * dropped a field would delete it from the reading pane outright.
  */
 import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -30,11 +32,15 @@ const message: MessageSummary = {
   keywords: [],
 }
 
-function render(overrides: Partial<MessageSummary> = {}, threadCount = 1) {
+function render(
+  overrides: Partial<MessageSummary> = {},
+  props: { conversationSubject?: string | null; threadCount?: number } = {},
+) {
   return renderToStaticMarkup(
     <MessageFieldRows
+      conversationSubject={props.conversationSubject}
       message={{ ...message, ...overrides }}
-      threadMessageCount={threadCount}
+      threadMessageCount={props.threadCount ?? 1}
     />,
   )
 }
@@ -44,19 +50,67 @@ describe('rows', () => {
     expect(render()).toContain('Arrived at:')
   })
 
-  test('shows the default selection, which is To and nothing else', () => {
+  test('the default selection names the message and its sender', () => {
+    // The header draws nothing of its own any more, so these defaults are
+    // what stands between a reader and a message with no subject and no
+    // sender on it.
     const html = render()
+    expect(html).toContain('Quarterly report')
+    expect(html).toContain('From:')
+    expect(html).toContain('Ada')
     expect(html).toContain('To:')
     expect(html).toContain('Grace')
-    expect(html).not.toContain('CC:')
-    expect(html).not.toContain('BCC:')
-    expect(html).not.toContain('Reply-To:')
   })
 
-  test('a populated but unselected CC stays hidden', () => {
+  test('the subject reads as a heading and prints no key', () => {
+    // Its declared presentation: prominence is a property of the field, so
+    // the subject can be as toggleable as Reply-To and still be the thing the
+    // eye lands on. A `Subject:` in front of it would say less than it does.
+    const html = render()
+    expect(html).toContain('text-heading')
+    expect(html).not.toContain('Subject:')
+  })
+
+  test('a label-less row spans both columns rather than indenting', () => {
+    expect(render()).toContain('col-span-2')
+  })
+
+  test('Reply-To is the one detail field left off by default', () => {
+    const html = render({ replyTo: [{ name: null, email: 'r@example.com' }] })
+    expect(html).not.toContain('Reply-To:')
+    expect(html).not.toContain('r@example.com')
+  })
+
+  test('CC and BCC are on by default, and cost nothing when absent', () => {
+    expect(render()).not.toContain('CC:')
     const html = render({ cc: [{ name: null, email: 'cc@example.com' }] })
-    expect(html).not.toContain('CC:')
-    expect(html).not.toContain('cc@example.com')
+    expect(html).toContain('CC:')
+    expect(html).toContain('cc@example.com')
+  })
+
+  test('the conversation subject wins over the message', () => {
+    expect(render({}, { conversationSubject: 'Thread subject' })).toContain(
+      'Thread subject',
+    )
+  })
+
+  test('a subject-less message says so rather than losing the row', () => {
+    expect(render({ subject: null })).toContain('(no subject)')
+  })
+
+  test('the sender keeps its click-to-search buttons, name and address', () => {
+    const html = render()
+    expect(html).toContain('Search emails from this sender')
+    expect(html).toContain('&lt;ada@example.com&gt;')
+  })
+
+  test('tags render as chips, and no tags renders no row at all', () => {
+    expect(render()).not.toContain('Tags:')
+    const html = render({ keywords: ['$seen', 'invoice'] })
+    expect(html).toContain('Tags:')
+    expect(html).toContain('invoice')
+    // System keywords are message state, shown elsewhere; only user tags here.
+    expect(html).not.toContain('$seen')
   })
 
   test('a To with no recipients renders no row', () => {
@@ -64,15 +118,17 @@ describe('rows', () => {
   })
 
   test('names the message count only when the thread has more than one', () => {
-    expect(render({}, 1)).not.toContain('messages')
-    expect(render({}, 3)).toContain('3 messages')
+    expect(render({}, { threadCount: 1 })).not.toContain('messages')
+    expect(render({}, { threadCount: 3 })).toContain('3 messages')
   })
 
-  test('the rows are the picker trigger, so selection is reachable', () => {
-    // The menu's own items render only once it opens (Radix), which no DOM-less
-    // render reaches; what is checkable here is that the rows carry the trigger
-    // at all. The set of fields it offers is `fieldsForSurface('detail')`,
-    // covered in ../fields.test.ts.
-    expect(render()).toContain('data-slot="context-menu-trigger"')
+  test('the picker is reachable by right-click AND by a visible button', () => {
+    // Menu and popover items render only once open (Radix portals), which no
+    // DOM-less render reaches; what is checkable here is that both ways in
+    // exist. The set of fields they offer is `fieldPickerOptions`, covered in
+    // ../thread/fieldPicker.test.tsx.
+    const html = render()
+    expect(html).toContain('data-slot="context-menu-trigger"')
+    expect(html).toContain('aria-label="Choose header rows"')
   })
 })

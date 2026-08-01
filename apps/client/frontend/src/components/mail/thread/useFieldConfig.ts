@@ -8,17 +8,22 @@
  * detail pane its own store would mean a second storage key with its own
  * validation and its own migration to keep in step.
  *
- * The list's entry keeps layout with it — sort and per-column widths — since
- * those are meaningless to a stacked row. The detail pane stores a visible
- * set and nothing else.
+ * Each surface stores what layout means for it, and they do not match: the
+ * list keeps sort and per-column widths, which mean nothing to a stacked row,
+ * while the detail pane keeps an ORDERED list of rows carrying each one's
+ * emphasis and whether it prints its label. Order is the array's, because the
+ * reader arranges those rows themselves.
  */
 import { useCallback } from 'react'
 import type { SortDirection } from '@/domain/vocabulary'
 import { createStoredStore, useStore } from '@/lib/store'
 
 import {
+  detailFieldDefault,
   fieldsForSurface,
+  isMessageFieldEmphasis,
   isMessageFieldId,
+  type DetailFieldSetting,
   type MessageFieldId,
 } from '../fields'
 import {
@@ -31,21 +36,53 @@ import {
   getColumnDef,
 } from './columns'
 
+/**
+ * The key does NOT move for the detail-row rework, even though the shape of
+ * `detailFields` does. A stored config is a reader's arrangement — column
+ * widths, sort, chosen rows — and throwing it away to dodge a shape change
+ * would be the loudest possible way to handle a change they never asked
+ * about. `readDetailFields` upgrades the old shape instead.
+ */
 const STORAGE_KEY = 'posthaste-message-columns-v7'
 
 /**
- * The detail rows shown out of the box: the recipients a reader expects to
- * see on every message. `cc`, `bcc` and `replyTo` are available but OFF by
- * default — they are absent on most mail, and a reader who wants them can
- * turn them on. An enabled-but-absent field renders nothing at all.
+ * The detail rows shown out of the box, in order.
+ *
+ * `subject`, `from` and `tags` are here because nothing else draws them any
+ * more: the header's heading, byline and chip row all became ordinary fields,
+ * and a default omitting one would silently delete it from the UI for every
+ * reader who never opens the picker.
+ *
+ * `cc` and `bcc` are here because they cost nothing when absent — an
+ * enabled-but-empty field renders no row at all — and being CC'd rather than
+ * addressed is worth seeing. `bcc` is stripped in transit on received mail,
+ * so in practice it appears only on the user's own sent mail and drafts,
+ * which is exactly where it means something.
+ *
+ * `replyTo` and `source` stay off: the first usually just repeats the sender
+ * (the case where it does not is the case worth opting into), and the second
+ * is only interesting to a reader with several accounts.
+ *
+ * Each entry's emphasis and label come from the field's own declaration, so
+ * this list says only WHICH rows and in what order.
  */
-const DEFAULT_DETAIL_FIELDS: MessageFieldId[] = ['to']
+const DEFAULT_DETAIL_FIELDS: DetailFieldSetting[] = (
+  ['subject', 'from', 'to', 'cc', 'bcc', 'tags'] as const
+).map(detailFieldDefault)
+
+/**
+ * The rows that had no home outside the header before it became these fields.
+ * A stored selection written before then cannot name them, so migrating one
+ * faithfully would produce a message with no subject, no sender and no tags —
+ * which is why the upgrade adds these back rather than trusting their absence.
+ */
+const STRUCTURAL_DETAIL_FIELDS: MessageFieldId[] = ['subject', 'from', 'tags']
 
 interface StoredConfig {
   columns: ColumnId[]
   sort: SortConfig
   widths: ColumnWidths
-  detailFields: MessageFieldId[]
+  detailFields: DetailFieldSetting[]
 }
 
 const DEFAULT_CONFIG: StoredConfig = {
@@ -64,6 +101,94 @@ function isValidColumnId(id: unknown): id is ColumnId {
 
 function isValidDetailFieldId(id: unknown): id is MessageFieldId {
   return isMessageFieldId(id) && detailIds.has(id)
+}
+
+/**
+ * Reads the detail selection out of storage, in either shape it can have.
+ *
+ * Before the header became its fields, a selection was a flat list of ids and
+ * carried nothing else; now each row also holds its emphasis and whether it
+ * prints its label, and the ARRAY ORDER is the reader's row order. Both shapes
+ * arrive here:
+ *
+ * - a list of ids (pre-rework) is upgraded entry by entry to the declared
+ *   presentation of each field, then has the structural rows it could not have
+ *   named added at the front — see `STRUCTURAL_DETAIL_FIELDS`;
+ * - a list of entries is taken as written, with each part validated on its own
+ *   so one bad emphasis costs that field its emphasis and nothing else.
+ *
+ * Anything else — a number, a string, a missing key — returns `null` and the
+ * caller falls back to the defaults. Junk resets; a real arrangement never
+ * does.
+ *
+ * Exported for its own tests: the store it feeds is module-scoped and reads
+ * storage once at import, so the upgrade path is unreachable through the hook.
+ */
+export function readDetailFields(value: unknown): DetailFieldSetting[] | null {
+  if (!Array.isArray(value)) return null
+
+  // An EMPTY array is not evidence of either shape, and it is read as the new
+  // one: "show no rows" is a choice the settings editor now offers, and a
+  // reader who makes it must not find the header repopulated on next launch.
+  // The cost is a pre-rework reader who had turned their one row off keeping
+  // an empty header — a deliberate state then and now.
+  const legacy =
+    value.length > 0 && value.every((entry) => typeof entry === 'string')
+  const entries: DetailFieldSetting[] = []
+  const seen = new Set<MessageFieldId>()
+
+  for (const entry of value) {
+    const raw: unknown =
+      typeof entry === 'string' ? { id: entry } : (entry as unknown)
+    if (typeof raw !== 'object' || raw === null) continue
+    const record = raw as Record<string, unknown>
+    if (!isValidDetailFieldId(record.id) || seen.has(record.id)) continue
+
+    const declared = detailFieldDefault(record.id)
+    entries.push({
+      id: record.id,
+      emphasis: isMessageFieldEmphasis(record.emphasis)
+        ? record.emphasis
+        : declared.emphasis,
+      showLabel:
+        typeof record.showLabel === 'boolean'
+          ? record.showLabel
+          : declared.showLabel,
+    })
+    seen.add(record.id)
+  }
+
+  if (legacy) {
+    const missing = STRUCTURAL_DETAIL_FIELDS.filter((id) => !seen.has(id)).map(
+      detailFieldDefault,
+    )
+    return [...missing, ...entries]
+  }
+
+  return entries
+}
+
+/**
+ * One row moved one place, or the same list back when the move would fall off
+ * either end (the settings buttons disable at the ends, but a list is not
+ * trusted to have been rendered by them).
+ *
+ * Pure and exported so the arithmetic is testable: the hook that wraps it
+ * needs a store that reads storage at import, and an off-by-one here silently
+ * rearranges the header of every message the reader owns.
+ */
+export function moveDetailRow(
+  fields: DetailFieldSetting[],
+  fieldId: MessageFieldId,
+  direction: -1 | 1,
+): DetailFieldSetting[] {
+  const from = fields.findIndex((field) => field.id === fieldId)
+  const to = from + direction
+  if (from === -1 || to < 0 || to >= fields.length) return fields
+  const next = [...fields]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
 }
 
 function readStoredConfig(raw: string | null): StoredConfig {
@@ -125,9 +250,8 @@ function readStoredConfig(raw: string | null): StoredConfig {
 
     // An absent key means a config stored before the detail pane had a
     // selection; an EMPTY array is a real choice (show no rows) and is kept.
-    const detailFields = Array.isArray(obj.detailFields)
-      ? obj.detailFields.filter(isValidDetailFieldId)
-      : DEFAULT_CONFIG.detailFields
+    const detailFields =
+      readDetailFields(obj.detailFields) ?? DEFAULT_CONFIG.detailFields
 
     return { columns, sort, widths, detailFields }
   } catch {
@@ -217,12 +341,17 @@ export function useColumnConfig() {
 }
 
 /**
- * The detail pane's chosen rows — the same store and the same storage entry
- * the column picker writes, so the two selections stay one saved preference.
+ * The detail pane's rows — which fields, in what order, and how each one
+ * presents. Same store and same storage entry as the column picker, so the two
+ * surfaces stay one saved preference.
  *
- * Selection order is deliberately NOT stored: rows render in the registry's
- * declaration order, so `To` stays above `CC` however they were toggled on.
- * Unlike columns there is no minimum — choosing to show no rows is allowed.
+ * The array's ORDER is the header's row order: unlike columns, whose order the
+ * reader drags in place, detail rows are reordered from settings, because the
+ * reading pane is content and dragging content around is a different promise.
+ * Unlike columns there is also no minimum — showing no rows is allowed.
+ *
+ * A newly enabled field arrives with its DECLARED presentation and lands at
+ * the end, where the reader put their attention when they turned it on.
  */
 export function useDetailFieldConfig() {
   const config = useStore(columnConfigStore)
@@ -230,11 +359,39 @@ export function useDetailFieldConfig() {
   const toggleDetailField = useCallback((fieldId: MessageFieldId) => {
     const { detailFields } = currentConfig()
     persist({
-      detailFields: detailFields.includes(fieldId)
-        ? detailFields.filter((id) => id !== fieldId)
-        : [...detailFields, fieldId],
+      detailFields: detailFields.some((field) => field.id === fieldId)
+        ? detailFields.filter((field) => field.id !== fieldId)
+        : [...detailFields, detailFieldDefault(fieldId)],
     })
   }, [])
+
+  /** Rewrites one row's presentation, leaving its place and every other row
+   *  alone. */
+  const updateDetailField = useCallback(
+    (fieldId: MessageFieldId, patch: Partial<Omit<DetailFieldSetting, 'id'>>) => {
+      const { detailFields } = currentConfig()
+      persist({
+        detailFields: detailFields.map((field) =>
+          field.id === fieldId ? { ...field, ...patch } : field,
+        ),
+      })
+    },
+    [],
+  )
+
+  /**
+   * Moves a row one place up or down. One step at a time rather than a
+   * to-index move because that is the whole of what the settings controls
+   * offer, and a step is the operation a reader can undo by pressing the
+   * other button.
+   */
+  const moveDetailField = useCallback(
+    (fieldId: MessageFieldId, direction: -1 | 1) => {
+      const { detailFields } = currentConfig()
+      persist({ detailFields: moveDetailRow(detailFields, fieldId, direction) })
+    },
+    [],
+  )
 
   const resetDetailFields = useCallback(() => {
     persist({ detailFields: [...DEFAULT_DETAIL_FIELDS] })
@@ -243,6 +400,8 @@ export function useDetailFieldConfig() {
   return {
     detailFields: config.detailFields,
     toggleDetailField,
+    updateDetailField,
+    moveDetailField,
     resetDetailFields,
   } as const
 }

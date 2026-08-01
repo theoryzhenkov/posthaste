@@ -36,25 +36,30 @@ describe('surfaces', () => {
     expect(fieldsForSurface('list')).toEqual([
       'unread',
       'flagged',
-      'attachment',
       'subject',
       'from',
       'date',
       'source',
       'sourceMailbox',
       'tags',
+      'attachment',
       'preview',
     ])
   })
 
-  test('the detail offers the reading fields, recipients included', () => {
+  test('the detail offers everything the header draws, in reading order', () => {
+    // Declaration order IS the header's row order now that the header is
+    // nothing but these rows: what it is and who sent it, then who else got
+    // it, then where it came from and how it is marked.
     expect(fieldsForSurface('detail')).toEqual([
+      'subject',
       'from',
-      'source',
       'to',
       'cc',
       'bcc',
       'replyTo',
+      'source',
+      'tags',
     ])
   })
 
@@ -190,17 +195,23 @@ describe('detail row selection', () => {
     expect(visibleDetailFields(selectAll, message)).toEqual(['to', 'cc'])
   })
 
-  test('orders by declaration, not by the order fields were enabled', () => {
+  test('keeps the order it is given, which is the reader’s', () => {
+    // Rows are reorderable, so a stored selection is a sequence rather than a
+    // set: re-sorting it here would quietly undo the reader's arrangement.
     const message = {
       ...base,
       cc: [{ name: null, email: 'cc@example.com' }],
       replyTo: [{ name: null, email: 'r@example.com' }],
     }
     expect(visibleDetailFields(['replyTo', 'cc', 'to'], message)).toEqual([
-      'to',
-      'cc',
       'replyTo',
+      'cc',
+      'to',
     ])
+  })
+
+  test('a repeated field yields one row', () => {
+    expect(visibleDetailFields(['to', 'to'], base)).toEqual(['to'])
   })
 
   test('an empty selection yields no rows', () => {
@@ -209,9 +220,10 @@ describe('detail row selection', () => {
 
   test('a list-only field cannot leak into the detail rows', () => {
     // Guards the surface split: a stale stored id must not resurrect a column
-    // as a detail row.
-    expect(visibleDetailFields(['subject', 'preview', 'to'], base)).toEqual([
-      'to',
-    ])
+    // as a detail row. `subject` is no longer one of those — it is a field on
+    // both surfaces — so `preview` and `date` carry the case.
+    expect(
+      visibleDetailFields(['preview', 'date', 'to', 'unread'], base),
+    ).toEqual(['to'])
   })
 })
