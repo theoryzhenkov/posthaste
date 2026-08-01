@@ -42,7 +42,7 @@ import type { SidebarSelection } from '@/data/models/selection'
 import { buildThreadListLayout } from '../thread/columns'
 import { ThreadListHeader } from '../thread/ThreadListHeader'
 import type { RowContextMenuFor } from './MessageRow'
-import { useColumnConfig } from '../thread/useColumnConfig'
+import { useColumnConfig } from '../thread/useFieldConfig'
 
 interface MessageListProps {
   selectedView: SidebarSelection | null

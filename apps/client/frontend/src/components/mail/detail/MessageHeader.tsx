@@ -12,6 +12,10 @@
  * parameterized actions (Snooze presets), a confirm dialog for destructive
  * `confirm`-bearing actions (delete-permanently), the flag tint, and the tag
  * editor's outside-click anchor attribute.
+ *
+ * The message's own properties are NOT laid out here: `MessageFieldRows`
+ * renders them as labelled rows off the shared message-field registry, so the
+ * detail pane and the message list describe a field the same way.
  */
 import { useState, type MouseEvent } from 'react'
 import { Paperclip } from 'lucide-react'
@@ -28,12 +32,8 @@ import { Badge } from '../../ui/display/badge'
 import { Button } from '../../ui/form/button'
 import { KeyboardConfirmDialog } from '../../keyboard/KeyboardConfirmDialog'
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui/overlay/popover'
-import {
-  formatAbsoluteDate,
-  formatRecipientEmailList,
-  initialsForSender,
-  userTags,
-} from './model'
+import { MessageFieldRows } from './MessageFieldRows'
+import { initialsForSender, userTags } from './model'
 
 export function MessageHeader({
   conversationSubject,
@@ -53,7 +53,6 @@ export function MessageHeader({
   const senderName = message.fromName ?? message.fromEmail ?? 'Unknown sender'
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
-  const recipientLabel = `to ${formatRecipientEmailList(message.to)}`
 
   const headerActions = orderForHeader(headerActionsFor(message))
 
@@ -75,18 +74,11 @@ export function MessageHeader({
                   senderName={senderName}
                   onSearch={onSearch}
                 />
-                <span className="text-muted-foreground/60">
-                  {recipientLabel}
-                </span>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {formatAbsoluteDate(message.receivedAt)}
-                </span>
-                {threadMessages.length > 1 && (
-                  <span className="font-mono text-[11px] text-muted-foreground/80">
-                    {threadMessages.length} messages
-                  </span>
-                )}
               </div>
+              <MessageFieldRows
+                message={message}
+                threadMessageCount={threadMessages.length}
+              />
             </div>
             <HeaderActions
               headerActions={headerActions}

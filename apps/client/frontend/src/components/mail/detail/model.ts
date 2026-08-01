@@ -1,4 +1,4 @@
-import type { MessageSummary, Recipient } from '@/data/transport/api'
+import type { MessageSummary } from '@/data/transport/api'
 
 /**
  * Marks the reading pane's body scroll container. The pane is display-only
@@ -31,13 +31,6 @@ export function formatAbsoluteDate(value: string): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
-}
-
-export function formatRecipientEmailList(recipients: Recipient[]): string {
-  if (recipients.length === 0) {
-    return 'recipients unavailable'
-  }
-  return recipients.map((recipient) => recipient.email).join(', ')
 }
 
 export function initialsForSender(senderName: string): string {

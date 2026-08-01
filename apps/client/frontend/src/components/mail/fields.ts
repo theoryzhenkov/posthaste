@@ -194,3 +194,25 @@ export function hasMessageField(
 ): boolean {
   return messageFieldText(id, message) !== ''
 }
+
+/**
+ * The detail rows to draw for a message: the reader's selection, narrowed to
+ * the fields this message actually has, in declaration order.
+ *
+ * Ordering by declaration rather than by selection keeps `To` above `CC`
+ * however the reader toggled them on. Narrowing by presence is what makes an
+ * enabled-but-empty field vanish instead of rendering a label with nothing
+ * after it — the permanent state of `BCC` on received mail.
+ */
+export function visibleDetailFields(
+  selected: Iterable<MessageFieldId>,
+  message: MessageSummary,
+): MessageFieldId[] {
+  const chosen = new Set(selected)
+  return FIELDS.filter(
+    (field) =>
+      field.surfaces.includes('detail') &&
+      chosen.has(field.id) &&
+      hasMessageField(field.id, message),
+  ).map((field) => field.id)
+}

@@ -8,6 +8,7 @@ import {
   hasMessageField,
   isMessageFieldId,
   messageFieldText,
+  visibleDetailFields,
   type MessageFieldId,
 } from './fields'
 
@@ -169,5 +170,48 @@ describe('presence', () => {
     const message = { ...base, subject: null, preview: null }
     expect(hasMessageField('subject', message)).toBe(false)
     expect(hasMessageField('preview', message)).toBe(false)
+  })
+})
+
+describe('detail row selection', () => {
+  const selectAll = ['to', 'cc', 'bcc', 'replyTo'] as const
+
+  test('narrows the selection to the fields the message has', () => {
+    // The BCC case is the one that matters: it is stripped in transit, so a
+    // reader who enables it must not get an empty row on every message.
+    expect(visibleDetailFields(selectAll, base)).toEqual(['to'])
+  })
+
+  test('includes a field once it is populated', () => {
+    const message = {
+      ...base,
+      cc: [{ name: null, email: 'cc@example.com' }],
+    }
+    expect(visibleDetailFields(selectAll, message)).toEqual(['to', 'cc'])
+  })
+
+  test('orders by declaration, not by the order fields were enabled', () => {
+    const message = {
+      ...base,
+      cc: [{ name: null, email: 'cc@example.com' }],
+      replyTo: [{ name: null, email: 'r@example.com' }],
+    }
+    expect(visibleDetailFields(['replyTo', 'cc', 'to'], message)).toEqual([
+      'to',
+      'cc',
+      'replyTo',
+    ])
+  })
+
+  test('an empty selection yields no rows', () => {
+    expect(visibleDetailFields([], base)).toEqual([])
+  })
+
+  test('a list-only field cannot leak into the detail rows', () => {
+    // Guards the surface split: a stale stored id must not resurrect a column
+    // as a detail row.
+    expect(visibleDetailFields(['subject', 'preview', 'to'], base)).toEqual([
+      'to',
+    ])
   })
 })

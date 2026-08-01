@@ -79,9 +79,14 @@ export function useStore<T, U>(
   store: Store<T>,
   selector?: (value: T) => U,
 ): T | U {
-  return useSyncExternalStore(store.subscribe, (): T | U =>
-    selector ? selector(store.get()) : store.get(),
-  )
+  const snapshot = (): T | U =>
+    selector ? selector(store.get()) : store.get()
+  // The same function serves as the server snapshot: a store is plain
+  // in-memory state with no request scope, so a non-browser render has
+  // nothing different to read. Without it React refuses to render any
+  // store-backed component outside the browser — which is exactly how these
+  // components are unit-tested (`renderToStaticMarkup`, no DOM).
+  return useSyncExternalStore(store.subscribe, snapshot, snapshot)
 }
 
 /** How a stored value crosses the string boundary of web storage. */
