@@ -32,7 +32,7 @@ const SETTINGS_CATEGORIES = [
   {
     id: 'appearance',
     label: 'Appearance',
-    description: 'Built-in themes, color mode, and density.',
+    description: 'Themes, color mode, density, and message fields.',
     icon: Palette,
     accent: brandAccents.sage,
   },
