@@ -60,7 +60,7 @@ export function SortableColumnHeader({
       ref={setNodeRef}
       type="button"
       className={cn(
-        'relative flex h-full min-w-0 select-none items-center overflow-visible px-0 text-[11px]',
+        'relative flex h-full min-w-0 select-none items-center overflow-visible px-0 text-meta',
         isSortable ? 'cursor-pointer' : 'cursor-grab',
         isDragging && 'z-10 opacity-60',
       )}

@@ -51,6 +51,19 @@
   --color-brand-coral-foreground: var(--brand-coral-foreground);
   --color-brand-coral-soft: var(--brand-coral-soft);
 
+  /*
+   * The type scale, named for Tailwind. The sizes themselves stay in `:root`
+   * with the other structural tokens (`--ph-font-size-*`); this only exposes
+   * them as utilities, so a component says `text-body` instead of
+   * `text-[13px]` and the scale keeps one home rather than a pixel literal
+   * per component.
+   */
+  --text-meta: var(--ph-font-size-meta);
+  --text-ui: var(--ph-font-size-ui);
+  --text-body: var(--ph-font-size-body);
+  --text-emphasis: var(--ph-font-size-emphasis);
+  --text-heading: var(--ph-font-size-heading);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
