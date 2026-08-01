@@ -97,6 +97,7 @@ export * from "./PushStatus";
 export * from "./Query";
 export * from "./QueryEnvelope";
 export * from "./Recipient";
+export * from "./RederiveMessageMetadataIntent";
 export * from "./RedoIntent";
 export * from "./RenameMailboxIntent";
 export * from "./ReplaceMailboxesCommand";

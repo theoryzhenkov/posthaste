@@ -2,7 +2,7 @@
 title: "Backend (L1)"
 scope: L1
 summary: "The backend's internal structure: the domain service over the SQLite store, provider gateways, per-account runtimes, the outbox, events and the store generation, query evaluation, and command execution."
-modified: 2026-07-18
+modified: 2026-08-01
 reviewed: 2026-07-18
 state: draft
 depends:
@@ -66,6 +66,18 @@ migrations run forward on open, and an older binary refuses a newer database
 cleanly. The full state model — projections, freshness, query semantics — is
 specified in the mail-state docs; this document's contract is the ownership
 rules above.
+
+Repair and catch-up work runs DEFERRED, after the store is open and serving,
+never on the open path: an unbounded scan there would block the first read of
+every startup. Each pass is idempotent and best-effort, so a failed or
+interrupted one is simply re-run next startup, and each answers "is there work?"
+cheaply — an indexed probe, or, where the work's absence is indistinguishable
+from ordinary data, a recorded completion marker rather than a scan. This is
+where a field added to the message projection reaches mail that was already
+synced: delta sync never re-fetches an unchanged message, so a new
+header-derived column is re-derived from the raw MIME the body cache already
+retains, with no provider round trip. The same repair is exposed as a manual
+action for the case where the automatic pass has already run.
 
 ## 5. Account runtimes
 

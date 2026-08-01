@@ -24,6 +24,7 @@ mod failure;
 mod mail_list;
 mod mail_mutations;
 mod mailboxes;
+mod maintenance;
 mod message_detail;
 pub(crate) mod oauth;
 mod operations;

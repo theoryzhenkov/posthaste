@@ -166,5 +166,11 @@ function makeCommands(client: MailClient, queryClient: QueryClient) {
           forceBackfill: opts?.forceBackfill ?? false,
         },
       }),
+
+    /** Rebuilds message details (Cc, Bcc, Reply-To, unsubscribe links) from
+     * the mail already cached on this device. Network-free and non-destructive
+     * — it only fills fields that are still blank — but it runs to completion
+     * before resolving, so callers must show progress. */
+    rederiveMessageMetadata: () => run({ rederiveMessageMetadata: {} }),
   }
 }

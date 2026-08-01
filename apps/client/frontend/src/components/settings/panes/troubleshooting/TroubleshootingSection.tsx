@@ -1,14 +1,19 @@
 /**
- * Troubleshooting controls: a manual "repair local database" pathway.
+ * Troubleshooting controls, ordered by how much they cost the user.
  *
- * The local database is a rebuildable cache (accounts live in config, secrets in
- * the keychain), so repairing quarantines a possibly-corrupt database and
- * rebuilds it on restart. Desktop-only.
+ * The three actions here look alike and differ wildly in consequence, so the
+ * copy's job is to keep them apart: rebuilding message details re-reads mail
+ * already on disk and fills blanks; repairing the database throws that mail
+ * away and downloads it again; the factory reset throws the accounts away too.
+ * Someone looking at a blank Cc row will otherwise reach for whichever sounds
+ * most decisive, so the lightest is listed first and the heavy ones say what
+ * they destroy. Desktop-only.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { useCommands } from '@/data'
 import { usePlatformServices } from '@/lib/platform/services'
 import { LOG_EVENTS } from '@/lib/log/logEvents'
 import { syncLogger } from '@/lib/log/logger'
@@ -27,10 +32,56 @@ import {
 import { Button } from '../../../ui/form/button'
 import { SettingsSection } from '../../panel/shared'
 
+/** One labelled action: explanation on the left, its control on the right. */
+function ActionRow({
+  title,
+  description,
+  className,
+  children,
+}: {
+  title: string
+  description: string
+  className?: string
+  children: ReactNode
+}) {
+  const divider = className ? ` ${className}` : ''
+  return (
+    <div
+      className={`grid gap-3 sm:grid-cols-[1fr_280px] sm:items-center${divider}`}
+    >
+      <div className="min-w-0">
+        <p className="text-[13px] font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      {children}
+    </div>
+  )
+}
+
 export function TroubleshootingSection() {
   const { repair } = usePlatformServices()
+  const commands = useCommands()
+  const [isRebuilding, setIsRebuilding] = useState(false)
   const [isRepairing, setIsRepairing] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
+
+  async function runMetadataRebuild() {
+    setIsRebuilding(true)
+    try {
+      await commands.rederiveMessageMetadata()
+      toast.success('Message details rebuilt from mail stored on this device.')
+    } catch (error) {
+      syncLogger.warn(
+        { event: LOG_EVENTS.databaseRederiveMetadataFailed, error },
+        'message-detail rebuild failed',
+      )
+      toast.error('Could not rebuild message details. Please try again.')
+    } finally {
+      setIsRebuilding(false)
+    }
+  }
 
   async function runRepair() {
     setIsRepairing(true)
@@ -62,18 +113,26 @@ export function TroubleshootingSection() {
 
   return (
     <SettingsSection title="Troubleshooting">
-      <div className="grid gap-3 sm:grid-cols-[1fr_280px] sm:items-center">
-        <div className="min-w-0">
-          <p className="text-[13px] font-medium text-foreground">
-            Repair local database
-          </p>
-          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-            Resets the local view cache and rebuilds the mail database, then
-            restarts. Use this if mail looks corrupted, fails to load, or views
-            stay stuck loading. Accounts and passwords are kept; any unsent
-            changes are discarded.
-          </p>
-        </div>
+      <ActionRow
+        title="Rebuild message details"
+        description="Fills in details older messages are missing — Cc, Bcc, Reply-To, unsubscribe links — by re-reading mail already stored on this device. Nothing is downloaded, nothing is deleted, and details you can already see are left alone. This runs on its own after an update; use it if a message still shows blanks."
+      >
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isRebuilding}
+          onClick={() => void runMetadataRebuild()}
+          className="h-8 gap-2 border-border bg-background text-[13px] shadow-none sm:justify-self-end"
+        >
+          {isRebuilding ? <Loader2 size={14} className="animate-spin" /> : null}
+          Rebuild details
+        </Button>
+      </ActionRow>
+      <ActionRow
+        className="mt-4 border-t border-border/60 pt-4"
+        title="Repair local database"
+        description="The heavy one. Sets the mail database aside and rebuilds it on restart: every message cached on this device is discarded and downloaded again, and local-only state such as snoozes is lost. Accounts and passwords are kept. Use it when mail fails to load at all — not for blank or stale fields, which the rebuild above fixes without downloading anything."
+      >
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
@@ -90,12 +149,14 @@ export function TroubleshootingSection() {
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Repair local data?</AlertDialogTitle>
+              <AlertDialogTitle>Rebuild the mail database?</AlertDialogTitle>
               <AlertDialogDescription>
-                This resets Posthaste&rsquo;s local data — the cached mail and
-                the view state — and restarts. Your accounts and passwords are
-                not affected and mail re-syncs from your providers, but any
-                unsent changes will be discarded.
+                Every message cached on this device is discarded and downloaded
+                again from your providers, and local-only state such as snoozed
+                messages is lost. Your accounts, passwords, and the mail on the
+                server are not affected. If details merely look blank or out of
+                date, cancel and use &ldquo;Rebuild message details&rdquo;
+                instead — it fixes that without downloading anything.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -106,19 +167,13 @@ export function TroubleshootingSection() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </div>
+      </ActionRow>
       {repair.canFactoryReset() ? (
-        <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 sm:grid-cols-[1fr_280px] sm:items-center">
-          <div className="min-w-0">
-            <p className="text-[13px] font-medium text-foreground">
-              Reset all local data
-            </p>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              Removes every account, setting, and cached message from this
-              device and restarts with a clean install. Your mail on the server
-              is not affected; you will need to add your accounts again.
-            </p>
-          </div>
+        <ActionRow
+          className="mt-4 border-t border-border/60 pt-4"
+          title="Reset all local data"
+          description="Removes every account, setting, and cached message from this device and restarts with a clean install. Your mail on the server is not affected; you will need to add your accounts again."
+        >
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
@@ -154,7 +209,7 @@ export function TroubleshootingSection() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </div>
+        </ActionRow>
       ) : null}
     </SettingsSection>
   )

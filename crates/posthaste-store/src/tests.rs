@@ -175,6 +175,7 @@ mod mailbox_role_overrides;
 mod mailbox_snapshots;
 mod message_queries;
 mod message_snapshots;
+mod metadata_rederive;
 mod mutation_cursors;
 mod mutation_events;
 mod outbox;

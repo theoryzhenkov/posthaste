@@ -260,6 +260,21 @@ pub(super) const SCHEMA_SQL: &str = "
                     ON DELETE CASCADE
             );
 
+            -- Watermarks for the deferred post-startup maintenance passes, so a
+            -- pass can answer 'is there work?' with ONE primary-key probe
+            -- instead of a scan. A pass that can only be detected by looking at
+            -- the data it repairs (a derivation whose 'not done yet' state is
+            -- indistinguishable from 'legitimately empty' — most mail has no
+            -- Cc) has no indexable predicate to probe, so the fact that it ran
+            -- is recorded here rather than inferred. `value` is a monotonic
+            -- revision: bumping the pass's current revision in code re-arms it
+            -- exactly once per database.
+            CREATE TABLE IF NOT EXISTS store_maintenance_marker (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS cache_rescore_queue (
                 account_id TEXT NOT NULL,
                 message_id TEXT NOT NULL,

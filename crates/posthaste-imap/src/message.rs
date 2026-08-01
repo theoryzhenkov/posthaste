@@ -2,10 +2,13 @@ use imap_client::imap_types::flag::Flag;
 use mail_parser::MessageParser;
 use posthaste_domain_model::{
     GmailLabel, ImapGmailMetadata, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid,
-    MessageRecord, Recipient, SystemKeyword, RFC3339_EPOCH,
+    MessageRecord, SystemKeyword, RFC3339_EPOCH,
 };
 use posthaste_domain_model::{MailboxId, MessageId, ThreadId};
-use posthaste_domain_service::{gmail_message_id, gmail_thread_id, imap_message_id};
+use posthaste_domain_service::{
+    derive_message_metadata_from_parsed, gmail_message_id, gmail_thread_id, imap_message_id,
+    recipients_from,
+};
 
 use crate::ImapAdapterError;
 
@@ -98,6 +101,10 @@ pub fn imap_header_message_record_with_gmail_metadata(
         .unwrap_or_else(|| imap_thread_id(&message_id, rfc_message_id.as_deref(), &references));
     let from = parsed.from().and_then(|address| address.first());
     let to = recipients_from(parsed.to());
+    // The one derivation, shared with the body-fetch path and with the
+    // store's offline re-derive of already-cached mail — three producers of
+    // the same columns, one parse of the same headers.
+    let derived = derive_message_metadata_from_parsed(&parsed);
     // Normalize to UTC before serializing: `DateTime::to_rfc3339` preserves
     // the Date header's original offset (`+02:00`, `-08:00`, …), and the
     // store sorts `received_at` as TEXT — lexicographic order is only
@@ -121,9 +128,9 @@ pub fn imap_header_message_record_with_gmail_metadata(
         // i.e. the WHOLE header block, so Cc/Bcc/Reply-To were already on the
         // wire and merely unparsed. Zero added bytes and zero added round
         // trips for the IMAP path.
-        cc: recipients_from(parsed.cc()),
-        bcc: recipients_from(parsed.bcc()),
-        reply_to: recipients_from(parsed.reply_to()),
+        cc: derived.cc,
+        bcc: derived.bcc,
+        reply_to: derived.reply_to,
         preview: None,
         received_at,
         has_attachment: fetched.has_attachment,
@@ -137,7 +144,7 @@ pub fn imap_header_message_record_with_gmail_metadata(
         in_reply_to,
         references,
         draft_id,
-        list_unsubscribe: list_unsubscribe_from_parsed(&parsed),
+        list_unsubscribe: derived.list_unsubscribe,
     };
     let location = ImapMessageLocation {
         message_id,
@@ -155,37 +162,6 @@ pub fn imap_header_message_record_with_gmail_metadata(
         mailbox_membership_source: ImapMailboxMembershipSource::SelectedMailbox,
         provider_absent_mailbox_ids: Vec::new(),
     })
-}
-
-/// Projects one of `mail_parser`'s address headers (`To`, `Cc`, `Bcc`,
-/// `Reply-To`) into the domain recipient shape. An address with no
-/// `addr-spec` is dropped rather than stored under an empty email — a
-/// display-name-only group construct is not a recipient anything can act on.
-pub(crate) fn recipients_from(addresses: Option<&mail_parser::Address<'_>>) -> Vec<Recipient> {
-    addresses
-        .map(|addresses| {
-            addresses
-                .iter()
-                .filter_map(|address| {
-                    Some(Recipient {
-                        name: address.name.as_ref().map(|name| name.to_string()),
-                        email: address.address.as_ref()?.to_string(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Extracts and parses the RFC 2369/8058 unsubscribe headers from a parsed
-/// message's raw headers (`header_raw` keeps the value undecoded so encoded-
-/// word handling can never mangle a URL; the shared parser unfolds).
-pub(crate) fn list_unsubscribe_from_parsed(
-    parsed: &mail_parser::Message<'_>,
-) -> Option<posthaste_domain_model::ListUnsubscribe> {
-    let header = parsed.header_raw("List-Unsubscribe")?;
-    let post = parsed.header_raw("List-Unsubscribe-Post");
-    posthaste_domain_model::parse_list_unsubscribe(header, post)
 }
 
 /// Map IMAP system flags into the JMAP keyword vocabulary used by Posthaste.

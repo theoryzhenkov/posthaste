@@ -8,9 +8,9 @@ use posthaste_client_models::{Command, CommandAccepted, CommandEnvelope};
 use posthaste_domain_model::{AccountId, DomainEvent, OperationId, SyncTrigger};
 
 use super::{
-    accounts, automation, compose, decode_json, mail_mutations, mailboxes, offload_read,
-    operations, rev_log, settings, smart_mailboxes, snooze, sync, unsubscribe, ApiFailure,
-    ApiState, CommandOutcome, COMMAND_OUTCOME_CAP,
+    accounts, automation, compose, decode_json, mail_mutations, mailboxes, maintenance,
+    offload_read, operations, rev_log, settings, smart_mailboxes, snooze, sync, unsubscribe,
+    ApiFailure, ApiState, CommandOutcome, COMMAND_OUTCOME_CAP,
 };
 use crate::AppState;
 
@@ -126,6 +126,9 @@ async fn apply_command(
         Command::RetryOperation(intent) => operations::retry_operation(app, intent).await,
         Command::CancelOperation(intent) => operations::cancel_operation(app, intent).await,
         Command::Unsubscribe(intent) => unsubscribe::unsubscribe(app, intent),
+        Command::RederiveMessageMetadata(intent) => {
+            maintenance::rederive_message_metadata(app, intent).await
+        }
     }
 }
 

@@ -253,6 +253,24 @@ pub const STORE_STARTUP_MESSAGE_FTS_BACKFILL_FAILED: LogEvent =
 pub const STORE_STARTUP_MESSAGE_FTS_BACKFILL_COMPLETED: LogEvent =
     LogEvent::new("store.startup.message_fts_backfill_completed");
 
+/// The deferred post-startup re-derive of message metadata (Cc/Bcc/Reply-To/
+/// List-Unsubscribe recovered from cached raw MIME) ran, one time per
+/// derivation revision. Carries the counts so an upgraded install shows how
+/// much pre-upgrade mail it repaired.
+pub const STORE_STARTUP_METADATA_REDERIVE_COMPLETED: LogEvent =
+    LogEvent::new("store.startup.metadata_rederive_completed");
+
+/// The deferred post-startup metadata re-derive failed. Non-fatal — the store
+/// is serving, the completion marker is only written on success, so the whole
+/// pass simply re-runs on the next startup. Until it succeeds, mail whose body
+/// was cached before those columns existed keeps showing them empty.
+pub const STORE_STARTUP_METADATA_REDERIVE_FAILED: LogEvent =
+    LogEvent::new("store.startup.metadata_rederive_failed");
+
+/// A user-requested metadata re-derive (Settings → Troubleshooting) finished.
+pub const STORE_METADATA_REDERIVE_REQUESTED: LogEvent =
+    LogEvent::new("store.metadata_rederive.requested");
+
 pub const SUPERVISOR_ACCOUNT_DISABLED: LogEvent = LogEvent::new("supervisor.account.disabled");
 pub const SUPERVISOR_ACCOUNT_REMOVED: LogEvent = LogEvent::new("supervisor.account.removed");
 pub const SUPERVISOR_ACCOUNT_RUNTIME_STARTED: LogEvent =

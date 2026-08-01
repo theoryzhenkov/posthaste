@@ -21,6 +21,7 @@ export const LOG_EVENTS = {
   paletteSearchCancelled: 'palette.search.cancelled',
   paletteSearchStale: 'palette.search.stale',
   databaseRepairFailed: 'database.repair.failed',
+  databaseRederiveMetadataFailed: 'database.rederive_metadata.failed',
   diagnosticsCopied: 'diagnostics.copied',
   diagnosticsCopyFailed: 'diagnostics.copy.failed',
   replicaDatabaseBlocked: 'replica.database.blocked',

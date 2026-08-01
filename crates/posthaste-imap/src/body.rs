@@ -91,11 +91,11 @@ pub fn imap_body_from_raw_mime(
         .collect::<Vec<_>>();
     // Old-mail backfill: the full raw message carries the headers, so a body
     // fetch re-extracts the unsubscribe targets and the recipient set for rows
-    // synced before those columns existed.
-    let list_unsubscribe = crate::message::list_unsubscribe_from_parsed(&parsed);
-    let cc = crate::message::recipients_from(parsed.cc());
-    let bcc = crate::message::recipients_from(parsed.bcc());
-    let reply_to = crate::message::recipients_from(parsed.reply_to());
+    // synced before those columns existed. The store's offline re-derive pass
+    // runs this same derivation over the `.eml` this fetch is about to cache,
+    // for the mail whose body was cached before the columns existed and so
+    // never reaches this path again.
+    let derived = posthaste_domain_service::derive_message_metadata_from_parsed(&parsed);
     let raw_mime = String::from_utf8(raw_mime).ok();
 
     Ok(FetchedBody {
@@ -103,10 +103,10 @@ pub fn imap_body_from_raw_mime(
         body_text,
         raw_mime,
         attachments,
-        list_unsubscribe,
-        cc,
-        bcc,
-        reply_to,
+        list_unsubscribe: derived.list_unsubscribe,
+        cc: derived.cc,
+        bcc: derived.bcc,
+        reply_to: derived.reply_to,
     })
 }
 

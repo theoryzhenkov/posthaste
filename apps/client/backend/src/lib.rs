@@ -267,6 +267,25 @@ fn spawn_deferred_store_maintenance(database_store: &Arc<DatabaseStore>) {
                 "deferred startup full-text-index backfill failed"
             ),
         }
+        // Guarded on a one-row marker probe, NOT a scan: the "has this row
+        // been re-derived?" question has no indexable form (a message with no
+        // Cc and a message whose Cc was never parsed are the same empty
+        // column), so the store records that it ran instead of inferring it.
+        match repair_store.rederive_stale_message_metadata() {
+            Ok(Some(report)) => ph_info!(
+                events::STORE_STARTUP_METADATA_REDERIVE_COMPLETED,
+                examined = report.examined,
+                filled = report.filled,
+                unreadable = report.unreadable,
+                "deferred startup message-metadata re-derive completed"
+            ),
+            Ok(None) => {}
+            Err(error) => ph_warn!(
+                events::STORE_STARTUP_METADATA_REDERIVE_FAILED,
+                error = %error,
+                "deferred startup message-metadata re-derive failed"
+            ),
+        }
     });
 }
 

@@ -8,6 +8,7 @@ mod automation;
 mod cache;
 mod commands;
 mod db;
+mod derived_metadata;
 mod imap;
 mod mutations;
 mod outbox;
@@ -29,6 +30,7 @@ mod test_support;
 pub use crate::apply_ledger::{
     ApplyLedgerReserve, ApplyLedgerRow, ApplyLedgerState, APPLY_LEDGER_RETENTION_SECS,
 };
+pub use crate::derived_metadata::MetadataRederiveReport;
 pub(crate) use crate::store::StagedBodyFiles;
 pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 pub use rev_log::MAX_REV_LOG_HISTORY;

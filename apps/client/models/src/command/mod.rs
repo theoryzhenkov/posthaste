@@ -21,6 +21,7 @@ mod automation;
 mod draft;
 mod mail;
 mod mailbox;
+mod maintenance;
 mod operation;
 mod patch;
 mod rev_log;
@@ -37,6 +38,7 @@ pub use automation::*;
 pub use draft::*;
 pub use mail::*;
 pub use mailbox::*;
+pub use maintenance::*;
 pub use operation::*;
 pub use patch::*;
 pub use rev_log::*;
@@ -147,6 +149,10 @@ pub enum Command {
     CancelOperation(CancelOperationIntent),
     /// Execute a message's RFC 8058 one-click unsubscribe, backend-side.
     Unsubscribe(UnsubscribeIntent),
+    /// Re-derive message metadata (Cc/Bcc/Reply-To/List-Unsubscribe) from the
+    /// raw MIME the body cache already holds, for mail whose body was cached
+    /// before those fields existed. Network-free; fills only empty columns.
+    RederiveMessageMetadata(RederiveMessageMetadataIntent),
 }
 
 /// The acceptance reply for a command: recorded and visible at this

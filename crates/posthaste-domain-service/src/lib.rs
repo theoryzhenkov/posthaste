@@ -16,6 +16,7 @@
 pub mod cache;
 mod config;
 mod imap;
+mod message_metadata;
 mod ports;
 mod push;
 mod secret;
@@ -25,6 +26,7 @@ mod validation;
 pub use cache::*;
 pub use config::*;
 pub use imap::*;
+pub use message_metadata::*;
 pub use ports::*;
 pub use push::*;
 pub use secret::*;
