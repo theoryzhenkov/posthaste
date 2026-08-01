@@ -69,41 +69,49 @@ pub struct MessageRecord {
     pub list_unsubscribe: Option<ListUnsubscribe>,
 }
 
-/// Builds a minimal RFC 2822 message from constituent parts for draft storage.
+/// The address headers a synthesized message carries.
+///
+/// Grouped rather than passed as four same-typed slices: `(&to, &cc, &bcc,
+/// &reply_to)` transposes silently at a call site, and these values land in the
+/// cached `.eml` that `rederive_message_metadata` later reads back as truth — so
+/// a swap would be durable, invisible corruption rather than a compile error.
+/// Defaults to no addresses, for callers (draft storage) that have only a
+/// `From`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AddressHeaders<'a> {
+    /// Pre-formatted `From` value; omitted when absent or blank.
+    pub from: Option<&'a str>,
+    pub to: &'a [Recipient],
+    pub cc: &'a [Recipient],
+    pub bcc: &'a [Recipient],
+    pub reply_to: &'a [Recipient],
+}
+
+/// Builds a minimal RFC 2822 message from constituent parts.
+///
+/// Used for draft storage, and for provider APIs (notably JMAP) that fetch
+/// structured body fields but do not provide raw RFC822 bytes. Preserving the
+/// address headers lets draft resumption reconstruct the compose form from the
+/// cached raw MIME — and, since the synthesized bytes are the ONLY local source
+/// those messages have, it is also what `rederive_message_metadata` can recover
+/// later. A header omitted here is unrecoverable for every message synthesized
+/// while it was missing, so carry everything the derivation reads.
 ///
 /// @spec docs/L1-compose#mime-structures
 pub fn synthesize_plain_text_raw_mime(
-    from_header: &str,
+    addresses: AddressHeaders<'_>,
     subject: &str,
     body_text: Option<&str>,
 ) -> String {
-    synthesize_plain_text_raw_mime_with_recipients(
-        Some(from_header),
-        &[],
-        &[],
-        &[],
-        subject,
-        body_text,
-    )
-}
-
-/// Builds a minimal RFC 2822 message including compose-recipient headers.
-///
-/// Used for provider APIs (notably JMAP) that fetch structured body fields but
-/// do not provide raw RFC822 bytes. Preserving Cc/Bcc here lets draft resumption
-/// reconstruct the compose form from the cached raw MIME.
-///
-/// @spec docs/L1-compose#mime-structures
-pub fn synthesize_plain_text_raw_mime_with_recipients(
-    from_header: Option<&str>,
-    to: &[Recipient],
-    cc: &[Recipient],
-    bcc: &[Recipient],
-    subject: &str,
-    body_text: Option<&str>,
-) -> String {
+    let AddressHeaders {
+        from,
+        to,
+        cc,
+        bcc,
+        reply_to,
+    } = addresses;
     let mut headers = String::new();
-    if let Some(from_header) = from_header.filter(|value| !value.trim().is_empty()) {
+    if let Some(from_header) = from.filter(|value| !value.trim().is_empty()) {
         headers.push_str(&format!("From: {from_header}\r\n"));
     }
     if let Some(value) = recipients_to_header(to) {
@@ -114,6 +122,9 @@ pub fn synthesize_plain_text_raw_mime_with_recipients(
     }
     if let Some(value) = recipients_to_header(bcc) {
         headers.push_str(&format!("Bcc: {value}\r\n"));
+    }
+    if let Some(value) = recipients_to_header(reply_to) {
+        headers.push_str(&format!("Reply-To: {value}\r\n"));
     }
     headers.push_str(&format!(
         "Subject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}\r\n",

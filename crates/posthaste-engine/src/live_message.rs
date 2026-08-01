@@ -1,6 +1,6 @@
 use jmap_client::email;
 use posthaste_domain_model::{
-    synthesize_plain_text_raw_mime_with_recipients, BlobId, FetchedBody, GatewayError,
+    synthesize_plain_text_raw_mime, AddressHeaders, BlobId, FetchedBody, GatewayError,
     MessageAttachment, MessageId, MessageRecord,
 };
 use posthaste_provider_call::{CallClass, HttpRequestSpec};
@@ -122,11 +122,18 @@ pub(crate) async fn fetch_message_body(
         .bcc()
         .map(crate::compose::addresses_to_recipients)
         .unwrap_or_default();
-    let raw_mime = synthesize_plain_text_raw_mime_with_recipients(
-        from_header.as_deref(),
-        &to,
-        &cc,
-        &bcc,
+    let reply_to = email
+        .reply_to()
+        .map(crate::compose::addresses_to_recipients)
+        .unwrap_or_default();
+    let raw_mime = synthesize_plain_text_raw_mime(
+        AddressHeaders {
+            from: from_header.as_deref(),
+            to: &to,
+            cc: &cc,
+            bcc: &bcc,
+            reply_to: &reply_to,
+        },
         email.subject().unwrap_or("(no subject)"),
         body_text.as_deref(),
     );

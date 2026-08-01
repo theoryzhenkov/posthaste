@@ -92,5 +92,20 @@ pub(crate) fn synthesize_raw_mime(
         .body_text
         .as_deref()
         .unwrap_or_else(|| message.preview.as_deref().unwrap_or(""));
-    Some(synthesize_plain_text_raw_mime(&from, subject, Some(text)))
+    // Carry the address headers, not just From/Subject. These synthesized bytes
+    // become the row's `raw_path`, and for a record that arrives without raw
+    // they are the only local source `rederive_message_metadata` can ever read —
+    // so a header dropped here is unrecoverable for that message, permanently.
+    // The record carries them, so there is nothing to fetch.
+    Some(synthesize_plain_text_raw_mime(
+        AddressHeaders {
+            from: Some(&from),
+            to: &message.to,
+            cc: &message.cc,
+            bcc: &message.bcc,
+            reply_to: &message.reply_to,
+        },
+        subject,
+        Some(text),
+    ))
 }

@@ -400,3 +400,48 @@ fn rederive_pages_through_more_rows_than_one_chunk() -> Result<(), StoreError> {
     assert_eq!(last.summary.cc, vec![named("Carol", "carol@example.test")]);
     Ok(())
 }
+
+/// A record that arrives with a body but no raw bytes gets its `.eml`
+/// SYNTHESIZED by the store (`projections::synthesize_raw_mime`), and those
+/// synthesized bytes then become the row's only local source. So the
+/// synthesizer's header list and the derivation's column list are one
+/// contract: a header the synthesizer omits is unrecoverable for that message
+/// forever, because the re-derive has nothing else to read.
+///
+/// The synthesizer wrote From/Subject/body only until this was pinned, which
+/// is precisely how the gap this whole pass repairs could have been reopened
+/// silently. Assert the round trip, not the synthesizer's output.
+#[test]
+fn a_synthesized_raw_message_still_carries_the_derived_headers() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    let mut message = sample_message("synth-1", "inbox", None);
+    message.raw_mime = None;
+    message.body_text = Some("Hello.".to_string());
+    message.cc = vec![named("Carol", "carol@example.test")];
+    message.bcc = vec![bare("bcc@example.test")];
+    message.reply_to = vec![bare("replies@example.test")];
+    seed_messages(&store, &account, vec![message], "state-1")?;
+
+    let message_id = MessageId::from("synth-1");
+    blank_derived_columns(&store, &account, &message_id)?;
+    store.rederive_message_metadata()?;
+
+    let detail = store
+        .get_message_detail(&account, &message_id)?
+        .expect("detail");
+    assert_eq!(
+        detail.summary.cc,
+        vec![named("Carol", "carol@example.test")]
+    );
+    assert_eq!(detail.summary.bcc, vec![bare("bcc@example.test")]);
+    assert_eq!(
+        detail.summary.reply_to,
+        vec![bare("replies@example.test")],
+        "a synthesized raw must round-trip every derived header"
+    );
+    Ok(())
+}
