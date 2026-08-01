@@ -4,7 +4,7 @@
 // facts the guides state about the environment contract.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { operations } from "../src/operations/index.js";
@@ -175,10 +175,24 @@ function validate(tokens: string[]): string[] {
   return errors;
 }
 
-const guides = readdirSync(GUIDE_DIR).filter((name) => name.endsWith(".md"));
+// The corpus lives in apps/site and is legitimately EMPTY right now: the
+// scripting/automations guide was removed for a hand rewrite, and the CLI it
+// documented is withdrawn, so there is nothing to check against the registry
+// until guides return. Absence must not fail — reading it unguarded threw
+// ENOENT at module scope, which failed this whole file rather than reporting
+// an empty corpus.
+const guides = existsSync(GUIDE_DIR)
+  ? readdirSync(GUIDE_DIR).filter((name) => name.endsWith(".md"))
+  : [];
 
 describe("guide examples match the CLI surface", () => {
-  test("guides exist", () => {
+  // Not an unconditional "guides exist": the corpus is deliberately absent
+  // today. But a PRESENT directory that yields nothing means the glob stopped
+  // matching, which is the silent failure this guarded against — so keep the
+  // ratchet for that case. Every check below resumes on its own once a guide
+  // lands.
+  test("a present guide corpus is non-empty", () => {
+    if (!existsSync(GUIDE_DIR)) return;
     expect(guides.length).toBeGreaterThan(0);
   });
 
