@@ -155,15 +155,6 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      # Must run after `bun install` so apps/tools deps resolve; rustc (set up
-      # earlier in the job) supplies the host triple. Shared with the CI
-      # packaging gate, which is what keeps this path from breaking only at
-      # tag time. Linux stages it too but bundles without it — see the sidecar
-      # note in "Build desktop bundles" below.
-      - name: Stage posthastectl sidecar
-        shell: bash
-        run: bash tools/release/stage-sidecar.sh
-
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
@@ -272,29 +263,13 @@ jobs:
             d="$POSTHASTE_ICON_DIR"
             icon_config=(--config "{\"bundle\":{\"icon\":[\"$d/32x32.png\",\"$d/128x128.png\",\"$d/128x128@2x.png\",\"$d/icon.icns\",\"$d/icon.ico\"]}}")
           fi
-          # Linux ships WITHOUT the posthastectl sidecar. `bundle.externalBin`
-          # is unconditional in tauri.conf.json (macOS and Windows bundle it
-          # fine), but on Linux it lands the binary in the AppDir's usr/bin,
-          # where linuxdeploy's gtk plugin runs `ldd` over every ELF and aborts
-          # on the Bun --compile binary's appended VM/payload — gtk plugin exit
-          # 134, and linuxdeploy has no per-file dep-sweep exclude. Root cause
-          # is definitive: docs/eph/RFC-L2-scripting.md §"Distribution wave",
-          # which DEFERRED the Linux sidecar; this applies that deferral to the
-          # build instead of leaving the config contradicting it. Arrays replace
-          # on --config deep-merge, so [] clears it. Linux installs the CLI
-          # separately. The sidecar is still staged above on every platform, so
-          # the staging path stays exercised on the cheapest runner.
-          sidecar_config=()
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            sidecar_config=(--config '{"bundle":{"externalBin":[]}}')
-          fi
           # Run from the tauri dir so CLI app-dir discovery is unambiguous.
           # The frontend is prebuilt above, so beforeBuildCommand is nulled out.
           cd apps/client/desktop
           # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
           # have no code-signing certs configured, so code signing is a no-op
           # here regardless, while updater signatures (.sig) are produced.
-          bun x tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config" "${icon_config[@]}" "${sidecar_config[@]}"
+          bun x tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config" "${icon_config[@]}"
 
       - name: Build macOS desktop bundles
         if: runner.os == 'macOS'

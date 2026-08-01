@@ -118,16 +118,12 @@ jobs:
   # The shipped desktop PACKAGING path — the one release step nothing else
   # exercises. Compilation is already covered: apps/client/desktop is a
   # workspace member, so the `rust` job's `clippy/test --workspace` builds it.
-  # What was never covered is what actually breaks — staging the posthastectl
-  # sidecar where `bundle.externalBin` resolves it, and bundling. Both of this
-  # class's tag-time failures were in those steps, which ran nowhere until a
-  # tag was cut.
+  # What was never covered is bundling, which ran nowhere until a tag was cut
+  # and which produced this class's tag-time failures.
   #
-  # Mirrors the Linux leg of release.yml's build-desktop, including the empty
-  # externalBin override (rationale in that job's sidecar note). The sidecar is
-  # still staged here even though the AppImage does not carry it, so the
-  # staging script stays under test on the cheapest runner — it is shared with
-  # the release build, so a break here is a break there.
+  # Mirrors the Linux leg of release.yml's build-desktop. The app bundles no
+  # sidecar on any platform now, so this and the release build take the same
+  # path with no per-platform override between them.
   desktop-package:
     runs-on: ubuntu-latest
     steps:
@@ -164,25 +160,11 @@ jobs:
             patchelf \
             wget
       - run: bun install --frozen-lockfile
-      - name: Stage posthastectl sidecar
-        run: bash tools/release/stage-sidecar.sh
-      - name: Assert the sidecar landed where externalBin resolves it
-        run: |
-          # The staging script is the contract `bundle.externalBin` depends on;
-          # assert its output rather than trusting a zero exit.
-          triple="$(rustc -vV | sed -n 's/^host: //p')"
-          dest="apps/client/desktop/binaries/posthastectl-${triple}"
-          test -x "$dest" || {
-            echo "sidecar missing or not executable: $dest" >&2
-            ls -la apps/client/desktop/binaries || true
-            exit 1
-          }
       # tauri.conf.json's beforeBuildCommand builds the frontend, so this also
-      # covers the frontend -> bundle wiring. externalBin is cleared to match
-      # the Linux release build.
+      # covers the frontend -> bundle wiring.
       - name: Bundle the desktop app (AppImage)
         working-directory: apps/client/desktop
-        run: bun x tauri build --ci --bundles appimage --config '{"bundle":{"externalBin":[]}}'
+        run: bun x tauri build --ci --bundles appimage
 
   # HARD live gate for the integrated backend: the full loop (account -> sync
   # -> inject -> converge -> command -> counts) plus the new-surfaces scenario

@@ -29,6 +29,12 @@ contents) still reads `proposed` in that RFC with no implementation; and the
 `legacy/split-model-final` recovery branch referenced above no longer exists on
 the remote (`git ls-remote --heads origin` returns only `main`).
 
+Added 2026-08-01: the posthastectl sidecar is withdrawn — the app ships no CLI
+on any platform. `apps/tools` is unchanged and still CI-tested; only the delivery
+is gone, pending a clean rebuild. See the WITHDRAWN banner in
+`RFC-L2-scripting` §"Distribution wave" for the reasoning and for what the
+`wip/cli-path-affordance` tag preserves.
+
 ## Status vocabulary
 
 - **SHIPPED** — all migration steps landed.
@@ -46,7 +52,7 @@ the remote (`git ls-remote --heads origin` returns only `main`).
 | **DEVIATION-L2-architecture-cleanup** | Reality ledger for the cleanup: one row per drained divergence between spec end-state and code. | **REFERENCE** (ledger) — complete; all 13 rows closed at M8. |
 | **RFC-L2-lifecycle-and-errors** | Ordered shutdown/teardown, deadline discipline, bounded growth, watchdog liveness, typed `Terminality` vocabulary + boundary error hygiene. | **SHIPPED** — M20–M31 (incl. M23b) landed; M28 absorbed into scripting S1. |
 | **RFC-L2-provider-reliability** | One outbound-call envelope per provider call, send-exactly-once, push-lifecycle repair, IMAP/sync robustness, supervision + P5 fix, OAuth CAS rotation. | **SHIPPED** — M30–M37 all landed. |
-| **RFC-L2-scripting** | The scripting/automation surface: the tap, one-vocabulary action path, capability tokens, the rules→MCP ladder, and CLI distribution. | **SHIPPED, NOW DORMANT** — S1–S6 + distribution wave + rulings 21–23 landed in the split model; the CLI/MCP artifacts (`apps/mcp`, `posthastectl`) were deleted with that stack (2026-07-18). The surface returns as the mirror-client Slice-4 rebuild on the one integration surface. |
+| **RFC-L2-scripting** | The scripting/automation surface: the tap, one-vocabulary action path, capability tokens, the rules→MCP ladder, and CLI distribution. | **SHIPPED, NOW DORMANT — DISTRIBUTION WITHDRAWN (2026-08-01)** — S1–S6 + distribution wave + rulings 21–23 landed in the split model; the CLI/MCP artifacts (`apps/mcp`, `posthastectl`) were deleted with that stack (2026-07-18). The surface returns as the mirror-client Slice-4 rebuild on the one integration surface. |
 | **RFC-L2-client-resilience** | The web client converges from any state: level-triggered self-healing, no silent drops, one reconcile pass, the one reactive store revamp. | **SUPERSEDED (pending tail)** by RFC-L2-mirror-client — M40, M46–M48 landed in the split-model web client (now deleted); the pending tail (M41–M45, M49–M50) will not be implemented. |
 | **RFC-L2-drafts** | The draft lifecycle: send consumes the draft, discard = hard-delete, idempotent identity-stable saves, edit-draft in the action row. | **SHIPPED** — M60, M61, M62 all landed. |
 | **RFC-L2-client-replication-model** | The north-star: `visible = fold(base, intent_log)`, one writer per plane, mutations-as-single-intents, verdict as projection — enforced by a Rust type-system `BaseWrite` capability (Tier 1). §6: the base/overlay/effective substrate (D167–D169) — optimism materialized as the fold's *output* into a `message_overlay` table, every SQL read via the `_effective` view; SQL stays the single predicate engine, replica-core the single fold (one engine, two storage backends). Parent of the send-RFC and the test-taxonomy. | **NS1 COMPLETE (2026-07-11)** — overlay substrate + all reads strangled + live counts + the cutover (mutations→overlay, sync writes raw truth, `_protected`/guard deleted, confirmation-gated retire) + the `BaseWrite` compile-time seal (one legacy production grant: draft-discard, dies with NS2). NS2 send-as-intent landed (see the send RFC row); NS3 generalize next. Tier-2 linters deferred. |

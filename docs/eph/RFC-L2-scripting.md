@@ -187,5 +187,34 @@ this RFC — it stays in the architecture-cleanup track as dead-code removal.
 24. **Follow-up (SDK gap): /commands/send idempotency** — the reply/send verbs auto-attach Idempotency-Key but /v1/.../commands/send ignores it server-side (only the 5 message-command routes dedupe). A redelivered rule that replies/sends could double-send. Fix: extend the send route to honor Idempotency-Key via the same M32/S4 apply-ledger. Beta-important for reply/send-in-rules; queue with the reliability tail.
 
 ## Distribution wave — DONE (2026-07-04, nightly.59)
+
+> **WITHDRAWN (2026-08-01).** The sidecar no longer ships on any platform:
+> `bundle.externalBin`, `entitlements.plist`, the staging script and its CI/release
+> steps are all deleted. Everything below is history, not current state.
+>
+> Why: the sidecar was ~95 MB in every download and, because Tauri applies ONE
+> entitlements file to every binary it signs, it forced `allow-jit`,
+> `allow-unsigned-executable-memory` and `disable-library-validation` onto the
+> whole macOS app — a weakened hardened runtime bought for a binary no user could
+> reach. There was never an install-to-PATH affordance in the integrated app
+> (rider 10b had re-pointed rider 9's install path at the wizard, which was then
+> retired), so the bundled CLI was unreachable from a shell and the only
+> `posthastectl` a user could have on PATH was a stale split-model one — which is
+> exactly how this was found: a user hit `daemon.json` / `posthaste serve` errors
+> from a binary predating the integrated rewrite.
+>
+> It also removed a build-time dependency: `apps/client/desktop` could not even
+> `cargo check` without a 95 MB staged binary, because `tauri_build` resolves
+> `externalBin` in `build.rs`.
+>
+> `apps/tools` is UNCHANGED and still built and tested in CI — only the delivery
+> is withdrawn. The connection contract (`connection-info.json`, loopback + token)
+> is untouched, so a rebuilt CLI connects the same way. Research from the
+> abandoned install affordance is preserved on the `wip/cli-path-affordance` tag:
+> a three-way ownership proof before deleting anything on PATH, shadow detection,
+> and the finding that a Finder-launched macOS app inherits launchd's environment
+> rather than the login shell's — so `std::env::var("PATH")` inside the app is not
+> the PATH the user's terminal has.
+
 Riders 9/12/14/17-pairing all landed: posthastectl ships INSIDE the desktop app (Tauri sidecar; macOS signed with the JIT entitlements via Tauri's inside-out pass — PROVEN by the release smoke: the nested binary answers --print-release-channel under hardened runtime; Windows sidecar bundles clean); wizard update (install manifest, verified swap, .bak rollback, self-update-last, opt-in timer); ctl register-watch/unregister-watch (+ --serve-hook) with ruling-20b consent. Channel-stamping: build-cli --define + channel-policy re-emitting POSTHASTE_RELEASE_CHANNEL (the .59 root cause — 4 release rounds, diagnostic smoke landed permanently).
 DEFERRED: the Linux AppImage sidecar — ROOT CAUSE now definitive (probe run 28702460224, --verbose): linuxdeploy's gtk plugin sweeps usr/lib AND usr/bin and runs ldd on every ELF; ldd aborts on the Bun --compile binary's appended VM/payload ('Failed to run ldd: exited with code 1', gtk plugin exit 134). Both externalBin (usr/bin) AND resources (usr/lib) hit the sweep — resources do NOT escape it (the research's premise was wrong on that detail). linuxdeploy has no per-file dep-sweep exclude. Linux stays on the wizard tarball path (works today; appDir discovery is now wired for it). Real fix = post-AppImage injection (tauri build → extract the AppImage → inject posthastectl into a NON-swept dir → repack with appimagetool) as a workflow step — a separate unit, LOW value vs the tarball (linux users self-install the CLI once). The publish-free probe mode (workflow_dispatch only_desktop_linux) is retained for any future attempt. Windows follow-up: verify the NSIS install path against ctl.rs's candidate list on a real Windows machine.

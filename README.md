@@ -26,17 +26,6 @@ store with JMAP/IMAP providers) plus a TypeScript/Tauri frontend. See
 and `flake.nix` at the repo root for the toolchain, and `justfile` for the
 common dev commands (`just` lists them).
 
-## Scripting & MCP
-
-`posthastectl` is the CLI bundled with the desktop app — on macOS at
-`Posthaste.app/Contents/MacOS/posthastectl` (or `PosthasteNightly.app` on the
-nightly channel); symlink it onto your `PATH`. It discovers the running app
-automatically (no URLs or tokens to copy), runs a handler script per matching
-message via `posthastectl watch --exec 'sh ./handler.sh'` (the message arrives
-as JSON on stdin), and exposes the same operations to agent hosts via
-`posthastectl mcp`. The connection grants the full mail surface — read, write,
-and send across every account — so only connect handlers you trust.
-
 ## Docs
 
 Full documentation lives at
