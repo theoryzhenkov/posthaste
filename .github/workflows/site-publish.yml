@@ -92,11 +92,16 @@ jobs:
       # Nudge tars to pull the new image immediately instead of waiting for the
       # 30min polling fallback. Guarded so forks/API outages never fail the build.
       - name: Trigger tars app update
-        if: ${{ secrets.TARS_APP_UPDATE_WEBHOOK_SECRET != '' }}
+        env:
+          TARS_WEBHOOK_SECRET: ${{ secrets.TARS_APP_UPDATE_WEBHOOK_SECRET }}
         run: |
+          if [ -z "$TARS_WEBHOOK_SECRET" ]; then
+            echo "TARS_APP_UPDATE_WEBHOOK_SECRET not provided; skipping tars trigger"
+            exit 0
+          fi
           ts=$(date +%s)000
           body='{"app":"posthaste-site"}'
-          sig=$(printf '%s%s' "$body" "$ts" | openssl dgst -sha256 -hmac "${{ secrets.TARS_APP_UPDATE_WEBHOOK_SECRET }}" -r | cut -d' ' -f1)
+          sig=$(printf '%s%s' "$body" "$ts" | openssl dgst -sha256 -hmac "$TARS_WEBHOOK_SECRET" -r | cut -d' ' -f1)
           curl -fsS -X POST https://theor.net/.theor/app-update \
             -H "X-Update-Signature: sha256=$sig,t=$ts" \
             -H 'Content-Type: application/json' -d "$body"
